@@ -28,14 +28,14 @@ function createMockProvider(
 
 describe("Chat Persistence", () => {
   it("persists messages to SQLite", async () => {
-    const { taskService, projectService, queries } = createTestServices();
+    const { taskService, projectService, storage } = createTestServices();
     const provider = createMockProvider([{ content: "Hi there!" }]);
     const session = new ChatSession(
       provider,
       { taskService, projectService },
       { role: "system", content: "You are helpful." },
       undefined,
-      queries,
+      storage,
     );
 
     session.addUserMessage("Hello");
@@ -44,14 +44,14 @@ describe("Chat Persistence", () => {
     }
 
     // Check messages were persisted (system is NOT persisted, only user + assistant)
-    const rows = queries.listChatMessages(session.sessionId);
+    const rows = storage.listChatMessages(session.sessionId);
     expect(rows.length).toBeGreaterThanOrEqual(2); // user + assistant
     expect(rows.some((r) => r.role === "user" && r.content === "Hello")).toBe(true);
     expect(rows.some((r) => r.role === "assistant" && r.content === "Hi there!")).toBe(true);
   });
 
   it("persists tool call messages", async () => {
-    const { taskService, projectService, queries } = createTestServices();
+    const { taskService, projectService, storage } = createTestServices();
     const provider = createMockProvider([
       {
         content: "",
@@ -65,7 +65,7 @@ describe("Chat Persistence", () => {
       { taskService, projectService },
       { role: "system", content: "You are helpful." },
       undefined,
-      queries,
+      storage,
     );
 
     session.addUserMessage("What tasks do I have?");
@@ -73,7 +73,7 @@ describe("Chat Persistence", () => {
       // drain
     }
 
-    const rows = queries.listChatMessages(session.sessionId);
+    const rows = storage.listChatMessages(session.sessionId);
     // user + assistant(tool call) + tool result + assistant(final)
     expect(rows.length).toBeGreaterThanOrEqual(4);
     expect(rows.some((r) => r.role === "tool")).toBe(true);
@@ -81,13 +81,13 @@ describe("Chat Persistence", () => {
   });
 
   it("restores session from DB", async () => {
-    const { taskService, projectService, queries } = createTestServices();
+    const { taskService, projectService, storage } = createTestServices();
     const provider = createMockProvider([{ content: "Hello!" }]);
     const services = { taskService, projectService };
 
     // Create and populate a session
     const manager1 = new ChatManager();
-    const session1 = manager1.getOrCreateSession(provider, services, queries);
+    const session1 = manager1.getOrCreateSession(provider, services, storage);
     session1.addUserMessage("Hi");
     for await (const _event of session1.run()) {
       // drain
@@ -97,7 +97,7 @@ describe("Chat Persistence", () => {
     // Now restore from a fresh manager
     const manager2 = new ChatManager();
     const provider2 = createMockProvider([]);
-    const restored = manager2.restoreSession(provider2, services, queries);
+    const restored = manager2.restoreSession(provider2, services, storage);
 
     expect(restored).not.toBeNull();
     expect(restored!.sessionId).toBe(sessionId);
@@ -107,12 +107,12 @@ describe("Chat Persistence", () => {
   });
 
   it("clearSession deletes from DB", async () => {
-    const { taskService, projectService, queries } = createTestServices();
+    const { taskService, projectService, storage } = createTestServices();
     const provider = createMockProvider([{ content: "Hello!" }]);
     const services = { taskService, projectService };
 
     const manager = new ChatManager();
-    const session = manager.getOrCreateSession(provider, services, queries);
+    const session = manager.getOrCreateSession(provider, services, storage);
     session.addUserMessage("Hi");
     for await (const _event of session.run()) {
       // drain
@@ -120,19 +120,19 @@ describe("Chat Persistence", () => {
     const sessionId = session.sessionId;
 
     // Verify messages exist
-    expect(queries.listChatMessages(sessionId).length).toBeGreaterThan(0);
+    expect(storage.listChatMessages(sessionId).length).toBeGreaterThan(0);
 
     // Clear and verify deletion
-    manager.clearSession(queries);
-    expect(queries.listChatMessages(sessionId).length).toBe(0);
+    manager.clearSession(storage);
+    expect(storage.listChatMessages(sessionId).length).toBe(0);
     expect(manager.getSession()).toBeNull();
   });
 
   it("returns null when no session to restore", () => {
-    const { taskService, projectService, queries } = createTestServices();
+    const { taskService, projectService, storage } = createTestServices();
     const provider = createMockProvider([]);
     const manager = new ChatManager();
-    const restored = manager.restoreSession(provider, { taskService, projectService }, queries);
+    const restored = manager.restoreSession(provider, { taskService, projectService }, storage);
     expect(restored).toBeNull();
   });
 });

@@ -320,7 +320,7 @@ export const api = {
   async getPluginPermissions(pluginId: string): Promise<string[] | null> {
     if (isTauri()) {
       const svc = await getServices();
-      return svc.queries.getPluginPermissions(pluginId);
+      return svc.storage.getPluginPermissions(pluginId);
     }
     const res = await fetch(`${BASE}/plugins/${pluginId}/permissions`);
     const data = await res.json();
@@ -443,10 +443,10 @@ export const api = {
   async getAIConfig(): Promise<AIConfigInfo> {
     if (isTauri()) {
       const svc = await getServices();
-      const providerSetting = svc.queries.getAppSetting("ai_provider");
-      const modelSetting = svc.queries.getAppSetting("ai_model");
-      const baseUrlSetting = svc.queries.getAppSetting("ai_base_url");
-      const apiKeySetting = svc.queries.getAppSetting("ai_api_key");
+      const providerSetting = svc.storage.getAppSetting("ai_provider");
+      const modelSetting = svc.storage.getAppSetting("ai_model");
+      const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+      const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
       return {
         provider: providerSetting?.value ?? null,
         model: modelSetting?.value ?? null,
@@ -466,23 +466,23 @@ export const api = {
   }): Promise<void> {
     if (isTauri()) {
       const svc = await getServices();
-      if (config.provider) svc.queries.setAppSetting("ai_provider", config.provider);
-      if (config.apiKey) svc.queries.setAppSetting("ai_api_key", config.apiKey);
+      if (config.provider) svc.storage.setAppSetting("ai_provider", config.provider);
+      if (config.apiKey) svc.storage.setAppSetting("ai_api_key", config.apiKey);
       if (config.model !== undefined) {
         if (config.model) {
-          svc.queries.setAppSetting("ai_model", config.model);
+          svc.storage.setAppSetting("ai_model", config.model);
         } else {
-          svc.queries.deleteAppSetting("ai_model");
+          svc.storage.deleteAppSetting("ai_model");
         }
       }
       if (config.baseUrl !== undefined) {
         if (config.baseUrl) {
-          svc.queries.setAppSetting("ai_base_url", config.baseUrl);
+          svc.storage.setAppSetting("ai_base_url", config.baseUrl);
         } else {
-          svc.queries.deleteAppSetting("ai_base_url");
+          svc.storage.deleteAppSetting("ai_base_url");
         }
       }
-      svc.chatManager.clearSession(svc.queries);
+      svc.chatManager.clearSession(svc.storage);
       svc.save();
       return;
     }
@@ -496,7 +496,7 @@ export const api = {
   async sendChatMessage(message: string): Promise<ReadableStream<Uint8Array> | null> {
     if (isTauri()) {
       const svc = await getServices();
-      const providerSetting = svc.queries.getAppSetting("ai_provider");
+      const providerSetting = svc.storage.getAppSetting("ai_provider");
       if (!providerSetting?.value) {
         // Return a stream with an error event, matching SSE format
         const encoder = new TextEncoder();
@@ -515,9 +515,9 @@ export const api = {
       try {
         const { createProvider } = await import("../ai/provider.js");
         const { gatherContext } = await import("../ai/chat.js");
-        const apiKeySetting = svc.queries.getAppSetting("ai_api_key");
-        const modelSetting = svc.queries.getAppSetting("ai_model");
-        const baseUrlSetting = svc.queries.getAppSetting("ai_base_url");
+        const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+        const modelSetting = svc.storage.getAppSetting("ai_model");
+        const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
 
         const provider = createProvider({
           provider: providerSetting.value as
@@ -540,7 +540,7 @@ export const api = {
         const session = svc.chatManager.getOrCreateSession(
           provider,
           toolServices,
-          svc.queries,
+          svc.storage,
           contextBlock,
         );
 
@@ -592,12 +592,12 @@ export const api = {
 
       if (!session) {
         try {
-          const providerSetting = svc.queries.getAppSetting("ai_provider");
+          const providerSetting = svc.storage.getAppSetting("ai_provider");
           if (providerSetting?.value) {
             const { createProvider } = await import("../ai/provider.js");
-            const apiKeySetting = svc.queries.getAppSetting("ai_api_key");
-            const modelSetting = svc.queries.getAppSetting("ai_model");
-            const baseUrlSetting = svc.queries.getAppSetting("ai_base_url");
+            const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+            const modelSetting = svc.storage.getAppSetting("ai_model");
+            const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
 
             const provider = createProvider({
               provider: providerSetting.value as
@@ -614,7 +614,7 @@ export const api = {
             session = svc.chatManager.restoreSession(
               provider,
               { taskService: svc.taskService, projectService: svc.projectService },
-              svc.queries,
+              svc.storage,
             );
           }
         } catch {
@@ -632,7 +632,7 @@ export const api = {
   async clearChat(): Promise<void> {
     if (isTauri()) {
       const svc = await getServices();
-      svc.chatManager.clearSession(svc.queries);
+      svc.chatManager.clearSession(svc.storage);
       svc.save();
       return;
     }
@@ -648,7 +648,7 @@ export const api = {
       const svc = await getServices();
       const tasks = await svc.taskService.list();
       const projects = await svc.projectService.list();
-      const tags = svc.queries.listTags();
+      const tags = svc.storage.listTags();
       return { tasks, projects, tags };
     }
     const [tasks, projects] = await Promise.all([api.listTasks(), api.listProjects()]);
@@ -665,7 +665,7 @@ export const api = {
   async getAppSetting(key: string): Promise<string | null> {
     if (isTauri()) {
       const svc = await getServices();
-      const row = svc.queries.getAppSetting(key);
+      const row = svc.storage.getAppSetting(key);
       return row?.value ?? null;
     }
     const res = await fetch(`${BASE}/settings/${key}`);
@@ -674,10 +674,19 @@ export const api = {
     return data.value ?? null;
   },
 
+  async getStorageInfo(): Promise<{ mode: string; path: string }> {
+    if (isTauri()) {
+      // Tauri always uses SQLite
+      return { mode: "sqlite", path: "(embedded database)" };
+    }
+    const res = await fetch(`${BASE}/settings/storage`);
+    return res.json();
+  },
+
   async setAppSetting(key: string, value: string): Promise<void> {
     if (isTauri()) {
       const svc = await getServices();
-      svc.queries.setAppSetting(key, value);
+      svc.storage.setAppSetting(key, value);
       svc.save();
       return;
     }

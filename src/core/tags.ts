@@ -1,10 +1,10 @@
 import type { Tag } from "./types.js";
-import type { Queries } from "../db/queries.js";
+import type { IStorage } from "../storage/interface.js";
 import { generateId } from "../utils/ids.js";
 
 /** Tag service — manages task labels. */
 export class TagService {
-  constructor(private queries: Queries) {}
+  constructor(private queries: IStorage) {}
 
   async create(name: string, color?: string): Promise<Tag> {
     const tag: Tag = {

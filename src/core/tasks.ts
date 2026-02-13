@@ -1,5 +1,5 @@
 import type { CreateTaskInput, UpdateTaskInput, Task, Tag } from "./types.js";
-import type { Queries } from "../db/queries.js";
+import type { IStorage } from "../storage/interface.js";
 import type { TagService } from "./tags.js";
 import type { TaskFilter } from "./filters.js";
 import type { EventBus } from "./event-bus.js";
@@ -15,7 +15,7 @@ import { getNextOccurrence } from "./recurrence.js";
  */
 export class TaskService {
   constructor(
-    private queries: Queries,
+    private queries: IStorage,
     private tagService: TagService,
     private eventBus?: EventBus,
   ) {}

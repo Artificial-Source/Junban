@@ -110,16 +110,16 @@ describe("Plugin System Integration", () => {
 
   describe("PluginLoader - discover", () => {
     it("should discover a valid plugin", async () => {
-      const { taskService, eventBus, queries } = createTestServices();
+      const { taskService, eventBus, storage } = createTestServices();
       writePlugin(pluginDir, "test-plugin", validManifest, pluginCode);
 
       const loader = new PluginLoader(pluginDir, {
         taskService,
         eventBus,
-        settingsManager: new PluginSettingsManager(queries),
+        settingsManager: new PluginSettingsManager(storage),
         commandRegistry: new CommandRegistry(),
         uiRegistry: new UIRegistry(),
-        queries,
+        queries: storage,
       });
 
       const discovered = await loader.discover();
@@ -129,16 +129,16 @@ describe("Plugin System Integration", () => {
     });
 
     it("should skip directories without manifest.json", async () => {
-      const { taskService, eventBus, queries } = createTestServices();
+      const { taskService, eventBus, storage } = createTestServices();
       fs.mkdirSync(path.join(pluginDir, "no-manifest"), { recursive: true });
 
       const loader = new PluginLoader(pluginDir, {
         taskService,
         eventBus,
-        settingsManager: new PluginSettingsManager(queries),
+        settingsManager: new PluginSettingsManager(storage),
         commandRegistry: new CommandRegistry(),
         uiRegistry: new UIRegistry(),
-        queries,
+        queries: storage,
       });
 
       const discovered = await loader.discover();
@@ -146,17 +146,17 @@ describe("Plugin System Integration", () => {
     });
 
     it("should reject invalid manifests", async () => {
-      const { taskService, eventBus, queries } = createTestServices();
+      const { taskService, eventBus, storage } = createTestServices();
       const invalid = { id: "INVALID ID!", name: "Bad" }; // Missing required fields
       writePlugin(pluginDir, "bad-plugin", invalid, "");
 
       const loader = new PluginLoader(pluginDir, {
         taskService,
         eventBus,
-        settingsManager: new PluginSettingsManager(queries),
+        settingsManager: new PluginSettingsManager(storage),
         commandRegistry: new CommandRegistry(),
         uiRegistry: new UIRegistry(),
-        queries,
+        queries: storage,
       });
 
       const discovered = await loader.discover();
@@ -164,11 +164,11 @@ describe("Plugin System Integration", () => {
     });
 
     it("should handle non-existent plugin directory", async () => {
-      const { taskService, eventBus, queries } = createTestServices();
+      const { taskService, eventBus, storage } = createTestServices();
       const loader = new PluginLoader("/nonexistent/path", {
         taskService,
         eventBus,
-        settingsManager: new PluginSettingsManager(queries),
+        settingsManager: new PluginSettingsManager(storage),
         commandRegistry: new CommandRegistry(),
         uiRegistry: new UIRegistry(),
       });
@@ -180,7 +180,7 @@ describe("Plugin System Integration", () => {
 
   describe("PluginLoader - load/unload lifecycle", () => {
     it("should load a plugin and call onLoad", async () => {
-      const { taskService, eventBus, queries } = createTestServices();
+      const { taskService, eventBus, storage } = createTestServices();
       const loadCode = `
         export default class TestPlugin {
           async onLoad() { globalThis.__testPluginLoaded = true; }
@@ -192,15 +192,15 @@ describe("Plugin System Integration", () => {
       const loader = new PluginLoader(pluginDir, {
         taskService,
         eventBus,
-        settingsManager: new PluginSettingsManager(queries),
+        settingsManager: new PluginSettingsManager(storage),
         commandRegistry: new CommandRegistry(),
         uiRegistry: new UIRegistry(),
-        queries,
+        queries: storage,
       });
 
       await loader.discover();
       // Pre-approve permissions so the plugin loads
-      queries.setPluginPermissions("test-plugin", ["task:read", "commands", "ui:status"]);
+      storage.setPluginPermissions("test-plugin", ["task:read", "commands", "ui:status"]);
       await loader.load("test-plugin");
 
       const plugin = loader.get("test-plugin");
@@ -214,7 +214,7 @@ describe("Plugin System Integration", () => {
     });
 
     it("should clean up commands and UI on unload", async () => {
-      const { taskService, eventBus, queries } = createTestServices();
+      const { taskService, eventBus, storage } = createTestServices();
       const commandRegistry = new CommandRegistry();
       const uiRegistry = new UIRegistry();
 
@@ -240,14 +240,14 @@ describe("Plugin System Integration", () => {
       const loader = new PluginLoader(pluginDir, {
         taskService,
         eventBus,
-        settingsManager: new PluginSettingsManager(queries),
+        settingsManager: new PluginSettingsManager(storage),
         commandRegistry,
         uiRegistry,
-        queries,
+        queries: storage,
       });
 
       await loader.discover();
-      queries.setPluginPermissions("test-plugin", ["task:read", "commands", "ui:status"]);
+      storage.setPluginPermissions("test-plugin", ["task:read", "commands", "ui:status"]);
       await loader.load("test-plugin");
 
       expect(commandRegistry.getAll()).toHaveLength(1);
@@ -262,13 +262,13 @@ describe("Plugin System Integration", () => {
 
   describe("Plugin API - permission gating", () => {
     it("should allow access to permitted APIs", () => {
-      const { taskService, eventBus, queries } = createTestServices();
+      const { taskService, eventBus, storage } = createTestServices();
       const api = createPluginAPI({
         pluginId: "test",
         permissions: ["task:read", "commands", "storage"] as Permission[],
         taskService,
         eventBus,
-        settingsManager: new PluginSettingsManager(queries),
+        settingsManager: new PluginSettingsManager(storage),
         commandRegistry: new CommandRegistry(),
         uiRegistry: new UIRegistry(),
         settingDefinitions: [],
@@ -280,13 +280,13 @@ describe("Plugin System Integration", () => {
     });
 
     it("should deny access to unpermitted APIs", () => {
-      const { taskService, eventBus, queries } = createTestServices();
+      const { taskService, eventBus, storage } = createTestServices();
       const api = createPluginAPI({
         pluginId: "test",
         permissions: [] as Permission[],
         taskService,
         eventBus,
-        settingsManager: new PluginSettingsManager(queries),
+        settingsManager: new PluginSettingsManager(storage),
         commandRegistry: new CommandRegistry(),
         uiRegistry: new UIRegistry(),
         settingDefinitions: [],
@@ -302,13 +302,13 @@ describe("Plugin System Integration", () => {
     });
 
     it("should throw when accessing events without task:read permission", () => {
-      const { taskService, eventBus, queries } = createTestServices();
+      const { taskService, eventBus, storage } = createTestServices();
       const api = createPluginAPI({
         pluginId: "restricted",
         permissions: [] as Permission[],
         taskService,
         eventBus,
-        settingsManager: new PluginSettingsManager(queries),
+        settingsManager: new PluginSettingsManager(storage),
         commandRegistry: new CommandRegistry(),
         uiRegistry: new UIRegistry(),
         settingDefinitions: [],
@@ -320,14 +320,14 @@ describe("Plugin System Integration", () => {
 
   describe("PluginSettingsManager - DB persistence", () => {
     it("should save and load settings via database", async () => {
-      const { queries } = createTestServices();
-      const manager = new PluginSettingsManager(queries);
+      const { storage } = createTestServices();
+      const manager = new PluginSettingsManager(storage);
 
       await manager.set("my-plugin", "color", "blue");
       await manager.set("my-plugin", "count", 42);
 
       // Create a new manager to simulate fresh load from DB
-      const manager2 = new PluginSettingsManager(queries);
+      const manager2 = new PluginSettingsManager(storage);
       const loaded = await manager2.load("my-plugin");
 
       expect(loaded.color).toBe("blue");
@@ -335,15 +335,15 @@ describe("Plugin System Integration", () => {
     });
 
     it("should return empty settings for unknown plugin", async () => {
-      const { queries } = createTestServices();
-      const manager = new PluginSettingsManager(queries);
+      const { storage } = createTestServices();
+      const manager = new PluginSettingsManager(storage);
       const loaded = await manager.load("nonexistent");
       expect(loaded).toEqual({});
     });
 
     it("should fall back to manifest defaults for get()", () => {
-      const { queries } = createTestServices();
-      const manager = new PluginSettingsManager(queries);
+      const { storage } = createTestServices();
+      const manager = new PluginSettingsManager(storage);
 
       const defs = [{ id: "color", name: "Color", type: "text" as const, default: "red" }];
 
@@ -351,8 +351,8 @@ describe("Plugin System Integration", () => {
     });
 
     it("should delete settings", async () => {
-      const { queries } = createTestServices();
-      const manager = new PluginSettingsManager(queries);
+      const { storage } = createTestServices();
+      const manager = new PluginSettingsManager(storage);
 
       await manager.set("my-plugin", "key1", "value1");
       await manager.set("my-plugin", "key2", "value2");
@@ -508,7 +508,7 @@ describe("Plugin System Integration", () => {
 
   describe("Full lifecycle", () => {
     it("should discover → load → receive events → unload", async () => {
-      const { taskService, eventBus, queries } = createTestServices();
+      const { taskService, eventBus, storage } = createTestServices();
 
       const code = `
         let count = 0;
@@ -529,14 +529,14 @@ describe("Plugin System Integration", () => {
       const loader = new PluginLoader(pluginDir, {
         taskService,
         eventBus,
-        settingsManager: new PluginSettingsManager(queries),
+        settingsManager: new PluginSettingsManager(storage),
         commandRegistry: new CommandRegistry(),
         uiRegistry: new UIRegistry(),
-        queries,
+        queries: storage,
       });
 
       // Pre-approve and discover + load
-      queries.setPluginPermissions("test-plugin", ["task:read", "commands", "ui:status"]);
+      storage.setPluginPermissions("test-plugin", ["task:read", "commands", "ui:status"]);
       await loader.loadAll();
       expect(loader.getAll().filter((p) => p.enabled)).toHaveLength(1);
 

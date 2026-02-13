@@ -45,7 +45,7 @@ All work items for ASF Docket, organized by area and prioritized within each sec
 | C-10 | Priority sorting in queries | done | S1 | Sort logic exists, wire to DB |
 | C-11 | Recurring task creation on completion | done | S2 | Recurrence logic exists |
 | C-12 | Task search (full-text across title + description) | done | S2 | |
-| C-13 | Bulk operations (complete all, move, tag multiple) | needs-design | — | UX design needed |
+| C-13 | Bulk operations (complete all, move, tag multiple) | done | S9 | Multi-select + bulk complete/move/tag/delete |
 | C-14 | Sub-tasks (nested hierarchy) | idea | — | Future |
 
 ## Parser & NLP
@@ -79,8 +79,8 @@ All work items for ASF Docket, organized by area and prioritized within each sec
 | U-13 | Keyboard navigation (j/k, enter, esc) | done | S2 | |
 | U-14 | Command palette keybinding (Ctrl+K) | done | S2 | Component exists, needs global listener |
 | U-15 | Light/dark theme switching | done | S2 | CSS exists, needs toggle wiring |
-| U-16 | Drag-and-drop task reordering | needs-design | — | |
-| U-17 | Undo/redo for task operations | needs-design | — | |
+| U-16 | Drag-and-drop task reordering | done | S9 | @dnd-kit/core + sortable |
+| U-17 | Undo/redo for task operations | done | S9 | UndoManager with Ctrl+Z/Ctrl+Shift+Z |
 | U-18 | Focus mode (hide everything except current task) | idea | — | |
 
 ## CLI
@@ -113,8 +113,8 @@ All work items for ASF Docket, organized by area and prioritized within each sec
 | PL-11 | Plugin commands integration with command palette | done | S4 | |
 | PL-12 | Plugin settings UI in Settings view | done | S4 | |
 | PL-13 | Plugin store view (browse sources.json) | done | S4 | |
-| PL-14 | Plugin install/uninstall from store | needs-design | — | Download + extract |
-| PL-15 | Plugin permission approval UX | needs-design | — | |
+| PL-14 | Plugin install/uninstall from store | done | S10 | tar.gz download + extract, PluginInstaller |
+| PL-15 | Plugin permission approval UX | done | S9 | Permission prompt on install, per-plugin grants |
 | PL-16 | Event bus for task lifecycle hooks | done | S3 | |
 | PL-17 | Plugin-specific isolated storage (persist to DB) | done | S3 | SQLite-backed per-plugin storage |
 | PL-18 | Built-in Pomodoro plugin (fully functional) | done | S4 | Timer, pause/resume, configurable durations |
@@ -139,7 +139,7 @@ All work items for ASF Docket, organized by area and prioritized within each sec
 | A-14 | AI daily schedule suggestion | done | S6 | Enhanced system prompt |
 | A-15 | Voice input (speech-to-text) | done | S6 | Browser Speech API |
 | A-16 | Provider settings UI | done | S5 | Select provider, enter API keys |
-| A-17 | Custom AI provider plugin support | blocked | — | Blocked by plugin system (PL-07) |
+| A-17 | Custom AI provider plugin support | done | S9 | BYOM via ai:provider permission |
 | A-18 | AI reminders via integrations | idea | — | Discord bot, Google Calendar, etc. |
 
 ## Storage & Data
@@ -152,8 +152,8 @@ All work items for ASF Docket, organized by area and prioritized within each sec
 | D-04 | CRUD query helpers (tasks, projects, tags, task_tags) | done | S1 | queries.ts partial |
 | D-05 | Markdown storage backend | needs-design | — | v0.7 milestone |
 | D-06 | Storage interface abstraction | needs-design | — | v0.7 milestone |
-| D-07 | Data export (JSON, Markdown, CSV) | ready | — | |
-| D-08 | Data import (Todoist JSON, plain text) | needs-design | — | |
+| D-07 | Data export (JSON, Markdown, CSV) | done | S9 | JSON + Markdown + CSV export |
+| D-08 | Data import (Todoist JSON, plain text) | done | S10 | Docket JSON, Todoist JSON, Markdown |
 | D-09 | Generalize DB layer (BaseSQLiteDatabase) | done | S8 | better-sqlite3 + sql.js share types |
 | D-10 | sql.js WebView client + bundled migrations | done | S8 | client-web.ts, migrate-web.ts |
 | D-11 | Tauri FS persistence (load/save SQLite) | done | S8 | persistence.ts via @tauri-apps/plugin-fs |

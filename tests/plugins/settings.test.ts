@@ -10,8 +10,8 @@ const DEFINITIONS: SettingDefinition[] = [
 ];
 
 function createManager() {
-  const { queries } = createTestServices();
-  return new PluginSettingsManager(queries);
+  const { storage } = createTestServices();
+  return new PluginSettingsManager(storage);
 }
 
 describe("PluginSettingsManager", () => {

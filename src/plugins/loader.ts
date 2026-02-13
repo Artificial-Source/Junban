@@ -8,7 +8,7 @@ import type { EventBus } from "../core/event-bus.js";
 import type { PluginSettingsManager } from "./settings.js";
 import type { CommandRegistry } from "./command-registry.js";
 import type { UIRegistry } from "./ui-registry.js";
-import type { Queries } from "../db/queries.js";
+import type { IStorage } from "../storage/interface.js";
 import type { AIProviderRegistry } from "../ai/provider-registry.js";
 import { createLogger } from "../utils/logger.js";
 
@@ -28,7 +28,7 @@ export interface PluginServices {
   settingsManager: PluginSettingsManager;
   commandRegistry: CommandRegistry;
   uiRegistry: UIRegistry;
-  queries: Queries;
+  queries: IStorage;
   aiProviderRegistry?: AIProviderRegistry;
 }
 

@@ -193,9 +193,7 @@ These will be planned as we get closer. See [BACKLOG.md](BACKLOG.md) for all ite
 
 | Sprint | Theme | Key Items |
 |--------|-------|-----------|
-| S9 | Markdown Storage | Storage abstraction, Markdown backend, file-based projects |
-| S10 | Data Portability | Export (JSON/MD/CSV), import (Todoist), migration tools |
-| S11 | Advanced UX | Drag-and-drop, bulk ops, undo/redo, shortcut customization |
+| S11 | Markdown Storage | Storage abstraction, Markdown backend, file-based projects |
 | S12 | Hardening | Accessibility audit, performance profiling, error boundaries |
 | S13 | v1.0 Release | Stable API freeze, auto-updater, community plugins |
 
@@ -354,3 +352,31 @@ These will be planned as we get closer. See [BACKLOG.md](BACKLOG.md) for all ite
 | F-12 | Vite build config (conditional apiPlugin, external better-sqlite3, sql.js WASM) | done |
 
 **Result**: 6 new files, 4 modified files, full `src-tauri/` scaffold. Tailwind styling works. Tauri desktop app launches with native window. Production build uses sql.js in WebView with Tauri FS persistence. 333 passing tests.
+
+### Sprint 9 — "Power User" (completed)
+
+**Goal**: Bulk operations, plugin permissions, AI BYOM (Bring Your Own Model), data export, keyboard shortcut customization, undo/redo, and drag-and-drop reordering. Closes most of v0.2 (Polish) and v0.5 (Plugin System).
+
+| ID | Item | Status |
+|----|------|--------|
+| C-13 | Bulk operations (multi-select + complete/move/tag/delete) | done |
+| U-16 | Drag-and-drop task reordering (@dnd-kit/core + sortable) | done |
+| U-17 | Undo/redo for task operations (UndoManager + Ctrl+Z) | done |
+| PL-15 | Plugin permission approval UX | done |
+| A-17 | Custom AI provider plugin support (BYOM) | done |
+| D-07 | Data export (JSON, Markdown, CSV) | done |
+| — | Keyboard shortcut customization | done |
+
+**Result**: Bulk ops with multi-select toolbar, drag-and-drop via @dnd-kit, undo/redo with keyboard shortcuts, plugin permission grants, AI BYOM via ai:provider permission, data export in 3 formats. 387 passing tests.
+
+### Sprint 10 — "Milestone Closure" (completed)
+
+**Goal**: Close v0.2 (Polish) and v0.5 (Plugin System) milestones. Data import from Docket JSON / Todoist JSON / Markdown, custom CSS themes with live editor, and plugin install/uninstall from store.
+
+| ID | Item | Status |
+|----|------|--------|
+| D-08 | Data import (Docket JSON, Todoist JSON, Markdown) | done |
+| — | Custom CSS themes (18 CSS variables, inline editor, live preview) | done |
+| PL-14 | Plugin install/uninstall from store (tar.gz download + extract) | done |
+
+**Result**: 3 new files, 10+ modified files. Import with preview + auto-detection, custom themes with grouped color pickers and live preview, plugin install/uninstall with search and loading states. 424 passing tests.

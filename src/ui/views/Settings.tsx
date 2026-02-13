@@ -202,6 +202,8 @@ export function Settings() {
 
       <AIAssistantSettings />
 
+      <StorageSection />
+
       <section className="mb-8">
         <h2 className="text-lg font-semibold mb-3">Plugins</h2>
         {plugins.length === 0 ? (
@@ -567,6 +569,50 @@ function KeyboardShortcutsSection() {
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+function StorageSection() {
+  const [storageInfo, setStorageInfo] = useState<{ mode: string; path: string } | null>(null);
+
+  useEffect(() => {
+    api
+      .getStorageInfo()
+      .then(setStorageInfo)
+      .catch(() => {});
+  }, []);
+
+  return (
+    <section className="mb-8">
+      <h2 className="text-lg font-semibold mb-3">Storage</h2>
+      {storageInfo ? (
+        <div className="space-y-2 max-w-md">
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-700 dark:text-gray-300">Mode:</span>
+            <span className="text-sm font-mono px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
+              {storageInfo.mode === "markdown" ? "Markdown Files" : "SQLite"}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-700 dark:text-gray-300">Path:</span>
+            <span className="text-sm font-mono px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
+              {storageInfo.path}
+            </span>
+          </div>
+          <p className="text-xs text-gray-400 mt-2">
+            {storageInfo.mode === "markdown"
+              ? "Tasks are stored as .md files with YAML frontmatter. Git-friendly and human-readable."
+              : "Tasks are stored in a local SQLite database. Fast queries and structured data."}
+          </p>
+          <p className="text-xs text-gray-400">
+            Storage mode is set via the STORAGE_MODE environment variable. Switching modes requires
+            restart. Data is not automatically migrated — use Export then Import to transfer.
+          </p>
+        </div>
+      ) : (
+        <p className="text-sm text-gray-400">Loading storage info...</p>
+      )}
     </section>
   );
 }

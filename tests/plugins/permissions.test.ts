@@ -5,14 +5,14 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as schema from "../../src/db/schema.js";
-import { createQueries } from "../../src/db/queries.js";
-import type { Queries } from "../../src/db/queries.js";
+import { SQLiteBackend } from "../../src/storage/sqlite-backend.js";
+import type { IStorage } from "../../src/storage/interface.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(__dirname, "../../src/db/migrations");
 
 describe("Plugin Permissions (DB)", () => {
-  let queries: Queries;
+  let storage: IStorage;
 
   beforeEach(() => {
     const sqlite = new Database(":memory:");
@@ -20,42 +20,42 @@ describe("Plugin Permissions (DB)", () => {
     sqlite.pragma("foreign_keys = ON");
     const db = drizzle(sqlite, { schema });
     migrate(db, { migrationsFolder });
-    queries = createQueries(db);
+    storage = new SQLiteBackend(db);
   });
 
   it("returns null for unapproved plugins", () => {
-    const perms = queries.getPluginPermissions("unknown-plugin");
+    const perms = storage.getPluginPermissions("unknown-plugin");
     expect(perms).toBeNull();
   });
 
   it("stores and retrieves permissions", () => {
-    queries.setPluginPermissions("my-plugin", ["task:read", "task:write"]);
+    storage.setPluginPermissions("my-plugin", ["task:read", "task:write"]);
 
-    const perms = queries.getPluginPermissions("my-plugin");
+    const perms = storage.getPluginPermissions("my-plugin");
     expect(perms).toEqual(["task:read", "task:write"]);
   });
 
   it("updates permissions on re-set", () => {
-    queries.setPluginPermissions("my-plugin", ["task:read"]);
-    queries.setPluginPermissions("my-plugin", ["task:read", "storage"]);
+    storage.setPluginPermissions("my-plugin", ["task:read"]);
+    storage.setPluginPermissions("my-plugin", ["task:read", "storage"]);
 
-    const perms = queries.getPluginPermissions("my-plugin");
+    const perms = storage.getPluginPermissions("my-plugin");
     expect(perms).toEqual(["task:read", "storage"]);
   });
 
   it("deletes permissions", () => {
-    queries.setPluginPermissions("my-plugin", ["task:read"]);
-    queries.deletePluginPermissions("my-plugin");
+    storage.setPluginPermissions("my-plugin", ["task:read"]);
+    storage.deletePluginPermissions("my-plugin");
 
-    const perms = queries.getPluginPermissions("my-plugin");
+    const perms = storage.getPluginPermissions("my-plugin");
     expect(perms).toBeNull();
   });
 
   it("isolates permissions between plugins", () => {
-    queries.setPluginPermissions("plugin-a", ["task:read"]);
-    queries.setPluginPermissions("plugin-b", ["storage", "network"]);
+    storage.setPluginPermissions("plugin-a", ["task:read"]);
+    storage.setPluginPermissions("plugin-b", ["storage", "network"]);
 
-    expect(queries.getPluginPermissions("plugin-a")).toEqual(["task:read"]);
-    expect(queries.getPluginPermissions("plugin-b")).toEqual(["storage", "network"]);
+    expect(storage.getPluginPermissions("plugin-a")).toEqual(["task:read"]);
+    expect(storage.getPluginPermissions("plugin-b")).toEqual(["storage", "network"]);
   });
 });

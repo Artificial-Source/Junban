@@ -1,6 +1,5 @@
 import { createWebDb } from "./db/client-web.js";
 import { runWebMigrations } from "./db/migrate-web.js";
-import { createQueries } from "./db/queries.js";
 import { TaskService } from "./core/tasks.js";
 import { ProjectService } from "./core/projects.js";
 import { TagService } from "./core/tags.js";
@@ -12,7 +11,11 @@ import { PluginSettingsManager } from "./plugins/settings.js";
 import { CommandRegistry } from "./plugins/command-registry.js";
 import { UIRegistry } from "./plugins/ui-registry.js";
 import { loadDbFile, saveDbFile } from "./db/persistence.js";
-import type { Queries } from "./db/queries.js";
+import { SQLiteBackend } from "./storage/sqlite-backend.js";
+import type { IStorage } from "./storage/interface.js";
+
+// Web/Tauri mode always uses SQLite (sql.js in browser has no filesystem access).
+// Markdown storage requires Node.js for file I/O.
 
 export interface WebAppServices {
   taskService: TaskService;
@@ -23,7 +26,7 @@ export interface WebAppServices {
   commandRegistry: CommandRegistry;
   uiRegistry: UIRegistry;
   chatManager: ChatManager;
-  queries: Queries;
+  storage: IStorage;
   aiProviderRegistry: AIProviderRegistry;
   save: () => void;
 }
@@ -41,12 +44,12 @@ export async function bootstrapWeb(): Promise<WebAppServices> {
   const { db, sqlite } = await createWebDb(existingData ?? undefined);
   runWebMigrations(sqlite);
 
-  const queries = createQueries(db);
-  const tagService = new TagService(queries);
-  const projectService = new ProjectService(queries);
+  const storage: IStorage = new SQLiteBackend(db);
+  const tagService = new TagService(storage);
+  const projectService = new ProjectService(storage);
   const eventBus = new EventBus();
-  const taskService = new TaskService(queries, tagService, eventBus);
-  const settingsManager = new PluginSettingsManager(queries);
+  const taskService = new TaskService(storage, tagService, eventBus);
+  const settingsManager = new PluginSettingsManager(storage);
   const commandRegistry = new CommandRegistry();
   const uiRegistry = new UIRegistry();
   const chatManager = new ChatManager();
@@ -78,7 +81,7 @@ export async function bootstrapWeb(): Promise<WebAppServices> {
     commandRegistry,
     uiRegistry,
     chatManager,
-    queries,
+    storage,
     aiProviderRegistry,
     save,
   };

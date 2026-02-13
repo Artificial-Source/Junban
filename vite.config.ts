@@ -235,7 +235,7 @@ function apiPlugin() {
         if (permMatch && req.method === "GET") {
           const pluginId = permMatch[1];
           const svc = await getServices();
-          const permissions = svc.queries.getPluginPermissions(pluginId);
+          const permissions = svc.storage.getPluginPermissions(pluginId);
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ permissions }));
           return;
@@ -437,12 +437,27 @@ function apiPlugin() {
 
         const result = await installer.uninstall(pluginId);
         if (result.success) {
-          svc.queries.deletePluginPermissions(pluginId);
+          svc.storage.deletePluginPermissions(pluginId);
           svc.pluginLoader.remove(pluginId);
         }
 
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify(result));
+      });
+
+      // GET /api/settings/storage — storage mode info
+      server.middlewares.use(async (req, res, next) => {
+        if (req.url !== "/api/settings/storage" || req.method !== "GET") return next();
+
+        const { loadEnv } = await import("./src/config/env.js");
+        const env = loadEnv();
+        res.setHeader("Content-Type", "application/json");
+        res.end(
+          JSON.stringify({
+            mode: env.STORAGE_MODE,
+            path: env.STORAGE_MODE === "markdown" ? env.MARKDOWN_PATH : env.DB_PATH,
+          }),
+        );
       });
 
       // GET/PUT /api/settings/:key — generic app settings
@@ -453,7 +468,7 @@ function apiPlugin() {
         const svc = await getServices();
 
         if (req.method === "GET") {
-          const row = svc.queries.getAppSetting(key);
+          const row = svc.storage.getAppSetting(key);
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ value: row?.value ?? null }));
           return;
@@ -461,7 +476,7 @@ function apiPlugin() {
 
         if (req.method === "PUT") {
           const body = await parseBody(req);
-          svc.queries.setAppSetting(key, body.value as string);
+          svc.storage.setAppSetting(key, body.value as string);
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ ok: true }));
           return;
@@ -549,10 +564,10 @@ function apiPlugin() {
         const svc = await getServices();
 
         if (req.method === "GET") {
-          const providerSetting = svc.queries.getAppSetting("ai_provider");
-          const modelSetting = svc.queries.getAppSetting("ai_model");
-          const baseUrlSetting = svc.queries.getAppSetting("ai_base_url");
-          const apiKeySetting = svc.queries.getAppSetting("ai_api_key");
+          const providerSetting = svc.storage.getAppSetting("ai_provider");
+          const modelSetting = svc.storage.getAppSetting("ai_model");
+          const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+          const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
           res.setHeader("Content-Type", "application/json");
           res.end(
             JSON.stringify({
@@ -573,24 +588,24 @@ function apiPlugin() {
             model?: string;
             baseUrl?: string;
           };
-          if (provider) svc.queries.setAppSetting("ai_provider", provider);
-          if (apiKey) svc.queries.setAppSetting("ai_api_key", apiKey);
+          if (provider) svc.storage.setAppSetting("ai_provider", provider);
+          if (apiKey) svc.storage.setAppSetting("ai_api_key", apiKey);
           if (model !== undefined) {
             if (model) {
-              svc.queries.setAppSetting("ai_model", model);
+              svc.storage.setAppSetting("ai_model", model);
             } else {
-              svc.queries.deleteAppSetting("ai_model");
+              svc.storage.deleteAppSetting("ai_model");
             }
           }
           if (baseUrl !== undefined) {
             if (baseUrl) {
-              svc.queries.setAppSetting("ai_base_url", baseUrl);
+              svc.storage.setAppSetting("ai_base_url", baseUrl);
             } else {
-              svc.queries.deleteAppSetting("ai_base_url");
+              svc.storage.deleteAppSetting("ai_base_url");
             }
           }
           // Reset chat session when provider config changes
-          svc.chatManager.clearSession(svc.queries);
+          svc.chatManager.clearSession(svc.storage);
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ ok: true }));
           return;
@@ -615,7 +630,7 @@ function apiPlugin() {
         }
 
         // Load provider config
-        const providerSetting = svc.queries.getAppSetting("ai_provider");
+        const providerSetting = svc.storage.getAppSetting("ai_provider");
         if (!providerSetting?.value) {
           res.setHeader("Content-Type", "text/event-stream");
           res.setHeader("Cache-Control", "no-cache");
@@ -630,9 +645,9 @@ function apiPlugin() {
         try {
           const { createProvider } = await import("./src/ai/provider.js");
           const { gatherContext } = await import("./src/ai/chat.js");
-          const apiKeySetting = svc.queries.getAppSetting("ai_api_key");
-          const modelSetting = svc.queries.getAppSetting("ai_model");
-          const baseUrlSetting = svc.queries.getAppSetting("ai_base_url");
+          const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+          const modelSetting = svc.storage.getAppSetting("ai_model");
+          const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
 
           const provider = createProvider({
             provider: providerSetting.value as any,
@@ -652,7 +667,7 @@ function apiPlugin() {
           const session = svc.chatManager.getOrCreateSession(
             provider,
             toolServices,
-            svc.queries,
+            svc.storage,
             contextBlock,
           );
 
@@ -689,12 +704,12 @@ function apiPlugin() {
         // Try to restore from DB if no in-memory session
         if (!session) {
           try {
-            const providerSetting = svc.queries.getAppSetting("ai_provider");
+            const providerSetting = svc.storage.getAppSetting("ai_provider");
             if (providerSetting?.value) {
               const { createProvider } = await import("./src/ai/provider.js");
-              const apiKeySetting = svc.queries.getAppSetting("ai_api_key");
-              const modelSetting = svc.queries.getAppSetting("ai_model");
-              const baseUrlSetting = svc.queries.getAppSetting("ai_base_url");
+              const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+              const modelSetting = svc.storage.getAppSetting("ai_model");
+              const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
 
               const provider = createProvider({
                 provider: providerSetting.value as any,
@@ -706,7 +721,7 @@ function apiPlugin() {
               session = svc.chatManager.restoreSession(
                 provider,
                 { taskService: svc.taskService, projectService: svc.projectService },
-                svc.queries,
+                svc.storage,
               );
             }
           } catch {
@@ -724,7 +739,7 @@ function apiPlugin() {
         if (req.url !== "/api/ai/clear" || req.method !== "POST") return next();
 
         const svc = await getServices();
-        svc.chatManager.clearSession(svc.queries);
+        svc.chatManager.clearSession(svc.storage);
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: true }));
       });

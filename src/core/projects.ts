@@ -1,10 +1,10 @@
 import type { Project } from "./types.js";
-import type { Queries } from "../db/queries.js";
+import type { IStorage } from "../storage/interface.js";
 import { generateId } from "../utils/ids.js";
 
 /** Project service — manages task groupings. */
 export class ProjectService {
-  constructor(private queries: Queries) {}
+  constructor(private queries: IStorage) {}
 
   async create(name: string, color?: string): Promise<Project> {
     const project = {

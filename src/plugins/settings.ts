@@ -1,5 +1,5 @@
 import type { SettingDefinition } from "./types.js";
-import type { Queries } from "../db/queries.js";
+import type { IStorage } from "../storage/interface.js";
 
 /**
  * Per-plugin settings manager.
@@ -9,7 +9,7 @@ import type { Queries } from "../db/queries.js";
 export class PluginSettingsManager {
   private cache: Map<string, Record<string, unknown>> = new Map();
 
-  constructor(private queries: Queries) {}
+  constructor(private queries: IStorage) {}
 
   /** Get a setting value for a plugin, falling back to the manifest default. */
   get<T>(pluginId: string, settingId: string, definitions: SettingDefinition[]): T {

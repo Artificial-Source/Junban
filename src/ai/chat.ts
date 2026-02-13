@@ -1,7 +1,7 @@
 import type { AIProvider } from "./provider.js";
 import type { ChatMessage, StreamEvent } from "./types.js";
 import { getToolDefinitions, executeTool, type ToolServices } from "./tools.js";
-import type { Queries } from "../db/queries.js";
+import type { IStorage } from "../storage/interface.js";
 import { generateId } from "../utils/ids.js";
 
 export class ChatSession {
@@ -9,14 +9,14 @@ export class ChatSession {
   private provider: AIProvider;
   private services: ToolServices;
   readonly sessionId: string;
-  private queries?: Queries;
+  private queries?: IStorage;
 
   constructor(
     provider: AIProvider,
     services: ToolServices,
     systemMessage: ChatMessage,
     sessionId?: string,
-    queries?: Queries,
+    queries?: IStorage,
   ) {
     this.provider = provider;
     this.services = services;
@@ -116,7 +116,7 @@ export class ChatManager {
   getOrCreateSession(
     provider: AIProvider,
     services: ToolServices,
-    queries?: Queries,
+    queries?: IStorage,
     contextBlock?: string,
   ): ChatSession {
     if (!this.session) {
@@ -130,14 +130,14 @@ export class ChatManager {
     return this.session;
   }
 
-  clearSession(queries?: Queries): void {
+  clearSession(queries?: IStorage): void {
     if (this.session && queries) {
       queries.deleteChatSession(this.session.sessionId);
     }
     this.session = null;
   }
 
-  resetWithProvider(provider: AIProvider, services: ToolServices, queries?: Queries): ChatSession {
+  resetWithProvider(provider: AIProvider, services: ToolServices, queries?: IStorage): ChatSession {
     this.session = null;
     return this.getOrCreateSession(provider, services, queries);
   }
@@ -145,7 +145,7 @@ export class ChatManager {
   restoreSession(
     provider: AIProvider,
     services: ToolServices,
-    queries: Queries,
+    queries: IStorage,
   ): ChatSession | null {
     const latest = queries.getLatestSessionId();
     if (!latest) return null;

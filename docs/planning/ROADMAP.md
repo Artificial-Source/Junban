@@ -28,14 +28,14 @@ Refinements to the core experience before plugins.
 
 - [x] Recurring tasks (daily, weekly, monthly, custom)
 - [x] Task search and filtering (by project, tag, priority, date range)
-- [ ] Bulk operations (complete all, move to project, tag multiple)
-- [ ] Drag-and-drop task reordering
+- [x] Bulk operations (complete all, move to project, tag multiple)
+- [x] Drag-and-drop task reordering
 - [x] Task descriptions (longer notes below the title)
-- [ ] Undo/redo for task operations
-- [ ] Custom CSS theme support
-- [ ] Keyboard shortcut customization
-- [ ] Data export (JSON, Markdown, CSV)
-- [ ] Data import (Todoist JSON, plain text)
+- [x] Undo/redo for task operations
+- [x] Custom CSS theme support
+- [x] Keyboard shortcut customization
+- [x] Data export (JSON, Markdown, CSV)
+- [x] Data import (Todoist JSON, plain text)
 
 ## v0.3 — AI Assistant
 
@@ -56,7 +56,7 @@ The conversational AI that makes Docket feel like JARVIS for tasks.
 - [x] AI priority suggestions ("You have 3 overdue tasks — want me to reschedule?")
 - [x] Voice input (speech-to-text → AI chat)
 - [x] Provider settings UI (select provider, enter API keys)
-- [ ] Custom AI provider plugin support (BYOM)
+- [x] Custom AI provider plugin support (BYOM)
 
 ## v0.5 — Plugin System
 
@@ -76,7 +76,7 @@ The Obsidian-style plugin architecture.
 - [x] Plugin store view (browse, install, configure, remove)
 - [x] Built-in example plugin (Pomodoro timer)
 - [x] Plugin API documentation and examples
-- [ ] Plugin permission model (approve on install)
+- [x] Plugin permission model (approve on install)
 
 ## v0.7 — Markdown Storage
 

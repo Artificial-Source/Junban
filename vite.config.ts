@@ -110,6 +110,61 @@ function apiPlugin() {
         res.end(JSON.stringify({ ok: true }));
       });
 
+      // POST /api/tasks/import — import tasks from external formats
+      server.middlewares.use(async (req, res, next) => {
+        if (req.url !== "/api/tasks/import" || req.method !== "POST") return next();
+        const svc = await getServices();
+        const body = await parseBody(req);
+        const { tasks: importedTasks } = body as {
+          tasks: Array<{
+            title: string;
+            description: string | null;
+            status: "pending" | "completed";
+            priority: number | null;
+            dueDate: string | null;
+            dueTime: boolean;
+            projectName: string | null;
+            tagNames: string[];
+            recurrence: string | null;
+          }>;
+        };
+
+        const errors: string[] = [];
+        let imported = 0;
+
+        for (const t of importedTasks) {
+          try {
+            let projectId: string | undefined;
+            if (t.projectName) {
+              const project = await svc.projectService.getOrCreate(t.projectName);
+              projectId = project.id;
+            }
+
+            const task = await svc.taskService.create({
+              title: t.title,
+              description: t.description ?? undefined,
+              priority: t.priority,
+              dueDate: t.dueDate ?? undefined,
+              dueTime: t.dueTime,
+              projectId,
+              recurrence: t.recurrence ?? undefined,
+              tags: t.tagNames,
+            });
+
+            if (t.status === "completed") {
+              await svc.taskService.complete(task.id);
+            }
+
+            imported++;
+          } catch (err: any) {
+            errors.push(`Failed to import "${t.title}": ${err.message ?? "unknown error"}`);
+          }
+        }
+
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ imported, errors }));
+      });
+
       // GET /api/projects
       server.middlewares.use(async (req, res, next) => {
         if (req.url !== "/api/projects" || req.method !== "GET") return next();
@@ -331,6 +386,63 @@ function apiPlugin() {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ plugins: [] }));
         }
+      });
+
+      // POST /api/plugins/install — install a plugin from URL
+      server.middlewares.use(async (req, res, next) => {
+        if (req.url !== "/api/plugins/install" || req.method !== "POST") return next();
+
+        const svc = await getServices();
+        await ensurePlugins();
+        const body = await parseBody(req);
+        const { pluginId, downloadUrl } = body as { pluginId: string; downloadUrl: string };
+
+        const { PluginInstaller } = await import("./src/plugins/installer.js");
+        const installer = new PluginInstaller(path.resolve(process.cwd(), "plugins"));
+
+        const result = await installer.install(pluginId, downloadUrl);
+        if (result.success) {
+          const discovered = await svc.pluginLoader.discoverOne(pluginId);
+          if (discovered) {
+            try {
+              await svc.pluginLoader.load(pluginId);
+            } catch {
+              // Plugin may need permission approval — that's fine
+            }
+          }
+        }
+
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(result));
+      });
+
+      // POST /api/plugins/:id/uninstall — uninstall a plugin
+      server.middlewares.use(async (req, res, next) => {
+        const match = req.url?.match(/^\/api\/plugins\/([^/]+)\/uninstall$/);
+        if (!match || req.method !== "POST") return next();
+
+        const pluginId = match[1];
+        const svc = await getServices();
+        await ensurePlugins();
+
+        // Unload plugin if loaded
+        try {
+          await svc.pluginLoader.unload(pluginId);
+        } catch {
+          // May not be loaded — that's fine
+        }
+
+        const { PluginInstaller } = await import("./src/plugins/installer.js");
+        const installer = new PluginInstaller(path.resolve(process.cwd(), "plugins"));
+
+        const result = await installer.uninstall(pluginId);
+        if (result.success) {
+          svc.queries.deletePluginPermissions(pluginId);
+          svc.pluginLoader.remove(pluginId);
+        }
+
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(result));
       });
 
       // GET/PUT /api/settings/:key — generic app settings

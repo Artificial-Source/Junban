@@ -1,5 +1,6 @@
 import type { Task, CreateTaskInput, UpdateTaskInput, Project } from "../core/types.js";
 import type { TaskFilter } from "../core/filters.js";
+import type { ImportedTask, ImportResult } from "../core/import.js";
 
 const BASE = "/api";
 
@@ -148,6 +149,55 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ orderedIds }),
     });
+  },
+
+  async importTasks(tasks: ImportedTask[]): Promise<ImportResult> {
+    if (isTauri()) {
+      const svc = await getServices();
+      const errors: string[] = [];
+      let imported = 0;
+
+      for (const t of tasks) {
+        try {
+          let projectId: string | undefined;
+          if (t.projectName) {
+            const project = await svc.projectService.getOrCreate(t.projectName);
+            projectId = project.id;
+          }
+
+          const task = await svc.taskService.create({
+            title: t.title,
+            description: t.description ?? undefined,
+            priority: t.priority,
+            dueDate: t.dueDate ?? undefined,
+            dueTime: t.dueTime,
+            projectId,
+            recurrence: t.recurrence ?? undefined,
+            tags: t.tagNames,
+          });
+
+          if (t.status === "completed") {
+            await svc.taskService.complete(task.id);
+          }
+
+          imported++;
+        } catch (err) {
+          errors.push(
+            `Failed to import "${t.title}": ${err instanceof Error ? err.message : "unknown error"}`,
+          );
+        }
+      }
+
+      svc.save();
+      return { imported, errors };
+    }
+
+    const res = await fetch(`${BASE}/tasks/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tasks }),
+    });
+    return res.json();
   },
 
   async listProjects(): Promise<Project[]> {
@@ -306,6 +356,34 @@ export const api = {
     }
     const res = await fetch(`${BASE}/plugins/store`);
     return res.json();
+  },
+
+  async installPlugin(pluginId: string, downloadUrl: string): Promise<void> {
+    if (isTauri()) {
+      throw new Error("Plugin install not available in desktop mode");
+    }
+    const res = await fetch(`${BASE}/plugins/install`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pluginId, downloadUrl }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error ?? "Install failed");
+    }
+  },
+
+  async uninstallPlugin(pluginId: string): Promise<void> {
+    if (isTauri()) {
+      throw new Error("Plugin uninstall not available in desktop mode");
+    }
+    const res = await fetch(`${BASE}/plugins/${pluginId}/uninstall`, {
+      method: "POST",
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error ?? "Uninstall failed");
+    }
   },
 
   // AI APIs
@@ -666,6 +744,7 @@ export interface StorePluginInfo {
   author: string;
   version: string;
   repository: string;
+  downloadUrl?: string;
   tags: string[];
   minDocketVersion: string;
 }

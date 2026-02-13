@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import path from "node:path";
 import { PluginRegistry, type RegistryEntry } from "../../src/plugins/registry.js";
 
 const PLUGINS: RegistryEntry[] = [
@@ -94,5 +95,32 @@ describe("PluginRegistry.search", () => {
     const results = registry.search(PLUGINS, "view");
     expect(results).toHaveLength(1);
     expect(results[0].id).toBe("kanban");
+  });
+});
+
+describe("PluginRegistry.loadLocal", () => {
+  it("parses sources.json from project root", async () => {
+    const sourcesPath = path.resolve(process.cwd(), "sources.json");
+    const registry = new PluginRegistry(sourcesPath);
+    const plugins = await registry.loadLocal();
+
+    expect(plugins.length).toBeGreaterThan(0);
+    expect(plugins[0].id).toBeTruthy();
+    expect(plugins[0].name).toBeTruthy();
+  });
+
+  it("returns empty array for malformed JSON path", async () => {
+    const registry = new PluginRegistry("/nonexistent/path.json");
+    const plugins = await registry.loadLocal();
+    expect(plugins).toEqual([]);
+  });
+
+  it("includes downloadUrl when present", async () => {
+    const sourcesPath = path.resolve(process.cwd(), "sources.json");
+    const registry = new PluginRegistry(sourcesPath);
+    const plugins = await registry.loadLocal();
+
+    const withUrl = plugins.filter((p) => p.downloadUrl);
+    expect(withUrl.length).toBeGreaterThan(0);
   });
 });

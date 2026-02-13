@@ -11,6 +11,7 @@
       "author": "ASF",
       "version": "0.1.0",
       "repository": "https://github.com/asf-org/docket-plugin-pomodoro",
+      "downloadUrl": "https://github.com/asf-org/docket-plugin-pomodoro/releases/latest/download/plugin.tar.gz",
       "tags": ["productivity", "timer"],
       "minDocketVersion": "0.1.0"
     },
@@ -21,6 +22,7 @@
       "author": "ASF",
       "version": "0.1.0",
       "repository": "https://github.com/asf-org/docket-plugin-kanban",
+      "downloadUrl": "https://github.com/asf-org/docket-plugin-kanban/releases/latest/download/plugin.tar.gz",
       "tags": ["view", "kanban", "productivity"],
       "minDocketVersion": "0.1.0"
     },
@@ -31,6 +33,7 @@
       "author": "ASF",
       "version": "0.1.0",
       "repository": "https://github.com/asf-org/docket-plugin-calendar",
+      "downloadUrl": "https://github.com/asf-org/docket-plugin-calendar/releases/latest/download/plugin.tar.gz",
       "tags": ["view", "calendar"],
       "minDocketVersion": "0.1.0"
     },
@@ -41,6 +44,7 @@
       "author": "ASF",
       "version": "0.1.0",
       "repository": "https://github.com/asf-org/docket-plugin-time-tracking",
+      "downloadUrl": "https://github.com/asf-org/docket-plugin-time-tracking/releases/latest/download/plugin.tar.gz",
       "tags": ["productivity", "tracking"],
       "minDocketVersion": "0.1.0"
     },
@@ -51,6 +55,7 @@
       "author": "ASF",
       "version": "0.1.0",
       "repository": "https://github.com/asf-org/docket-plugin-git-sync",
+      "downloadUrl": "https://github.com/asf-org/docket-plugin-git-sync/releases/latest/download/plugin.tar.gz",
       "tags": ["sync", "git"],
       "minDocketVersion": "0.5.0"
     }

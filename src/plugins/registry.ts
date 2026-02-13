@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { z } from "zod";
 
 const RegistryEntry = z.object({
@@ -7,14 +8,15 @@ const RegistryEntry = z.object({
   author: z.string(),
   version: z.string(),
   repository: z.string(),
+  downloadUrl: z.string().url().optional(),
   tags: z.array(z.string()),
   minDocketVersion: z.string(),
 });
 
 const _RegistrySchema = z.object({
   version: z.number(),
-  description: z.string(),
-  lastUpdated: z.string(),
+  description: z.string().optional(),
+  lastUpdated: z.string().optional(),
   plugins: z.array(RegistryEntry),
 });
 
@@ -29,15 +31,32 @@ export class PluginRegistry {
 
   /** Load the registry from a local JSON file. */
   async loadLocal(): Promise<RegistryEntry[]> {
-    // TODO: Read and parse this.registryPath
-    void this.registryPath;
-    return [];
+    try {
+      const data = fs.readFileSync(this.registryPath, "utf-8");
+      const parsed = _RegistrySchema.safeParse(JSON.parse(data));
+      if (parsed.success) {
+        return parsed.data.plugins;
+      }
+      return [];
+    } catch {
+      return [];
+    }
   }
 
   /** Fetch the registry from a remote URL. */
-  async fetchRemote(_url: string): Promise<RegistryEntry[]> {
-    // TODO: Fetch, parse, validate
-    return [];
+  async fetchRemote(url: string): Promise<RegistryEntry[]> {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const json = await res.json();
+      const parsed = _RegistrySchema.safeParse(json);
+      if (parsed.success) {
+        return parsed.data.plugins;
+      }
+      return [];
+    } catch {
+      return [];
+    }
   }
 
   /** Search plugins by keyword. */

@@ -248,4 +248,46 @@ export class PluginLoader {
   get(pluginId: string): LoadedPlugin | undefined {
     return this.plugins.get(pluginId);
   }
+
+  /** Discover a single plugin by ID (after install). */
+  async discoverOne(pluginId: string): Promise<LoadedPlugin | null> {
+    const pluginPath = path.join(this.pluginDir, pluginId);
+    const manifestPath = path.join(pluginPath, "manifest.json");
+
+    if (!fs.existsSync(manifestPath)) {
+      logger.warn(`No manifest.json for ${pluginId}`);
+      return null;
+    }
+
+    try {
+      const raw = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+      const result = PluginManifest.safeParse(raw);
+
+      if (!result.success) {
+        logger.warn(`Invalid manifest for ${pluginId}: ${result.error.message}`);
+        return null;
+      }
+
+      const loaded: LoadedPlugin = {
+        manifest: result.data,
+        path: pluginPath,
+        enabled: false,
+      };
+
+      this.plugins.set(result.data.id, loaded);
+      logger.info(`Discovered plugin: ${result.data.name} v${result.data.version}`);
+      return loaded;
+    } catch (err) {
+      logger.warn(
+        `Failed to read manifest for ${pluginId}: ${err instanceof Error ? err.message : err}`,
+      );
+      return null;
+    }
+  }
+
+  /** Remove a plugin from the internal map (after uninstall). */
+  remove(pluginId: string): void {
+    this.plugins.delete(pluginId);
+    logger.info(`Removed plugin "${pluginId}" from loader`);
+  }
 }

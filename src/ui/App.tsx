@@ -214,6 +214,11 @@ function AppContent() {
     enabled: !commandPaletteOpen,
   });
 
+  // Load custom themes on mount
+  useEffect(() => {
+    themeManager.loadCustomThemes();
+  }, []);
+
   // Register shortcuts
   useEffect(() => {
     shortcutManager.register({

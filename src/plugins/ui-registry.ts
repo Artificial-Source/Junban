@@ -3,7 +3,8 @@ export interface PanelRegistration {
   pluginId: string;
   title: string;
   icon: string;
-  component: unknown;
+  component?: unknown;
+  getContent?: () => string;
 }
 
 export interface ViewRegistration {
@@ -11,7 +12,8 @@ export interface ViewRegistration {
   pluginId: string;
   name: string;
   icon: string;
-  component: unknown;
+  component?: unknown;
+  getContent?: () => string;
 }
 
 export interface StatusBarRegistration {
@@ -78,5 +80,15 @@ export class UIRegistry {
 
   getStatusBarItems(): StatusBarRegistration[] {
     return Array.from(this.statusBarItems.values());
+  }
+
+  getPanelContent(id: string): string | undefined {
+    const panel = this.panels.get(id);
+    return panel?.getContent?.();
+  }
+
+  getViewContent(id: string): string | undefined {
+    const view = this.views.get(id);
+    return view?.getContent?.();
   }
 }

@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Sidebar } from "./components/Sidebar.js";
 import { CommandPalette } from "./components/CommandPalette.js";
+import { StatusBar } from "./components/StatusBar.js";
 import { TaskDetailPanel } from "./components/TaskDetailPanel.js";
 import { TaskProvider, useTaskContext } from "./context/TaskContext.js";
+import { PluginProvider, usePluginContext } from "./context/PluginContext.js";
 import { useKeyboardNavigation } from "./hooks/useKeyboardNavigation.js";
 import { themeManager } from "./themes/manager.js";
 import { Inbox } from "./views/Inbox.js";
@@ -10,18 +12,22 @@ import { Today } from "./views/Today.js";
 import { Upcoming } from "./views/Upcoming.js";
 import { Project } from "./views/Project.js";
 import { Settings } from "./views/Settings.js";
+import { PluginStore } from "./views/PluginStore.js";
+import { PluginView } from "./views/PluginView.js";
 import type { Project as ProjectType } from "../core/types.js";
 import { api } from "./api.js";
 
-type View = "inbox" | "today" | "upcoming" | "project" | "settings";
+type View = "inbox" | "today" | "upcoming" | "project" | "settings" | "plugin-store" | "plugin-view";
 
 function AppContent() {
   const [currentView, setCurrentView] = useState<View>("inbox");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedPluginViewId, setSelectedPluginViewId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [projects, setProjects] = useState<ProjectType[]>([]);
   const { state, createTask, updateTask, completeTask, deleteTask } = useTaskContext();
+  const { commands: pluginCommands, panels, views: pluginViews, executeCommand } = usePluginContext();
 
   // Fetch projects on mount and after task changes
   const fetchProjects = useCallback(async () => {
@@ -42,9 +48,15 @@ function AppContent() {
     fetchProjects();
   }, [state.tasks, fetchProjects]);
 
-  const handleNavigate = (view: string, projectId?: string) => {
-    setCurrentView(view as View);
-    setSelectedProjectId(projectId ?? null);
+  const handleNavigate = (view: string, id?: string) => {
+    if (view === "plugin-view") {
+      setCurrentView("plugin-view");
+      setSelectedPluginViewId(id ?? null);
+    } else {
+      setCurrentView(view as View);
+      setSelectedProjectId(view === "project" ? (id ?? null) : null);
+      setSelectedPluginViewId(null);
+    }
     setSelectedTaskId(null);
   };
 
@@ -130,13 +142,14 @@ function AppContent() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Command palette commands
+  // Command palette commands — merge built-in + plugin commands
   const commands = useMemo(() => {
     const cmds = [
       { id: "nav-inbox", name: "Go to Inbox", callback: () => handleNavigate("inbox") },
       { id: "nav-today", name: "Go to Today", callback: () => handleNavigate("today") },
       { id: "nav-upcoming", name: "Go to Upcoming", callback: () => handleNavigate("upcoming") },
       { id: "nav-settings", name: "Go to Settings", callback: () => handleNavigate("settings") },
+      { id: "nav-plugin-store", name: "Go to Plugin Store", callback: () => handleNavigate("plugin-store") },
       { id: "theme-toggle", name: "Toggle Dark Mode", callback: () => themeManager.toggle() },
       { id: "theme-light", name: "Switch to Light Theme", callback: () => themeManager.setTheme("light") },
       { id: "theme-dark", name: "Switch to Dark Theme", callback: () => themeManager.setTheme("dark") },
@@ -150,8 +163,17 @@ function AppContent() {
       });
     }
 
+    // Add plugin commands
+    for (const cmd of pluginCommands) {
+      cmds.push({
+        id: `plugin-${cmd.id}`,
+        name: cmd.name,
+        callback: () => executeCommand(cmd.id),
+      });
+    }
+
     return cmds;
-  }, [projects]);
+  }, [projects, pluginCommands, executeCommand]);
 
   const selectedTask = selectedTaskId ? state.tasks.find((t) => t.id === selectedTaskId) : null;
 
@@ -203,36 +225,50 @@ function AppContent() {
       }
       case "settings":
         return <Settings />;
+      case "plugin-store":
+        return <PluginStore />;
+      case "plugin-view":
+        return selectedPluginViewId ? (
+          <PluginView viewId={selectedPluginViewId} />
+        ) : (
+          <p className="text-gray-500">No plugin view selected.</p>
+        );
       default:
         return null;
     }
   };
 
   return (
-    <div className="flex h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-      <Sidebar
-        currentView={currentView}
-        onNavigate={handleNavigate}
-        projects={projects}
-        selectedProjectId={selectedProjectId}
-      />
-      <main className="flex-1 overflow-auto p-6">
-        {state.loading ? (
-          <p className="text-gray-500">Loading...</p>
-        ) : state.error ? (
-          <p className="text-red-500">Error: {state.error}</p>
-        ) : (
-          renderView()
-        )}
-      </main>
-      {selectedTask && (
-        <TaskDetailPanel
-          task={selectedTask}
-          onUpdate={handleUpdateTask}
-          onDelete={handleDeleteTask}
-          onClose={handleCloseDetail}
+    <div className="flex flex-col h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar
+          currentView={currentView}
+          onNavigate={handleNavigate}
+          projects={projects}
+          selectedProjectId={selectedProjectId}
+          panels={panels}
+          pluginViews={pluginViews}
+          selectedPluginViewId={selectedPluginViewId}
         />
-      )}
+        <main className="flex-1 overflow-auto p-6">
+          {state.loading ? (
+            <p className="text-gray-500">Loading...</p>
+          ) : state.error ? (
+            <p className="text-red-500">Error: {state.error}</p>
+          ) : (
+            renderView()
+          )}
+        </main>
+        {selectedTask && (
+          <TaskDetailPanel
+            task={selectedTask}
+            onUpdate={handleUpdateTask}
+            onDelete={handleDeleteTask}
+            onClose={handleCloseDetail}
+          />
+        )}
+      </div>
+      <StatusBar />
       <CommandPalette
         commands={commands}
         isOpen={commandPaletteOpen}
@@ -245,7 +281,9 @@ function AppContent() {
 export function App() {
   return (
     <TaskProvider>
-      <AppContent />
+      <PluginProvider>
+        <AppContent />
+      </PluginProvider>
     </TaskProvider>
   );
 }

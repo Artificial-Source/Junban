@@ -73,13 +73,13 @@ export function createPluginAPI(options: PluginAPIOptions) {
 
     ui: {
       addSidebarPanel: hasPermission("ui:panel")
-        ? (panel: { id: string; title: string; icon: string; component: unknown }) => {
-            uiRegistry.addPanel({ ...panel, pluginId });
+        ? (panel: { id: string; title: string; icon: string; component?: unknown; render?: () => string }) => {
+            uiRegistry.addPanel({ ...panel, pluginId, getContent: panel.render });
           }
         : undefined,
       addView: hasPermission("ui:view")
-        ? (view: { id: string; name: string; icon: string; component: unknown }) => {
-            uiRegistry.addView({ ...view, pluginId });
+        ? (view: { id: string; name: string; icon: string; component?: unknown; render?: () => string }) => {
+            uiRegistry.addView({ ...view, pluginId, getContent: view.render });
           }
         : undefined,
       addStatusBarItem: hasPermission("ui:status")

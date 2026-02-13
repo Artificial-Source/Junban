@@ -1,0 +1,44 @@
+{
+  "id": "pomodoro",
+  "name": "Pomodoro Timer",
+  "version": "1.0.0",
+  "author": "ASF",
+  "description": "Focus timer with configurable work/break intervals.",
+  "main": "index.ts",
+  "minDocketVersion": "0.1.0",
+  "permissions": ["task:read", "commands", "ui:status", "ui:panel", "storage"],
+  "settings": [
+    {
+      "id": "workMinutes",
+      "name": "Work Duration",
+      "type": "number",
+      "default": 25,
+      "min": 1,
+      "max": 120
+    },
+    {
+      "id": "breakMinutes",
+      "name": "Break Duration",
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 60
+    },
+    {
+      "id": "longBreakMinutes",
+      "name": "Long Break Duration",
+      "type": "number",
+      "default": 15,
+      "min": 1,
+      "max": 60
+    },
+    {
+      "id": "sessionsBeforeLongBreak",
+      "name": "Sessions Before Long Break",
+      "type": "number",
+      "default": 4,
+      "min": 1,
+      "max": 10
+    }
+  ]
+}

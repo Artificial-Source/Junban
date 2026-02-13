@@ -19,6 +19,7 @@ export interface AppServices {
   tagService: TagService;
   eventBus: EventBus;
   pluginLoader: PluginLoader;
+  settingsManager: PluginSettingsManager;
   commandRegistry: CommandRegistry;
   uiRegistry: UIRegistry;
 }
@@ -62,6 +63,7 @@ export function bootstrap(dbPath?: string): AppServices {
     tagService,
     eventBus,
     pluginLoader,
+    settingsManager,
     commandRegistry,
     uiRegistry,
   };

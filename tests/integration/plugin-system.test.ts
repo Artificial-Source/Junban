@@ -436,6 +436,70 @@ describe("Plugin System Integration", () => {
       expect(registry.getViews()).toHaveLength(0);
       expect(registry.getStatusBarItems()).toHaveLength(0);
     });
+
+    it("should register panel with getContent and return content", () => {
+      const registry = new UIRegistry();
+      registry.addPanel({
+        id: "p1",
+        pluginId: "test",
+        title: "Panel",
+        icon: "x",
+        component: null,
+        getContent: () => "Hello from panel",
+      });
+
+      expect(registry.getPanels()).toHaveLength(1);
+      expect(registry.getPanelContent("p1")).toBe("Hello from panel");
+    });
+
+    it("should register view with getContent and return content", () => {
+      const registry = new UIRegistry();
+      registry.addView({
+        id: "v1",
+        pluginId: "test",
+        name: "View",
+        icon: "x",
+        component: null,
+        getContent: () => "Hello from view",
+      });
+
+      expect(registry.getViews()).toHaveLength(1);
+      expect(registry.getViewContent("v1")).toBe("Hello from view");
+    });
+
+    it("should return undefined for panel/view content without getContent", () => {
+      const registry = new UIRegistry();
+      registry.addPanel({ id: "p1", pluginId: "test", title: "Panel", icon: "x", component: null });
+      registry.addView({ id: "v1", pluginId: "test", name: "View", icon: "x", component: null });
+
+      expect(registry.getPanelContent("p1")).toBeUndefined();
+      expect(registry.getViewContent("v1")).toBeUndefined();
+    });
+  });
+
+  describe("Command palette integration", () => {
+    it("should list plugin commands from command registry", () => {
+      const registry = new CommandRegistry();
+
+      registry.register({
+        id: "plugin1:cmd1",
+        name: "Plugin One: Do Thing",
+        pluginId: "plugin1",
+        callback: () => {},
+      });
+      registry.register({
+        id: "plugin2:cmd2",
+        name: "Plugin Two: Do Other",
+        pluginId: "plugin2",
+        callback: () => {},
+        hotkey: "Ctrl+Shift+P",
+      });
+
+      const commands = registry.getAll();
+      expect(commands).toHaveLength(2);
+      expect(commands[0].name).toBe("Plugin One: Do Thing");
+      expect(commands[1].hotkey).toBe("Ctrl+Shift+P");
+    });
   });
 
   describe("Full lifecycle", () => {

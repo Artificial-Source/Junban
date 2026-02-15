@@ -1,9 +1,10 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Inbox as InboxIcon } from "lucide-react";
 import { TaskInput } from "../components/TaskInput.js";
 import { TaskList } from "../components/TaskList.js";
 import { QueryBar } from "../components/QueryBar.js";
 import { filterTasks } from "../../core/filters.js";
+import { parseQuery } from "../../core/query-parser.js";
 import type { ParsedQuery } from "../../core/query-parser.js";
 import type { Task } from "../../core/types.js";
 
@@ -26,6 +27,8 @@ interface InboxProps {
     event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
   ) => void;
   onReorder?: (orderedIds: string[]) => void;
+  queryText?: string;
+  onQueryTextChange?: (value: string) => void;
 }
 
 export function Inbox({
@@ -37,9 +40,20 @@ export function Inbox({
   selectedTaskIds,
   onMultiSelect,
   onReorder,
+  queryText,
+  onQueryTextChange,
 }: InboxProps) {
   const [query, setQuery] = useState<ParsedQuery | null>(null);
   const [inboxViewTimeMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    if (queryText === undefined) return;
+    if (!queryText.trim()) {
+      setQuery(null);
+      return;
+    }
+    setQuery(parseQuery(queryText));
+  }, [queryText]);
 
   const inboxTasks = useMemo(() => {
     const cutoffMs = inboxViewTimeMs - 14 * 24 * 60 * 60 * 1000;
@@ -76,7 +90,7 @@ export function Inbox({
       </div>
       <TaskInput onSubmit={onCreateTask} />
       <div className="mb-3">
-        <QueryBar onQueryChange={setQuery} />
+        <QueryBar value={queryText} onValueChange={onQueryTextChange} onQueryChange={setQuery} />
       </div>
       <TaskList
         tasks={inboxTasks}

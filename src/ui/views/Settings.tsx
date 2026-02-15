@@ -26,7 +26,19 @@ import { THEME_VARIABLES, type CustomTheme } from "../../config/themes.js";
 import { generateId } from "../../utils/ids.js";
 import { shortcutManager } from "../App.js";
 
-type SettingsTab = "general" | "ai" | "plugins" | "templates" | "keyboard" | "data" | "about";
+export type SettingsTab =
+  | "general"
+  | "ai"
+  | "plugins"
+  | "templates"
+  | "keyboard"
+  | "data"
+  | "about";
+
+interface SettingsProps {
+  activeTab?: SettingsTab;
+  onActiveTabChange?: (tab: SettingsTab) => void;
+}
 
 const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { id: "general", label: "General", icon: <Palette className="w-4 h-4" /> },
@@ -43,8 +55,9 @@ const LM_STUDIO_MODEL_LINKS = [
   { label: "liquid/lfm2-1.2b", url: "https://lmstudio.ai/models/liquid/lfm2-1.2b" },
 ] as const;
 
-export function Settings() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+export function Settings({ activeTab: controlledActiveTab, onActiveTabChange }: SettingsProps) {
+  const [internalActiveTab, setInternalActiveTab] = useState<SettingsTab>("general");
+  const activeTab = controlledActiveTab ?? internalActiveTab;
   const [currentTheme, setCurrentTheme] = useState(themeManager.getCurrent());
   const [allThemes, setAllThemes] = useState(themeManager.listThemes());
   const { plugins, refreshPlugins } = usePluginContext();
@@ -153,6 +166,13 @@ export function Settings() {
     refreshPlugins();
   };
 
+  const handleTabChange = (tab: SettingsTab) => {
+    if (controlledActiveTab === undefined) {
+      setInternalActiveTab(tab);
+    }
+    onActiveTabChange?.(tab);
+  };
+
   return (
     <div>
       <h1 className="text-2xl font-bold mb-6 flex items-center gap-2 text-on-surface">
@@ -165,7 +185,7 @@ export function Settings() {
         {TABS.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => handleTabChange(tab.id)}
             className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab.id
                 ? "border-accent text-accent"

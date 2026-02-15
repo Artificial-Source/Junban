@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { CommandPalette } from "./components/CommandPalette.js";
@@ -24,6 +24,7 @@ import { Project } from "./views/Project.js";
 import { Settings } from "./views/Settings.js";
 import { PluginStore } from "./views/PluginStore.js";
 import { PluginView } from "./views/PluginView.js";
+import type { SettingsTab } from "./views/Settings.js";
 import type { Project as ProjectType } from "../core/types.js";
 import { api } from "./api.js";
 
@@ -39,10 +40,155 @@ type View =
   | "plugin-store"
   | "plugin-view";
 
+interface RouteState {
+  view: View;
+  projectId: string | null;
+  pluginViewId: string | null;
+  inboxQuery: string;
+  settingsTab: SettingsTab;
+  pluginSearch: string;
+  focusModeOpen: boolean;
+}
+
+const DEFAULT_ROUTE_STATE: RouteState = {
+  view: "inbox",
+  projectId: null,
+  pluginViewId: null,
+  inboxQuery: "",
+  settingsTab: "general",
+  pluginSearch: "",
+  focusModeOpen: false,
+};
+
+function decodePathSegment(segment: string | undefined): string | null {
+  if (!segment) return null;
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+function parseSettingsTab(tab: string | null): SettingsTab {
+  const validTabs: SettingsTab[] = [
+    "general",
+    "ai",
+    "plugins",
+    "templates",
+    "keyboard",
+    "data",
+    "about",
+  ];
+  if (tab && validTabs.includes(tab as SettingsTab)) {
+    return tab as SettingsTab;
+  }
+  return "general";
+}
+
+function parseRouteStateFromHash(hash: string): RouteState {
+  const hashValue = hash.startsWith("#") ? hash.slice(1) : hash;
+  const normalized = hashValue.startsWith("/") ? hashValue : "/inbox";
+  const [rawPath, rawQuery = ""] = normalized.split("?");
+  const pathSegments = rawPath.split("/").filter(Boolean);
+  const params = new URLSearchParams(rawQuery);
+  const route: RouteState = { ...DEFAULT_ROUTE_STATE };
+  const root = pathSegments[0] ?? "inbox";
+
+  switch (root) {
+    case "inbox":
+      route.view = "inbox";
+      route.inboxQuery = params.get("q") ?? "";
+      break;
+    case "today":
+      route.view = "today";
+      break;
+    case "upcoming":
+      route.view = "upcoming";
+      break;
+    case "project":
+      route.view = "project";
+      route.projectId = decodePathSegment(pathSegments[1]);
+      if (!route.projectId) route.view = "inbox";
+      break;
+    case "settings":
+      route.view = "settings";
+      route.settingsTab = parseSettingsTab(params.get("tab"));
+      break;
+    case "plugin-store":
+      route.view = "plugin-store";
+      route.pluginSearch = params.get("q") ?? "";
+      break;
+    case "plugin-view":
+      route.view = "plugin-view";
+      route.pluginViewId = decodePathSegment(pathSegments[1]);
+      if (!route.pluginViewId) route.view = "inbox";
+      break;
+    default:
+      route.view = "inbox";
+      break;
+  }
+
+  route.focusModeOpen = params.get("focus") === "1";
+
+  return route;
+}
+
+function buildHashFromRoute(route: RouteState): string {
+  const params = new URLSearchParams();
+
+  if (route.view === "inbox" && route.inboxQuery.trim()) {
+    params.set("q", route.inboxQuery);
+  }
+  if (route.view === "settings") {
+    params.set("tab", route.settingsTab);
+  }
+  if (route.view === "plugin-store" && route.pluginSearch.trim()) {
+    params.set("q", route.pluginSearch);
+  }
+  if (route.focusModeOpen) {
+    params.set("focus", "1");
+  }
+
+  let path = "/inbox";
+  switch (route.view) {
+    case "today":
+      path = "/today";
+      break;
+    case "upcoming":
+      path = "/upcoming";
+      break;
+    case "project":
+      path = route.projectId ? `/project/${encodeURIComponent(route.projectId)}` : "/inbox";
+      break;
+    case "settings":
+      path = "/settings";
+      break;
+    case "plugin-store":
+      path = "/plugin-store";
+      break;
+    case "plugin-view":
+      path = route.pluginViewId
+        ? `/plugin-view/${encodeURIComponent(route.pluginViewId)}`
+        : "/inbox";
+      break;
+    case "inbox":
+    default:
+      path = "/inbox";
+      break;
+  }
+
+  const query = params.toString();
+  return `#${path}${query ? `?${query}` : ""}`;
+}
+
 function AppContent() {
   const [currentView, setCurrentView] = useState<View>("inbox");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedPluginViewId, setSelectedPluginViewId] = useState<string | null>(null);
+  const [inboxQueryText, setInboxQueryText] = useState("");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const [pluginStoreSearchQuery, setPluginStoreSearchQuery] = useState("");
+  const [routeReady, setRouteReady] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
@@ -68,6 +214,7 @@ function AppContent() {
     views: pluginViews,
     executeCommand,
   } = usePluginContext();
+  const navigationKeyRef = useRef<string | null>(null);
 
   // Fetch projects on mount and after task changes
   const fetchProjects = useCallback(async () => {
@@ -125,17 +272,90 @@ function AppContent() {
     fetchProjects();
   }, [taskCount, fetchProjects]);
 
-  const handleNavigate = (view: string, id?: string) => {
-    if (view === "plugin-view") {
-      setCurrentView("plugin-view");
-      setSelectedPluginViewId(id ?? null);
-    } else {
-      setCurrentView(view as View);
-      setSelectedProjectId(view === "project" ? (id ?? null) : null);
-      setSelectedPluginViewId(null);
+  const applyRouteState = useCallback((route: RouteState) => {
+    setCurrentView(route.view);
+    setSelectedProjectId(route.view === "project" ? route.projectId : null);
+    setSelectedPluginViewId(route.view === "plugin-view" ? route.pluginViewId : null);
+    setInboxQueryText(route.inboxQuery);
+    setSettingsTab(route.settingsTab);
+    setPluginStoreSearchQuery(route.pluginSearch);
+    setFocusModeOpen(route.focusModeOpen);
+  }, []);
+
+  useEffect(() => {
+    const syncRouteFromLocation = () => {
+      const route = parseRouteStateFromHash(window.location.hash);
+      applyRouteState(route);
+      setSelectedTaskId(null);
+      navigationKeyRef.current = `${route.view}:${route.projectId ?? ""}:${route.pluginViewId ?? ""}`;
+    };
+
+    syncRouteFromLocation();
+    setRouteReady(true);
+
+    window.addEventListener("popstate", syncRouteFromLocation);
+    window.addEventListener("hashchange", syncRouteFromLocation);
+    return () => {
+      window.removeEventListener("popstate", syncRouteFromLocation);
+      window.removeEventListener("hashchange", syncRouteFromLocation);
+    };
+  }, [applyRouteState]);
+
+  useEffect(() => {
+    if (!routeReady) return;
+
+    const route: RouteState = {
+      view: currentView,
+      projectId: selectedProjectId,
+      pluginViewId: selectedPluginViewId,
+      inboxQuery: inboxQueryText,
+      settingsTab,
+      pluginSearch: pluginStoreSearchQuery,
+      focusModeOpen,
+    };
+
+    const nextHash = buildHashFromRoute(route);
+    const navigationKey = `${currentView}:${selectedProjectId ?? ""}:${selectedPluginViewId ?? ""}`;
+
+    if (window.location.hash === nextHash) {
+      navigationKeyRef.current = navigationKey;
+      return;
     }
-    setSelectedTaskId(null);
-  };
+
+    if (navigationKeyRef.current === navigationKey) {
+      window.history.replaceState(null, "", nextHash);
+    } else {
+      window.history.pushState(null, "", nextHash);
+    }
+    navigationKeyRef.current = navigationKey;
+  }, [
+    routeReady,
+    currentView,
+    selectedProjectId,
+    selectedPluginViewId,
+    inboxQueryText,
+    settingsTab,
+    pluginStoreSearchQuery,
+    focusModeOpen,
+  ]);
+
+  const handleNavigate = useCallback(
+    (view: string, id?: string) => {
+      const nextRoute: RouteState = {
+        view: view as View,
+        projectId: view === "project" ? (id ?? null) : null,
+        pluginViewId: view === "plugin-view" ? (id ?? null) : null,
+        inboxQuery: inboxQueryText,
+        settingsTab,
+        pluginSearch: pluginStoreSearchQuery,
+        focusModeOpen,
+      };
+
+      applyRouteState(nextRoute);
+      setSelectedTaskId(null);
+    },
+    [applyRouteState, inboxQueryText, settingsTab, pluginStoreSearchQuery, focusModeOpen],
+  );
 
   const handleCreateTask = async (parsed: {
     title: string;
@@ -394,6 +614,8 @@ function AppContent() {
             selectedTaskIds={multiSelectedIds}
             onMultiSelect={handleMultiSelect}
             onReorder={handleReorder}
+            queryText={inboxQueryText}
+            onQueryTextChange={setInboxQueryText}
           />
         );
       case "today":
@@ -440,9 +662,14 @@ function AppContent() {
         );
       }
       case "settings":
-        return <Settings />;
+        return <Settings activeTab={settingsTab} onActiveTabChange={setSettingsTab} />;
       case "plugin-store":
-        return <PluginStore />;
+        return (
+          <PluginStore
+            searchQuery={pluginStoreSearchQuery}
+            onSearchQueryChange={setPluginStoreSearchQuery}
+          />
+        );
       case "plugin-view":
         return selectedPluginViewId ? (
           <PluginView viewId={selectedPluginViewId} />

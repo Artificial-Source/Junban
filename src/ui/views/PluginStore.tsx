@@ -3,14 +3,30 @@ import { Puzzle, Search, Download, Trash2, Loader2 } from "lucide-react";
 import { api, type StorePluginInfo } from "../api.js";
 import { usePluginContext } from "../context/PluginContext.js";
 
-export function PluginStore() {
+interface PluginStoreProps {
+  searchQuery?: string;
+  onSearchQueryChange?: (value: string) => void;
+}
+
+export function PluginStore({
+  searchQuery: controlledSearchQuery,
+  onSearchQueryChange,
+}: PluginStoreProps) {
   const [storePlugins, setStorePlugins] = useState<StorePluginInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [internalSearchQuery, setInternalSearchQuery] = useState("");
   const [installing, setInstalling] = useState<Set<string>>(new Set());
   const [uninstalling, setUninstalling] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const { plugins: installedPlugins, refreshPlugins } = usePluginContext();
+  const searchQuery = controlledSearchQuery ?? internalSearchQuery;
+
+  const setSearchQuery = (value: string) => {
+    if (controlledSearchQuery === undefined) {
+      setInternalSearchQuery(value);
+    }
+    onSearchQueryChange?.(value);
+  };
 
   useEffect(() => {
     const fetchStore = async () => {

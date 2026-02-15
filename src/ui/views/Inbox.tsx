@@ -41,6 +41,7 @@ export function Inbox({
   const [query, setQuery] = useState<ParsedQuery | null>(null);
 
   const inboxTasks = useMemo(() => {
+<<<<<<< fix/inbox-filter-autocomplete
     if (!query) {
       return tasks.filter((t) => t.status === "pending" && !t.projectId);
     }
@@ -49,6 +50,22 @@ export function Inbox({
     const base = tasks.filter(
       (t) => !t.projectId && (hasExplicitStatusFilter || t.status === "pending"),
     );
+=======
+    const cutoffMs = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    const base = tasks.filter((t) => {
+      if (t.projectId) return false;
+      if (t.status === "pending") return true;
+      if (t.status !== "completed") return false;
+
+      if (!t.completedAt) return true;
+      const completedAtMs = Date.parse(t.completedAt);
+      if (Number.isNaN(completedAtMs)) return true;
+
+      return completedAtMs >= cutoffMs;
+    });
+
+    if (!query) return base;
+>>>>>>> local
     return filterTasks(base, query.filter);
   }, [tasks, query]);
 

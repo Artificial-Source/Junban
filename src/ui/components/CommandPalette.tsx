@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Search } from "lucide-react";
 
 interface Command {
@@ -17,6 +17,7 @@ interface CommandPaletteProps {
 export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -31,6 +32,15 @@ export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProp
   useEffect(() => {
     setSelectedIndex(0);
   }, [query]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const selected = filtered[selectedIndex];
+    if (!selected) return;
+
+    const element = listRef.current?.querySelector<HTMLLIElement>(`#cmd-${selected.id}`);
+    element?.scrollIntoView({ block: "nearest" });
+  }, [isOpen, filtered, selectedIndex]);
 
   const handleSelect = useCallback(
     (command: Command) => {
@@ -99,6 +109,7 @@ export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProp
           />
         </div>
         <ul
+          ref={listRef}
           id="command-palette-list"
           role="listbox"
           aria-label="Commands"

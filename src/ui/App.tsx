@@ -439,6 +439,14 @@ function AppContent() {
     [applyRouteState, inboxQueryText, settingsTab, pluginStoreSearchQuery, focusModeOpen],
   );
 
+  const openSettingsTab = useCallback(
+    (tab: SettingsTab) => {
+      handleNavigate("settings");
+      setSettingsTab(tab);
+    },
+    [handleNavigate],
+  );
+
   const handleCreateTask = async (parsed: {
     title: string;
     priority: number | null;
@@ -637,6 +645,41 @@ function AppContent() {
       { id: "nav-upcoming", name: "Go to Upcoming", callback: () => handleNavigate("upcoming") },
       { id: "nav-settings", name: "Go to Settings", callback: () => handleNavigate("settings") },
       {
+        id: "nav-settings-general",
+        name: "Go to Settings: General",
+        callback: () => openSettingsTab("general"),
+      },
+      {
+        id: "nav-settings-ai",
+        name: "Go to Settings: AI Assistant",
+        callback: () => openSettingsTab("ai"),
+      },
+      {
+        id: "nav-settings-plugins",
+        name: "Go to Settings: Plugins",
+        callback: () => openSettingsTab("plugins"),
+      },
+      {
+        id: "nav-settings-templates",
+        name: "Go to Settings: Templates",
+        callback: () => openSettingsTab("templates"),
+      },
+      {
+        id: "nav-settings-keyboard",
+        name: "Go to Settings: Keyboard",
+        callback: () => openSettingsTab("keyboard"),
+      },
+      {
+        id: "nav-settings-data",
+        name: "Go to Settings: Data",
+        callback: () => openSettingsTab("data"),
+      },
+      {
+        id: "nav-settings-about",
+        name: "Go to Settings: About",
+        callback: () => openSettingsTab("about"),
+      },
+      {
         id: "nav-plugin-store",
         name: "Go to Plugin Store",
         callback: () => handleNavigate("plugin-store"),
@@ -679,7 +722,7 @@ function AppContent() {
     }
 
     return cmds;
-  }, [projects, pluginCommands, executeCommand, handleNavigate]);
+  }, [projects, pluginCommands, executeCommand, handleNavigate, openSettingsTab]);
 
   const selectedTask = selectedTaskId ? state.tasks.find((t) => t.id === selectedTaskId) : null;
 

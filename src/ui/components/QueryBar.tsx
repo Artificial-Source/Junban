@@ -17,6 +17,7 @@ const SUGGESTIONS = [
   "p1",
   "pending",
   "completed",
+  "cancelled",
 ];
 
 export function QueryBar({ onQueryChange, placeholder, value, onValueChange }: QueryBarProps) {

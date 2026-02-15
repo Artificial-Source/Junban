@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   X,
   Trash2,
@@ -39,8 +39,16 @@ export function TaskDetailPanel({
   onOutdent,
   onSelect,
 }: TaskDetailPanelProps) {
+  const currentDueDateInput = task.dueDate ? task.dueDate.split("T")[0] : "";
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
+  const [dueDateInput, setDueDateInput] = useState(currentDueDateInput);
+
+  useEffect(() => {
+    setTitle(task.title);
+    setDescription(task.description ?? "");
+    setDueDateInput(task.dueDate ? task.dueDate.split("T")[0] : "");
+  }, [task]);
 
   const handleTitleBlur = () => {
     const trimmed = title.trim();
@@ -59,6 +67,18 @@ export function TaskDetailPanel({
   const handlePriorityClick = (priority: number) => {
     const newPriority = task.priority === priority ? null : priority;
     onUpdate(task.id, { priority: newPriority });
+  };
+
+  const handleDueDateBlur = () => {
+    if (dueDateInput === currentDueDateInput) return;
+
+    if (!dueDateInput) {
+      onUpdate(task.id, { dueDate: null, dueTime: false });
+      return;
+    }
+
+    const nextDueDate = new Date(`${dueDateInput}T00:00:00`).toISOString();
+    onUpdate(task.id, { dueDate: nextDueDate, dueTime: false });
   };
 
   return (
@@ -121,16 +141,31 @@ export function TaskDetailPanel({
           />
         </div>
 
-        {task.dueDate && (
-          <div>
-            <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider flex items-center gap-1.5">
-              <Calendar size={12} /> Due Date
-            </label>
-            <p className="text-sm mt-1 text-on-surface">
-              {new Date(task.dueDate).toLocaleDateString()}
-            </p>
+        <div>
+          <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider flex items-center gap-1.5">
+            <Calendar size={12} /> Due Date
+          </label>
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              type="date"
+              value={dueDateInput}
+              onChange={(e) => setDueDateInput(e.target.value)}
+              onBlur={handleDueDateBlur}
+              className="flex-1 px-2 py-1.5 text-sm bg-surface-secondary border border-border rounded-md text-on-surface focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            {dueDateInput && (
+              <button
+                onClick={() => {
+                  setDueDateInput("");
+                  onUpdate(task.id, { dueDate: null, dueTime: false });
+                }}
+                className="text-xs px-2 py-1.5 rounded-md bg-surface-tertiary text-on-surface-secondary hover:text-on-surface"
+              >
+                Clear
+              </button>
+            )}
           </div>
-        )}
+        </div>
 
         {task.tags.length > 0 && (
           <div>

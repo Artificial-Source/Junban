@@ -41,8 +41,14 @@ export function Inbox({
   const [query, setQuery] = useState<ParsedQuery | null>(null);
 
   const inboxTasks = useMemo(() => {
-    const base = tasks.filter((t) => t.status === "pending" && !t.projectId);
-    if (!query) return base;
+    if (!query) {
+      return tasks.filter((t) => t.status === "pending" && !t.projectId);
+    }
+
+    const hasExplicitStatusFilter = Boolean(query.filter.status);
+    const base = tasks.filter(
+      (t) => !t.projectId && (hasExplicitStatusFilter || t.status === "pending"),
+    );
     return filterTasks(base, query.filter);
   }, [tasks, query]);
 

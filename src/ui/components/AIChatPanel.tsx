@@ -148,7 +148,7 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
 
       {/* Input */}
       <form onSubmit={handleSubmit} className="p-3 border-t border-border">
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <input
             ref={inputRef}
             type="text"
@@ -156,13 +156,13 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask about your tasks..."
             disabled={isStreaming}
-            className="flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
+            className="min-w-0 flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
           />
           <VoiceButton onResult={handleVoiceResult} disabled={isStreaming} />
           <button
             type="submit"
             disabled={isStreaming || !input.trim()}
-            className="px-3 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="shrink-0 px-3 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Send size={16} />
           </button>
@@ -286,7 +286,7 @@ function VoiceButton({
       onClick={toggleListening}
       disabled={disabled}
       title={listening ? "Stop listening" : "Voice input"}
-      className={`px-2 py-2 text-sm rounded-lg border disabled:opacity-50 transition-colors ${
+      className={`shrink-0 px-2 py-2 text-sm rounded-lg border disabled:opacity-50 transition-colors ${
         listening
           ? "bg-error/10 border-error/30 text-error"
           : "border-border text-on-surface-muted hover:bg-surface-secondary"

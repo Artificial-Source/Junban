@@ -3,6 +3,26 @@ import type { ChatMessage, StreamEvent } from "./types.js";
 import { getToolDefinitions, executeTool, type ToolServices } from "./tools.js";
 import type { IStorage } from "../storage/interface.js";
 import { generateId } from "../utils/ids.js";
+import { AIError, classifyProviderError, type StreamErrorData } from "./errors.js";
+
+const STREAM_TIMEOUT_MS = 60_000;
+
+async function* withTimeout(
+  source: AsyncIterable<StreamEvent>,
+  timeoutMs: number,
+): AsyncGenerator<StreamEvent> {
+  const iterator = source[Symbol.asyncIterator]();
+  while (true) {
+    const result = await Promise.race([
+      iterator.next(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new AIError("Response timed out.", "timeout", true)), timeoutMs),
+      ),
+    ]);
+    if (result.done) return;
+    yield result.value;
+  }
+}
 
 export class ChatSession {
   private messages: ChatMessage[] = [];
@@ -43,16 +63,43 @@ export class ChatSession {
       let fullContent = "";
       let toolCalls: { id: string; name: string; arguments: string }[] | null = null;
 
-      for await (const event of this.provider.streamChat(this.messages, tools)) {
-        if (event.type === "token") {
-          fullContent += event.data;
-          yield event;
-        } else if (event.type === "tool_call") {
-          toolCalls = JSON.parse(event.data);
-        } else if (event.type === "error") {
-          yield event;
-          return;
+      try {
+        for await (const event of withTimeout(
+          this.provider.streamChat(this.messages, tools),
+          STREAM_TIMEOUT_MS,
+        )) {
+          if (event.type === "token") {
+            fullContent += event.data;
+            yield event;
+          } else if (event.type === "tool_call") {
+            toolCalls = JSON.parse(event.data);
+          } else if (event.type === "error") {
+            // Provider already classified the error — save partial content if any
+            if (fullContent) {
+              const partialMsg: ChatMessage = { role: "assistant", content: fullContent };
+              this.messages.push(partialMsg);
+              this.persistMessage(partialMsg);
+            }
+            yield event;
+            return;
+          }
         }
+      } catch (err) {
+        // Mid-stream failure (timeout or unexpected crash)
+        if (fullContent) {
+          const partialMsg: ChatMessage = { role: "assistant", content: fullContent };
+          this.messages.push(partialMsg);
+          this.persistMessage(partialMsg);
+        }
+        const aiError = classifyProviderError(err);
+        const errorData: StreamErrorData = {
+          message: aiError.message,
+          category: aiError.category,
+          retryable: aiError.retryable,
+          ...(aiError.retryAfterMs !== undefined ? { retryAfterMs: aiError.retryAfterMs } : {}),
+        };
+        yield { type: "error", data: JSON.stringify(errorData) };
+        return;
       }
 
       if (!toolCalls || toolCalls.length === 0) {
@@ -94,7 +141,12 @@ export class ChatSession {
       }
     }
 
-    yield { type: "error", data: "Too many tool call iterations" };
+    const tooManyError: StreamErrorData = {
+      message: "Too many tool call iterations",
+      category: "unknown",
+      retryable: true,
+    };
+    yield { type: "error", data: JSON.stringify(tooManyError) };
   }
 
   private persistMessage(msg: ChatMessage): void {

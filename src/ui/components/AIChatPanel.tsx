@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Send, Mic, MicOff, Bot, Trash2, Settings } from "lucide-react";
+import { X, Send, Mic, MicOff, Bot, Trash2, Settings, AlertTriangle, RotateCcw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -12,8 +12,15 @@ interface AIChatPanelProps {
 }
 
 export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
-  const { messages, isStreaming, isConfigured, sendMessage, clearChat, restoreMessages } =
-    useAIContext();
+  const {
+    messages,
+    isStreaming,
+    isConfigured,
+    sendMessage,
+    clearChat,
+    restoreMessages,
+    retryLastMessage,
+  } = useAIContext();
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -128,7 +135,15 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
           </div>
         )}
         {messages.map((msg, i) => (
-          <MessageBubble key={i} message={msg} />
+          <MessageBubble
+            key={i}
+            message={msg}
+            onRetry={
+              msg.isError && msg.retryable && i === messages.length - 1
+                ? retryLastMessage
+                : undefined
+            }
+          />
         ))}
         {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
           <div className="flex items-center gap-1.5 text-on-surface-muted text-sm">
@@ -175,7 +190,30 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
   );
 }
 
-function MessageBubble({ message }: { message: AIChatMessage }) {
+function getErrorHint(category?: string): string | null {
+  switch (category) {
+    case "auth":
+      return "Check your API key in Settings.";
+    case "rate_limit":
+      return "You've hit the rate limit. Wait a moment.";
+    case "network":
+      return "Check your network connection.";
+    case "server":
+      return "The provider is having issues.";
+    case "timeout":
+      return "The response took too long.";
+    default:
+      return null;
+  }
+}
+
+function MessageBubble({
+  message,
+  onRetry,
+}: {
+  message: AIChatMessage;
+  onRetry?: () => void;
+}) {
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
 
@@ -184,6 +222,34 @@ function MessageBubble({ message }: { message: AIChatMessage }) {
 
   // Show tool call indicators for assistant messages that used tools
   const hasToolCalls = message.toolCalls && message.toolCalls.length > 0;
+
+  if (message.isError) {
+    const hint = getErrorHint(message.errorCategory);
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[85%] space-y-1">
+          <div className="px-3 py-2 rounded-lg text-sm bg-error/10 border border-error/20 text-error">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p>{message.content}</p>
+                {hint && <p className="text-xs mt-1 opacity-80">{hint}</p>}
+              </div>
+            </div>
+            {onRetry && (
+              <button
+                onClick={onRetry}
+                className="mt-2 flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-error/10 hover:bg-error/20 transition-colors"
+              >
+                <RotateCcw size={12} />
+                Retry
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>

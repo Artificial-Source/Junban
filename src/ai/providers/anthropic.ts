@@ -7,6 +7,7 @@ import type {
   StreamEvent,
   ToolDefinition,
 } from "../types.js";
+import { classifyProviderError, type StreamErrorData } from "../errors.js";
 
 function toAnthropicMessages(messages: ChatMessage[]): Anthropic.MessageParam[] {
   const result: Anthropic.MessageParam[] = [];
@@ -104,50 +105,61 @@ export class AnthropicProvider implements AIProvider {
   }
 
   async *streamChat(messages: ChatMessage[], tools?: ToolDefinition[]): AsyncIterable<StreamEvent> {
-    const systemMessage = messages.find((m) => m.role === "system");
+    try {
+      const systemMessage = messages.find((m) => m.role === "system");
 
-    const stream = this.client.messages.stream({
-      model: this.model,
-      max_tokens: 4096,
-      ...(systemMessage ? { system: systemMessage.content } : {}),
-      messages: toAnthropicMessages(messages),
-      ...(tools?.length ? { tools: toAnthropicTools(tools) } : {}),
-    });
+      const stream = this.client.messages.stream({
+        model: this.model,
+        max_tokens: 4096,
+        ...(systemMessage ? { system: systemMessage.content } : {}),
+        messages: toAnthropicMessages(messages),
+        ...(tools?.length ? { tools: toAnthropicTools(tools) } : {}),
+      });
 
-    const toolCalls: { id: string; name: string; arguments: string }[] = [];
-    let currentToolId = "";
-    let currentToolName = "";
-    let currentToolArgs = "";
+      const toolCalls: { id: string; name: string; arguments: string }[] = [];
+      let currentToolId = "";
+      let currentToolName = "";
+      let currentToolArgs = "";
 
-    for await (const event of stream) {
-      if (event.type === "content_block_start") {
-        if (event.content_block.type === "tool_use") {
-          currentToolId = event.content_block.id;
-          currentToolName = event.content_block.name;
-          currentToolArgs = "";
-        }
-      } else if (event.type === "content_block_delta") {
-        if (event.delta.type === "text_delta") {
-          yield { type: "token", data: event.delta.text };
-        } else if (event.delta.type === "input_json_delta") {
-          currentToolArgs += event.delta.partial_json;
-        }
-      } else if (event.type === "content_block_stop") {
-        if (currentToolId) {
-          toolCalls.push({
-            id: currentToolId,
-            name: currentToolName,
-            arguments: currentToolArgs,
-          });
-          currentToolId = "";
+      for await (const event of stream) {
+        if (event.type === "content_block_start") {
+          if (event.content_block.type === "tool_use") {
+            currentToolId = event.content_block.id;
+            currentToolName = event.content_block.name;
+            currentToolArgs = "";
+          }
+        } else if (event.type === "content_block_delta") {
+          if (event.delta.type === "text_delta") {
+            yield { type: "token", data: event.delta.text };
+          } else if (event.delta.type === "input_json_delta") {
+            currentToolArgs += event.delta.partial_json;
+          }
+        } else if (event.type === "content_block_stop") {
+          if (currentToolId) {
+            toolCalls.push({
+              id: currentToolId,
+              name: currentToolName,
+              arguments: currentToolArgs,
+            });
+            currentToolId = "";
+          }
         }
       }
-    }
 
-    if (toolCalls.length > 0) {
-      yield { type: "tool_call", data: JSON.stringify(toolCalls) };
-    } else {
-      yield { type: "done", data: "" };
+      if (toolCalls.length > 0) {
+        yield { type: "tool_call", data: JSON.stringify(toolCalls) };
+      } else {
+        yield { type: "done", data: "" };
+      }
+    } catch (err) {
+      const aiError = classifyProviderError(err);
+      const errorData: StreamErrorData = {
+        message: aiError.message,
+        category: aiError.category,
+        retryable: aiError.retryable,
+        ...(aiError.retryAfterMs !== undefined ? { retryAfterMs: aiError.retryAfterMs } : {}),
+      };
+      yield { type: "error", data: JSON.stringify(errorData) };
     }
   }
 }

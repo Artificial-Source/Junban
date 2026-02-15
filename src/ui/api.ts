@@ -926,6 +926,9 @@ export interface AIChatMessage {
   content: string;
   toolCallId?: string;
   toolCalls?: { id: string; name: string; arguments: string }[];
+  isError?: boolean;
+  errorCategory?: string;
+  retryable?: boolean;
 }
 
 export interface AIProviderInfo {

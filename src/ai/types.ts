@@ -36,3 +36,11 @@ export interface StreamEvent {
   type: "token" | "tool_call" | "tool_result" | "done" | "error";
   data: string;
 }
+
+/** Typed shape for JSON-encoded error payloads in StreamEvent.data */
+export interface StreamErrorData {
+  message: string;
+  category: "auth" | "rate_limit" | "network" | "server" | "timeout" | "unknown";
+  retryable: boolean;
+  retryAfterMs?: number;
+}

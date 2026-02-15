@@ -79,7 +79,7 @@ All work items for ASF Docket, organized by area and prioritized within each sec
 | U-08 | Wire Upcoming view to live data | done | S1 | Depends on C-09 |
 | U-09 | Project view with task list | done | S2 | Depends on C-02 |
 | U-10 | Settings view: theme toggle | done | S2 | |
-| U-11 | Settings view: storage mode display | ready | — | Deferred from S2 |
+| U-11 | Settings view: storage mode display | done | S14 | StorageSection in Data tab |
 | U-12 | Task detail panel / editor | done | S2 | Click task → edit |
 | U-13 | Keyboard navigation (j/k, enter, esc) | done | S2 | |
 | U-14 | Command palette keybinding (Ctrl+K) | done | S2 | Component exists, needs global listener |
@@ -153,6 +153,12 @@ All work items for ASF Docket, organized by area and prioritized within each sec
 | A-16 | Provider settings UI | done | S5 | Select provider, enter API keys |
 | A-17 | Custom AI provider plugin support | done | S9 | BYOM via ai:provider permission |
 | A-18 | AI reminders via integrations | idea | — | Discord bot, Google Calendar, etc. |
+| A-19 | AI chat error handling & graceful degradation | done | S17 | AIError class, classifyProviderError, error bubbles with retry, safety timeout |
+| A-20 | AI voice output (text-to-speech for responses) | needs-design | — | TTS for AI assistant responses, provider abstraction (Browser Speech Synthesis, ElevenLabs, etc.) |
+| A-21 | AI voice conversation mode (bidirectional) | needs-design | — | Full voice-in/voice-out conversational flow, wake word or push-to-talk |
+| A-22 | AI chat streaming error recovery | done | S17 | withTimeout(), partial content preservation, structured error events |
+| A-23 | Auto-detect local AI providers (Ollama/LM Studio) | ready | — | Probe local endpoints, discover available models, auto-fill base URL in Settings |
+| A-24 | Local AI voice models (STT/TTS) | needs-design | — | Local speech-to-text and text-to-speech models for mobile & desktop (Whisper, Piper, etc.) |
 
 ## Storage & Data
 

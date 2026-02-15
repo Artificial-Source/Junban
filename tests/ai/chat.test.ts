@@ -67,6 +67,158 @@ describe("ChatSession", () => {
     expect(messages[1].content).toBe("Hello! How can I help?");
   });
 
+  it("yields structured error event when provider streamChat errors", async () => {
+    const { taskService, projectService } = createTestServices();
+
+    const provider: AIProvider = {
+      chat: vi.fn(),
+      async *streamChat(): AsyncIterable<StreamEvent> {
+        // Provider yields a structured error (as OpenAI/Anthropic wrappers now do)
+        yield {
+          type: "error",
+          data: JSON.stringify({
+            message: "Authentication failed. Please check your API key in Settings.",
+            category: "auth",
+            retryable: false,
+          }),
+        };
+      },
+    };
+
+    const session = new ChatSession(
+      provider,
+      { taskService, projectService },
+      { role: "system", content: "You are helpful." },
+    );
+
+    session.addUserMessage("Hi");
+    const events: StreamEvent[] = [];
+    for await (const event of session.run()) {
+      events.push(event);
+    }
+
+    const errorEvent = events.find((e) => e.type === "error");
+    expect(errorEvent).toBeDefined();
+    const parsed = JSON.parse(errorEvent!.data);
+    expect(parsed.category).toBe("auth");
+    expect(parsed.retryable).toBe(false);
+  });
+
+  it("preserves partial content on mid-stream error", async () => {
+    const { taskService, projectService } = createTestServices();
+
+    const provider: AIProvider = {
+      chat: vi.fn(),
+      async *streamChat(): AsyncIterable<StreamEvent> {
+        yield { type: "token", data: "Here is some partial " };
+        yield { type: "token", data: "content" };
+        // Then an error occurs
+        yield {
+          type: "error",
+          data: JSON.stringify({
+            message: "Stream interrupted",
+            category: "network",
+            retryable: true,
+          }),
+        };
+      },
+    };
+
+    const session = new ChatSession(
+      provider,
+      { taskService, projectService },
+      { role: "system", content: "You are helpful." },
+    );
+
+    session.addUserMessage("Tell me something");
+    const events: StreamEvent[] = [];
+    for await (const event of session.run()) {
+      events.push(event);
+    }
+
+    // Partial content should be saved as assistant message
+    const messages = session.getMessages();
+    const assistantMsg = messages.find((m) => m.role === "assistant");
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg!.content).toBe("Here is some partial content");
+
+    // Error event should also be yielded
+    expect(events.some((e) => e.type === "error")).toBe(true);
+  });
+
+  it("handles provider crash (thrown error) with structured error event", async () => {
+    const { taskService, projectService } = createTestServices();
+
+    const provider: AIProvider = {
+      chat: vi.fn(),
+      async *streamChat(): AsyncIterable<StreamEvent> {
+        yield { type: "token", data: "partial" };
+        throw Object.assign(new Error("Server Error"), { status: 500 });
+      },
+    };
+
+    const session = new ChatSession(
+      provider,
+      { taskService, projectService },
+      { role: "system", content: "You are helpful." },
+    );
+
+    session.addUserMessage("Hi");
+    const events: StreamEvent[] = [];
+    for await (const event of session.run()) {
+      events.push(event);
+    }
+
+    const errorEvent = events.find((e) => e.type === "error");
+    expect(errorEvent).toBeDefined();
+    const parsed = JSON.parse(errorEvent!.data);
+    expect(parsed.category).toBe("server");
+    expect(parsed.retryable).toBe(true);
+
+    // Partial content saved
+    const messages = session.getMessages();
+    const assistantMsg = messages.find((m) => m.role === "assistant");
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg!.content).toBe("partial");
+  });
+
+  it("emits structured error for too many iterations", async () => {
+    const { taskService, projectService } = createTestServices();
+
+    // Provider always returns tool calls, never text-only
+    let callCount = 0;
+    const provider: AIProvider = {
+      chat: vi.fn(),
+      async *streamChat(): AsyncIterable<StreamEvent> {
+        callCount++;
+        yield {
+          type: "tool_call",
+          data: JSON.stringify([
+            { id: `call_${callCount}`, name: "list_tasks", arguments: "{}" },
+          ]),
+        };
+      },
+    };
+
+    const session = new ChatSession(
+      provider,
+      { taskService, projectService },
+      { role: "system", content: "You are helpful." },
+    );
+
+    session.addUserMessage("List tasks forever");
+    const events: StreamEvent[] = [];
+    for await (const event of session.run()) {
+      events.push(event);
+    }
+
+    const errorEvent = events.find((e) => e.type === "error");
+    expect(errorEvent).toBeDefined();
+    const parsed = JSON.parse(errorEvent!.data);
+    expect(parsed.message).toBe("Too many tool call iterations");
+    expect(parsed.category).toBe("unknown");
+  });
+
   it("handles tool call loop", async () => {
     const { taskService, projectService } = createTestServices();
 

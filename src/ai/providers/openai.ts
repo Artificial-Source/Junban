@@ -8,6 +8,7 @@ import type {
   ToolCall,
   ToolDefinition,
 } from "../types.js";
+import { classifyProviderError, type StreamErrorData } from "../errors.js";
 
 function toOpenAIMessages(messages: ChatMessage[]): OpenAI.ChatCompletionMessageParam[] {
   return messages.map((msg) => {
@@ -86,47 +87,58 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async *streamChat(messages: ChatMessage[], tools?: ToolDefinition[]): AsyncIterable<StreamEvent> {
-    const stream = await this.client.chat.completions.create({
-      model: this.model,
-      messages: toOpenAIMessages(messages),
-      stream: true,
-      ...(tools?.length ? { tools: toOpenAITools(tools) } : {}),
-    });
+    try {
+      const stream = await this.client.chat.completions.create({
+        model: this.model,
+        messages: toOpenAIMessages(messages),
+        stream: true,
+        ...(tools?.length ? { tools: toOpenAITools(tools) } : {}),
+      });
 
-    const toolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map();
+      const toolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map();
 
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-      if (!delta) continue;
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta;
+        if (!delta) continue;
 
-      // Stream text tokens
-      if (delta.content) {
-        yield { type: "token", data: delta.content };
-      }
+        // Stream text tokens
+        if (delta.content) {
+          yield { type: "token", data: delta.content };
+        }
 
-      // Accumulate tool calls
-      if (delta.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const existing = toolCalls.get(tc.index);
-          if (existing) {
-            existing.arguments += tc.function?.arguments ?? "";
-          } else {
-            toolCalls.set(tc.index, {
-              id: tc.id ?? "",
-              name: tc.function?.name ?? "",
-              arguments: tc.function?.arguments ?? "",
-            });
+        // Accumulate tool calls
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const existing = toolCalls.get(tc.index);
+            if (existing) {
+              existing.arguments += tc.function?.arguments ?? "";
+            } else {
+              toolCalls.set(tc.index, {
+                id: tc.id ?? "",
+                name: tc.function?.name ?? "",
+                arguments: tc.function?.arguments ?? "",
+              });
+            }
           }
         }
       }
-    }
 
-    // Emit accumulated tool calls
-    if (toolCalls.size > 0) {
-      const calls = Array.from(toolCalls.values());
-      yield { type: "tool_call", data: JSON.stringify(calls) };
-    } else {
-      yield { type: "done", data: "" };
+      // Emit accumulated tool calls
+      if (toolCalls.size > 0) {
+        const calls = Array.from(toolCalls.values());
+        yield { type: "tool_call", data: JSON.stringify(calls) };
+      } else {
+        yield { type: "done", data: "" };
+      }
+    } catch (err) {
+      const aiError = classifyProviderError(err);
+      const errorData: StreamErrorData = {
+        message: aiError.message,
+        category: aiError.category,
+        retryable: aiError.retryable,
+        ...(aiError.retryAfterMs !== undefined ? { retryAfterMs: aiError.retryAfterMs } : {}),
+      };
+      yield { type: "error", data: JSON.stringify(errorData) };
     }
   }
 }

@@ -92,15 +92,24 @@ class OpenAICompatExecutor implements LLMExecutor {
     try {
       const stream = await this.client.chat.completions.create({
         model,
+        max_tokens: 4096,
         messages,
         stream: true,
         ...(tools ? { tools } : {}),
       });
 
       const toolCalls: Map<number, ToolCall> = new Map();
+      let finishReason: string | null = null;
 
       for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta;
+        const choice = chunk.choices[0];
+        if (!choice) continue;
+
+        if (choice.finish_reason) {
+          finishReason = choice.finish_reason;
+        }
+
+        const delta = choice.delta;
         if (!delta) continue;
 
         if (delta.content) {
@@ -121,6 +130,11 @@ class OpenAICompatExecutor implements LLMExecutor {
             }
           }
         }
+      }
+
+      // If truncated due to token limit, append indicator
+      if (finishReason === "length" && toolCalls.size === 0) {
+        yield { type: "token", data: "\n\n_(Response truncated due to length limit)_" };
       }
 
       if (toolCalls.size > 0) {

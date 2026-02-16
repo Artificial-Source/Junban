@@ -123,7 +123,6 @@ class AnthropicExecutor implements LLMExecutor {
       let currentToolId = "";
       let currentToolName = "";
       let currentToolArgs = "";
-
       for await (const event of stream) {
         if (event.type === "content_block_start") {
           if (event.content_block.type === "tool_use") {
@@ -147,6 +146,12 @@ class AnthropicExecutor implements LLMExecutor {
             currentToolId = "";
           }
         }
+      }
+
+      // Check if response was truncated due to token limit
+      const finalMessage = await stream.finalMessage();
+      if (finalMessage.stop_reason === "max_tokens" && toolCalls.length === 0) {
+        yield { type: "token", data: "\n\n_(Response truncated due to length limit)_" };
       }
 
       if (toolCalls.length > 0) {

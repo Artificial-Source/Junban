@@ -75,7 +75,7 @@ export function Settings({ activeTab: controlledActiveTab, onActiveTabChange, on
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={handleBackdropClick}
     >
-      <div className="bg-surface rounded-xl shadow-xl border border-border max-w-3xl w-full max-h-[85vh] flex overflow-hidden">
+      <div className="bg-surface rounded-xl shadow-xl border border-border max-w-3xl w-full h-[85vh] flex overflow-hidden">
         {/* Left sidebar nav */}
         <div className="w-[220px] flex-shrink-0 border-r border-border bg-surface-secondary p-4 flex flex-col">
           <h2 className="text-lg font-bold text-on-surface mb-4 px-2">Settings</h2>

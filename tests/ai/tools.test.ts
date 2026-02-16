@@ -15,7 +15,7 @@ describe("ToolRegistry", () => {
     expect(names).toContain("complete_task");
     expect(names).toContain("update_task");
     expect(names).toContain("delete_task");
-    expect(defs).toHaveLength(5);
+    expect(defs).toHaveLength(10);
   });
 
   it("each tool has name, description, and parameters", () => {

@@ -12,6 +12,10 @@ import { lmstudioPlugin } from "./provider/adapters/lmstudio.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { registerTaskCrudTools } from "./tools/builtin/task-crud.js";
 import { registerQueryTasksTool } from "./tools/builtin/query-tasks.js";
+import { registerAnalyzePatternsTool } from "./tools/builtin/analyze-patterns.js";
+import { registerAnalyzeWorkloadTool } from "./tools/builtin/analyze-workload.js";
+import { registerSmartOrganizeTools } from "./tools/builtin/smart-organize.js";
+import { registerEnergyRecommendationsTool } from "./tools/builtin/energy-recommendations.js";
 
 /** Create a provider registry with all built-in providers. */
 export function createDefaultRegistry(): LLMProviderRegistry {
@@ -29,5 +33,9 @@ export function createDefaultToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   registerTaskCrudTools(registry);
   registerQueryTasksTool(registry);
+  registerAnalyzePatternsTool(registry);
+  registerAnalyzeWorkloadTool(registry);
+  registerSmartOrganizeTools(registry);
+  registerEnergyRecommendationsTool(registry);
   return registry;
 }

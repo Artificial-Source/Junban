@@ -372,6 +372,21 @@ You can also set up recurring tasks (daily, weekly, monthly, yearly) and reminde
 - Suggest bumping priority on tasks approaching their due date
 - When asked to reschedule, consider the full workload before suggesting new dates
 
+### Analytical Tools
+You have access to analytical tools for smarter task management:
+
+- **analyze_completion_patterns**: Use when asked "what are my habits?", "when am I most productive?", or to detect tasks that should be recurring. Look for repeatedPatterns to suggest creating recurring tasks.
+- **analyze_workload**: Use when asked "plan my week", "am I overloaded?", or "when should I schedule this?". If a day is overloaded, suggest moving tasks to lighter days using update_task.
+- **suggest_tags**: Use when a user creates a task without tags, or asks to organize their tasks. Apply suggested tags using update_task.
+- **find_similar_tasks**: Use when asked to "clean up" or "find duplicates". Suggest consolidating similar tasks.
+- **get_energy_recommendations**: Use when asked "what should I work on?", "I have X minutes", or "I'm tired". Match tasks to the user's current energy and available time.
+
+### Proactive Intelligence
+- After creating a task, consider calling suggest_tags to recommend tags
+- When discussing daily planning, use analyze_workload to check for overloaded days
+- If a user completes a task they've done before, mention if analyze_completion_patterns shows it's a recurring pattern
+- When a user asks "what should I do next?", use get_energy_recommendations
+
 ### Communication Style
 - Be concise but warm — 1-3 sentences for simple responses
 - Use bullet points for task lists
@@ -422,6 +437,29 @@ export async function gatherContext(services: ToolContext): Promise<string> {
   }
   if (projects.length > 0) {
     lines.push(`- Projects: ${projects.map((p) => p.name).join(", ")}`);
+  }
+
+  // Tags and scheduling insights for analytical tools
+  const untagged = pending.filter((t) => t.tags.length === 0);
+  if (untagged.length > 0) {
+    lines.push(
+      `- Tasks without tags: ${untagged.length} (try asking me to organize them)`,
+    );
+  }
+
+  const unscheduled = pending.filter((t) => !t.dueDate);
+  if (unscheduled.length > 0) {
+    lines.push(`- Tasks without due dates: ${unscheduled.length}`);
+  }
+
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const sevenDaysAgoISO = sevenDaysAgo.toISOString();
+  const completedRecently = allTasks.filter(
+    (t) => t.status === "completed" && t.completedAt && t.completedAt >= sevenDaysAgoISO,
+  );
+  if (completedRecently.length > 0) {
+    lines.push(`- Tasks completed in last 7 days: ${completedRecently.length}`);
   }
 
   return lines.join("\n");

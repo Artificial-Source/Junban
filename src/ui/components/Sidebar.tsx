@@ -173,8 +173,13 @@ export function Sidebar({
     >
       <div className={`py-4 ${collapsed ? "px-2" : "px-5"}`}>
         <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"}`}>
-          {!collapsed && (
-            <h2 className="text-lg font-bold text-on-surface tracking-tight">Docket</h2>
+          {!collapsed ? (
+            <div className="flex items-center gap-2">
+              <img src="/images/logo-192.png" alt="Docket logo" className="w-7 h-7" />
+              <h2 className="text-lg font-bold text-on-surface tracking-tight">Docket</h2>
+            </div>
+          ) : (
+            <img src="/images/logo-192.png" alt="Docket logo" className="w-7 h-7" />
           )}
           {onToggleCollapsed && (
             <button

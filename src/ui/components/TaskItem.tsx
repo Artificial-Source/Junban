@@ -3,6 +3,7 @@ import { Calendar, Check, ChevronDown, ChevronRight, GripVertical, Pencil, Repea
 import type { Task } from "../../core/types.js";
 import { getPriority } from "../../core/priorities.js";
 import { DatePicker } from "./DatePicker.js";
+import { formatRecurrenceLabel } from "./RecurrencePicker.js";
 
 interface TaskItemProps {
   task: Task;
@@ -192,7 +193,7 @@ export const TaskItem = React.memo(function TaskItem({
             {task.tags.map((tag) => (
               <span
                 key={tag.id}
-                className="text-xs px-1.5 py-0 rounded-md bg-surface-tertiary text-on-surface-secondary"
+                className="font-mono text-xs px-1.5 py-0 rounded-md bg-surface-tertiary text-on-surface-secondary"
               >
                 {tag.name}
               </span>
@@ -210,7 +211,12 @@ export const TaskItem = React.memo(function TaskItem({
             {(task as any).remindAt && (
               <Bell size={12} className="text-warning flex-shrink-0" />
             )}
-            {task.recurrence && <Repeat size={12} className="text-on-surface-muted flex-shrink-0" />}
+            {task.recurrence && (
+              <span className="text-xs flex items-center gap-0.5 text-on-surface-muted flex-shrink-0">
+                <Repeat size={11} />
+                {formatRecurrenceLabel(task.recurrence)}
+              </span>
+            )}
           </div>
         )}
       </div>

@@ -1,35 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { THEME_VARIABLES, BUILT_IN_THEMES, type CustomTheme } from "../../src/config/themes.js";
-
-describe("THEME_VARIABLES", () => {
-  it("has all 19 entries", () => {
-    expect(THEME_VARIABLES).toHaveLength(19);
-  });
-
-  it("all entries have required fields", () => {
-    for (const v of THEME_VARIABLES) {
-      expect(v.key).toBeTruthy();
-      expect(v.label).toBeTruthy();
-      expect(v.group).toBeTruthy();
-      expect(v.key.startsWith("--")).toBe(true);
-    }
-  });
-
-  it("has unique keys", () => {
-    const keys = THEME_VARIABLES.map((v) => v.key);
-    expect(new Set(keys).size).toBe(keys.length);
-  });
-
-  it("covers all expected groups", () => {
-    const groups = new Set(THEME_VARIABLES.map((v) => v.group));
-    expect(groups).toContain("Background");
-    expect(groups).toContain("Text");
-    expect(groups).toContain("UI");
-    expect(groups).toContain("Status");
-    expect(groups).toContain("Priority");
-    expect(groups).toContain("Layout");
-  });
-});
+import { BUILT_IN_THEMES } from "../../src/config/themes.js";
 
 describe("BUILT_IN_THEMES", () => {
   it("includes light and dark", () => {
@@ -47,38 +17,16 @@ describe("BUILT_IN_THEMES", () => {
     const dark = BUILT_IN_THEMES.find((t) => t.id === "dark");
     expect(dark?.type).toBe("dark");
   });
-});
 
-describe("CustomTheme import/export roundtrip", () => {
-  it("serializes and deserializes correctly", () => {
-    const theme: CustomTheme = {
-      id: "custom-test",
-      name: "My Test Theme",
-      type: "dark",
-      variables: {
-        "--color-surface": "#1a1a1a",
-        "--color-on-surface": "#ffffff",
-        "--color-accent": "#3b82f6",
-        "--radius-md": "0.75rem",
-      },
-    };
-
-    const json = JSON.stringify(theme);
-    const parsed = JSON.parse(json) as CustomTheme;
-
-    expect(parsed.id).toBe(theme.id);
-    expect(parsed.name).toBe(theme.name);
-    expect(parsed.type).toBe(theme.type);
-    expect(parsed.variables).toEqual(theme.variables);
+  it("has exactly 2 built-in themes", () => {
+    expect(BUILT_IN_THEMES).toHaveLength(2);
   });
 
-  it("rejects invalid theme JSON", () => {
-    const invalidJson = '{"name": "test"}';
-    const parsed = JSON.parse(invalidJson);
-
-    // A valid custom theme must have id, name, type, and variables
-    expect(parsed.variables).toBeUndefined();
-    expect(parsed.type).toBeUndefined();
-    expect(parsed.id).toBeUndefined();
+  it("all themes have required fields", () => {
+    for (const theme of BUILT_IN_THEMES) {
+      expect(theme.id).toBeTruthy();
+      expect(theme.name).toBeTruthy();
+      expect(["light", "dark"]).toContain(theme.type);
+    }
   });
 });

@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { CommandPalette } from "./components/CommandPalette.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { TaskDetailPanel } from "./components/TaskDetailPanel.js";
 import { BulkActionBar } from "./components/BulkActionBar.js";
+import { RightActionRail } from "./components/RightActionRail.js";
 import { TaskProvider, useTaskContext } from "./context/TaskContext.js";
 import { PluginProvider, usePluginContext } from "./context/PluginContext.js";
 import { AIProvider } from "./context/AIContext.js";
@@ -13,12 +14,15 @@ import { AIChatPanel } from "./components/AIChatPanel.js";
 import { FocusMode } from "./components/FocusMode.js";
 import { TemplateSelector } from "./components/TemplateSelector.js";
 import { Toast } from "./components/Toast.js";
-import { Focus } from "lucide-react";
 import { useKeyboardNavigation } from "./hooks/useKeyboardNavigation.js";
 import { useMultiSelect } from "./hooks/useMultiSelect.js";
 import { useReminders } from "./hooks/useReminders.js";
-import { ShortcutManager } from "./shortcuts.js";
-import { themeManager } from "./themes/manager.js";
+import { useRouting, type View } from "./hooks/useRouting.js";
+import { useTaskHandlers } from "./hooks/useTaskHandlers.js";
+import { useBulkActions } from "./hooks/useBulkActions.js";
+import { useAppShortcuts } from "./hooks/useAppShortcuts.js";
+import { useAppCommands } from "./hooks/useAppCommands.js";
+import { shortcutManager } from "./shortcutManagerInstance.js";
 import { Inbox } from "./views/Inbox.js";
 import { Today } from "./views/Today.js";
 import { Upcoming } from "./views/Upcoming.js";
@@ -28,267 +32,59 @@ import { PluginStore } from "./views/PluginStore.js";
 import { PluginView } from "./views/PluginView.js";
 import { Completed } from "./views/Completed.js";
 import { FiltersLabels } from "./views/FiltersLabels.js";
+import { TaskPage } from "./views/TaskPage.js";
 import type { SettingsTab } from "./views/Settings.js";
 import type { Project as ProjectType } from "../core/types.js";
-import { api } from "./api.js";
+import { api } from "./api/index.js";
 
-const shortcutManager = new ShortcutManager();
 const AI_SIDEBAR_OPEN_SETTING_KEY = "ui_ai_sidebar_open";
-
-type View =
-  | "inbox"
-  | "today"
-  | "upcoming"
-  | "project"
-  | "settings"
-  | "plugin-store"
-  | "plugin-view"
-  | "filters-labels"
-  | "completed";
-
-interface RouteState {
-  view: View;
-  projectId: string | null;
-  pluginViewId: string | null;
-  inboxQuery: string;
-  settingsTab: SettingsTab;
-  pluginSearch: string;
-  focusModeOpen: boolean;
-}
-
-const DEFAULT_ROUTE_STATE: RouteState = {
-  view: "inbox",
-  projectId: null,
-  pluginViewId: null,
-  inboxQuery: "",
-  settingsTab: "general",
-  pluginSearch: "",
-  focusModeOpen: false,
-};
-
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "docket.ui.sidebar.collapsed";
 const AI_CHAT_EXPANDED_STORAGE_KEY = "docket.ui.ai-chat.expanded";
 
-function decodePathSegment(segment: string | undefined): string | null {
-  if (!segment) return null;
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
-  }
-}
-
-function parseSettingsTab(tab: string | null): SettingsTab {
-  const validTabs: SettingsTab[] = [
-    "general",
-    "ai",
-    "plugins",
-    "templates",
-    "keyboard",
-    "data",
-    "about",
-  ];
-  if (tab && validTabs.includes(tab as SettingsTab)) {
-    return tab as SettingsTab;
-  }
-  return "general";
-}
-
-function parseRouteStateFromHash(hash: string): RouteState {
-  const hashValue = hash.startsWith("#") ? hash.slice(1) : hash;
-  const normalized = hashValue.startsWith("/") ? hashValue : "/inbox";
-  const [rawPath, rawQuery = ""] = normalized.split("?");
-  const pathSegments = rawPath.split("/").filter(Boolean);
-  const params = new URLSearchParams(rawQuery);
-  const route: RouteState = { ...DEFAULT_ROUTE_STATE };
-  const root = pathSegments[0] ?? "inbox";
-
-  switch (root) {
-    case "inbox":
-      route.view = "inbox";
-      route.inboxQuery = params.get("q") ?? "";
-      break;
-    case "today":
-      route.view = "today";
-      break;
-    case "upcoming":
-      route.view = "upcoming";
-      break;
-    case "project":
-      route.view = "project";
-      route.projectId = decodePathSegment(pathSegments[1]);
-      if (!route.projectId) route.view = "inbox";
-      break;
-    case "settings":
-      route.view = "settings";
-      route.settingsTab = parseSettingsTab(params.get("tab"));
-      break;
-    case "plugin-store":
-      route.view = "plugin-store";
-      route.pluginSearch = params.get("q") ?? "";
-      break;
-    case "plugin-view":
-      route.view = "plugin-view";
-      route.pluginViewId = decodePathSegment(pathSegments[1]);
-      if (!route.pluginViewId) route.view = "inbox";
-      break;
-    case "filters-labels":
-      route.view = "filters-labels";
-      break;
-    case "completed":
-      route.view = "completed";
-      break;
-    default:
-      route.view = "inbox";
-      break;
-  }
-
-  route.focusModeOpen = params.get("focus") === "1";
-  return route;
-}
-
-function buildHashFromRoute(route: RouteState): string {
-  const params = new URLSearchParams();
-
-  if (route.view === "inbox" && route.inboxQuery.trim()) {
-    params.set("q", route.inboxQuery);
-  }
-  if (route.view === "settings") {
-    params.set("tab", route.settingsTab);
-  }
-  if (route.view === "plugin-store" && route.pluginSearch.trim()) {
-    params.set("q", route.pluginSearch);
-  }
-  if (route.focusModeOpen) {
-    params.set("focus", "1");
-  }
-  let path = "/inbox";
-  switch (route.view) {
-    case "today":
-      path = "/today";
-      break;
-    case "upcoming":
-      path = "/upcoming";
-      break;
-    case "project":
-      path = route.projectId ? `/project/${encodeURIComponent(route.projectId)}` : "/inbox";
-      break;
-    case "settings":
-      path = "/settings";
-      break;
-    case "plugin-store":
-      path = "/plugin-store";
-      break;
-    case "plugin-view":
-      path = route.pluginViewId
-        ? `/plugin-view/${encodeURIComponent(route.pluginViewId)}`
-        : "/inbox";
-      break;
-    case "filters-labels":
-      path = "/filters-labels";
-      break;
-    case "completed":
-      path = "/completed";
-      break;
-    case "inbox":
-    default:
-      path = "/inbox";
-      break;
-  }
-
-  const query = params.toString();
-  return `#${path}${query ? `?${query}` : ""}`;
-}
-
-interface RightActionRailProps {
-  chatOpen: boolean;
-  onToggleChat: () => void;
-  onFocusMode: () => void;
-}
-
-function RailTooltip({ label }: { label: string }) {
-  return (
-    <span
-      role="tooltip"
-      className="pointer-events-none absolute right-full top-1/2 z-50 mr-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-xs text-on-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-    >
-      {label}
-    </span>
-  );
-}
-
-function RobotIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M9 3h6" />
-      <path d="M12 3v2" />
-      <rect x="4" y="7" width="16" height="11" rx="3" />
-      <circle cx="9" cy="12" r="1" />
-      <circle cx="15" cy="12" r="1" />
-      <path d="M9 16h6" />
-      <path d="M2 11v3" />
-      <path d="M22 11v3" />
-    </svg>
-  );
-}
-
-function RightActionRail({ chatOpen, onToggleChat, onFocusMode }: RightActionRailProps) {
-  return (
-    <aside
-      aria-label="Quick tools"
-      className="w-14 border-l border-border bg-surface-secondary flex flex-col items-center justify-start gap-3 pt-4"
-    >
-      <button
-        onClick={onToggleChat}
-        aria-label={chatOpen ? "Close AI chat" : "Open AI chat"}
-        aria-pressed={chatOpen}
-        className={`group relative w-11 h-11 rounded-lg border flex items-center justify-center transition-colors ${
-          chatOpen
-            ? "border-accent/50 bg-accent/10 text-accent"
-            : "border-transparent text-on-surface-secondary hover:text-on-surface hover:bg-surface-tertiary"
-        }`}
-      >
-        <RobotIcon className="w-5 h-5" />
-        <RailTooltip label="AI Chat" />
-      </button>
-
-      <button
-        onClick={onFocusMode}
-        aria-label="Enter focus mode"
-        className="group relative w-11 h-11 rounded-lg border border-transparent flex items-center justify-center text-on-surface-secondary hover:text-on-surface hover:bg-surface-tertiary transition-colors"
-      >
-        <Focus size={19} />
-        <RailTooltip label="Focus Mode" />
-      </button>
-    </aside>
-  );
-}
-
 function AppContent() {
-  const [currentView, setCurrentView] = useState<View>("inbox");
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [selectedPluginViewId, setSelectedPluginViewId] = useState<string | null>(null);
-  const [inboxQueryText, setInboxQueryText] = useState("");
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
-  const [pluginStoreSearchQuery, setPluginStoreSearchQuery] = useState("");
-  const [routeReady, setRouteReady] = useState(false);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // ── Routing ──
+  const {
+    currentView,
+    selectedProjectId,
+    selectedRouteTaskId,
+    selectedPluginViewId,
+    inboxQueryText,
+    setInboxQueryText,
+    settingsTab,
+    setSettingsTab,
+    pluginStoreSearchQuery,
+    setPluginStoreSearchQuery,
+    focusModeOpen,
+    setFocusModeOpen,
+    handleNavigate,
+    openSettingsTab,
+  } = useRouting();
+
+  // ── Task handlers ──
+  const {
+    selectedTaskId,
+    setSelectedTaskId,
+    selectedTask,
+    handleCreateTask,
+    handleToggleTask,
+    handleSelectTask,
+    handleCloseDetail,
+    handleUpdateTask,
+    handleDeleteTask,
+    handleUpdateDueDate,
+    handleAddSubtask,
+    handleIndent,
+    handleOutdent,
+    handleReorder,
+  } = useTaskHandlers(selectedProjectId);
+
+  // ── UI state ──
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [chatPanelOpen, setChatPanelOpen] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(AI_CHAT_EXPANDED_STORAGE_KEY) === "1";
   });
   const [chatPanelStateLoaded, setChatPanelStateLoaded] = useState(false);
-  const [focusModeOpen, setFocusModeOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
@@ -297,17 +93,9 @@ function AppContent() {
   const [projects, setProjects] = useState<ProjectType[]>([]);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [addTaskTrigger, setAddTaskTrigger] = useState(0);
-  const {
-    state,
-    createTask,
-    updateTask,
-    completeTask,
-    deleteTask,
-    completeManyTasks,
-    deleteManyTasks,
-    updateManyTasks,
-    refreshTasks,
-  } = useTaskContext();
+
+  // ── Context hooks ──
+  const { state, refreshTasks } = useTaskContext();
   const { undo, redo, toast, dismissToast } = useUndoContext();
   const {
     commands: pluginCommands,
@@ -315,15 +103,14 @@ function AppContent() {
     views: pluginViews,
     executeCommand,
   } = usePluginContext();
-  const navigationKeyRef = useRef<string | null>(null);
 
-  // Fetch projects on mount and after task changes
+  // ── Data fetching ──
   const fetchProjects = useCallback(async () => {
     try {
       const p = await api.listProjects();
       setProjects(p);
     } catch {
-      // Non-critical — projects sidebar just won't populate
+      // Non-critical
     }
   }, []);
 
@@ -341,59 +128,34 @@ function AppContent() {
     fetchTags();
   }, [fetchProjects, fetchTags]);
 
-  // Restore AI chat sidebar open/closed state on startup.
-  useEffect(() => {
-    let mounted = true;
-    api
-      .getAppSetting(AI_SIDEBAR_OPEN_SETTING_KEY)
-      .then((value) => {
-        if (!mounted || value === null) {
-          return;
-        }
-        setChatPanelOpen(value === "1" || value.toLowerCase() === "true");
-      })
-      .catch(() => {
-        // Non-critical
-      })
-      .finally(() => {
-        if (mounted) {
-          setChatPanelStateLoaded(true);
-        }
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  // Persist AI chat sidebar state after initial restore.
-  useEffect(() => {
-    if (!chatPanelStateLoaded) {
-      return;
-    }
-
-    api.setAppSetting(AI_SIDEBAR_OPEN_SETTING_KEY, chatPanelOpen ? "1" : "0").catch(() => {
-      // Non-critical
-    });
-  }, [chatPanelOpen, chatPanelStateLoaded]);
-
-  // Re-fetch projects and tags when tasks are added/removed
   const taskCount = state.tasks.length;
   useEffect(() => {
     fetchProjects();
     fetchTags();
   }, [taskCount, fetchProjects, fetchTags]);
 
-  const applyRouteState = useCallback((route: RouteState) => {
-    setCurrentView(route.view);
-    setSelectedProjectId(route.view === "project" ? route.projectId : null);
-    setSelectedPluginViewId(route.view === "plugin-view" ? route.pluginViewId : null);
-    setInboxQueryText(route.inboxQuery);
-    setSettingsTab(route.settingsTab);
-    setPluginStoreSearchQuery(route.pluginSearch);
-    setFocusModeOpen(route.focusModeOpen);
+  // ── AI chat sidebar persistence ──
+  useEffect(() => {
+    let mounted = true;
+    api
+      .getAppSetting(AI_SIDEBAR_OPEN_SETTING_KEY)
+      .then((value) => {
+        if (!mounted || value === null) return;
+        setChatPanelOpen(value === "1" || value.toLowerCase() === "true");
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (mounted) setChatPanelStateLoaded(true);
+      });
+    return () => { mounted = false; };
   }, []);
 
+  useEffect(() => {
+    if (!chatPanelStateLoaded) return;
+    api.setAppSetting(AI_SIDEBAR_OPEN_SETTING_KEY, chatPanelOpen ? "1" : "0").catch(() => {});
+  }, [chatPanelOpen, chatPanelStateLoaded]);
+
+  // ── Local storage sync ──
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
   }, [sidebarCollapsed]);
@@ -402,129 +164,12 @@ function AppContent() {
     window.localStorage.setItem(AI_CHAT_EXPANDED_STORAGE_KEY, chatPanelOpen ? "1" : "0");
   }, [chatPanelOpen]);
 
+  // ── Clear selected task on navigation ──
   useEffect(() => {
-    const syncRouteFromLocation = () => {
-      const route = parseRouteStateFromHash(window.location.hash);
-      applyRouteState(route);
-      setSelectedTaskId(null);
-      navigationKeyRef.current = `${route.view}:${route.projectId ?? ""}:${route.pluginViewId ?? ""}`;
-    };
-
-    syncRouteFromLocation();
-    setRouteReady(true);
-
-    window.addEventListener("popstate", syncRouteFromLocation);
-    window.addEventListener("hashchange", syncRouteFromLocation);
-    return () => {
-      window.removeEventListener("popstate", syncRouteFromLocation);
-      window.removeEventListener("hashchange", syncRouteFromLocation);
-    };
-  }, [applyRouteState]);
-
-  useEffect(() => {
-    if (!routeReady) return;
-
-    const route: RouteState = {
-      view: currentView,
-      projectId: selectedProjectId,
-      pluginViewId: selectedPluginViewId,
-      inboxQuery: inboxQueryText,
-      settingsTab,
-      pluginSearch: pluginStoreSearchQuery,
-      focusModeOpen,
-    };
-
-    const nextHash = buildHashFromRoute(route);
-    const navigationKey = `${currentView}:${selectedProjectId ?? ""}:${selectedPluginViewId ?? ""}`;
-
-    if (window.location.hash === nextHash) {
-      navigationKeyRef.current = navigationKey;
-      return;
-    }
-
-    if (navigationKeyRef.current === navigationKey) {
-      window.history.replaceState(null, "", nextHash);
-    } else {
-      window.history.pushState(null, "", nextHash);
-    }
-    navigationKeyRef.current = navigationKey;
-  }, [
-    routeReady,
-    currentView,
-    selectedProjectId,
-    selectedPluginViewId,
-    inboxQueryText,
-    settingsTab,
-    pluginStoreSearchQuery,
-    focusModeOpen,
-  ]);
-
-  const handleNavigate = useCallback(
-    (view: string, id?: string) => {
-      const nextRoute: RouteState = {
-        view: view as View,
-        projectId: view === "project" ? (id ?? null) : null,
-        pluginViewId: view === "plugin-view" ? (id ?? null) : null,
-        inboxQuery: inboxQueryText,
-        settingsTab,
-        pluginSearch: pluginStoreSearchQuery,
-        focusModeOpen,
-      };
-
-      applyRouteState(nextRoute);
-      setSelectedTaskId(null);
-    },
-    [applyRouteState, inboxQueryText, settingsTab, pluginStoreSearchQuery, focusModeOpen],
-  );
-
-  const openSettingsTab = useCallback(
-    (tab: SettingsTab) => {
-      handleNavigate("settings");
-      setSettingsTab(tab);
-    },
-    [handleNavigate],
-  );
-
-  const handleCreateTask = async (parsed: {
-    title: string;
-    priority: number | null;
-    tags: string[];
-    project: string | null;
-    dueDate: Date | null;
-    dueTime: boolean;
-  }) => {
-    await createTask({
-      title: parsed.title,
-      priority: parsed.priority,
-      dueDate: parsed.dueDate?.toISOString() ?? null,
-      dueTime: parsed.dueTime,
-      tags: parsed.tags,
-      projectId: selectedProjectId,
-    });
-  };
-
-  const handleToggleTask = async (id: string) => {
-    await completeTask(id);
-  };
-
-  const handleSelectTask = (id: string) => {
-    setSelectedTaskId(id);
-  };
-
-  const handleCloseDetail = () => {
     setSelectedTaskId(null);
-  };
+  }, [currentView, selectedProjectId, selectedPluginViewId, setSelectedTaskId]);
 
-  const handleUpdateTask = async (id: string, input: Parameters<typeof updateTask>[1]) => {
-    await updateTask(id, input);
-  };
-
-  const handleDeleteTask = async (id: string) => {
-    await deleteTask(id);
-    setSelectedTaskId(null);
-  };
-
-  // Compute visible tasks for keyboard navigation based on current view
+  // ── Visible tasks for keyboard navigation ──
   const visibleTasks = useMemo(() => {
     const tasks = state.tasks;
     switch (currentView) {
@@ -545,7 +190,7 @@ function AppContent() {
     }
   }, [state.tasks, currentView, selectedProjectId]);
 
-  // Sidebar badge counts
+  // ── Badge counts ──
   const inboxTaskCount = useMemo(
     () => state.tasks.filter((t) => t.status === "pending" && !t.projectId).length,
     [state.tasks],
@@ -566,7 +211,7 @@ function AppContent() {
     return counts;
   }, [state.tasks]);
 
-  // Add task handler for sidebar button
+  // ── Add task handler for sidebar button ──
   const handleAddTask = useCallback(() => {
     const taskViews: View[] = ["inbox", "today", "upcoming", "project"];
     if (!taskViews.includes(currentView)) {
@@ -575,99 +220,22 @@ function AppContent() {
     setAddTaskTrigger((n) => n + 1);
   }, [currentView, handleNavigate]);
 
-  // Multi-select
+  // ── Multi-select ──
   const {
     selectedIds: multiSelectedIds,
     handleMultiSelect,
     clearSelection,
   } = useMultiSelect(visibleTasks.map((t) => t.id));
 
-  const handleBulkComplete = async () => {
-    const ids = Array.from(multiSelectedIds);
-    await completeManyTasks(ids);
-    clearSelection();
-  };
+  // ── Bulk actions ──
+  const {
+    handleBulkComplete,
+    handleBulkDelete,
+    handleBulkMoveToProject,
+    handleBulkAddTag,
+  } = useBulkActions(multiSelectedIds, clearSelection);
 
-  const handleBulkDelete = async () => {
-    const ids = Array.from(multiSelectedIds);
-    await deleteManyTasks(ids);
-    clearSelection();
-  };
-
-  const handleBulkMoveToProject = async (projectId: string | null) => {
-    const ids = Array.from(multiSelectedIds);
-    await updateManyTasks(ids, { projectId });
-    clearSelection();
-  };
-
-  const handleBulkAddTag = async (tag: string) => {
-    // We need to add a tag to existing tasks. Since updateMany replaces tags,
-    // we gather existing tags and append the new one
-    const ids = Array.from(multiSelectedIds);
-    for (const id of ids) {
-      const task = state.tasks.find((t) => t.id === id);
-      if (task) {
-        const existingTags = task.tags.map((t) => t.name);
-        if (!existingTags.includes(tag)) {
-          await updateTask(id, { tags: [...existingTags, tag] });
-        }
-      }
-    }
-    clearSelection();
-  };
-
-  // Inline due date update (from DatePicker on TaskItem)
-  const handleUpdateDueDate = useCallback(async (taskId: string, dueDate: string | null) => {
-    if (dueDate) {
-      await updateTask(taskId, { dueDate: new Date(dueDate).toISOString(), dueTime: false });
-    } else {
-      await updateTask(taskId, { dueDate: null, dueTime: false });
-    }
-  }, [updateTask]);
-
-  // Add subtask handler
-  const handleAddSubtask = useCallback(async (parentId: string, title: string) => {
-    await createTask({
-      title,
-      priority: null,
-      dueDate: null,
-      dueTime: false,
-      tags: [],
-      projectId: selectedProjectId,
-      parentId,
-    } as any);
-  }, [createTask, selectedProjectId]);
-
-  // Sub-task indent/outdent
-  const handleIndent = useCallback(async (id: string) => {
-    try {
-      await api.indentTask(id);
-      // TaskContext will refresh on next fetch
-    } catch {
-      // Non-critical
-    }
-  }, []);
-
-  const handleOutdent = useCallback(async (id: string) => {
-    try {
-      await api.outdentTask(id);
-    } catch {
-      // Non-critical
-    }
-  }, []);
-
-  // Drag-and-drop reorder
-  const handleReorder = useCallback(async (orderedIds: string[]) => {
-    try {
-      await api.reorderTasks(orderedIds);
-      // Refresh tasks to pick up new sort orders
-      // The TaskContext will handle this via the next fetch
-    } catch {
-      // Non-critical — visual order already reflects the change
-    }
-  }, []);
-
-  // Keyboard navigation
+  // ── Keyboard navigation ──
   useKeyboardNavigation({
     tasks: visibleTasks,
     selectedTaskId,
@@ -677,11 +245,8 @@ function AppContent() {
     enabled: !commandPaletteOpen,
   });
 
-  // Reminder notifications
+  // ── Reminders ──
   const handleReminder = useCallback((task: { id: string; title: string }) => {
-    // In-app toast
-    // Use the same toast pattern from undo — trigger a brief notification
-    // For now, show browser notification if permitted
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       new Notification("Docket Reminder", { body: task.title });
     }
@@ -689,159 +254,37 @@ function AppContent() {
 
   useReminders({ onReminder: handleReminder, enabled: true });
 
-  // Load custom themes on mount
-  useEffect(() => {
-    themeManager.loadCustomThemes();
-  }, []);
+  // ── Keyboard shortcuts ──
+  useAppShortcuts(setCommandPaletteOpen, undo, redo);
 
-  // Register shortcuts
-  useEffect(() => {
-    shortcutManager.register({
-      id: "command-palette",
-      description: "Open Command Palette",
-      defaultKey: "ctrl+k",
-      callback: () => setCommandPaletteOpen((open) => !open),
-    });
-    shortcutManager.register({
-      id: "toggle-dark-mode",
-      description: "Toggle Dark Mode",
-      defaultKey: "ctrl+shift+d",
-      callback: () => themeManager.toggle(),
-    });
-    shortcutManager.register({
-      id: "undo",
-      description: "Undo",
-      defaultKey: "ctrl+z",
-      callback: () => undo(),
-    });
-    shortcutManager.register({
-      id: "redo",
-      description: "Redo",
-      defaultKey: "ctrl+shift+z",
-      callback: () => redo(),
-    });
+  // ── Command palette commands ──
+  const commands = useAppCommands(
+    handleNavigate,
+    openSettingsTab,
+    setChatPanelOpen,
+    setFocusModeOpen,
+    setTemplateSelectorOpen,
+    projects,
+    pluginCommands,
+    executeCommand,
+  );
 
-    // Load custom bindings from settings
-    api.getAppSetting("keyboard_shortcuts").then((val) => {
-      if (val) {
-        try {
-          shortcutManager.loadCustomBindings(JSON.parse(val));
-        } catch {
-          // Non-critical
-        }
-      }
-    });
+  // ── Task detail panel navigation ──
+  const selectedTaskIdx = selectedTask
+    ? visibleTasks.findIndex((t) => t.id === selectedTask.id)
+    : -1;
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      shortcutManager.handleKeyDown(e);
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [undo, redo]);
-
-  // Command palette commands — merge built-in + plugin commands
-  const commands = useMemo(() => {
-    const cmds = [
-      { id: "nav-inbox", name: "Go to Inbox", callback: () => handleNavigate("inbox") },
-      { id: "nav-today", name: "Go to Today", callback: () => handleNavigate("today") },
-      { id: "nav-upcoming", name: "Go to Upcoming", callback: () => handleNavigate("upcoming") },
-      {
-        id: "nav-filters-labels",
-        name: "Go to Filters & Labels",
-        callback: () => handleNavigate("filters-labels"),
-      },
-      {
-        id: "nav-completed",
-        name: "Go to Completed",
-        callback: () => handleNavigate("completed"),
-      },
-      { id: "nav-settings", name: "Go to Settings", callback: () => handleNavigate("settings") },
-      {
-        id: "nav-settings-general",
-        name: "Go to Settings: General",
-        callback: () => openSettingsTab("general"),
-      },
-      {
-        id: "nav-settings-ai",
-        name: "Go to Settings: AI Assistant",
-        callback: () => openSettingsTab("ai"),
-      },
-      {
-        id: "nav-settings-plugins",
-        name: "Go to Settings: Plugins",
-        callback: () => openSettingsTab("plugins"),
-      },
-      {
-        id: "nav-settings-templates",
-        name: "Go to Settings: Templates",
-        callback: () => openSettingsTab("templates"),
-      },
-      {
-        id: "nav-settings-keyboard",
-        name: "Go to Settings: Keyboard",
-        callback: () => openSettingsTab("keyboard"),
-      },
-      {
-        id: "nav-settings-data",
-        name: "Go to Settings: Data",
-        callback: () => openSettingsTab("data"),
-      },
-      {
-        id: "nav-settings-about",
-        name: "Go to Settings: About",
-        callback: () => openSettingsTab("about"),
-      },
-      {
-        id: "nav-plugin-store",
-        name: "Go to Plugin Store",
-        callback: () => handleNavigate("plugin-store"),
-      },
-      { id: "theme-toggle", name: "Toggle Dark Mode", callback: () => themeManager.toggle() },
-      {
-        id: "theme-light",
-        name: "Switch to Light Theme",
-        callback: () => themeManager.setTheme("light"),
-      },
-      {
-        id: "theme-dark",
-        name: "Switch to Dark Theme",
-        callback: () => themeManager.setTheme("dark"),
-      },
-      { id: "ai-chat-toggle", name: "Toggle AI Chat", callback: () => setChatPanelOpen((o) => !o) },
-      { id: "focus-mode", name: "Enter Focus Mode", callback: () => setFocusModeOpen(true) },
-      {
-        id: "create-from-template",
-        name: "Create Task from Template",
-        callback: () => setTemplateSelectorOpen(true),
-      },
-    ];
-
-    for (const project of projects) {
-      cmds.push({
-        id: `nav-project-${project.id}`,
-        name: `Go to Project: ${project.name}`,
-        callback: () => handleNavigate("project", project.id),
-      });
+  const selectedTaskProjectName = useMemo(() => {
+    if (!selectedTask) return "Inbox";
+    if (selectedTask.projectId) {
+      return projects.find((p) => p.id === selectedTask.projectId)?.name ?? "Inbox";
     }
+    return "Inbox";
+  }, [selectedTask, projects]);
 
-    // Add plugin commands
-    for (const cmd of pluginCommands) {
-      cmds.push({
-        id: `plugin-${cmd.id}`,
-        name: cmd.name,
-        callback: () => executeCommand(cmd.id),
-      });
-    }
-
-    return cmds;
-  }, [projects, pluginCommands, executeCommand, handleNavigate, openSettingsTab]);
-
-  const selectedTask = selectedTaskId ? state.tasks.find((t) => t.id === selectedTaskId) : null;
-
+  // ── Document title ──
   const appTitle = useMemo(() => {
-    if (focusModeOpen) {
-      return "Focus Mode - Docket";
-    }
+    if (focusModeOpen) return "Focus Mode - Docket";
 
     switch (currentView) {
       case "inbox":
@@ -872,6 +315,10 @@ function AppContent() {
         const pluginView = pluginViews.find((view) => view.id === selectedPluginViewId);
         return pluginView ? `${pluginView.name} - Docket` : "Custom View - Docket";
       }
+      case "task": {
+        const t = selectedRouteTaskId ? state.tasks.find((tk) => tk.id === selectedRouteTaskId) : null;
+        return t ? `${t.title} - Docket` : "Task - Docket";
+      }
       case "filters-labels":
         return "Filters & Labels - Docket";
       case "completed":
@@ -879,20 +326,13 @@ function AppContent() {
       default:
         return "Docket";
     }
-  }, [
-    focusModeOpen,
-    currentView,
-    projects,
-    selectedProjectId,
-    settingsTab,
-    pluginViews,
-    selectedPluginViewId,
-  ]);
+  }, [focusModeOpen, currentView, projects, selectedProjectId, selectedRouteTaskId, state.tasks, settingsTab, pluginViews, selectedPluginViewId]);
 
   useEffect(() => {
     document.title = appTitle;
   }, [appTitle]);
 
+  // ── View rendering ──
   const renderView = () => {
     switch (currentView) {
       case "inbox":
@@ -968,6 +408,32 @@ function AppContent() {
             onAddSubtask={handleAddSubtask}
             onUpdateDueDate={handleUpdateDueDate}
             autoFocusTrigger={addTaskTrigger}
+          />
+        );
+      }
+      case "task": {
+        const routeTask = selectedRouteTaskId
+          ? state.tasks.find((t) => t.id === selectedRouteTaskId)
+          : null;
+        if (!routeTask) {
+          return <p className="text-on-surface-muted">Task not found.</p>;
+        }
+        return (
+          <TaskPage
+            task={routeTask}
+            allTasks={state.tasks}
+            projects={projects}
+            onUpdate={handleUpdateTask}
+            onDelete={(id) => {
+              handleDeleteTask(id);
+              handleNavigate("inbox");
+            }}
+            onNavigateBack={() => window.history.back()}
+            onSelect={(id) => handleNavigate("task", id)}
+            onAddSubtask={handleAddSubtask}
+            onToggleSubtask={handleToggleTask}
+            onReorder={handleReorder}
+            availableTags={availableTags}
           />
         );
       }
@@ -1047,20 +513,6 @@ function AppContent() {
             <ErrorBoundary>{renderView()}</ErrorBoundary>
           )}
         </main>
-        {selectedTask && (
-          <TaskDetailPanel
-            task={selectedTask}
-            allTasks={state.tasks}
-            onUpdate={handleUpdateTask}
-            onDelete={handleDeleteTask}
-            onClose={handleCloseDetail}
-            onIndent={handleIndent}
-            onOutdent={handleOutdent}
-            onSelect={handleSelectTask}
-            onAddSubtask={handleAddSubtask}
-            availableTags={availableTags}
-          />
-        )}
         {chatPanelOpen && (
           <AIChatPanel
             onClose={() => setChatPanelOpen(false)}
@@ -1076,6 +528,28 @@ function AppContent() {
           onFocusMode={() => setFocusModeOpen(true)}
         />
       </div>
+      {selectedTask && currentView !== "task" && (
+        <TaskDetailPanel
+          task={selectedTask}
+          allTasks={state.tasks}
+          onUpdate={handleUpdateTask}
+          onDelete={handleDeleteTask}
+          onClose={handleCloseDetail}
+          onIndent={handleIndent}
+          onOutdent={handleOutdent}
+          onSelect={handleSelectTask}
+          onAddSubtask={handleAddSubtask}
+          onToggleSubtask={handleToggleTask}
+          onReorder={handleReorder}
+          onNavigatePrev={selectedTaskIdx > 0 ? () => handleSelectTask(visibleTasks[selectedTaskIdx - 1].id) : undefined}
+          onNavigateNext={selectedTaskIdx >= 0 && selectedTaskIdx < visibleTasks.length - 1 ? () => handleSelectTask(visibleTasks[selectedTaskIdx + 1].id) : undefined}
+          onOpenFullPage={(id) => handleNavigate("task", id)}
+          hasPrev={selectedTaskIdx > 0}
+          hasNext={selectedTaskIdx >= 0 && selectedTaskIdx < visibleTasks.length - 1}
+          projectName={selectedTaskProjectName}
+          availableTags={availableTags}
+        />
+      )}
       {focusModeOpen && (
         <FocusMode
           tasks={state.tasks.filter((t) => t.status === "pending")}

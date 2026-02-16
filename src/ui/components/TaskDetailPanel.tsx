@@ -2,19 +2,17 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import {
   X,
   Trash2,
-  Calendar,
-  Tag,
-  Repeat,
-  ChevronRight,
   ArrowRight,
   ArrowLeft,
-  Check,
-  Plus,
-  Bell,
+  ChevronDown,
+  ChevronUp,
+  MoreHorizontal,
+  Maximize2,
+  Inbox,
 } from "lucide-react";
 import type { Task, UpdateTaskInput } from "../../core/types.js";
-import { DatePicker } from "./DatePicker.js";
-import { TagsInput } from "./TagsInput.js";
+import { SubtaskSection } from "./SubtaskSection.js";
+import { TaskMetadataSidebar } from "./TaskMetadataSidebar.js";
 
 interface TaskDetailPanelProps {
   task: Task;
@@ -26,15 +24,16 @@ interface TaskDetailPanelProps {
   onOutdent?: (id: string) => void;
   onSelect?: (id: string) => void;
   onAddSubtask?: (parentId: string, title: string) => void;
+  onToggleSubtask?: (id: string) => void;
+  onReorder?: (orderedIds: string[]) => void;
+  onNavigatePrev?: () => void;
+  onNavigateNext?: () => void;
+  onOpenFullPage?: (id: string) => void;
+  hasPrev?: boolean;
+  hasNext?: boolean;
+  projectName?: string;
   availableTags?: string[];
 }
-
-const PRIORITIES = [
-  { value: 1, label: "P1", activeClass: "bg-priority-1/15 text-priority-1" },
-  { value: 2, label: "P2", activeClass: "bg-priority-2/15 text-priority-2" },
-  { value: 3, label: "P3", activeClass: "bg-priority-3/15 text-priority-3" },
-  { value: 4, label: "P4", activeClass: "bg-priority-4/15 text-priority-4" },
-];
 
 export function TaskDetailPanel({
   task,
@@ -46,28 +45,55 @@ export function TaskDetailPanel({
   onOutdent,
   onSelect,
   onAddSubtask,
+  onToggleSubtask,
+  onReorder,
+  onNavigatePrev,
+  onNavigateNext,
+  onOpenFullPage,
+  hasPrev = false,
+  hasNext = false,
+  projectName = "Inbox",
   availableTags = [],
 }: TaskDetailPanelProps) {
-  const currentRemindAt = (task as any).remindAt ?? null;
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [remindAtInput, setRemindAtInput] = useState(
-    currentRemindAt ? currentRemindAt.slice(0, 16) : "",
-  );
-  const [addingSubtask, setAddingSubtask] = useState(false);
-  const [subtaskTitle, setSubtaskTitle] = useState("");
-  const subtaskInputRef = useRef<HTMLInputElement>(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  // Subtask inline edit state (shared between SubtaskSection and this component)
+  const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
+  const [editingSubtaskTitle, setEditingSubtaskTitle] = useState("");
+  const [focusedSubtaskIdx, setFocusedSubtaskIdx] = useState(-1);
 
   useEffect(() => {
     setTitle(task.title);
     setDescription(task.description ?? "");
-    setShowDatePicker(false);
-    const remind = (task as any).remindAt ?? null;
-    setRemindAtInput(remind ? remind.slice(0, 16) : "");
-    setAddingSubtask(false);
-    setSubtaskTitle("");
+    setMoreMenuOpen(false);
+    setEditingSubtaskId(null);
+    setEditingSubtaskTitle("");
+    setFocusedSubtaskIdx(-1);
   }, [task]);
+
+  // Close more menu on outside click
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [moreMenuOpen]);
+
+  // Escape to close
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   const handleTitleBlur = () => {
     const trimmed = title.trim();
@@ -83,328 +109,219 @@ export function TaskDetailPanel({
     }
   };
 
-  const handlePriorityClick = (priority: number) => {
-    const newPriority = task.priority === priority ? null : priority;
-    onUpdate(task.id, { priority: newPriority });
-  };
+  // Subtask inline edit handlers
+  const handleStartEdit = useCallback((child: Task) => {
+    setEditingSubtaskId(child.id);
+    setEditingSubtaskTitle(child.title);
+  }, []);
 
-  const handleDueDateChange = useCallback(
-    (date: string | null) => {
-      if (!date) {
-        onUpdate(task.id, { dueDate: null, dueTime: false });
-      } else {
-        onUpdate(task.id, { dueDate: new Date(date).toISOString(), dueTime: false });
+  const handleSaveEdit = useCallback(() => {
+    if (editingSubtaskId) {
+      const trimmed = editingSubtaskTitle.trim();
+      const original = allTasks.find((t) => t.id === editingSubtaskId);
+      if (trimmed && original && trimmed !== original.title) {
+        onUpdate(editingSubtaskId, { title: trimmed });
       }
-      setShowDatePicker(false);
-    },
-    [task.id, onUpdate],
-  );
-
-  const handleTagsChange = useCallback(
-    (tags: string[]) => {
-      onUpdate(task.id, { tags });
-    },
-    [task.id, onUpdate],
-  );
-
-  const handleRemindAtBlur = () => {
-    const currentVal = currentRemindAt ? currentRemindAt.slice(0, 16) : "";
-    if (remindAtInput === currentVal) return;
-
-    if (!remindAtInput) {
-      onUpdate(task.id, { remindAt: null } as any);
-      return;
+      setEditingSubtaskId(null);
+      setEditingSubtaskTitle("");
     }
+  }, [editingSubtaskId, editingSubtaskTitle, allTasks, onUpdate]);
 
-    const isoString = new Date(remindAtInput).toISOString();
-    onUpdate(task.id, { remindAt: isoString } as any);
-  };
+  const handleCancelEdit = useCallback(() => {
+    setEditingSubtaskId(null);
+    setEditingSubtaskTitle("");
+  }, []);
 
-  const handleAddSubtask = () => {
-    const trimmed = subtaskTitle.trim();
-    if (trimmed && onAddSubtask) {
-      onAddSubtask(task.id, trimmed);
-      setSubtaskTitle("");
-      setAddingSubtask(false);
-    }
-  };
-
-  const children = allTasks.filter((t) => t.parentId === task.id);
+  // Format created date for the more menu
+  const createdDateLabel = new Date(task.createdAt).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const createdTimeLabel = new Date(task.createdAt).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 
   return (
     <div
-      role="complementary"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      role="dialog"
+      aria-modal="true"
       aria-label="Task details"
-      className="w-96 border-l border-border flex flex-col bg-surface overflow-auto"
+      onClick={onClose}
     >
-      <div className="flex items-center justify-between p-4 border-b border-border">
-        <span className="text-xs text-on-surface-muted font-mono">{task.id.slice(0, 8)}</span>
-        <button
-          onClick={onClose}
-          aria-label="Close task details"
-          className="text-on-surface-muted hover:text-on-surface-secondary transition-colors p-1 rounded-md hover:bg-surface-tertiary"
-        >
-          <X size={18} />
-        </button>
-      </div>
-
-      <div className="flex-1 p-4 space-y-4">
-        <input
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={handleTitleBlur}
-          className="w-full text-lg font-semibold bg-transparent border-none focus:outline-none focus:ring-0 text-on-surface"
-        />
-
-        <div>
-          <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider">
-            Priority
-          </label>
-          <div className="flex gap-2 mt-1">
-            {PRIORITIES.map((p) => (
-              <button
-                key={p.value}
-                onClick={() => handlePriorityClick(p.value)}
-                className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                  task.priority === p.value
-                    ? p.activeClass
-                    : "bg-surface-tertiary text-on-surface-muted hover:text-on-surface-secondary"
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider">
-            Description
-          </label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            onBlur={handleDescriptionBlur}
-            placeholder="Add a description..."
-            className="w-full mt-1 p-2 text-sm bg-surface-secondary border border-border rounded-md text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-1 focus:ring-accent min-h-[80px] resize-y"
-          />
-        </div>
-
-        <div className="relative">
-          <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider flex items-center gap-1.5">
-            <Calendar size={12} /> Due Date
-          </label>
-          <div className="mt-1 flex items-center gap-2">
+      <div
+        className="bg-surface rounded-lg shadow-xl border border-border w-full max-w-4xl h-[85vh] flex flex-col mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header — Todoist style */}
+        <div className="flex items-center justify-between px-6 py-3 border-b border-border flex-shrink-0">
+          {/* Left: Project / parent breadcrumb */}
+          {task.parentId ? (
             <button
-              onClick={() => setShowDatePicker((prev) => !prev)}
-              className="flex-1 px-2 py-1.5 text-sm text-left bg-surface-secondary border border-border rounded-md text-on-surface hover:bg-surface-tertiary transition-colors"
+              className="text-xs text-on-surface-muted hover:text-accent flex items-center gap-1.5 transition-colors"
+              onClick={() => onSelect?.(task.parentId!)}
             >
-              {task.dueDate
-                ? new Date(task.dueDate).toLocaleDateString()
-                : "No due date"}
+              <ArrowLeft size={12} />
+              <span className="truncate max-w-[200px]">
+                {allTasks.find((t) => t.id === task.parentId)?.title ?? "Parent task"}
+              </span>
             </button>
-            {task.dueDate && (
-              <button
-                onClick={() => handleDueDateChange(null)}
-                className="text-xs px-2 py-1.5 rounded-md bg-surface-tertiary text-on-surface-secondary hover:text-on-surface"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          {showDatePicker && (
-            <DatePicker
-              value={task.dueDate}
-              onChange={handleDueDateChange}
-              onClose={() => setShowDatePicker(false)}
-            />
+          ) : (
+            <span className="text-xs text-on-surface-muted flex items-center gap-1.5">
+              <Inbox size={12} />
+              {projectName}
+            </span>
           )}
-        </div>
 
-        <div>
-          <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider flex items-center gap-1.5">
-            <Bell size={12} /> Reminder
-          </label>
-          <div className="mt-1 flex items-center gap-2">
-            <input
-              type="datetime-local"
-              value={remindAtInput}
-              onChange={(e) => setRemindAtInput(e.target.value)}
-              onBlur={handleRemindAtBlur}
-              className="flex-1 px-2 py-1.5 text-sm bg-surface-secondary border border-border rounded-md text-on-surface focus:outline-none focus:ring-1 focus:ring-accent"
-            />
-            {remindAtInput && (
+          {/* Right: prev/next, more, close */}
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={onNavigatePrev}
+              disabled={!hasPrev}
+              className="p-1.5 rounded-md text-on-surface-muted hover:text-on-surface hover:bg-surface-tertiary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+              title="Previous task"
+            >
+              <ChevronUp size={16} />
+            </button>
+            <button
+              onClick={onNavigateNext}
+              disabled={!hasNext}
+              className="p-1.5 rounded-md text-on-surface-muted hover:text-on-surface hover:bg-surface-tertiary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+              title="Next task"
+            >
+              <ChevronDown size={16} />
+            </button>
+
+            {/* More menu */}
+            <div className="relative" ref={moreMenuRef}>
               <button
-                onClick={() => {
-                  setRemindAtInput("");
-                  onUpdate(task.id, { remindAt: null } as any);
-                }}
-                className="text-xs px-2 py-1.5 rounded-md bg-surface-tertiary text-on-surface-secondary hover:text-on-surface"
+                onClick={() => setMoreMenuOpen((prev) => !prev)}
+                className={`p-1.5 rounded-md text-on-surface-muted hover:text-on-surface hover:bg-surface-tertiary transition-colors ${
+                  moreMenuOpen ? "bg-surface-tertiary text-on-surface" : ""
+                }`}
+                title="More options"
               >
-                Clear
+                <MoreHorizontal size={16} />
               </button>
-            )}
-          </div>
-        </div>
-
-        <div>
-          <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider flex items-center gap-1.5 mb-1">
-            <Tag size={12} /> Tags
-          </label>
-          <TagsInput
-            value={task.tags.map((t) => t.name)}
-            onChange={handleTagsChange}
-            suggestions={availableTags}
-          />
-        </div>
-
-        {task.recurrence && (
-          <div>
-            <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider flex items-center gap-1.5">
-              <Repeat size={12} /> Recurrence
-            </label>
-            <p className="text-sm mt-1 text-on-surface">{task.recurrence}</p>
-          </div>
-        )}
-
-        {/* Sub-task hierarchy controls */}
-        {(onIndent || onOutdent) && (
-          <div>
-            <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider">
-              Hierarchy
-            </label>
-            <div className="flex gap-2 mt-1">
-              {onIndent && (
-                <button
-                  onClick={() => onIndent(task.id)}
-                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-surface-tertiary text-on-surface-secondary hover:text-on-surface transition-colors"
-                  title="Make sub-task of previous sibling"
-                >
-                  <ArrowRight size={12} /> Indent
-                </button>
-              )}
-              {onOutdent && task.parentId && (
-                <button
-                  onClick={() => onOutdent(task.id)}
-                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-surface-tertiary text-on-surface-secondary hover:text-on-surface transition-colors"
-                  title="Move up one level"
-                >
-                  <ArrowLeft size={12} /> Outdent
-                </button>
-              )}
-            </div>
-            {task.parentId && (
-              <p className="text-xs text-on-surface-muted mt-1">
-                Sub-task of{" "}
-                <button
-                  className="text-accent hover:underline"
-                  onClick={() => onSelect?.(task.parentId!)}
-                >
-                  {allTasks.find((t) => t.id === task.parentId)?.title ?? task.parentId.slice(0, 8)}
-                </button>
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Sub-tasks list */}
-        {(children.length > 0 || onAddSubtask) && (
-          <div>
-            <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider flex items-center gap-1.5">
-              <ChevronRight size={12} /> Sub-tasks
-            </label>
-            <div className="mt-1 space-y-1">
-              {children.map((child) => (
-                <button
-                  key={child.id}
-                  onClick={() => onSelect?.(child.id)}
-                  className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface-tertiary transition-colors"
-                >
-                  <span
-                    className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
-                      child.status === "completed"
-                        ? "bg-success border-success"
-                        : child.priority
-                          ? `border-priority-${child.priority}`
-                          : "border-on-surface-muted"
-                    }`}
-                  >
-                    {child.status === "completed" && <Check size={10} className="text-white" />}
-                  </span>
-                  <span
-                    className={`text-sm ${
-                      child.status === "completed"
-                        ? "line-through text-on-surface-muted"
-                        : "text-on-surface"
-                    }`}
-                  >
-                    {child.title}
-                  </span>
-                </button>
-              ))}
-
-              {/* Inline add subtask */}
-              {onAddSubtask && (
-                addingSubtask ? (
-                  <div className="flex items-center gap-2 px-2 py-1.5">
-                    <div className="w-3.5 h-3.5 rounded-full border-2 border-on-surface-muted/40 flex-shrink-0" />
-                    <input
-                      ref={subtaskInputRef}
-                      type="text"
-                      value={subtaskTitle}
-                      onChange={(e) => setSubtaskTitle(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleAddSubtask();
-                        if (e.key === "Escape") {
-                          setSubtaskTitle("");
-                          setAddingSubtask(false);
-                        }
-                      }}
-                      onBlur={() => {
-                        if (!subtaskTitle.trim()) setAddingSubtask(false);
-                        else handleAddSubtask();
-                      }}
-                      placeholder="Sub-task title..."
-                      autoFocus
-                      className="flex-1 text-sm bg-transparent border-none outline-none text-on-surface placeholder-on-surface-muted/50"
-                    />
+              {moreMenuOpen && (
+                <div className="absolute right-0 top-full mt-1 w-56 bg-surface rounded-lg shadow-xl border border-border z-50 py-1 text-sm">
+                  <div className="px-3 py-2 text-xs text-on-surface-muted">
+                    Added on {createdDateLabel} &middot; {createdTimeLabel}
                   </div>
-                ) : (
+                  <div className="border-t border-border my-1" />
+                  {onIndent && (
+                    <button
+                      onClick={() => {
+                        onIndent(task.id);
+                        setMoreMenuOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2 flex items-center gap-2.5 hover:bg-surface-tertiary transition-colors text-on-surface"
+                    >
+                      <ArrowRight size={14} className="text-on-surface-muted" />
+                      Make sub-task
+                    </button>
+                  )}
+                  {onOutdent && task.parentId && (
+                    <button
+                      onClick={() => {
+                        onOutdent(task.id);
+                        setMoreMenuOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2 flex items-center gap-2.5 hover:bg-surface-tertiary transition-colors text-on-surface"
+                    >
+                      <ArrowLeft size={14} className="text-on-surface-muted" />
+                      Move up one level
+                    </button>
+                  )}
+                  {(onIndent || (onOutdent && task.parentId)) && (
+                    <div className="border-t border-border my-1" />
+                  )}
                   <button
                     onClick={() => {
-                      setAddingSubtask(true);
-                      setTimeout(() => subtaskInputRef.current?.focus(), 0);
+                      setMoreMenuOpen(false);
+                      onDelete(task.id);
                     }}
-                    className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-on-surface-muted hover:text-accent transition-colors w-full text-left"
+                    className="w-full text-left px-3 py-2 flex items-center gap-2.5 hover:bg-surface-tertiary transition-colors text-error"
                   >
-                    <Plus size={12} />
-                    Add sub-task
+                    <Trash2 size={14} />
+                    Delete task
                   </button>
-                )
+                </div>
               )}
             </div>
+
+            {onOpenFullPage && (
+              <button
+                onClick={() => {
+                  onOpenFullPage(task.id);
+                  onClose();
+                }}
+                aria-label="Open full page"
+                className="text-on-surface-muted hover:text-on-surface transition-colors p-1.5 rounded-md hover:bg-surface-tertiary"
+                title="Open as full page"
+              >
+                <Maximize2 size={16} />
+              </button>
+            )}
+
+            <button
+              onClick={onClose}
+              aria-label="Close task details"
+              className="text-on-surface-muted hover:text-on-surface transition-colors p-1.5 rounded-md hover:bg-surface-tertiary ml-0.5"
+            >
+              <X size={18} />
+            </button>
           </div>
-        )}
-
-        <div>
-          <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider">
-            Created
-          </label>
-          <p className="text-sm mt-1 text-on-surface-muted">
-            {new Date(task.createdAt).toLocaleString()}
-          </p>
         </div>
-      </div>
 
-      <div className="p-4 border-t border-border">
-        <button
-          onClick={() => onDelete(task.id)}
-          className="text-sm text-error hover:text-error/80 flex items-center gap-1.5 transition-colors"
-        >
-          <Trash2 size={14} />
-          Delete task
-        </button>
+        {/* Two-column body */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Left column — main content */}
+          <div className="flex-1 overflow-auto p-6 space-y-4">
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={handleTitleBlur}
+              className="w-full text-xl font-semibold bg-transparent border-none focus:outline-none focus:ring-0 text-on-surface"
+            />
+
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onBlur={handleDescriptionBlur}
+              placeholder="Description"
+              className="w-full p-0 text-sm bg-transparent border-none text-on-surface placeholder-on-surface-muted/50 focus:outline-none focus:ring-0 min-h-[80px] resize-none"
+            />
+
+            <SubtaskSection
+              task={task}
+              allTasks={allTasks}
+              editingSubtaskId={editingSubtaskId}
+              editingSubtaskTitle={editingSubtaskTitle}
+              focusedSubtaskIdx={focusedSubtaskIdx}
+              onEditTitleChange={setEditingSubtaskTitle}
+              onStartEdit={handleStartEdit}
+              onSaveEdit={handleSaveEdit}
+              onCancelEdit={handleCancelEdit}
+              onToggle={onToggleSubtask}
+              onSelect={onSelect}
+              onAddSubtask={onAddSubtask}
+              onReorder={onReorder}
+              onFocusedIdxChange={setFocusedSubtaskIdx}
+            />
+          </div>
+
+          {/* Right column — metadata sidebar */}
+          <TaskMetadataSidebar
+            task={task}
+            onUpdate={onUpdate}
+            onDelete={onDelete}
+            availableTags={availableTags}
+          />
+        </div>
       </div>
     </div>
   );

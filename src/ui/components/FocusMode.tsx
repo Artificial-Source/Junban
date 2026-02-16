@@ -161,7 +161,7 @@ export function FocusMode({ tasks, onComplete, onClose }: FocusModeProps) {
               {currentTask!.tags.map((tag) => (
                 <span
                   key={tag.id}
-                  className="text-sm px-2.5 py-1 rounded-lg bg-surface-tertiary text-on-surface-secondary"
+                  className="font-mono text-sm px-2.5 py-1 rounded-lg bg-surface-tertiary text-on-surface-secondary"
                 >
                   #{tag.name}
                 </span>

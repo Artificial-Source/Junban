@@ -1,20 +1,22 @@
 /* ASF Docket — Dark Theme (overrides) */
 
 .dark {
-  --color-surface: #111827;
-  --color-surface-secondary: #1f2937;
-  --color-surface-tertiary: #374151;
-  --color-on-surface: #f9fafb;
-  --color-on-surface-secondary: #9ca3af;
-  --color-on-surface-muted: #6b7280;
-  --color-border: #374151;
-  --color-accent: #60a5fa;
-  --color-accent-hover: #3b82f6;
-  --color-success: #34d399;
-  --color-warning: #fbbf24;
-  --color-error: #f87171;
-  --color-priority-1: #f87171;
-  --color-priority-2: #fbbf24;
-  --color-priority-3: #60a5fa;
-  --color-priority-4: #9ca3af;
+  --color-surface: #0a0a0a;
+  --color-surface-secondary: #141414;
+  --color-surface-tertiary: #1a1a1a;
+  --color-on-surface: #e8e8e8;
+  --color-on-surface-secondary: #a0a0a0;
+  --color-on-surface-muted: #585858;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-accent: #BF5AF2;
+  --color-accent-hover: #A84CD8;
+  --color-success: #30D158;
+  --color-warning: #FFD60A;
+  --color-error: #FF453A;
+  --color-priority-1: #FF453A;
+  --color-priority-2: #FF9F0A;
+  --color-priority-3: #BF5AF2;
+  --color-priority-4: #585858;
+  --color-glass: rgba(10, 10, 10, 0.7);
+  --color-glass-border: rgba(255, 255, 255, 0.06);
 }

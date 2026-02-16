@@ -190,18 +190,22 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
   );
 }
 
-function getErrorHint(category?: string): string | null {
+function getErrorHint(category?: string, message?: string): string | null {
   switch (category) {
     case "auth":
       return "Check your API key in Settings.";
     case "rate_limit":
       return "You've hit the rate limit. Wait a moment.";
     case "network":
-      return "Check your network connection.";
+      // The error message itself already has specific guidance for local providers
+      if (message?.includes("LM Studio") || message?.includes("Ollama")) {
+        return null;
+      }
+      return "Check your network connection and provider settings.";
     case "server":
-      return "The provider is having issues.";
+      return "The provider is having issues. Try again in a moment.";
     case "timeout":
-      return "The response took too long.";
+      return "The response took too long. Try a simpler question or check the provider.";
     default:
       return null;
   }
@@ -224,7 +228,7 @@ function MessageBubble({
   const hasToolCalls = message.toolCalls && message.toolCalls.length > 0;
 
   if (message.isError) {
-    const hint = getErrorHint(message.errorCategory);
+    const hint = getErrorHint(message.errorCategory, message.content);
     return (
       <div className="flex justify-start">
         <div className="max-w-[85%] space-y-1">
@@ -322,19 +326,29 @@ const markdownComponents: Components = {
   ),
 };
 
+const TOOL_META: Record<string, { emoji: string; verb: string }> = {
+  create_task: { emoji: "✨", verb: "Creating" },
+  complete_task: { emoji: "✅", verb: "Completing" },
+  update_task: { emoji: "✏️", verb: "Updating" },
+  delete_task: { emoji: "🗑️", verb: "Deleting" },
+  list_tasks: { emoji: "📋", verb: "Checking tasks" },
+};
+
 function ToolCallBadge({ name, args }: { name: string; args: string }) {
-  let label = name.replace(/_/g, " ");
+  const meta = TOOL_META[name] ?? { emoji: "⚡", verb: name.replace(/_/g, " ") };
+  let label = meta.verb;
   try {
     const parsed = JSON.parse(args);
-    if (parsed.title) label = `${name === "create_task" ? "Creating" : "Task"}: ${parsed.title}`;
-    else if (parsed.taskId) label = `${label} (${parsed.taskId.slice(0, 6)}...)`;
+    if (parsed.title) label = `${meta.verb} "${parsed.title}"`;
+    else if (parsed.search) label = `Searching "${parsed.search}"`;
+    else if (parsed.status) label = `${meta.verb} (${parsed.status})`;
   } catch {
-    // Use raw name
+    // Use default label
   }
 
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-accent/10 text-accent rounded-full">
-      <span className="w-1.5 h-1.5 bg-accent rounded-full" />
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs bg-accent/10 text-accent rounded-full">
+      <span>{meta.emoji}</span>
       {label}
     </span>
   );

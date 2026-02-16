@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { api, type AIConfigInfo, type AIChatMessage } from "../api.js";
+import { useTaskContext } from "./TaskContext.js";
 
 interface AIState {
   config: AIConfigInfo | null;
@@ -54,11 +55,19 @@ function parseStreamError(data: string): {
   return { message: data, category: "unknown", retryable: true };
 }
 
+const TASK_MUTATING_TOOLS = new Set([
+  "create_task",
+  "complete_task",
+  "update_task",
+  "delete_task",
+]);
+
 export function AIProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AIConfigInfo | null>(null);
   const [messages, setMessages] = useState<AIChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const lastUserMessageRef = useRef<string>("");
+  const { refreshTasks } = useTaskContext();
 
   // Dynamic check: provider is configured if it has an API key or doesn't need one
   // For built-in providers we check known names; for plugin providers,
@@ -99,6 +108,7 @@ export function AIProvider({ children }: { children: ReactNode }) {
     lastUserMessageRef.current = text;
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setIsStreaming(true);
+    let hadTaskMutation = false;
 
     try {
       const stream = await api.sendChatMessage(text);
@@ -112,6 +122,7 @@ export function AIProvider({ children }: { children: ReactNode }) {
       let assistantContent = "";
       let toolCalls: AIChatMessage["toolCalls"] = [];
       let buffer = "";
+      let roundFinalized = false;
 
       // Safety timeout to prevent stuck spinner
       const safetyTimer = setTimeout(() => {
@@ -139,36 +150,56 @@ export function AIProvider({ children }: { children: ReactNode }) {
 
               if (event.type === "token") {
                 assistantContent += event.data;
-                // Update the assistant message in real-time
+                const isNewRound = roundFinalized;
+                if (isNewRound) roundFinalized = false;
+                // Snapshot values so React batching doesn't read stale refs
+                const contentSnap = assistantContent;
+                const toolCallsSnap = [...toolCalls];
                 setMessages((prev) => {
                   const last = prev[prev.length - 1];
-                  if (last?.role === "assistant" && !last.isError) {
+                  if (!isNewRound && last?.role === "assistant" && !last.isError) {
                     return [
                       ...prev.slice(0, -1),
-                      { ...last, content: assistantContent, toolCalls },
+                      { ...last, content: contentSnap, toolCalls: toolCallsSnap },
                     ];
                   }
-                  return [...prev, { role: "assistant", content: assistantContent, toolCalls }];
+                  return [...prev, { role: "assistant", content: contentSnap, toolCalls: toolCallsSnap }];
                 });
               } else if (event.type === "tool_call") {
                 // Capture tool calls for display as badges
                 try {
                   const calls = JSON.parse(event.data);
                   toolCalls = [...(toolCalls ?? []), ...calls];
+                  const toolCallsSnap = [...toolCalls];
                   setMessages((prev) => {
                     const last = prev[prev.length - 1];
                     if (last?.role === "assistant" && !last.isError) {
-                      return [...prev.slice(0, -1), { ...last, toolCalls }];
+                      return [...prev.slice(0, -1), { ...last, toolCalls: toolCallsSnap }];
                     }
-                    return [...prev, { role: "assistant", content: "", toolCalls }];
+                    return [...prev, { role: "assistant", content: "", toolCalls: toolCallsSnap }];
                   });
                 } catch {
                   // Skip malformed tool call data
                 }
+              } else if (event.type === "tool_result") {
+                // Track task mutations for refresh
+                try {
+                  const result = JSON.parse(event.data);
+                  if (TASK_MUTATING_TOOLS.has(result.tool)) {
+                    hadTaskMutation = true;
+                  }
+                } catch {
+                  // Skip malformed tool result
+                }
               } else if (event.type === "done") {
-                // On done, reset accumulators for next tool-call round
+                // Refresh task list after tool round completes
+                if (hadTaskMutation) {
+                  refreshTasks();
+                }
+                // Finalize current round — next tokens will start a new message
                 assistantContent = "";
                 toolCalls = [];
+                roundFinalized = true;
               } else if (event.type === "error") {
                 const { message, category, retryable } = parseStreamError(event.data);
                 setMessages((prev) => [
@@ -204,8 +235,12 @@ export function AIProvider({ children }: { children: ReactNode }) {
       ]);
     } finally {
       setIsStreaming(false);
+      // Safety-net refresh after stream ends to catch any missed mutations
+      if (hadTaskMutation) {
+        refreshTasks();
+      }
     }
-  }, []);
+  }, [refreshTasks]);
 
   const retryLastMessage = useCallback(() => {
     const text = lastUserMessageRef.current;

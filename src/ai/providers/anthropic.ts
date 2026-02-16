@@ -64,12 +64,14 @@ function toAnthropicTools(tools: ToolDefinition[]): Anthropic.Tool[] {
 export class AnthropicProvider implements AIProvider {
   private client: Anthropic;
   private model: string;
+  private providerName: string;
 
   constructor(config: AIProviderConfig) {
     this.client = new Anthropic({
       apiKey: config.apiKey,
     });
     this.model = config.model ?? "claude-sonnet-4-5-20250929";
+    this.providerName = config.provider;
   }
 
   async chat(messages: ChatMessage[], tools?: ToolDefinition[]): Promise<ChatResponse> {
@@ -152,7 +154,7 @@ export class AnthropicProvider implements AIProvider {
         yield { type: "done", data: "" };
       }
     } catch (err) {
-      const aiError = classifyProviderError(err);
+      const aiError = classifyProviderError(err, this.providerName);
       const errorData: StreamErrorData = {
         message: aiError.message,
         category: aiError.category,

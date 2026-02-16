@@ -10,6 +10,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Focus,
+  Plus,
+  Search,
+  SlidersHorizontal,
+  CheckCircle2,
 } from "lucide-react";
 import type { Project } from "../../core/types.js";
 import type { PanelInfo, ViewInfo } from "../api.js";
@@ -40,12 +44,23 @@ interface SidebarProps {
   onFocusMode?: () => void;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  projectTaskCounts?: Map<string, number>;
+  onAddTask?: () => void;
+  inboxCount?: number;
+  todayCount?: number;
 }
 
-const TASK_NAV_ITEMS = [
-  { id: "inbox", label: "Inbox", icon: Inbox },
-  { id: "today", label: "Today", icon: CalendarDays },
+const TASK_NAV_ITEMS: Array<{
+  id: string;
+  label: string;
+  icon: typeof Inbox;
+  countKey?: "inbox" | "today";
+}> = [
+  { id: "inbox", label: "Inbox", icon: Inbox, countKey: "inbox" },
+  { id: "today", label: "Today", icon: CalendarDays, countKey: "today" },
   { id: "upcoming", label: "Upcoming", icon: Clock },
+  { id: "filters-labels", label: "Filters & Labels", icon: SlidersHorizontal },
+  { id: "completed", label: "Completed", icon: CheckCircle2 },
 ];
 
 const WORKSPACE_NAV_ITEMS = [
@@ -66,14 +81,24 @@ export function Sidebar({
   onFocusMode,
   collapsed = false,
   onToggleCollapsed,
+  projectTaskCounts,
+  onAddTask,
+  inboxCount,
+  todayCount,
 }: SidebarProps) {
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const showToolsSection = Boolean(onFocusMode || onToggleChat);
+
+  const countMap: Record<string, number | undefined> = {
+    inbox: inboxCount,
+    today: todayCount,
+  };
 
   const renderNavItems = (items: typeof TASK_NAV_ITEMS) => {
     return items.map((item) => {
       const Icon = item.icon;
       const isActive = currentView === item.id;
+      const count = item.countKey ? countMap[item.countKey] : undefined;
       return (
         <li key={item.id}>
           <button
@@ -89,6 +114,11 @@ export function Sidebar({
           >
             <Icon size={18} strokeWidth={isActive ? 2.25 : 1.75} />
             {!collapsed && item.label}
+            {!collapsed && count !== undefined && count > 0 && (
+              <span className="ml-auto text-xs px-1.5 py-0.5 rounded-full bg-surface-tertiary text-on-surface-secondary font-medium">
+                {count}
+              </span>
+            )}
             <CollapsedTooltip visible={collapsed} label={item.label} />
           </button>
         </li>
@@ -157,6 +187,40 @@ export function Sidebar({
             </button>
           )}
         </div>
+
+        {/* Add task button */}
+        {onAddTask && (
+          <button
+            onClick={onAddTask}
+            className={`mt-3 w-full flex items-center rounded-lg bg-accent text-white font-medium text-sm transition-colors hover:bg-accent/90 ${
+              collapsed ? "justify-center p-2" : "gap-2 px-3 py-2"
+            }`}
+          >
+            <Plus size={18} />
+            {!collapsed && "Add task"}
+          </button>
+        )}
+
+        {/* Search button */}
+        {!collapsed && (
+          <button
+            onClick={() => onNavigate("inbox")}
+            className="mt-2 w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-on-surface-muted hover:bg-surface-tertiary hover:text-on-surface transition-colors"
+          >
+            <Search size={16} />
+            Search
+          </button>
+        )}
+        {collapsed && (
+          <button
+            onClick={() => onNavigate("inbox")}
+            aria-label="Search"
+            className="group relative mt-2 w-full flex items-center justify-center p-2 rounded-lg text-on-surface-muted hover:bg-surface-tertiary hover:text-on-surface transition-colors"
+          >
+            <Search size={16} />
+            <CollapsedTooltip visible={collapsed} label="Search" />
+          </button>
+        )}
       </div>
       <nav aria-label="Views" className={`flex-1 flex flex-col ${collapsed ? "px-2" : "px-3"}`}>
         <div>
@@ -174,12 +238,13 @@ export function Sidebar({
                 className="flex items-center gap-1 text-xs font-semibold text-on-surface-muted uppercase tracking-wider mt-6 mb-2 px-3 w-full text-left hover:text-on-surface-secondary transition-colors"
               >
                 {projectsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                Projects
+                My Projects
               </button>
               {projectsExpanded && (
                 <ul className="space-y-0.5">
                   {projects.map((project) => {
                     const isActive = currentView === "project" && selectedProjectId === project.id;
+                    const projectCount = projectTaskCounts?.get(project.id) ?? 0;
                     return (
                       <li key={project.id}>
                         <button
@@ -196,7 +261,12 @@ export function Sidebar({
                             className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                             style={{ backgroundColor: project.color }}
                           />
-                          {project.name}
+                          <span className="flex-1">{project.name}</span>
+                          {projectCount > 0 && (
+                            <span className="text-xs px-1.5 py-0.5 rounded-full bg-surface-tertiary text-on-surface-secondary font-medium">
+                              {projectCount}
+                            </span>
+                          )}
                         </button>
                       </li>
                     );

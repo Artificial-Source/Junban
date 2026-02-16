@@ -74,6 +74,43 @@ describe("classifyProviderError", () => {
     expect(result.retryable).toBe(true);
   });
 
+  it("gives LM Studio-specific message for ECONNREFUSED", () => {
+    const err = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1234"), {
+      code: "ECONNREFUSED",
+    });
+    const result = classifyProviderError(err, "lmstudio");
+    expect(result.category).toBe("network");
+    expect(result.message).toContain("LM Studio");
+    expect(result.message).toContain("running");
+    expect(result.message).toContain("server is started");
+  });
+
+  it("gives Ollama-specific message for ECONNREFUSED", () => {
+    const err = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:11434"), {
+      code: "ECONNREFUSED",
+    });
+    const result = classifyProviderError(err, "ollama");
+    expect(result.category).toBe("network");
+    expect(result.message).toContain("Ollama");
+    expect(result.message).toContain("running");
+  });
+
+  it("gives local provider hint when localhost detected in error message", () => {
+    const err = new Error("fetch failed: connect to localhost:1234 refused");
+    const result = classifyProviderError(err);
+    expect(result.category).toBe("network");
+    expect(result.message).toContain("local AI app");
+  });
+
+  it("gives generic network message for cloud providers", () => {
+    const err = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    const result = classifyProviderError(err, "openai");
+    expect(result.category).toBe("network");
+    expect(result.message).not.toContain("LM Studio");
+    expect(result.message).not.toContain("Ollama");
+    expect(result.message).toContain("network connection");
+  });
+
   it("classifies unknown errors as unknown (retryable)", () => {
     const result = classifyProviderError(new Error("Something unexpected"));
     expect(result.category).toBe("unknown");

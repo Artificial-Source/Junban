@@ -63,6 +63,7 @@ function parseToolCalls(choices: OpenAI.ChatCompletion.Choice[]): ToolCall[] | u
 export class OpenAIProvider implements AIProvider {
   protected client: OpenAI;
   protected model: string;
+  protected providerName: string;
 
   constructor(config: AIProviderConfig) {
     this.client = new OpenAI({
@@ -70,6 +71,7 @@ export class OpenAIProvider implements AIProvider {
       baseURL: config.baseUrl,
     });
     this.model = config.model ?? "gpt-4o";
+    this.providerName = config.provider;
   }
 
   async chat(messages: ChatMessage[], tools?: ToolDefinition[]): Promise<ChatResponse> {
@@ -131,7 +133,7 @@ export class OpenAIProvider implements AIProvider {
         yield { type: "done", data: "" };
       }
     } catch (err) {
-      const aiError = classifyProviderError(err);
+      const aiError = classifyProviderError(err, this.providerName);
       const errorData: StreamErrorData = {
         message: aiError.message,
         category: aiError.category,

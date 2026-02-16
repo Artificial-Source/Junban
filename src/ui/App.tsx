@@ -25,6 +25,8 @@ import { Project } from "./views/Project.js";
 import { Settings } from "./views/Settings.js";
 import { PluginStore } from "./views/PluginStore.js";
 import { PluginView } from "./views/PluginView.js";
+import { Completed } from "./views/Completed.js";
+import { FiltersLabels } from "./views/FiltersLabels.js";
 import type { SettingsTab } from "./views/Settings.js";
 import type { Project as ProjectType } from "../core/types.js";
 import { api } from "./api.js";
@@ -39,7 +41,9 @@ type View =
   | "project"
   | "settings"
   | "plugin-store"
-  | "plugin-view";
+  | "plugin-view"
+  | "filters-labels"
+  | "completed";
 
 interface RouteState {
   view: View;
@@ -127,6 +131,12 @@ function parseRouteStateFromHash(hash: string): RouteState {
       route.pluginViewId = decodePathSegment(pathSegments[1]);
       if (!route.pluginViewId) route.view = "inbox";
       break;
+    case "filters-labels":
+      route.view = "filters-labels";
+      break;
+    case "completed":
+      route.view = "completed";
+      break;
     default:
       route.view = "inbox";
       break;
@@ -172,6 +182,12 @@ function buildHashFromRoute(route: RouteState): string {
       path = route.pluginViewId
         ? `/plugin-view/${encodeURIComponent(route.pluginViewId)}`
         : "/inbox";
+      break;
+    case "filters-labels":
+      path = "/filters-labels";
+      break;
+    case "completed":
+      path = "/completed";
       break;
     case "inbox":
     default:
@@ -278,6 +294,7 @@ function AppContent() {
   });
   const [templateSelectorOpen, setTemplateSelectorOpen] = useState(false);
   const [projects, setProjects] = useState<ProjectType[]>([]);
+  const [addTaskTrigger, setAddTaskTrigger] = useState(0);
   const {
     state,
     createTask,
@@ -515,6 +532,36 @@ function AppContent() {
     }
   }, [state.tasks, currentView, selectedProjectId]);
 
+  // Sidebar badge counts
+  const inboxTaskCount = useMemo(
+    () => state.tasks.filter((t) => t.status === "pending" && !t.projectId).length,
+    [state.tasks],
+  );
+
+  const todayTaskCount = useMemo(() => {
+    const today = new Date().toISOString().split("T")[0];
+    return state.tasks.filter((t) => t.status === "pending" && t.dueDate?.startsWith(today)).length;
+  }, [state.tasks]);
+
+  const projectTaskCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of state.tasks) {
+      if (t.status === "pending" && t.projectId) {
+        counts.set(t.projectId, (counts.get(t.projectId) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [state.tasks]);
+
+  // Add task handler for sidebar button
+  const handleAddTask = useCallback(() => {
+    const taskViews: View[] = ["inbox", "today", "upcoming", "project"];
+    if (!taskViews.includes(currentView)) {
+      handleNavigate("inbox");
+    }
+    setAddTaskTrigger((n) => n + 1);
+  }, [currentView, handleNavigate]);
+
   // Multi-select
   const {
     selectedIds: multiSelectedIds,
@@ -651,6 +698,16 @@ function AppContent() {
       { id: "nav-inbox", name: "Go to Inbox", callback: () => handleNavigate("inbox") },
       { id: "nav-today", name: "Go to Today", callback: () => handleNavigate("today") },
       { id: "nav-upcoming", name: "Go to Upcoming", callback: () => handleNavigate("upcoming") },
+      {
+        id: "nav-filters-labels",
+        name: "Go to Filters & Labels",
+        callback: () => handleNavigate("filters-labels"),
+      },
+      {
+        id: "nav-completed",
+        name: "Go to Completed",
+        callback: () => handleNavigate("completed"),
+      },
       { id: "nav-settings", name: "Go to Settings", callback: () => handleNavigate("settings") },
       {
         id: "nav-settings-general",
@@ -768,6 +825,10 @@ function AppContent() {
         const pluginView = pluginViews.find((view) => view.id === selectedPluginViewId);
         return pluginView ? `${pluginView.name} - Docket` : "Custom View - Docket";
       }
+      case "filters-labels":
+        return "Filters & Labels - Docket";
+      case "completed":
+        return "Completed - Docket";
       default:
         return "Docket";
     }
@@ -800,32 +861,39 @@ function AppContent() {
             onReorder={handleReorder}
             queryText={inboxQueryText}
             onQueryTextChange={setInboxQueryText}
+            autoFocusTrigger={addTaskTrigger}
           />
         );
       case "today":
         return (
           <Today
             tasks={state.tasks}
+            projects={projects}
             onCreateTask={handleCreateTask}
             onToggleTask={handleToggleTask}
             onSelectTask={handleSelectTask}
+            onUpdateTask={handleUpdateTask}
             selectedTaskId={selectedTaskId}
             selectedTaskIds={multiSelectedIds}
             onMultiSelect={handleMultiSelect}
             onReorder={handleReorder}
+            autoFocusTrigger={addTaskTrigger}
           />
         );
       case "upcoming":
         return (
           <Upcoming
             tasks={state.tasks}
+            projects={projects}
             onCreateTask={handleCreateTask}
             onToggleTask={handleToggleTask}
             onSelectTask={handleSelectTask}
+            onUpdateTask={handleUpdateTask}
             selectedTaskId={selectedTaskId}
             selectedTaskIds={multiSelectedIds}
             onMultiSelect={handleMultiSelect}
             onReorder={handleReorder}
+            autoFocusTrigger={addTaskTrigger}
           />
         );
       case "project": {
@@ -844,9 +912,22 @@ function AppContent() {
             selectedTaskIds={multiSelectedIds}
             onMultiSelect={handleMultiSelect}
             onReorder={handleReorder}
+            autoFocusTrigger={addTaskTrigger}
           />
         );
       }
+      case "filters-labels":
+        return (
+          <FiltersLabels
+            tasks={state.tasks}
+            onNavigateToFilter={(query) => {
+              setInboxQueryText(query);
+              handleNavigate("inbox");
+            }}
+          />
+        );
+      case "completed":
+        return <Completed tasks={state.tasks} projects={projects} />;
       case "settings":
         return <Settings activeTab={settingsTab} onActiveTabChange={setSettingsTab} />;
       case "plugin-store":
@@ -886,6 +967,10 @@ function AppContent() {
           selectedPluginViewId={selectedPluginViewId}
           collapsed={sidebarCollapsed}
           onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+          projectTaskCounts={projectTaskCounts}
+          onAddTask={handleAddTask}
+          inboxCount={inboxTaskCount}
+          todayCount={todayTaskCount}
         />
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto p-6">
           <BulkActionBar

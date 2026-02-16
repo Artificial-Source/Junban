@@ -305,6 +305,23 @@ function apiPlugin() {
         }
       });
 
+      // GET /api/tags
+      server.middlewares.use(async (req, res, next) => {
+        if (req.url !== "/api/tags" || req.method !== "GET") return next();
+
+        try {
+          const svc = await getServices();
+          const tags = await svc.tagService.list();
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(tags));
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Internal server error";
+          res.statusCode = 500;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: message }));
+        }
+      });
+
       // GET /api/projects
       server.middlewares.use(async (req, res, next) => {
         if (req.url !== "/api/projects" || req.method !== "GET") return next();
@@ -832,6 +849,78 @@ function apiPlugin() {
         }
 
         next();
+      });
+
+      // GET /api/ai/providers/:name/models — fetch available models for a provider
+      server.middlewares.use(async (req, res, next) => {
+        const modelsMatch = req.url?.match(
+          /^\/api\/ai\/providers\/([^/]+)\/models(\?.*)?$/,
+        );
+        if (!modelsMatch || req.method !== "GET") return next();
+
+        try {
+          const providerName = modelsMatch[1];
+          const svc = await getServices();
+          const url = new URL(req.url!, `http://${req.headers.host}`);
+          const baseUrlOverride = url.searchParams.get("baseUrl");
+
+          const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+          const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+
+          const { fetchAvailableModels } = await import(
+            "./src/ai/model-discovery.js"
+          );
+          const models = await fetchAvailableModels(providerName, {
+            apiKey: apiKeySetting?.value,
+            baseUrl: baseUrlOverride || baseUrlSetting?.value,
+          });
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ models }));
+        } catch {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ models: [] }));
+        }
+      });
+
+      // POST /api/ai/providers/:name/models/load — load a model (LM Studio)
+      server.middlewares.use(async (req, res, next) => {
+        const loadMatch = req.url?.match(
+          /^\/api\/ai\/providers\/([^/]+)\/models\/load$/,
+        );
+        if (!loadMatch || req.method !== "POST") return next();
+
+        try {
+          const providerName = loadMatch[1];
+          const svc = await getServices();
+          const body = await parseBody(req);
+          const { model: modelKey, baseUrl: baseUrlOverride } = body as {
+            model: string;
+            baseUrl?: string;
+          };
+          const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+
+          if (providerName === "lmstudio") {
+            const { loadLMStudioModel } = await import(
+              "./src/ai/model-discovery.js"
+            );
+            await loadLMStudioModel(
+              modelKey,
+              (baseUrlOverride as string) ||
+                baseUrlSetting?.value ||
+                "http://localhost:1234/v1",
+            );
+          }
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err: unknown) {
+          const message =
+            err instanceof Error ? err.message : "Failed to load model";
+          res.statusCode = 500;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: message }));
+        }
       });
 
       // POST /api/ai/chat — SSE streaming chat

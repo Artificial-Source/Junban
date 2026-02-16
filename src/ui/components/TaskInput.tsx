@@ -1,14 +1,22 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Plus } from "lucide-react";
 import { parseTask } from "../../parser/task-parser.js";
 
 interface TaskInputProps {
   onSubmit: (input: ReturnType<typeof parseTask>) => void;
   placeholder?: string;
+  autoFocusTrigger?: number;
 }
 
-export function TaskInput({ onSubmit, placeholder }: TaskInputProps) {
+export function TaskInput({ onSubmit, placeholder, autoFocusTrigger }: TaskInputProps) {
   const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (autoFocusTrigger && autoFocusTrigger > 0) {
+      inputRef.current?.focus();
+    }
+  }, [autoFocusTrigger]);
 
   const preview = useMemo(() => {
     if (!value.trim()) return null;
@@ -31,6 +39,7 @@ export function TaskInput({ onSubmit, placeholder }: TaskInputProps) {
           <Plus size={18} />
         </div>
         <input
+          ref={inputRef}
           type="text"
           value={value}
           onChange={(e) => setValue(e.target.value)}

@@ -157,7 +157,7 @@ All work items for ASF Docket, organized by area and prioritized within each sec
 | A-20 | AI voice output (text-to-speech for responses) | needs-design | — | TTS for AI assistant responses, provider abstraction (Browser Speech Synthesis, ElevenLabs, etc.) |
 | A-21 | AI voice conversation mode (bidirectional) | needs-design | — | Full voice-in/voice-out conversational flow, wake word or push-to-talk |
 | A-22 | AI chat streaming error recovery | done | S17 | withTimeout(), partial content preservation, structured error events |
-| A-23 | Auto-detect local AI providers (Ollama/LM Studio) | ready | — | Probe local endpoints, discover available models, auto-fill base URL in Settings |
+| A-23 | Dynamic model discovery for all AI providers | done | S18 | Fetch available models from provider APIs, dynamic dropdown in Settings with Custom fallback |
 | A-24 | Local AI voice models (STT/TTS) | needs-design | — | Local speech-to-text and text-to-speech models for mobile & desktop (Whisper, Piper, etc.) |
 
 ## Storage & Data

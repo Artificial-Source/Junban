@@ -206,7 +206,7 @@ describe("Context Injection", () => {
     const { taskService, projectService } = createTestServices();
     const manager = new ChatManager();
     const msg = manager.buildSystemMessage({ taskService, projectService });
-    expect(msg.content).toContain("Ask Follow-Up Questions");
+    expect(msg.content).toContain("Ask Before Acting");
     expect(msg.content).toContain("Daily Planning");
     expect(msg.content).toContain("Priority Suggestions");
   });

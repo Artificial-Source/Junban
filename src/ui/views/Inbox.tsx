@@ -29,6 +29,7 @@ interface InboxProps {
   onReorder?: (orderedIds: string[]) => void;
   queryText?: string;
   onQueryTextChange?: (value: string) => void;
+  autoFocusTrigger?: number;
 }
 
 export function Inbox({
@@ -42,6 +43,7 @@ export function Inbox({
   onReorder,
   queryText,
   onQueryTextChange,
+  autoFocusTrigger,
 }: InboxProps) {
   const [query, setQuery] = useState<ParsedQuery | null>(null);
   const [inboxViewTimeMs] = useState<number>(() => Date.now());
@@ -88,7 +90,7 @@ export function Inbox({
         <h1 className="text-2xl font-bold text-on-surface">Inbox</h1>
         <span className="text-sm text-on-surface-muted">{inboxTasks.length} tasks</span>
       </div>
-      <TaskInput onSubmit={onCreateTask} />
+      <TaskInput onSubmit={onCreateTask} autoFocusTrigger={autoFocusTrigger} />
       <div className="mb-3">
         <QueryBar value={queryText} onValueChange={onQueryTextChange} onQueryChange={setQuery} />
       </div>

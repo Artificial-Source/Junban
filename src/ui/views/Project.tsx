@@ -22,6 +22,7 @@ interface ProjectProps {
     event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
   ) => void;
   onReorder?: (orderedIds: string[]) => void;
+  autoFocusTrigger?: number;
 }
 
 export function Project({
@@ -34,6 +35,7 @@ export function Project({
   selectedTaskIds,
   onMultiSelect,
   onReorder,
+  autoFocusTrigger,
 }: ProjectProps) {
   const projectTasks = tasks.filter((t) => t.status === "pending" && t.projectId === project.id);
 
@@ -47,7 +49,7 @@ export function Project({
         <h1 className="text-2xl font-bold text-on-surface">{project.name}</h1>
         <span className="text-sm text-on-surface-muted">{projectTasks.length} tasks</span>
       </div>
-      <TaskInput onSubmit={onCreateTask} placeholder={`Add a task to ${project.name}...`} />
+      <TaskInput onSubmit={onCreateTask} placeholder={`Add a task to ${project.name}...`} autoFocusTrigger={autoFocusTrigger} />
       <TaskList
         tasks={projectTasks}
         onToggle={onToggleTask}

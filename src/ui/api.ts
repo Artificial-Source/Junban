@@ -343,6 +343,15 @@ export const api = {
     return handleResponse<Task>(res);
   },
 
+  async listTags(): Promise<{ id: string; name: string; color: string }[]> {
+    if (isTauri()) {
+      const svc = await getServices();
+      return svc.tagService.list();
+    }
+    const res = await fetch(`${BASE}/tags`);
+    return handleResponse<{ id: string; name: string; color: string }[]>(res);
+  },
+
   async listProjects(): Promise<Project[]> {
     if (isTauri()) {
       const svc = await getServices();
@@ -590,6 +599,43 @@ export const api = {
     }
     const res = await fetch(`${BASE}/ai/providers`);
     return handleResponse<AIProviderInfo[]>(res);
+  },
+
+  async fetchModels(providerName: string, baseUrl?: string): Promise<ModelDiscoveryInfo[]> {
+    if (isTauri()) {
+      const svc = await getServices();
+      const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+      const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+      const { fetchAvailableModels } = await import("../ai/model-discovery.js");
+      return fetchAvailableModels(providerName, {
+        apiKey: apiKeySetting?.value,
+        baseUrl: baseUrl || baseUrlSetting?.value,
+      });
+    }
+    const url = new URL(`${BASE}/ai/providers/${encodeURIComponent(providerName)}/models`, window.location.origin);
+    if (baseUrl) url.searchParams.set("baseUrl", baseUrl);
+    const res = await fetch(url.toString());
+    const data = await handleResponse<{ models: ModelDiscoveryInfo[] }>(res);
+    return data.models;
+  },
+
+  async loadModel(providerName: string, modelKey: string, baseUrl?: string): Promise<void> {
+    if (isTauri()) {
+      const svc = await getServices();
+      const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+      if (providerName === "lmstudio") {
+        const { loadLMStudioModel } = await import("../ai/model-discovery.js");
+        await loadLMStudioModel(modelKey, baseUrl || baseUrlSetting?.value || "http://localhost:1234/v1");
+      }
+      return;
+    }
+    await handleVoidResponse(
+      await fetch(`${BASE}/ai/providers/${encodeURIComponent(providerName)}/models/load`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: modelKey, baseUrl }),
+      }),
+    );
   },
 
   async getAIConfig(): Promise<AIConfigInfo> {
@@ -940,4 +986,10 @@ export interface AIProviderInfo {
   defaultBaseUrl?: string;
   showBaseUrl?: boolean;
   pluginId: string | null;
+}
+
+export interface ModelDiscoveryInfo {
+  id: string;
+  label: string;
+  loaded: boolean;
 }

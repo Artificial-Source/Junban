@@ -18,7 +18,7 @@ import { useTaskContext } from "../context/TaskContext.js";
 import { usePluginContext } from "../context/PluginContext.js";
 import { useAIContext } from "../context/AIContext.js";
 import { PermissionDialog } from "../components/PermissionDialog.js";
-import { api, type PluginInfo, type SettingDefinitionInfo, type AIProviderInfo } from "../api.js";
+import { api, type PluginInfo, type SettingDefinitionInfo, type AIProviderInfo, type ModelDiscoveryInfo } from "../api.js";
 import type { TaskTemplate, CreateTemplateInput } from "../../core/types.js";
 import { exportJSON, exportCSV, exportMarkdown, type ExportData } from "../../core/export.js";
 import { parseImport, type ImportPreview } from "../../core/import.js";
@@ -49,11 +49,6 @@ const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { id: "data", label: "Data", icon: <Database className="w-4 h-4" /> },
   { id: "about", label: "About", icon: <Info className="w-4 h-4" /> },
 ];
-
-const LM_STUDIO_MODEL_LINKS = [
-  { label: "liquid/lfm2.5-1.2b", url: "https://lmstudio.ai/models/liquid/lfm2.5-1.2b" },
-  { label: "liquid/lfm2-1.2b", url: "https://lmstudio.ai/models/liquid/lfm2-1.2b" },
-] as const;
 
 export function Settings({ activeTab: controlledActiveTab, onActiveTabChange }: SettingsProps) {
   const [internalActiveTab, setInternalActiveTab] = useState<SettingsTab>("general");
@@ -448,6 +443,11 @@ function AIAssistantSettings() {
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [availableModels, setAvailableModels] = useState<ModelDiscoveryInfo[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsFailed, setModelsFailed] = useState(false);
+  const [useCustomModel, setUseCustomModel] = useState(false);
+  const [modelLoadingId, setModelLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -465,9 +465,47 @@ function AIAssistantSettings() {
     }
   }, [config, loaded]);
 
+  // Fetch available models when provider or baseUrl changes
+  useEffect(() => {
+    if (!provider) {
+      setAvailableModels([]);
+      setModelsFailed(false);
+      return;
+    }
+
+    setModelsLoading(true);
+    setModelsFailed(false);
+    setUseCustomModel(false);
+
+    const timer = setTimeout(() => {
+      api
+        .fetchModels(provider, baseUrl || undefined)
+        .then((models) => {
+          setAvailableModels(models);
+          setModelsFailed(false);
+          if (models.length > 0) {
+            const isPlaceholder = !model || model === "default";
+            if (isPlaceholder) {
+              // Auto-select first loaded model, or first model
+              const firstLoaded = models.find((m) => m.loaded);
+              setModel((firstLoaded ?? models[0]).id);
+            } else if (!models.some((m) => m.id === model)) {
+              setUseCustomModel(true);
+            }
+          }
+        })
+        .catch(() => {
+          setAvailableModels([]);
+          setModelsFailed(true);
+        })
+        .finally(() => setModelsLoading(false));
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [provider, baseUrl]);
+
   const currentProvider = providers.find((p) => p.name === provider);
-  const suggestedModels = currentProvider?.suggestedModels ?? [];
-  const modelInputListId = provider ? `ai-model-suggestions-${provider}` : undefined;
+  const supportsAutoLoad = provider === "lmstudio";
 
   const handleProviderChange = async (newProvider: string) => {
     setProvider(newProvider);
@@ -475,9 +513,36 @@ function AIAssistantSettings() {
     const prov = providers.find((p) => p.name === newProvider);
     setModel(prov?.defaultModel ?? "");
     setBaseUrl(prov?.defaultBaseUrl ?? "");
+    setUseCustomModel(false);
 
     if (!newProvider) {
       await updateConfig({ provider: "", apiKey: "", model: "", baseUrl: "" });
+    }
+  };
+
+  const handleModelSelect = async (selectedId: string) => {
+    if (selectedId === "__custom__") {
+      setUseCustomModel(true);
+      setModel("");
+      return;
+    }
+    setModel(selectedId);
+
+    // Auto-load if the model isn't loaded yet (LM Studio)
+    const modelInfo = availableModels.find((m) => m.id === selectedId);
+    if (supportsAutoLoad && modelInfo && !modelInfo.loaded) {
+      setModelLoadingId(selectedId);
+      try {
+        await api.loadModel(provider, selectedId, baseUrl || undefined);
+        // Update loaded status in state
+        setAvailableModels((prev) =>
+          prev.map((m) => (m.id === selectedId ? { ...m, loaded: true } : m)),
+        );
+      } catch {
+        // Model load failed — still set the model, user can retry
+      } finally {
+        setModelLoadingId(null);
+      }
     }
   };
 
@@ -490,7 +555,19 @@ function AIAssistantSettings() {
     });
     setApiKey("");
     await refreshConfig();
+    // Re-fetch models after save (API key may have changed)
+    if (provider) {
+      api
+        .fetchModels(provider, baseUrl || undefined)
+        .then((models) => {
+          setAvailableModels(models);
+          setModelsFailed(false);
+        })
+        .catch(() => {});
+    }
   };
+
+  const showDropdown = availableModels.length > 0 && !useCustomModel;
 
   return (
     <section className="mb-8">
@@ -539,53 +616,68 @@ function AIAssistantSettings() {
             <div>
               <label className="block text-xs font-medium text-on-surface-secondary mb-1">
                 Model
+                {modelsLoading && (
+                  <span className="font-normal text-on-surface-muted ml-2">Loading...</span>
+                )}
               </label>
-              <input
-                type="text"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder={currentProvider?.defaultModel ?? ""}
-                list={modelInputListId}
-                className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
-              />
-              {suggestedModels.length > 0 && modelInputListId && (
+              {showDropdown ? (
                 <>
-                  <datalist id={modelInputListId}>
-                    {suggestedModels.map((suggestion) => (
-                      <option key={suggestion} value={suggestion} />
+                  <select
+                    value={model}
+                    onChange={(e) => handleModelSelect(e.target.value)}
+                    disabled={!!modelLoadingId}
+                    className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface disabled:opacity-60"
+                  >
+                    {!model && (
+                      <option value="">Select a model...</option>
+                    )}
+                    {availableModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}{m.loaded ? "" : " (not loaded)"}
+                      </option>
                     ))}
-                  </datalist>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {suggestedModels.map((suggestion) => (
-                      <button
-                        key={suggestion}
-                        type="button"
-                        onClick={() => setModel(suggestion)}
-                        className="px-2 py-1 text-xs rounded border border-border bg-surface-secondary text-on-surface-secondary hover:text-on-surface"
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
-                  </div>
+                    <option value="__custom__">Custom...</option>
+                  </select>
+                  {modelLoadingId && (
+                    <p className="mt-1 text-xs text-accent">
+                      Loading model into LM Studio...
+                    </p>
+                  )}
                 </>
-              )}
-              {provider === "lmstudio" && (
-                <p className="mt-2 text-xs text-on-surface-muted">
-                  Suggested models:{" "}
-                  {LM_STUDIO_MODEL_LINKS.map((modelLink, index) => (
-                    <span key={modelLink.label}>
-                      {index > 0 && " or "}
-                      <a
-                        href={modelLink.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-accent hover:text-accent-hover"
-                      >
-                        {modelLink.label}
-                      </a>
-                    </span>
-                  ))}
-                </p>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder={currentProvider?.defaultModel ?? "Enter model name"}
+                    className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
+                  />
+                  {useCustomModel && availableModels.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUseCustomModel(false);
+                        if (!availableModels.some((m) => m.id === model)) {
+                          const firstLoaded = availableModels.find((m) => m.loaded);
+                          setModel((firstLoaded ?? availableModels[0]).id);
+                        }
+                      }}
+                      className="mt-1 text-xs text-accent hover:text-accent-hover"
+                    >
+                      Back to model list
+                    </button>
+                  )}
+                  {modelsFailed && (
+                    <p className="mt-1 text-xs text-on-surface-muted">
+                      {provider === "lmstudio"
+                        ? "Could not connect to LM Studio. Make sure LM Studio is running and its local server is started."
+                        : provider === "ollama"
+                          ? "Could not connect to Ollama. Make sure Ollama is running."
+                          : "Could not fetch models — enter a model name manually."}
+                    </p>
+                  )}
+                </>
               )}
             </div>
 

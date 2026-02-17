@@ -1,29 +1,22 @@
 # ASF Saydo
 
-An open-source task manager with AI and an Obsidian-style plugin system. Local-first, no accounts, no tracking.
+**The task manager that doesn't exist yet.** Beautiful and simple out of the box, with a real AI assistant and a plugin system so simple that anyone can build features — no coding required.
+
+Local-first. No accounts. No tracking. Your data stays on your machine.
 
 Built by the [AI Strategic Forum (ASF)](https://github.com/asf-org) community.
 
 <!-- ![Saydo Screenshot](docs/assets/screenshot.png) -->
 
-## What it does
+## Why Saydo
 
-Saydo is a desktop task manager built with Tauri and React. You type tasks in natural language, organize with projects and tags, and optionally talk to an AI assistant in the sidebar.
+Most task managers are either too simple (no AI, no extensibility) or too complex (enterprise bloat). Saydo sits in the middle:
 
-**The plugin system is the main idea.** It's simple enough that you can describe what you want to Claude or ChatGPT and get a working plugin back. No coding required.
-
-### Features
-
-- Natural language input — `buy milk tomorrow 3pm p1 #groceries +shopping` just works
-- AI sidebar — chat with your LLM of choice to create tasks, plan your day, get suggestions
-- Voice — speak instead of type, with browser, Groq, Inworld AI, or local models (Whisper, Kokoro, Piper)
-- Plugins — TypeScript files in a folder. Commands, sidebar panels, views, task hooks, storage
-- Dual storage — SQLite (default) or Markdown files with YAML frontmatter
-- Sub-tasks, templates, recurring tasks, reminders
-- Focus mode — distraction-free, keyboard-driven
-- CLI companion — `saydo add`, `saydo list`, `saydo done`
-- Light/dark themes + custom CSS
-- 960+ tests
+- **Type naturally** — `buy milk tomorrow 3pm p1 #groceries +shopping` just works
+- **Talk to AI** — a sidebar chat that actually sees your tasks, projects, and schedule
+- **Speak instead of type** — voice input via browser, Groq, Inworld AI, or local models
+- **Extend with plugins** — describe what you want to Claude or ChatGPT, drop the file in a folder, done
+- **Own your data** — SQLite or Markdown files. Export anytime. No vendor lock-in.
 
 ## Quick start
 
@@ -43,7 +36,24 @@ For the desktop app (requires Rust + Tauri CLI):
 pnpm tauri:dev
 ```
 
-See [local setup guide](docs/development/SETUP_LOCAL.md) for details.
+See the [local setup guide](docs/development/SETUP_LOCAL.md) for details.
+
+## Features
+
+| | |
+|---|---|
+| **Natural language input** | Dates, priorities, tags, and projects — parsed from plain text |
+| **AI assistant** | Sidebar chat with task CRUD, scheduling, pattern analysis, workload insights |
+| **Voice** | STT + TTS via browser, Groq, Inworld AI, Whisper, Kokoro, or Piper |
+| **Plugins** | Obsidian-style — commands, sidebar panels, views, task hooks, storage |
+| **Dual storage** | SQLite (default) or Markdown files with YAML frontmatter |
+| **Sub-tasks & templates** | Break down work, reuse common patterns |
+| **Recurring tasks** | Daily, weekly, monthly — with natural language scheduling |
+| **Reminders** | Set reminders on any task, get notified when they're due |
+| **Focus mode** | Distraction-free, keyboard-driven |
+| **CLI companion** | `saydo add`, `saydo list`, `saydo done` from the terminal |
+| **Themes** | Light/dark + custom CSS |
+| **960+ tests** | Solid coverage across the entire codebase |
 
 ## Plugins
 
@@ -71,11 +81,28 @@ Docs: [Plugin API](docs/plugins/API.md) / [Examples](docs/plugins/EXAMPLES.md)
 
 ## AI assistant
 
-The sidebar chat connects to your LLM provider. It sees your tasks, projects, and schedule, so it can give useful suggestions.
+The sidebar chat connects to your LLM provider. It sees your tasks, projects, and schedule — so it gives suggestions that are actually useful.
+
+**19 built-in tools**: task CRUD, project management, reminders, pattern analysis, workload detection, smart organization, and energy-based scheduling recommendations.
 
 Supported providers: OpenAI, Anthropic, OpenRouter, Ollama, LM Studio — or write a custom provider plugin.
 
 Nothing AI-related runs unless you configure it. No keys are stored or proxied by Saydo.
+
+## Voice
+
+Full speech-to-text and text-to-speech pipeline. Pick your provider:
+
+| Provider | Type | Notes |
+|----------|------|-------|
+| Browser Speech API | STT + TTS | Zero config, works everywhere |
+| Groq | STT + TTS | Whisper STT + PlayAI TTS, free tier available |
+| Inworld AI | TTS | High-quality voices, ~100-200ms latency, 15 languages |
+| Whisper (local) | STT | Runs on your machine, no API key |
+| Kokoro (local) | TTS | Local neural TTS via Web Worker |
+| Piper (local) | TTS | Lightweight local TTS |
+
+Voice activation with VAD (voice activity detection) — just start talking.
 
 ## Tech stack
 
@@ -86,16 +113,18 @@ Nothing AI-related runs unless you configure it. No keys are stored or proxied b
 | Frontend | React 19, Tailwind CSS 4 |
 | Database | SQLite (better-sqlite3 / sql.js) + Drizzle ORM |
 | AI | OpenAI, Anthropic, OpenRouter, Ollama, LM Studio |
-| Voice | Browser Speech API, Groq, Inworld AI, Whisper, Kokoro, Piper |
+| Voice | Browser, Groq, Inworld AI, Whisper, Kokoro, Piper |
 | CLI | Commander.js |
-| Tests | Vitest |
+| Tests | Vitest (960+) |
 | Build | Vite 6 |
 
 ## Status
 
-v1.0 shipped. Desktop app works on Mac, Windows, Linux. Active development — Inworld AI TTS, mobile UI, and AI intelligence tools are latest additions.
+v1.0 shipped. Desktop app works on Mac, Windows, Linux.
 
-Next milestone: Saydo Sync (optional paid cross-device sync).
+Latest additions: Inworld AI TTS, AI intelligence tools (pattern analysis, workload detection, smart organization), project & reminder AI tools, contextual settings UX.
+
+Next milestone: **Saydo Sync** — optional paid cross-device sync.
 
 ## Docs
 

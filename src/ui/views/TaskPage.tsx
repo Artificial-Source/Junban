@@ -3,6 +3,7 @@ import { ArrowLeft, Inbox } from "lucide-react";
 import type { Task, UpdateTaskInput } from "../../core/types.js";
 import { TaskMetadataSidebar } from "../components/TaskMetadataSidebar.js";
 import { SubtaskSection } from "../components/SubtaskSection.js";
+import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 
 interface TaskPageProps {
@@ -39,6 +40,7 @@ export function TaskPage({
   // Subtask inline edit state
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
   const [editingSubtaskTitle, setEditingSubtaskTitle] = useState("");
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [focusedSubtaskIdx, setFocusedSubtaskIdx] = useState(-1);
 
   useEffect(() => {
@@ -87,7 +89,8 @@ export function TaskPage({
 
   const handleDelete = () => {
     if (settings.confirm_delete === "true") {
-      if (!window.confirm("Delete this task? This cannot be undone.")) return;
+      setConfirmDeleteOpen(true);
+      return;
     }
     onDelete(task.id);
     onNavigateBack();
@@ -161,6 +164,20 @@ export function TaskPage({
           availableTags={availableTags}
         />
       </div>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title="Delete task"
+        message="This task will be permanently deleted. This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => {
+          setConfirmDeleteOpen(false);
+          onDelete(task.id);
+          onNavigateBack();
+        }}
+        onCancel={() => setConfirmDeleteOpen(false)}
+      />
     </div>
   );
 }

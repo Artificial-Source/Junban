@@ -114,16 +114,48 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
     [voice, handleVoiceResult],
   );
 
-  // VAD enabled when: normal VAD mode OR voice call is in listening state
+  // Browser STT can't transcribe audio blobs from VAD — use live recognition loop instead
+  const useBrowserSTTForCall = voiceCall.isCallActive && voice.sttProvider instanceof BrowserSTTProvider;
+
+  // VAD enabled when: normal VAD mode OR voice call listening (but NOT with browser STT)
   const vadEnabled =
     (voice.settings.voiceMode === "vad" && !isStreaming && !voice.isSpeaking && !voiceCall.isCallActive) ||
-    voiceCall.vadEnabled;
+    (voiceCall.vadEnabled && !useBrowserSTTForCall);
 
   useVAD({
     onSpeechEnd: handleVADSpeechEnd,
     enabled: vadEnabled,
     deviceId: voice.settings.microphoneId || undefined,
   });
+
+  // Browser STT loop for voice call mode: use live recognition instead of VAD
+  useEffect(() => {
+    if (!useBrowserSTTForCall || voiceCall.callState !== "listening") return;
+    const stt = voice.sttProvider as BrowserSTTProvider;
+    let cancelled = false;
+
+    const listen = async () => {
+      while (!cancelled) {
+        try {
+          const transcript = await stt.startLiveRecognition();
+          if (cancelled) break;
+          if (transcript.trim()) {
+            handleVoiceResult(transcript);
+            break; // State changes to processing; effect re-runs when back to listening
+          }
+          // Empty transcript — loop and try again
+        } catch {
+          if (cancelled) break;
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
+    };
+    listen();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [useBrowserSTTForCall, voiceCall.callState, voice.sttProvider, handleVoiceResult]);
 
   // Voice conversation loop: TTS when AI finishes responding (streaming → done)
   // Skip when voice call is active — the hook handles TTS
@@ -478,9 +510,6 @@ function VoiceButton({
 
   const { settings, sttProvider, isTranscribing, isSpeaking } = voice;
 
-  // Don't show button if voice mode is off or VAD (VAD handles itself)
-  if (settings.voiceMode === "off" || settings.voiceMode === "vad") return null;
-
   const handlePushToTalk = useCallback(async () => {
     if (listening) {
       // Stop recording and transcribe
@@ -526,6 +555,9 @@ function VoiceButton({
       }
     }
   }, [listening, sttProvider, voice, onResult]);
+
+  // Don't show button if voice mode is off or VAD (VAD handles itself)
+  if (settings.voiceMode === "off" || settings.voiceMode === "vad") return null;
 
   const buttonState = isTranscribing
     ? "transcribing"

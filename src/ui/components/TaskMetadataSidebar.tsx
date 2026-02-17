@@ -4,6 +4,7 @@ import type { Task, UpdateTaskInput } from "../../core/types.js";
 import { DatePicker } from "./DatePicker.js";
 import { TagsInput } from "./TagsInput.js";
 import { RecurrencePicker, formatRecurrenceLabel } from "./RecurrencePicker.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 
 const PRIORITIES = [
@@ -30,6 +31,7 @@ export function TaskMetadataSidebar({
   const currentRemindAt = (task as any).remindAt ?? null;
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showRecurrencePicker, setShowRecurrencePicker] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [remindAtInput, setRemindAtInput] = useState(
     currentRemindAt ? currentRemindAt.slice(0, 16) : "",
   );
@@ -238,7 +240,8 @@ export function TaskMetadataSidebar({
       <button
         onClick={() => {
           if (settings.confirm_delete === "true") {
-            if (!window.confirm("Delete this task? This cannot be undone.")) return;
+            setConfirmDeleteOpen(true);
+            return;
           }
           onDelete(task.id);
         }}
@@ -247,6 +250,19 @@ export function TaskMetadataSidebar({
         <Trash2 size={14} />
         Delete task
       </button>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title="Delete task"
+        message="This task will be permanently deleted. This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => {
+          setConfirmDeleteOpen(false);
+          onDelete(task.id);
+        }}
+        onCancel={() => setConfirmDeleteOpen(false)}
+      />
     </div>
   );
 }

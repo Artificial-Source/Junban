@@ -13,6 +13,7 @@ import {
 import type { Task, UpdateTaskInput } from "../../core/types.js";
 import { SubtaskSection } from "./SubtaskSection.js";
 import { TaskMetadataSidebar } from "./TaskMetadataSidebar.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 
 interface TaskDetailPanelProps {
@@ -60,6 +61,7 @@ export function TaskDetailPanel({
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
 
   // Subtask inline edit state (shared between SubtaskSection and this component)
@@ -244,7 +246,8 @@ export function TaskDetailPanel({
                     onClick={() => {
                       setMoreMenuOpen(false);
                       if (settings.confirm_delete === "true") {
-                        if (!window.confirm("Delete this task? This cannot be undone.")) return;
+                        setConfirmDeleteOpen(true);
+                        return;
                       }
                       onDelete(task.id);
                     }}
@@ -328,6 +331,19 @@ export function TaskDetailPanel({
           />
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title="Delete task"
+        message="This task will be permanently deleted. This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => {
+          setConfirmDeleteOpen(false);
+          onDelete(task.id);
+        }}
+        onCancel={() => setConfirmDeleteOpen(false)}
+      />
     </div>
   );
 }

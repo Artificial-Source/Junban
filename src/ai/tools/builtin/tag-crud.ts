@@ -9,8 +9,7 @@ export function registerTagCrudTools(registry: ToolRegistry): void {
   registry.register(
     {
       name: "list_tags",
-      description:
-        "List all tags/labels that exist in the system. Returns tag names and colors.",
+      description: "List all tags/labels that exist in the system. Returns tag names and colors.",
       parameters: {
         type: "object",
         properties: {},
@@ -77,8 +76,7 @@ export function registerTagCrudTools(registry: ToolRegistry): void {
   registry.register(
     {
       name: "remove_tags_from_task",
-      description:
-        "Remove one or more tags/labels from a task, keeping all other tags intact.",
+      description: "Remove one or more tags/labels from a task, keeping all other tags intact.",
       parameters: {
         type: "object",
         properties: {

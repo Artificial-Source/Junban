@@ -51,7 +51,13 @@ describe("GeneralTab", () => {
     (api.getAppSetting as any).mockResolvedValue(null);
     document.documentElement.style.removeProperty("--color-accent");
     document.documentElement.style.removeProperty("--color-accent-hover");
-    document.documentElement.classList.remove("density-compact", "density-comfortable", "font-small", "font-large", "reduce-motion");
+    document.documentElement.classList.remove(
+      "density-compact",
+      "density-comfortable",
+      "font-small",
+      "font-large",
+      "reduce-motion",
+    );
   });
 
   it("renders 3 sections (no Appearance)", async () => {

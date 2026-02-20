@@ -89,9 +89,7 @@ describe("LLMProviderRegistry", () => {
     registry.register(createTestPlugin("paid", { needsApiKey: true, displayName: "Paid" }));
 
     expect(() => registry.createExecutor({ provider: "paid" })).toThrow("requires an API key");
-    expect(() =>
-      registry.createExecutor({ provider: "paid", apiKey: "sk-test" }),
-    ).not.toThrow();
+    expect(() => registry.createExecutor({ provider: "paid", apiKey: "sk-test" })).not.toThrow();
   });
 
   it("getPlugin returns just the plugin", () => {

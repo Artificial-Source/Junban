@@ -113,5 +113,14 @@ export function useAppCommands(
     }
 
     return cmds;
-  }, [projects, pluginCommands, executeCommand, handleNavigate, openSettingsTab, setChatPanelOpen, setFocusModeOpen, setTemplateSelectorOpen]);
+  }, [
+    projects,
+    pluginCommands,
+    executeCommand,
+    handleNavigate,
+    openSettingsTab,
+    setChatPanelOpen,
+    setFocusModeOpen,
+    setTemplateSelectorOpen,
+  ]);
 }

@@ -42,9 +42,7 @@ describe("LLMPipeline", () => {
     });
 
     const ctx = createTestCtx();
-    await pipeline.execute(ctx, async () =>
-      createStreamResult([{ type: "done", data: "" }]),
-    );
+    await pipeline.execute(ctx, async () => createStreamResult([{ type: "done", data: "" }]));
     expect(ctx.metadata.get("modified")).toBe(true);
   });
 
@@ -108,9 +106,7 @@ describe("LLMPipeline", () => {
 
   it("use() is chainable", () => {
     const pipeline = new LLMPipeline();
-    const result = pipeline
-      .use(async (_ctx, next) => next())
-      .use(async (_ctx, next) => next());
+    const result = pipeline.use(async (_ctx, next) => next()).use(async (_ctx, next) => next());
     expect(result).toBe(pipeline);
   });
 });
@@ -155,9 +151,7 @@ describe("capabilityGuard middleware", () => {
 describe("logging middleware", () => {
   it("records startTime and durationMs in metadata", async () => {
     const ctx = createTestCtx();
-    await logging(ctx, async () =>
-      createStreamResult([{ type: "done", data: "" }]),
-    );
+    await logging(ctx, async () => createStreamResult([{ type: "done", data: "" }]));
 
     expect(ctx.metadata.has("startTime")).toBe(true);
     expect(ctx.metadata.has("durationMs")).toBe(true);

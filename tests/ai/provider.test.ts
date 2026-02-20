@@ -57,9 +57,7 @@ describe("createDefaultRegistry", () => {
 
   it("throws for missing API key on Anthropic", () => {
     const registry = createDefaultRegistry();
-    expect(() => registry.createExecutor({ provider: "anthropic" })).toThrow(
-      "requires an API key",
-    );
+    expect(() => registry.createExecutor({ provider: "anthropic" })).toThrow("requires an API key");
   });
 
   it("throws for missing API key on OpenRouter", () => {

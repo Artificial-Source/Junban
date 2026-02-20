@@ -121,7 +121,13 @@ export class TaskService {
     const tagRows = this.queries.getTaskTags(id);
     const tags = tagRows.map((r) => r.tags);
 
-    return { ...row, dueTime: row.dueTime ?? false, parentId: row.parentId ?? null, remindAt: row.remindAt ?? null, tags };
+    return {
+      ...row,
+      dueTime: row.dueTime ?? false,
+      parentId: row.parentId ?? null,
+      remindAt: row.remindAt ?? null,
+      tags,
+    };
   }
 
   async update(id: string, input: UpdateTaskInput): Promise<Task> {
@@ -176,11 +182,15 @@ export class TaskService {
       const fromDate = existing.dueDate ? new Date(existing.dueDate) : new Date();
       const nextDate = getNextOccurrence(existing.recurrence, fromDate);
       if (nextDate) {
-        logger.debug("Creating next recurrence", { originalId: id, nextDate: nextDate.toISOString() });
+        logger.debug("Creating next recurrence", {
+          originalId: id,
+          nextDate: nextDate.toISOString(),
+        });
         // Propagate remindAt with preserved offset from dueDate
         let nextRemindAt: string | null = null;
         if (existing.remindAt && existing.dueDate) {
-          const offsetMs = new Date(existing.dueDate).getTime() - new Date(existing.remindAt).getTime();
+          const offsetMs =
+            new Date(existing.dueDate).getTime() - new Date(existing.remindAt).getTime();
           nextRemindAt = new Date(nextDate.getTime() - offsetMs).toISOString();
         } else if (existing.remindAt) {
           // No dueDate but has remindAt — keep the same remind offset from now

@@ -17,8 +17,11 @@ export function registerProjectCrudTools(registry: ToolRegistry): void {
           name: { type: "string", description: "Project name (required)" },
           color: {
             type: "string",
-            description:
-              'Hex color code for the project (e.g. "#22c55e"). Defaults to blue.',
+            description: 'Hex color code for the project (e.g. "#22c55e"). Defaults to blue.',
+          },
+          icon: {
+            type: "string",
+            description: 'Emoji icon for the project (e.g. "🚀", "📚"). Optional.',
           },
         },
         required: ["name"],
@@ -29,12 +32,17 @@ export function registerProjectCrudTools(registry: ToolRegistry): void {
         args.name as string,
         args.color as string | undefined,
       );
+      if (args.icon) {
+        await ctx.projectService.update(project.id, { icon: args.icon as string });
+        project.icon = args.icon as string;
+      }
       return JSON.stringify({
         success: true,
         project: {
           id: project.id,
           name: project.name,
           color: project.color,
+          icon: project.icon,
           archived: project.archived,
         },
       });
@@ -59,15 +67,14 @@ export function registerProjectCrudTools(registry: ToolRegistry): void {
     async (args, ctx) => {
       const all = await ctx.projectService.list();
       const includeArchived = (args.includeArchived as boolean) ?? false;
-      const projects = includeArchived
-        ? all
-        : all.filter((p) => !p.archived);
+      const projects = includeArchived ? all : all.filter((p) => !p.archived);
       return JSON.stringify({
         count: projects.length,
         projects: projects.map((p) => ({
           id: p.id,
           name: p.name,
           color: p.color,
+          icon: p.icon,
           archived: p.archived,
         })),
       });
@@ -77,8 +84,7 @@ export function registerProjectCrudTools(registry: ToolRegistry): void {
   registry.register(
     {
       name: "get_project",
-      description:
-        "Get a single project by ID or name. Provide either projectId or name.",
+      description: "Get a single project by ID or name. Provide either projectId or name.",
       parameters: {
         type: "object",
         properties: {
@@ -123,8 +129,7 @@ export function registerProjectCrudTools(registry: ToolRegistry): void {
   registry.register(
     {
       name: "update_project",
-      description:
-        "Update an existing project. Can change name, color, or archived status.",
+      description: "Update an existing project. Can change name, color, icon, or archived status.",
       parameters: {
         type: "object",
         properties: {
@@ -134,6 +139,10 @@ export function registerProjectCrudTools(registry: ToolRegistry): void {
           },
           name: { type: "string", description: "New project name" },
           color: { type: "string", description: "New hex color code" },
+          icon: {
+            type: "string",
+            description: 'Emoji icon (e.g. "🚀"). Set to empty string to remove.',
+          },
           archived: {
             type: "boolean",
             description: "Set to true to archive, false to unarchive",
@@ -144,9 +153,18 @@ export function registerProjectCrudTools(registry: ToolRegistry): void {
     },
     async (args, ctx) => {
       const { projectId, ...updates } = args;
+      // Convert empty icon to null for clearing
+      const cleaned: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(updates)) {
+        if (key === "icon" && value === "") {
+          cleaned[key] = null;
+        } else {
+          cleaned[key] = value;
+        }
+      }
       const project = await ctx.projectService.update(
         projectId as string,
-        updates as { name?: string; color?: string; archived?: boolean },
+        cleaned as { name?: string; color?: string; icon?: string | null; archived?: boolean },
       );
       if (!project) {
         return JSON.stringify({ error: "Project not found" });
@@ -157,6 +175,7 @@ export function registerProjectCrudTools(registry: ToolRegistry): void {
           id: project.id,
           name: project.name,
           color: project.color,
+          icon: project.icon,
           archived: project.archived,
         },
       });
@@ -180,9 +199,7 @@ export function registerProjectCrudTools(registry: ToolRegistry): void {
       },
     },
     async (args, ctx) => {
-      const deleted = await ctx.projectService.delete(
-        args.projectId as string,
-      );
+      const deleted = await ctx.projectService.delete(args.projectId as string);
       return JSON.stringify({ success: true, deleted });
     },
   );

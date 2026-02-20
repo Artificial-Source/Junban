@@ -176,11 +176,17 @@ export interface OpenAICompatConfig {
   discoverModels?: (config: AIProviderConfig) => Promise<ModelDescriptor[]>;
   /** Custom model loader (e.g., LM Studio). */
   loadModel?: (modelKey: string, config: AIProviderConfig) => Promise<void>;
+  /** Custom model unloader (e.g., LM Studio). */
+  unloadModel?: (modelKey: string, config: AIProviderConfig) => Promise<void>;
 }
 
 const FETCH_TIMEOUT_MS = 5000;
 
-async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  init?: RequestInit,
+  timeoutMs = FETCH_TIMEOUT_MS,
+): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -249,5 +255,6 @@ export function createOpenAICompatPlugin(cfg: OpenAICompatConfig): LLMProviderPl
     },
 
     ...(cfg.loadModel ? { loadModel: cfg.loadModel } : {}),
+    ...(cfg.unloadModel ? { unloadModel: cfg.unloadModel } : {}),
   };
 }

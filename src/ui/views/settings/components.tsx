@@ -45,7 +45,9 @@ export function ColorSwatchPicker({
           onClick={() => onChange(color)}
           aria-label={`Accent color ${color}`}
           className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
-            value === color ? "ring-2 ring-offset-2 ring-offset-surface ring-on-surface" : "hover:scale-110"
+            value === color
+              ? "ring-2 ring-offset-2 ring-offset-surface ring-on-surface"
+              : "hover:scale-110"
           }`}
           style={{ backgroundColor: color }}
         >

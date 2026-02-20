@@ -52,12 +52,9 @@ export class InworldTTSProvider implements TTSProviderPlugin {
 
   async getVoices(): Promise<Voice[]> {
     try {
-      const res = await fetch(
-        this.baseUrl.replace("inworld-synthesize", "inworld-voices"),
-        {
-          headers: { "X-Api-Key": this.apiKey },
-        },
-      );
+      const res = await fetch(this.baseUrl.replace("inworld-synthesize", "inworld-voices"), {
+        headers: { "X-Api-Key": this.apiKey },
+      });
 
       if (!res.ok) return [];
 

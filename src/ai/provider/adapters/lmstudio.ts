@@ -107,6 +107,25 @@ async function loadLMStudioModel(modelKey: string, config: AIProviderConfig): Pr
   }
 }
 
+/** Unload a model from LM Studio (POST /api/v1/models/unload). */
+export async function unloadLMStudioModel(
+  modelKey: string,
+  config: AIProviderConfig,
+): Promise<void> {
+  const baseUrl = config.baseUrl ?? "http://localhost:1234/v1";
+  const host = getLMStudioHost(baseUrl);
+  const auth = authHeaders(config.apiKey);
+  const res = await fetchWithTimeout(`${host}/api/v1/models/unload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...auth },
+    body: JSON.stringify({ model: modelKey }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to unload model: ${text || res.statusText}`);
+  }
+}
+
 export const lmstudioPlugin: LLMProviderPlugin = createOpenAICompatPlugin({
   name: "lmstudio",
   displayName: "LM Studio",
@@ -118,4 +137,5 @@ export const lmstudioPlugin: LLMProviderPlugin = createOpenAICompatPlugin({
   fakeApiKey: "lm-studio",
   discoverModels: discoverLMStudioModels,
   loadModel: loadLMStudioModel,
+  unloadModel: unloadLMStudioModel,
 });

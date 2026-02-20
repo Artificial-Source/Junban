@@ -12,11 +12,7 @@ export class ToolRegistry {
   private tools = new Map<string, RegisteredTool>();
 
   /** Register a tool. Throws if a tool with the same name already exists. */
-  register(
-    definition: ToolDefinition,
-    executor: ToolExecutor,
-    source = "builtin",
-  ): void {
+  register(definition: ToolDefinition, executor: ToolExecutor, source = "builtin"): void {
     if (this.tools.has(definition.name)) {
       throw new Error(`Tool "${definition.name}" is already registered`);
     }
@@ -59,11 +55,7 @@ export class ToolRegistry {
   }
 
   /** Execute a tool by name. Throws if the tool is not found. */
-  async execute(
-    name: string,
-    args: Record<string, unknown>,
-    ctx: ToolContext,
-  ): Promise<string> {
+  async execute(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const tool = this.tools.get(name);
     if (!tool) {
       logger.warn("Unknown tool requested", { name });

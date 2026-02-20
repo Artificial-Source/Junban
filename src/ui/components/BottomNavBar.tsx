@@ -17,9 +17,7 @@ const LEFT_ITEMS = [
   { id: "today", label: "Today", icon: CalendarDays, countKey: "today" as const },
 ] as const;
 
-const RIGHT_ITEMS = [
-  { id: "upcoming", label: "Upcoming", icon: Clock, countKey: null },
-] as const;
+const RIGHT_ITEMS = [{ id: "upcoming", label: "Upcoming", icon: Clock, countKey: null }] as const;
 
 const LONG_PRESS_MS = 400;
 
@@ -62,7 +60,12 @@ export function BottomNavBar({
     }
   }, []);
 
-  const renderNavItem = (item: { id: string; label: string; icon: typeof Inbox; countKey: "inbox" | "today" | null }) => {
+  const renderNavItem = (item: {
+    id: string;
+    label: string;
+    icon: typeof Inbox;
+    countKey: "inbox" | "today" | null;
+  }) => {
     const Icon = item.icon;
     const isActive = currentView === item.id;
     const count = item.countKey ? counts[item.countKey] : undefined;

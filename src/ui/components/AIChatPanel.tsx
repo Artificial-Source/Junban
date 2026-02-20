@@ -20,6 +20,7 @@ import { useVoiceContext } from "../context/VoiceContext.js";
 import { useVAD } from "../hooks/useVAD.js";
 import { useVoiceCall } from "../hooks/useVoiceCall.js";
 import { VoiceCallOverlay } from "./VoiceCallOverlay.js";
+import { ChatTaskCard } from "./ChatTaskCard.js";
 import { BrowserSTTProvider } from "../../ai/voice/adapters/browser-stt.js";
 import { createAudioRecorder } from "../../ai/voice/audio-utils.js";
 import type { AIChatMessage } from "../api/index.js";
@@ -27,9 +28,10 @@ import type { AIChatMessage } from "../api/index.js";
 interface AIChatPanelProps {
   onClose: () => void;
   onOpenSettings: () => void;
+  onSelectTask?: (taskId: string) => void;
 }
 
-export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
+export function AIChatPanel({ onClose, onOpenSettings, onSelectTask }: AIChatPanelProps) {
   const {
     messages,
     isStreaming,
@@ -77,7 +79,18 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
   const wasStreamingRef = useRef(false);
 
   const ttsAvailable = !!(voice.ttsProvider && voice.settings.ttsEnabled);
-  console.log("[VoiceCall:Panel] ttsAvailable:", ttsAvailable, "sttProvider:", voice.sttProvider?.id, "ttsProvider:", voice.ttsProvider?.id, "ttsEnabled:", voice.settings.ttsEnabled, "voiceMode:", voice.settings.voiceMode);
+  console.log(
+    "[VoiceCall:Panel] ttsAvailable:",
+    ttsAvailable,
+    "sttProvider:",
+    voice.sttProvider?.id,
+    "ttsProvider:",
+    voice.ttsProvider?.id,
+    "ttsEnabled:",
+    voice.settings.ttsEnabled,
+    "voiceMode:",
+    voice.settings.voiceMode,
+  );
 
   const voiceCall = useVoiceCall({
     speak: voice.speak,
@@ -92,7 +105,12 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
   const handleVoiceResult = useCallback(
     (transcript: string) => {
       const cleaned = transcript.trim();
-      console.log("[VoiceCall:Panel] handleVoiceResult:", JSON.stringify(cleaned), "callActive:", voiceCall.isCallActive);
+      console.log(
+        "[VoiceCall:Panel] handleVoiceResult:",
+        JSON.stringify(cleaned),
+        "callActive:",
+        voiceCall.isCallActive,
+      );
       // Filter out empty or non-speech markers from STT
       if (!cleaned || cleaned === "[BLANK_AUDIO]") {
         console.log("[VoiceCall:Panel] filtered out empty/blank transcript");
@@ -125,47 +143,75 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
   );
 
   // Voice call listening: prefer user's STT provider with VAD, fall back to browser STT
-  const isNonBrowserSTT = voiceCall.isCallActive && !(voice.sttProvider instanceof BrowserSTTProvider);
-  const browserSTTAvailable = typeof window !== "undefined" &&
+  const isNonBrowserSTT =
+    voiceCall.isCallActive && !(voice.sttProvider instanceof BrowserSTTProvider);
+  const browserSTTAvailable =
+    typeof window !== "undefined" &&
     ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
 
   // VAD enabled for: normal VAD mode outside calls, OR calls with API-based STT (Groq etc.)
   const vadEnabled =
-    (voice.settings.voiceMode === "vad" && !isStreaming && !voice.isSpeaking && !voiceCall.isCallActive) ||
+    (voice.settings.voiceMode === "vad" &&
+      !isStreaming &&
+      !voice.isSpeaking &&
+      !voiceCall.isCallActive) ||
     (voiceCall.vadEnabled && isNonBrowserSTT);
 
   const vad = useVAD({
     onSpeechEnd: handleVADSpeechEnd,
     enabled: vadEnabled,
     deviceId: voice.settings.microphoneId || undefined,
+    smartEndpoint: voice.settings.smartEndpoint,
+    gracePeriodMs: voice.settings.gracePeriodMs,
   });
 
   // Fall back to browser STT loop if: using browser STT provider, OR VAD failed to load
-  const needBrowserSTTFallback = voiceCall.isCallActive && (
-    voice.sttProvider instanceof BrowserSTTProvider ||
-    (isNonBrowserSTT && !vad.isSupported)
-  );
+  const needBrowserSTTFallback =
+    voiceCall.isCallActive &&
+    (voice.sttProvider instanceof BrowserSTTProvider || (isNonBrowserSTT && !vad.isSupported));
   const useBrowserSTTLoop = needBrowserSTTFallback && browserSTTAvailable;
 
-  console.log("[VoiceCall:Panel] vadEnabled:", vadEnabled, "vad.isListening:", vad.isListening, "vad.isSupported:", vad.isSupported, "useBrowserSTTLoop:", useBrowserSTTLoop, "isNonBrowserSTT:", isNonBrowserSTT, "callState:", voiceCall.callState);
+  console.log(
+    "[VoiceCall:Panel] vadEnabled:",
+    vadEnabled,
+    "vad.isListening:",
+    vad.isListening,
+    "vad.isSupported:",
+    vad.isSupported,
+    "useBrowserSTTLoop:",
+    useBrowserSTTLoop,
+    "isNonBrowserSTT:",
+    isNonBrowserSTT,
+    "callState:",
+    voiceCall.callState,
+  );
 
   // Browser STT recognition loop — used for Browser STT provider, or as fallback when VAD fails
   const browserSTTRef = useRef<BrowserSTTProvider | null>(null);
-  if (!browserSTTRef.current && browserSTTAvailable) {
-    browserSTTRef.current = new BrowserSTTProvider();
-  }
+  useEffect(() => {
+    if (!browserSTTRef.current && browserSTTAvailable) {
+      browserSTTRef.current = new BrowserSTTProvider();
+    }
+  }, [browserSTTAvailable]);
 
   useEffect(() => {
     if (!useBrowserSTTLoop || voiceCall.callState !== "listening") {
       if (voiceCall.isCallActive) {
-        console.log("[VoiceCall:Panel] Browser STT loop NOT starting — useBrowserSTTLoop:", useBrowserSTTLoop, "callState:", voiceCall.callState);
+        console.log(
+          "[VoiceCall:Panel] Browser STT loop NOT starting — useBrowserSTTLoop:",
+          useBrowserSTTLoop,
+          "callState:",
+          voiceCall.callState,
+        );
       }
       return;
     }
     const stt = browserSTTRef.current;
     if (!stt) return;
     let cancelled = false;
-    console.log("[VoiceCall:Panel] Browser STT loop STARTING" + (isNonBrowserSTT ? " (VAD fallback)" : ""));
+    console.log(
+      "[VoiceCall:Panel] Browser STT loop STARTING" + (isNonBrowserSTT ? " (VAD fallback)" : ""),
+    );
 
     const listen = async () => {
       while (!cancelled) {
@@ -192,7 +238,13 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [useBrowserSTTLoop, voiceCall.callState, handleVoiceResult, voiceCall.isCallActive, isNonBrowserSTT]);
+  }, [
+    useBrowserSTTLoop,
+    voiceCall.callState,
+    handleVoiceResult,
+    voiceCall.isCallActive,
+    isNonBrowserSTT,
+  ]);
 
   // Voice conversation loop: TTS when AI finishes responding (streaming → done)
   // Skip when voice call is active — the hook handles TTS
@@ -301,6 +353,7 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
                 ? retryLastMessage
                 : undefined
             }
+            onSelectTask={onSelectTask}
           />
         ))}
         {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
@@ -329,6 +382,8 @@ export function AIChatPanel({ onClose, onOpenSettings }: AIChatPanelProps) {
             callState={voiceCall.callState as Exclude<typeof voiceCall.callState, "idle">}
             callDuration={voiceCall.callDuration}
             onEndCall={voiceCall.endCall}
+            isInGracePeriod={vad.isInGracePeriod}
+            gracePeriodProgress={vad.gracePeriodProgress}
           />
         </div>
       ) : (
@@ -389,12 +444,53 @@ function getErrorHint(category?: string, message?: string): string | null {
   }
 }
 
+function extractTasksFromToolCalls(
+  toolCalls?: AIChatMessage["toolCalls"],
+): {
+  id: string;
+  title: string;
+  status?: string;
+  priority?: number | null;
+  dueDate?: string | null;
+}[] {
+  if (!toolCalls || toolCalls.length === 0) return [];
+  const tasks: {
+    id: string;
+    title: string;
+    status?: string;
+    priority?: number | null;
+    dueDate?: string | null;
+  }[] = [];
+  const taskToolNames = new Set(["create_task", "update_task", "complete_task"]);
+
+  for (const tc of toolCalls) {
+    if (!taskToolNames.has(tc.name)) continue;
+    try {
+      const args = JSON.parse(tc.arguments);
+      if (args.title || args.taskId) {
+        tasks.push({
+          id: args.taskId ?? "",
+          title: args.title ?? tc.name.replace(/_/g, " "),
+          priority: args.priority ?? null,
+          dueDate: args.dueDate ?? null,
+          status: tc.name === "complete_task" ? "completed" : "pending",
+        });
+      }
+    } catch {
+      /* skip */
+    }
+  }
+  return tasks;
+}
+
 function MessageBubble({
   message,
   onRetry,
+  onSelectTask,
 }: {
   message: AIChatMessage;
   onRetry?: () => void;
+  onSelectTask?: (taskId: string) => void;
 }) {
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
@@ -433,6 +529,8 @@ function MessageBubble({
     );
   }
 
+  const inlineTasks = extractTasksFromToolCalls(message.toolCalls);
+
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className="max-w-[85%] space-y-1">
@@ -440,6 +538,17 @@ function MessageBubble({
           <div className="flex flex-wrap gap-1">
             {message.toolCalls!.map((tc) => (
               <ToolCallBadge key={tc.id} name={tc.name} args={tc.arguments} />
+            ))}
+          </div>
+        )}
+        {inlineTasks.length > 0 && onSelectTask && (
+          <div className="space-y-1">
+            {inlineTasks.map((task, i) => (
+              <ChatTaskCard
+                key={task.id || i}
+                task={task}
+                onClick={task.id ? onSelectTask : undefined}
+              />
             ))}
           </div>
         )}
@@ -452,7 +561,7 @@ function MessageBubble({
             {isUser ? (
               <span className="whitespace-pre-wrap">{message.content}</span>
             ) : (
-              <MarkdownMessage content={message.content} />
+              <MarkdownMessage content={message.content} onSelectTask={onSelectTask} />
             )}
           </div>
         )}
@@ -461,48 +570,76 @@ function MessageBubble({
   );
 }
 
-function MarkdownMessage({ content }: { content: string }) {
+function MarkdownMessage({
+  content,
+  onSelectTask,
+}: {
+  content: string;
+  onSelectTask?: (taskId: string) => void;
+}) {
+  const components = createMarkdownComponents(onSelectTask);
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
       {content}
     </ReactMarkdown>
   );
 }
 
-const markdownComponents: Components = {
-  p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
-  ol: ({ children }) => <ol className="mb-3 ml-5 list-decimal space-y-1 last:mb-0">{children}</ol>,
-  ul: ({ children }) => <ul className="mb-3 ml-5 list-disc space-y-1 last:mb-0">{children}</ul>,
-  li: ({ children }) => <li className="pl-1">{children}</li>,
-  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-  em: ({ children }) => <em className="italic">{children}</em>,
-  code: ({ children, className, ...props }) => {
-    if (className) {
+function createMarkdownComponents(onSelectTask?: (taskId: string) => void): Components {
+  return {
+    p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+    ol: ({ children }) => (
+      <ol className="mb-3 ml-5 list-decimal space-y-1 last:mb-0">{children}</ol>
+    ),
+    ul: ({ children }) => <ul className="mb-3 ml-5 list-disc space-y-1 last:mb-0">{children}</ul>,
+    li: ({ children }) => <li className="pl-1">{children}</li>,
+    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+    em: ({ children }) => <em className="italic">{children}</em>,
+    code: ({ children, className, ...props }) => {
+      if (className) {
+        return (
+          <code {...props} className="block rounded-md bg-surface/70 px-2 py-1 font-mono text-xs">
+            {children}
+          </code>
+        );
+      }
       return (
-        <code {...props} className="block rounded-md bg-surface/70 px-2 py-1 font-mono text-xs">
+        <code {...props} className="rounded bg-surface/70 px-1 py-0.5 font-mono text-xs">
           {children}
         </code>
       );
-    }
-
-    return (
-      <code {...props} className="rounded bg-surface/70 px-1 py-0.5 font-mono text-xs">
-        {children}
-      </code>
-    );
-  },
-  a: ({ href, children, ...props }) => (
-    <a
-      {...props}
-      href={href}
-      target="_blank"
-      rel="noreferrer noopener"
-      className="text-accent underline underline-offset-2"
-    >
-      {children}
-    </a>
-  ),
-};
+    },
+    a: ({ href, children, ...props }) => {
+      // Handle saydo://task/<id> links
+      if (href && href.startsWith("saydo://task/") && onSelectTask) {
+        const taskId = href.replace("saydo://task/", "");
+        return (
+          <button
+            {...(props as any)}
+            onClick={(e) => {
+              e.preventDefault();
+              onSelectTask(taskId);
+            }}
+            className="text-accent underline underline-offset-2 cursor-pointer"
+          >
+            {children}
+          </button>
+        );
+      }
+      return (
+        <a
+          {...props}
+          href={href}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-accent underline underline-offset-2"
+        >
+          {children}
+        </a>
+      );
+    },
+  };
+}
 
 const TOOL_META: Record<string, { emoji: string; verb: string }> = {
   create_task: { emoji: "✨", verb: "Creating" },
@@ -626,7 +763,8 @@ function VoiceButton({
 
   const colorClass = {
     idle: "border-border text-on-surface-muted hover:bg-surface-secondary",
-    listening: "bg-error/20 border-error text-error animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.4)]",
+    listening:
+      "bg-error/20 border-error text-error animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.4)]",
     transcribing: "bg-accent/10 border-accent/30 text-accent",
     speaking: "bg-success/10 border-success/30 text-success",
   }[buttonState];

@@ -50,6 +50,7 @@ interface SidebarProps {
   onSearch?: () => void;
   inboxCount?: number;
   todayCount?: number;
+  onCreateProject?: (name: string, color: string, icon: string) => void;
 }
 
 const TASK_NAV_ITEMS: Array<{
@@ -65,9 +66,7 @@ const TASK_NAV_ITEMS: Array<{
   { id: "completed", label: "Completed", icon: CheckCircle2 },
 ];
 
-const WORKSPACE_NAV_ITEMS = [
-  { id: "plugin-store", label: "Plugin Store", icon: Puzzle },
-];
+const WORKSPACE_NAV_ITEMS = [{ id: "plugin-store", label: "Plugin Store", icon: Puzzle }];
 
 export function Sidebar({
   currentView,
@@ -88,8 +87,13 @@ export function Sidebar({
   onSearch,
   inboxCount,
   todayCount,
+  onCreateProject,
 }: SidebarProps) {
   const [projectsExpanded, setProjectsExpanded] = useState(true);
+  const [showProjectForm, setShowProjectForm] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectColor, setNewProjectColor] = useState("#3b82f6");
+  const [newProjectIcon, setNewProjectIcon] = useState("");
   const showToolsSection = Boolean(onFocusMode || onToggleChat);
 
   const countMap: Record<string, number | undefined> = {
@@ -178,11 +182,11 @@ export function Sidebar({
         <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"}`}>
           {!collapsed ? (
             <div className="flex items-center gap-2">
-              <img src="/images/logo-192.png" alt="Saydo logo" className="w-7 h-7" />
+              <img src="/images/logo.svg" alt="Saydo logo" className="w-7 h-7" />
               <h2 className="text-lg font-bold text-on-surface tracking-tight">Saydo</h2>
             </div>
           ) : (
-            <img src="/images/logo-192.png" alt="Saydo logo" className="w-7 h-7" />
+            <img src="/images/logo.svg" alt="Saydo logo" className="w-7 h-7" />
           )}
           {onToggleCollapsed && (
             <button
@@ -239,15 +243,74 @@ export function Sidebar({
           )}
           <ul className="space-y-0.5">{renderNavItems(TASK_NAV_ITEMS)}</ul>
 
-          {!collapsed && projects.length > 0 && (
+          {!collapsed && (projects.length > 0 || onCreateProject) && (
             <>
-              <button
-                onClick={() => setProjectsExpanded(!projectsExpanded)}
-                className="flex items-center gap-1 text-xs font-semibold text-on-surface-muted uppercase tracking-wider mt-6 mb-2 px-3 w-full text-left hover:text-on-surface-secondary transition-colors"
-              >
-                {projectsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                My Projects
-              </button>
+              <div className="flex items-center mt-6 mb-2 px-3">
+                <button
+                  onClick={() => setProjectsExpanded(!projectsExpanded)}
+                  className="flex items-center gap-1 text-xs font-semibold text-on-surface-muted uppercase tracking-wider text-left hover:text-on-surface-secondary transition-colors flex-1"
+                >
+                  {projectsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  My Projects
+                </button>
+                {onCreateProject && projectsExpanded && (
+                  <button
+                    onClick={() => setShowProjectForm((v) => !v)}
+                    title="New project"
+                    className="p-0.5 rounded text-on-surface-muted hover:text-on-surface-secondary hover:bg-surface-tertiary transition-colors"
+                  >
+                    <Plus size={14} />
+                  </button>
+                )}
+              </div>
+              {projectsExpanded && showProjectForm && onCreateProject && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const name = newProjectName.trim();
+                    if (!name) return;
+                    onCreateProject(name, newProjectColor, newProjectIcon);
+                    setNewProjectName("");
+                    setNewProjectColor("#3b82f6");
+                    setNewProjectIcon("");
+                    setShowProjectForm(false);
+                  }}
+                  className="mx-3 mb-2 p-2 rounded-lg border border-border bg-surface-tertiary space-y-2"
+                >
+                  <input
+                    type="text"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    placeholder="Project name"
+                    autoFocus
+                    className="w-full px-2 py-1.5 text-xs border border-border rounded bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newProjectIcon}
+                      onChange={(e) => setNewProjectIcon(e.target.value)}
+                      placeholder="Emoji"
+                      maxLength={2}
+                      className="w-12 px-2 py-1.5 text-xs text-center border border-border rounded bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                    <input
+                      type="color"
+                      value={newProjectColor}
+                      onChange={(e) => setNewProjectColor(e.target.value)}
+                      title="Project color"
+                      className="w-7 h-7 rounded border border-border cursor-pointer"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!newProjectName.trim()}
+                      className="ml-auto px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent/90 disabled:opacity-50 transition-colors"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </form>
+              )}
               {projectsExpanded && (
                 <ul className="space-y-0.5">
                   {projects.map((project) => {
@@ -264,11 +327,20 @@ export function Sidebar({
                               : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
                           }`}
                         >
-                          <span
-                            aria-hidden="true"
-                            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: project.color }}
-                          />
+                          {project.icon ? (
+                            <span
+                              aria-hidden="true"
+                              className="flex-shrink-0 text-base leading-none"
+                            >
+                              {project.icon}
+                            </span>
+                          ) : (
+                            <span
+                              aria-hidden="true"
+                              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: project.color }}
+                            />
+                          )}
                           <span className="flex-1">{project.name}</span>
                           {projectCount > 0 && (
                             <span className="text-xs px-1.5 py-0.5 rounded-full bg-surface-tertiary text-on-surface-secondary font-medium">

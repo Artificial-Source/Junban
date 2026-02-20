@@ -49,10 +49,7 @@ ctx.addEventListener("message", async (e: MessageEvent<KokoroWorkerRequest>) => 
       const wavBlob = float32ToWav(samples, sampleRate);
       const buffer = await wavBlob.arrayBuffer();
 
-      post(
-        { type: "synthesize-complete", id: msg.id, buffer },
-        [buffer],
-      );
+      post({ type: "synthesize-complete", id: msg.id, buffer }, [buffer]);
     } catch (err) {
       post({
         type: "synthesize-error",

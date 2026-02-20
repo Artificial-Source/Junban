@@ -27,7 +27,8 @@ class MockWorker {
   }
 
   removeEventListener(type: string, listener: any) {
-    if (type === "message") this.messageListeners = this.messageListeners.filter((l) => l !== listener);
+    if (type === "message")
+      this.messageListeners = this.messageListeners.filter((l) => l !== listener);
     if (type === "error") this.errorListeners = this.errorListeners.filter((l) => l !== listener);
   }
 
@@ -153,9 +154,7 @@ describe("KokoroLocalTTSProvider", () => {
     );
 
     // Get the synth ID from the postMessage call
-    const synthCall = worker.postMessage.mock.calls.find(
-      (c: any[]) => c[0].type === "synthesize",
-    );
+    const synthCall = worker.postMessage.mock.calls.find((c: any[]) => c[0].type === "synthesize");
     const synthId = synthCall![0].id;
 
     // Simulate worker response with WAV buffer
@@ -182,9 +181,7 @@ describe("KokoroLocalTTSProvider", () => {
     await Promise.resolve();
 
     const worker = MockWorker.latest;
-    const synthCall = worker.postMessage.mock.calls.find(
-      (c: any[]) => c[0].type === "synthesize",
-    );
+    const synthCall = worker.postMessage.mock.calls.find((c: any[]) => c[0].type === "synthesize");
     expect(synthCall![0].voice).toBe("am_adam");
 
     // Complete the synthesis to avoid dangling promise
@@ -296,9 +293,7 @@ describe("KokoroLocalTTSProvider", () => {
     const synthPromise = provider.synthesize("Error text");
     await Promise.resolve();
     const worker = MockWorker.latest;
-    const synthCall = worker.postMessage.mock.calls.find(
-      (c: any[]) => c[0].type === "synthesize",
-    );
+    const synthCall = worker.postMessage.mock.calls.find((c: any[]) => c[0].type === "synthesize");
 
     worker.simulateMessage({
       type: "synthesize-error",

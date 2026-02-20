@@ -7,12 +7,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { LLMProviderPlugin, LLMExecutor } from "../interface.js";
 import type { LLMCapabilities, ModelDescriptor } from "../../core/capabilities.js";
 import type { LLMExecutionContext, PipelineResult } from "../../core/context.js";
-import type {
-  AIProviderConfig,
-  ChatMessage,
-  StreamEvent,
-  ToolDefinition,
-} from "../../types.js";
+import type { AIProviderConfig, ChatMessage, StreamEvent, ToolDefinition } from "../../types.js";
 import { classifyProviderError, type StreamErrorData } from "../../errors.js";
 import { DEFAULT_CAPABILITIES } from "../../core/capabilities.js";
 

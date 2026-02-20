@@ -44,10 +44,7 @@ async function* withStreamTimeout(
     const result = await Promise.race([
       iterator.next(),
       new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new AIError("Response timed out.", "timeout", true)),
-          timeoutMs,
-        ),
+        setTimeout(() => reject(new AIError("Response timed out.", "timeout", true)), timeoutMs),
       ),
     ]);
     if (result.done) return;

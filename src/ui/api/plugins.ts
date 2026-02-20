@@ -78,7 +78,11 @@ export async function getPluginSettings(pluginId: string): Promise<Record<string
   return handleResponse<Record<string, unknown>>(res);
 }
 
-export async function updatePluginSetting(pluginId: string, key: string, value: unknown): Promise<void> {
+export async function updatePluginSetting(
+  pluginId: string,
+  key: string,
+  value: unknown,
+): Promise<void> {
   if (isTauri()) {
     const svc = await getServices();
     await svc.settingsManager.set(pluginId, key, value);
@@ -180,7 +184,10 @@ export async function getPluginPermissions(pluginId: string): Promise<string[] |
   return data.permissions;
 }
 
-export async function approvePluginPermissions(pluginId: string, permissions: string[]): Promise<void> {
+export async function approvePluginPermissions(
+  pluginId: string,
+  permissions: string[],
+): Promise<void> {
   if (isTauri()) {
     // Not yet supported in Tauri mode
     return;

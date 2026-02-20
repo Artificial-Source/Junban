@@ -18,13 +18,7 @@ const PRIORITY_COLORS: Record<number, string> = {
   4: "text-on-surface-muted",
 };
 
-export function SearchModal({
-  isOpen,
-  onClose,
-  tasks,
-  projects,
-  onSelectTask,
-}: SearchModalProps) {
+export function SearchModal({ isOpen, onClose, tasks, projects, onSelectTask }: SearchModalProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -209,9 +203,10 @@ export function SearchModal({
                       </span>
                     )}
                     {task.priority && task.priority <= 4 && (
-                      <span className={`flex items-center gap-0.5 text-xs ${PRIORITY_COLORS[task.priority] ?? ""}`}>
-                        <Flag size={10} />
-                        P{task.priority}
+                      <span
+                        className={`flex items-center gap-0.5 text-xs ${PRIORITY_COLORS[task.priority] ?? ""}`}
+                      >
+                        <Flag size={10} />P{task.priority}
                       </span>
                     )}
                     {task.dueDate && (

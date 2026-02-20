@@ -30,7 +30,10 @@ export async function createTemplate(input: CreateTemplateInput): Promise<TaskTe
   return handleResponse<TaskTemplate>(res);
 }
 
-export async function updateTemplate(id: string, input: UpdateTemplateInput): Promise<TaskTemplate> {
+export async function updateTemplate(
+  id: string,
+  input: UpdateTemplateInput,
+): Promise<TaskTemplate> {
   if (isTauri()) {
     const svc = await getServices();
     const template = await svc.templateService.update(id, input);
@@ -55,7 +58,10 @@ export async function deleteTemplate(id: string): Promise<void> {
   await handleVoidResponse(await fetch(`${BASE}/templates/${id}`, { method: "DELETE" }));
 }
 
-export async function instantiateTemplate(id: string, variables?: Record<string, string>): Promise<Task> {
+export async function instantiateTemplate(
+  id: string,
+  variables?: Record<string, string>,
+): Promise<Task> {
   if (isTauri()) {
     const svc = await getServices();
     const task = await svc.templateService.instantiate(id, variables);

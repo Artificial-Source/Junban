@@ -69,16 +69,10 @@ export function ConfirmDialog({
               isDanger ? "bg-error/10" : "bg-accent/10"
             }`}
           >
-            <AlertTriangle
-              size={20}
-              className={isDanger ? "text-error" : "text-accent"}
-            />
+            <AlertTriangle size={20} className={isDanger ? "text-error" : "text-accent"} />
           </div>
           <div>
-            <h2
-              id="confirm-dialog-title"
-              className="text-base font-semibold text-on-surface"
-            >
+            <h2 id="confirm-dialog-title" className="text-base font-semibold text-on-surface">
               {title}
             </h2>
             <p className="text-sm text-on-surface-muted mt-1">{message}</p>
@@ -96,9 +90,7 @@ export function ConfirmDialog({
             ref={confirmRef}
             onClick={onConfirm}
             className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${
-              isDanger
-                ? "bg-error hover:bg-error/90"
-                : "bg-accent hover:bg-accent-hover"
+              isDanger ? "bg-error hover:bg-error/90" : "bg-accent hover:bg-accent-hover"
             }`}
           >
             {confirmLabel}

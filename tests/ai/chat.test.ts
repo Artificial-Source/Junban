@@ -274,7 +274,11 @@ describe("ChatSession", () => {
             yield {
               type: "tool_call" as const,
               data: JSON.stringify([
-                { id: `call_${callCount}`, name: "query_tasks", arguments: JSON.stringify({ search: `query_${callCount}` }) },
+                {
+                  id: `call_${callCount}`,
+                  name: "query_tasks",
+                  arguments: JSON.stringify({ search: `query_${callCount}` }),
+                },
               ]),
             };
           })(),

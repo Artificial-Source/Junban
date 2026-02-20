@@ -22,10 +22,7 @@ export interface ToolContext {
 }
 
 /** Function that executes a tool and returns a JSON string result. */
-export type ToolExecutor = (
-  args: Record<string, unknown>,
-  ctx: ToolContext,
-) => Promise<string>;
+export type ToolExecutor = (args: Record<string, unknown>, ctx: ToolContext) => Promise<string>;
 
 /** A tool as stored in the registry. */
 export interface RegisteredTool {

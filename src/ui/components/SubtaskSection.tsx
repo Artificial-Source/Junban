@@ -8,10 +8,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { Task } from "../../core/types.js";
 import { SortableSubtaskBlock } from "./SubtaskBlock.js";
 

@@ -41,18 +41,15 @@ export function registerQueryTasksTool(registry: ToolRegistry): void {
           },
           dueBefore: {
             type: "string",
-            description:
-              "Only tasks due before this ISO 8601 date (exclusive upper bound)",
+            description: "Only tasks due before this ISO 8601 date (exclusive upper bound)",
           },
           dueAfter: {
             type: "string",
-            description:
-              "Only tasks due after this ISO 8601 date (exclusive lower bound)",
+            description: "Only tasks due after this ISO 8601 date (exclusive lower bound)",
           },
           limit: {
             type: "number",
-            description:
-              "Maximum number of tasks to return (default 50, max 200)",
+            description: "Maximum number of tasks to return (default 50, max 200)",
           },
         },
       },

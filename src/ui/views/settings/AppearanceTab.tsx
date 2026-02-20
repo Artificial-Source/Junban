@@ -2,12 +2,7 @@ import { useState } from "react";
 import { themeManager } from "../../themes/manager.js";
 import { useGeneralSettings } from "../../context/SettingsContext.js";
 import { DEFAULT_PROJECT_COLORS } from "../../../config/defaults.js";
-import {
-  SegmentedControl,
-  ColorSwatchPicker,
-  SettingRow,
-  Toggle,
-} from "./components.js";
+import { SegmentedControl, ColorSwatchPicker, SettingRow, Toggle } from "./components.js";
 
 export function AppearanceTab() {
   const { settings, loaded, updateSetting } = useGeneralSettings();
@@ -88,7 +83,10 @@ export function AppearanceTab() {
             <Toggle
               enabled={settings.reduce_animations === "true"}
               onToggle={() =>
-                updateSetting("reduce_animations", settings.reduce_animations === "true" ? "false" : "true")
+                updateSetting(
+                  "reduce_animations",
+                  settings.reduce_animations === "true" ? "false" : "true",
+                )
               }
             />
           </SettingRow>

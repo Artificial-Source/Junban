@@ -6,7 +6,10 @@ describe("InworldTTSProvider", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    provider = new InworldTTSProvider("test-credential", "http://test/api/voice/inworld-synthesize");
+    provider = new InworldTTSProvider(
+      "test-credential",
+      "http://test/api/voice/inworld-synthesize",
+    );
   });
 
   afterEach(() => {

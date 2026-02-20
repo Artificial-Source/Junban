@@ -46,7 +46,10 @@ export function FiltersLabels({ tasks, onNavigateToFilter }: FiltersLabelsProps)
 
   // Load tags
   useEffect(() => {
-    api.listTags().then(setTags).catch(() => {});
+    api
+      .listTags()
+      .then(setTags)
+      .catch(() => {});
   }, []);
 
   const persistFilters = useCallback((filters: SavedFilter[]) => {

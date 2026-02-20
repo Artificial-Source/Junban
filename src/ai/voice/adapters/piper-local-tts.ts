@@ -70,16 +70,13 @@ export class PiperLocalTTSProvider implements TTSProviderPlugin {
     const voiceId = opts?.voice ?? this.defaultVoice;
 
     const tts = await import("@mintplex-labs/piper-tts-web");
-    const blob = await tts.predict(
-      { text, voiceId: voiceId as any },
-      (p) => {
-        if (this.status !== "ready" && p.total > 0) {
-          this.status = "loading";
-          this.progress = Math.round((p.loaded / p.total) * 100);
-          this.onStatusChange?.("loading", this.progress);
-        }
-      },
-    );
+    const blob = await tts.predict({ text, voiceId: voiceId as any }, (p) => {
+      if (this.status !== "ready" && p.total > 0) {
+        this.status = "loading";
+        this.progress = Math.round((p.loaded / p.total) * 100);
+        this.onStatusChange?.("loading", this.progress);
+      }
+    });
 
     if (this.status !== "ready") {
       this.status = "ready";
@@ -103,13 +100,46 @@ export class PiperLocalTTSProvider implements TTSProviderPlugin {
     try {
       const root = await navigator.storage.getDirectory();
       const dir = await root.getDirectoryHandle("piper", { create: false });
-      // keys() is part of the async iterable protocol on FileSystemDirectoryHandle
       for await (const name of (dir as any).keys()) {
         if ((name as string).endsWith(".onnx")) return true;
       }
       return false;
     } catch {
       return false;
+    }
+  }
+
+  /** Delete cached model files from OPFS. */
+  async deleteModel(): Promise<void> {
+    try {
+      const root = await navigator.storage.getDirectory();
+      await root.removeEntry("piper", { recursive: true });
+    } catch {
+      // Directory may not exist
+    }
+    this.status = "idle";
+    this.progress = 0;
+    this.onStatusChange?.("idle", 0);
+  }
+
+  /** Get the total size of cached model files in OPFS in bytes. */
+  async getModelSize(): Promise<number> {
+    try {
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle("piper", { create: false });
+      let totalSize = 0;
+      for await (const name of (dir as any).keys()) {
+        try {
+          const fileHandle = await dir.getFileHandle(name as string);
+          const file = await fileHandle.getFile();
+          totalSize += file.size;
+        } catch {
+          /* skip unreadable entries */
+        }
+      }
+      return totalSize;
+    } catch {
+      return 0;
     }
   }
 }

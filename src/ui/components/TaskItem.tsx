@@ -1,5 +1,14 @@
 import React, { useState } from "react";
-import { Calendar, Check, ChevronDown, ChevronRight, GripVertical, Pencil, Repeat, Bell } from "lucide-react";
+import {
+  Calendar,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  GripVertical,
+  Pencil,
+  Repeat,
+  Bell,
+} from "lucide-react";
 import type { Task } from "../../core/types.js";
 import { getPriority } from "../../core/priorities.js";
 import { DatePicker } from "./DatePicker.js";
@@ -71,14 +80,15 @@ export const TaskItem = React.memo(function TaskItem({
   const indentPadding = depth > 0 ? { paddingLeft: `${depth * 1.5 + 0.75}rem` } : undefined;
 
   const hasMetadataLine =
-    task.tags.length > 0 ||
-    task.dueDate ||
-    task.recurrence ||
-    (task as any).remindAt;
+    task.tags.length > 0 || task.dueDate || task.recurrence || (task as any).remindAt;
 
   // Priority-based circle colors
-  const priorityColorClass = task.priority ? `border-priority-${task.priority}` : "border-on-surface-muted";
-  const priorityHoverClass = task.priority ? `hover:bg-priority-${task.priority}/15` : "hover:bg-on-surface-muted/15";
+  const priorityColorClass = task.priority
+    ? `border-priority-${task.priority}`
+    : "border-on-surface-muted";
+  const priorityHoverClass = task.priority
+    ? `hover:bg-priority-${task.priority}/15`
+    : "hover:bg-on-surface-muted/15";
 
   return (
     <div
@@ -150,7 +160,9 @@ export const TaskItem = React.memo(function TaskItem({
         }}
         aria-label={
           showCheckbox
-            ? isMultiSelected ? "Deselect task" : "Select task"
+            ? isMultiSelected
+              ? "Deselect task"
+              : "Select task"
             : task.status === "completed"
               ? "Mark task incomplete"
               : `Complete task${priority ? ` (${priority.label})` : ""}`
@@ -188,7 +200,9 @@ export const TaskItem = React.memo(function TaskItem({
               <div className="h-1 w-12 rounded-full bg-surface-tertiary overflow-hidden">
                 <div
                   className="h-full rounded-full bg-accent transition-all"
-                  style={{ width: `${totalChildCount > 0 ? (completedChildCount / totalChildCount) * 100 : 0}%` }}
+                  style={{
+                    width: `${totalChildCount > 0 ? (completedChildCount / totalChildCount) * 100 : 0}%`,
+                  }}
                 />
               </div>
               <span className="text-xs text-on-surface-muted">
@@ -226,9 +240,7 @@ export const TaskItem = React.memo(function TaskItem({
                 {new Date(task.dueDate).toLocaleDateString()}
               </span>
             )}
-            {(task as any).remindAt && (
-              <Bell size={12} className="text-warning flex-shrink-0" />
-            )}
+            {(task as any).remindAt && <Bell size={12} className="text-warning flex-shrink-0" />}
             {task.recurrence && (
               <span className="text-xs flex items-center gap-0.5 text-on-surface-muted flex-shrink-0">
                 <Repeat size={11} />

@@ -94,7 +94,9 @@ export function useVoiceCall({
     wasSpeakingRef.current = isSpeaking;
 
     if (isCallActive) {
-      console.log(`[VoiceCall] isSpeaking: ${wasSpeaking} → ${isSpeaking}, callState: ${callState}`);
+      console.log(
+        `[VoiceCall] isSpeaking: ${wasSpeaking} → ${isSpeaking}, callState: ${callState}`,
+      );
     }
 
     if (wasSpeaking && !isSpeaking) {
@@ -111,7 +113,9 @@ export function useVoiceCall({
     wasStreamingRef.current = isStreaming;
 
     if (isCallActive) {
-      console.log(`[VoiceCall] isStreaming: ${wasStreaming} → ${isStreaming}, callState: ${callState}`);
+      console.log(
+        `[VoiceCall] isStreaming: ${wasStreaming} → ${isStreaming}, callState: ${callState}`,
+      );
     }
 
     if (callState === "processing" && wasStreaming && !isStreaming) {
@@ -143,12 +147,14 @@ export function useVoiceCall({
     setCallStateDebug("greeting", "call started");
 
     if (ttsAvailable) {
-      speak(GREETING).then(() => {
-        console.log("[VoiceCall] greeting speak() resolved");
-      }).catch((err) => {
-        console.warn("[VoiceCall] greeting TTS failed:", err);
-        setCallStateDebug("listening", "greeting TTS failed");
-      });
+      speak(GREETING)
+        .then(() => {
+          console.log("[VoiceCall] greeting speak() resolved");
+        })
+        .catch((err) => {
+          console.warn("[VoiceCall] greeting TTS failed:", err);
+          setCallStateDebug("listening", "greeting TTS failed");
+        });
     } else {
       console.log("[VoiceCall] no TTS, skipping greeting");
       setCallStateDebug("listening", "no TTS available");

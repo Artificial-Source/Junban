@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { extractPriority, extractTags, extractProject, extractRecurrence } from "../../src/parser/grammar.js";
+import {
+  extractPriority,
+  extractTags,
+  extractProject,
+  extractRecurrence,
+} from "../../src/parser/grammar.js";
 
 describe("extractPriority", () => {
   it("extracts p1", () => {

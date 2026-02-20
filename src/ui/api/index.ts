@@ -15,5 +15,13 @@ export const api = {
 };
 
 // Re-export all interfaces
-export type { PluginInfo, SettingDefinitionInfo, PluginCommandInfo, StatusBarItemInfo, PanelInfo, ViewInfo, StorePluginInfo } from "./plugins.js";
+export type {
+  PluginInfo,
+  SettingDefinitionInfo,
+  PluginCommandInfo,
+  StatusBarItemInfo,
+  PanelInfo,
+  ViewInfo,
+  StorePluginInfo,
+} from "./plugins.js";
 export type { AIConfigInfo, AIChatMessage, AIProviderInfo, ModelDiscoveryInfo } from "./ai.js";

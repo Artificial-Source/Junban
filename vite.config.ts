@@ -807,9 +807,7 @@ function apiPlugin() {
 
       // GET /api/ai/providers/:name/models — fetch available models for a provider
       server.middlewares.use(async (req, res, next) => {
-        const modelsMatch = req.url?.match(
-          /^\/api\/ai\/providers\/([^/]+)\/models(\?.*)?$/,
-        );
+        const modelsMatch = req.url?.match(/^\/api\/ai\/providers\/([^/]+)\/models(\?.*)?$/);
         if (!modelsMatch || req.method !== "GET") return next();
 
         try {
@@ -821,9 +819,7 @@ function apiPlugin() {
           const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
           const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
 
-          const { fetchAvailableModels } = await import(
-            "./src/ai/model-discovery.js"
-          );
+          const { fetchAvailableModels } = await import("./src/ai/model-discovery.js");
           const models = await fetchAvailableModels(providerName, {
             apiKey: apiKeySetting?.value,
             baseUrl: baseUrlOverride || baseUrlSetting?.value,
@@ -839,9 +835,7 @@ function apiPlugin() {
 
       // POST /api/ai/providers/:name/models/load — load a model (LM Studio)
       server.middlewares.use(async (req, res, next) => {
-        const loadMatch = req.url?.match(
-          /^\/api\/ai\/providers\/([^/]+)\/models\/load$/,
-        );
+        const loadMatch = req.url?.match(/^\/api\/ai\/providers\/([^/]+)\/models\/load$/);
         if (!loadMatch || req.method !== "POST") return next();
 
         try {
@@ -856,14 +850,10 @@ function apiPlugin() {
           const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
 
           if (providerName === "lmstudio") {
-            const { loadLMStudioModel } = await import(
-              "./src/ai/model-discovery.js"
-            );
+            const { loadLMStudioModel } = await import("./src/ai/model-discovery.js");
             await loadLMStudioModel(
               modelKey,
-              (baseUrlOverride as string) ||
-                baseUrlSetting?.value ||
-                "http://localhost:1234/v1",
+              (baseUrlOverride as string) || baseUrlSetting?.value || "http://localhost:1234/v1",
               apiKeySetting?.value,
             );
           }
@@ -871,8 +861,7 @@ function apiPlugin() {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ ok: true }));
         } catch (err: unknown) {
-          const message =
-            err instanceof Error ? err.message : "Failed to load model";
+          const message = err instanceof Error ? err.message : "Failed to load model";
           res.statusCode = 500;
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ error: message }));
@@ -930,17 +919,13 @@ function apiPlugin() {
           // Gather context for new sessions
           const contextBlock = await gatherContext(toolServices);
 
-          const session = svc.chatManager.getOrCreateSession(
-            executor,
-            toolServices,
-            {
-              queries: svc.storage,
-              contextBlock,
-              toolRegistry: svc.toolRegistry,
-              model: modelSetting?.value ?? undefined,
-              providerName: providerSetting.value as string,
-            },
-          );
+          const session = svc.chatManager.getOrCreateSession(executor, toolServices, {
+            queries: svc.storage,
+            contextBlock,
+            toolRegistry: svc.toolRegistry,
+            model: modelSetting?.value ?? undefined,
+            providerName: providerSetting.value as string,
+          });
 
           session.addUserMessage(message);
 

@@ -1,8 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { ToolRegistry } from "../../src/ai/tools/registry.js";
 import { registerAnalyzePatternsTool } from "../../src/ai/tools/builtin/analyze-patterns.js";
-import { registerAnalyzeWorkloadTool, registerCheckOvercommitmentTool } from "../../src/ai/tools/builtin/analyze-workload.js";
-import { registerSmartOrganizeTools, registerCheckDuplicatesTool } from "../../src/ai/tools/builtin/smart-organize.js";
+import {
+  registerAnalyzeWorkloadTool,
+  registerCheckOvercommitmentTool,
+} from "../../src/ai/tools/builtin/analyze-workload.js";
+import {
+  registerSmartOrganizeTools,
+  registerCheckDuplicatesTool,
+} from "../../src/ai/tools/builtin/smart-organize.js";
 import { registerEnergyRecommendationsTool } from "../../src/ai/tools/builtin/energy-recommendations.js";
 import { createDefaultToolRegistry } from "../../src/ai/provider.js";
 import { createTestServices } from "../integration/helpers.js";
@@ -113,9 +119,7 @@ describe("analyze_completion_patterns", () => {
 
     const result = await exec(registry, "analyze_completion_patterns", {}, ctx);
     expect(result.topTags.length).toBeGreaterThanOrEqual(1);
-    const workTag = result.topTags.find(
-      (t: { tag: string }) => t.tag === "work",
-    );
+    const workTag = result.topTags.find((t: { tag: string }) => t.tag === "work");
     expect(workTag).toBeDefined();
     expect(workTag.count).toBe(2);
   });
@@ -125,21 +129,11 @@ describe("analyze_completion_patterns", () => {
     await taskService.complete(task.id);
 
     // With days=0 (effectively) should find nothing — but let's use days=90 and days=1
-    const result90 = await exec(
-      registry,
-      "analyze_completion_patterns",
-      { days: 90 },
-      ctx,
-    );
+    const result90 = await exec(registry, "analyze_completion_patterns", { days: 90 }, ctx);
     expect(result90.totalCompleted).toBe(1);
 
     // days=1 still includes today's completions
-    const result1 = await exec(
-      registry,
-      "analyze_completion_patterns",
-      { days: 1 },
-      ctx,
-    );
+    const result1 = await exec(registry, "analyze_completion_patterns", { days: 1 }, ctx);
     expect(result1.totalCompleted).toBe(1);
     expect(result1.daysAnalyzed).toBe(1);
   });
@@ -204,9 +198,7 @@ describe("analyze_workload", () => {
     });
 
     const result = await exec(registry, "analyze_workload", {}, ctx);
-    const todayBucket = result.days.find(
-      (d: { date: string }) => d.date === today,
-    );
+    const todayBucket = result.days.find((d: { date: string }) => d.date === today);
     expect(todayBucket).toBeDefined();
     expect(todayBucket.taskCount).toBe(1);
     expect(todayBucket.tasks[0].title).toBe("Today task");
@@ -224,9 +216,7 @@ describe("analyze_workload", () => {
     }
 
     const result = await exec(registry, "analyze_workload", {}, ctx);
-    const todayBucket = result.days.find(
-      (d: { date: string }) => d.date === today,
-    );
+    const todayBucket = result.days.find((d: { date: string }) => d.date === today);
     expect(todayBucket.isOverloaded).toBe(true);
   });
 
@@ -317,17 +307,10 @@ describe("suggest_tags", () => {
       tags: [],
     });
 
-    const result = await exec(
-      registry,
-      "suggest_tags",
-      { taskId: target.id },
-      ctx,
-    );
+    const result = await exec(registry, "suggest_tags", { taskId: target.id }, ctx);
     expect(result.taskTitle).toBe("Buy fruits at store");
     expect(result.suggestedTags.length).toBeGreaterThan(0);
-    const tagNames = result.suggestedTags.map(
-      (t: { tag: string }) => t.tag,
-    );
+    const tagNames = result.suggestedTags.map((t: { tag: string }) => t.tag);
     expect(tagNames).toContain("shopping");
   });
 
@@ -341,12 +324,7 @@ describe("suggest_tags", () => {
       tags: [],
     });
 
-    const result = await exec(
-      registry,
-      "suggest_tags",
-      { taskId: target.id },
-      ctx,
-    );
+    const result = await exec(registry, "suggest_tags", { taskId: target.id }, ctx);
     expect(result.suggestedTags).toHaveLength(0);
   });
 
@@ -360,26 +338,14 @@ describe("suggest_tags", () => {
       tags: ["work"],
     });
 
-    const result = await exec(
-      registry,
-      "suggest_tags",
-      { taskId: target.id },
-      ctx,
-    );
-    const tagNames = result.suggestedTags.map(
-      (t: { tag: string }) => t.tag,
-    );
+    const result = await exec(registry, "suggest_tags", { taskId: target.id }, ctx);
+    const tagNames = result.suggestedTags.map((t: { tag: string }) => t.tag);
     expect(tagNames).not.toContain("work");
     expect(result.existingTags).toContain("work");
   });
 
   it("returns error for non-existent task", async () => {
-    const result = await exec(
-      registry,
-      "suggest_tags",
-      { taskId: "nonexistent" },
-      ctx,
-    );
+    const result = await exec(registry, "suggest_tags", { taskId: "nonexistent" }, ctx);
     expect(result.error).toBeDefined();
   });
 });
@@ -436,25 +402,14 @@ describe("find_similar_tasks", () => {
       tags: [],
     });
 
-    const result = await exec(
-      registry,
-      "find_similar_tasks",
-      { taskId: ref.id },
-      ctx,
-    );
+    const result = await exec(registry, "find_similar_tasks", { taskId: ref.id }, ctx);
     expect(result.groups.length).toBeGreaterThanOrEqual(1);
     const similar = result.groups[0].tasks;
-    expect(similar.some((t: { title: string }) => t.title.includes("annual")))
-      .toBe(true);
+    expect(similar.some((t: { title: string }) => t.title.includes("annual"))).toBe(true);
   });
 
   it("returns error for non-existent taskId", async () => {
-    const result = await exec(
-      registry,
-      "find_similar_tasks",
-      { taskId: "nonexistent" },
-      ctx,
-    );
+    const result = await exec(registry, "find_similar_tasks", { taskId: "nonexistent" }, ctx);
     expect(result.error).toBeDefined();
   });
 
@@ -485,12 +440,7 @@ describe("get_energy_recommendations", () => {
   });
 
   it("returns empty recommendations when no tasks", async () => {
-    const result = await exec(
-      registry,
-      "get_energy_recommendations",
-      {},
-      ctx,
-    );
+    const result = await exec(registry, "get_energy_recommendations", {}, ctx);
     expect(result.quickWins).toHaveLength(0);
     expect(result.deepWork).toHaveLength(0);
     expect(result.recommended).toHaveLength(0);
@@ -502,12 +452,7 @@ describe("get_energy_recommendations", () => {
     await taskService.create({ title: "Reply email", tags: [] });
     await taskService.create({ title: "Check messages", tags: [] });
 
-    const result = await exec(
-      registry,
-      "get_energy_recommendations",
-      {},
-      ctx,
-    );
+    const result = await exec(registry, "get_energy_recommendations", {}, ctx);
     expect(result.quickWins.length).toBe(2);
     expect(result.quickWins[0].category).toBe("quick_win");
     expect(result.quickWins[0].estimatedMinutes).toBe(10);
@@ -520,12 +465,7 @@ describe("get_energy_recommendations", () => {
       priority: 1,
     });
 
-    const result = await exec(
-      registry,
-      "get_energy_recommendations",
-      {},
-      ctx,
-    );
+    const result = await exec(registry, "get_energy_recommendations", {}, ctx);
     expect(result.deepWork.length).toBe(1);
     expect(result.deepWork[0].category).toBe("deep_work");
     expect(result.deepWork[0].estimatedMinutes).toBe(45);
@@ -538,12 +478,7 @@ describe("get_energy_recommendations", () => {
       description: "This is a detailed description of what needs to be planned.",
     });
 
-    const result = await exec(
-      registry,
-      "get_energy_recommendations",
-      {},
-      ctx,
-    );
+    const result = await exec(registry, "get_energy_recommendations", {}, ctx);
     expect(result.deepWork.length).toBe(1);
   });
 
@@ -553,12 +488,7 @@ describe("get_energy_recommendations", () => {
       tags: [],
     });
 
-    const result = await exec(
-      registry,
-      "get_energy_recommendations",
-      {},
-      ctx,
-    );
+    const result = await exec(registry, "get_energy_recommendations", {}, ctx);
     expect(result.deepWork.length).toBe(1);
   });
 
@@ -570,12 +500,7 @@ describe("get_energy_recommendations", () => {
       priority: 1,
     });
 
-    const result = await exec(
-      registry,
-      "get_energy_recommendations",
-      { energy_level: "low" },
-      ctx,
-    );
+    const result = await exec(registry, "get_energy_recommendations", { energy_level: "low" }, ctx);
     // Recommended should only contain quick wins
     for (const task of result.recommended) {
       expect(task.category).toBe("quick_win");
@@ -645,12 +570,7 @@ describe("get_energy_recommendations", () => {
       parentId: parent.id,
     });
 
-    const result = await exec(
-      registry,
-      "get_energy_recommendations",
-      {},
-      ctx,
-    );
+    const result = await exec(registry, "get_energy_recommendations", {}, ctx);
     const titles = [
       ...result.quickWins.map((t: { title: string }) => t.title),
       ...result.deepWork.map((t: { title: string }) => t.title),
@@ -669,15 +589,9 @@ describe("get_energy_recommendations", () => {
       parentId: parent.id,
     });
 
-    const result = await exec(
-      registry,
-      "get_energy_recommendations",
-      {},
-      ctx,
-    );
+    const result = await exec(registry, "get_energy_recommendations", {}, ctx);
     // "Ship" has subtasks so it should be deep work despite short title
-    expect(result.deepWork.some((t: { title: string }) => t.title === "Ship"))
-      .toBe(true);
+    expect(result.deepWork.some((t: { title: string }) => t.title === "Ship")).toBe(true);
   });
 });
 
@@ -771,12 +685,7 @@ describe("check_duplicates", () => {
   });
 
   it("handles empty task list", async () => {
-    const result = await exec(
-      registry,
-      "check_duplicates",
-      { title: "Any task title" },
-      ctx,
-    );
+    const result = await exec(registry, "check_duplicates", { title: "Any task title" }, ctx);
     expect(result.duplicatesFound).toBe(false);
     expect(result.matches).toHaveLength(0);
   });
@@ -805,12 +714,7 @@ describe("check_overcommitment", () => {
       dueDate: `${today}T12:00:00.000Z`,
     });
 
-    const result = await exec(
-      registry,
-      "check_overcommitment",
-      { date: today },
-      ctx,
-    );
+    const result = await exec(registry, "check_overcommitment", { date: today }, ctx);
     expect(result.isOverloaded).toBe(false);
     expect(result.taskCount).toBe(1);
     expect(result.suggestion).toBeNull();
@@ -826,12 +730,7 @@ describe("check_overcommitment", () => {
       });
     }
 
-    const result = await exec(
-      registry,
-      "check_overcommitment",
-      { date: today },
-      ctx,
-    );
+    const result = await exec(registry, "check_overcommitment", { date: today }, ctx);
     expect(result.isOverloaded).toBe(true);
     expect(result.taskCount).toBe(6);
     expect(result.suggestion).toBeTruthy();
@@ -849,12 +748,7 @@ describe("check_overcommitment", () => {
       });
     }
 
-    const result = await exec(
-      registry,
-      "check_overcommitment",
-      { date: today },
-      ctx,
-    );
+    const result = await exec(registry, "check_overcommitment", { date: today }, ctx);
     expect(result.isOverloaded).toBe(true);
     expect(result.priorityWeight).toBe(16);
   });
@@ -870,24 +764,14 @@ describe("check_overcommitment", () => {
       dueDate: `${yesterdayStr}T12:00:00.000Z`,
     });
 
-    const result = await exec(
-      registry,
-      "check_overcommitment",
-      {},
-      ctx,
-    );
+    const result = await exec(registry, "check_overcommitment", {}, ctx);
     expect(result.overdue).toBe(1);
   });
 
   it("defaults to today when no date provided", async () => {
     const today = new Date().toISOString().split("T")[0];
 
-    const result = await exec(
-      registry,
-      "check_overcommitment",
-      {},
-      ctx,
-    );
+    const result = await exec(registry, "check_overcommitment", {}, ctx);
     expect(result.date).toBe(today);
   });
 
@@ -901,12 +785,7 @@ describe("check_overcommitment", () => {
       });
     }
 
-    const result = await exec(
-      registry,
-      "check_overcommitment",
-      { date: today },
-      ctx,
-    );
+    const result = await exec(registry, "check_overcommitment", { date: today }, ctx);
     expect(result.suggestion).toMatch(/You have 6 tasks/);
     expect(result.suggestion).toMatch(/Consider/);
   });

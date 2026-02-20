@@ -160,12 +160,9 @@ describe("Chat Persistence", () => {
     const executor = createMockExecutor([]);
     const toolRegistry = createToolRegistry();
     const manager = new ChatManager();
-    const restored = manager.restoreSession(
-      executor,
-      { taskService, projectService },
-      storage,
-      { toolRegistry },
-    );
+    const restored = manager.restoreSession(executor, { taskService, projectService }, storage, {
+      toolRegistry,
+    });
     expect(restored).toBeNull();
   });
 });
@@ -441,7 +438,9 @@ describe("Tool Filtering for Local Providers", () => {
           events: (async function* (): AsyncGenerator<StreamEvent> {
             yield {
               type: "tool_call",
-              data: JSON.stringify([{ id: `call_${callCount}`, name: "query_tasks", arguments: "{}" }]),
+              data: JSON.stringify([
+                { id: `call_${callCount}`, name: "query_tasks", arguments: "{}" },
+              ]),
             };
           })(),
         };

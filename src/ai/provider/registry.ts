@@ -93,7 +93,11 @@ export class LLMProviderRegistry {
   }
 
   /** Get capabilities for a model from its provider's executor. */
-  getCapabilities(providerName: string, modelId: string, config: AIProviderConfig): LLMCapabilities {
+  getCapabilities(
+    providerName: string,
+    modelId: string,
+    config: AIProviderConfig,
+  ): LLMCapabilities {
     const reg = this.providers.get(providerName);
     if (!reg) {
       return { streaming: true, toolCalling: true, vision: false, structuredOutput: false };

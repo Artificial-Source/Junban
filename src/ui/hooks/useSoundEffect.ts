@@ -2,7 +2,10 @@ import { useCallback } from "react";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 import { playSound as playSoundRaw, type SoundEvent } from "../../utils/sounds.js";
 
-const EVENT_SETTING_KEY: Record<SoundEvent, "sound_complete" | "sound_create" | "sound_delete" | "sound_reminder"> = {
+const EVENT_SETTING_KEY: Record<
+  SoundEvent,
+  "sound_complete" | "sound_create" | "sound_delete" | "sound_reminder"
+> = {
   complete: "sound_complete",
   create: "sound_create",
   delete: "sound_delete",

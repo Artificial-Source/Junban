@@ -50,7 +50,12 @@ describe("Tag CRUD tools", () => {
   // ── add_tags_to_task ──
 
   it("adds tags to a task without removing existing ones", async () => {
-    const created = await exec(registry, "create_task", { title: "My task", tags: ["existing"] }, ctx);
+    const created = await exec(
+      registry,
+      "create_task",
+      { title: "My task", tags: ["existing"] },
+      ctx,
+    );
     const taskId = created.task.id;
 
     const result = await exec(registry, "add_tags_to_task", { taskId, tags: ["new-tag"] }, ctx);
@@ -64,7 +69,12 @@ describe("Tag CRUD tools", () => {
     const created = await exec(registry, "create_task", { title: "My task", tags: ["work"] }, ctx);
     const taskId = created.task.id;
 
-    const result = await exec(registry, "add_tags_to_task", { taskId, tags: ["work", "play"] }, ctx);
+    const result = await exec(
+      registry,
+      "add_tags_to_task",
+      { taskId, tags: ["work", "play"] },
+      ctx,
+    );
     expect(result.success).toBe(true);
     expect(result.task.tags).toHaveLength(2);
     expect(result.task.tags).toContain("work");
@@ -72,14 +82,24 @@ describe("Tag CRUD tools", () => {
   });
 
   it("returns error for non-existent task when adding tags", async () => {
-    const result = await exec(registry, "add_tags_to_task", { taskId: "nonexistent", tags: ["tag"] }, ctx);
+    const result = await exec(
+      registry,
+      "add_tags_to_task",
+      { taskId: "nonexistent", tags: ["tag"] },
+      ctx,
+    );
     expect(result.error).toBeDefined();
   });
 
   // ── remove_tags_from_task ──
 
   it("removes specific tags from a task", async () => {
-    const created = await exec(registry, "create_task", { title: "My task", tags: ["a", "b", "c"] }, ctx);
+    const created = await exec(
+      registry,
+      "create_task",
+      { title: "My task", tags: ["a", "b", "c"] },
+      ctx,
+    );
     const taskId = created.task.id;
 
     const result = await exec(registry, "remove_tags_from_task", { taskId, tags: ["b"] }, ctx);
@@ -100,7 +120,12 @@ describe("Tag CRUD tools", () => {
   });
 
   it("returns error for non-existent task when removing tags", async () => {
-    const result = await exec(registry, "remove_tags_from_task", { taskId: "nonexistent", tags: ["tag"] }, ctx);
+    const result = await exec(
+      registry,
+      "remove_tags_from_task",
+      { taskId: "nonexistent", tags: ["tag"] },
+      ctx,
+    );
     expect(result.error).toBeDefined();
   });
 
@@ -108,7 +133,12 @@ describe("Tag CRUD tools", () => {
     const created = await exec(registry, "create_task", { title: "My task", tags: ["keep"] }, ctx);
     const taskId = created.task.id;
 
-    const result = await exec(registry, "remove_tags_from_task", { taskId, tags: ["nonexistent"] }, ctx);
+    const result = await exec(
+      registry,
+      "remove_tags_from_task",
+      { taskId, tags: ["nonexistent"] },
+      ctx,
+    );
     expect(result.success).toBe(true);
     expect(result.task.tags).toContain("keep");
     expect(result.task.tags).toHaveLength(1);

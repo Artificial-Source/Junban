@@ -1,10 +1,4 @@
-export type AIErrorCategory =
-  | "auth"
-  | "rate_limit"
-  | "network"
-  | "server"
-  | "timeout"
-  | "unknown";
+export type AIErrorCategory = "auth" | "rate_limit" | "network" | "server" | "timeout" | "unknown";
 
 export class AIError extends Error {
   readonly category: AIErrorCategory;
@@ -64,11 +58,7 @@ export function classifyProviderError(err: unknown, providerName?: string): AIEr
   }
 
   if (status && status >= 500) {
-    return new AIError(
-      "The AI provider is experiencing issues. Please try again.",
-      "server",
-      true,
-    );
+    return new AIError("The AI provider is experiencing issues. Please try again.", "server", true);
   }
 
   // Network errors (ECONNREFUSED, ENOTFOUND, fetch failures, etc.)
@@ -84,11 +74,15 @@ export function classifyProviderError(err: unknown, providerName?: string): AIEr
 
   if (isNetworkError) {
     const isLocal = providerName === "ollama" || providerName === "lmstudio";
-    const isLocalFromMessage =
-      message.includes("localhost") || message.includes("127.0.0.1");
+    const isLocalFromMessage = message.includes("localhost") || message.includes("127.0.0.1");
 
     if (isLocal || isLocalFromMessage) {
-      const appName = providerName === "ollama" ? "Ollama" : providerName === "lmstudio" ? "LM Studio" : "the local AI app";
+      const appName =
+        providerName === "ollama"
+          ? "Ollama"
+          : providerName === "lmstudio"
+            ? "LM Studio"
+            : "the local AI app";
       const connectionRefused = code === "ECONNREFUSED" || message.includes("ECONNREFUSED");
       if (connectionRefused) {
         return new AIError(

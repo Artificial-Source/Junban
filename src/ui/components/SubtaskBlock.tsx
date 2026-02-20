@@ -95,9 +95,7 @@ export function SubtaskBlock({
             onStartEdit();
           }}
           className={`flex-1 text-sm cursor-text select-none ${
-            task.status === "completed"
-              ? "line-through text-on-surface-muted"
-              : "text-on-surface"
+            task.status === "completed" ? "line-through text-on-surface-muted" : "text-on-surface"
           }`}
         >
           {task.title}

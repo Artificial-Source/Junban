@@ -203,10 +203,7 @@ describe("fetchAvailableModels", () => {
       ok: true,
       json: () =>
         Promise.resolve({
-          data: [
-            { id: "anthropic/claude-sonnet-4-5-20250929" },
-            { id: "openai/gpt-4o" },
-          ],
+          data: [{ id: "anthropic/claude-sonnet-4-5-20250929" }, { id: "openai/gpt-4o" }],
         }),
     });
 
@@ -285,8 +282,8 @@ describe("loadLMStudioModel", () => {
       text: () => Promise.resolve("Model not found"),
     });
 
-    await expect(
-      loadLMStudioModel("nonexistent", "http://localhost:1234/v1"),
-    ).rejects.toThrow("Failed to load model");
+    await expect(loadLMStudioModel("nonexistent", "http://localhost:1234/v1")).rejects.toThrow(
+      "Failed to load model",
+    );
   });
 });

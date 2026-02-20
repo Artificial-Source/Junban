@@ -111,12 +111,16 @@ export function Completed({ tasks, projects, onSelectTask }: CompletedProps) {
                       role={onSelectTask ? "button" : undefined}
                       tabIndex={onSelectTask ? 0 : undefined}
                       onClick={onSelectTask ? () => onSelectTask(task.id) : undefined}
-                      onKeyDown={onSelectTask ? (e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          onSelectTask(task.id);
-                        }
-                      } : undefined}
+                      onKeyDown={
+                        onSelectTask
+                          ? (e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                onSelectTask(task.id);
+                              }
+                            }
+                          : undefined
+                      }
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
                         onSelectTask
                           ? "cursor-pointer hover:bg-surface-secondary hover:ring-1 hover:ring-accent/30"

@@ -94,15 +94,15 @@ All work items for ASF Saydo, organized by area and prioritized within each sect
 | U-23 | TemplateSelector modal | done | S16 | Template picker with variable form |
 | U-24 | Reminder UI + useReminders hook | done | S19 | Polls /api/tasks/reminders/due every 30s |
 | U-25 | Voice settings tab in Settings | done | S21 | Microphone detection, provider selection, 8 tabs total |
-| U-26 | Use datepicker in reminder date input | ready | — | Replace text input with proper datepicker widget. GH #20 |
-| U-27 | Task status updates (revert completed, mark cancelled) | ready | — | Allow reverting completed tasks and marking tasks as cancelled. GH #21 |
-| U-28 | Project emoji/icon customization | ready | — | Add ability to use emojis/icons to represent projects alongside names. GH #23 |
-| U-29 | Clear task selection context menu on page switch | ready | — | Context menu persists across pages even when selected task is not in context. GH #24 |
-| U-30 | SVG app icon | ready | — | Use an SVG icon that can be customized as needed. GH #25 |
-| U-31 | Nord theme | ready | — | Add Nord color scheme (https://www.nordtheme.com/). Dark theme too dark for some users. GH #26 |
-| U-32 | Auto-set today's date when adding task on Today page | ready | — | Tasks added on the Today page should default to today's due date. GH #28 |
-| U-33 | View completed task details | ready | — | Allow clicking completed tasks to view more details. GH #29 |
-| U-34 | Fix task creation error | ready | — | Task creation fails in certain conditions (screenshot in issue). GH #30 |
+| U-26 | Use datepicker in reminder date input | done | S30 | DatePicker with showTime replaces raw datetime-local. GH #20 |
+| U-27 | Task status updates (revert completed, mark cancelled) | done | S30 | Allow reverting completed tasks and marking tasks as cancelled. GH #21 |
+| U-28 | Project emoji/icon customization | done | S31 | Emoji input in Sidebar creation form, icon display in project header. GH #23 |
+| U-29 | Clear task selection context menu on page switch | done | S30 | Context menu cleared on page navigation. GH #24 |
+| U-30 | SVG app icon | done | S31 | SVG logo in sidebar + favicon with PNG fallback. GH #25 |
+| U-31 | Nord theme | done | S30 | Nord color scheme with full Arctic palette. GH #26 |
+| U-32 | Auto-set today's date when adding task on Today page | done | S30 | Tasks on Today page default to today's due date. GH #28 |
+| U-33 | View completed task details | done | S30 | Completed tasks clickable to view details. GH #29 |
+| U-34 | Fix task creation error | done | S30 | Empty title guard in useTaskHandlers. GH #30 |
 
 ## CLI
 
@@ -197,11 +197,12 @@ All work items for ASF Saydo, organized by area and prioritized within each sect
 | A-49 | Inworld AI TTS provider | done | S26 | Cloud TTS via Inworld AI streaming API. Adapter, proxy (NDJSON streaming), model selection (1.5-max/mini), contextual API key UX |
 | A-50 | Contextual API key UX for Voice & AI tabs | done | S26 | API key input appears inline under selected provider with "Set" indicator and help text |
 | A-51 | TTS model selection interface | done | S26 | TTSProviderPlugin.getModels(), model dropdown in Voice settings, Inworld exposes 4 models |
-| A-52 | Auto load/unload LM Studio models with chat | ready | — | Auto-unload LM Studio models when chat is closed, load when opened. GH #18 |
-| A-53 | Voice model management (delete, show sizes) | ready | — | Allow deleting unused Whisper/Kokoro/Piper models, show file sizes, cleanup option. GH #19 |
-| A-54 | Rich interactive task cards in AI chat | ready | — | Show clickable task cards when AI mentions tasks, clicking opens task modal. GH #22 |
-| A-55 | Link task titles in AI chat responses | ready | — | Task titles in LLM responses should be clickable links that open the task detail modal. GH #27 |
-| A-56 | TTS UX improvements (voice preview, audio overlap fix) | ready | — | Play demo sound on voice selection; cancel old TTS audio when new message triggers new response. GH #31 |
+| A-52 | Auto load/unload LM Studio models with chat | done | S31 | Auto-manage toggle in AI settings, load on chat open, unload on close. GH #18 |
+| A-53 | Voice model management (delete, show sizes) | done | S31 | Delete button + size display per model in Voice settings. GH #19 |
+| A-54 | Rich interactive task cards in AI chat | done | S31 | ChatTaskCard component rendered after tool calls. GH #22 |
+| A-55 | Link task titles in AI chat responses | done | S31 | saydo://task/<id> links intercepted in markdown renderer. GH #27 |
+| A-56 | TTS UX improvements (voice preview, audio overlap fix) | done | S30 | Voice preview button + cancellable AudioPlayback handles. GH #31 |
+| A-57 | Smart voice detection for call mode | done | S31 | Grace period buffering in useVAD, smart endpoint toggle + slider in Voice settings. GH #32 |
 
 ## Storage & Data
 

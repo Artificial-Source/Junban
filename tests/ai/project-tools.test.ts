@@ -61,12 +61,7 @@ describe("Project CRUD tools", () => {
   it("lists projects excluding archived by default", async () => {
     await exec(registry, "create_project", { name: "Active" }, ctx);
     const created = await exec(registry, "create_project", { name: "Old" }, ctx);
-    await exec(
-      registry,
-      "update_project",
-      { projectId: created.project.id, archived: true },
-      ctx,
-    );
+    await exec(registry, "update_project", { projectId: created.project.id, archived: true }, ctx);
 
     const result = await exec(registry, "list_projects", {}, ctx);
     expect(result.count).toBe(1);
@@ -76,19 +71,9 @@ describe("Project CRUD tools", () => {
   it("lists projects including archived when requested", async () => {
     await exec(registry, "create_project", { name: "Active" }, ctx);
     const created = await exec(registry, "create_project", { name: "Old" }, ctx);
-    await exec(
-      registry,
-      "update_project",
-      { projectId: created.project.id, archived: true },
-      ctx,
-    );
+    await exec(registry, "update_project", { projectId: created.project.id, archived: true }, ctx);
 
-    const result = await exec(
-      registry,
-      "list_projects",
-      { includeArchived: true },
-      ctx,
-    );
+    const result = await exec(registry, "list_projects", { includeArchived: true }, ctx);
     expect(result.count).toBe(2);
   });
 
@@ -97,12 +82,7 @@ describe("Project CRUD tools", () => {
   it("gets a project by ID", async () => {
     const created = await exec(registry, "create_project", { name: "Lookup" }, ctx);
 
-    const result = await exec(
-      registry,
-      "get_project",
-      { projectId: created.project.id },
-      ctx,
-    );
+    const result = await exec(registry, "get_project", { projectId: created.project.id }, ctx);
     expect(result.project.name).toBe("Lookup");
     expect(result.project.createdAt).toBeDefined();
   });
@@ -116,12 +96,7 @@ describe("Project CRUD tools", () => {
   });
 
   it("returns error for non-existent project", async () => {
-    const result = await exec(
-      registry,
-      "get_project",
-      { projectId: "nonexistent" },
-      ctx,
-    );
+    const result = await exec(registry, "get_project", { projectId: "nonexistent" }, ctx);
     expect(result.error).toBe("Project not found");
   });
 
@@ -186,12 +161,7 @@ describe("Project CRUD tools", () => {
   it("deletes a project", async () => {
     const created = await exec(registry, "create_project", { name: "Doomed" }, ctx);
 
-    const result = await exec(
-      registry,
-      "delete_project",
-      { projectId: created.project.id },
-      ctx,
-    );
+    const result = await exec(registry, "delete_project", { projectId: created.project.id }, ctx);
     expect(result.success).toBe(true);
     expect(result.deleted).toBe(true);
 
@@ -201,12 +171,7 @@ describe("Project CRUD tools", () => {
   });
 
   it("returns deleted=false for non-existent project", async () => {
-    const result = await exec(
-      registry,
-      "delete_project",
-      { projectId: "nonexistent" },
-      ctx,
-    );
+    const result = await exec(registry, "delete_project", { projectId: "nonexistent" }, ctx);
     expect(result.deleted).toBe(false);
   });
 });
@@ -227,12 +192,7 @@ describe("Cross-tool integration (project + task)", () => {
   });
 
   it("creates a project then assigns a task to it", async () => {
-    const project = await exec(
-      registry,
-      "create_project",
-      { name: "Sprint 25" },
-      ctx,
-    );
+    const project = await exec(registry, "create_project", { name: "Sprint 25" }, ctx);
 
     const task = await exec(
       registry,
@@ -250,12 +210,7 @@ describe("Cross-tool integration (project + task)", () => {
   });
 
   it("deleting a project nullifies task projectId", async () => {
-    const project = await exec(
-      registry,
-      "create_project",
-      { name: "Temporary" },
-      ctx,
-    );
+    const project = await exec(registry, "create_project", { name: "Temporary" }, ctx);
     const task = await exec(
       registry,
       "create_task",
@@ -263,12 +218,7 @@ describe("Cross-tool integration (project + task)", () => {
       ctx,
     );
 
-    await exec(
-      registry,
-      "delete_project",
-      { projectId: project.project.id },
-      ctx,
-    );
+    await exec(registry, "delete_project", { projectId: project.project.id }, ctx);
 
     const fetched = await ctx.taskService.get(task.task.id);
     expect(fetched!.projectId).toBeNull();
@@ -281,9 +231,7 @@ describe("Cross-tool integration (project + task)", () => {
     const list = await exec(registry, "list_projects", {}, ctx);
     expect(list.count).toBe(2);
 
-    const betaProject = list.projects.find(
-      (p: { name: string }) => p.name === "Beta",
-    );
+    const betaProject = list.projects.find((p: { name: string }) => p.name === "Beta");
     const task = await exec(
       registry,
       "create_task",
@@ -297,19 +245,9 @@ describe("Cross-tool integration (project + task)", () => {
   });
 
   it("gets a project by name and verifies ID resolution", async () => {
-    const created = await exec(
-      registry,
-      "create_project",
-      { name: "Resolve Me" },
-      ctx,
-    );
+    const created = await exec(registry, "create_project", { name: "Resolve Me" }, ctx);
 
-    const byName = await exec(
-      registry,
-      "get_project",
-      { name: "Resolve Me" },
-      ctx,
-    );
+    const byName = await exec(registry, "get_project", { name: "Resolve Me" }, ctx);
     expect(byName.project.id).toBe(created.project.id);
     expect(byName.project.name).toBe("Resolve Me");
   });

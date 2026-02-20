@@ -70,8 +70,7 @@ export function registerReminderTools(registry: ToolRegistry): void {
           },
           remindAt: {
             type: "string",
-            description:
-              "Reminder time as ISO 8601 datetime (e.g. '2026-02-18T10:00:00.000Z')",
+            description: "Reminder time as ISO 8601 datetime (e.g. '2026-02-18T10:00:00.000Z')",
           },
         },
         required: ["taskId", "remindAt"],
@@ -114,8 +113,7 @@ export function registerReminderTools(registry: ToolRegistry): void {
           },
           minutes: {
             type: "number",
-            description:
-              "Minutes to snooze by. Common values: 15, 30, 60, 120, 1440 (1 day)",
+            description: "Minutes to snooze by. Common values: 15, 30, 60, 120, 1440 (1 day)",
           },
         },
         required: ["taskId", "minutes"],

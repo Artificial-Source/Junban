@@ -56,3 +56,20 @@ export async function loadLMStudioModel(
   await registry.loadModel("lmstudio", modelKey, config);
   return modelKey;
 }
+
+/**
+ * Unload a model from LM Studio.
+ */
+export async function unloadLMStudioModel(
+  modelKey: string,
+  baseUrl: string,
+  apiKey?: string,
+): Promise<void> {
+  const { unloadLMStudioModel: unload } = await import("./provider/adapters/lmstudio.js");
+  const config: AIProviderConfig = {
+    provider: "lmstudio",
+    baseUrl,
+    apiKey,
+  };
+  await unload(modelKey, config);
+}

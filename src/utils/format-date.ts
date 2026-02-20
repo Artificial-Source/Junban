@@ -21,10 +21,7 @@ export function formatTaskDate(
 }
 
 /** Format a time string according to user preferences. */
-export function formatTaskTime(
-  isoDate: string,
-  timeFormat: "12h" | "24h",
-): string {
+export function formatTaskTime(isoDate: string, timeFormat: "12h" | "24h"): string {
   const date = new Date(isoDate);
   if (isNaN(date.getTime())) return "";
 

@@ -14,9 +14,14 @@ import {
 } from "react";
 import { VoiceProviderRegistry } from "../../ai/voice/registry.js";
 import { createDefaultVoiceRegistry } from "../../ai/voice/provider.js";
-import type { STTProviderPlugin, TTSProviderPlugin, TTSModel, Voice } from "../../ai/voice/interface.js";
+import type {
+  STTProviderPlugin,
+  TTSProviderPlugin,
+  TTSModel,
+  Voice,
+} from "../../ai/voice/interface.js";
 import { BrowserTTSProvider } from "../../ai/voice/adapters/browser-tts.js";
-import { playAudioBuffer, type AudioPlayback } from "../../ai/voice/audio-utils.js";
+import { playAudioBuffer } from "../../ai/voice/audio-utils.js";
 
 export type VoiceMode = "off" | "push-to-talk" | "vad";
 
@@ -31,6 +36,8 @@ export interface VoiceSettings {
   groqApiKey: string;
   inworldApiKey: string;
   microphoneId: string;
+  smartEndpoint: boolean;
+  gracePeriodMs: number;
 }
 
 const DEFAULT_SETTINGS: VoiceSettings = {
@@ -44,6 +51,8 @@ const DEFAULT_SETTINGS: VoiceSettings = {
   groqApiKey: "",
   inworldApiKey: "",
   microphoneId: "",
+  smartEndpoint: false,
+  gracePeriodMs: 1500,
 };
 
 const STORAGE_KEY = "saydo-voice-settings";
@@ -106,10 +115,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    setRegistry(createDefaultVoiceRegistry({
-      groqApiKey: settings.groqApiKey || undefined,
-      inworldApiKey: settings.inworldApiKey || undefined,
-    }));
+    setRegistry(
+      createDefaultVoiceRegistry({
+        groqApiKey: settings.groqApiKey || undefined,
+        inworldApiKey: settings.inworldApiKey || undefined,
+      }),
+    );
   }, [settings.groqApiKey, settings.inworldApiKey]);
 
   const sttProvider = registry.getSTT(settings.sttProviderId);
@@ -118,7 +129,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // Fetch TTS voices when provider changes
   useEffect(() => {
     if (ttsProvider?.getVoices) {
-      ttsProvider.getVoices().then(setTTSVoices).catch(() => setTTSVoices([]));
+      ttsProvider
+        .getVoices()
+        .then(setTTSVoices)
+        .catch(() => setTTSVoices([]));
     } else {
       setTTSVoices([]);
     }
@@ -127,7 +141,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // Fetch TTS models when provider changes
   useEffect(() => {
     if (ttsProvider?.getModels) {
-      ttsProvider.getModels().then(setTTSModels).catch(() => setTTSModels([]));
+      ttsProvider
+        .getModels()
+        .then(setTTSModels)
+        .catch(() => setTTSModels([]));
     } else {
       setTTSModels([]);
     }
@@ -165,7 +182,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   const speak = useCallback(
     async (text: string) => {
-      console.log("[VoiceCall:TTS] speak() called — provider:", ttsProvider?.id, "enabled:", settings.ttsEnabled, "textLen:", text.length);
+      console.log(
+        "[VoiceCall:TTS] speak() called — provider:",
+        ttsProvider?.id,
+        "enabled:",
+        settings.ttsEnabled,
+        "textLen:",
+        text.length,
+      );
       if (!ttsProvider || !settings.ttsEnabled) {
         console.log("[VoiceCall:TTS] speak() SKIPPED — no provider or TTS disabled");
         return;
@@ -183,11 +207,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       try {
         // Strip markdown formatting for cleaner speech
         const clean = text
-          .replace(/```[\s\S]*?```/g, "")  // remove code blocks
-          .replace(/`[^`]+`/g, "")          // remove inline code
-          .replace(/[#*_~>|[\]()-]/g, "")   // remove markdown punctuation
-          .replace(/\n{2,}/g, ". ")         // paragraph breaks → pauses
-          .replace(/\n/g, " ")              // single newlines → spaces
+          .replace(/```[\s\S]*?```/g, "") // remove code blocks
+          .replace(/`[^`]+`/g, "") // remove inline code
+          .replace(/[#*_~>|[\]()-]/g, "") // remove markdown punctuation
+          .replace(/\n{2,}/g, ". ") // paragraph breaks → pauses
+          .replace(/\n/g, " ") // single newlines → spaces
           .trim();
         if (!clean) {
           console.log("[VoiceCall:TTS] speak() SKIPPED — cleaned text is empty");
@@ -197,7 +221,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
         const maxLen = isBrowserTTS ? 5000 : 2000;
         const truncated = clean.length > maxLen ? clean.slice(0, maxLen) + "..." : clean;
-        console.log("[VoiceCall:TTS] speaking:", truncated.slice(0, 80) + (truncated.length > 80 ? "..." : ""));
+        console.log(
+          "[VoiceCall:TTS] speaking:",
+          truncated.slice(0, 80) + (truncated.length > 80 ? "..." : ""),
+        );
 
         if (ttsProvider instanceof BrowserTTSProvider) {
           await ttsProvider.speakDirect(truncated, { voice: settings.ttsVoice || undefined });

@@ -108,7 +108,9 @@ describe("PiperLocalTTSProvider", () => {
   });
 
   it("checkCached returns true when OPFS has onnx files", async () => {
-    const mockKeys = (async function* () { yield "en_US-hfc_female-medium.onnx"; })();
+    const mockKeys = (async function* () {
+      yield "en_US-hfc_female-medium.onnx";
+    })();
     const mockDir = { keys: () => mockKeys };
     const mockRoot = { getDirectoryHandle: vi.fn().mockResolvedValue(mockDir) };
     vi.stubGlobal("navigator", {

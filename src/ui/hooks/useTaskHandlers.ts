@@ -4,13 +4,7 @@ import { useSoundEffect } from "./useSoundEffect.js";
 import { api } from "../api/index.js";
 
 export function useTaskHandlers(selectedProjectId: string | null) {
-  const {
-    state,
-    createTask,
-    updateTask,
-    completeTask,
-    deleteTask,
-  } = useTaskContext();
+  const { state, createTask, updateTask, completeTask, deleteTask } = useTaskContext();
   const playSound = useSoundEffect();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
@@ -59,25 +53,31 @@ export function useTaskHandlers(selectedProjectId: string | null) {
     setSelectedTaskId(null);
   };
 
-  const handleUpdateDueDate = useCallback(async (taskId: string, dueDate: string | null) => {
-    if (dueDate) {
-      await updateTask(taskId, { dueDate: new Date(dueDate).toISOString(), dueTime: false });
-    } else {
-      await updateTask(taskId, { dueDate: null, dueTime: false });
-    }
-  }, [updateTask]);
+  const handleUpdateDueDate = useCallback(
+    async (taskId: string, dueDate: string | null) => {
+      if (dueDate) {
+        await updateTask(taskId, { dueDate: new Date(dueDate).toISOString(), dueTime: false });
+      } else {
+        await updateTask(taskId, { dueDate: null, dueTime: false });
+      }
+    },
+    [updateTask],
+  );
 
-  const handleAddSubtask = useCallback(async (parentId: string, title: string) => {
-    await createTask({
-      title,
-      priority: null,
-      dueDate: null,
-      dueTime: false,
-      tags: [],
-      projectId: selectedProjectId,
-      parentId,
-    } as any);
-  }, [createTask, selectedProjectId]);
+  const handleAddSubtask = useCallback(
+    async (parentId: string, title: string) => {
+      await createTask({
+        title,
+        priority: null,
+        dueDate: null,
+        dueTime: false,
+        tags: [],
+        projectId: selectedProjectId,
+        parentId,
+      } as any);
+    },
+    [createTask, selectedProjectId],
+  );
 
   const handleIndent = useCallback(async (id: string) => {
     try {

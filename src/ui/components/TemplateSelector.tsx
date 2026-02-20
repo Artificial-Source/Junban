@@ -20,7 +20,10 @@ export function TemplateSelector({ open, onClose, onTaskCreated }: TemplateSelec
 
   useEffect(() => {
     if (open) {
-      api.listTemplates().then(setTemplates).catch((err) => logger.error("Failed to load templates", { error: String(err) }));
+      api
+        .listTemplates()
+        .then(setTemplates)
+        .catch((err) => logger.error("Failed to load templates", { error: String(err) }));
       setSelected(null);
       setVariables({});
     }

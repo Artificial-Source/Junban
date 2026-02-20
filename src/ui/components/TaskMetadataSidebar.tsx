@@ -1,5 +1,15 @@
 import { useState, useCallback } from "react";
-import { Calendar, Tag, Bell, Repeat, Trash2, X, Circle, CheckCircle2, XCircle } from "lucide-react";
+import {
+  Calendar,
+  Tag,
+  Bell,
+  Repeat,
+  Trash2,
+  X,
+  Circle,
+  CheckCircle2,
+  XCircle,
+} from "lucide-react";
 import type { Task, UpdateTaskInput } from "../../core/types.js";
 import { DatePicker } from "./DatePicker.js";
 import { TagsInput } from "./TagsInput.js";
@@ -147,9 +157,11 @@ export function TaskMetadataSidebar({
           onClick={() => setShowDatePicker((prev) => !prev)}
           className="mt-1.5 w-full px-2 py-1.5 text-sm text-left rounded-md text-on-surface hover:bg-surface-tertiary transition-colors"
         >
-          {task.dueDate
-            ? new Date(task.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })
-            : <span className="text-on-surface-muted">No date</span>}
+          {task.dueDate ? (
+            new Date(task.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+          ) : (
+            <span className="text-on-surface-muted">No date</span>
+          )}
         </button>
         {task.dueDate && (
           <button
@@ -221,9 +233,16 @@ export function TaskMetadataSidebar({
           onClick={() => setShowRemindAtPicker((prev) => !prev)}
           className="mt-1.5 w-full px-2 py-1.5 text-sm text-left rounded-md text-on-surface hover:bg-surface-tertiary transition-colors"
         >
-          {currentRemindAt
-            ? new Date(currentRemindAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
-            : <span className="text-on-surface-muted">No reminder</span>}
+          {currentRemindAt ? (
+            new Date(currentRemindAt).toLocaleString(undefined, {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+            })
+          ) : (
+            <span className="text-on-surface-muted">No reminder</span>
+          )}
         </button>
         {currentRemindAt && (
           <button
@@ -254,9 +273,11 @@ export function TaskMetadataSidebar({
           onClick={() => setShowRecurrencePicker((prev) => !prev)}
           className="mt-1.5 w-full px-2 py-1.5 text-sm text-left rounded-md text-on-surface hover:bg-surface-tertiary transition-colors"
         >
-          {task.recurrence
-            ? formatRecurrenceLabel(task.recurrence)
-            : <span className="text-on-surface-muted">No repeat</span>}
+          {task.recurrence ? (
+            formatRecurrenceLabel(task.recurrence)
+          ) : (
+            <span className="text-on-surface-muted">No repeat</span>
+          )}
         </button>
         {task.recurrence && (
           <button

@@ -41,7 +41,13 @@ describe("AppearanceTab", () => {
     (api.getAppSetting as any).mockResolvedValue(null);
     document.documentElement.style.removeProperty("--color-accent");
     document.documentElement.style.removeProperty("--color-accent-hover");
-    document.documentElement.classList.remove("density-compact", "density-comfortable", "font-small", "font-large", "reduce-motion");
+    document.documentElement.classList.remove(
+      "density-compact",
+      "density-comfortable",
+      "font-small",
+      "font-large",
+      "reduce-motion",
+    );
   });
 
   it("renders all 3 sections", async () => {

@@ -55,7 +55,6 @@ export class WhisperLocalSTTProvider implements STTProviderPlugin {
   async checkCached(): Promise<boolean> {
     if (typeof caches === "undefined") return false;
     try {
-      // Search all caches — transformers.js cache name may vary by version
       const names = await caches.keys();
       for (const name of names) {
         const cache = await caches.open(name);
@@ -66,6 +65,52 @@ export class WhisperLocalSTTProvider implements STTProviderPlugin {
     } catch {
       return false;
     }
+  }
+
+  /** Delete cached model files from Cache Storage. */
+  async deleteModel(): Promise<void> {
+    if (typeof caches === "undefined") return;
+    const names = await caches.keys();
+    for (const name of names) {
+      const cache = await caches.open(name);
+      const keys = await cache.keys();
+      for (const req of keys) {
+        if (req.url.includes(this.modelId)) {
+          await cache.delete(req);
+        }
+      }
+    }
+    // Reset provider state
+    this.pipelineInstance = null;
+    this.loadPromise = null;
+    this.status = "idle";
+    this.progress = 0;
+    this.onStatusChange?.("idle", 0);
+  }
+
+  /** Get the total size of cached model files in bytes. */
+  async getModelSize(): Promise<number> {
+    if (typeof caches === "undefined") return 0;
+    let totalSize = 0;
+    const names = await caches.keys();
+    for (const name of names) {
+      const cache = await caches.open(name);
+      const keys = await cache.keys();
+      for (const req of keys) {
+        if (req.url.includes(this.modelId)) {
+          try {
+            const response = await cache.match(req);
+            if (response) {
+              const blob = await response.blob();
+              totalSize += blob.size;
+            }
+          } catch {
+            /* skip unreadable entries */
+          }
+        }
+      }
+    }
+    return totalSize;
   }
 
   private async ensureModel(): Promise<void> {
@@ -85,20 +130,16 @@ export class WhisperLocalSTTProvider implements STTProviderPlugin {
 
     try {
       const { pipeline } = await import("@huggingface/transformers");
-      this.pipelineInstance = await pipeline(
-        "automatic-speech-recognition",
-        this.modelId,
-        {
-          dtype: "q4",
-          device: "wasm",
-          progress_callback: (event: any) => {
-            if (event.status === "progress" && typeof event.progress === "number") {
-              this.progress = Math.round(event.progress);
-              this.onStatusChange?.("loading", this.progress);
-            }
-          },
+      this.pipelineInstance = await pipeline("automatic-speech-recognition", this.modelId, {
+        dtype: "q4",
+        device: "wasm",
+        progress_callback: (event: any) => {
+          if (event.status === "progress" && typeof event.progress === "number") {
+            this.progress = Math.round(event.progress);
+            this.onStatusChange?.("loading", this.progress);
+          }
         },
-      );
+      });
       this.status = "ready";
       this.progress = 100;
       this.onStatusChange?.("ready", 100);

@@ -98,7 +98,7 @@ export function TaskPage({
 
   // Breadcrumb label
   const projectName = task.projectId
-    ? projects.find((p) => p.id === task.projectId)?.name ?? "Project"
+    ? (projects.find((p) => p.id === task.projectId)?.name ?? "Project")
     : "Inbox";
 
   return (

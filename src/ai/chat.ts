@@ -73,7 +73,11 @@ export class ChatSession {
     this.model = options.model ?? "default";
     this.providerName = options.providerName ?? "unknown";
     this.messages.push(systemMessage);
-    logger.info("Chat session created", { sessionId: this.sessionId, provider: this.providerName, model: this.model });
+    logger.info("Chat session created", {
+      sessionId: this.sessionId,
+      provider: this.providerName,
+      model: this.model,
+    });
   }
 
   addUserMessage(content: string): void {
@@ -90,9 +94,7 @@ export class ChatSession {
   async *run(): AsyncIterable<StreamEvent> {
     const isLocal = this.providerName === "ollama" || this.providerName === "lmstudio";
     const allTools = this.toolRegistry.getDefinitions();
-    const tools = isLocal
-      ? allTools.filter((t) => LOCAL_PROVIDER_TOOLS.has(t.name))
-      : allTools;
+    const tools = isLocal ? allTools.filter((t) => LOCAL_PROVIDER_TOOLS.has(t.name)) : allTools;
     let maxIterations = 10;
     let lastToolSignature = "";
 
@@ -157,7 +159,11 @@ export class ChatSession {
           this.persistMessage(partialMsg);
         }
         const aiError = classifyProviderError(err);
-        logger.error("Provider error", { sessionId: this.sessionId, category: aiError.category, retryable: aiError.retryable });
+        logger.error("Provider error", {
+          sessionId: this.sessionId,
+          category: aiError.category,
+          retryable: aiError.retryable,
+        });
         const errorData: StreamErrorData = {
           message: aiError.message,
           category: aiError.category,
@@ -169,10 +175,16 @@ export class ChatSession {
       }
 
       if (toolCalls && toolCalls.length > 0) {
-        logger.debug("Tool calls received", { sessionId: this.sessionId, tools: toolCalls.map(tc => tc.name) });
+        logger.debug("Tool calls received", {
+          sessionId: this.sessionId,
+          tools: toolCalls.map((tc) => tc.name),
+        });
 
         // Detect hallucination loop: same tool calls repeated back-to-back
-        const signature = toolCalls.map(tc => `${tc.name}:${tc.arguments}`).sort().join("|");
+        const signature = toolCalls
+          .map((tc) => `${tc.name}:${tc.arguments}`)
+          .sort()
+          .join("|");
         if (signature === lastToolSignature) {
           logger.warn("Duplicate tool call loop detected, breaking", { sessionId: this.sessionId });
           const msg: ChatMessage = { role: "assistant", content: fullContent || "Done." };
@@ -212,7 +224,11 @@ export class ChatSession {
           this.persistMessage(toolMsg);
         } catch (err: unknown) {
           const errorMsg = err instanceof Error ? err.message : String(err);
-          logger.warn("Tool execution failed", { sessionId: this.sessionId, tool: tc.name, error: errorMsg });
+          logger.warn("Tool execution failed", {
+            sessionId: this.sessionId,
+            tool: tc.name,
+            error: errorMsg,
+          });
           const errorResult = JSON.stringify({ error: errorMsg });
 
           yield { type: "tool_result", data: JSON.stringify({ tool: tc.name, error: errorMsg }) };
@@ -265,7 +281,11 @@ export class ChatManager {
   ): ChatSession {
     if (!this.session) {
       logger.info("Creating chat session");
-      const systemMessage = this.buildSystemMessage(services, options.contextBlock, options.providerName);
+      const systemMessage = this.buildSystemMessage(
+        services,
+        options.contextBlock,
+        options.providerName,
+      );
       this.session = new ChatSession(executor, services, systemMessage, options);
     }
     return this.session;
@@ -337,7 +357,10 @@ export class ChatManager {
     }
 
     this.session = session;
-    logger.info("Chat session restored", { sessionId: latest.sessionId, messageCount: rows.length });
+    logger.info("Chat session restored", {
+      sessionId: latest.sessionId,
+      messageCount: rows.length,
+    });
     return session;
   }
 
@@ -360,7 +383,12 @@ export class ChatManager {
     return { role: "system", content };
   }
 
-  private buildFullPrompt(dateStr: string, timeStr: string, isoDate: string, contextBlock: string): string {
+  private buildFullPrompt(
+    dateStr: string,
+    timeStr: string,
+    isoDate: string,
+    contextBlock: string,
+  ): string {
     return `You are Saydo's AI assistant — a task manager that helps users stay organized.
 
 Current date/time: ${dateStr}, ${timeStr} (${isoDate})
@@ -419,10 +447,16 @@ ${contextBlock ? contextBlock + "\n" : ""}## Task Tools
 - Use ISO 8601 for all tool date arguments.
 - After creating a task, call check_duplicates to warn about potential duplicates.
 - When setting a due date, call check_overcommitment to warn about overloaded days.
-- When asked to "break down" or "split" a task, use break_down_task.`;
+- When asked to "break down" or "split" a task, use break_down_task.
+- When referencing tasks in your response, link them using this format: [Task Title](saydo://task/<taskId>). This makes tasks clickable in the UI.`;
   }
 
-  private buildCompactPrompt(dateStr: string, timeStr: string, isoDate: string, contextBlock: string): string {
+  private buildCompactPrompt(
+    dateStr: string,
+    timeStr: string,
+    isoDate: string,
+    contextBlock: string,
+  ): string {
     return `You are Saydo, a task manager assistant.
 Date: ${dateStr}, ${timeStr} (${isoDate}). Use for relative date resolution.
 
@@ -439,7 +473,10 @@ ${contextBlock ? "\n" + contextBlock : ""}`;
  * Gather live context from services for the system message.
  * Must be called async before building the system message.
  */
-export async function gatherContext(services: ToolContext, options?: { compact?: boolean; voiceCall?: boolean }): Promise<string> {
+export async function gatherContext(
+  services: ToolContext,
+  options?: { compact?: boolean; voiceCall?: boolean },
+): Promise<string> {
   const { taskService, projectService } = services;
   const todayISO = new Date().toISOString().split("T")[0];
   const compact = options?.compact ?? false;
@@ -506,9 +543,7 @@ You are in a live voice call with the user. Follow these rules:
   // Tags and scheduling insights for analytical tools
   const untagged = pending.filter((t) => t.tags.length === 0);
   if (untagged.length > 0) {
-    lines.push(
-      `- Tasks without tags: ${untagged.length} (try asking me to organize them)`,
-    );
+    lines.push(`- Tasks without tags: ${untagged.length} (try asking me to organize them)`);
   }
 
   const unscheduled = pending.filter((t) => !t.dueDate);

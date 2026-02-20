@@ -239,12 +239,9 @@ export function useRouting() {
     [applyRouteState, pluginStoreSearchQuery, focusModeOpen],
   );
 
-  const openSettingsTab = useCallback(
-    (tab: SettingsTab) => {
-      setSettingsTab(tab);
-    },
-    [],
-  );
+  const openSettingsTab = useCallback((tab: SettingsTab) => {
+    setSettingsTab(tab);
+  }, []);
 
   return {
     currentView,

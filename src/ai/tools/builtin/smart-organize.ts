@@ -7,21 +7,104 @@ import type { ToolRegistry } from "../registry.js";
 import type { Task } from "../../../core/types.js";
 
 const STOP_WORDS = new Set([
-  "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-  "have", "has", "had", "do", "does", "did", "will", "would", "shall",
-  "should", "may", "might", "must", "can", "could", "to", "of", "in",
-  "for", "on", "with", "at", "by", "from", "as", "into", "through",
-  "during", "before", "after", "above", "below", "between", "out", "off",
-  "up", "down", "and", "but", "or", "nor", "not", "so", "yet", "both",
-  "either", "neither", "each", "every", "all", "any", "few", "more",
-  "most", "other", "some", "such", "no", "only", "own", "same", "than",
-  "too", "very", "just", "about", "it", "its", "my", "me", "i",
-  "this", "that", "these", "those", "he", "she", "they", "we", "you",
+  "a",
+  "an",
+  "the",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "shall",
+  "should",
+  "may",
+  "might",
+  "must",
+  "can",
+  "could",
+  "to",
+  "of",
+  "in",
+  "for",
+  "on",
+  "with",
+  "at",
+  "by",
+  "from",
+  "as",
+  "into",
+  "through",
+  "during",
+  "before",
+  "after",
+  "above",
+  "below",
+  "between",
+  "out",
+  "off",
+  "up",
+  "down",
+  "and",
+  "but",
+  "or",
+  "nor",
+  "not",
+  "so",
+  "yet",
+  "both",
+  "either",
+  "neither",
+  "each",
+  "every",
+  "all",
+  "any",
+  "few",
+  "more",
+  "most",
+  "other",
+  "some",
+  "such",
+  "no",
+  "only",
+  "own",
+  "same",
+  "than",
+  "too",
+  "very",
+  "just",
+  "about",
+  "it",
+  "its",
+  "my",
+  "me",
+  "i",
+  "this",
+  "that",
+  "these",
+  "those",
+  "he",
+  "she",
+  "they",
+  "we",
+  "you",
 ]);
 
 /** Extract meaningful keywords from text. */
 function tokenize(text: string): Set<string> {
-  const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/);
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/);
   return new Set(words.filter((w) => w.length > 1 && !STOP_WORDS.has(w)));
 }
 
@@ -144,8 +227,7 @@ export function registerSmartOrganizeTools(registry: ToolRegistry): void {
           },
           taskId: {
             type: "string",
-            description:
-              "Task ID to find similar tasks for (alternative to search)",
+            description: "Task ID to find similar tasks for (alternative to search)",
           },
         },
       },
@@ -194,10 +276,9 @@ export function registerSmartOrganizeTools(registry: ToolRegistry): void {
               {
                 reference: referenceText,
                 tasks: similar.slice(0, 10),
-                suggestedAction:
-                  similar.some((t) => t.similarity > 0.7)
-                    ? "These tasks look like duplicates — consider merging or deleting extras."
-                    : "These tasks are related — consider grouping under a project or parent task.",
+                suggestedAction: similar.some((t) => t.similarity > 0.7)
+                  ? "These tasks look like duplicates — consider merging or deleting extras."
+                  : "These tasks are related — consider grouping under a project or parent task.",
               },
             ]
           : [];
@@ -305,8 +386,7 @@ function findAllSimilarGroups(tasks: Task[]): {
       visited.add(tokenized[i].task.id);
       groups.push({
         tasks: cluster,
-        suggestedAction:
-          "These tasks look similar — consider merging or deleting duplicates.",
+        suggestedAction: "These tasks look similar — consider merging or deleting duplicates.",
       });
     }
   }

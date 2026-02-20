@@ -36,7 +36,10 @@ function TestConsumer() {
       <button data-testid="set-font-size" onClick={() => updateSetting("font_size", "large")}>
         Set font size
       </button>
-      <button data-testid="set-reduce-animations" onClick={() => updateSetting("reduce_animations", "true")}>
+      <button
+        data-testid="set-reduce-animations"
+        onClick={() => updateSetting("reduce_animations", "true")}
+      >
         Set reduce animations
       </button>
     </div>
@@ -49,7 +52,13 @@ describe("SettingsContext", () => {
     // Reset document element state
     document.documentElement.style.removeProperty("--color-accent");
     document.documentElement.style.removeProperty("--color-accent-hover");
-    document.documentElement.classList.remove("density-compact", "density-comfortable", "font-small", "font-large", "reduce-motion");
+    document.documentElement.classList.remove(
+      "density-compact",
+      "density-comfortable",
+      "font-small",
+      "font-large",
+      "reduce-motion",
+    );
   });
 
   it("provides default settings when none are stored", async () => {

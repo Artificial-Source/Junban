@@ -42,15 +42,65 @@ interface TabMeta {
 }
 
 const TABS: TabMeta[] = [
-  { id: "general", label: "General", icon: <SlidersHorizontal className="w-4 h-4" />, mobileIcon: <SlidersHorizontal className="w-5 h-5" /> },
-  { id: "appearance", label: "Appearance", subtitle: "Theme & layout", icon: <Palette className="w-4 h-4" />, mobileIcon: <Palette className="w-5 h-5" /> },
-  { id: "ai", label: "AI Assistant", subtitle: "Models & providers", icon: <Bot className="w-4 h-4" />, mobileIcon: <Bot className="w-5 h-5" /> },
-  { id: "voice", label: "Voice", subtitle: "Speech & microphone", icon: <Mic className="w-4 h-4" />, mobileIcon: <Mic className="w-5 h-5" /> },
-  { id: "plugins", label: "Plugins", icon: <Puzzle className="w-4 h-4" />, mobileIcon: <Puzzle className="w-5 h-5" /> },
-  { id: "templates", label: "Templates", icon: <FileText className="w-4 h-4" />, mobileIcon: <FileText className="w-5 h-5" /> },
-  { id: "keyboard", label: "Keyboard", subtitle: "Shortcuts", icon: <Keyboard className="w-4 h-4" />, mobileIcon: <Keyboard className="w-5 h-5" /> },
-  { id: "data", label: "Data", subtitle: "Import & export", icon: <Database className="w-4 h-4" />, mobileIcon: <Database className="w-5 h-5" /> },
-  { id: "about", label: "About", icon: <Info className="w-4 h-4" />, mobileIcon: <Info className="w-5 h-5" /> },
+  {
+    id: "general",
+    label: "General",
+    icon: <SlidersHorizontal className="w-4 h-4" />,
+    mobileIcon: <SlidersHorizontal className="w-5 h-5" />,
+  },
+  {
+    id: "appearance",
+    label: "Appearance",
+    subtitle: "Theme & layout",
+    icon: <Palette className="w-4 h-4" />,
+    mobileIcon: <Palette className="w-5 h-5" />,
+  },
+  {
+    id: "ai",
+    label: "AI Assistant",
+    subtitle: "Models & providers",
+    icon: <Bot className="w-4 h-4" />,
+    mobileIcon: <Bot className="w-5 h-5" />,
+  },
+  {
+    id: "voice",
+    label: "Voice",
+    subtitle: "Speech & microphone",
+    icon: <Mic className="w-4 h-4" />,
+    mobileIcon: <Mic className="w-5 h-5" />,
+  },
+  {
+    id: "plugins",
+    label: "Plugins",
+    icon: <Puzzle className="w-4 h-4" />,
+    mobileIcon: <Puzzle className="w-5 h-5" />,
+  },
+  {
+    id: "templates",
+    label: "Templates",
+    icon: <FileText className="w-4 h-4" />,
+    mobileIcon: <FileText className="w-5 h-5" />,
+  },
+  {
+    id: "keyboard",
+    label: "Keyboard",
+    subtitle: "Shortcuts",
+    icon: <Keyboard className="w-4 h-4" />,
+    mobileIcon: <Keyboard className="w-5 h-5" />,
+  },
+  {
+    id: "data",
+    label: "Data",
+    subtitle: "Import & export",
+    icon: <Database className="w-4 h-4" />,
+    mobileIcon: <Database className="w-5 h-5" />,
+  },
+  {
+    id: "about",
+    label: "About",
+    icon: <Info className="w-4 h-4" />,
+    mobileIcon: <Info className="w-5 h-5" />,
+  },
 ];
 
 // Sections for the mobile index page
@@ -63,19 +113,32 @@ const MOBILE_SECTIONS: { label: string; tabs: SettingsTab[] }[] = [
 
 function renderTabContent(tab: SettingsTab) {
   switch (tab) {
-    case "general": return <GeneralTab />;
-    case "appearance": return <AppearanceTab />;
-    case "ai": return <AITab />;
-    case "voice": return <VoiceTab />;
-    case "plugins": return <PluginsTab />;
-    case "templates": return <TemplatesTab />;
-    case "keyboard": return <KeyboardTab />;
-    case "data": return <DataTab />;
-    case "about": return <AboutTab />;
+    case "general":
+      return <GeneralTab />;
+    case "appearance":
+      return <AppearanceTab />;
+    case "ai":
+      return <AITab />;
+    case "voice":
+      return <VoiceTab />;
+    case "plugins":
+      return <PluginsTab />;
+    case "templates":
+      return <TemplatesTab />;
+    case "keyboard":
+      return <KeyboardTab />;
+    case "data":
+      return <DataTab />;
+    case "about":
+      return <AboutTab />;
   }
 }
 
-export function Settings({ activeTab: controlledActiveTab, onActiveTabChange, onClose }: SettingsProps) {
+export function Settings({
+  activeTab: controlledActiveTab,
+  onActiveTabChange,
+  onClose,
+}: SettingsProps) {
   const isMobile = useIsMobile();
   const [internalActiveTab, setInternalActiveTab] = useState<SettingsTab>("general");
   // null = show the mobile index page; a tab id = show that tab's content
@@ -147,9 +210,7 @@ export function Settings({ activeTab: controlledActiveTab, onActiveTabChange, on
             </button>
             <h2 className="text-lg font-bold text-on-surface">{tabMeta?.label ?? "Settings"}</h2>
           </div>
-          <div className="flex-1 overflow-y-auto p-4">
-            {renderTabContent(mobileSelectedTab)}
-          </div>
+          <div className="flex-1 overflow-y-auto p-4">{renderTabContent(mobileSelectedTab)}</div>
         </div>
       );
     }
@@ -186,9 +247,13 @@ export function Settings({ activeTab: controlledActiveTab, onActiveTabChange, on
                         {tab.mobileIcon}
                       </span>
                       <div className="flex-1 min-w-0">
-                        <span className="text-sm font-medium text-on-surface block">{tab.label}</span>
+                        <span className="text-sm font-medium text-on-surface block">
+                          {tab.label}
+                        </span>
                         {tab.subtitle && (
-                          <span className="text-xs text-on-surface-muted block mt-0.5">{tab.subtitle}</span>
+                          <span className="text-xs text-on-surface-muted block mt-0.5">
+                            {tab.subtitle}
+                          </span>
                         )}
                       </div>
                       <ChevronRight className="w-4 h-4 text-on-surface-muted flex-shrink-0" />
@@ -248,9 +313,7 @@ export function Settings({ activeTab: controlledActiveTab, onActiveTabChange, on
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-6">
-            {renderTabContent(activeTab)}
-          </div>
+          <div className="flex-1 overflow-y-auto p-6">{renderTabContent(activeTab)}</div>
         </div>
       </div>
     </div>

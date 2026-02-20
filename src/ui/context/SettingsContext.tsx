@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useContext,
-  useState,
-  useCallback,
-  useEffect,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import { api } from "../api/index.js";
 
 export interface GeneralSettings {
@@ -150,7 +143,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       .catch(() => {
         if (mounted) setLoaded(true);
       });
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const updateSetting = useCallback(
@@ -160,7 +155,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (key === "accent_color") applyAccentColor(value as string);
         if (key === "density") applyDensity(value as GeneralSettings["density"]);
         if (key === "font_size") applyFontSize(value as GeneralSettings["font_size"]);
-        if (key === "reduce_animations") applyReduceAnimations(value as GeneralSettings["reduce_animations"]);
+        if (key === "reduce_animations")
+          applyReduceAnimations(value as GeneralSettings["reduce_animations"]);
         return next;
       });
       api.setAppSetting(key, String(value)).catch(() => {});

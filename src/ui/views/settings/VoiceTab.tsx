@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
-import { Mic, RefreshCw, AlertCircle, CheckCircle2, Download, Loader2, Play } from "lucide-react";
+import {
+  Mic,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  Download,
+  Loader2,
+  Play,
+  Trash2,
+} from "lucide-react";
 import { useVoiceContext, type VoiceMode, type VoiceSettings } from "../../context/VoiceContext.js";
 import {
   enumerateMicrophones,
@@ -28,10 +37,7 @@ export function VoiceTab() {
 
       <div className="space-y-8 max-w-lg">
         {/* ── Microphone ── */}
-        <MicrophoneSection
-          selectedId={settings.microphoneId}
-          onSelect={updateSettings}
-        />
+        <MicrophoneSection selectedId={settings.microphoneId} onSelect={updateSettings} />
 
         {/* ── Speech-to-Text ── */}
         <fieldset className="space-y-4">
@@ -181,7 +187,8 @@ export function VoiceTab() {
             {settings.voiceMode === "vad" && (
               <p className="mt-2 text-xs text-on-surface-muted">
                 Voice Activity Detection automatically detects when you start and stop speaking.
-                Requires an audio-based STT provider (Whisper Local or Groq) since VAD produces raw audio.
+                Requires an audio-based STT provider (Whisper Local or Groq) since VAD produces raw
+                audio.
               </p>
             )}
           </div>
@@ -195,18 +202,53 @@ export function VoiceTab() {
             />
             Auto-send transcribed text to AI
           </label>
+
+          <label className="flex items-center gap-2 text-sm text-on-surface">
+            <input
+              type="checkbox"
+              checked={settings.smartEndpoint}
+              onChange={(e) => updateSettings({ smartEndpoint: e.target.checked })}
+              className="accent-accent"
+            />
+            Smart endpoint detection
+          </label>
+          {settings.smartEndpoint && (
+            <div>
+              <label className="block text-xs font-medium text-on-surface-secondary mb-1">
+                Grace period: {(settings.gracePeriodMs / 1000).toFixed(1)}s
+              </label>
+              <input
+                type="range"
+                min={500}
+                max={3000}
+                step={100}
+                value={settings.gracePeriodMs}
+                onChange={(e) => updateSettings({ gracePeriodMs: Number(e.target.value) })}
+                className="w-full accent-accent"
+              />
+              <div className="flex justify-between text-[10px] text-on-surface-muted">
+                <span>0.5s</span>
+                <span>3.0s</span>
+              </div>
+              <p className="mt-1 text-xs text-on-surface-muted">
+                Waits for you to resume speaking before submitting audio. Helps with natural pauses.
+              </p>
+            </div>
+          )}
         </fieldset>
 
         {/* ── Local Models ── */}
         <LocalModelsSection registry={registry} />
-
       </div>
     </section>
   );
 }
 
 /** Maps a voice provider ID to the settings key holding its API key. */
-const PROVIDER_KEY_MAP: Record<string, { settingsKey: keyof VoiceSettings; placeholder: string; helpText: string }> = {
+const PROVIDER_KEY_MAP: Record<
+  string,
+  { settingsKey: keyof VoiceSettings; placeholder: string; helpText: string }
+> = {
   "groq-stt": {
     settingsKey: "groqApiKey",
     placeholder: "Enter Groq API key",
@@ -242,9 +284,7 @@ function ProviderApiKeyInput({
     <div>
       <label className="block text-xs font-medium text-on-surface-secondary mb-1">
         API Key
-        {currentValue && (
-          <span className="font-normal text-success ml-2">Set</span>
-        )}
+        {currentValue && <span className="font-normal text-success ml-2">Set</span>}
       </label>
       <input
         type="password"
@@ -253,9 +293,7 @@ function ProviderApiKeyInput({
         placeholder={info.placeholder}
         className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
       />
-      <p className="mt-1 text-xs text-on-surface-muted">
-        {info.helpText}
-      </p>
+      <p className="mt-1 text-xs text-on-surface-muted">{info.helpText}</p>
     </div>
   );
 }
@@ -302,16 +340,19 @@ function MicrophoneSection({
     };
 
     let permStatus: PermissionStatus | null = null;
-    navigator.permissions.query({ name: "microphone" as PermissionName }).then((status) => {
-      permStatus = status;
-      setPermissionState(status.state);
-      if (status.state === "granted") {
-        refreshMicrophones();
-      }
-      status.addEventListener("change", () => handleChange(status));
-    }).catch(() => {
-      // permissions.query not supported for microphone in some browsers
-    });
+    navigator.permissions
+      .query({ name: "microphone" as PermissionName })
+      .then((status) => {
+        permStatus = status;
+        setPermissionState(status.state);
+        if (status.state === "granted") {
+          refreshMicrophones();
+        }
+        status.addEventListener("change", () => handleChange(status));
+      })
+      .catch(() => {
+        // permissions.query not supported for microphone in some browsers
+      });
 
     return () => {
       if (permStatus) {
@@ -331,7 +372,11 @@ function MicrophoneSection({
 
   // Reset selected mic if it's no longer available
   useEffect(() => {
-    if (selectedId && microphones.length > 0 && !microphones.some((m) => m.deviceId === selectedId)) {
+    if (
+      selectedId &&
+      microphones.length > 0 &&
+      !microphones.some((m) => m.deviceId === selectedId)
+    ) {
       onSelect({ microphoneId: "" });
     }
   }, [selectedId, microphones, onSelect]);
@@ -414,8 +459,8 @@ function MicrophoneSection({
             <p className="text-xs text-warning flex items-start gap-1.5">
               <AlertCircle size={12} className="shrink-0 mt-0.5" />
               <span>
-                Microphone access was denied. Click the lock/site icon in your browser's
-                address bar to reset the permission, then try again.
+                Microphone access was denied. Click the lock/site icon in your browser's address bar
+                to reset the permission, then try again.
               </span>
             </p>
           )}
@@ -492,6 +537,8 @@ interface LocalModelInfo {
   progress: number;
   preload: () => Promise<void>;
   checkCached?: () => Promise<boolean>;
+  deleteModel?: () => Promise<void>;
+  getModelSize?: () => Promise<number>;
   onStatusChange?: ((status: ModelStatus, progress: number) => void) | undefined;
 }
 
@@ -506,43 +553,86 @@ function toLocalModelInfo(provider: any, type: "STT" | "TTS"): LocalModelInfo | 
       status: provider.status,
       progress: provider.progress,
       preload: () => provider.preload(),
-      checkCached: typeof provider.checkCached === "function"
-        ? () => provider.checkCached()
-        : undefined,
-      get onStatusChange() { return provider.onStatusChange; },
-      set onStatusChange(cb) { provider.onStatusChange = cb; },
+      checkCached:
+        typeof provider.checkCached === "function" ? () => provider.checkCached() : undefined,
+      deleteModel:
+        typeof provider.deleteModel === "function" ? () => provider.deleteModel() : undefined,
+      getModelSize:
+        typeof provider.getModelSize === "function" ? () => provider.getModelSize() : undefined,
+      get onStatusChange() {
+        return provider.onStatusChange;
+      },
+      set onStatusChange(cb) {
+        provider.onStatusChange = cb;
+      },
     };
   }
   return null;
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
   const [, forceUpdate] = useState(0);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [cachedIds, setCachedIds] = useState<Set<string>>(new Set());
+  const [modelSizes, setModelSizes] = useState<Map<string, number>>(new Map());
 
   const localModels: LocalModelInfo[] = [
-    ...registry.listSTT().map((p) => toLocalModelInfo(p, "STT")).filter((m): m is LocalModelInfo => m !== null),
-    ...registry.listTTS().map((p) => toLocalModelInfo(p, "TTS")).filter((m): m is LocalModelInfo => m !== null),
+    ...registry
+      .listSTT()
+      .map((p) => toLocalModelInfo(p, "STT"))
+      .filter((m): m is LocalModelInfo => m !== null),
+    ...registry
+      .listTTS()
+      .map((p) => toLocalModelInfo(p, "TTS"))
+      .filter((m): m is LocalModelInfo => m !== null),
   ];
+
+  const checkCacheStatus = useCallback(async () => {
+    const found = new Set<string>();
+    const sizes = new Map<string, number>();
+    for (const model of localModels) {
+      if (!model.checkCached) continue;
+      try {
+        if (await model.checkCached()) {
+          found.add(model.id);
+          if (model.getModelSize) {
+            try {
+              const size = await model.getModelSize();
+              if (size > 0) sizes.set(model.id, size);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (found.size > 0) setCachedIds(found);
+    else setCachedIds(new Set());
+    setModelSizes(sizes);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Check which models are already downloaded in browser cache (lightweight, no WASM loading)
   useEffect(() => {
     let cancelled = false;
-    const check = async () => {
-      const found = new Set<string>();
-      for (const model of localModels) {
-        if (!model.checkCached) continue;
-        try {
-          if (await model.checkCached()) found.add(model.id);
-        } catch { /* ignore */ }
-      }
-      if (!cancelled && found.size > 0) setCachedIds(found);
+    checkCacheStatus().then(() => {
+      if (cancelled) return;
+    });
+    return () => {
+      cancelled = true;
     };
-    check();
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [checkCacheStatus]);
 
   if (localModels.length === 0) return null;
 
@@ -562,6 +652,23 @@ function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
     model.onStatusChange = originalCallback;
     setLoadingId(null);
     forceUpdate((n) => n + 1);
+    // Re-check cache status after download
+    await checkCacheStatus();
+  };
+
+  const handleDelete = async (model: LocalModelInfo) => {
+    if (!model.deleteModel) return;
+    setDeletingId(model.id);
+    setConfirmDeleteId(null);
+    try {
+      await model.deleteModel();
+    } catch {
+      // Deletion failed — ignore
+    }
+    setDeletingId(null);
+    forceUpdate((n) => n + 1);
+    // Re-check cache status after delete
+    await checkCacheStatus();
   };
 
   return (
@@ -574,6 +681,7 @@ function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
       <div className="space-y-3">
         {localModels.map((model) => {
           const isCached = cachedIds.has(model.id);
+          const modelSize = modelSizes.get(model.id);
           return (
             <div
               key={model.id}
@@ -585,6 +693,11 @@ function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-tertiary text-on-surface-muted">
                     {model.type}
                   </span>
+                  {isCached && modelSize !== undefined && (
+                    <span className="text-[10px] text-on-surface-muted">
+                      {formatBytes(modelSize)}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-on-surface-muted mt-0.5 truncate">{model.modelId}</p>
 
@@ -602,14 +715,45 @@ function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
                     </p>
                   </div>
                 )}
+
+                {/* Delete confirmation */}
+                {confirmDeleteId === model.id && (
+                  <div className="mt-2 flex items-center gap-2 p-2 rounded bg-error/5 border border-error/20">
+                    <p className="text-xs text-on-surface flex-1">Delete this model?</p>
+                    <button
+                      onClick={() => handleDelete(model)}
+                      className="px-2 py-0.5 text-xs bg-error text-white rounded hover:bg-error/90 transition-colors"
+                    >
+                      Delete
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="px-2 py-0.5 text-xs border border-border rounded text-on-surface-secondary hover:bg-surface-tertiary transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </div>
 
-              <div className="ml-3 shrink-0">
+              <div className="ml-3 shrink-0 flex items-center gap-2">
                 {model.status === "ready" ? (
-                  <span className="flex items-center gap-1 text-xs text-success">
-                    <CheckCircle2 size={12} />
-                    Ready
-                  </span>
+                  <>
+                    <span className="flex items-center gap-1 text-xs text-success">
+                      <CheckCircle2 size={12} />
+                      Ready
+                    </span>
+                    {model.deleteModel && (
+                      <button
+                        onClick={() => setConfirmDeleteId(model.id)}
+                        disabled={!!deletingId}
+                        title="Delete model"
+                        className="p-1 text-on-surface-muted hover:text-error transition-colors disabled:opacity-50"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </>
                 ) : model.status === "loading" ? (
                   <Loader2 size={14} className="animate-spin text-accent" />
                 ) : model.status === "error" ? (
@@ -620,11 +764,25 @@ function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
                     <AlertCircle size={12} />
                     Retry
                   </button>
+                ) : deletingId === model.id ? (
+                  <Loader2 size={14} className="animate-spin text-on-surface-muted" />
                 ) : isCached ? (
-                  <span className="flex items-center gap-1 text-xs text-success">
-                    <CheckCircle2 size={12} />
-                    Downloaded
-                  </span>
+                  <>
+                    <span className="flex items-center gap-1 text-xs text-success">
+                      <CheckCircle2 size={12} />
+                      Downloaded
+                    </span>
+                    {model.deleteModel && (
+                      <button
+                        onClick={() => setConfirmDeleteId(model.id)}
+                        disabled={!!deletingId}
+                        title="Delete model"
+                        className="p-1 text-on-surface-muted hover:text-error transition-colors disabled:opacity-50"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <button
                     onClick={() => handlePreload(model)}

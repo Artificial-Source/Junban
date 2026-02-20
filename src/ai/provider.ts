@@ -16,8 +16,14 @@ import { ToolRegistry } from "./tools/registry.js";
 import { registerTaskCrudTools } from "./tools/builtin/task-crud.js";
 import { registerQueryTasksTool } from "./tools/builtin/query-tasks.js";
 import { registerAnalyzePatternsTool } from "./tools/builtin/analyze-patterns.js";
-import { registerAnalyzeWorkloadTool, registerCheckOvercommitmentTool } from "./tools/builtin/analyze-workload.js";
-import { registerSmartOrganizeTools, registerCheckDuplicatesTool } from "./tools/builtin/smart-organize.js";
+import {
+  registerAnalyzeWorkloadTool,
+  registerCheckOvercommitmentTool,
+} from "./tools/builtin/analyze-workload.js";
+import {
+  registerSmartOrganizeTools,
+  registerCheckDuplicatesTool,
+} from "./tools/builtin/smart-organize.js";
 import { registerEnergyRecommendationsTool } from "./tools/builtin/energy-recommendations.js";
 import { registerProjectCrudTools } from "./tools/builtin/project-crud.js";
 import { registerReminderTools } from "./tools/builtin/reminder-tools.js";

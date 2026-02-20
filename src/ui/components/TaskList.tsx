@@ -180,7 +180,10 @@ export function TaskList({
   const topLevel = tasks.filter((t) => !t.parentId);
 
   // Flatten visible tree for DnD ordering
-  function flattenVisible(items: Task[], depth: number): Array<{ task: Task; depth: number; showAddSubtask?: boolean }> {
+  function flattenVisible(
+    items: Task[],
+    depth: number,
+  ): Array<{ task: Task; depth: number; showAddSubtask?: boolean }> {
     const result: Array<{ task: Task; depth: number; showAddSubtask?: boolean }> = [];
     for (const item of items) {
       const stats = childStatsMap.get(item.id);
@@ -198,7 +201,7 @@ export function TaskList({
 
   const visibleTasks = flattenVisible(topLevel, 0);
   const isMultiSelectActive = selectedTaskIds && selectedTaskIds.size > 0;
-  const taskIds = visibleTasks.filter(v => !v.showAddSubtask).map((v) => v.task.id);
+  const taskIds = visibleTasks.filter((v) => !v.showAddSubtask).map((v) => v.task.id);
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

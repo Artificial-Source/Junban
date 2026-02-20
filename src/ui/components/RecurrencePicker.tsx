@@ -45,7 +45,7 @@ export function RecurrencePicker({ value, onChange, onClose }: RecurrencePickerP
 
   const handleCustomApply = () => {
     const n = Math.max(1, Math.floor(customN));
-    const unit = customUnit === "day" ? (n === 1 ? "day" : "days") : (n === 1 ? "week" : "weeks");
+    const unit = customUnit === "day" ? (n === 1 ? "day" : "days") : n === 1 ? "week" : "weeks";
     onChange(`every ${n} ${unit}`);
   };
 

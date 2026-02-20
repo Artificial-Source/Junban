@@ -27,10 +27,7 @@ export class LLMPipeline {
   ): Promise<PipelineResult> {
     const chain = this.middlewares.reduceRight<
       (ctx: LLMExecutionContext) => Promise<PipelineResult>
-    >(
-      (next, mw) => (c) => mw(c, () => next(c)),
-      handler,
-    );
+    >((next, mw) => (c) => mw(c, () => next(c)), handler);
     return chain(ctx);
   }
 }

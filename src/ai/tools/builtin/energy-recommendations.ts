@@ -29,10 +29,7 @@ function classifyTask(task: Task, hasSubtasks: boolean): ClassifiedTask {
   const hasDescription = !!task.description && task.description.trim().length > 0;
 
   const isDeepWork =
-    wordCount > QUICK_WIN_WORD_THRESHOLD ||
-    hasSubtasks ||
-    isHighPriority ||
-    hasDescription;
+    wordCount > QUICK_WIN_WORD_THRESHOLD || hasSubtasks || isHighPriority || hasDescription;
 
   return {
     id: task.id,
@@ -57,8 +54,7 @@ export function registerEnergyRecommendationsTool(registry: ToolRegistry): void 
         properties: {
           available_minutes: {
             type: "number",
-            description:
-              "Minutes available to work (default 60)",
+            description: "Minutes available to work (default 60)",
           },
           energy_level: {
             type: "string",
@@ -75,9 +71,7 @@ export function registerEnergyRecommendationsTool(registry: ToolRegistry): void 
       const pending = await ctx.taskService.list({ status: "pending" });
 
       // Determine which tasks have subtasks
-      const parentIds = new Set(
-        pending.filter((t) => t.parentId).map((t) => t.parentId!),
-      );
+      const parentIds = new Set(pending.filter((t) => t.parentId).map((t) => t.parentId!));
 
       const classified = pending
         .filter((t) => !t.parentId) // Only top-level tasks

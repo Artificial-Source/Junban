@@ -68,7 +68,10 @@ export function GeneralTab() {
       <section>
         <h2 className="text-lg font-semibold mb-3 text-on-surface">Task Behavior</h2>
         <div className="space-y-4 max-w-md">
-          <SettingRow label="Default priority" description="Applied when creating tasks without an explicit priority">
+          <SettingRow
+            label="Default priority"
+            description="Applied when creating tasks without an explicit priority"
+          >
             <SettingSelect
               value={settings.default_priority}
               onChange={(v) => updateSetting("default_priority", v)}
@@ -82,11 +85,17 @@ export function GeneralTab() {
             />
           </SettingRow>
 
-          <SettingRow label="Confirm before deleting" description="Show a confirmation dialog when deleting tasks">
+          <SettingRow
+            label="Confirm before deleting"
+            description="Show a confirmation dialog when deleting tasks"
+          >
             <Toggle
               enabled={settings.confirm_delete === "true"}
               onToggle={() =>
-                updateSetting("confirm_delete", settings.confirm_delete === "true" ? "false" : "true")
+                updateSetting(
+                  "confirm_delete",
+                  settings.confirm_delete === "true" ? "false" : "true",
+                )
               }
             />
           </SettingRow>
@@ -114,7 +123,11 @@ export function GeneralTab() {
   );
 }
 
-const SOUND_EVENTS: { event: SoundEvent; settingKey: "sound_complete" | "sound_create" | "sound_delete" | "sound_reminder"; label: string }[] = [
+const SOUND_EVENTS: {
+  event: SoundEvent;
+  settingKey: "sound_complete" | "sound_create" | "sound_delete" | "sound_reminder";
+  label: string;
+}[] = [
   { event: "complete", settingKey: "sound_complete", label: "Task completed" },
   { event: "create", settingKey: "sound_create", label: "Task created" },
   { event: "delete", settingKey: "sound_delete", label: "Task deleted" },
@@ -158,11 +171,16 @@ function SoundSettings() {
         </div>
 
         {SOUND_EVENTS.map(({ event, settingKey, label }) => (
-          <div key={event} className={`flex items-center justify-between gap-4 ${enabled ? "" : "opacity-50 pointer-events-none"}`}>
+          <div
+            key={event}
+            className={`flex items-center justify-between gap-4 ${enabled ? "" : "opacity-50 pointer-events-none"}`}
+          >
             <div className="flex items-center gap-3 min-w-0">
               <Toggle
                 enabled={settings[settingKey] === "true"}
-                onToggle={() => updateSetting(settingKey, settings[settingKey] === "true" ? "false" : "true")}
+                onToggle={() =>
+                  updateSetting(settingKey, settings[settingKey] === "true" ? "false" : "true")
+                }
               />
               <span className="text-sm text-on-surface">{label}</span>
             </div>

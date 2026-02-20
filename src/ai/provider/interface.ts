@@ -30,6 +30,9 @@ export interface LLMProviderPlugin {
 
   /** Load a model (for local providers like LM Studio). */
   loadModel?(modelKey: string, config: AIProviderConfig): Promise<void>;
+
+  /** Unload a model (for local providers like LM Studio). */
+  unloadModel?(modelKey: string, config: AIProviderConfig): Promise<void>;
 }
 
 /**

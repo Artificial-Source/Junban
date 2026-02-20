@@ -4,10 +4,7 @@ import { bootstrap } from "../bootstrap.js";
 const program = new Command();
 const services = bootstrap();
 
-program
-  .name("saydo")
-  .description("ASF Saydo — Task management from the terminal")
-  .version("0.1.0");
+program.name("saydo").description("ASF Saydo — Task management from the terminal").version("0.1.0");
 
 program
   .command("add <description>")

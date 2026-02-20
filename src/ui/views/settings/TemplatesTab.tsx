@@ -12,7 +12,10 @@ export function TemplatesTab() {
   const [creating, setCreating] = useState(false);
 
   const loadTemplates = useCallback(() => {
-    api.listTemplates().then(setTemplates).catch((err) => logger.error("Failed to load templates", { error: String(err) }));
+    api
+      .listTemplates()
+      .then(setTemplates)
+      .catch((err) => logger.error("Failed to load templates", { error: String(err) }));
   }, []);
 
   useEffect(() => {

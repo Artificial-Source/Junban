@@ -38,7 +38,11 @@ export class BrowserSTTProvider implements STTProviderPlugin {
       recognition.lang = opts?.language ?? "en-US";
       // Increase max silence before the API auto-stops (Chrome default is very short)
       // Not all browsers support this but it doesn't hurt to set it
-      try { (recognition as any).maxAlternatives = 1; } catch { /* ignore */ }
+      try {
+        (recognition as any).maxAlternatives = 1;
+      } catch {
+        /* ignore */
+      }
 
       let resolved = false;
 

@@ -12,6 +12,7 @@ export interface AIChatMessage {
   content: string;
   toolCallId?: string;
   toolCalls?: { id: string; name: string; arguments: string }[];
+  toolResults?: { toolName: string; data: string }[];
   isError?: boolean;
   errorCategory?: string;
   retryable?: boolean;
@@ -53,7 +54,10 @@ export async function listAIProviders(): Promise<AIProviderInfo[]> {
   return handleResponse<AIProviderInfo[]>(res);
 }
 
-export async function fetchModels(providerName: string, baseUrl?: string): Promise<ModelDiscoveryInfo[]> {
+export async function fetchModels(
+  providerName: string,
+  baseUrl?: string,
+): Promise<ModelDiscoveryInfo[]> {
   if (isTauri()) {
     const svc = await getServices();
     const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
@@ -64,14 +68,21 @@ export async function fetchModels(providerName: string, baseUrl?: string): Promi
       baseUrl: baseUrl || baseUrlSetting?.value,
     });
   }
-  const url = new URL(`${BASE}/ai/providers/${encodeURIComponent(providerName)}/models`, window.location.origin);
+  const url = new URL(
+    `${BASE}/ai/providers/${encodeURIComponent(providerName)}/models`,
+    window.location.origin,
+  );
   if (baseUrl) url.searchParams.set("baseUrl", baseUrl);
   const res = await fetch(url.toString());
   const data = await handleResponse<{ models: ModelDiscoveryInfo[] }>(res);
   return data.models;
 }
 
-export async function loadModel(providerName: string, modelKey: string, baseUrl?: string): Promise<void> {
+export async function loadModel(
+  providerName: string,
+  modelKey: string,
+  baseUrl?: string,
+): Promise<void> {
   if (isTauri()) {
     const svc = await getServices();
     const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
@@ -88,6 +99,34 @@ export async function loadModel(providerName: string, modelKey: string, baseUrl?
   }
   await handleVoidResponse(
     await fetch(`${BASE}/ai/providers/${encodeURIComponent(providerName)}/models/load`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: modelKey, baseUrl }),
+    }),
+  );
+}
+
+export async function unloadModel(
+  providerName: string,
+  modelKey: string,
+  baseUrl?: string,
+): Promise<void> {
+  if (isTauri()) {
+    const svc = await getServices();
+    const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+    const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+    if (providerName === "lmstudio") {
+      const { unloadLMStudioModel } = await import("../../ai/model-discovery.js");
+      await unloadLMStudioModel(
+        modelKey,
+        baseUrl || baseUrlSetting?.value || "http://localhost:1234/v1",
+        apiKeySetting?.value,
+      );
+    }
+    return;
+  }
+  await handleVoidResponse(
+    await fetch(`${BASE}/ai/providers/${encodeURIComponent(providerName)}/models/unload`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: modelKey, baseUrl }),
@@ -150,7 +189,10 @@ export async function updateAIConfig(config: {
   );
 }
 
-export async function sendChatMessage(message: string, options?: { voiceCall?: boolean }): Promise<ReadableStream<Uint8Array> | null> {
+export async function sendChatMessage(
+  message: string,
+  options?: { voiceCall?: boolean },
+): Promise<ReadableStream<Uint8Array> | null> {
   if (isTauri()) {
     const svc = await getServices();
     const providerSetting = svc.storage.getAppSetting("ai_provider");
@@ -188,19 +230,19 @@ export async function sendChatMessage(message: string, options?: { voiceCall?: b
         tagService: svc.tagService,
       };
 
-      const isLocalProvider = providerSetting.value === "ollama" || providerSetting.value === "lmstudio";
-      const contextBlock = await gatherContext(toolServices, { compact: isLocalProvider, voiceCall: options?.voiceCall });
-      const session = svc.chatManager.getOrCreateSession(
-        executor,
-        toolServices,
-        {
-          queries: svc.storage,
-          contextBlock,
-          toolRegistry: svc.toolRegistry,
-          model: modelSetting?.value ?? undefined,
-          providerName: providerSetting.value as string,
-        },
-      );
+      const isLocalProvider =
+        providerSetting.value === "ollama" || providerSetting.value === "lmstudio";
+      const contextBlock = await gatherContext(toolServices, {
+        compact: isLocalProvider,
+        voiceCall: options?.voiceCall,
+      });
+      const session = svc.chatManager.getOrCreateSession(executor, toolServices, {
+        queries: svc.storage,
+        contextBlock,
+        toolRegistry: svc.toolRegistry,
+        model: modelSetting?.value ?? undefined,
+        providerName: providerSetting.value as string,
+      });
 
       session.addUserMessage(message);
 
@@ -265,7 +307,11 @@ export async function getChatMessages(): Promise<AIChatMessage[]> {
 
           session = svc.chatManager.restoreSession(
             executor,
-            { taskService: svc.taskService, projectService: svc.projectService, tagService: svc.tagService },
+            {
+              taskService: svc.taskService,
+              projectService: svc.projectService,
+              tagService: svc.tagService,
+            },
             svc.storage,
             {
               toolRegistry: svc.toolRegistry,

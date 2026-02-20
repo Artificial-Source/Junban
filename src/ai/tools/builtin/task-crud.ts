@@ -60,7 +60,15 @@ export function registerTaskCrudTools(registry: ToolRegistry): void {
       });
       return JSON.stringify({
         success: true,
-        task: { id: task.id, title: task.title, status: task.status },
+        task: {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          projectId: task.projectId,
+          tags: task.tags,
+        },
       });
     },
   );
@@ -99,8 +107,7 @@ export function registerTaskCrudTools(registry: ToolRegistry): void {
           },
           remindAt: {
             type: "string",
-            description:
-              "Reminder date/time as ISO 8601 string. Set to empty string to remove.",
+            description: "Reminder date/time as ISO 8601 string. Set to empty string to remove.",
           },
         },
         required: ["taskId"],
@@ -120,7 +127,15 @@ export function registerTaskCrudTools(registry: ToolRegistry): void {
       const task = await ctx.taskService.update(taskId as string, cleaned);
       return JSON.stringify({
         success: true,
-        task: { id: task.id, title: task.title, status: task.status },
+        task: {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          projectId: task.projectId,
+          tags: task.tags,
+        },
       });
     },
   );
@@ -145,7 +160,15 @@ export function registerTaskCrudTools(registry: ToolRegistry): void {
       const task = await ctx.taskService.complete(args.taskId as string);
       return JSON.stringify({
         success: true,
-        task: { id: task.id, title: task.title, status: task.status },
+        task: {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          projectId: task.projectId,
+          tags: task.tags,
+        },
       });
     },
   );

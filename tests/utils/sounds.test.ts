@@ -100,29 +100,50 @@ describe("sounds", () => {
   it("complete sound creates 2 oscillators (C5 → G5)", async () => {
     await playSound("complete", 0.7);
     expect(createdOscillators).toHaveLength(2);
-    expect(createdOscillators[0].frequency.setValueAtTime).toHaveBeenCalledWith(523.25, expect.any(Number));
-    expect(createdOscillators[1].frequency.setValueAtTime).toHaveBeenCalledWith(783.99, expect.any(Number));
+    expect(createdOscillators[0].frequency.setValueAtTime).toHaveBeenCalledWith(
+      523.25,
+      expect.any(Number),
+    );
+    expect(createdOscillators[1].frequency.setValueAtTime).toHaveBeenCalledWith(
+      783.99,
+      expect.any(Number),
+    );
   });
 
   it("create sound creates 1 oscillator (A4 triangle)", async () => {
     await playSound("create", 0.7);
     expect(createdOscillators).toHaveLength(1);
-    expect(createdOscillators[0].frequency.setValueAtTime).toHaveBeenCalledWith(440, expect.any(Number));
+    expect(createdOscillators[0].frequency.setValueAtTime).toHaveBeenCalledWith(
+      440,
+      expect.any(Number),
+    );
     expect(createdOscillators[0].type).toBe("triangle");
   });
 
   it("delete sound creates 2 oscillators (A4 → E4)", async () => {
     await playSound("delete", 0.7);
     expect(createdOscillators).toHaveLength(2);
-    expect(createdOscillators[0].frequency.setValueAtTime).toHaveBeenCalledWith(440, expect.any(Number));
-    expect(createdOscillators[1].frequency.setValueAtTime).toHaveBeenCalledWith(329.63, expect.any(Number));
+    expect(createdOscillators[0].frequency.setValueAtTime).toHaveBeenCalledWith(
+      440,
+      expect.any(Number),
+    );
+    expect(createdOscillators[1].frequency.setValueAtTime).toHaveBeenCalledWith(
+      329.63,
+      expect.any(Number),
+    );
   });
 
   it("reminder sound creates 4 oscillators (D5+G5 x2)", async () => {
     await playSound("reminder", 0.7);
     expect(createdOscillators).toHaveLength(4);
-    expect(createdOscillators[0].frequency.setValueAtTime).toHaveBeenCalledWith(587.33, expect.any(Number));
-    expect(createdOscillators[1].frequency.setValueAtTime).toHaveBeenCalledWith(783.99, expect.any(Number));
+    expect(createdOscillators[0].frequency.setValueAtTime).toHaveBeenCalledWith(
+      587.33,
+      expect.any(Number),
+    );
+    expect(createdOscillators[1].frequency.setValueAtTime).toHaveBeenCalledWith(
+      783.99,
+      expect.any(Number),
+    );
   });
 
   it("clamps volume to 1", async () => {

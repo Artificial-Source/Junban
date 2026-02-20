@@ -8,12 +8,7 @@ import type { ToolRegistry } from "../registry.js";
 
 /** Normalize a title for grouping repeated tasks. */
 function normalizeTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .trim()
-    .replace(/\d+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return title.toLowerCase().trim().replace(/\d+/g, "").replace(/\s+/g, " ").trim();
 }
 
 /** Map an average interval in days to a human-readable recurrence suggestion. */
@@ -39,8 +34,7 @@ export function registerAnalyzePatternsTool(registry: ToolRegistry): void {
         properties: {
           days: {
             type: "number",
-            description:
-              "Number of days of history to analyze (default 90)",
+            description: "Number of days of history to analyze (default 90)",
           },
         },
       },
@@ -52,9 +46,7 @@ export function registerAnalyzePatternsTool(registry: ToolRegistry): void {
       const cutoffISO = cutoff.toISOString();
 
       const completed = await ctx.taskService.list({ status: "completed" });
-      const inWindow = completed.filter(
-        (t) => t.completedAt && t.completedAt >= cutoffISO,
-      );
+      const inWindow = completed.filter((t) => t.completedAt && t.completedAt >= cutoffISO);
 
       // Hour histogram (0-23)
       const byHour: Record<number, number> = {};
@@ -85,8 +77,7 @@ export function registerAnalyzePatternsTool(registry: ToolRegistry): void {
 
         // Time-to-complete
         const createdDate = new Date(task.createdAt);
-        const hours =
-          (completedDate.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
+        const hours = (completedDate.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
         if (hours >= 0) {
           totalCompletionHours += hours;
           completionCount++;
@@ -99,9 +90,7 @@ export function registerAnalyzePatternsTool(registry: ToolRegistry): void {
       }
 
       const avgCompletionHours =
-        completionCount > 0
-          ? Math.round((totalCompletionHours / completionCount) * 10) / 10
-          : 0;
+        completionCount > 0 ? Math.round((totalCompletionHours / completionCount) * 10) / 10 : 0;
 
       // Top tags
       const topTags = Array.from(tagCounts.entries())
@@ -110,10 +99,7 @@ export function registerAnalyzePatternsTool(registry: ToolRegistry): void {
         .map(([tag, count]) => ({ tag, count }));
 
       // Repeated title detection
-      const titleGroups = new Map<
-        string,
-        { originalTitle: string; completedDates: Date[] }
-      >();
+      const titleGroups = new Map<string, { originalTitle: string; completedDates: Date[] }>();
       for (const task of inWindow) {
         const normalized = normalizeTitle(task.title);
         if (!normalized) continue;
@@ -137,17 +123,12 @@ export function registerAnalyzePatternsTool(registry: ToolRegistry): void {
 
       for (const [, group] of titleGroups) {
         if (group.completedDates.length < 3) continue;
-        const sorted = group.completedDates.sort(
-          (a, b) => a.getTime() - b.getTime(),
-        );
+        const sorted = group.completedDates.sort((a, b) => a.getTime() - b.getTime());
         let totalInterval = 0;
         for (let i = 1; i < sorted.length; i++) {
-          totalInterval +=
-            (sorted[i].getTime() - sorted[i - 1].getTime()) /
-            (1000 * 60 * 60 * 24);
+          totalInterval += (sorted[i].getTime() - sorted[i - 1].getTime()) / (1000 * 60 * 60 * 24);
         }
-        const avgInterval =
-          Math.round((totalInterval / (sorted.length - 1)) * 10) / 10;
+        const avgInterval = Math.round((totalInterval / (sorted.length - 1)) * 10) / 10;
         repeatedPatterns.push({
           title: group.originalTitle,
           count: group.completedDates.length,

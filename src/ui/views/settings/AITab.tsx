@@ -81,6 +81,10 @@ export function AITab() {
 
   const currentProvider = providers.find((p) => p.name === provider);
   const supportsAutoLoad = provider === "lmstudio";
+  const [autoManage, setAutoManage] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("saydo.ai.auto-manage-lmstudio") === "1";
+  });
 
   const handleProviderChange = async (newProvider: string) => {
     setProvider(newProvider);
@@ -177,21 +181,23 @@ export function AITab() {
                   {currentProvider?.optionalApiKey && !currentProvider?.needsApiKey && (
                     <span className="font-normal text-on-surface-muted ml-1">(optional)</span>
                   )}
-                  {config?.hasApiKey && (
-                    <span className="font-normal text-success ml-2">Set</span>
-                  )}
+                  {config?.hasApiKey && <span className="font-normal text-success ml-2">Set</span>}
                 </label>
                 <input
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={config?.hasApiKey ? "Enter new key to update" : currentProvider?.optionalApiKey ? "Enter API key for remote servers" : "Enter API key"}
+                  placeholder={
+                    config?.hasApiKey
+                      ? "Enter new key to update"
+                      : currentProvider?.optionalApiKey
+                        ? "Enter API key for remote servers"
+                        : "Enter API key"
+                  }
                   className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
                 />
                 {PROVIDER_HELP[provider] && (
-                  <p className="mt-1 text-xs text-on-surface-muted">
-                    {PROVIDER_HELP[provider]}
-                  </p>
+                  <p className="mt-1 text-xs text-on-surface-muted">{PROVIDER_HELP[provider]}</p>
                 )}
               </div>
             )}
@@ -211,20 +217,17 @@ export function AITab() {
                     disabled={!!modelLoadingId}
                     className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface disabled:opacity-60"
                   >
-                    {!model && (
-                      <option value="">Select a model...</option>
-                    )}
+                    {!model && <option value="">Select a model...</option>}
                     {availableModels.map((m) => (
                       <option key={m.id} value={m.id}>
-                        {m.label}{m.loaded ? "" : " (not loaded)"}
+                        {m.label}
+                        {m.loaded ? "" : " (not loaded)"}
                       </option>
                     ))}
                     <option value="__custom__">Custom...</option>
                   </select>
                   {modelLoadingId && (
-                    <p className="mt-1 text-xs text-accent">
-                      Loading model into LM Studio...
-                    </p>
+                    <p className="mt-1 text-xs text-accent">Loading model into LM Studio...</p>
                   )}
                 </>
               ) : (
@@ -289,6 +292,28 @@ export function AITab() {
             <p className={`text-xs ${isConfigured ? "text-success" : "text-on-surface-muted"}`}>
               {isConfigured ? "Connected" : "Not configured"}
             </p>
+
+            {supportsAutoLoad && (
+              <label className="flex items-center gap-2 text-sm text-on-surface mt-2">
+                <input
+                  type="checkbox"
+                  checked={autoManage}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setAutoManage(checked);
+                    window.localStorage.setItem(
+                      "saydo.ai.auto-manage-lmstudio",
+                      checked ? "1" : "0",
+                    );
+                  }}
+                  className="accent-accent"
+                />
+                Auto-manage LM Studio models
+                <span className="text-xs text-on-surface-muted ml-1">
+                  (load on chat open, unload on close)
+                </span>
+              </label>
+            )}
           </>
         )}
       </div>

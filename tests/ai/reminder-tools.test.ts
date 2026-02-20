@@ -136,12 +136,7 @@ describe("set_reminder", () => {
     const task = await ctx.taskService.create({ title: "Remind me", tags: [] });
     const remindAt = "2026-02-18T10:00:00.000Z";
 
-    const result = await exec(
-      registry,
-      "set_reminder",
-      { taskId: task.id, remindAt },
-      ctx,
-    );
+    const result = await exec(registry, "set_reminder", { taskId: task.id, remindAt }, ctx);
     expect(result.success).toBe(true);
     expect(result.task.remindAt).toBe(remindAt);
     expect(result.task.title).toBe("Remind me");
@@ -199,20 +194,13 @@ describe("snooze_reminder", () => {
       remindAt: originalRemindAt,
     });
 
-    const result = await exec(
-      registry,
-      "snooze_reminder",
-      { taskId: task.id, minutes: 30 },
-      ctx,
-    );
+    const result = await exec(registry, "snooze_reminder", { taskId: task.id, minutes: 30 }, ctx);
     expect(result.success).toBe(true);
     expect(result.task.previousRemindAt).toBe(originalRemindAt);
     expect(result.task.snoozedByMinutes).toBe(30);
 
     // Verify the new time is 30 minutes later
-    const expected = new Date(
-      new Date(originalRemindAt).getTime() + 30 * 60_000,
-    ).toISOString();
+    const expected = new Date(new Date(originalRemindAt).getTime() + 30 * 60_000).toISOString();
     expect(result.task.remindAt).toBe(expected);
   });
 
@@ -223,12 +211,7 @@ describe("snooze_reminder", () => {
     });
     const before = Date.now();
 
-    const result = await exec(
-      registry,
-      "snooze_reminder",
-      { taskId: task.id, minutes: 60 },
-      ctx,
-    );
+    const result = await exec(registry, "snooze_reminder", { taskId: task.id, minutes: 60 }, ctx);
     expect(result.success).toBe(true);
 
     const snoozedTime = new Date(result.task.remindAt).getTime();
@@ -250,12 +233,7 @@ describe("snooze_reminder", () => {
   it("returns error for non-positive minutes", async () => {
     const task = await ctx.taskService.create({ title: "Nope", tags: [] });
 
-    const result = await exec(
-      registry,
-      "snooze_reminder",
-      { taskId: task.id, minutes: 0 },
-      ctx,
-    );
+    const result = await exec(registry, "snooze_reminder", { taskId: task.id, minutes: 0 }, ctx);
     expect(result.error).toBe("Minutes must be a positive number");
   });
 
@@ -267,12 +245,7 @@ describe("snooze_reminder", () => {
       remindAt: originalRemindAt,
     });
 
-    const result = await exec(
-      registry,
-      "snooze_reminder",
-      { taskId: task.id, minutes: 1440 },
-      ctx,
-    );
+    const result = await exec(registry, "snooze_reminder", { taskId: task.id, minutes: 1440 }, ctx);
     expect(result.success).toBe(true);
     expect(result.task.remindAt).toBe("2026-02-17T09:00:00.000Z");
   });
@@ -298,12 +271,7 @@ describe("dismiss_reminder", () => {
       remindAt: "2026-02-18T10:00:00.000Z",
     });
 
-    const result = await exec(
-      registry,
-      "dismiss_reminder",
-      { taskId: task.id },
-      ctx,
-    );
+    const result = await exec(registry, "dismiss_reminder", { taskId: task.id }, ctx);
     expect(result.success).toBe(true);
     expect(result.task.remindAt).toBeNull();
     expect(result.task.previousRemindAt).toBe("2026-02-18T10:00:00.000Z");
@@ -315,12 +283,7 @@ describe("dismiss_reminder", () => {
   });
 
   it("returns error for non-existent task", async () => {
-    const result = await exec(
-      registry,
-      "dismiss_reminder",
-      { taskId: "nonexistent" },
-      ctx,
-    );
+    const result = await exec(registry, "dismiss_reminder", { taskId: "nonexistent" }, ctx);
     expect(result.error).toBe("Task not found");
   });
 
@@ -330,12 +293,7 @@ describe("dismiss_reminder", () => {
       tags: [],
     });
 
-    const result = await exec(
-      registry,
-      "dismiss_reminder",
-      { taskId: task.id },
-      ctx,
-    );
+    const result = await exec(registry, "dismiss_reminder", { taskId: task.id }, ctx);
     expect(result.error).toBe("Task has no reminder set");
   });
 });
@@ -356,12 +314,7 @@ describe("Cross-tool integration (reminder + task)", () => {
 
   it("creates a task with reminder then lists it", async () => {
     const remindAt = new Date(Date.now() + 3600_000).toISOString();
-    await exec(
-      registry,
-      "create_task",
-      { title: "Leave for Guadalajara", remindAt },
-      ctx,
-    );
+    await exec(registry, "create_task", { title: "Leave for Guadalajara", remindAt }, ctx);
 
     const reminders = await exec(registry, "list_reminders", {}, ctx);
     expect(reminders.count).toBe(1);
@@ -376,21 +329,11 @@ describe("Cross-tool integration (reminder + task)", () => {
     await exec(registry, "set_reminder", { taskId: task.id, remindAt }, ctx);
 
     // Snooze by 30 minutes
-    const snoozed = await exec(
-      registry,
-      "snooze_reminder",
-      { taskId: task.id, minutes: 30 },
-      ctx,
-    );
+    const snoozed = await exec(registry, "snooze_reminder", { taskId: task.id, minutes: 30 }, ctx);
     expect(snoozed.task.remindAt).toBe("2026-02-18T10:30:00.000Z");
 
     // Dismiss
-    const dismissed = await exec(
-      registry,
-      "dismiss_reminder",
-      { taskId: task.id },
-      ctx,
-    );
+    const dismissed = await exec(registry, "dismiss_reminder", { taskId: task.id }, ctx);
     expect(dismissed.task.remindAt).toBeNull();
 
     // Verify no reminders left

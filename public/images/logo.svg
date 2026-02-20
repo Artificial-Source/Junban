@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#BF5AF2"/>
+      <stop offset="100%" stop-color="#8B3FC7"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#D98AF5"/>
+      <stop offset="100%" stop-color="#A855F7"/>
+    </linearGradient>
+    <linearGradient id="g3" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#E0B0FF" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#BF5AF2" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="96" cy="96" r="88" fill="#1a1a2e"/>
+  <!-- S shape — main body -->
+  <path d="M124 60c0-16.57-13.43-30-30-30H74c-11.05 0-20 8.95-20 20s8.95 20 20 20h30c5.52 0 10 4.48 10 10s-4.48 10-10 10H74c-16.57 0-30 13.43-30 30s13.43 30 30 30h20c11.05 0 20-8.95 20-20s-8.95-20-20-20H64c-5.52 0-10-4.48-10-10s4.48-10 10-10h30c16.57 0 30-13.43 30-30z" fill="url(#g1)"/>
+  <!-- S shape — highlight layer -->
+  <path d="M124 60c0-16.57-13.43-30-30-30H74c-11.05 0-20 8.95-20 20s8.95 20 20 20h30c5.52 0 10 4.48 10 10s-4.48 10-10 10H74c-16.57 0-30 13.43-30 30s13.43 30 30 30h20c11.05 0 20-8.95 20-20s-8.95-20-20-20H64c-5.52 0-10-4.48-10-10s4.48-10 10-10h30c16.57 0 30-13.43 30-30z" fill="url(#g3)"/>
+  <!-- Accent diamond -->
+  <rect x="103" y="33" width="10" height="10" rx="2" transform="rotate(45 108 38)" fill="#E0B0FF"/>
+</svg>

@@ -48,10 +48,13 @@ export class KokoroLocalTTSProvider implements TTSProviderPlugin {
   private worker: Worker | null = null;
   private modelLoaded = false;
   private loadPromise: Promise<void> | null = null;
-  private pendingSyntheses = new Map<string, {
-    resolve: (buf: ArrayBuffer) => void;
-    reject: (err: Error) => void;
-  }>();
+  private pendingSyntheses = new Map<
+    string,
+    {
+      resolve: (buf: ArrayBuffer) => void;
+      reject: (err: Error) => void;
+    }
+  >();
 
   constructor(opts?: {
     modelId?: string;
@@ -90,7 +93,6 @@ export class KokoroLocalTTSProvider implements TTSProviderPlugin {
   async checkCached(): Promise<boolean> {
     if (typeof caches === "undefined") return false;
     try {
-      // Search all caches — transformers.js cache name may vary by version
       const names = await caches.keys();
       for (const name of names) {
         const cache = await caches.open(name);
@@ -103,15 +105,59 @@ export class KokoroLocalTTSProvider implements TTSProviderPlugin {
     }
   }
 
+  /** Delete cached model files from Cache Storage. */
+  async deleteModel(): Promise<void> {
+    // Terminate worker first
+    this.terminateWorker();
+    if (typeof caches === "undefined") return;
+    const names = await caches.keys();
+    for (const name of names) {
+      const cache = await caches.open(name);
+      const keys = await cache.keys();
+      for (const req of keys) {
+        if (req.url.includes(this.modelId)) {
+          await cache.delete(req);
+        }
+      }
+    }
+    this.status = "idle";
+    this.progress = 0;
+    this.onStatusChange?.("idle", 0);
+  }
+
+  /** Get the total size of cached model files in bytes. */
+  async getModelSize(): Promise<number> {
+    if (typeof caches === "undefined") return 0;
+    let totalSize = 0;
+    const names = await caches.keys();
+    for (const name of names) {
+      const cache = await caches.open(name);
+      const keys = await cache.keys();
+      for (const req of keys) {
+        if (req.url.includes(this.modelId)) {
+          try {
+            const response = await cache.match(req);
+            if (response) {
+              const blob = await response.blob();
+              totalSize += blob.size;
+            }
+          } catch {
+            /* skip unreadable entries */
+          }
+        }
+      }
+    }
+    return totalSize;
+  }
+
   private postMessage(msg: KokoroWorkerRequest): void {
     this.worker!.postMessage(msg);
   }
 
   private createWorker(): Worker {
-    const worker = new Worker(
-      new URL("../workers/kokoro.worker.ts", import.meta.url),
-      { type: "module" },
-    );
+    const worker = new Worker(new URL("../workers/kokoro.worker.ts", import.meta.url), {
+      type: "module",
+    });
 
     worker.addEventListener("message", (e: MessageEvent<KokoroWorkerResponse>) => {
       this.handleWorkerMessage(e.data);
@@ -202,7 +248,7 @@ export class KokoroLocalTTSProvider implements TTSProviderPlugin {
     this.progress = 0;
     this.onStatusChange?.("loading", 0);
 
-    const worker = this.worker = this.createWorker();
+    const worker = (this.worker = this.createWorker());
 
     return new Promise<void>((resolve, reject) => {
       const onMessage = (e: MessageEvent<KokoroWorkerResponse>) => {

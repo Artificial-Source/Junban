@@ -10,6 +10,8 @@ interface VoiceCallOverlayProps {
   callState: Exclude<CallState, "idle">;
   callDuration: number;
   onEndCall: () => void;
+  isInGracePeriod?: boolean;
+  gracePeriodProgress?: number;
 }
 
 const STATE_CONFIG: Record<
@@ -28,8 +30,15 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function VoiceCallOverlay({ callState, callDuration, onEndCall }: VoiceCallOverlayProps) {
+export function VoiceCallOverlay({
+  callState,
+  callDuration,
+  onEndCall,
+  isInGracePeriod,
+  gracePeriodProgress,
+}: VoiceCallOverlayProps) {
   const { label, color, ringColor } = STATE_CONFIG[callState];
+  const displayLabel = isInGracePeriod ? "Waiting..." : label;
 
   return (
     <div className="flex flex-col items-center gap-3 py-4" data-testid="voice-call-overlay">
@@ -45,13 +54,23 @@ export function VoiceCallOverlay({ callState, callDuration, onEndCall }: VoiceCa
         />
       </div>
 
+      {/* Grace period progress */}
+      {isInGracePeriod && gracePeriodProgress !== undefined && (
+        <div className="w-24 h-1 bg-surface-tertiary rounded-full overflow-hidden">
+          <div
+            className="h-full bg-warning rounded-full transition-all duration-100"
+            style={{ width: `${gracePeriodProgress * 100}%` }}
+          />
+        </div>
+      )}
+
       {/* Timer and state label */}
       <div className="text-center">
         <p className="text-lg font-mono text-on-surface" data-testid="call-duration">
           {formatDuration(callDuration)}
         </p>
         <p className="text-xs text-on-surface-muted" data-testid="call-state-label">
-          {label}
+          {displayLabel}
         </p>
       </div>
 

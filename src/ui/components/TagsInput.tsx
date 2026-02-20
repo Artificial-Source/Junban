@@ -25,9 +25,7 @@ export function TagsInput({
 
   const filtered = inputValue.trim()
     ? suggestions.filter(
-        (s) =>
-          s.toLowerCase().includes(inputValue.toLowerCase()) &&
-          !value.includes(s),
+        (s) => s.toLowerCase().includes(inputValue.toLowerCase()) && !value.includes(s),
       )
     : suggestions.filter((s) => !value.includes(s));
 
@@ -95,11 +93,7 @@ export function TagsInput({
               className={`font-mono inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${
                 color ? "" : "bg-surface-tertiary text-on-surface-secondary"
               }`}
-              style={
-                color
-                  ? { backgroundColor: hexToRgba(color, 0.15), color }
-                  : undefined
-              }
+              style={color ? { backgroundColor: hexToRgba(color, 0.15), color } : undefined}
             >
               {tag}
               <button

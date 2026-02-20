@@ -1,17 +1,9 @@
 import { useTaskContext } from "../context/TaskContext.js";
 import { useSoundEffect } from "./useSoundEffect.js";
 
-export function useBulkActions(
-  multiSelectedIds: Set<string>,
-  clearSelection: () => void,
-) {
-  const {
-    state,
-    completeManyTasks,
-    deleteManyTasks,
-    updateManyTasks,
-    updateTask,
-  } = useTaskContext();
+export function useBulkActions(multiSelectedIds: Set<string>, clearSelection: () => void) {
+  const { state, completeManyTasks, deleteManyTasks, updateManyTasks, updateTask } =
+    useTaskContext();
   const playSound = useSoundEffect();
 
   const handleBulkComplete = async () => {

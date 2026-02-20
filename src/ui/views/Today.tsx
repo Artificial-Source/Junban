@@ -60,9 +60,7 @@ export function Today({
 
   const overdueTasks = useMemo(
     () =>
-      tasks.filter(
-        (t) => t.status === "pending" && t.dueDate && t.dueDate.split("T")[0] < today,
-      ),
+      tasks.filter((t) => t.status === "pending" && t.dueDate && t.dueDate.split("T")[0] < today),
     [tasks, today],
   );
 

@@ -41,9 +41,7 @@ export function registerCheckOvercommitmentTool(registry: ToolRegistry): void {
       );
 
       // Count overdue tasks
-      const overdue = pending.filter(
-        (t) => t.dueDate && t.dueDate.split("T")[0] < todayISO,
-      );
+      const overdue = pending.filter((t) => t.dueDate && t.dueDate.split("T")[0] < todayISO);
 
       // Calculate priority weight for the target date
       let priorityWeight = 0;
@@ -74,7 +72,15 @@ export function registerCheckOvercommitmentTool(registry: ToolRegistry): void {
           }
         }
 
-        const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+        const dayNames = [
+          "Sunday",
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+        ];
         const targetDay = dayNames[targetD.getDay()];
 
         if (lightest && lightest.count < tasksOnDate.length) {
@@ -84,8 +90,7 @@ export function registerCheckOvercommitmentTool(registry: ToolRegistry): void {
             `You have ${tasksOnDate.length} tasks due ${targetDay}. ` +
             `Consider spreading some to ${lighterDay} (only ${lightest.count} task${lightest.count === 1 ? "" : "s"}).`;
         } else {
-          suggestion =
-            `You have ${tasksOnDate.length} tasks due ${targetDay}. Consider rescheduling some tasks.`;
+          suggestion = `You have ${tasksOnDate.length} tasks due ${targetDay}. Consider rescheduling some tasks.`;
         }
       }
 
@@ -203,10 +208,7 @@ export function registerAnalyzeWorkloadTool(registry: ToolRegistry): void {
       const taskCounts = formattedDays.map((d) => d.taskCount);
       const totalTasks = taskCounts.reduce((a, b) => a + b, 0);
       const daysWithTasks = taskCounts.filter((c) => c > 0).length;
-      const avgPerDay =
-        daysWithTasks > 0
-          ? Math.round((totalTasks / daysWithTasks) * 10) / 10
-          : 0;
+      const avgPerDay = daysWithTasks > 0 ? Math.round((totalTasks / daysWithTasks) * 10) / 10 : 0;
 
       const busiestDay = formattedDays.reduce(
         (best, d) => (d.taskCount > best.taskCount ? d : best),

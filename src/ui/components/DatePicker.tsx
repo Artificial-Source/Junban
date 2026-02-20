@@ -39,9 +39,7 @@ export function DatePicker({ value, onChange, showTime = false, onClose }: DateP
   const initialDate = value ? new Date(value) : now;
   const [viewYear, setViewYear] = useState(initialDate.getFullYear());
   const [viewMonth, setViewMonth] = useState(initialDate.getMonth());
-  const [timeValue, setTimeValue] = useState(
-    value && showTime ? value.slice(11, 16) : "",
-  );
+  const [timeValue, setTimeValue] = useState(value && showTime ? value.slice(11, 16) : "");
   const ref = useRef<HTMLDivElement>(null);
 
   const selectedDateStr = value ? value.split("T")[0] : null;

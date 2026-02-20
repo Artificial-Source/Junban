@@ -13,7 +13,12 @@ interface TaskInputProps {
   defaultDueDate?: Date;
 }
 
-export function TaskInput({ onSubmit, placeholder, autoFocusTrigger, defaultDueDate }: TaskInputProps) {
+export function TaskInput({
+  onSubmit,
+  placeholder,
+  autoFocusTrigger,
+  defaultDueDate,
+}: TaskInputProps) {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const { settings } = useGeneralSettings();

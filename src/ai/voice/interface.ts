@@ -36,6 +36,12 @@ export interface STTProviderPlugin {
 
   /** Check if this provider is available in the current environment. */
   isAvailable(): Promise<boolean>;
+
+  /** Delete cached model files. */
+  deleteModel?(): Promise<void>;
+
+  /** Get the size of cached model files in bytes. */
+  getModelSize?(): Promise<number>;
 }
 
 /** Text-to-Speech provider plugin. */
@@ -55,4 +61,10 @@ export interface TTSProviderPlugin {
 
   /** Check if this provider is available in the current environment. */
   isAvailable(): Promise<boolean>;
+
+  /** Delete cached model files. */
+  deleteModel?(): Promise<void>;
+
+  /** Get the size of cached model files in bytes. */
+  getModelSize?(): Promise<number>;
 }

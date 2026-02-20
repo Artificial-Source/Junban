@@ -16,7 +16,9 @@ describe("BrowserSTTProvider", () => {
 
   it("transcribe() throws (blob mode not supported)", async () => {
     const blob = new Blob(["test"], { type: "audio/wav" });
-    await expect(provider.transcribe(blob)).rejects.toThrow("does not support transcribing audio blobs");
+    await expect(provider.transcribe(blob)).rejects.toThrow(
+      "does not support transcribing audio blobs",
+    );
   });
 
   it("isAvailable returns false when SpeechRecognition is not available", async () => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { CommandPalette } from "./components/CommandPalette.js";
@@ -168,7 +168,9 @@ function AppContent() {
       .finally(() => {
         if (mounted) setChatPanelStateLoaded(true);
       });
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -184,6 +186,31 @@ function AppContent() {
   useEffect(() => {
     window.localStorage.setItem(AI_CHAT_EXPANDED_STORAGE_KEY, chatPanelOpen ? "1" : "0");
   }, [chatPanelOpen]);
+
+  // ── Auto-manage LM Studio models ──
+  const autoLoadedModelRef = useRef<string | null>(null);
+  const { config: aiConfig } = useAIContext();
+
+  useEffect(() => {
+    if (!chatPanelStateLoaded) return;
+    const autoManage = window.localStorage.getItem("saydo.ai.auto-manage-lmstudio") === "1";
+    if (!autoManage || aiConfig?.provider !== "lmstudio" || !aiConfig.model) return;
+
+    if (chatPanelOpen) {
+      // Auto-load model when chat opens
+      api
+        .loadModel("lmstudio", aiConfig.model)
+        .then(() => {
+          autoLoadedModelRef.current = aiConfig.model;
+        })
+        .catch(() => {});
+    } else if (autoLoadedModelRef.current) {
+      // Auto-unload model when chat closes
+      const modelToUnload = autoLoadedModelRef.current;
+      autoLoadedModelRef.current = null;
+      api.unloadModel("lmstudio", modelToUnload).catch(() => {});
+    }
+  }, [chatPanelOpen, chatPanelStateLoaded, aiConfig]);
 
   // ── Close drawer on navigation ──
   useEffect(() => {
@@ -237,6 +264,19 @@ function AppContent() {
     return counts;
   }, [state.tasks]);
 
+  // ── Project CRUD handlers ──
+  const handleCreateProject = useCallback(
+    async (name: string, color: string, icon: string) => {
+      try {
+        await api.createProject(name, color || undefined, icon || undefined);
+        fetchProjects();
+      } catch {
+        // Non-critical
+      }
+    },
+    [fetchProjects],
+  );
+
   // ── Mobile AI voice handler ──
   const handleOpenVoice = useCallback(() => {
     setChatPanelOpen(true);
@@ -268,12 +308,8 @@ function AppContent() {
   }, [currentView, selectedProjectId, selectedPluginViewId, clearSelection]);
 
   // ── Bulk actions ──
-  const {
-    handleBulkComplete,
-    handleBulkDelete,
-    handleBulkMoveToProject,
-    handleBulkAddTag,
-  } = useBulkActions(multiSelectedIds, clearSelection);
+  const { handleBulkComplete, handleBulkDelete, handleBulkMoveToProject, handleBulkAddTag } =
+    useBulkActions(multiSelectedIds, clearSelection);
 
   // ── Keyboard navigation ──
   useKeyboardNavigation({
@@ -286,12 +322,15 @@ function AppContent() {
   });
 
   // ── Reminders ──
-  const handleReminder = useCallback((task: { id: string; title: string }) => {
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-      new Notification("Saydo Reminder", { body: task.title });
-    }
-    playSound("reminder");
-  }, [playSound]);
+  const handleReminder = useCallback(
+    (task: { id: string; title: string }) => {
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        new Notification("Saydo Reminder", { body: task.title });
+      }
+      playSound("reminder");
+    },
+    [playSound],
+  );
 
   useReminders({ onReminder: handleReminder, enabled: true });
 
@@ -358,7 +397,9 @@ function AppContent() {
         return pluginView ? `${pluginView.name} - Saydo` : "Custom View - Saydo";
       }
       case "task": {
-        const t = selectedRouteTaskId ? state.tasks.find((tk) => tk.id === selectedRouteTaskId) : null;
+        const t = selectedRouteTaskId
+          ? state.tasks.find((tk) => tk.id === selectedRouteTaskId)
+          : null;
         return t ? `${t.title} - Saydo` : "Task - Saydo";
       }
       case "filters-labels":
@@ -368,7 +409,16 @@ function AppContent() {
       default:
         return "Saydo";
     }
-  }, [focusModeOpen, currentView, projects, selectedProjectId, selectedRouteTaskId, state.tasks, pluginViews, selectedPluginViewId]);
+  }, [
+    focusModeOpen,
+    currentView,
+    projects,
+    selectedProjectId,
+    selectedRouteTaskId,
+    state.tasks,
+    pluginViews,
+    selectedPluginViewId,
+  ]);
 
   useEffect(() => {
     document.title = appTitle;
@@ -487,7 +537,9 @@ function AppContent() {
           />
         );
       case "completed":
-        return <Completed tasks={state.tasks} projects={projects} onSelectTask={handleSelectTask} />;
+        return (
+          <Completed tasks={state.tasks} projects={projects} onSelectTask={handleSelectTask} />
+        );
       case "plugin-store":
         return (
           <PluginStore
@@ -533,6 +585,7 @@ function AppContent() {
             onSearch={() => setSearchOpen(true)}
             inboxCount={inboxTaskCount}
             todayCount={todayTaskCount}
+            onCreateProject={handleCreateProject}
           />
         </div>
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto p-3 md:p-6">
@@ -555,8 +608,8 @@ function AppContent() {
             <ErrorBoundary>{renderView()}</ErrorBoundary>
           )}
         </main>
-        {chatPanelOpen && (
-          isMobile ? (
+        {chatPanelOpen &&
+          (isMobile ? (
             <div className="fixed inset-0 z-50">
               <AIChatPanel
                 onClose={() => setChatPanelOpen(false)}
@@ -564,6 +617,7 @@ function AppContent() {
                   setSettingsOpen(true);
                   setChatPanelOpen(false);
                 }}
+                onSelectTask={handleSelectTask}
               />
             </div>
           ) : (
@@ -573,9 +627,9 @@ function AppContent() {
                 setSettingsOpen(true);
                 setChatPanelOpen(false);
               }}
+              onSelectTask={handleSelectTask}
             />
-          )
-        )}
+          ))}
         <div className="hidden md:flex">
           <RightActionRail
             chatOpen={chatPanelOpen}
@@ -611,6 +665,7 @@ function AppContent() {
           }}
           inboxCount={inboxTaskCount}
           todayCount={todayTaskCount}
+          onCreateProject={handleCreateProject}
         />
       </MobileDrawer>
 
@@ -644,8 +699,16 @@ function AppContent() {
           onAddSubtask={handleAddSubtask}
           onToggleSubtask={handleToggleTask}
           onReorder={handleReorder}
-          onNavigatePrev={selectedTaskIdx > 0 ? () => handleSelectTask(visibleTasks[selectedTaskIdx - 1].id) : undefined}
-          onNavigateNext={selectedTaskIdx >= 0 && selectedTaskIdx < visibleTasks.length - 1 ? () => handleSelectTask(visibleTasks[selectedTaskIdx + 1].id) : undefined}
+          onNavigatePrev={
+            selectedTaskIdx > 0
+              ? () => handleSelectTask(visibleTasks[selectedTaskIdx - 1].id)
+              : undefined
+          }
+          onNavigateNext={
+            selectedTaskIdx >= 0 && selectedTaskIdx < visibleTasks.length - 1
+              ? () => handleSelectTask(visibleTasks[selectedTaskIdx + 1].id)
+              : undefined
+          }
           onOpenFullPage={(id) => handleNavigate("task", id)}
           hasPrev={selectedTaskIdx > 0}
           hasNext={selectedTaskIdx >= 0 && selectedTaskIdx < visibleTasks.length - 1}

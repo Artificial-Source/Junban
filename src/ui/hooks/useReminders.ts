@@ -14,7 +14,7 @@ interface UseRemindersOptions {
 export function useReminders({
   onReminder,
   enabled = true,
-  intervalMs = 30000,
+  intervalMs = 60000,
 }: UseRemindersOptions) {
   const firedRef = useRef<Set<string>>(new Set());
 

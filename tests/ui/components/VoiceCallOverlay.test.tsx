@@ -4,7 +4,7 @@ import { VoiceCallOverlay } from "../../../src/ui/components/VoiceCallOverlay.js
 
 // Mock lucide-react
 vi.mock("lucide-react", () => ({
-  PhoneOff: ({ size, ...props }: any) => <svg data-testid="phone-off-icon" {...props} />,
+  PhoneOff: ({ size: _size, ...props }: any) => <svg data-testid="phone-off-icon" {...props} />,
 }));
 
 describe("VoiceCallOverlay", () => {

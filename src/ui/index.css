@@ -4,16 +4,21 @@
 @import "./themes/nord.css";
 
 @theme {
-  --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
-  --font-heading: 'Space Grotesk', 'Outfit', ui-sans-serif, sans-serif;
-  --font-mono: 'Space Mono', ui-monospace, monospace;
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Space Grotesk", "Outfit", ui-sans-serif, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, monospace;
 }
 
 @layer base {
   body {
     font-family: var(--font-sans);
   }
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-family: var(--font-heading);
   }
 }
@@ -56,44 +61,125 @@
 /* ── Entrance animations ────────────────────────────────── */
 
 @keyframes fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes slide-up-fade {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes scale-fade-in {
-  from { opacity: 0; transform: scale(0.96); }
-  to   { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @keyframes drop-fade-in {
-  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @keyframes toast-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 @keyframes pop-in {
-  0%   { opacity: 0; transform: scale(0.5); }
-  70%  { transform: scale(1.05); }
-  100% { opacity: 1; transform: scale(1); }
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  70% {
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @keyframes message-enter {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes task-complete {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  30% {
+    opacity: 0.8;
+    transform: scale(0.98);
+    background: color-mix(in srgb, var(--color-success, #22c55e) 8%, transparent);
+  }
+  70% {
+    opacity: 0.4;
+    transform: scale(0.97) translateY(4px);
+  }
+  100% {
+    opacity: 0.6;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes task-revive {
+  0% {
+    opacity: 0.5;
+    transform: scale(0.97);
+  }
+  50% {
+    transform: scale(1.02);
+    background: color-mix(in srgb, var(--color-accent, #6366f1) 6%, transparent);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @keyframes typing-shimmer {
-  0%   { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 @layer utilities {
@@ -118,6 +204,12 @@
   .animate-message-enter {
     animation: message-enter 250ms ease-out both;
   }
+  .animate-task-complete {
+    animation: task-complete 500ms ease-out both;
+  }
+  .animate-task-revive {
+    animation: task-revive 400ms ease-out both;
+  }
 }
 
 /* ── Typing shimmer indicator ────────────────────────── */
@@ -131,4 +223,45 @@
   );
   background-size: 200% 100%;
   animation: typing-shimmer 1.5s ease-in-out infinite;
+}
+
+/* ── Tool call badge shimmer ────────────────────────── */
+
+@keyframes tool-call-shimmer {
+  0% {
+    background-position: -100% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tool-call-shimmer {
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--color-accent, #6366f1) 8%, transparent) 50%,
+      transparent 100%
+    ),
+    color-mix(in srgb, var(--color-accent, #6366f1) 10%, transparent);
+  background-size:
+    200% 100%,
+    100% 100%;
+  animation: tool-call-shimmer 2s ease-in-out infinite;
+}
+
+@layer utilities {
+  .animate-spin-slow {
+    animation: spin-slow 2s linear infinite;
+  }
 }

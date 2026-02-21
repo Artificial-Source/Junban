@@ -9,7 +9,12 @@ import {
   Shield,
   ArrowLeft,
 } from "lucide-react";
-import { api, type PluginInfo, type StorePluginInfo, type SettingDefinitionInfo } from "../api/index.js";
+import {
+  api,
+  type PluginInfo,
+  type StorePluginInfo,
+  type SettingDefinitionInfo,
+} from "../api/index.js";
 import { usePluginContext } from "../context/PluginContext.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
@@ -48,10 +53,7 @@ interface PluginBrowserProps {
 
 // ── Data merging ─────────────────────────────────────
 
-function mergePlugins(
-  installed: PluginInfo[],
-  store: StorePluginInfo[],
-): BrowserPlugin[] {
+function mergePlugins(installed: PluginInfo[], store: StorePluginInfo[]): BrowserPlugin[] {
   const installedMap = new Map(installed.map((p) => [p.id, p]));
   const seen = new Set<string>();
   const result: BrowserPlugin[] = [];
@@ -127,10 +129,13 @@ export function PluginBrowser({ open, onClose }: PluginBrowserProps) {
   useEffect(() => {
     if (!open) return;
     setLoading(true);
-    api.getPluginStore().then((data) => {
-      setStorePlugins(data.plugins ?? []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    api
+      .getPluginStore()
+      .then((data) => {
+        setStorePlugins(data.plugins ?? []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, [open]);
 
   // Auto-focus search on open
@@ -204,48 +209,71 @@ export function PluginBrowser({ open, onClose }: PluginBrowserProps) {
 
   // ── Handlers ─────────────────────────────────────
 
-  const handleInstall = useCallback(async (plugin: BrowserPlugin) => {
-    if (!plugin.downloadUrl) {
-      setError(`No download URL available for ${plugin.name}`);
-      return;
-    }
-    setError(null);
-    setInstalling((prev) => new Set(prev).add(plugin.id));
-    try {
-      await api.installPlugin(plugin.id, plugin.downloadUrl);
-      await refreshPlugins();
-    } catch (err) {
-      setError(`Failed to install ${plugin.name}: ${err instanceof Error ? err.message : "unknown error"}`);
-    } finally {
-      setInstalling((prev) => { const n = new Set(prev); n.delete(plugin.id); return n; });
-    }
-  }, [refreshPlugins]);
+  const handleInstall = useCallback(
+    async (plugin: BrowserPlugin) => {
+      if (!plugin.downloadUrl) {
+        setError(`No download URL available for ${plugin.name}`);
+        return;
+      }
+      setError(null);
+      setInstalling((prev) => new Set(prev).add(plugin.id));
+      try {
+        await api.installPlugin(plugin.id, plugin.downloadUrl);
+        await refreshPlugins();
+      } catch (err) {
+        setError(
+          `Failed to install ${plugin.name}: ${err instanceof Error ? err.message : "unknown error"}`,
+        );
+      } finally {
+        setInstalling((prev) => {
+          const n = new Set(prev);
+          n.delete(plugin.id);
+          return n;
+        });
+      }
+    },
+    [refreshPlugins],
+  );
 
-  const handleUninstall = useCallback(async (pluginId: string) => {
-    setError(null);
-    setUninstalling((prev) => new Set(prev).add(pluginId));
-    try {
-      await api.uninstallPlugin(pluginId);
-      await refreshPlugins();
-    } catch (err) {
-      setError(`Failed to uninstall: ${err instanceof Error ? err.message : "unknown error"}`);
-    } finally {
-      setUninstalling((prev) => { const n = new Set(prev); n.delete(pluginId); return n; });
-    }
-  }, [refreshPlugins]);
+  const handleUninstall = useCallback(
+    async (pluginId: string) => {
+      setError(null);
+      setUninstalling((prev) => new Set(prev).add(pluginId));
+      try {
+        await api.uninstallPlugin(pluginId);
+        await refreshPlugins();
+      } catch (err) {
+        setError(`Failed to uninstall: ${err instanceof Error ? err.message : "unknown error"}`);
+      } finally {
+        setUninstalling((prev) => {
+          const n = new Set(prev);
+          n.delete(pluginId);
+          return n;
+        });
+      }
+    },
+    [refreshPlugins],
+  );
 
-  const handleToggle = useCallback(async (pluginId: string) => {
-    setError(null);
-    setActivating((prev) => new Set(prev).add(pluginId));
-    try {
-      await api.togglePlugin(pluginId);
-      await refreshPlugins();
-    } catch (err) {
-      setError(`Failed to toggle: ${err instanceof Error ? err.message : "unknown error"}`);
-    } finally {
-      setActivating((prev) => { const n = new Set(prev); n.delete(pluginId); return n; });
-    }
-  }, [refreshPlugins]);
+  const handleToggle = useCallback(
+    async (pluginId: string) => {
+      setError(null);
+      setActivating((prev) => new Set(prev).add(pluginId));
+      try {
+        await api.togglePlugin(pluginId);
+        await refreshPlugins();
+      } catch (err) {
+        setError(`Failed to toggle: ${err instanceof Error ? err.message : "unknown error"}`);
+      } finally {
+        setActivating((prev) => {
+          const n = new Set(prev);
+          n.delete(pluginId);
+          return n;
+        });
+      }
+    },
+    [refreshPlugins],
+  );
 
   if (!open) return null;
 
@@ -261,7 +289,9 @@ export function PluginBrowser({ open, onClose }: PluginBrowserProps) {
           >
             <ArrowLeft size={20} />
           </button>
-          <h2 className="text-base font-semibold text-on-surface truncate">{selectedPlugin.name}</h2>
+          <h2 className="text-base font-semibold text-on-surface truncate">
+            {selectedPlugin.name}
+          </h2>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -318,7 +348,10 @@ export function PluginBrowser({ open, onClose }: PluginBrowserProps) {
             {/* Search */}
             <div className="px-3 pt-3 pb-2">
               <div className="relative">
-                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-muted" />
+                <Search
+                  size={14}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-muted"
+                />
                 <input
                   ref={searchRef}
                   type="text"

@@ -76,9 +76,9 @@ describe("BottomNavBar", () => {
     expect(screen.getByText("99+")).toBeDefined();
   });
 
-  it("tap on center button calls onOpenChat", () => {
-    const onOpenChat = vi.fn();
-    render(<BottomNavBar {...defaultProps} onOpenChat={onOpenChat} />);
+  it("tap on center button calls onNavigate with ai-chat", () => {
+    const onNavigate = vi.fn();
+    render(<BottomNavBar {...defaultProps} onNavigate={onNavigate} />);
     const aiButton = screen.getByLabelText("AI assistant — hold for voice");
 
     fireEvent.pointerDown(aiButton);
@@ -86,7 +86,7 @@ describe("BottomNavBar", () => {
     vi.advanceTimersByTime(100);
     fireEvent.pointerUp(aiButton);
 
-    expect(onOpenChat).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith("ai-chat");
   });
 
   it("long press on center button calls onOpenVoice", () => {

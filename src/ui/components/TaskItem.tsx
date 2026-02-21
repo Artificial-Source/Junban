@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Calendar,
   Check,
@@ -66,6 +66,25 @@ export const TaskItem = React.memo(function TaskItem({
   onContextMenu,
 }: TaskItemProps) {
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [animClass, setAnimClass] = useState("");
+  const prevStatusRef = useRef(task.status);
+
+  useEffect(() => {
+    if (prevStatusRef.current === "pending" && task.status === "completed") {
+      setAnimClass("animate-task-complete");
+      const timer = setTimeout(() => setAnimClass(""), 600);
+      prevStatusRef.current = task.status;
+      return () => clearTimeout(timer);
+    }
+    if (prevStatusRef.current === "completed" && task.status === "pending") {
+      setAnimClass("animate-task-revive");
+      const timer = setTimeout(() => setAnimClass(""), 500);
+      prevStatusRef.current = task.status;
+      return () => clearTimeout(timer);
+    }
+    prevStatusRef.current = task.status;
+  }, [task.status]);
+
   const priority = task.priority ? getPriority(task.priority) : null;
   const isOverdue =
     task.dueDate && task.status === "pending" && new Date(task.dueDate) < new Date();
@@ -81,8 +100,7 @@ export const TaskItem = React.memo(function TaskItem({
 
   const indentPadding = depth > 0 ? { paddingLeft: `${depth * 1.5 + 0.75}rem` } : undefined;
 
-  const hasMetadataLine =
-    task.tags.length > 0 || task.dueDate || task.recurrence || task.remindAt;
+  const hasMetadataLine = task.tags.length > 0 || task.dueDate || task.recurrence || task.remindAt;
 
   // Priority-based circle colors
   const priorityColorClass = task.priority
@@ -105,7 +123,7 @@ export const TaskItem = React.memo(function TaskItem({
           onSelect(task.id);
         }
       }}
-      className={`group relative flex items-center gap-2 px-3 py-2 border-b border-border/30 cursor-pointer transition-colors duration-150 ${
+      className={`group relative flex items-center gap-2 px-3 py-2 border-b border-border/30 cursor-pointer transition-all duration-150 ${animClass} ${
         isMultiSelected
           ? "bg-accent/10 ring-1 ring-accent"
           : isSelected

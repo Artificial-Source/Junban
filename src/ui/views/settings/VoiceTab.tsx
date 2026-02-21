@@ -587,20 +587,25 @@ function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
 
   // Memoize localModels to avoid recreating on every render.
   // modelVersion is bumped after preload/delete to pick up status changes.
-  const localModels = useMemo<LocalModelInfo[]>(() => [
-    ...registry
-      .listSTT()
-      .map((p) => toLocalModelInfo(p, "STT"))
-      .filter((m): m is LocalModelInfo => m !== null),
-    ...registry
-      .listTTS()
-      .map((p) => toLocalModelInfo(p, "TTS"))
-      .filter((m): m is LocalModelInfo => m !== null),
-  ], [registry, modelVersion]);
+  const localModels = useMemo<LocalModelInfo[]>(
+    () => [
+      ...registry
+        .listSTT()
+        .map((p) => toLocalModelInfo(p, "STT"))
+        .filter((m): m is LocalModelInfo => m !== null),
+      ...registry
+        .listTTS()
+        .map((p) => toLocalModelInfo(p, "TTS"))
+        .filter((m): m is LocalModelInfo => m !== null),
+    ],
+    [registry, modelVersion],
+  );
 
   // Keep a ref so async callbacks always see the latest models
   const localModelsRef = useRef(localModels);
-  localModelsRef.current = localModels;
+  useEffect(() => {
+    localModelsRef.current = localModels;
+  }, [localModels]);
 
   // Phase 1: fast check — just whether models are cached (no size computation)
   const checkCacheStatus = useCallback(async () => {
@@ -662,10 +667,13 @@ function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
     checkCacheStatus().then((found) => {
       if (cancelled || !found) return;
       // Defer size fetching so the tab renders fast with just cached/not-cached status
-      const defer = typeof requestIdleCallback === "function"
-        ? requestIdleCallback
-        : (cb: () => void) => setTimeout(cb, 50);
-      defer(() => { if (!cancelled) fetchModelSizes(found); });
+      const defer =
+        typeof requestIdleCallback === "function"
+          ? requestIdleCallback
+          : (cb: () => void) => setTimeout(cb, 50);
+      defer(() => {
+        if (!cancelled) fetchModelSizes(found);
+      });
     });
     return () => {
       cancelled = true;

@@ -5,7 +5,9 @@ interface TypingIndicatorProps {
   mode?: "panel" | "view";
 }
 
-export const TypingIndicator = memo(function TypingIndicator({ mode = "panel" }: TypingIndicatorProps) {
+export const TypingIndicator = memo(function TypingIndicator({
+  mode = "panel",
+}: TypingIndicatorProps) {
   const isView = mode === "view";
   const avatarSize = isView ? 28 : 24;
   const iconSize = isView ? 14 : 12;

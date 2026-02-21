@@ -101,7 +101,10 @@ function SessionEntry({
         <button onClick={handleConfirmRename} className="p-0.5 text-success hover:text-success/80">
           <Check size={10} />
         </button>
-        <button onClick={() => setEditing(false)} className="p-0.5 text-on-surface-muted hover:text-on-surface">
+        <button
+          onClick={() => setEditing(false)}
+          className="p-0.5 text-on-surface-muted hover:text-on-surface"
+        >
           <X size={10} />
         </button>
       </div>

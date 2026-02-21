@@ -99,7 +99,9 @@ export function Today({
         </span>
       </div>
       <div className="flex items-center gap-3 mb-4 md:mb-6">
-        <p className="text-sm text-on-surface-muted">{totalCount} tasks</p>
+        <p className="text-sm text-on-surface-muted">
+          {totalCount} {totalCount === 1 ? "task" : "tasks"}
+        </p>
         {ringTotal > 0 && <CompletionRing completed={todayCompletedCount} total={ringTotal} />}
       </div>
 

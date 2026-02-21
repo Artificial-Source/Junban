@@ -29,7 +29,10 @@ export function CalendarWeekView({
   onToggleTask,
   onDayClick,
 }: CalendarWeekViewProps) {
-  const weekDays = useMemo(() => getWeekDays(selectedDate, weekStartDay), [selectedDate, weekStartDay]);
+  const weekDays = useMemo(
+    () => getWeekDays(selectedDate, weekStartDay),
+    [selectedDate, weekStartDay],
+  );
   const today = toDateKey(new Date());
 
   const projectMap = useMemo(() => {
@@ -72,16 +75,18 @@ export function CalendarWeekView({
                 isToday ? "bg-accent/5" : ""
               }`}
             >
-              <span className={`text-[10px] uppercase tracking-wider font-medium ${
-                isToday ? "text-accent" : "text-on-surface-muted"
-              }`}>
+              <span
+                className={`text-[10px] uppercase tracking-wider font-medium ${
+                  isToday ? "text-accent" : "text-on-surface-muted"
+                }`}
+              >
                 {weekday}
               </span>
-              <span className={`text-lg font-semibold mt-0.5 w-8 h-8 flex items-center justify-center rounded-full ${
-                isToday
-                  ? "bg-accent text-white"
-                  : "text-on-surface"
-              }`}>
+              <span
+                className={`text-lg font-semibold mt-0.5 w-8 h-8 flex items-center justify-center rounded-full ${
+                  isToday ? "bg-accent text-white" : "text-on-surface"
+                }`}
+              >
                 {dayNum}
               </span>
             </button>
@@ -107,17 +112,16 @@ export function CalendarWeekView({
                 {dayTasks.map((task) => {
                   const project = task.projectId ? projectMap.get(task.projectId) : null;
                   const isCompleted = task.status === "completed";
-                  const priorityBorder = !isCompleted && task.priority
-                    ? PRIORITY_COLORS[task.priority] ?? "border-l-transparent"
-                    : "border-l-transparent";
+                  const priorityBorder =
+                    !isCompleted && task.priority
+                      ? (PRIORITY_COLORS[task.priority] ?? "border-l-transparent")
+                      : "border-l-transparent";
 
                   return (
                     <div
                       key={task.id}
                       className={`group relative rounded-md border-l-2 ${priorityBorder} transition-all ${
-                        isCompleted
-                          ? "opacity-50"
-                          : "hover:shadow-sm"
+                        isCompleted ? "opacity-50" : "hover:shadow-sm"
                       }`}
                     >
                       <button
@@ -129,22 +133,33 @@ export function CalendarWeekView({
                         }`}
                       >
                         <div className="flex items-start gap-1">
-                          <button
+                          <span
+                            role="button"
+                            tabIndex={0}
                             onClick={(e) => {
                               e.stopPropagation();
                               onToggleTask(task.id);
                             }}
-                            className="shrink-0 mt-px text-on-surface-muted hover:text-accent transition-colors"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onToggleTask(task.id);
+                              }
+                            }}
+                            className="shrink-0 mt-px text-on-surface-muted hover:text-accent transition-colors cursor-pointer"
                           >
                             {isCompleted ? (
                               <CheckCircle2 size={12} className="text-accent" />
                             ) : (
                               <Circle size={12} />
                             )}
-                          </button>
-                          <span className={`line-clamp-2 ${
-                            isCompleted ? "line-through text-on-surface-muted" : "text-on-surface"
-                          }`}>
+                          </span>
+                          <span
+                            className={`line-clamp-2 ${
+                              isCompleted ? "line-through text-on-surface-muted" : "text-on-surface"
+                            }`}
+                          >
                             {task.title}
                           </span>
                         </div>

@@ -47,7 +47,7 @@ export function ChatTaskCard({ task, onClick, onComplete }: ChatTaskCardProps) {
   return (
     <button
       onClick={() => onClick?.(task.id)}
-      className="w-full text-left px-2.5 py-2 rounded-md border border-border bg-surface hover:bg-surface-secondary transition-colors flex items-center gap-2 group animate-scale-fade-in"
+      className="w-full text-left px-3 py-2.5 rounded-xl border border-border bg-surface hover:bg-surface-secondary shadow-sm hover:shadow transition-all flex items-center gap-2.5 group animate-scale-fade-in"
     >
       {onComplete ? (
         <span onClick={handleComplete} className="shrink-0 cursor-pointer">

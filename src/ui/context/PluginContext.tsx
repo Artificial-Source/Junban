@@ -100,7 +100,7 @@ export function PluginProvider({ children }: { children: React.ReactNode }) {
     const interval = setInterval(() => {
       refreshStatusBar();
       refreshPanels();
-    }, 1000);
+    }, 30000);
     return () => clearInterval(interval);
   }, [refreshStatusBar, refreshPanels]);
 

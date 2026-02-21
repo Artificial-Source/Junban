@@ -10,13 +10,7 @@ describe("EmptyState", () => {
   });
 
   it("renders description when provided", () => {
-    render(
-      <EmptyState
-        icon={<svg />}
-        title="Empty"
-        description="Add a task to get started"
-      />,
-    );
+    render(<EmptyState icon={<svg />} title="Empty" description="Add a task to get started" />);
     expect(screen.getByText("Add a task to get started")).toBeInTheDocument();
   });
 
@@ -28,13 +22,7 @@ describe("EmptyState", () => {
 
   it("renders action button and calls onClick", () => {
     const onClick = vi.fn();
-    render(
-      <EmptyState
-        icon={<svg />}
-        title="Empty"
-        action={{ label: "Add Task", onClick }}
-      />,
-    );
+    render(<EmptyState icon={<svg />} title="Empty" action={{ label: "Add Task", onClick }} />);
     const button = screen.getByText("Add Task");
     expect(button).toBeInTheDocument();
     fireEvent.click(button);

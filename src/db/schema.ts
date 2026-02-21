@@ -27,7 +27,9 @@ export const projects = sqliteTable("projects", {
   icon: text("icon"),
   parentId: text("parent_id").references((): any => projects.id, { onDelete: "set null" }),
   isFavorite: integer("is_favorite", { mode: "boolean" }).notNull().default(false),
-  viewStyle: text("view_style", { enum: ["list", "board", "calendar"] }).notNull().default("list"),
+  viewStyle: text("view_style", { enum: ["list", "board", "calendar"] })
+    .notNull()
+    .default("list"),
   sortOrder: integer("sort_order").notNull().default(0),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull(),

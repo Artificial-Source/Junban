@@ -417,7 +417,11 @@ export async function switchChatSession(sessionId: string): Promise<AIChatMessag
     };
 
     // Build system message and create a session from stored messages
-    const systemMessage = svc.chatManager.buildSystemMessage(toolServices, "", providerSetting.value as string);
+    const systemMessage = svc.chatManager.buildSystemMessage(
+      toolServices,
+      "",
+      providerSetting.value as string,
+    );
     const { ChatSession } = await import("../../ai/chat.js");
     const session = new ChatSession(executor, toolServices, systemMessage, {
       sessionId,

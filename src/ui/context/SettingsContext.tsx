@@ -19,6 +19,7 @@ export interface GeneralSettings {
   sound_delete: "true" | "false";
   sound_reminder: "true" | "false";
   calendar_default_mode: "day" | "week" | "month";
+  font_family: "outfit" | "inter" | "system";
 }
 
 const DEFAULT_SETTINGS: GeneralSettings = {
@@ -39,6 +40,7 @@ const DEFAULT_SETTINGS: GeneralSettings = {
   sound_delete: "true",
   sound_reminder: "true",
   calendar_default_mode: "week",
+  font_family: "outfit",
 };
 
 const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS) as (keyof GeneralSettings)[];
@@ -119,6 +121,15 @@ function applyReduceAnimations(reduce: GeneralSettings["reduce_animations"]) {
   el.classList.toggle("reduce-motion", reduce === "true");
 }
 
+function applyFontFamily(family: GeneralSettings["font_family"]) {
+  const fonts: Record<GeneralSettings["font_family"], string> = {
+    outfit: '"Outfit", ui-sans-serif, system-ui, sans-serif',
+    inter: '"Inter", ui-sans-serif, system-ui, sans-serif',
+    system: "ui-sans-serif, system-ui, -apple-system, sans-serif",
+  };
+  document.documentElement.style.setProperty("--font-sans", fonts[family]);
+}
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<GeneralSettings>(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
@@ -140,6 +151,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         applyDensity(next.density);
         applyFontSize(next.font_size);
         applyReduceAnimations(next.reduce_animations);
+        applyFontFamily(next.font_family);
         setLoaded(true);
       })
       .catch(() => {
@@ -159,6 +171,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (key === "font_size") applyFontSize(value as GeneralSettings["font_size"]);
         if (key === "reduce_animations")
           applyReduceAnimations(value as GeneralSettings["reduce_animations"]);
+        if (key === "font_family") applyFontFamily(value as GeneralSettings["font_family"]);
         return next;
       });
       api.setAppSetting(key, String(value)).catch(() => {});

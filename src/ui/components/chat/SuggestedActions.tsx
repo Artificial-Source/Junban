@@ -53,8 +53,8 @@ export const SuggestedActions = memo(function SuggestedActions({
         <button
           key={text}
           onClick={() => onSend(text)}
-          className="px-3 py-1.5 text-xs bg-surface-secondary text-on-surface-secondary rounded-full hover:bg-surface-tertiary transition-colors animate-fade-in"
-          style={{ animationDelay: `${i * 50}ms` }}
+          className="px-3 py-1.5 text-xs bg-surface-secondary text-on-surface-secondary rounded-lg border border-border/50 hover:bg-surface-tertiary hover:border-border transition-all animate-fade-in"
+          style={{ animationDelay: `${i * 75}ms` }}
         >
           {text}
         </button>

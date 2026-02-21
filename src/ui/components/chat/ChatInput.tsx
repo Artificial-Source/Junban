@@ -19,7 +19,16 @@ export interface ChatInputRef {
 }
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(function ChatInput(
-  { onSubmit, isStreaming, mode, voice, ttsAvailable: _ttsAvailable, onVoiceResult, onStartCall, showCallButton },
+  {
+    onSubmit,
+    isStreaming,
+    mode,
+    voice,
+    ttsAvailable: _ttsAvailable,
+    onVoiceResult,
+    onStartCall,
+    showCallButton,
+  },
   ref,
 ) {
   const [input, setInput] = useState("");

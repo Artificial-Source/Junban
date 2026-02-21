@@ -84,9 +84,10 @@ export function CalendarDayView({
   const renderTaskCard = (task: Task) => {
     const project = task.projectId ? projectMap.get(task.projectId) : null;
     const isCompleted = task.status === "completed";
-    const priorityBorder = !isCompleted && task.priority
-      ? PRIORITY_COLORS[task.priority] ?? "border-l-transparent"
-      : "border-l-transparent";
+    const priorityBorder =
+      !isCompleted && task.priority
+        ? (PRIORITY_COLORS[task.priority] ?? "border-l-transparent")
+        : "border-l-transparent";
 
     return (
       <div
@@ -104,23 +105,34 @@ export function CalendarDayView({
           }`}
         >
           <div className="flex items-start gap-2">
-            <button
+            <span
+              role="button"
+              tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleTask(task.id);
               }}
-              className="shrink-0 mt-0.5 text-on-surface-muted hover:text-accent transition-colors"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onToggleTask(task.id);
+                }
+              }}
+              className="shrink-0 mt-0.5 text-on-surface-muted hover:text-accent transition-colors cursor-pointer"
             >
               {isCompleted ? (
                 <CheckCircle2 size={18} className="text-accent" />
               ) : (
                 <Circle size={18} />
               )}
-            </button>
+            </span>
             <div className="flex-1 min-w-0">
-              <span className={`text-sm ${
-                isCompleted ? "line-through text-on-surface-muted" : "text-on-surface"
-              }`}>
+              <span
+                className={`text-sm ${
+                  isCompleted ? "line-through text-on-surface-muted" : "text-on-surface"
+                }`}
+              >
                 {task.title}
               </span>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -139,9 +151,11 @@ export function CalendarDayView({
                   </span>
                 )}
                 {!isCompleted && task.priority && (
-                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                    PRIORITY_TAG_COLORS[task.priority] ?? ""
-                  }`}>
+                  <span
+                    className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                      PRIORITY_TAG_COLORS[task.priority] ?? ""
+                    }`}
+                  >
                     {PRIORITY_LABELS[task.priority]}
                   </span>
                 )}
@@ -166,9 +180,7 @@ export function CalendarDayView({
           <h3 className="text-xs uppercase tracking-wider font-medium text-on-surface-muted mb-2">
             All Day
           </h3>
-          <div className="space-y-1.5">
-            {allDayTasks.map(renderTaskCard)}
-          </div>
+          <div className="space-y-1.5">{allDayTasks.map(renderTaskCard)}</div>
         </section>
       )}
 
@@ -178,9 +190,7 @@ export function CalendarDayView({
           <h3 className="text-xs uppercase tracking-wider font-medium text-on-surface-muted mb-2">
             Scheduled
           </h3>
-          <div className="space-y-1.5">
-            {timedTasks.map(renderTaskCard)}
-          </div>
+          <div className="space-y-1.5">{timedTasks.map(renderTaskCard)}</div>
         </section>
       )}
     </div>

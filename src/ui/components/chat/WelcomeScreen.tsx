@@ -30,7 +30,8 @@ export const WelcomeScreen = memo(function WelcomeScreen({
   onSend,
   isStreaming,
 }: WelcomeScreenProps) {
-  const { tasks } = useTaskContext();
+  const { state } = useTaskContext();
+  const tasks = state.tasks ?? [];
   const isView = mode === "view";
   const greeting = getGreeting();
 
@@ -52,17 +53,18 @@ export const WelcomeScreen = memo(function WelcomeScreen({
           <div className="w-16 h-16 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-6 shadow-[0_0_24px_rgba(var(--color-accent-rgb,99,102,241),0.15)]">
             <Bot size={32} className="text-accent" />
           </div>
-          <h2 className="text-2xl font-light text-on-surface mb-2">
-            {greeting}
-          </h2>
-          <p className="text-sm text-on-surface-muted mb-8">
-            Let's get things done.
-          </p>
+          <h2 className="text-2xl font-light text-on-surface mb-2">{greeting}</h2>
+          <p className="text-sm text-on-surface-muted mb-8">Let's get things done.</p>
 
           {/* Stat cards */}
           <div className="flex items-center justify-center gap-4 mb-8">
             {overdueCount > 0 && (
-              <StatCard icon={<AlertTriangle size={14} />} count={overdueCount} label="overdue" variant="error" />
+              <StatCard
+                icon={<AlertTriangle size={14} />}
+                count={overdueCount}
+                label="overdue"
+                variant="error"
+              />
             )}
             <StatCard icon={<CalendarDays size={14} />} count={todayCount} label="due today" />
             <StatCard icon={<ListTodo size={14} />} count={pendingCount} label="pending" />
@@ -91,9 +93,7 @@ export const WelcomeScreen = memo(function WelcomeScreen({
     <div className="text-center mt-8 space-y-2">
       <p className="text-sm font-medium text-on-surface">{greeting}</p>
       <p className="text-xs text-on-surface-muted">
-        {overdueCount > 0 && (
-          <span className="text-error">{overdueCount} overdue</span>
-        )}
+        {overdueCount > 0 && <span className="text-error">{overdueCount} overdue</span>}
         {overdueCount > 0 && todayCount > 0 && <span> &middot; </span>}
         {todayCount > 0 && <span>{todayCount} today</span>}
         {(overdueCount > 0 || todayCount > 0) && pendingCount > 0 && <span> &middot; </span>}
@@ -131,7 +131,9 @@ function StatCard({
 }) {
   const textColor = variant === "error" ? "text-error" : "text-on-surface-secondary";
   return (
-    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-secondary/50 ${textColor}`}>
+    <div
+      className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-secondary/50 ${textColor}`}
+    >
       {icon}
       <span className="text-sm font-medium">{count}</span>
       <span className="text-xs opacity-70">{label}</span>

@@ -86,7 +86,11 @@ export const MessageActions = memo(function MessageActions({
         isUser ? "left-0 -top-7" : "right-0 -top-7"
       } opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-surface border border-border rounded-md shadow-sm p-0.5 z-10`}
     >
-      <ActionButton icon={copied ? <Check size={12} /> : <Copy size={12} />} onClick={handleCopy} title="Copy" />
+      <ActionButton
+        icon={copied ? <Check size={12} /> : <Copy size={12} />}
+        onClick={handleCopy}
+        title="Copy"
+      />
       {isUser && onEditAndResend && messageIndex !== undefined && (
         <ActionButton icon={<Pencil size={12} />} onClick={handleStartEdit} title="Edit & resend" />
       )}

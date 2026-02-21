@@ -85,7 +85,10 @@ export function CalendarMonthView({
       {/* Weekday header row */}
       <div className="grid grid-cols-7 border-b border-border bg-surface shrink-0">
         {weekdayHeaders.map((label) => (
-          <div key={label} className="text-center py-2 text-[10px] uppercase tracking-wider font-medium text-on-surface-muted">
+          <div
+            key={label}
+            className="text-center py-2 text-[10px] uppercase tracking-wider font-medium text-on-surface-muted"
+          >
             {label}
           </div>
         ))}
@@ -113,13 +116,15 @@ export function CalendarMonthView({
                 onClick={() => onDayClick(day)}
                 className="flex items-center justify-center mb-0.5 self-start"
               >
-                <span className={`text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full transition-colors hover:bg-surface-tertiary ${
-                  isToday
-                    ? "bg-accent text-white hover:bg-accent-hover"
-                    : isCurrentMonth
-                      ? "text-on-surface"
-                      : "text-on-surface-muted/50"
-                }`}>
+                <span
+                  className={`text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full transition-colors hover:bg-surface-tertiary ${
+                    isToday
+                      ? "bg-accent text-white hover:bg-accent-hover"
+                      : isCurrentMonth
+                        ? "text-on-surface"
+                        : "text-on-surface-muted/50"
+                  }`}
+                >
                   {day.getDate()}
                 </span>
               </button>
@@ -128,9 +133,10 @@ export function CalendarMonthView({
               <div className="space-y-0.5 flex-1 min-h-0 overflow-hidden">
                 {visibleTasks.map((task) => {
                   const isCompleted = task.status === "completed";
-                  const priorityBorder = !isCompleted && task.priority
-                    ? PRIORITY_COLORS[task.priority] ?? "border-l-transparent"
-                    : "border-l-transparent";
+                  const priorityBorder =
+                    !isCompleted && task.priority
+                      ? (PRIORITY_COLORS[task.priority] ?? "border-l-transparent")
+                      : "border-l-transparent";
                   const project = task.projectId ? projectMap.get(task.projectId) : null;
 
                   return (

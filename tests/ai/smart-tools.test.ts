@@ -14,7 +14,6 @@ import { createDefaultToolRegistry } from "../../src/ai/provider.js";
 import { createTestServices } from "../integration/helpers.js";
 import type { ToolContext } from "../../src/ai/tools/types.js";
 import type { TaskService } from "../../src/core/tasks.js";
-import type { ProjectService } from "../../src/core/projects.js";
 
 function exec(
   registry: ToolRegistry,

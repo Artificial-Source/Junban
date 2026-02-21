@@ -124,7 +124,7 @@ export function TaskMetadataSidebar({
         <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider">
           Status
         </label>
-        <div className="flex gap-1.5 mt-1.5">
+        <div className="flex gap-1.5 mt-1.5 flex-wrap">
           {STATUS_OPTIONS.map((opt) => {
             const Icon = opt.icon;
             const isActive = task.status === opt.value;

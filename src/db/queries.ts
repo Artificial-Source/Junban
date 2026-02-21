@@ -1,4 +1,4 @@
-import { eq, desc, inArray, and, lte, isNotNull, sql, min, count } from "drizzle-orm";
+import { eq, desc, inArray, and, lte, isNotNull, min, count } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "./schema.js";
 
@@ -169,10 +169,7 @@ export function createQueries(db: BaseSQLiteDatabase<"sync", any, typeof schema>
         .select({ content: schema.chatMessages.content })
         .from(schema.chatMessages)
         .where(
-          and(
-            eq(schema.chatMessages.sessionId, sessionId),
-            eq(schema.chatMessages.role, "user"),
-          ),
+          and(eq(schema.chatMessages.sessionId, sessionId), eq(schema.chatMessages.role, "user")),
         )
         .limit(1)
         .get(),

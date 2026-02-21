@@ -116,7 +116,7 @@ export function DatePicker({ value, onChange, showTime = false, onClose }: DateP
   return (
     <div
       ref={ref}
-      className="absolute z-50 mt-1 bg-surface border border-border rounded-lg shadow-lg p-3 w-64"
+      className="absolute right-0 z-50 mt-1 bg-surface border border-border rounded-lg shadow-lg p-3 w-64"
     >
       {/* Quick options */}
       <div className="flex flex-wrap gap-1.5 mb-3">

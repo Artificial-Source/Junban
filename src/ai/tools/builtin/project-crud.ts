@@ -153,7 +153,8 @@ export function registerProjectCrudTools(registry: ToolRegistry): void {
   registry.register(
     {
       name: "update_project",
-      description: "Update an existing project. Can change name, color, icon, archived status, parent, favorite, or view style.",
+      description:
+        "Update an existing project. Can change name, color, icon, archived status, parent, favorite, or view style.",
       parameters: {
         type: "object",
         properties: {
@@ -201,7 +202,15 @@ export function registerProjectCrudTools(registry: ToolRegistry): void {
       }
       const project = await ctx.projectService.update(
         projectId as string,
-        cleaned as Partial<{ name: string; color: string; icon: string | null; archived: boolean; parentId: string | null; isFavorite: boolean; viewStyle: "list" | "board" | "calendar" }>,
+        cleaned as Partial<{
+          name: string;
+          color: string;
+          icon: string | null;
+          archived: boolean;
+          parentId: string | null;
+          isFavorite: boolean;
+          viewStyle: "list" | "board" | "calendar";
+        }>,
       );
       if (!project) {
         return JSON.stringify({ error: "Project not found" });

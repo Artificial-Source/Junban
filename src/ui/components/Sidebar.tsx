@@ -64,6 +64,31 @@ const NAV_ITEMS: Array<{
   { id: "completed", label: "Completed", icon: CheckCircle2 },
 ];
 
+function SectionHeader({
+  label,
+  expanded,
+  onToggle,
+  trailing,
+}: {
+  label: string;
+  expanded: boolean;
+  onToggle: () => void;
+  trailing?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center mt-5 mb-1 px-3">
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-1 text-[11px] font-semibold text-on-surface-muted uppercase tracking-wider text-left hover:text-on-surface-secondary transition-colors flex-1"
+      >
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {label}
+      </button>
+      {trailing}
+    </div>
+  );
+}
+
 export function Sidebar({
   currentView,
   onNavigate,
@@ -119,7 +144,8 @@ export function Sidebar({
     today: todayCount,
   };
 
-  const isMac = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
+  const isMac =
+    typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
 
   // ── Reusable renderers ──
 
@@ -184,30 +210,6 @@ export function Sidebar({
       </button>
     );
   };
-
-  // ── Section header ──
-  const SectionHeader = ({
-    label,
-    expanded,
-    onToggle,
-    trailing,
-  }: {
-    label: string;
-    expanded: boolean;
-    onToggle: () => void;
-    trailing?: React.ReactNode;
-  }) => (
-    <div className="flex items-center mt-5 mb-1 px-3">
-      <button
-        onClick={onToggle}
-        className="flex items-center gap-1 text-[11px] font-semibold text-on-surface-muted uppercase tracking-wider text-left hover:text-on-surface-secondary transition-colors flex-1"
-      >
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        {label}
-      </button>
-      {trailing}
-    </div>
-  );
 
   return (
     <aside
@@ -287,7 +289,10 @@ export function Sidebar({
       </div>
 
       {/* ── Navigation ── */}
-      <nav aria-label="Views" className={`flex-1 flex flex-col min-h-0 ${collapsed ? "px-2" : "px-3"}`}>
+      <nav
+        aria-label="Views"
+        className={`flex-1 flex flex-col min-h-0 ${collapsed ? "px-2" : "px-3"}`}
+      >
         <div className="flex-1 overflow-y-auto overflow-x-hidden">
           {/* Nav items — no section header needed (it's the primary content) */}
           <ul className="space-y-0.5">
@@ -303,6 +308,41 @@ export function Sidebar({
             )}
           </ul>
 
+          {/* ── Collapsed Projects ── */}
+          {collapsed && projects.filter((p) => !p.archived).length > 0 && (
+            <div className="space-y-0.5 mt-2">
+              {projects
+                .filter((p) => !p.archived)
+                .slice(0, 5)
+                .map((p) => (
+                  <li key={p.id}>
+                    <button
+                      onClick={() => onNavigate("project", p.id)}
+                      title={p.name}
+                      aria-current={
+                        currentView === "project" && selectedProjectId === p.id ? "page" : undefined
+                      }
+                      className={`group relative w-full flex items-center justify-center p-1.5 rounded-lg transition-colors ${
+                        currentView === "project" && selectedProjectId === p.id
+                          ? "bg-accent/10 text-accent"
+                          : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
+                      }`}
+                    >
+                      {p.icon ? (
+                        <span className="text-base leading-none">{p.icon}</span>
+                      ) : (
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: p.color }}
+                        />
+                      )}
+                      <CollapsedTooltip visible={collapsed} label={p.name} />
+                    </button>
+                  </li>
+                ))}
+            </div>
+          )}
+
           {/* ── Favorites ── */}
           {!collapsed && favoriteProjects.length > 0 && (
             <>
@@ -310,9 +350,7 @@ export function Sidebar({
                 label="Favorites"
                 expanded={favoritesExpanded}
                 onToggle={() => setFavoritesExpanded(!favoritesExpanded)}
-                trailing={
-                  <Star size={11} className="text-on-surface-muted mr-1" />
-                }
+                trailing={<Star size={11} className="text-on-surface-muted mr-1" />}
               />
               {favoritesExpanded && (
                 <ul className="space-y-0.5">
@@ -443,19 +481,17 @@ export function Sidebar({
         </div>
 
         {/* ── Bottom: Workspace ── */}
-        <div className={`shrink-0 border-t border-border/60 ${collapsed ? "pt-2 pb-3" : "pt-3 pb-3"}`}>
+        <div
+          className={`shrink-0 border-t border-border/60 ${collapsed ? "pt-2 pb-3" : "pt-3 pb-3"}`}
+        >
           {!collapsed && (
             <h3 className="text-[11px] font-semibold text-on-surface-muted uppercase tracking-wider mb-1 px-3">
               Workspace
             </h3>
           )}
           <ul className="space-y-0.5">
-            {renderNavButton(
-              "ai-chat",
-              "AI Chat",
-              MessageSquare,
-              currentView === "ai-chat",
-              () => onNavigate("ai-chat"),
+            {renderNavButton("ai-chat", "AI Chat", MessageSquare, currentView === "ai-chat", () =>
+              onNavigate("ai-chat"),
             )}
             {onOpenSettings && (
               <li>

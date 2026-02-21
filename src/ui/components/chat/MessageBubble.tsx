@@ -39,9 +39,7 @@ function getErrorHint(category?: string, message?: string): string | null {
   }
 }
 
-function extractTasksFromMessage(
-  msg: AIChatMessage,
-): {
+function extractTasksFromMessage(msg: AIChatMessage): {
   id: string;
   title: string;
   status?: string;
@@ -79,15 +77,8 @@ function extractTasksFromMessage(
       const args = JSON.parse(tc.arguments);
       const result = resultByTool.get(tc.name) as Record<string, unknown> | undefined;
       const resultTask = result?.task as Record<string, unknown> | undefined;
-      const id =
-        (resultTask?.id as string) ??
-        (result?.taskId as string) ??
-        args.taskId ??
-        "";
-      const title =
-        (resultTask?.title as string) ??
-        args.title ??
-        tc.name.replace(/_/g, " ");
+      const id = (resultTask?.id as string) ?? (result?.taskId as string) ?? args.taskId ?? "";
+      const title = (resultTask?.title as string) ?? args.title ?? tc.name.replace(/_/g, " ");
       if (title || id) {
         tasks.push({
           id,
@@ -199,9 +190,14 @@ export const MessageBubble = memo(function MessageBubble({
           onRegenerate={onRegenerate}
         />
         {hasToolCalls && (
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-1.5">
             {message.toolCalls!.map((tc) => (
-              <ToolCallBadge key={tc.id} name={tc.name} args={tc.arguments} />
+              <ToolCallBadge
+                key={tc.id}
+                name={tc.name}
+                args={tc.arguments}
+                isComplete={hasRichToolResults || !!message.content}
+              />
             ))}
           </div>
         )}
@@ -209,13 +205,9 @@ export const MessageBubble = memo(function MessageBubble({
           <ChatToolResultCard toolResults={message.toolResults!} onSelectTask={onSelectTask} />
         )}
         {inlineTasks.length > 0 && onSelectTask && (
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {inlineTasks.map((task, i) => (
-              <ChatTaskCard
-                key={task.id || i}
-                task={task}
-                onClick={onSelectTask}
-              />
+              <ChatTaskCard key={task.id || i} task={task} onClick={onSelectTask} />
             ))}
           </div>
         )}

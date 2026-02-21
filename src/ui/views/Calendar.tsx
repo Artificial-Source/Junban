@@ -35,10 +35,11 @@ export function Calendar({
     onModeChange,
   });
 
-  // Sync mode from route prop
+  // Sync mode from route prop and reset date to today
   useEffect(() => {
     if (modeProp && modeProp !== nav.mode) {
       nav.setMode(modeProp);
+      nav.setDate(new Date());
     }
   }, [modeProp]);
 

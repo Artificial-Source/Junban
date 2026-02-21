@@ -79,9 +79,7 @@ function createMarkdownComponents(onSelectTask?: (taskId: string) => void): Comp
     em: ({ children }) => <em className="italic">{children}</em>,
     h1: ({ children }) => <h1 className="text-lg font-bold mb-2 mt-3 first:mt-0">{children}</h1>,
     h2: ({ children }) => <h2 className="text-base font-bold mb-2 mt-3 first:mt-0">{children}</h2>,
-    h3: ({ children }) => (
-      <h3 className="text-sm font-bold mb-1.5 mt-2 first:mt-0">{children}</h3>
-    ),
+    h3: ({ children }) => <h3 className="text-sm font-bold mb-1.5 mt-2 first:mt-0">{children}</h3>,
     hr: () => <hr className="my-3 border-border" />,
     blockquote: ({ children }) => (
       <blockquote className="border-l-3 border-accent/40 pl-3 my-2 text-on-surface-secondary italic">
@@ -137,9 +135,7 @@ function createMarkdownComponents(onSelectTask?: (taskId: string) => void): Comp
         (c) => typeof c === "object" && c !== null && "type" in c && c.type === "summary",
       );
       const rest = childArray.filter((c) => c !== summaryChild);
-      return (
-        <CollapsibleDetails summary={summaryChild || "Details"}>{rest}</CollapsibleDetails>
-      );
+      return <CollapsibleDetails summary={summaryChild || "Details"}>{rest}</CollapsibleDetails>;
     },
     a: ({ href, children, ...props }) => {
       if (href && href.startsWith("saydo://task/") && onSelectTask) {
@@ -178,8 +174,10 @@ function extractTextFromChildren(children: React.ReactNode): string {
   if (typeof children === "number") return String(children);
   if (!children) return "";
   if (Array.isArray(children)) return children.map(extractTextFromChildren).join("");
-  if (typeof children === "object" && "props" in children) {
-    return extractTextFromChildren((children as React.ReactElement).props.children);
+  if (typeof children === "object" && children !== null && "props" in children) {
+    return extractTextFromChildren(
+      (children as React.ReactElement<{ children?: React.ReactNode }>).props.children,
+    );
   }
   return "";
 }

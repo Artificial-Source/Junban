@@ -1,6 +1,6 @@
 # Frontend Views Reference
 
-> Every file in `src/ui/views/` and `src/ui/views/settings/`.
+> Every file in `src/ui/views/`, `src/ui/views/calendar/`, and `src/ui/views/settings/`.
 
 ---
 
@@ -8,144 +8,155 @@
 
 ### Inbox.tsx
 
-- **Path:** `src/ui/views/Inbox.tsx` (83 lines)
-- **Purpose:** Default inbox view. Shows tasks that have no project assignment and are still pending, plus a section of recently completed tasks.
-- **Key Exports:** `InboxView`
+- **Path:** `src/ui/views/Inbox.tsx` (84 lines)
+- **Purpose:** Default inbox view. Shows tasks that have no project assignment and are still pending, plus recently completed tasks (within the last 14 days).
+- **Key Exports:** `Inbox`
 - **Props:**
   - `tasks: Task[]`
-  - `projects: Project[]`
-  - `onAddTask, onComplete, onDelete, onSelect, onNavigateToTask` -- task action callbacks
-  - `onReorder?, selectedTaskId?, highlightedTaskIds?, multiSelectedIds?, onMultiSelect?`
-  - `onAddSubtask?, onIndent?, onOutdent?`
-- **Key Dependencies:** `TaskInput.tsx`, `TaskList.tsx`
+  - `onCreateTask` -- callback receiving parsed task input (title, priority, tags, project, dueDate, dueTime)
+  - `onToggleTask, onSelectTask` -- task action callbacks
+  - `selectedTaskId: string | null`
+  - `selectedTaskIds?: Set<string>`
+  - `onMultiSelect?, onReorder?, onAddSubtask?, onUpdateDueDate?`
+  - `autoFocusTrigger?: number`
+- **Key Dependencies:** `TaskInput.tsx`, `TaskList.tsx`, `lucide-react` (Inbox icon)
 - **Used By:** `App.tsx`
-- **Notes:** Filters tasks by `!task.projectId && task.status === 'pending'`. Recently completed section shows last 5 completed-today tasks.
+- **Notes:** Filters tasks by `!task.projectId && (pending || recently completed)`. Recent completed cutoff is 14 days from when the view was first mounted (uses `useState` to capture mount time). Displays task count in the header.
 
 ---
 
 ### Today.tsx
 
-- **Path:** `src/ui/views/Today.tsx` (142 lines)
+- **Path:** `src/ui/views/Today.tsx` (143 lines)
 - **Purpose:** Shows tasks due today and overdue tasks with a reschedule option. Includes a CompletionRing in the header.
-- **Key Exports:** `TodayView`
+- **Key Exports:** `Today`
 - **Props:**
   - `tasks: Task[]`
   - `projects: Project[]`
-  - Same task action callbacks as InboxView
-  - `onUpdate: (id, input) => void` -- needed for reschedule
-- **Key Dependencies:** `TaskInput.tsx`, `TaskList.tsx`, `CompletionRing.tsx`, `OverdueSection.tsx`
+  - `onCreateTask, onToggleTask, onSelectTask`
+  - `onUpdateTask: (id: string, updates: Record<string, unknown>) => void` -- needed for reschedule
+  - `selectedTaskId: string | null`
+  - `selectedTaskIds?, onMultiSelect?, onReorder?, onAddSubtask?, onUpdateDueDate?`
+  - `autoFocusTrigger?: number`
+- **Key Dependencies:** `TaskInput.tsx`, `TaskList.tsx`, `CompletionRing.tsx`, `OverdueSection.tsx`, `toDateKey` from `utils/format-date.js`, `parseTask` from `parser/task-parser.js`
 - **Used By:** `App.tsx`
-- **Notes:** Uses OverdueSection component for the overdue section. CompletionRing SVG shows completed/total for today's tasks.
+- **Notes:** Uses OverdueSection component for the overdue section. CompletionRing SVG shows completed/total for today's tasks. TaskInput defaults new tasks to today's date. Reschedule moves all overdue tasks to today.
 
 ---
 
 ### Upcoming.tsx
 
-- **Path:** `src/ui/views/Upcoming.tsx` (176 lines)
+- **Path:** `src/ui/views/Upcoming.tsx` (177 lines)
 - **Purpose:** Shows upcoming tasks grouped by date, plus an overdue section at the top.
-- **Key Exports:** `UpcomingView`
+- **Key Exports:** `Upcoming`
 - **Props:**
-  - Same as TodayView
-- **Key Dependencies:** `TaskInput.tsx`, `TaskList.tsx`, `OverdueSection.tsx`
+  - Same as TodayView plus `autoFocusTrigger`
+- **Key Dependencies:** `TaskInput.tsx`, `TaskList.tsx`, `OverdueSection.tsx`, `EmptyState.tsx`, `toDateKey` from `utils/format-date.js`, `parseTask` from `parser/task-parser.js`
 - **Used By:** `App.tsx`
-- **Notes:** Groups tasks by due date with date headers (e.g., "Monday, Jan 15"). Overdue section collapsible. Tasks without due dates shown in a "No date" section at the bottom. Uses OverdueSection component for the overdue section (shared with Today view).
+- **Notes:** Groups tasks by due date with date headers (e.g., "Mon, Jan 15"). Overdue section with reschedule support (shared OverdueSection component with Today view). Month header displayed above date groups. EmptyState shown when no upcoming tasks exist.
 
 ---
 
 ### Project.tsx
 
-- **Path:** `src/ui/views/Project.tsx` (79 lines)
-- **Purpose:** Single project view. Shows tasks belonging to the selected project.
-- **Key Exports:** `ProjectView`
+- **Path:** `src/ui/views/Project.tsx` (80 lines)
+- **Purpose:** Single project view. Shows pending tasks belonging to the selected project.
+- **Key Exports:** `Project`
 - **Props:**
-  - `project: Project`
+  - `project: ProjectType`
   - `tasks: Task[]`
-  - Same task action callbacks
-  - `projects: Project[]`
+  - `onCreateTask` -- parsed task input callback
+  - `onToggleTask, onSelectTask`
+  - `selectedTaskId: string | null`
+  - `selectedTaskIds?, onMultiSelect?, onReorder?, onAddSubtask?, onUpdateDueDate?`
+  - `autoFocusTrigger?: number`
 - **Key Dependencies:** `TaskInput.tsx`, `TaskList.tsx`
 - **Used By:** `App.tsx`
-- **Notes:** Passes `defaultProjectId` to TaskInput so new tasks auto-assign to the project. Shows project name and icon in header.
+- **Notes:** Filters tasks to only show pending tasks for the current project. TaskInput placeholder customized with project name. Shows project icon (emoji) or color dot, name, and task count in header.
 
 ---
 
 ### Completed.tsx
 
-- **Path:** `src/ui/views/Completed.tsx` (160 lines)
-- **Purpose:** Shows completed tasks grouped by completion date, with project filter dropdown.
-- **Key Exports:** `CompletedView`
+- **Path:** `src/ui/views/Completed.tsx` (161 lines)
+- **Purpose:** Shows completed (and cancelled) tasks grouped by completion date, with project filter dropdown.
+- **Key Exports:** `Completed`
 - **Props:**
   - `tasks: Task[]`
   - `projects: Project[]`
-  - `onDelete, onSelect, onNavigateToTask`
-  - `onComplete` -- used for "uncomplete" action
-- **Key Dependencies:** `TaskList.tsx`, `EmptyState.tsx`
+  - `onSelectTask?: (id: string) => void`
+- **Key Dependencies:** `EmptyState.tsx`, `lucide-react` (CheckCircle2)
 - **Used By:** `App.tsx`
-- **Notes:** Tasks grouped by completedAt date into sections: "Today", "Yesterday", "This Week", "Older". Filter by project dropdown in header. No TaskInput here (cannot add tasks to completed view). Uses EmptyState component when no completed tasks exist.
+- **Notes:** Tasks grouped by `completedAt` date into sections with date headers. Filter by project dropdown in header. No TaskInput here (cannot add tasks to completed view). Uses EmptyState component when no completed tasks exist. Each task row is clickable (when onSelectTask provided) and shows project color dot and completion time.
 
 ---
 
 ### FiltersLabels.tsx
 
-- **Path:** `src/ui/views/FiltersLabels.tsx` (283 lines)
+- **Path:** `src/ui/views/FiltersLabels.tsx` (284 lines)
 - **Purpose:** Saved filters and labels (tags) management view with CRUD for both.
-- **Key Exports:** `FiltersLabelsView`
+- **Key Exports:** `FiltersLabels`
 - **Props:**
   - `tasks: Task[]`
-  - `projects: Project[]`
-  - `onNavigateToTask, onSelect, onComplete, onDelete`
-- **Key Dependencies:** `QueryBar.tsx`, `TaskList.tsx`, `TagsInput.tsx`, `api` for tag CRUD
+  - `onNavigateToFilter: (query: string) => void`
+- **Key Dependencies:** `api` (getAppSetting, setAppSetting, listTags), `lucide-react` (SlidersHorizontal, Tag, ChevronDown, ChevronRight, Plus, X, Filter)
 - **Used By:** `App.tsx`
-- **Notes:** Two tabs: "Filters" (saved query presets) and "Labels" (tag management with color editing). Filter syntax supports `priority:`, `tag:`, `project:`, `status:`, `due:` operators.
+- **Notes:** Two collapsible sections: "My Filters" (saved query presets persisted via app settings) and "Labels" (tags loaded from API with per-tag pending task counts). Add filter form accepts name + query string. Tags are auto-created when assigned to tasks. Clicking a filter or label navigates via `onNavigateToFilter` callback.
 
 ---
 
 ### TaskPage.tsx
 
-- **Path:** `src/ui/views/TaskPage.tsx` (183 lines)
-- **Purpose:** Full-page task detail view (used when navigating to `#/task/:id`). Two-column layout with content and metadata sidebar.
-- **Key Exports:** `TaskPageView`
+- **Path:** `src/ui/views/TaskPage.tsx` (184 lines)
+- **Purpose:** Full-page task detail view. Two-column layout with content and metadata sidebar.
+- **Key Exports:** `TaskPage`
 - **Props:**
-  - `taskId: string`
-  - `tasks: Task[]`
-  - `projects: Project[]`
-  - `onUpdate, onComplete, onDelete, onNavigateToTask`
-  - `onAddSubtask?, onCompleteSubtask?, onDeleteSubtask?, onUpdateSubtask?, onReorderSubtasks?`
-- **Key Dependencies:** `SubtaskSection.tsx`, `TaskMetadataSidebar.tsx`
+  - `task: Task`
+  - `allTasks: Task[]`
+  - `projects: { id: string; name: string }[]`
+  - `onUpdate: (id: string, input: UpdateTaskInput) => void`
+  - `onDelete: (id: string) => void`
+  - `onNavigateBack: () => void`
+  - `onSelect: (id: string) => void`
+  - `onAddSubtask?, onToggleSubtask?, onReorder?`
+  - `availableTags?: string[]`
+- **Key Dependencies:** `SubtaskSection.tsx`, `TaskMetadataSidebar.tsx`, `ConfirmDialog.tsx`, `useGeneralSettings` context
 - **Used By:** `App.tsx`
-- **Notes:** Similar layout to `TaskDetailPanel` but rendered as a full page view instead of a modal overlay. Title and description inline-editable. Breadcrumb navigation at top.
+- **Notes:** Title and description inline-editable with blur-to-save. Breadcrumb navigation at top shows project name (or "Inbox"). Subtask inline editing with save/cancel. Delete honors `confirm_delete` setting via ConfirmDialog. Responsive: stacks vertically on mobile, side-by-side on desktop.
 
 ---
 
-### PluginStore.tsx
+### AIChat.tsx
 
-- **Path:** `src/ui/views/PluginStore.tsx` (225 lines)
-- **Purpose:** Community plugin store. Browse, search, install, and uninstall plugins.
-- **Key Exports:** `PluginStoreView`
+- **Path:** `src/ui/views/AIChat.tsx` (49 lines)
+- **Purpose:** Full-view AI chat interface. Wraps the `AIChatPanel` component in "view" mode (as opposed to sidebar/overlay mode).
+- **Key Exports:** `AIChat`
 - **Props:**
-  - `installedPlugins: PluginInfo[]`
-- **Key Dependencies:** `api` (getPluginStore, installPlugin, uninstallPlugin), `lucide-react`
+  - `onOpenSettings: () => void`
+  - `onSelectTask?: (taskId: string) => void`
+- **Key Dependencies:** `AIChatPanel.tsx`, `useAIContext`, `api` (loadModel, unloadModel)
 - **Used By:** `App.tsx`
-- **Notes:** Fetches store index from API on mount. Search filters by name, description, author, and tags. Shows install/uninstall buttons based on `installedPlugins`. Displays plugin author, version, and tags.
+- **Notes:** Auto-manages LM Studio models when the view is active: loads the configured model on mount and unloads it on unmount, if the `saydo.ai.auto-manage-lmstudio` localStorage flag is set. Renders AIChatPanel with `mode="view"` which changes its layout to fill the full content area instead of appearing as a sidebar panel.
 
 ---
 
 ### PluginView.tsx
 
-- **Path:** `src/ui/views/PluginView.tsx` (40 lines)
+- **Path:** `src/ui/views/PluginView.tsx` (41 lines)
 - **Purpose:** Renders content from a plugin-registered custom view.
 - **Key Exports:** `PluginView`
 - **Props:**
   - `viewId: string`
 - **Key Dependencies:** `api.getPluginViewContent`
 - **Used By:** `App.tsx`
-- **Notes:** Polls view content every 1 second using `setInterval`. Renders content as raw HTML-like text (plugins set content as strings).
+- **Notes:** Polls view content every 1 second using `setInterval`. Uses a `mountedRef` to prevent state updates after unmount. Renders content as monospace preformatted text (plugins set content as strings).
 
 ---
 
 ### Calendar.tsx
 
-- **Path:** `src/ui/views/Calendar.tsx` (170 lines)
-- **Purpose:** Week-based calendar view showing tasks plotted on a 7-day grid by their due date.
+- **Path:** `src/ui/views/Calendar.tsx` (147 lines)
+- **Purpose:** Calendar container view with day/week/month mode switcher. Delegates rendering to sub-views in `calendar/` directory.
 - **Key Exports:** `Calendar`
 - **Props:**
   - `tasks: Task[]`
@@ -153,24 +164,97 @@
   - `onSelectTask: (id: string) => void`
   - `onToggleTask: (id: string) => void`
   - `onUpdateDueDate?: (taskId: string, dueDate: string | null) => void`
-- **Key Dependencies:** `lucide-react` (CalendarRange, ChevronLeft, ChevronRight), `toDateKey` from `utils/format-date.js`
+  - `mode?: CalendarMode | null` -- externally controlled mode (from route)
+  - `onModeChange?: (mode: CalendarMode) => void`
+- **Key Dependencies:** `SegmentedControl` from `settings/components.js`, `useCalendarNavigation` hook, `CalendarWeekView`, `CalendarMonthView`, `CalendarDayView`, `useGeneralSettings` context, `lucide-react` (CalendarRange, ChevronLeft, ChevronRight)
 - **Used By:** `App.tsx`
-- **Notes:** Week navigation with Previous/Next/Today buttons. Shows week range label (e.g., "February 15 - 21, 2026"). Today's column highlighted with accent background. Tasks colored by priority (P1-P2 use error color). Project color dots shown next to task titles. Responsive 7-column grid layout.
+- **Notes:** Header contains a `SegmentedControl` for Day/Week/Month mode switching and Previous/Next/Today navigation buttons. Period label dynamically formatted based on current mode. Mode can be controlled externally via `mode` prop or defaults to the `calendar_default_mode` general setting. Clicking a day in week or month view drills down to day view. Task count badge shown in day mode. Uses `animate-fade-in` transition when switching modes.
+
+---
+
+## Calendar Sub-Views
+
+### calendar/useCalendarNavigation.ts
+
+- **Path:** `src/ui/views/calendar/useCalendarNavigation.ts` (165 lines)
+- **Purpose:** Custom hook encapsulating all calendar navigation state and logic (date selection, mode switching, period labels, previous/next/today navigation).
+- **Key Exports:**
+  - `useCalendarNavigation(options?)` -- the main hook
+  - `CalendarMode` type (`"day" | "week" | "month"`)
+  - `getWeekStart(date, weekStartDay)` -- utility to get the start of a week
+  - `getWeekDays(date, weekStartDay)` -- utility to get all 7 days of a week
+- **Return value:** `{ selectedDate, mode, setMode, goNext, goPrev, goToday, setDate, isCurrentPeriod, periodLabel, weekStartDay }`
+- **Key Dependencies:** `useGeneralSettings` context
+- **Used By:** `Calendar.tsx`
+- **Notes:** Respects the `week_start` setting (Sunday/Monday/Saturday). `isCurrentPeriod` is `true` when the selected date falls within the current day/week/month. `periodLabel` generates human-readable labels like "February 15-21, 2026" (week), "Friday, Feb 21, 2026" (day), or "February 2026" (month). Handles cross-month and cross-year week labels.
+
+---
+
+### calendar/CalendarDayView.tsx
+
+- **Path:** `src/ui/views/calendar/CalendarDayView.tsx` (189 lines)
+- **Purpose:** Single-day calendar view showing all tasks for the selected date, split into "All Day" and "Scheduled" (timed) sections.
+- **Key Exports:** `CalendarDayView`
+- **Props:**
+  - `selectedDate: Date`
+  - `tasks: Task[]`
+  - `projects: Project[]`
+  - `onSelectTask: (id: string) => void`
+  - `onToggleTask: (id: string) => void`
+- **Key Dependencies:** `toDateKey`, `formatTaskTime` from `utils/format-date.js`, `useGeneralSettings` context, `EmptyState.tsx`, `lucide-react` (Circle, CheckCircle2, CalendarOff)
+- **Used By:** `Calendar.tsx`
+- **Notes:** Tasks separated into all-day (no `dueTime`) and timed (with `dueTime`) groups. Timed tasks sorted chronologically. Task cards show priority border (P1=red, P2=amber, P3=accent), completion toggle, project color dot, priority tag, and hashtags. Completed tasks shown with strikethrough and reduced opacity. EmptyState displayed when no tasks exist for the day. Respects `time_format` setting (12h/24h) for timed tasks.
+
+---
+
+### calendar/CalendarWeekView.tsx
+
+- **Path:** `src/ui/views/calendar/CalendarWeekView.tsx` (174 lines)
+- **Purpose:** 7-day week grid showing tasks plotted by due date in columns.
+- **Key Exports:** `CalendarWeekView`
+- **Props:**
+  - `selectedDate: Date`
+  - `weekStartDay: number`
+  - `tasks: Task[]`
+  - `projects: Project[]`
+  - `onSelectTask: (id: string) => void`
+  - `onToggleTask: (id: string) => void`
+  - `onDayClick: (date: Date) => void`
+- **Key Dependencies:** `toDateKey` from `utils/format-date.js`, `getWeekDays` from `useCalendarNavigation.js`, `lucide-react` (Circle, CheckCircle2)
+- **Used By:** `Calendar.tsx`
+- **Notes:** Day headers are clickable buttons that drill down to day view via `onDayClick`. Today's column highlighted with accent background. Today's date shown as a filled accent circle. Task cards show priority left-border color, completion toggle, title (2-line clamp), and project color dot with name. Responsive 7-column grid layout with per-column scrolling.
+
+---
+
+### calendar/CalendarMonthView.tsx
+
+- **Path:** `src/ui/views/calendar/CalendarMonthView.tsx` (178 lines)
+- **Purpose:** Full-month grid showing task chips on each day cell.
+- **Key Exports:** `CalendarMonthView`
+- **Props:**
+  - `selectedDate: Date`
+  - `weekStartDay: number`
+  - `tasks: Task[]`
+  - `projects: Project[]`
+  - `onSelectTask: (id: string) => void`
+  - `onDayClick: (date: Date) => void`
+- **Key Dependencies:** `toDateKey` from `utils/format-date.js`
+- **Used By:** `Calendar.tsx`
+- **Notes:** Always renders 6 rows (42 cells) for consistent height. Days outside the current month shown with muted background. Today highlighted with accent circle and subtle background. Maximum 3 visible task chips per day cell; overflow shown as "+N more" link that drills down to day view. Task chips show priority left-border, project color dot, and truncated title. Weekday headers respect `weekStartDay` setting.
 
 ---
 
 ### Settings.tsx
 
-- **Path:** `src/ui/views/Settings.tsx` (321 lines)
-- **Purpose:** Settings modal with 9 tabs. Desktop layout shows sidebar tab list + content area. Mobile layout uses drill-down navigation (tab list -> tab content with back button).
-- **Key Exports:** `SettingsView`
+- **Path:** `src/ui/views/Settings.tsx` (322 lines)
+- **Purpose:** Settings view with 9 tabs. Desktop layout shows sidebar tab list + content area in a modal. Mobile layout uses full-screen drill-down navigation (grouped index page -> tab content with back button).
+- **Key Exports:** `Settings`, `SettingsTab` (re-exported type)
 - **Props:**
-  - `open: boolean`
+  - `activeTab?: SettingsTab`
   - `onClose: () => void`
-  - `initialTab?: SettingsTab`
-- **Key Dependencies:** All settings tab components, `lucide-react`
+- **Key Dependencies:** All settings tab components, `useIsMobile` hook, `lucide-react` (X, SlidersHorizontal, Palette, Bot, Mic, Puzzle, Keyboard, Database, Info, FileText, ArrowLeft, ChevronRight)
 - **Used By:** `App.tsx`
-- **Notes:** Tabs: General, Appearance, AI, Voice, Plugins, Templates, Keyboard, Data, About. Each tab has its own icon. Modal with backdrop, closes on Escape. Mobile-responsive with full-screen layout on small screens.
+- **Notes:** Tabs: General, Appearance, AI Assistant, Voice, Plugins, Templates, Keyboard, Data, About. Each tab has its own icon (separate desktop/mobile icon sizes). Closes on Escape (mobile: Escape navigates back to index first). Desktop: modal with backdrop that closes on click-outside. Mobile: full-screen with grouped sections (General, AI & Voice, Extensions, Info) on the index page and drill-down navigation with back button. Syncs `activeTab` prop changes (e.g., from command palette "Open AI settings"). Tab metadata includes optional subtitles shown on mobile index.
 
 ---
 
@@ -178,7 +262,7 @@
 
 ### settings/types.ts
 
-- **Path:** `src/ui/views/settings/types.ts` (10 lines)
+- **Path:** `src/ui/views/settings/types.ts` (11 lines)
 - **Purpose:** Type definition for the `SettingsTab` union type.
 - **Key Exports:** `SettingsTab` type (`"general" | "appearance" | "ai" | "voice" | "plugins" | "templates" | "keyboard" | "data" | "about"`)
 - **Used By:** `Settings.tsx`, all tab components
@@ -187,121 +271,122 @@
 
 ### settings/components.tsx
 
-- **Path:** `src/ui/views/settings/components.tsx` (129 lines)
+- **Path:** `src/ui/views/settings/components.tsx` (130 lines)
 - **Purpose:** Shared UI primitives for settings tabs.
 - **Key Exports:**
-  - `SegmentedControl<T>` -- horizontal button group for enum-like options
+  - `SegmentedControl<T>` -- horizontal button group for enum-like options (also used by Calendar header)
   - `ColorSwatchPicker` -- color circle picker with check mark
   - `SettingRow` -- label + description + control layout
   - `SettingSelect<T>` -- styled `<select>` dropdown
   - `Toggle` -- on/off toggle switch
-- **Used By:** `GeneralTab.tsx`, `AppearanceTab.tsx`
-- **Notes:** These are generic, reusable primitives. `Toggle` renders as a rounded pill with sliding circle indicator.
+- **Key Dependencies:** `lucide-react` (Check)
+- **Used By:** `GeneralTab.tsx`, `AppearanceTab.tsx`, `Calendar.tsx`
+- **Notes:** These are generic, reusable primitives. `Toggle` renders as a rounded pill with sliding circle indicator. `SegmentedControl` highlights the active option with accent color and white text. Supports disabled state on `Toggle`.
 
 ---
 
 ### settings/GeneralTab.tsx
 
-- **Path:** `src/ui/views/settings/GeneralTab.tsx` (326 lines)
-- **Purpose:** General settings: Date & Time (week start, date format, time format), Task Behavior (default priority, confirm delete, start view), Sound Effects (enable/disable, volume, per-event toggles with preview), and Notifications (browser notifications, toast notifications, default reminder offset).
+- **Path:** `src/ui/views/settings/GeneralTab.tsx` (342 lines)
+- **Purpose:** General settings: Date & Time (week start, date format, time format, default calendar view), Task Behavior (default priority, confirm delete, start view), Sound Effects (enable/disable, volume, per-event toggles with preview), and Notifications (browser notifications, toast notifications, default reminder offset).
 - **Key Exports:** `GeneralTab`
 - **Props:** None (reads from `useGeneralSettings` context)
-- **Key Dependencies:** `SettingsContext`, settings `components.tsx`, `previewSound` from `utils/sounds.js`
+- **Key Dependencies:** `SettingsContext`, settings `components.tsx`, `previewSound` from `utils/sounds.js`, `api` (getAppSetting, setAppSetting), `lucide-react` (Bell, Volume2)
 - **Used By:** `Settings.tsx`
-- **Notes:** Sound section includes per-event preview buttons. Notification section handles browser permission requests. Date format shows live preview.
+- **Notes:** Contains three sub-components: `SoundSettings` and `NotificationSettings` (defined in the same file), plus a `dateFormatPreview` helper. Sound section includes per-event preview buttons for complete, create, delete, and reminder events. Notification section handles browser permission requests with fallback for denied/unsupported states. Date format shows live preview. "Default calendar view" setting added for Day/Week/Month mode.
 
 ---
 
 ### settings/AppearanceTab.tsx
 
-- **Path:** `src/ui/views/settings/AppearanceTab.tsx` (97 lines)
-- **Purpose:** Appearance settings: Theme (system/light/dark/nord), Accent color (8 preset colors), Layout (density: compact/default/comfortable, font size: small/default/large), and Accessibility (reduce animations toggle).
+- **Path:** `src/ui/views/settings/AppearanceTab.tsx` (98 lines)
+- **Purpose:** Appearance settings: Theme (system/light/dark/nord), Accent color (preset color swatches), Layout (density: compact/default/comfortable, font size: small/default/large), and Accessibility (reduce animations toggle).
 - **Key Exports:** `AppearanceTab`
 - **Props:** None (reads from `useGeneralSettings` context and `themeManager`)
 - **Key Dependencies:** `SettingsContext`, `ThemeManager`, `DEFAULT_PROJECT_COLORS`, settings `components.tsx`
 - **Used By:** `Settings.tsx`
-- **Notes:** Theme changes take effect immediately via ThemeManager. Accent color, density, and font size also apply immediately via CSS custom properties and classes.
+- **Notes:** Theme changes take effect immediately via ThemeManager. Accent color, density, and font size also apply immediately via CSS custom properties and classes. Uses `ColorSwatchPicker` for accent color selection and `SegmentedControl` for theme, density, and font size choices.
 
 ---
 
 ### settings/AITab.tsx
 
-- **Path:** `src/ui/views/settings/AITab.tsx` (322 lines)
-- **Purpose:** AI provider configuration: provider selection, API key input, model selection (dropdown or custom text), base URL, and save button. Supports model discovery for local providers (Ollama, LM Studio).
+- **Path:** `src/ui/views/settings/AITab.tsx` (323 lines)
+- **Purpose:** AI provider configuration: provider selection, API key input, model selection (dropdown or custom text), base URL, save button, and LM Studio auto-manage toggle.
 - **Key Exports:** `AITab`
 - **Props:** None (reads from `useAIContext`)
 - **Key Dependencies:** `AIContext`, `api` (listAIProviders, fetchModels, loadModel)
 - **Used By:** `Settings.tsx`
-- **Notes:** Provider help text shown below API key input. Model dropdown auto-populated via `fetchModels` API call with 300ms debounce on baseUrl changes. LM Studio supports auto-load/unload checkbox. Shows "Connected" or "Not configured" status.
+- **Notes:** Provider help text shown below API key input. Model dropdown auto-populated via `fetchModels` API call with 300ms debounce on baseUrl changes. When a model is selected in LM Studio, it auto-loads the model. Supports custom model input with a "Back to model list" toggle. Shows "Connected" or "Not configured" status. LM Studio-specific auto-manage checkbox stores preference in localStorage (`saydo.ai.auto-manage-lmstudio`). Plugin-provided providers shown with "(plugin)" label.
 
 ---
 
 ### settings/VoiceTab.tsx
 
-- **Path:** `src/ui/views/settings/VoiceTab.tsx` (803 lines)
+- **Path:** `src/ui/views/settings/VoiceTab.tsx` (842 lines)
 - **Purpose:** Voice settings: Microphone selection (with permission handling), STT provider selection, TTS provider and voice/model selection with preview, Voice interaction mode (off/push-to-talk/VAD), auto-send, smart endpoint with grace period slider, and Local Models management (download, preload, delete browser-cached ML models).
 - **Key Exports:** `VoiceTab`
 - **Props:** None (reads from `useVoiceContext`)
-- **Key Dependencies:** `VoiceContext`, `VoiceProviderRegistry`, voice audio utilities
+- **Key Dependencies:** `VoiceContext`, `VoiceProviderRegistry`, `enumerateMicrophones`, `triggerMicPermissionPrompt` from `audio-utils.js`, `lucide-react` (Mic, RefreshCw, AlertCircle, CheckCircle2, Download, Loader2, Play, Trash2)
 - **Used By:** `Settings.tsx`
-- **Notes:** MicrophoneSection handles permission prompt with timeout fallback for Linux/PipeWire issues. Local Models section shows download progress bars, cached status, and model sizes. Voice preview button speaks a test sentence.
+- **Notes:** Contains multiple sub-components defined in the same file: `ProviderApiKeyInput` (handles Groq and Inworld API keys), `MicrophoneSection` (permission prompt with timeout fallback for Linux/PipeWire issues, device enumeration, device change listener), and `LocalModelsSection` (two-phase cache check: fast cached/not-cached status then lazy size fetching via requestIdleCallback). Voice preview button speaks a test sentence. Grace period slider ranges from 0.5s to 3.0s. Local models show download progress bars, cached status with size, and delete confirmation.
 
 ---
 
 ### settings/PluginsTab.tsx
 
-- **Path:** `src/ui/views/settings/PluginsTab.tsx` (281 lines)
-- **Purpose:** Plugin management: list installed plugins with expand/collapse cards showing permissions, settings, enable/disable toggle, permission approval/revocation.
+- **Path:** `src/ui/views/settings/PluginsTab.tsx` (123 lines)
+- **Purpose:** Plugin management: lists built-in extensions and community plugins with enable/disable toggle, permission approval/revocation, and a button to browse community plugins.
 - **Key Exports:** `PluginsTab`
 - **Props:** None (reads from `usePluginContext`)
-- **Key Dependencies:** `PluginContext`, `PermissionDialog.tsx`, `api` (plugin settings and permissions)
+- **Key Dependencies:** `PluginContext`, `PermissionDialog.tsx`, `PluginCard.tsx`, `PluginBrowser.tsx`, `api` (approvePluginPermissions, revokePluginPermissions, togglePlugin), `lucide-react` (Puzzle)
 - **Used By:** `Settings.tsx`
-- **Notes:** PluginCard sub-component renders expandable cards. PluginSettings sub-component renders dynamic settings fields based on `SettingDefinitionInfo` (text, number, boolean, select). Links to Plugin Store when no plugins installed.
+- **Notes:** Separates plugins into "Built-in Extensions" (with enable/disable toggle) and "Community Plugins" (with permission approval/revocation) sections. Built-in plugins displayed in a 2-column grid of PluginCard components. "Browse Community Plugins" button opens the PluginBrowser modal. PermissionDialog shown when approving community plugin permissions.
 
 ---
 
 ### settings/TemplatesTab.tsx
 
-- **Path:** `src/ui/views/settings/TemplatesTab.tsx` (295 lines)
+- **Path:** `src/ui/views/settings/TemplatesTab.tsx` (296 lines)
 - **Purpose:** Task template management: create, edit, and delete templates. Template form supports name, title template (with `{{variable}}` syntax), description, priority, tags, and recurrence.
 - **Key Exports:** `TemplatesTab`
 - **Props:** None (uses `api` directly)
-- **Key Dependencies:** `api` (listTemplates, createTemplate, updateTemplate, deleteTemplate), `core/types.js`
+- **Key Dependencies:** `api` (listTemplates, createTemplate, updateTemplate, deleteTemplate), `core/types.js` (TaskTemplate, CreateTemplateInput), `utils/logger.js`, `lucide-react` (Plus, Pencil, Trash2)
 - **Used By:** `Settings.tsx`
-- **Notes:** TemplateForm sub-component for create/edit. Tags entered as comma-separated string. Empty state with prompt to create first template.
+- **Notes:** TemplateForm sub-component for create/edit with form validation (name and title required). Tags entered as comma-separated string. Priority and recurrence via dropdown selects. Template list shows priority badge, tag badges, and recurrence badge. Empty state with prompt to create first template.
 
 ---
 
 ### settings/KeyboardTab.tsx
 
-- **Path:** `src/ui/views/settings/KeyboardTab.tsx` (92 lines)
+- **Path:** `src/ui/views/settings/KeyboardTab.tsx` (93 lines)
 - **Purpose:** Keyboard shortcut customization. Lists all registered shortcuts with current key bindings. Supports recording new bindings and resetting to defaults.
 - **Key Exports:** `KeyboardTab`
 - **Props:** None (uses `shortcutManager` singleton)
-- **Key Dependencies:** `shortcutManager` from `shortcutManagerInstance.js`, `api` (persists custom bindings)
+- **Key Dependencies:** `shortcutManager` from `shortcutManagerInstance.js`, `api` (persists custom bindings via setAppSetting)
 - **Used By:** `Settings.tsx`
-- **Notes:** Recording mode captures next keypress as new binding. Escape cancels recording. Reset button shown only when binding differs from default. Persists to `keyboard_shortcuts` app setting.
+- **Notes:** Recording mode captures next keypress as new binding (captures on `keydown` with `useCapture: true`). Escape cancels recording. Modifier-only keys (Control, Meta, Alt, Shift) are ignored during recording. Reset button shown only when binding differs from default. Persists to `keyboard_shortcuts` app setting as JSON. Subscribes to shortcutManager changes for reactive updates.
 
 ---
 
 ### settings/DataTab.tsx
 
-- **Path:** `src/ui/views/settings/DataTab.tsx` (293 lines)
+- **Path:** `src/ui/views/settings/DataTab.tsx` (294 lines)
 - **Purpose:** Data management: storage info display, export (JSON/CSV/Markdown), and import (Saydo JSON, Todoist JSON, Markdown/text) with preview step.
 - **Key Exports:** `DataTab`
 - **Props:** None (uses `api` and `useTaskContext`)
-- **Key Dependencies:** `api` (exportAllData, importTasks, getStorageInfo), `core/export.js`, `core/import.js`, `TaskContext`
+- **Key Dependencies:** `api` (exportAllData, importTasks, getStorageInfo), `core/export.js` (exportJSON, exportCSV, exportMarkdown), `core/import.js` (parseImport), `TaskContext`
 - **Used By:** `Settings.tsx`
-- **Notes:** StorageSection shows current mode (SQLite/Markdown) and path. Export triggers browser file download. Import has a preview step showing task count, projects, tags, and warnings before confirming. Supports multiple import formats.
+- **Notes:** Contains two sub-components: `StorageSection` (shows current mode SQLite/Markdown and path, with explanation of each mode) and `DataSection` (export/import). Export triggers browser file download via Blob URL. Import has a multi-step flow: file selection -> preview (showing task count, projects, tags, warnings) -> confirm import -> success with result summary. File input accepts `.json`, `.txt`, `.md`. Refreshes task list after successful import.
 
 ---
 
 ### settings/AboutTab.tsx
 
-- **Path:** `src/ui/views/settings/AboutTab.tsx` (313 lines)
+- **Path:** `src/ui/views/settings/AboutTab.tsx` (314 lines)
 - **Purpose:** About page with app info, version, update checker (Tauri only), and open source credits listing all dependencies organized by category.
 - **Key Exports:** `AboutTab`
 - **Props:** None
-- **Key Dependencies:** `@tauri-apps/plugin-updater` (lazy import), `@tauri-apps/plugin-process` (lazy import), `isTauri` utility
+- **Key Dependencies:** `@tauri-apps/plugin-updater` (lazy import), `@tauri-apps/plugin-process` (lazy import), `isTauri` utility, `lucide-react` (ExternalLink)
 - **Used By:** `Settings.tsx`
-- **Notes:** Update check only available in Tauri desktop mode. Credits organized into 6 categories: AI & ML, Frontend, Database & Storage, Desktop & Platform, Parsing & Utilities, Testing. Each credit links to its repository. Footer links to AI Strategic Forum GitHub.
+- **Notes:** Update check only available in Tauri desktop mode. Credits organized into 6 categories: AI & Machine Learning (5 items), Frontend (5 items), Database & Storage (3 items), Desktop & Platform (2 items), Parsing & Utilities (4 items), Testing (2 items). Each credit links to its repository and shows its license. Footer links to AI Strategic Forum GitHub. App version shown as v1.0.0.

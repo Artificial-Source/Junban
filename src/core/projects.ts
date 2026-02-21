@@ -57,7 +57,12 @@ export class ProjectService {
 
   async update(
     id: string,
-    data: Partial<Pick<Project, "name" | "color" | "icon" | "archived" | "parentId" | "isFavorite" | "viewStyle">>,
+    data: Partial<
+      Pick<
+        Project,
+        "name" | "color" | "icon" | "archived" | "parentId" | "isFavorite" | "viewStyle"
+      >
+    >,
   ): Promise<Project | null> {
     const result = this.queries.updateProject(id, data);
     if (result.changes === 0) return null;

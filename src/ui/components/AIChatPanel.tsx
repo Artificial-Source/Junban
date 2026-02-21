@@ -23,7 +23,12 @@ interface AIChatPanelProps {
   mode?: "panel" | "view";
 }
 
-export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "panel" }: AIChatPanelProps) {
+export function AIChatPanel({
+  onClose,
+  onOpenSettings,
+  onSelectTask,
+  mode = "panel",
+}: AIChatPanelProps) {
   const isView = mode === "view";
   const {
     messages,
@@ -174,8 +179,16 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
       }
     };
     listen();
-    return () => { cancelled = true; };
-  }, [useBrowserSTTLoop, voiceCall.callState, handleVoiceResult, voiceCall.isCallActive, isNonBrowserSTT]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    useBrowserSTTLoop,
+    voiceCall.callState,
+    handleVoiceResult,
+    voiceCall.isCallActive,
+    isNonBrowserSTT,
+  ]);
 
   // TTS when AI finishes responding
   useEffect(() => {
@@ -204,21 +217,33 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
   // ── Not Configured State ──
   if (!isConfigured) {
     return (
-      <aside className={`${isView ? "w-full h-full" : "w-full h-full md:w-80 md:h-auto border-l-0 md:border-l border-border"} flex flex-col bg-surface`}>
+      <aside
+        className={`${isView ? "w-full h-full" : "w-full h-full md:w-80 md:h-auto border-l-0 md:border-l border-border"} flex flex-col bg-surface`}
+      >
         {!isView && (
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <h3 className="font-semibold text-sm text-on-surface">AI Chat</h3>
-            <button onClick={onClose} aria-label="Close AI chat" className="text-on-surface-muted hover:text-on-surface-secondary transition-colors p-1 rounded-md hover:bg-surface-tertiary">
+            <button
+              onClick={onClose}
+              aria-label="Close AI chat"
+              className="text-on-surface-muted hover:text-on-surface-secondary transition-colors p-1 rounded-md hover:bg-surface-tertiary"
+            >
               <X size={18} />
             </button>
           </div>
         )}
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <div className={`${isView ? "w-16 h-16 mb-6" : "w-12 h-12 mb-4"} rounded-full bg-accent/10 flex items-center justify-center`}>
+          <div
+            className={`${isView ? "w-16 h-16 mb-6" : "w-12 h-12 mb-4"} rounded-full bg-accent/10 flex items-center justify-center`}
+          >
             <Bot size={isView ? 32 : 24} className="text-accent" />
           </div>
-          <h4 className={`font-medium ${isView ? "text-lg mb-2" : "text-sm mb-2"} text-on-surface`}>AI Assistant</h4>
-          <p className={`${isView ? "text-sm mb-6 max-w-md" : "text-xs mb-4"} text-on-surface-muted`}>
+          <h4 className={`font-medium ${isView ? "text-lg mb-2" : "text-sm mb-2"} text-on-surface`}>
+            AI Assistant
+          </h4>
+          <p
+            className={`${isView ? "text-sm mb-6 max-w-md" : "text-xs mb-4"} text-on-surface-muted`}
+          >
             Configure an AI provider in Settings to start chatting.
           </p>
           <button
@@ -305,7 +330,11 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
                   <TypingIndicator mode="view" />
                 )}
                 {!isStreaming && messages.length > 0 && (
-                  <SuggestedActions messages={messages} onSend={handleSubmit} isStreaming={isStreaming} />
+                  <SuggestedActions
+                    messages={messages}
+                    onSend={handleSubmit}
+                    isStreaming={isStreaming}
+                  />
                 )}
                 <div ref={messagesEndRef} />
               </div>

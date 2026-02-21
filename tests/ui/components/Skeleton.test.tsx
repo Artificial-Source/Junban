@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { SkeletonLine, SkeletonTaskItem, SkeletonTaskList } from "../../../src/ui/components/Skeleton.js";
+import {
+  SkeletonLine,
+  SkeletonTaskItem,
+  SkeletonTaskList,
+} from "../../../src/ui/components/Skeleton.js";
 
 describe("SkeletonLine", () => {
   it("renders with default dimensions", () => {

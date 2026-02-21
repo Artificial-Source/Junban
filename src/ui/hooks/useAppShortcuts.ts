@@ -61,7 +61,7 @@ export function useAppShortcuts(
       });
       shortcutManager.register({
         id: "quick-add-ctrl",
-        description: "Quick Add Task",
+        description: "Quick Add Task (Alt)",
         defaultKey: "ctrl+n",
         callback: () => setQuickAddOpen(true),
       });

@@ -247,7 +247,7 @@ export function TaskList({
                 onSelect={onSelect}
                 isSelected={selectedTaskId === task.id}
                 isMultiSelected={selectedTaskIds?.has(task.id) ?? false}
-                showCheckbox={!!isMultiSelectActive || !!onMultiSelect}
+                showCheckbox={!!isMultiSelectActive}
                 onMultiSelect={onMultiSelect}
                 depth={depth}
                 completedChildCount={stats?.completed ?? 0}

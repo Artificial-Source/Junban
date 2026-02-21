@@ -29,7 +29,12 @@ export async function createProject(
 ): Promise<Project> {
   if (isTauri()) {
     const svc = await getServices();
-    const project = await svc.projectService.create(name, { color, parentId, isFavorite, viewStyle });
+    const project = await svc.projectService.create(name, {
+      color,
+      parentId,
+      isFavorite,
+      viewStyle,
+    });
     if (icon) {
       const updated = await svc.projectService.update(project.id, { icon });
       svc.save();
@@ -48,7 +53,9 @@ export async function createProject(
 
 export async function updateProject(
   id: string,
-  data: Partial<Pick<Project, "name" | "color" | "icon" | "archived" | "parentId" | "isFavorite" | "viewStyle">>,
+  data: Partial<
+    Pick<Project, "name" | "color" | "icon" | "archived" | "parentId" | "isFavorite" | "viewStyle">
+  >,
 ): Promise<Project | null> {
   if (isTauri()) {
     const svc = await getServices();

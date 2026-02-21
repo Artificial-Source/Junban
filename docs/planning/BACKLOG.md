@@ -287,6 +287,24 @@ All work items for ASF Saydo, organized by area and prioritized within each sect
 | FE-22 | Calendar view (week grid) | done | S32 | Calendar.tsx with week nav, task entries by due date |
 | FE-23 | Breadcrumb navigation | done | S32 | Breadcrumb component for project/task views |
 
+## QA — Bugs Found (Feb 2026 Full App Test)
+
+| ID | Item | Status | Sprint | Notes |
+|----|------|--------|--------|-------|
+| QA-01 | AI Chat crashes on load — WelcomeScreen.tsx `.filter()` on undefined `tasks` | done | S33 | Fixed: `const { state } = useTaskContext(); const tasks = state.tasks ?? []` |
+| QA-02 | ErrorBoundary doesn't reset on route change | done | S33 | Fixed: moved dynamic key to ErrorBoundary component |
+| QA-03 | NLP `+project` syntax doesn't assign tasks to projects | done | S33 | Fixed: resolve parsed.project name → project ID in useTaskHandlers |
+| QA-04 | Plugin UI polling every 1 second (massive perf issue) | done | S33 | Fixed: changed interval from 1s to 30s |
+| QA-05 | Inbox task count stale after marking task completed | done | S33 | Fixed: show pending-only count in header |
+| QA-06 | Calendar Day view doesn't default to today when switching modes | done | S33 | Fixed: reset date to today on mode switch |
+| QA-07 | React DOM nesting violations in Calendar task items | done | S33 | Fixed: `<button>` → `<span role="button">` in week + day views |
+| QA-08 | Filters & Labels route mismatch | done | S33 | Fixed: added `"filters"` case alias in useRouting |
+| QA-09 | "X tasks" plural grammar — shows "1 tasks" instead of "1 task" | done | S33 | Fixed: singular/plural in Inbox, Today, Upcoming, Project |
+| QA-10 | Task detail "Cancelled" status button truncated | done | S33 | Fixed: added flex-wrap to status button container |
+| QA-11 | Duplicate "Quick Add Task" in keyboard shortcuts settings | done | S33 | Fixed: renamed to "Quick Add Task (Alt)" |
+| QA-12 | Collapsed sidebar hides My Projects section entirely | done | S33 | Fixed: added collapsed project icons with tooltips |
+| QA-13 | Reminder polling every 30s even when no reminders exist | done | S33 | Fixed: increased default interval to 60s |
+
 ## Documentation
 
 | ID | Item | Status | Sprint | Notes |

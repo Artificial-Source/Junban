@@ -3,7 +3,10 @@ import { useTaskContext } from "../context/TaskContext.js";
 import { useSoundEffect } from "./useSoundEffect.js";
 import { api } from "../api/index.js";
 
-export function useTaskHandlers(selectedProjectId: string | null) {
+export function useTaskHandlers(
+  selectedProjectId: string | null,
+  projects?: { id: string; name: string }[],
+) {
   const { state, createTask, updateTask, completeTask, deleteTask } = useTaskContext();
   const playSound = useSoundEffect();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -18,21 +21,31 @@ export function useTaskHandlers(selectedProjectId: string | null) {
     recurrence?: string | null;
   }) => {
     if (!parsed.title.trim()) return;
+    let projectId = selectedProjectId;
+    if (parsed.project && projects) {
+      const match = projects.find((p) => p.name.toLowerCase() === parsed.project!.toLowerCase());
+      if (match) projectId = match.id;
+    }
     await createTask({
       title: parsed.title,
       priority: parsed.priority,
       dueDate: parsed.dueDate?.toISOString() ?? null,
       dueTime: parsed.dueTime,
       tags: parsed.tags,
-      projectId: selectedProjectId,
+      projectId,
       ...(parsed.recurrence ? { recurrence: parsed.recurrence } : {}),
     } as any);
     playSound("create");
   };
 
   const handleToggleTask = async (id: string) => {
-    await completeTask(id);
-    playSound("complete");
+    const task = state.tasks.find((t) => t.id === id);
+    if (task?.status === "completed") {
+      await updateTask(id, { status: "pending", completedAt: null } as any);
+    } else {
+      await completeTask(id);
+      playSound("complete");
+    }
   };
 
   const handleSelectTask = (id: string) => {

@@ -10,9 +10,12 @@ interface UseCalendarNavigationOptions {
 
 function getWeekStartOffset(weekStart: "sunday" | "monday" | "saturday"): number {
   switch (weekStart) {
-    case "sunday": return 0;
-    case "monday": return 1;
-    case "saturday": return 6;
+    case "sunday":
+      return 0;
+    case "monday":
+      return 1;
+    case "saturday":
+      return 6;
   }
 }
 

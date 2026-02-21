@@ -46,7 +46,13 @@ const mockRect = {
 
 describe("TaskPreview", () => {
   it("renders task title", () => {
-    render(<TaskPreview task={makeTask({ title: "Buy groceries" })} anchorRect={mockRect} onClose={vi.fn()} />);
+    render(
+      <TaskPreview
+        task={makeTask({ title: "Buy groceries" })}
+        anchorRect={mockRect}
+        onClose={vi.fn()}
+      />,
+    );
     expect(screen.getByText("Buy groceries")).toBeDefined();
   });
 
@@ -62,13 +68,19 @@ describe("TaskPreview", () => {
   });
 
   it("renders priority badge", () => {
-    render(<TaskPreview task={makeTask({ priority: 1 })} anchorRect={mockRect} onClose={vi.fn()} />);
+    render(
+      <TaskPreview task={makeTask({ priority: 1 })} anchorRect={mockRect} onClose={vi.fn()} />,
+    );
     expect(screen.getByText("P1")).toBeDefined();
   });
 
   it("renders due date", () => {
     render(
-      <TaskPreview task={makeTask({ dueDate: "2026-03-15T00:00:00Z" })} anchorRect={mockRect} onClose={vi.fn()} />,
+      <TaskPreview
+        task={makeTask({ dueDate: "2026-03-15T00:00:00Z" })}
+        anchorRect={mockRect}
+        onClose={vi.fn()}
+      />,
     );
     // Date should be rendered
     const dateEl = screen.getByTestId("calendar-icon");

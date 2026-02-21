@@ -68,6 +68,9 @@ function AppContent() {
     openSettingsTab,
   } = useRouting();
 
+  // ── Projects state (declared early for useTaskHandlers) ──
+  const [projects, setProjects] = useState<ProjectType[]>([]);
+
   // ── Task handlers ──
   const {
     selectedTaskId,
@@ -84,7 +87,7 @@ function AppContent() {
     handleIndent,
     handleOutdent,
     handleReorder,
-  } = useTaskHandlers(selectedProjectId);
+  } = useTaskHandlers(selectedProjectId, projects);
 
   // ── UI state ──
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -97,7 +100,6 @@ function AppContent() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [templateSelectorOpen, setTemplateSelectorOpen] = useState(false);
-  const [projects, setProjects] = useState<ProjectType[]>([]);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [addTaskTrigger, setAddTaskTrigger] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -303,7 +305,14 @@ function AppContent() {
   useReminders({ onReminder: handleReminder, enabled: true });
 
   // ── Keyboard shortcuts ──
-  useAppShortcuts(setCommandPaletteOpen, undo, redo, setSearchOpen, setFocusModeOpen, setQuickAddOpen);
+  useAppShortcuts(
+    setCommandPaletteOpen,
+    undo,
+    redo,
+    setSearchOpen,
+    setFocusModeOpen,
+    setQuickAddOpen,
+  );
 
   // ── Settings modal helpers ──
   const handleOpenSettings = useCallback(() => {
@@ -535,10 +544,7 @@ function AppContent() {
         );
       case "ai-chat":
         return (
-          <AIChat
-            onOpenSettings={() => setSettingsOpen(true)}
-            onSelectTask={handleSelectTask}
-          />
+          <AIChat onOpenSettings={() => setSettingsOpen(true)} onSelectTask={handleSelectTask} />
         );
       default:
         return null;
@@ -575,7 +581,11 @@ function AppContent() {
             onOpenProjectModal={() => setProjectModalOpen(true)}
           />
         </div>
-        <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto p-3 md:p-6 flex flex-col">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 overflow-auto p-3 md:p-6 flex flex-col"
+        >
           <BulkActionBar
             selectedCount={multiSelectedIds.size}
             onCompleteAll={handleBulkComplete}
@@ -592,8 +602,10 @@ function AppContent() {
               Error: {state.error}
             </p>
           ) : (
-            <ErrorBoundary>
-              <div key={`${currentView}-${selectedProjectId ?? ""}-${selectedPluginViewId ?? ""}`} className="animate-fade-in flex-1 flex flex-col">
+            <ErrorBoundary
+              key={`${currentView}-${selectedProjectId ?? ""}-${selectedPluginViewId ?? ""}`}
+            >
+              <div className="animate-fade-in flex-1 flex flex-col">
                 {(currentView === "project" || currentView === "task") && (
                   <Breadcrumb
                     items={(() => {
@@ -603,11 +615,16 @@ function AppContent() {
                         const project = projects.find((p) => p.id === selectedProjectId);
                         if (project) items.push({ label: project.name });
                       } else if (currentView === "task") {
-                        const routeTask = selectedRouteTaskId ? state.tasks.find((t) => t.id === selectedRouteTaskId) : null;
+                        const routeTask = selectedRouteTaskId
+                          ? state.tasks.find((t) => t.id === selectedRouteTaskId)
+                          : null;
                         if (routeTask?.projectId) {
                           const project = projects.find((p) => p.id === routeTask.projectId);
                           if (project) {
-                            items.push({ label: project.name, onClick: () => handleNavigate("project", project.id) });
+                            items.push({
+                              label: project.name,
+                              onClick: () => handleNavigate("project", project.id),
+                            });
                           }
                         }
                         if (routeTask) items.push({ label: routeTask.title });
@@ -701,12 +718,7 @@ function AppContent() {
           availableTags={availableTags}
         />
       )}
-      {settingsOpen && (
-        <Settings
-          activeTab={settingsTab}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
+      {settingsOpen && <Settings activeTab={settingsTab} onClose={() => setSettingsOpen(false)} />}
       {focusModeOpen && (
         <FocusMode
           tasks={state.tasks.filter((t) => t.status === "pending")}

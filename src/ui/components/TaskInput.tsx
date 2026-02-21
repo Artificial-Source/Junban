@@ -70,9 +70,10 @@ export function TaskInput({
         <div className="flex flex-wrap items-center gap-1.5 mt-1.5 px-1 text-xs">
           <span className="text-on-surface-secondary">{preview.title}</span>
           {preview.priority && (
-            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-medium bg-priority-${preview.priority}/15 text-priority-${preview.priority}`}>
-              <Flag size={10} />
-              P{preview.priority}
+            <span
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-medium bg-priority-${preview.priority}/15 text-priority-${preview.priority}`}
+            >
+              <Flag size={10} />P{preview.priority}
             </span>
           )}
           {preview.dueDate && (
@@ -82,7 +83,10 @@ export function TaskInput({
             </span>
           )}
           {preview.tags.map((tag) => (
-            <span key={tag} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-500">
+            <span
+              key={tag}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-500"
+            >
               <Hash size={10} />
               {tag}
             </span>

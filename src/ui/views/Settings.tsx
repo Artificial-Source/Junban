@@ -133,10 +133,7 @@ function renderTabContent(tab: SettingsTab) {
   }
 }
 
-export function Settings({
-  activeTab: initialTab,
-  onClose,
-}: SettingsProps) {
+export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
   const isMobile = useIsMobile();
   // Settings manages its own tab state. The initialTab prop is used only on mount
   // (or when changed from outside, e.g. command palette "Open AI settings").

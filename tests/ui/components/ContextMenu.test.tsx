@@ -9,9 +9,7 @@ const baseItems: ContextMenuItem[] = [
 ];
 
 function renderMenu(items = baseItems, onClose = vi.fn()) {
-  return render(
-    <ContextMenu items={items} position={{ x: 100, y: 200 }} onClose={onClose} />,
-  );
+  return render(<ContextMenu items={items} position={{ x: 100, y: 200 }} onClose={onClose} />);
 }
 
 describe("ContextMenu", () => {
@@ -30,12 +28,8 @@ describe("ContextMenu", () => {
   it("calls onClick and onClose when item is clicked", () => {
     const onClick = vi.fn();
     const onClose = vi.fn();
-    const items: ContextMenuItem[] = [
-      { id: "action", label: "Do Something", onClick },
-    ];
-    render(
-      <ContextMenu items={items} position={{ x: 0, y: 0 }} onClose={onClose} />,
-    );
+    const items: ContextMenuItem[] = [{ id: "action", label: "Do Something", onClick }];
+    render(<ContextMenu items={items} position={{ x: 0, y: 0 }} onClose={onClose} />);
     fireEvent.click(screen.getByText("Do Something"));
     expect(onClick).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -43,13 +37,9 @@ describe("ContextMenu", () => {
 
   it("does not call onClick for disabled items", () => {
     const onClick = vi.fn();
-    const items: ContextMenuItem[] = [
-      { id: "nope", label: "Nope", disabled: true, onClick },
-    ];
+    const items: ContextMenuItem[] = [{ id: "nope", label: "Nope", disabled: true, onClick }];
     const onClose = vi.fn();
-    render(
-      <ContextMenu items={items} position={{ x: 0, y: 0 }} onClose={onClose} />,
-    );
+    render(<ContextMenu items={items} position={{ x: 0, y: 0 }} onClose={onClose} />);
     fireEvent.click(screen.getByText("Nope"));
     expect(onClick).not.toHaveBeenCalled();
   });

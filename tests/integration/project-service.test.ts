@@ -23,7 +23,7 @@ describe("ProjectService (integration)", () => {
     });
 
     it("creates a project with custom color", async () => {
-      const project = await projectService.create("Personal", "#22c55e");
+      const project = await projectService.create("Personal", { color: "#22c55e" });
 
       expect(project.name).toBe("Personal");
       expect(project.color).toBe("#22c55e");
@@ -143,7 +143,7 @@ describe("ProjectService (integration)", () => {
     });
 
     it("partial update does not clear other fields", async () => {
-      const project = await projectService.create("Partial", "#22c55e");
+      const project = await projectService.create("Partial", { color: "#22c55e" });
 
       const updated = await projectService.update(project.id, {
         archived: true,

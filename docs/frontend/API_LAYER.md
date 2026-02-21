@@ -21,7 +21,7 @@ src/ui/api/
   projects.ts    -- Project CRUD, tag listing
   templates.ts   -- Template CRUD and instantiation
   plugins.ts     -- Plugin management, commands, UI registry, store
-  ai.ts          -- AI provider config, chat messaging with SSE, model discovery
+  ai.ts          -- AI provider config, chat messaging with SSE, model discovery, session management
   settings.ts    -- App settings, storage info, data export
 ```
 
@@ -29,23 +29,23 @@ src/ui/api/
 
 ## index.ts
 
-- **Path:** `src/ui/api/index.ts` (27 lines)
+- **Path:** `src/ui/api/index.ts` (28 lines)
 - **Purpose:** Barrel file that imports all API modules and re-exports them as a single `api` object plus type re-exports.
 - **Key Exports:**
   - `api` -- unified API object with all functions spread from submodules
-  - Type re-exports: `PluginInfo`, `SettingDefinitionInfo`, `PluginCommandInfo`, `StatusBarItemInfo`, `PanelInfo`, `ViewInfo`, `StorePluginInfo`, `AIConfigInfo`, `AIChatMessage`, `AIProviderInfo`, `ModelDiscoveryInfo`
+  - Type re-exports: `PluginInfo`, `SettingDefinitionInfo`, `PluginCommandInfo`, `StatusBarItemInfo`, `PanelInfo`, `ViewInfo`, `StorePluginInfo`, `AIConfigInfo`, `AIChatMessage`, `AIProviderInfo`, `ModelDiscoveryInfo`, `ChatSessionInfo`
 - **Used By:** Every component that needs to call the backend
 
 ---
 
 ## helpers.ts
 
-- **Path:** `src/ui/api/helpers.ts` (44 lines)
+- **Path:** `src/ui/api/helpers.ts` (45 lines)
 - **Purpose:** Shared utilities for all API modules.
 - **Key Exports:**
   - `isTauri` -- re-exported from `utils/tauri.js`
   - `BASE: string` -- base URL for REST API (`"/api"`)
-  - `handleResponse<T>(res: Response): Promise<T>` -- parses JSON response, throws on HTTP error
+  - `handleResponse<T>(res: Response): Promise<T>` -- parses JSON response, throws on HTTP error (extracts `error` field from JSON body if available)
   - `handleVoidResponse(res: Response): Promise<void>` -- checks for HTTP error without parsing body
   - `getServices(): Promise<WebServices>` -- lazy-loads and caches the Tauri in-process services
   - `WebServices` type -- the return type of `bootstrapWeb()`
@@ -55,7 +55,7 @@ src/ui/api/
 
 ## tasks.ts
 
-- **Path:** `src/ui/api/tasks.ts` (236 lines)
+- **Path:** `src/ui/api/tasks.ts` (237 lines)
 - **Purpose:** Task CRUD operations, bulk operations, tree/subtask operations, reminders, and import.
 - **Key Exports:**
 
@@ -93,12 +93,13 @@ src/ui/api/
   - `POST /api/tasks/:id/outdent`
   - `POST /api/tasks/reorder`
   - `POST /api/tasks/import`
+- **Notes:** In Tauri mode, `importTasks` handles project resolution via `svc.projectService.getOrCreate()` and completes tasks marked as completed after creation. Calls `svc.save()` after all mutations.
 
 ---
 
 ## projects.ts
 
-- **Path:** `src/ui/api/projects.ts` (72 lines)
+- **Path:** `src/ui/api/projects.ts` (80 lines)
 - **Purpose:** Project CRUD and tag listing.
 - **Key Exports:**
 
@@ -106,8 +107,8 @@ src/ui/api/
 |----------|-----------|-------------|
 | `listTags` | `() => Promise<{ id, name, color }[]>` | List all tags |
 | `listProjects` | `() => Promise<Project[]>` | List all projects |
-| `createProject` | `(name, color?, icon?) => Promise<Project>` | Create a project |
-| `updateProject` | `(id, data) => Promise<Project \| null>` | Update project fields |
+| `createProject` | `(name, color?, icon?, parentId?, isFavorite?, viewStyle?) => Promise<Project>` | Create a project with optional hierarchy and display options |
+| `updateProject` | `(id, data) => Promise<Project \| null>` | Update project fields (name, color, icon, archived, parentId, isFavorite, viewStyle) |
 | `deleteProject` | `(id) => Promise<void>` | Delete a project |
 
 - **REST Endpoints (server mode):**
@@ -116,13 +117,13 @@ src/ui/api/
   - `POST /api/projects`
   - `PATCH /api/projects/:id`
   - `DELETE /api/projects/:id`
-- **Notes:** In Tauri mode, `createProject` handles icon as a two-step operation (create then update with icon).
+- **Notes:** In Tauri mode, `createProject` handles icon as a two-step operation (create then update with icon). Project creation supports `parentId` for nested projects, `isFavorite` for pinning, and `viewStyle` for display mode (`"list" | "board" | "calendar"`).
 
 ---
 
 ## templates.ts
 
-- **Path:** `src/ui/api/templates.ts` (77 lines)
+- **Path:** `src/ui/api/templates.ts` (78 lines)
 - **Purpose:** Task template CRUD and instantiation.
 - **Key Exports:**
 
@@ -146,7 +147,7 @@ src/ui/api/
 
 ## plugins.ts
 
-- **Path:** `src/ui/api/plugins.ts` (265 lines)
+- **Path:** `src/ui/api/plugins.ts` (269 lines)
 - **Purpose:** Plugin management including lifecycle, settings, commands, UI components, permissions, and the plugin store.
 - **Key Exports:**
 
@@ -175,7 +176,7 @@ src/ui/api/
 interface PluginInfo {
   id: string; name: string; version: string; author: string;
   description: string; enabled: boolean; permissions: string[];
-  settings: SettingDefinitionInfo[]; builtin: boolean;
+  settings: SettingDefinitionInfo[]; builtin: boolean; icon?: string;
 }
 
 interface PluginCommandInfo { id: string; name: string; hotkey?: string; }
@@ -186,18 +187,19 @@ interface ViewInfo { id: string; name: string; icon: string; }
 interface StorePluginInfo {
   id: string; name: string; description: string; author: string;
   version: string; repository: string; downloadUrl?: string;
-  tags: string[]; minSaydoVersion: string;
+  tags: string[]; minSaydoVersion: string; icon?: string;
+  downloads?: number; longDescription?: string;
 }
 ```
 
-- **Notes:** In Tauri mode, plugin listing returns empty (plugins deferred). Install/uninstall throw errors in Tauri mode. Permission approval/revocation not yet supported in Tauri mode.
+- **Notes:** In Tauri mode, plugin listing returns empty (plugins deferred). Install/uninstall throw errors in Tauri mode. Permission approval/revocation and toggle not yet supported in Tauri mode. `PluginInfo` includes an optional `icon` field. `StorePluginInfo` includes optional `icon`, `downloads` count, and `longDescription` for the store detail view.
 
 ---
 
 ## ai.ts
 
-- **Path:** `src/ui/api/ai.ts` (343 lines)
-- **Purpose:** AI provider configuration, chat messaging with SSE streaming, model discovery, and model lifecycle management.
+- **Path:** `src/ui/api/ai.ts` (462 lines)
+- **Purpose:** AI provider configuration, chat messaging with SSE streaming, model discovery, model lifecycle management, and multi-session chat management.
 - **Key Exports:**
 
 | Function | Signature | Description |
@@ -207,10 +209,15 @@ interface StorePluginInfo {
 | `loadModel` | `(providerName, modelKey, baseUrl?) => Promise<void>` | Load a model (LM Studio) |
 | `unloadModel` | `(providerName, modelKey, baseUrl?) => Promise<void>` | Unload a model |
 | `getAIConfig` | `() => Promise<AIConfigInfo>` | Get current AI config |
-| `updateAIConfig` | `(config) => Promise<void>` | Update AI config |
+| `updateAIConfig` | `(config) => Promise<void>` | Update AI config (clears chat session) |
 | `sendChatMessage` | `(message, options?) => Promise<ReadableStream \| null>` | Send chat message, returns SSE stream |
-| `getChatMessages` | `() => Promise<AIChatMessage[]>` | Get chat history |
+| `getChatMessages` | `() => Promise<AIChatMessage[]>` | Get chat history (restores session if needed) |
 | `clearChat` | `() => Promise<void>` | Clear chat session |
+| `listChatSessions` | `() => Promise<ChatSessionInfo[]>` | List all chat sessions |
+| `renameChatSession` | `(sessionId, title) => Promise<void>` | Rename a chat session |
+| `deleteChatSession` | `(sessionId) => Promise<void>` | Delete a chat session |
+| `switchChatSession` | `(sessionId) => Promise<AIChatMessage[]>` | Switch to a session, returns its messages |
+| `createNewChatSession` | `() => Promise<string>` | Create a new empty session |
 
 - **Key Interfaces:**
 
@@ -229,6 +236,11 @@ interface AIChatMessage {
   isError?: boolean; errorCategory?: string; retryable?: boolean;
 }
 
+interface ChatSessionInfo {
+  sessionId: string; title: string;
+  createdAt: string; messageCount: number;
+}
+
 interface AIProviderInfo {
   name: string; displayName: string; needsApiKey: boolean;
   optionalApiKey?: boolean; defaultModel: string;
@@ -239,14 +251,30 @@ interface AIProviderInfo {
 interface ModelDiscoveryInfo { id: string; label: string; loaded: boolean; }
 ```
 
-- **SSE Stream Format:** `sendChatMessage` returns a `ReadableStream<Uint8Array>`. In Tauri mode, this is constructed in-process by iterating over the chat session's async generator. Each SSE event is `data: {JSON}\n\n` with types: `delta`, `tool_call`, `tool_result`, `done`, `error`.
-- **Notes:** In Tauri mode, `sendChatMessage` builds the entire AI pipeline in-process: loads provider, gathers context (compact mode for local providers), creates/restores session, and streams events. The `voiceCall` option in `sendChatMessage` passes a flag to the context gatherer for voice-optimized prompts.
+- **REST Endpoints (server mode):**
+  - `GET /api/ai/providers`
+  - `GET /api/ai/providers/:name/models`
+  - `POST /api/ai/providers/:name/models/load`
+  - `POST /api/ai/providers/:name/models/unload`
+  - `GET /api/ai/config`
+  - `PUT /api/ai/config`
+  - `POST /api/ai/chat`
+  - `GET /api/ai/messages`
+  - `POST /api/ai/clear`
+  - `GET /api/ai/sessions`
+  - `PUT /api/ai/sessions/:id/title`
+  - `DELETE /api/ai/sessions/:id`
+  - `POST /api/ai/sessions/:id/switch`
+  - `POST /api/ai/sessions/new`
+
+- **SSE Stream Format:** `sendChatMessage` returns a `ReadableStream<Uint8Array>`. In Tauri mode, this is constructed in-process by iterating over the chat session's async generator. Each SSE event is `data: {JSON}\n\n` with types: `token`, `tool_call`, `tool_result`, `done`, `error`.
+- **Notes:** In Tauri mode, `sendChatMessage` builds the entire AI pipeline in-process: loads provider, gathers context (compact mode for local providers), creates/restores session, and streams events. The `voiceCall` option passes a flag to the context gatherer for voice-optimized prompts. `updateAIConfig` clears the chat session when the provider changes. `getChatMessages` attempts to restore the session from storage if no active session exists. `switchChatSession` in Tauri mode manually reconstructs a `ChatSession` from stored messages. `deleteChatSession` also removes the title override setting. `createNewChatSession` in Tauri mode clears the in-memory session without deleting from the database.
 
 ---
 
 ## settings.ts
 
-- **Path:** `src/ui/api/settings.ts` (64 lines)
+- **Path:** `src/ui/api/settings.ts` (65 lines)
 - **Purpose:** App settings persistence, storage info, and data export.
 - **Key Exports:**
 
@@ -261,4 +289,4 @@ interface ModelDiscoveryInfo { id: string; label: string; loaded: boolean; }
   - `GET /api/settings/:key`
   - `PUT /api/settings/:key`
   - `GET /api/settings/storage`
-- **Notes:** In Tauri mode, `getStorageInfo` always returns `{ mode: "sqlite", path: "(embedded database)" }`. Settings are key-value pairs stored in the app_settings table. Used for keyboard shortcuts, notification preferences, AI config, and general settings.
+- **Notes:** In Tauri mode, `getStorageInfo` always returns `{ mode: "sqlite", path: "(embedded database)" }`. In server mode, `exportAllData` extracts unique tags from task data since there is no dedicated tags export endpoint. Settings are key-value pairs stored in the app_settings table. Used for keyboard shortcuts, notification preferences, AI config, and general settings.

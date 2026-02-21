@@ -55,7 +55,9 @@ export function Project({
           />
         )}
         <h1 className="text-xl md:text-2xl font-bold text-on-surface">{project.name}</h1>
-        <span className="text-sm text-on-surface-muted">{projectTasks.length} tasks</span>
+        <span className="text-sm text-on-surface-muted">
+          {projectTasks.length} {projectTasks.length === 1 ? "task" : "tasks"}
+        </span>
       </div>
       <TaskInput
         onSubmit={onCreateTask}

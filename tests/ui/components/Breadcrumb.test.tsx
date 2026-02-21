@@ -14,9 +14,7 @@ describe("Breadcrumb", () => {
   });
 
   it("renders breadcrumb items", () => {
-    render(
-      <Breadcrumb items={[{ label: "Projects" }, { label: "Work" }]} />,
-    );
+    render(<Breadcrumb items={[{ label: "Projects" }, { label: "Work" }]} />);
     expect(screen.getByText("Projects")).toBeDefined();
     expect(screen.getByText("Work")).toBeDefined();
   });
@@ -28,9 +26,7 @@ describe("Breadcrumb", () => {
 
   it("renders clickable items as buttons", () => {
     const onClick = vi.fn();
-    render(
-      <Breadcrumb items={[{ label: "Projects", onClick }, { label: "Current" }]} />,
-    );
+    render(<Breadcrumb items={[{ label: "Projects", onClick }, { label: "Current" }]} />);
     const btn = screen.getByText("Projects");
     expect(btn.tagName).toBe("BUTTON");
     fireEvent.click(btn);
@@ -38,9 +34,7 @@ describe("Breadcrumb", () => {
   });
 
   it("renders last item as text (no onClick)", () => {
-    render(
-      <Breadcrumb items={[{ label: "Projects", onClick: vi.fn() }, { label: "Current" }]} />,
-    );
+    render(<Breadcrumb items={[{ label: "Projects", onClick: vi.fn() }, { label: "Current" }]} />);
     const current = screen.getByText("Current");
     expect(current.tagName).toBe("SPAN");
   });

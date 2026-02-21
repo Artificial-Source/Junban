@@ -77,13 +77,13 @@ describe("AppearanceTab", () => {
     expect(themeManager.setTheme).toHaveBeenCalledWith("dark");
   });
 
-  it("renders 8 accent color swatches", async () => {
+  it("renders all accent color swatches", async () => {
     renderAppearanceTab();
     await waitFor(() => {
       expect(screen.getByText("Accent color")).toBeDefined();
     });
     const swatches = screen.getAllByLabelText(/Accent color #/);
-    expect(swatches.length).toBe(8);
+    expect(swatches.length).toBe(19);
   });
 
   it("accent color picker updates setting on click", async () => {
@@ -91,9 +91,9 @@ describe("AppearanceTab", () => {
     await waitFor(() => {
       expect(screen.getByText("Accent color")).toBeDefined();
     });
-    const redSwatch = screen.getByLabelText("Accent color #ef4444");
+    const redSwatch = screen.getByLabelText("Accent color #db4035");
     fireEvent.click(redSwatch);
-    expect(api.setAppSetting).toHaveBeenCalledWith("accent_color", "#ef4444");
+    expect(api.setAppSetting).toHaveBeenCalledWith("accent_color", "#db4035");
   });
 
   it("renders density segmented control", async () => {

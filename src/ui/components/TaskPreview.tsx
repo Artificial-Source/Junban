@@ -45,8 +45,7 @@ export function TaskPreview({ task, anchorRect, onClose }: TaskPreviewProps) {
       <div className="flex flex-wrap items-center gap-2 mt-2">
         {task.priority && (
           <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-surface-tertiary">
-            <Flag size={10} />
-            P{task.priority}
+            <Flag size={10} />P{task.priority}
           </span>
         )}
         {task.dueDate && (

@@ -190,7 +190,6 @@ export function SubtaskSection({
         className="grid transition-[grid-template-rows] duration-200 ease-in-out"
         style={{ gridTemplateRows: subtasksExpanded ? "1fr" : "0fr" }}
       >
-        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
         <div className="overflow-hidden" onKeyDown={handleSubtaskKeyDown} tabIndex={-1}>
           <DndContext
             sensors={subtaskSensors}

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { ChatSession, ChatManager } from "../../src/ai/chat.js";
 import type { LLMExecutor } from "../../src/ai/provider/interface.js";
 import type { LLMExecutionContext, PipelineResult } from "../../src/ai/core/context.js";

@@ -94,6 +94,7 @@ function parseRouteStateFromHash(hash: string, defaultView: View = "inbox"): Rou
       route.pluginViewId = decodePathSegment(pathSegments[1]);
       if (!route.pluginViewId) route.view = "inbox";
       break;
+    case "filters":
     case "filters-labels":
       route.view = "filters-labels";
       break;

@@ -53,9 +53,16 @@ export function Inbox({
       return completedAtMs >= cutoffMs;
     };
 
-    return tasks.filter(
+    const filtered = tasks.filter(
       (t) => !t.projectId && (t.status === "pending" || isRecentCompletedTask(t)),
     );
+
+    // Pending tasks first, completed at the bottom
+    return filtered.sort((a, b) => {
+      if (a.status === "completed" && b.status !== "completed") return 1;
+      if (a.status !== "completed" && b.status === "completed") return -1;
+      return 0;
+    });
   }, [tasks, inboxViewTimeMs]);
 
   return (
@@ -63,7 +70,12 @@ export function Inbox({
       <div className="flex items-center gap-3 mb-4 md:mb-6">
         <InboxIcon size={24} className="text-accent" />
         <h1 className="text-xl md:text-2xl font-bold text-on-surface">Inbox</h1>
-        <span className="text-sm text-on-surface-muted">{inboxTasks.length} tasks</span>
+        <span className="text-sm text-on-surface-muted">
+          {(() => {
+            const c = inboxTasks.filter((t) => t.status === "pending").length;
+            return `${c} ${c === 1 ? "task" : "tasks"}`;
+          })()}
+        </span>
       </div>
       <TaskInput onSubmit={onCreateTask} autoFocusTrigger={autoFocusTrigger} />
       <TaskList

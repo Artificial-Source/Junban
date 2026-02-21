@@ -62,7 +62,9 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
           e.preventDefault();
           const next = (focusIndex + 1) % enabledItems.length;
           setFocusIndex(next);
-          const buttons = menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])');
+          const buttons = menuRef.current?.querySelectorAll<HTMLElement>(
+            '[role="menuitem"]:not([aria-disabled="true"])',
+          );
           buttons?.[next]?.focus();
           break;
         }
@@ -70,7 +72,9 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
           e.preventDefault();
           const prev = (focusIndex - 1 + enabledItems.length) % enabledItems.length;
           setFocusIndex(prev);
-          const buttons = menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])');
+          const buttons = menuRef.current?.querySelectorAll<HTMLElement>(
+            '[role="menuitem"]:not([aria-disabled="true"])',
+          );
           buttons?.[prev]?.focus();
           break;
         }

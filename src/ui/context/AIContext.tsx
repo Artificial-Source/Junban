@@ -407,18 +407,15 @@ export function AIProvider({ children }: { children: ReactNode }) {
     await refreshSessions();
   }, [refreshSessions]);
 
-  const switchSession = useCallback(
-    async (sessionId: string) => {
-      try {
-        const msgs = await api.switchChatSession(sessionId);
-        setMessages(msgs.filter((m) => m.role !== "tool"));
-        setActiveSessionId(sessionId);
-      } catch {
-        // Non-critical
-      }
-    },
-    [],
-  );
+  const switchSession = useCallback(async (sessionId: string) => {
+    try {
+      const msgs = await api.switchChatSession(sessionId);
+      setMessages(msgs.filter((m) => m.role !== "tool"));
+      setActiveSessionId(sessionId);
+    } catch {
+      // Non-critical
+    }
+  }, []);
 
   const deleteSession = useCallback(
     async (sessionId: string) => {

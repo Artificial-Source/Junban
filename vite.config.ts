@@ -741,7 +741,9 @@ function apiPlugin() {
           if (plugin?.builtin) {
             res.statusCode = 400;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ success: false, error: "Cannot uninstall built-in extensions" }));
+            res.end(
+              JSON.stringify({ success: false, error: "Cannot uninstall built-in extensions" }),
+            );
             return;
           }
 

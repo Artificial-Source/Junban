@@ -137,7 +137,10 @@ export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjec
         <form onSubmit={handleSubmit} className="px-5 py-4 space-y-5">
           {/* Name + Emoji */}
           <div>
-            <label htmlFor="project-name" className="block text-xs font-medium text-on-surface-secondary mb-1.5">
+            <label
+              htmlFor="project-name"
+              className="block text-xs font-medium text-on-surface-secondary mb-1.5"
+            >
               Name
             </label>
             <div className="relative flex items-center gap-2">
@@ -157,10 +160,7 @@ export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjec
                   )}
                 </button>
                 {emojiPickerOpen && (
-                  <div
-                    ref={emojiPickerRef}
-                    className="absolute top-12 left-0 z-50"
-                  >
+                  <div ref={emojiPickerRef} className="absolute top-12 left-0 z-50">
                     <EmojiPicker
                       theme={Theme.AUTO}
                       lazyLoadEmojis
@@ -217,7 +217,9 @@ export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjec
                   }}
                   title={PROJECT_COLOR_LABELS[c] ?? c}
                   className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
-                    color === c ? "ring-2 ring-offset-2 ring-offset-surface ring-on-surface-secondary scale-110" : "hover:scale-110"
+                    color === c
+                      ? "ring-2 ring-offset-2 ring-offset-surface ring-on-surface-secondary scale-110"
+                      : "hover:scale-110"
                   }`}
                   style={{ backgroundColor: c }}
                 >
@@ -258,7 +260,9 @@ export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjec
                   placeholder="#4073ff"
                   maxLength={7}
                   className={`w-28 px-2 py-1.5 text-sm font-mono border rounded-lg bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-2 ${
-                    customHex && !HEX_REGEX.test(customHex) ? "border-error focus:ring-error" : "border-border focus:ring-accent"
+                    customHex && !HEX_REGEX.test(customHex)
+                      ? "border-error focus:ring-error"
+                      : "border-border focus:ring-accent"
                   }`}
                 />
                 {customHex && HEX_REGEX.test(customHex) && (
@@ -276,7 +280,10 @@ export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjec
 
           {/* Parent project */}
           <div>
-            <label htmlFor="project-parent" className="block text-xs font-medium text-on-surface-secondary mb-1.5">
+            <label
+              htmlFor="project-parent"
+              className="block text-xs font-medium text-on-surface-secondary mb-1.5"
+            >
               Parent project
             </label>
             <select
@@ -288,7 +295,8 @@ export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjec
               <option value="">None</option>
               {rootProjects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.icon ? `${p.icon} ` : "● "}{p.name}
+                  {p.icon ? `${p.icon} ` : "● "}
+                  {p.name}
                 </option>
               ))}
             </select>
@@ -296,7 +304,10 @@ export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjec
 
           {/* Favorite toggle */}
           <div className="flex items-center justify-between">
-            <label htmlFor="project-favorite" className="text-xs font-medium text-on-surface-secondary">
+            <label
+              htmlFor="project-favorite"
+              className="text-xs font-medium text-on-surface-secondary"
+            >
               Add to favorites
             </label>
             <button

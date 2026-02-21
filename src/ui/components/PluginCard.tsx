@@ -8,7 +8,12 @@ import {
   ExternalLink,
   Shield,
 } from "lucide-react";
-import { api, type PluginInfo, type StorePluginInfo, type SettingDefinitionInfo } from "../api/index.js";
+import {
+  api,
+  type PluginInfo,
+  type StorePluginInfo,
+  type SettingDefinitionInfo,
+} from "../api/index.js";
 
 // ── Gradient system ──────────────────────────────────
 
@@ -476,9 +481,7 @@ function SettingsPluginCard({
         </div>
 
         {/* Description */}
-        <p className="text-xs text-on-surface-secondary mt-2 line-clamp-2">
-          {plugin.description}
-        </p>
+        <p className="text-xs text-on-surface-secondary mt-2 line-clamp-2">{plugin.description}</p>
 
         {/* Footer: version + expand toggle */}
         <div className="flex items-center justify-between mt-3">

@@ -11,7 +11,10 @@ export function CompletionRing({ completed, total, size = 32 }: CompletionRingPr
   const offset = circumference * (1 - progress);
 
   return (
-    <div className="inline-flex items-center gap-1.5" aria-label={`${completed} of ${total} tasks completed`}>
+    <div
+      className="inline-flex items-center gap-1.5"
+      aria-label={`${completed} of ${total} tasks completed`}
+    >
       <svg width={size} height={size} className="transform -rotate-90">
         {/* Background circle */}
         <circle

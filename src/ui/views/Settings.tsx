@@ -29,7 +29,6 @@ export type { SettingsTab };
 
 interface SettingsProps {
   activeTab?: SettingsTab;
-  onActiveTabChange?: (tab: SettingsTab) => void;
   onClose: () => void;
 }
 
@@ -135,31 +134,32 @@ function renderTabContent(tab: SettingsTab) {
 }
 
 export function Settings({
-  activeTab: controlledActiveTab,
-  onActiveTabChange,
+  activeTab: initialTab,
   onClose,
 }: SettingsProps) {
   const isMobile = useIsMobile();
-  const [internalActiveTab, setInternalActiveTab] = useState<SettingsTab>("general");
+  // Settings manages its own tab state. The initialTab prop is used only on mount
+  // (or when changed from outside, e.g. command palette "Open AI settings").
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? "general");
   // null = show the mobile index page; a tab id = show that tab's content
-  const [mobileSelectedTab, setMobileSelectedTab] = useState<SettingsTab | null>(null);
-  const activeTab = controlledActiveTab ?? internalActiveTab;
+  const [mobileSelectedTab, setMobileSelectedTab] = useState<SettingsTab | null>(
+    isMobile && initialTab && initialTab !== "general" ? initialTab : null,
+  );
 
-  // Deep-link: if the caller changes the controlled tab after mount (e.g. "Open AI settings"),
-  // drill into that tab on mobile
-  const [prevControlledTab, setPrevControlledTab] = useState(controlledActiveTab);
-  if (controlledActiveTab !== prevControlledTab) {
-    setPrevControlledTab(controlledActiveTab);
-    if (isMobile && controlledActiveTab && controlledActiveTab !== "general") {
-      setMobileSelectedTab(controlledActiveTab);
+  // Sync if the caller changes initialTab after mount (e.g. re-opening at a different tab)
+  const [prevInitialTab, setPrevInitialTab] = useState(initialTab);
+  if (initialTab !== prevInitialTab) {
+    setPrevInitialTab(initialTab);
+    if (initialTab) {
+      setActiveTab(initialTab);
+      if (isMobile && initialTab !== "general") {
+        setMobileSelectedTab(initialTab);
+      }
     }
   }
 
   const handleTabChange = (tab: SettingsTab) => {
-    if (controlledActiveTab === undefined) {
-      setInternalActiveTab(tab);
-    }
-    onActiveTabChange?.(tab);
+    setActiveTab(tab);
     if (isMobile) {
       setMobileSelectedTab(tab);
     }

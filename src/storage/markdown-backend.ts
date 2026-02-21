@@ -15,6 +15,7 @@ import type {
   PluginSettingsRow,
   AppSettingRow,
   ChatMessageRow,
+  ChatSessionInfo,
   TemplateRow,
   MutationResult,
 } from "./interface.js";
@@ -480,6 +481,31 @@ export class MarkdownBackend implements IStorage {
       }
     }
     return latest ? { sessionId: latest.sessionId } : undefined;
+  }
+
+  listChatSessions(): ChatSessionInfo[] {
+    const sessions: ChatSessionInfo[] = [];
+    for (const [sessionId, messages] of this.chatMessages) {
+      if (messages.length === 0) continue;
+      const override = this.getAppSetting(`chat_session_title:${sessionId}`);
+      let title = override?.value ?? "";
+      if (!title) {
+        const firstUserMsg = messages.find((m) => m.role === "user");
+        title = firstUserMsg?.content?.slice(0, 40) ?? "New chat";
+      }
+      sessions.push({
+        sessionId,
+        title,
+        createdAt: messages[0].createdAt,
+        messageCount: messages.length,
+      });
+    }
+    sessions.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return sessions;
+  }
+
+  renameChatSession(sessionId: string, title: string): void {
+    this.setAppSetting(`chat_session_title:${sessionId}`, title);
   }
 
   // ── Plugin Permissions ──

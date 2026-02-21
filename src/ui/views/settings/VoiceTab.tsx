@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Mic,
   RefreshCw,
@@ -578,14 +578,16 @@ function formatBytes(bytes: number): string {
 }
 
 function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
-  const [, forceUpdate] = useState(0);
+  const [modelVersion, setModelVersion] = useState(0);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [cachedIds, setCachedIds] = useState<Set<string>>(new Set());
   const [modelSizes, setModelSizes] = useState<Map<string, number>>(new Map());
 
-  const localModels: LocalModelInfo[] = [
+  // Memoize localModels to avoid recreating on every render.
+  // modelVersion is bumped after preload/delete to pick up status changes.
+  const localModels = useMemo<LocalModelInfo[]>(() => [
     ...registry
       .listSTT()
       .map((p) => toLocalModelInfo(p, "STT"))
@@ -594,45 +596,81 @@ function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
       .listTTS()
       .map((p) => toLocalModelInfo(p, "TTS"))
       .filter((m): m is LocalModelInfo => m !== null),
-  ];
+  ], [registry, modelVersion]);
 
+  // Keep a ref so async callbacks always see the latest models
+  const localModelsRef = useRef(localModels);
+  localModelsRef.current = localModels;
+
+  // Phase 1: fast check — just whether models are cached (no size computation)
   const checkCacheStatus = useCallback(async () => {
-    const found = new Set<string>();
-    const sizes = new Map<string, number>();
-    for (const model of localModels) {
-      if (!model.checkCached) continue;
-      try {
-        if (await model.checkCached()) {
-          found.add(model.id);
-          if (model.getModelSize) {
-            try {
-              const size = await model.getModelSize();
-              if (size > 0) sizes.set(model.id, size);
-            } catch {
-              /* ignore */
-            }
-          }
-        }
-      } catch {
-        /* ignore */
-      }
+    const models = localModelsRef.current;
+    const checkable = models.filter((m) => m.checkCached);
+    if (checkable.length === 0) {
+      setCachedIds(new Set());
+      return;
     }
-    if (found.size > 0) setCachedIds(found);
-    else setCachedIds(new Set());
-    setModelSizes(sizes);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    const results = await Promise.all(
+      checkable.map(async (model) => {
+        try {
+          return { id: model.id, cached: await model.checkCached!() };
+        } catch {
+          return { id: model.id, cached: false };
+        }
+      }),
+    );
+
+    const found = new Set<string>();
+    for (const r of results) {
+      if (r.cached) found.add(r.id);
+    }
+    setCachedIds(found.size > 0 ? found : new Set());
+    return found;
   }, []);
 
-  // Check which models are already downloaded in browser cache (lightweight, no WASM loading)
+  // Phase 2: slow — fetch sizes only for cached models, after the UI has rendered
+  const fetchModelSizes = useCallback(async (cachedModelIds: Set<string>) => {
+    if (cachedModelIds.size === 0) {
+      setModelSizes(new Map());
+      return;
+    }
+    const models = localModelsRef.current;
+    const cachedModels = models.filter((m) => cachedModelIds.has(m.id) && m.getModelSize);
+
+    const results = await Promise.all(
+      cachedModels.map(async (model) => {
+        try {
+          const size = await model.getModelSize!();
+          return { id: model.id, size };
+        } catch {
+          return { id: model.id, size: 0 };
+        }
+      }),
+    );
+
+    const sizes = new Map<string, number>();
+    for (const r of results) {
+      if (r.size > 0) sizes.set(r.id, r.size);
+    }
+    setModelSizes(sizes);
+  }, []);
+
+  // On mount: check cache status quickly, then lazily fetch sizes
   useEffect(() => {
     let cancelled = false;
-    checkCacheStatus().then(() => {
-      if (cancelled) return;
+    checkCacheStatus().then((found) => {
+      if (cancelled || !found) return;
+      // Defer size fetching so the tab renders fast with just cached/not-cached status
+      const defer = typeof requestIdleCallback === "function"
+        ? requestIdleCallback
+        : (cb: () => void) => setTimeout(cb, 50);
+      defer(() => { if (!cancelled) fetchModelSizes(found); });
     });
     return () => {
       cancelled = true;
     };
-  }, [checkCacheStatus]);
+  }, [checkCacheStatus, fetchModelSizes]);
 
   if (localModels.length === 0) return null;
 
@@ -642,7 +680,7 @@ function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
     const originalCallback = model.onStatusChange;
     model.onStatusChange = (status: ModelStatus, progress: number) => {
       originalCallback?.(status, progress);
-      forceUpdate((n) => n + 1);
+      setModelVersion((n) => n + 1);
     };
     try {
       await model.preload();
@@ -651,9 +689,9 @@ function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
     }
     model.onStatusChange = originalCallback;
     setLoadingId(null);
-    forceUpdate((n) => n + 1);
-    // Re-check cache status after download
-    await checkCacheStatus();
+    setModelVersion((n) => n + 1);
+    const found = await checkCacheStatus();
+    if (found) fetchModelSizes(found);
   };
 
   const handleDelete = async (model: LocalModelInfo) => {
@@ -666,9 +704,9 @@ function LocalModelsSection({ registry }: { registry: VoiceProviderRegistry }) {
       // Deletion failed — ignore
     }
     setDeletingId(null);
-    forceUpdate((n) => n + 1);
-    // Re-check cache status after delete
-    await checkCacheStatus();
+    setModelVersion((n) => n + 1);
+    const found = await checkCacheStatus();
+    if (found) fetchModelSizes(found);
   };
 
   return (

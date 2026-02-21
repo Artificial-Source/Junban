@@ -12,7 +12,7 @@ import { api, type PluginInfo, type StorePluginInfo, type SettingDefinitionInfo 
 
 // ── Gradient system ──────────────────────────────────
 
-const GRADIENT_PALETTE = [
+export const GRADIENT_PALETTE = [
   ["from-violet-500", "to-purple-600"],
   ["from-blue-500", "to-cyan-500"],
   ["from-emerald-500", "to-teal-500"],
@@ -27,7 +27,7 @@ const GRADIENT_PALETTE = [
   ["from-pink-500", "to-rose-500"],
 ] as const;
 
-function hashString(str: string): number {
+export function hashString(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
@@ -35,12 +35,12 @@ function hashString(str: string): number {
   return Math.abs(hash);
 }
 
-function getGradient(pluginId: string): [string, string] {
+export function getGradient(pluginId: string): [string, string] {
   const idx = hashString(pluginId) % GRADIENT_PALETTE.length;
   return GRADIENT_PALETTE[idx] as [string, string];
 }
 
-function formatDownloads(count: number): string {
+export function formatDownloads(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
   return String(count);
@@ -48,7 +48,7 @@ function formatDownloads(count: number): string {
 
 // ── Gradient Banner ──────────────────────────────────
 
-function GradientBanner({ pluginId, icon }: { pluginId: string; icon?: string }) {
+export function GradientBanner({ pluginId, icon }: { pluginId: string; icon?: string }) {
   const [from, to] = getGradient(pluginId);
   return (
     <div

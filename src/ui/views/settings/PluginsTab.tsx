@@ -1,15 +1,17 @@
 import { useState } from "react";
+import { Puzzle } from "lucide-react";
 import { usePluginContext } from "../../context/PluginContext.js";
 import { PermissionDialog } from "../../components/PermissionDialog.js";
 import { api, type PluginInfo } from "../../api/index.js";
-import { PluginStore } from "../PluginStore.js";
 import { PluginCard } from "../../components/PluginCard.js";
+import { PluginBrowser } from "../../components/PluginBrowser.js";
 
 export function PluginsTab() {
   const { plugins, refreshPlugins } = usePluginContext();
   const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null);
   const [permissionPlugin, setPermissionPlugin] = useState<PluginInfo | null>(null);
   const [toggling, setToggling] = useState<Set<string>>(new Set());
+  const [browserOpen, setBrowserOpen] = useState(false);
 
   const builtinPlugins = plugins.filter((p) => p.builtin);
   const communityPlugins = plugins.filter((p) => !p.builtin);
@@ -89,12 +91,23 @@ export function PluginsTab() {
         </section>
       )}
 
-      {/* Browse & Install */}
+      {/* Browse Community Plugins */}
       <section className="mb-8">
         <div className="border-t border-border pt-6">
-          <PluginStore />
+          <button
+            onClick={() => setBrowserOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent text-white hover:bg-accent-hover transition-colors text-sm font-medium"
+          >
+            <Puzzle size={16} />
+            Browse Community Plugins
+          </button>
+          <p className="text-xs text-on-surface-muted mt-2">
+            Discover and install extensions from the community.
+          </p>
         </div>
       </section>
+
+      <PluginBrowser open={browserOpen} onClose={() => setBrowserOpen(false)} />
 
       {permissionPlugin && (
         <PermissionDialog

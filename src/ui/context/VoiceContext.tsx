@@ -9,6 +9,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   type ReactNode,
 } from "react";
@@ -106,22 +107,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const speechCancelledRef = useRef(false);
   const playbackCancelRef = useRef<(() => void) | null>(null);
 
-  // Build registry whenever API keys change
-  const [registry, setRegistry] = useState<VoiceProviderRegistry>(() =>
-    createDefaultVoiceRegistry({
-      groqApiKey: settings.groqApiKey || undefined,
-      inworldApiKey: settings.inworldApiKey || undefined,
-    }),
-  );
-
-  useEffect(() => {
-    setRegistry(
+  // Build registry whenever API keys change — useMemo avoids the double-create
+  // that useState+useEffect caused (init on mount, then useEffect re-creates,
+  // triggering a cascade of re-renders through ttsProvider/voices/models).
+  const registry = useMemo(
+    () =>
       createDefaultVoiceRegistry({
         groqApiKey: settings.groqApiKey || undefined,
         inworldApiKey: settings.inworldApiKey || undefined,
       }),
-    );
-  }, [settings.groqApiKey, settings.inworldApiKey]);
+    [settings.groqApiKey, settings.inworldApiKey],
+  );
 
   const sttProvider = registry.getSTT(settings.sttProviderId);
   const ttsProvider = registry.getTTS(settings.ttsProviderId);

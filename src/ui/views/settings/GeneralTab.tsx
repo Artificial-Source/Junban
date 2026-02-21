@@ -61,6 +61,21 @@ export function GeneralTab() {
               onChange={(v) => updateSetting("time_format", v)}
             />
           </SettingRow>
+
+          <SettingRow
+            label="Default calendar view"
+            description="Initial view mode when opening the calendar"
+          >
+            <SegmentedControl
+              options={[
+                { value: "day" as const, label: "Day" },
+                { value: "week" as const, label: "Week" },
+                { value: "month" as const, label: "Month" },
+              ]}
+              value={settings.calendar_default_mode}
+              onChange={(v) => updateSetting("calendar_default_mode", v)}
+            />
+          </SettingRow>
         </div>
       </section>
 

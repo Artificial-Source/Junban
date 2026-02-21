@@ -138,8 +138,14 @@ export class KokoroLocalTTSProvider implements TTSProviderPlugin {
           try {
             const response = await cache.match(req);
             if (response) {
-              const blob = await response.blob();
-              totalSize += blob.size;
+              // Prefer Content-Length header to avoid reading full blob into memory
+              const cl = response.headers.get("Content-Length");
+              if (cl) {
+                totalSize += parseInt(cl, 10) || 0;
+              } else {
+                const blob = await response.blob();
+                totalSize += blob.size;
+              }
             }
           } catch {
             /* skip unreadable entries */

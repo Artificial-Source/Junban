@@ -1,29 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import {
-  X,
-  Send,
-  Mic,
-  Phone,
-  Bot,
-  Trash2,
-  Settings,
-  AlertTriangle,
-  RotateCcw,
-  Loader2,
-  Volume2,
-} from "lucide-react";
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
-import type { Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { X, Bot, Settings, Trash2 } from "lucide-react";
 import { useAIContext } from "../context/AIContext.js";
 import { useVoiceContext } from "../context/VoiceContext.js";
 import { useVAD } from "../hooks/useVAD.js";
 import { useVoiceCall } from "../hooks/useVoiceCall.js";
 import { VoiceCallOverlay } from "./VoiceCallOverlay.js";
-import { ChatTaskCard } from "./ChatTaskCard.js";
 import { BrowserSTTProvider } from "../../ai/voice/adapters/browser-stt.js";
-import { createAudioRecorder } from "../../ai/voice/audio-utils.js";
-import type { AIChatMessage } from "../api/index.js";
+import {
+  MessageBubble,
+  TypingIndicator,
+  ChatInput,
+  WelcomeScreen,
+  SuggestedActions,
+  ChatHistory,
+} from "./chat/index.js";
+import type { ChatInputRef } from "./chat/index.js";
 
 interface AIChatPanelProps {
   onClose: () => void;
@@ -43,11 +34,21 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
     restoreMessages,
     retryLastMessage,
     setVoiceCallMode,
+    editAndResend,
+    regenerateLastResponse,
+    sessions,
+    activeSessionId,
+    createNewSession,
+    switchSession,
+    deleteSession,
+    renameSession,
   } = useAIContext();
-  const [input, setInput] = useState("");
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<ChatInputRef>(null);
   const [restored, setRestored] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [lastKnownMessageCount, setLastKnownMessageCount] = useState(0);
 
   // Restore chat history on first open
   useEffect(() => {
@@ -62,20 +63,17 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Focus input on mount and after streaming ends
+  // Focus input after streaming ends
   useEffect(() => {
     if (!isStreaming) {
-      inputRef.current?.focus();
+      chatInputRef.current?.focus();
     }
   }, [isStreaming]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const text = input.trim();
-    if (!text || isStreaming) return;
-    setInput("");
-    await sendMessage(text);
-  };
+  // Track whether a new message was added (for entrance animation)
+  useEffect(() => {
+    setLastKnownMessageCount(messages.length);
+  }, [messages.length]);
 
   const voice = useVoiceContext();
   const wasStreamingRef = useRef(false);
@@ -95,21 +93,17 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
   const handleVoiceResult = useCallback(
     (transcript: string) => {
       const cleaned = transcript.trim();
-      // Filter out empty or non-speech markers from STT
-      if (!cleaned || cleaned === "[BLANK_AUDIO]") {
-        return;
-      }
-      // During voice call, always auto-send
+      if (!cleaned || cleaned === "[BLANK_AUDIO]") return;
       if (voiceCall.isCallActive || voice.settings.autoSend) {
         sendMessage(cleaned);
       } else {
-        setInput((prev) => (prev ? prev + " " + cleaned : cleaned));
+        // Append to input — handled via ChatInput's own state
       }
     },
     [voice.settings.autoSend, sendMessage, voiceCall.isCallActive],
   );
 
-  // VAD integration — auto-detect speech and transcribe
+  // VAD integration
   const handleVADSpeechEnd = useCallback(
     async (audio: Blob) => {
       try {
@@ -122,14 +116,12 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
     [voice, handleVoiceResult],
   );
 
-  // Voice call listening: prefer user's STT provider with VAD, fall back to browser STT
   const isNonBrowserSTT =
     voiceCall.isCallActive && !(voice.sttProvider instanceof BrowserSTTProvider);
   const browserSTTAvailable =
     typeof window !== "undefined" &&
     ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
 
-  // VAD enabled for: normal VAD mode outside calls, OR calls with API-based STT (Groq etc.)
   const vadEnabled =
     (voice.settings.voiceMode === "vad" &&
       !isStreaming &&
@@ -145,13 +137,12 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
     gracePeriodMs: voice.settings.gracePeriodMs,
   });
 
-  // Fall back to browser STT loop if: using browser STT provider, OR VAD failed to load
   const needBrowserSTTFallback =
     voiceCall.isCallActive &&
     (voice.sttProvider instanceof BrowserSTTProvider || (isNonBrowserSTT && !vad.isSupported));
   const useBrowserSTTLoop = needBrowserSTTFallback && browserSTTAvailable;
 
-  // Browser STT recognition loop — used for Browser STT provider, or as fallback when VAD fails
+  // Browser STT recognition loop
   const browserSTTRef = useRef<BrowserSTTProvider | null>(null);
   useEffect(() => {
     if (!browserSTTRef.current && browserSTTAvailable) {
@@ -160,9 +151,7 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
   }, [browserSTTAvailable]);
 
   useEffect(() => {
-    if (!useBrowserSTTLoop || voiceCall.callState !== "listening") {
-      return;
-    }
+    if (!useBrowserSTTLoop || voiceCall.callState !== "listening") return;
     const stt = browserSTTRef.current;
     if (!stt) return;
     let cancelled = false;
@@ -177,7 +166,6 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
             handleVoiceResult(cleaned);
             break;
           }
-          // No speech detected — retry after brief pause
           await new Promise((r) => setTimeout(r, 200));
         } catch {
           if (cancelled) break;
@@ -186,86 +174,58 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
       }
     };
     listen();
+    return () => { cancelled = true; };
+  }, [useBrowserSTTLoop, voiceCall.callState, handleVoiceResult, voiceCall.isCallActive, isNonBrowserSTT]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    useBrowserSTTLoop,
-    voiceCall.callState,
-    handleVoiceResult,
-    voiceCall.isCallActive,
-    isNonBrowserSTT,
-  ]);
-
-  // Voice conversation loop: TTS when AI finishes responding (streaming → done)
-  // Skip when voice call is active — the hook handles TTS
+  // TTS when AI finishes responding
   useEffect(() => {
     const wasStreaming = wasStreamingRef.current;
     wasStreamingRef.current = isStreaming;
-
-    // Only trigger TTS when streaming just finished
     if (!wasStreaming || isStreaming) return;
-    // Voice call hook handles its own TTS
     if (voiceCall.isCallActive) return;
     if (!voice.settings.ttsEnabled || voice.settings.voiceMode === "off") return;
 
     const lastMsg = messages[messages.length - 1];
     if (lastMsg?.role === "assistant" && lastMsg.content && !lastMsg.isError) {
-      voice.speak(lastMsg.content).catch(() => {
-        // TTS failed — silently ignore
-      });
+      voice.speak(lastMsg.content).catch(() => {});
     }
   }, [isStreaming, messages, voice, voiceCall.isCallActive]);
 
+  const handleSubmit = useCallback(
+    (text: string) => {
+      sendMessage(text);
+    },
+    [sendMessage],
+  );
+
+  const showCallButton = !!(voice.sttProvider && ttsAvailable);
+  const isNewMessage = messages.length > lastKnownMessageCount;
+
+  // ── Not Configured State ──
   if (!isConfigured) {
-    if (isView) {
-      return (
-        <aside className="w-full h-full flex flex-col bg-surface">
-          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-            <div className="w-16 h-16 rounded-full bg-accent/10 flex items-center justify-center mb-6">
-              <Bot size={32} className="text-accent" />
-            </div>
-            <h4 className="font-medium text-lg text-on-surface mb-2">AI Assistant</h4>
-            <p className="text-sm text-on-surface-muted mb-6 max-w-md">
-              Configure an AI provider in Settings to start chatting.
-            </p>
-            <button
-              onClick={onOpenSettings}
-              className="px-5 py-2.5 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors flex items-center gap-2"
-            >
-              <Settings size={16} />
-              Open Settings
+    return (
+      <aside className={`${isView ? "w-full h-full" : "w-full h-full md:w-80 md:h-auto border-l-0 md:border-l border-border"} flex flex-col bg-surface`}>
+        {!isView && (
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <h3 className="font-semibold text-sm text-on-surface">AI Chat</h3>
+            <button onClick={onClose} aria-label="Close AI chat" className="text-on-surface-muted hover:text-on-surface-secondary transition-colors p-1 rounded-md hover:bg-surface-tertiary">
+              <X size={18} />
             </button>
           </div>
-        </aside>
-      );
-    }
-    return (
-      <aside className="w-full h-full md:w-80 md:h-auto border-l-0 md:border-l border-border flex flex-col bg-surface">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h3 className="font-semibold text-sm text-on-surface">AI Chat</h3>
-          <button
-            onClick={onClose}
-            aria-label="Close AI chat"
-            className="text-on-surface-muted hover:text-on-surface-secondary transition-colors p-1 rounded-md hover:bg-surface-tertiary"
-          >
-            <X size={18} />
-          </button>
-        </div>
+        )}
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <div className="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center mb-4">
-            <Bot size={24} className="text-accent" />
+          <div className={`${isView ? "w-16 h-16 mb-6" : "w-12 h-12 mb-4"} rounded-full bg-accent/10 flex items-center justify-center`}>
+            <Bot size={isView ? 32 : 24} className="text-accent" />
           </div>
-          <h4 className="font-medium text-sm text-on-surface mb-2">AI Assistant</h4>
-          <p className="text-xs text-on-surface-muted mb-4">
+          <h4 className={`font-medium ${isView ? "text-lg mb-2" : "text-sm mb-2"} text-on-surface`}>AI Assistant</h4>
+          <p className={`${isView ? "text-sm mb-6 max-w-md" : "text-xs mb-4"} text-on-surface-muted`}>
             Configure an AI provider in Settings to start chatting.
           </p>
           <button
             onClick={onOpenSettings}
-            className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors flex items-center gap-2"
+            className={`${isView ? "px-5 py-2.5" : "px-4 py-2"} text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors flex items-center gap-2`}
           >
-            <Settings size={14} />
+            <Settings size={isView ? 16 : 14} />
             Open Settings
           </button>
         </div>
@@ -273,136 +233,115 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
     );
   }
 
-  const viewSuggestions = [
-    { emoji: "\ud83d\udccb", text: "What tasks do I have?" },
-    { emoji: "\ud83d\udcc5", text: "Plan my day" },
-    { emoji: "\u23f0", text: "What's overdue?" },
-    { emoji: "\ud83d\udcca", text: "Summarize my week" },
-  ];
-
+  // ── View Mode ──
   if (isView) {
     return (
-      <aside className="w-full h-full flex flex-col bg-surface relative">
-        {/* Floating clear button */}
-        {messages.length > 0 && (
-          <button
-            onClick={clearChat}
-            title="Clear chat"
-            className="absolute top-4 right-4 z-10 text-on-surface-muted hover:text-on-surface-secondary p-2 rounded-lg hover:bg-surface-tertiary transition-colors"
-          >
-            <Trash2 size={18} />
-          </button>
+      <aside className="w-full h-full flex bg-surface relative">
+        {/* Chat History sidebar */}
+        {showHistory && sessions.length > 0 && (
+          <ChatHistory
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            onNewChat={createNewSession}
+            onSwitchSession={switchSession}
+            onDeleteSession={deleteSession}
+            onRenameSession={renameSession}
+            mode="view"
+          />
         )}
 
-        {/* Messages / Empty state */}
-        {messages.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center px-4 pb-24">
-              <div className="w-16 h-16 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-6 shadow-[0_0_24px_rgba(var(--color-accent-rgb,99,102,241),0.15)]">
-                <Bot size={32} className="text-accent" />
-              </div>
-              <h2 className="text-2xl font-light text-on-surface mb-8">
-                What can I help you with?
-              </h2>
-              <div className="grid grid-cols-2 gap-3 max-w-md mx-auto">
-                {viewSuggestions.map((s) => (
-                  <button
-                    key={s.text}
-                    onClick={() => sendMessage(s.text)}
-                    disabled={isStreaming}
-                    className="rounded-xl border border-border px-4 py-3 text-left text-sm text-on-surface-secondary hover:bg-surface-tertiary disabled:opacity-50 transition-colors"
-                  >
-                    <span className="mr-2">{s.emoji}</span>
-                    {s.text}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 overflow-auto">
-            <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
-              {messages.map((msg, i) => (
-                <MessageBubble
-                  key={i}
-                  message={msg}
-                  onRetry={
-                    msg.isError && msg.retryable && i === messages.length - 1
-                      ? retryLastMessage
-                      : undefined
-                  }
-                  onSelectTask={onSelectTask}
-                />
-              ))}
-              {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
-                <div className="flex items-center gap-1.5 text-on-surface-muted text-sm">
-                  <span
-                    className="inline-block w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-                    style={{ animationDelay: "0ms" }}
-                  />
-                  <span
-                    className="inline-block w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-                    style={{ animationDelay: "150ms" }}
-                  />
-                  <span
-                    className="inline-block w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-                    style={{ animationDelay: "300ms" }}
-                  />
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-        )}
-
-        {/* Bottom-pinned input pill */}
-        {voiceCall.isCallActive ? (
-          <div className="max-w-3xl mx-auto w-full px-4 pb-6">
-            <VoiceCallOverlay
-              callState={voiceCall.callState as Exclude<typeof voiceCall.callState, "idle">}
-              callDuration={voiceCall.callDuration}
-              onEndCall={voiceCall.endCall}
-              isInGracePeriod={vad.isInGracePeriod}
-              gracePeriodProgress={vad.gracePeriodProgress}
-            />
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="max-w-3xl mx-auto w-full px-4 pb-6">
-            <div className="flex items-center gap-2 rounded-2xl bg-surface-secondary border border-border shadow-sm px-4 py-3">
-              <input
-                ref={inputRef}
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask anything..."
-                className="min-w-0 flex-1 bg-transparent text-base text-on-surface placeholder-on-surface-muted focus:outline-none"
-              />
-              <VoiceButton onResult={handleVoiceResult} disabled={isStreaming} voice={voice} />
-              {voice.sttProvider && ttsAvailable && (
-                <button
-                  type="button"
-                  onClick={voiceCall.startCall}
-                  disabled={isStreaming}
-                  title="Start voice call"
-                  className="shrink-0 p-2 text-sm rounded-lg text-on-surface-muted hover:bg-surface-tertiary disabled:opacity-50 transition-colors"
-                >
-                  <Phone size={18} />
-                </button>
-              )}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Floating actions */}
+          <div className="absolute top-4 right-4 z-10 flex items-center gap-1">
+            {sessions.length > 0 && (
               <button
-                type="submit"
-                disabled={isStreaming || !input.trim()}
-                className="shrink-0 p-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                onClick={() => setShowHistory(!showHistory)}
+                title="Chat history"
+                className="text-on-surface-muted hover:text-on-surface-secondary p-2 rounded-lg hover:bg-surface-tertiary transition-colors text-xs"
               >
-                <Send size={18} />
+                {showHistory ? "Hide" : "History"}
               </button>
+            )}
+            {messages.length > 0 && (
+              <button
+                onClick={clearChat}
+                title="Clear chat"
+                className="text-on-surface-muted hover:text-on-surface-secondary p-2 rounded-lg hover:bg-surface-tertiary transition-colors"
+              >
+                <Trash2 size={18} />
+              </button>
+            )}
+          </div>
+
+          {/* Messages / Empty state */}
+          {messages.length === 0 ? (
+            <WelcomeScreen mode="view" onSend={handleSubmit} isStreaming={isStreaming} />
+          ) : (
+            <div className="flex-1 overflow-auto">
+              <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+                {messages.map((msg, i) => (
+                  <MessageBubble
+                    key={i}
+                    message={msg}
+                    onRetry={
+                      msg.isError && msg.retryable && i === messages.length - 1
+                        ? retryLastMessage
+                        : undefined
+                    }
+                    onSelectTask={onSelectTask}
+                    isLatest={i === messages.length - 1 && isNewMessage}
+                    isStreaming={isStreaming}
+                    mode="view"
+                    messageIndex={i}
+                    onEditAndResend={msg.role === "user" ? editAndResend : undefined}
+                    onRegenerate={
+                      msg.role === "assistant" && i === messages.length - 1 && !isStreaming
+                        ? regenerateLastResponse
+                        : undefined
+                    }
+                  />
+                ))}
+                {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
+                  <TypingIndicator mode="view" />
+                )}
+                {!isStreaming && messages.length > 0 && (
+                  <SuggestedActions messages={messages} onSend={handleSubmit} isStreaming={isStreaming} />
+                )}
+                <div ref={messagesEndRef} />
+              </div>
             </div>
-          </form>
-        )}
+          )}
+
+          {/* Input */}
+          {voiceCall.isCallActive ? (
+            <div className="max-w-3xl mx-auto w-full px-4 pb-6">
+              <VoiceCallOverlay
+                callState={voiceCall.callState as Exclude<typeof voiceCall.callState, "idle">}
+                callDuration={voiceCall.callDuration}
+                onEndCall={voiceCall.endCall}
+                isInGracePeriod={vad.isInGracePeriod}
+                gracePeriodProgress={vad.gracePeriodProgress}
+              />
+            </div>
+          ) : (
+            <ChatInput
+              ref={chatInputRef}
+              onSubmit={handleSubmit}
+              isStreaming={isStreaming}
+              mode="view"
+              voice={voice}
+              ttsAvailable={ttsAvailable}
+              onVoiceResult={handleVoiceResult}
+              onStartCall={voiceCall.startCall}
+              showCallButton={showCallButton}
+            />
+          )}
+        </div>
       </aside>
     );
   }
 
+  // ── Panel Mode ──
   return (
     <aside className="w-full h-full md:w-80 md:h-auto border-l-0 md:border-l border-border flex flex-col bg-surface">
       {/* Header */}
@@ -412,6 +351,15 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
           AI Chat
         </h3>
         <div className="flex items-center gap-1">
+          {sessions.length > 0 && (
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              title="Chat history"
+              className="text-on-surface-muted hover:text-on-surface-secondary p-1 rounded-md hover:bg-surface-tertiary transition-colors text-[10px]"
+            >
+              {showHistory ? "Hide" : "History"}
+            </button>
+          )}
           <button
             onClick={clearChat}
             title="Clear chat"
@@ -429,24 +377,23 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
         </div>
       </div>
 
+      {/* Chat History dropdown */}
+      {showHistory && sessions.length > 0 && (
+        <ChatHistory
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onNewChat={createNewSession}
+          onSwitchSession={switchSession}
+          onDeleteSession={deleteSession}
+          onRenameSession={renameSession}
+          mode="panel"
+        />
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-auto p-4 space-y-3">
         {messages.length === 0 && (
-          <div className="text-center mt-8 space-y-2">
-            <p className="text-xs text-on-surface-muted">Ask me anything about your tasks!</p>
-            <div className="flex flex-wrap gap-1.5 justify-center mt-3">
-              {["What tasks do I have?", "Plan my day", "What's overdue?"].map((suggestion) => (
-                <button
-                  key={suggestion}
-                  onClick={() => sendMessage(suggestion)}
-                  disabled={isStreaming}
-                  className="px-2 py-1 text-xs bg-surface-tertiary text-on-surface-secondary rounded-md hover:bg-border disabled:opacity-50 transition-colors"
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
-          </div>
+          <WelcomeScreen mode="panel" onSend={handleSubmit} isStreaming={isStreaming} />
         )}
         {messages.map((msg, i) => (
           <MessageBubble
@@ -458,28 +405,28 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
                 : undefined
             }
             onSelectTask={onSelectTask}
+            isLatest={i === messages.length - 1 && isNewMessage}
+            isStreaming={isStreaming}
+            mode="panel"
+            messageIndex={i}
+            onEditAndResend={msg.role === "user" ? editAndResend : undefined}
+            onRegenerate={
+              msg.role === "assistant" && i === messages.length - 1 && !isStreaming
+                ? regenerateLastResponse
+                : undefined
+            }
           />
         ))}
         {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
-          <div className="flex items-center gap-1.5 text-on-surface-muted text-sm">
-            <span
-              className="inline-block w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-              style={{ animationDelay: "0ms" }}
-            />
-            <span
-              className="inline-block w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-              style={{ animationDelay: "150ms" }}
-            />
-            <span
-              className="inline-block w-1.5 h-1.5 bg-accent rounded-full animate-bounce"
-              style={{ animationDelay: "300ms" }}
-            />
-          </div>
+          <TypingIndicator mode="panel" />
+        )}
+        {!isStreaming && messages.length > 0 && (
+          <SuggestedActions messages={messages} onSend={handleSubmit} isStreaming={isStreaming} />
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input / Voice Call Overlay */}
+      {/* Input */}
       {voiceCall.isCallActive ? (
         <div className="p-3 border-t border-border">
           <VoiceCallOverlay
@@ -491,431 +438,18 @@ export function AIChatPanel({ onClose, onOpenSettings, onSelectTask, mode = "pan
           />
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="p-3 border-t border-border">
-          <div className="flex items-center gap-2">
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about your tasks..."
-              className="min-w-0 flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-2 focus:ring-accent"
-            />
-            <VoiceButton onResult={handleVoiceResult} disabled={isStreaming} voice={voice} />
-            {voice.sttProvider && ttsAvailable && (
-              <button
-                type="button"
-                onClick={voiceCall.startCall}
-                disabled={isStreaming}
-                title="Start voice call"
-                className="shrink-0 px-2 py-2 text-sm rounded-lg border border-border text-on-surface-muted hover:bg-surface-secondary disabled:opacity-50 transition-colors"
-              >
-                <Phone size={16} />
-              </button>
-            )}
-            <button
-              type="submit"
-              disabled={isStreaming || !input.trim()}
-              className="shrink-0 px-3 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <Send size={16} />
-            </button>
-          </div>
-        </form>
+        <ChatInput
+          ref={chatInputRef}
+          onSubmit={handleSubmit}
+          isStreaming={isStreaming}
+          mode="panel"
+          voice={voice}
+          ttsAvailable={ttsAvailable}
+          onVoiceResult={handleVoiceResult}
+          onStartCall={voiceCall.startCall}
+          showCallButton={showCallButton}
+        />
       )}
     </aside>
-  );
-}
-
-function getErrorHint(category?: string, message?: string): string | null {
-  switch (category) {
-    case "auth":
-      return "Check your API key in Settings.";
-    case "rate_limit":
-      return "You've hit the rate limit. Wait a moment.";
-    case "network":
-      // The error message itself already has specific guidance for local providers
-      if (message?.includes("LM Studio") || message?.includes("Ollama")) {
-        return null;
-      }
-      return "Check your network connection and provider settings.";
-    case "server":
-      return "The provider is having issues. Try again in a moment.";
-    case "timeout":
-      return "The response took too long. Try a simpler question or check the provider.";
-    default:
-      return null;
-  }
-}
-
-function extractTasksFromMessage(
-  msg: AIChatMessage,
-): {
-  id: string;
-  title: string;
-  status?: string;
-  priority?: number | null;
-  dueDate?: string | null;
-}[] {
-  const taskToolNames = new Set(["create_task", "update_task", "complete_task"]);
-  const toolCalls = msg.toolCalls;
-  const toolResults = msg.toolResults;
-  if (!toolCalls || toolCalls.length === 0) return [];
-
-  // Build a map from tool name → parsed result data (contains real task IDs)
-  const resultByTool = new Map<string, Record<string, unknown>>();
-  if (toolResults) {
-    for (const tr of toolResults) {
-      if (!taskToolNames.has(tr.toolName)) continue;
-      try {
-        resultByTool.set(tr.toolName, JSON.parse(tr.data));
-      } catch {
-        /* skip */
-      }
-    }
-  }
-
-  const tasks: {
-    id: string;
-    title: string;
-    status?: string;
-    priority?: number | null;
-    dueDate?: string | null;
-  }[] = [];
-
-  for (const tc of toolCalls) {
-    if (!taskToolNames.has(tc.name)) continue;
-    try {
-      const args = JSON.parse(tc.arguments);
-      const result = resultByTool.get(tc.name) as Record<string, unknown> | undefined;
-      // The result contains { success, task: { id, title, ... } } or { success, taskId }
-      const resultTask = result?.task as Record<string, unknown> | undefined;
-      const id =
-        (resultTask?.id as string) ??
-        (result?.taskId as string) ??
-        args.taskId ??
-        "";
-      const title =
-        (resultTask?.title as string) ??
-        args.title ??
-        tc.name.replace(/_/g, " ");
-      if (title || id) {
-        tasks.push({
-          id,
-          title,
-          priority: (resultTask?.priority as number) ?? args.priority ?? null,
-          dueDate: (resultTask?.dueDate as string) ?? args.dueDate ?? null,
-          status:
-            (resultTask?.status as string) ??
-            (tc.name === "complete_task" ? "completed" : "pending"),
-        });
-      }
-    } catch {
-      /* skip */
-    }
-  }
-  return tasks;
-}
-
-function MessageBubble({
-  message,
-  onRetry,
-  onSelectTask,
-}: {
-  message: AIChatMessage;
-  onRetry?: () => void;
-  onSelectTask?: (taskId: string) => void;
-}) {
-  const isUser = message.role === "user";
-  const isTool = message.role === "tool";
-
-  // Don't render raw tool result messages
-  if (isTool) return null;
-
-  // Show tool call indicators for assistant messages that used tools
-  const hasToolCalls = message.toolCalls && message.toolCalls.length > 0;
-
-  if (message.isError) {
-    const hint = getErrorHint(message.errorCategory, message.content);
-    return (
-      <div className="flex justify-start">
-        <div className="max-w-[85%] space-y-1">
-          <div className="px-3 py-2 rounded-lg text-sm bg-error/10 border border-error/20 text-error">
-            <div className="flex items-start gap-2">
-              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <p>{message.content}</p>
-                {hint && <p className="text-xs mt-1 opacity-80">{hint}</p>}
-              </div>
-            </div>
-            {onRetry && (
-              <button
-                onClick={onRetry}
-                className="mt-2 flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-error/10 hover:bg-error/20 transition-colors"
-              >
-                <RotateCcw size={12} />
-                Retry
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const inlineTasks = extractTasksFromMessage(message);
-
-  return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div className="max-w-[85%] space-y-1">
-        {hasToolCalls && (
-          <div className="flex flex-wrap gap-1">
-            {message.toolCalls!.map((tc) => (
-              <ToolCallBadge key={tc.id} name={tc.name} args={tc.arguments} />
-            ))}
-          </div>
-        )}
-        {inlineTasks.length > 0 && onSelectTask && (
-          <div className="space-y-1">
-            {inlineTasks.map((task, i) => (
-              <ChatTaskCard
-                key={task.id || i}
-                task={task}
-                onClick={onSelectTask}
-              />
-            ))}
-          </div>
-        )}
-        {message.content && (
-          <div
-            className={`px-3 py-2 rounded-lg text-sm ${
-              isUser ? "bg-accent text-white" : "bg-surface-tertiary text-on-surface"
-            }`}
-          >
-            {isUser ? (
-              <span className="whitespace-pre-wrap">{message.content}</span>
-            ) : (
-              <MarkdownMessage content={message.content} onSelectTask={onSelectTask} />
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function MarkdownMessage({
-  content,
-  onSelectTask,
-}: {
-  content: string;
-  onSelectTask?: (taskId: string) => void;
-}) {
-  const components = createMarkdownComponents(onSelectTask);
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={components}
-      urlTransform={(url) => (url.startsWith("saydo://") ? url : defaultUrlTransform(url))}
-    >
-      {content}
-    </ReactMarkdown>
-  );
-}
-
-function createMarkdownComponents(onSelectTask?: (taskId: string) => void): Components {
-  return {
-    p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
-    ol: ({ children }) => (
-      <ol className="mb-3 ml-5 list-decimal space-y-1 last:mb-0">{children}</ol>
-    ),
-    ul: ({ children }) => <ul className="mb-3 ml-5 list-disc space-y-1 last:mb-0">{children}</ul>,
-    li: ({ children }) => <li className="pl-1">{children}</li>,
-    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-    em: ({ children }) => <em className="italic">{children}</em>,
-    code: ({ children, className, ...props }) => {
-      if (className) {
-        return (
-          <code {...props} className="block rounded-md bg-surface/70 px-2 py-1 font-mono text-xs">
-            {children}
-          </code>
-        );
-      }
-      return (
-        <code {...props} className="rounded bg-surface/70 px-1 py-0.5 font-mono text-xs">
-          {children}
-        </code>
-      );
-    },
-    a: ({ href, children, ...props }) => {
-      // Handle saydo://task/<id> links
-      if (href && href.startsWith("saydo://task/") && onSelectTask) {
-        const taskId = href.replace("saydo://task/", "");
-        return (
-          <button
-            {...(props as any)}
-            onClick={(e) => {
-              e.preventDefault();
-              onSelectTask(taskId);
-            }}
-            className="text-accent underline underline-offset-2 cursor-pointer"
-          >
-            {children}
-          </button>
-        );
-      }
-      return (
-        <a
-          {...props}
-          href={href}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="text-accent underline underline-offset-2"
-        >
-          {children}
-        </a>
-      );
-    },
-  };
-}
-
-const TOOL_META: Record<string, { emoji: string; verb: string }> = {
-  create_task: { emoji: "✨", verb: "Creating" },
-  complete_task: { emoji: "✅", verb: "Completing" },
-  update_task: { emoji: "✏️", verb: "Updating" },
-  delete_task: { emoji: "🗑️", verb: "Deleting" },
-  list_tasks: { emoji: "📋", verb: "Checking tasks" },
-  query_tasks: { emoji: "🔍", verb: "Searching tasks" },
-  list_tags: { emoji: "🏷️", verb: "Listing tags" },
-  add_tags_to_task: { emoji: "🏷️", verb: "Adding tags" },
-  remove_tags_from_task: { emoji: "🏷️", verb: "Removing tags" },
-  create_project: { emoji: "📁", verb: "Creating project" },
-  update_project: { emoji: "📁", verb: "Updating project" },
-  delete_project: { emoji: "📁", verb: "Deleting project" },
-};
-
-function ToolCallBadge({ name, args }: { name: string; args: string }) {
-  const meta = TOOL_META[name] ?? { emoji: "⚡", verb: name.replace(/_/g, " ") };
-  let label = meta.verb;
-  try {
-    const parsed = JSON.parse(args);
-    if (parsed.title) label = `${meta.verb} "${parsed.title}"`;
-    else if (parsed.search) label = `Searching "${parsed.search}"`;
-    else if (parsed.status) label = `${meta.verb} (${parsed.status})`;
-  } catch {
-    // Use default label
-  }
-
-  return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs bg-accent/10 text-accent rounded-full">
-      <span>{meta.emoji}</span>
-      {label}
-    </span>
-  );
-}
-
-function VoiceButton({
-  onResult,
-  disabled,
-  voice,
-}: {
-  onResult: (text: string) => void;
-  disabled: boolean;
-  voice: ReturnType<typeof useVoiceContext>;
-}) {
-  const [listening, setListening] = useState(false);
-  const recorderRef = useRef<ReturnType<typeof createAudioRecorder> | null>(null);
-
-  const { settings, sttProvider, isTranscribing, isSpeaking } = voice;
-
-  const handlePushToTalk = useCallback(async () => {
-    if (listening) {
-      // Stop recording and transcribe
-      setListening(false);
-      if (sttProvider instanceof BrowserSTTProvider) {
-        // Browser STT handles its own recording — the result comes from the recognition event
-        return;
-      }
-      // For API-based STT (Groq), stop the recorder and transcribe the blob
-      if (recorderRef.current) {
-        try {
-          const blob = await recorderRef.current.stop();
-          const transcript = await voice.transcribeAudio(blob);
-          onResult(transcript);
-        } catch {
-          // Transcription failed
-        }
-        recorderRef.current = null;
-      }
-      return;
-    }
-
-    // Start recording
-    setListening(true);
-    if (sttProvider instanceof BrowserSTTProvider) {
-      // Use browser live recognition
-      try {
-        const transcript = await sttProvider.startLiveRecognition();
-        if (transcript) onResult(transcript);
-      } catch {
-        // Recognition failed
-      }
-      setListening(false);
-    } else {
-      // Use MediaRecorder for API-based STT
-      const recorder = createAudioRecorder(voice.settings.microphoneId || undefined);
-      recorderRef.current = recorder;
-      try {
-        await recorder.start();
-      } catch {
-        setListening(false);
-        recorderRef.current = null;
-      }
-    }
-  }, [listening, sttProvider, voice, onResult]);
-
-  // Don't show button if voice mode is off or VAD (VAD handles itself)
-  if (settings.voiceMode === "off" || settings.voiceMode === "vad") return null;
-
-  const buttonState = isTranscribing
-    ? "transcribing"
-    : isSpeaking
-      ? "speaking"
-      : listening
-        ? "listening"
-        : "idle";
-
-  const title = {
-    idle: "Voice input (push to talk)",
-    listening: "Stop listening",
-    transcribing: "Transcribing...",
-    speaking: "AI speaking...",
-  }[buttonState];
-
-  const icon = {
-    idle: <Mic size={16} />,
-    listening: <Mic size={16} />,
-    transcribing: <Loader2 size={16} className="animate-spin" />,
-    speaking: <Volume2 size={16} className="animate-pulse" />,
-  }[buttonState];
-
-  const colorClass = {
-    idle: "border-border text-on-surface-muted hover:bg-surface-secondary",
-    listening:
-      "bg-error/20 border-error text-error animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.4)]",
-    transcribing: "bg-accent/10 border-accent/30 text-accent",
-    speaking: "bg-success/10 border-success/30 text-success",
-  }[buttonState];
-
-  return (
-    <button
-      type="button"
-      onClick={handlePushToTalk}
-      disabled={disabled || isTranscribing}
-      title={title}
-      className={`shrink-0 px-2 py-2 text-sm rounded-lg border disabled:opacity-50 transition-colors ${colorClass}`}
-    >
-      {icon}
-    </button>
   );
 }

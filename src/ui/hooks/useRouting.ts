@@ -14,12 +14,15 @@ export type View =
   | "completed"
   | "ai-chat";
 
+export type CalendarMode = "day" | "week" | "month";
+
 interface RouteState {
   view: View;
   projectId: string | null;
   taskId: string | null;
   pluginViewId: string | null;
   focusModeOpen: boolean;
+  calendarMode: CalendarMode | null;
 }
 
 const DEFAULT_ROUTE_STATE: RouteState = {
@@ -28,6 +31,7 @@ const DEFAULT_ROUTE_STATE: RouteState = {
   taskId: null,
   pluginViewId: null,
   focusModeOpen: false,
+  calendarMode: null,
 };
 
 function decodePathSegment(segment: string | undefined): string | null {
@@ -59,9 +63,14 @@ function parseRouteStateFromHash(hash: string, defaultView: View = "inbox"): Rou
     case "upcoming":
       route.view = "upcoming";
       break;
-    case "calendar":
+    case "calendar": {
       route.view = "calendar";
+      const modeParam = params.get("mode");
+      if (modeParam === "day" || modeParam === "week" || modeParam === "month") {
+        route.calendarMode = modeParam;
+      }
       break;
+    }
     case "project":
       route.view = "project";
       route.projectId = decodePathSegment(pathSegments[1]);
@@ -134,6 +143,12 @@ function buildHashFromRoute(route: RouteState): string {
     case "completed":
       path = "/completed";
       break;
+    case "calendar":
+      path = "/calendar";
+      if (route.calendarMode) {
+        params.set("mode", route.calendarMode);
+      }
+      break;
     case "ai-chat":
       path = "/ai-chat";
       break;
@@ -154,8 +169,11 @@ export function useRouting() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedRouteTaskId, setSelectedRouteTaskId] = useState<string | null>(null);
   const [selectedPluginViewId, setSelectedPluginViewId] = useState<string | null>(null);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const settingsTabRef = useRef<SettingsTab>("general");
+  const [, setSettingsTabTrigger] = useState(0);
+
   const [focusModeOpen, setFocusModeOpen] = useState(false);
+  const [calendarMode, setCalendarMode] = useState<CalendarMode | null>(null);
   const [routeReady, setRouteReady] = useState(false);
   const navigationKeyRef = useRef<string | null>(null);
 
@@ -164,6 +182,7 @@ export function useRouting() {
     setSelectedProjectId(route.view === "project" ? route.projectId : null);
     setSelectedRouteTaskId(route.view === "task" ? route.taskId : null);
     setSelectedPluginViewId(route.view === "plugin-view" ? route.pluginViewId : null);
+    setCalendarMode(route.view === "calendar" ? route.calendarMode : null);
     setFocusModeOpen(route.focusModeOpen);
   }, []);
 
@@ -196,6 +215,7 @@ export function useRouting() {
       taskId: selectedRouteTaskId,
       pluginViewId: selectedPluginViewId,
       focusModeOpen,
+      calendarMode,
     };
 
     const nextHash = buildHashFromRoute(route);
@@ -219,6 +239,7 @@ export function useRouting() {
     selectedRouteTaskId,
     selectedPluginViewId,
     focusModeOpen,
+    calendarMode,
   ]);
 
   const handleNavigate = useCallback(
@@ -229,15 +250,18 @@ export function useRouting() {
         taskId: view === "task" ? (id ?? null) : null,
         pluginViewId: view === "plugin-view" ? (id ?? null) : null,
         focusModeOpen,
+        calendarMode: view === "calendar" ? calendarMode : null,
       };
 
       applyRouteState(nextRoute);
     },
-    [applyRouteState, focusModeOpen],
+    [applyRouteState, focusModeOpen, calendarMode],
   );
 
   const openSettingsTab = useCallback((tab: SettingsTab) => {
-    setSettingsTab(tab);
+    settingsTabRef.current = tab;
+    // Trigger re-render only when opening from outside (command palette, etc.)
+    setSettingsTabTrigger((n) => n + 1);
   }, []);
 
   return {
@@ -245,10 +269,11 @@ export function useRouting() {
     selectedProjectId,
     selectedRouteTaskId,
     selectedPluginViewId,
-    settingsTab,
-    setSettingsTab,
+    settingsTab: settingsTabRef.current,
     focusModeOpen,
     setFocusModeOpen,
+    calendarMode,
+    setCalendarMode,
     handleNavigate,
     openSettingsTab,
   };

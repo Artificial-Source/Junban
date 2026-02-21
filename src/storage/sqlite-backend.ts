@@ -10,6 +10,7 @@ import type {
   PluginSettingsRow,
   AppSettingRow,
   ChatMessageRow,
+  ChatSessionInfo,
   TemplateRow,
   MutationResult,
 } from "./interface.js";
@@ -169,6 +170,29 @@ export class SQLiteBackend implements IStorage {
 
   getLatestSessionId(): { sessionId: string } | undefined {
     return this.q.getLatestSessionId();
+  }
+
+  listChatSessions(): ChatSessionInfo[] {
+    const rows = this.q.listChatSessions();
+    return rows.map((row) => {
+      // Derive title from first user message or stored override
+      const override = this.q.getAppSetting(`chat_session_title:${row.sessionId}`);
+      let title = override?.value ?? "";
+      if (!title) {
+        const firstMsg = this.q.getFirstUserMessage(row.sessionId);
+        title = firstMsg?.content?.slice(0, 40) ?? "New chat";
+      }
+      return {
+        sessionId: row.sessionId,
+        title,
+        createdAt: row.createdAt ?? new Date().toISOString(),
+        messageCount: row.messageCount,
+      };
+    });
+  }
+
+  renameChatSession(sessionId: string, title: string): void {
+    this.q.setAppSetting(`chat_session_title:${sessionId}`, title);
   }
 
   // ── Plugin Permissions ──

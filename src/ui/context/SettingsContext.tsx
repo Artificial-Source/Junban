@@ -18,6 +18,7 @@ export interface GeneralSettings {
   sound_create: "true" | "false";
   sound_delete: "true" | "false";
   sound_reminder: "true" | "false";
+  calendar_default_mode: "day" | "week" | "month";
 }
 
 const DEFAULT_SETTINGS: GeneralSettings = {
@@ -37,6 +38,7 @@ const DEFAULT_SETTINGS: GeneralSettings = {
   sound_create: "true",
   sound_delete: "true",
   sound_reminder: "true",
+  calendar_default_mode: "week",
 };
 
 const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS) as (keyof GeneralSettings)[];

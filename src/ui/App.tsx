@@ -60,9 +60,10 @@ function AppContent() {
     selectedRouteTaskId,
     selectedPluginViewId,
     settingsTab,
-    setSettingsTab,
     focusModeOpen,
     setFocusModeOpen,
+    calendarMode,
+    setCalendarMode,
     handleNavigate,
     openSettingsTab,
   } = useRouting();
@@ -367,8 +368,12 @@ function AppContent() {
           : null;
         return t ? `${t.title} - Saydo` : "Task - Saydo";
       }
-      case "calendar":
-        return "Calendar - Saydo";
+      case "calendar": {
+        const modeLabel = calendarMode
+          ? calendarMode.charAt(0).toUpperCase() + calendarMode.slice(1)
+          : "Week";
+        return `Calendar (${modeLabel}) - Saydo`;
+      }
       case "filters-labels":
         return "Filters & Labels - Saydo";
       case "completed":
@@ -387,6 +392,7 @@ function AppContent() {
     state.tasks,
     pluginViews,
     selectedPluginViewId,
+    calendarMode,
   ]);
 
   useEffect(() => {
@@ -504,6 +510,8 @@ function AppContent() {
             onSelectTask={handleSelectTask}
             onToggleTask={handleToggleTask}
             onUpdateDueDate={handleUpdateDueDate}
+            mode={calendarMode}
+            onModeChange={setCalendarMode}
           />
         );
       case "filters-labels":
@@ -696,7 +704,6 @@ function AppContent() {
       {settingsOpen && (
         <Settings
           activeTab={settingsTab}
-          onActiveTabChange={setSettingsTab}
           onClose={() => setSettingsOpen(false)}
         />
       )}

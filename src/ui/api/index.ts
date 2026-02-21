@@ -24,4 +24,4 @@ export type {
   ViewInfo,
   StorePluginInfo,
 } from "./plugins.js";
-export type { AIConfigInfo, AIChatMessage, AIProviderInfo, ModelDiscoveryInfo } from "./ai.js";
+export type { AIConfigInfo, AIChatMessage, AIProviderInfo, ModelDiscoveryInfo, ChatSessionInfo } from "./ai.js";

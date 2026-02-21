@@ -1,4 +1,4 @@
-import { eq, desc, inArray, and, lte, isNotNull } from "drizzle-orm";
+import { eq, desc, inArray, and, lte, isNotNull, sql, min, count } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "./schema.js";
 
@@ -149,6 +149,31 @@ export function createQueries(db: BaseSQLiteDatabase<"sync", any, typeof schema>
         .select({ sessionId: schema.chatMessages.sessionId })
         .from(schema.chatMessages)
         .orderBy(desc(schema.chatMessages.id))
+        .limit(1)
+        .get(),
+
+    listChatSessions: () =>
+      db
+        .select({
+          sessionId: schema.chatMessages.sessionId,
+          createdAt: min(schema.chatMessages.createdAt),
+          messageCount: count(),
+        })
+        .from(schema.chatMessages)
+        .groupBy(schema.chatMessages.sessionId)
+        .orderBy(desc(min(schema.chatMessages.createdAt)))
+        .all(),
+
+    getFirstUserMessage: (sessionId: string) =>
+      db
+        .select({ content: schema.chatMessages.content })
+        .from(schema.chatMessages)
+        .where(
+          and(
+            eq(schema.chatMessages.sessionId, sessionId),
+            eq(schema.chatMessages.role, "user"),
+          ),
+        )
         .limit(1)
         .get(),
 

@@ -7,7 +7,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import { api, type AIConfigInfo, type AIChatMessage } from "../api/index.js";
+import { api, type AIConfigInfo, type AIChatMessage, type ChatSessionInfo } from "../api/index.js";
 import { useTaskContext } from "./TaskContext.js";
 
 interface AIState {
@@ -33,6 +33,17 @@ interface AIContextValue extends AIState {
   setVoiceCallMode: (active: boolean) => void;
   /** Increments when AI tools mutate projects/tags — watch this to refresh data */
   dataMutationCount: number;
+  // Phase 5: Message actions
+  editAndResend: (messageIndex: number, newText: string) => void;
+  regenerateLastResponse: () => void;
+  // Phase 6: Session management
+  sessions: ChatSessionInfo[];
+  activeSessionId: string | null;
+  createNewSession: () => Promise<void>;
+  switchSession: (sessionId: string) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
+  renameSession: (sessionId: string, title: string) => Promise<void>;
+  refreshSessions: () => Promise<void>;
 }
 
 const AIContext = createContext<AIContextValue | null>(null);
@@ -75,6 +86,8 @@ export function AIProvider({ children }: { children: ReactNode }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [voiceCallActive, setVoiceCallActive] = useState(false);
   const [dataMutationCount, setDataMutationCount] = useState(0);
+  const [sessions, setSessions] = useState<ChatSessionInfo[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const voiceCallActiveRef = useRef(false);
   const lastUserMessageRef = useRef<string>("");
   const { refreshTasks } = useTaskContext();
@@ -103,16 +116,27 @@ export function AIProvider({ children }: { children: ReactNode }) {
     refreshConfig();
   }, [refreshConfig]);
 
+  const refreshSessions = useCallback(async () => {
+    try {
+      const list = await api.listChatSessions();
+      setSessions(list);
+    } catch {
+      // Non-critical
+    }
+  }, []);
+
   const restoreMessages = useCallback(async () => {
     try {
       const restored = await api.getChatMessages();
       if (restored.length > 0) {
         setMessages(restored.filter((m) => m.role !== "tool"));
       }
+      // Load sessions list
+      await refreshSessions();
     } catch {
       // Non-critical — chat history just won't be restored
     }
-  }, []);
+  }, [refreshSessions]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -281,9 +305,11 @@ export function AIProvider({ children }: { children: ReactNode }) {
         if (hadDataMutation) {
           setDataMutationCount((c) => c + 1);
         }
+        // Refresh sessions list (new session may have been created)
+        refreshSessions();
       }
     },
-    [refreshTasks],
+    [refreshTasks, refreshSessions],
   );
 
   const setVoiceCallMode = useCallback((active: boolean) => {
@@ -315,10 +341,54 @@ export function AIProvider({ children }: { children: ReactNode }) {
     }, 0);
   }, [sendMessage]);
 
+  const editAndResend = useCallback(
+    (messageIndex: number, newText: string) => {
+      // Truncate history at the edit point and re-send
+      setMessages((prev) => prev.slice(0, messageIndex));
+      setTimeout(() => {
+        sendMessage(newText);
+      }, 0);
+    },
+    [sendMessage],
+  );
+
+  const regenerateLastResponse = useCallback(() => {
+    // Remove the last assistant message and re-send the last user message
+    setMessages((prev) => {
+      const copy = [...prev];
+      // Pop trailing assistant messages
+      while (copy.length > 0 && copy[copy.length - 1]?.role === "assistant") {
+        copy.pop();
+      }
+      // The last message should now be the user message — grab its text
+      const lastUser = copy[copy.length - 1];
+      if (lastUser?.role === "user") {
+        lastUserMessageRef.current = lastUser.content;
+      }
+      return copy;
+    });
+
+    setTimeout(() => {
+      const text = lastUserMessageRef.current;
+      if (text) {
+        // Remove the user message too, sendMessage will re-add it
+        setMessages((prev) => {
+          if (prev.length > 0 && prev[prev.length - 1]?.role === "user") {
+            return prev.slice(0, -1);
+          }
+          return prev;
+        });
+        setTimeout(() => sendMessage(text), 0);
+      }
+    }, 0);
+  }, [sendMessage]);
+
   const clearChat = useCallback(async () => {
     await api.clearChat();
     setMessages([]);
-  }, []);
+    setActiveSessionId(null);
+    await refreshSessions();
+  }, [refreshSessions]);
 
   const updateConfig = useCallback(
     async (cfg: { provider?: string; apiKey?: string; model?: string; baseUrl?: string }) => {
@@ -327,6 +397,47 @@ export function AIProvider({ children }: { children: ReactNode }) {
       setMessages([]);
     },
     [refreshConfig],
+  );
+
+  // Session management
+  const createNewSession = useCallback(async () => {
+    await api.createNewChatSession();
+    setMessages([]);
+    setActiveSessionId(null);
+    await refreshSessions();
+  }, [refreshSessions]);
+
+  const switchSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        const msgs = await api.switchChatSession(sessionId);
+        setMessages(msgs.filter((m) => m.role !== "tool"));
+        setActiveSessionId(sessionId);
+      } catch {
+        // Non-critical
+      }
+    },
+    [],
+  );
+
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      await api.deleteChatSession(sessionId);
+      if (activeSessionId === sessionId) {
+        setMessages([]);
+        setActiveSessionId(null);
+      }
+      await refreshSessions();
+    },
+    [activeSessionId, refreshSessions],
+  );
+
+  const renameSession = useCallback(
+    async (sessionId: string, title: string) => {
+      await api.renameChatSession(sessionId, title);
+      await refreshSessions();
+    },
+    [refreshSessions],
   );
 
   return (
@@ -345,6 +456,15 @@ export function AIProvider({ children }: { children: ReactNode }) {
         voiceCallActive,
         setVoiceCallMode,
         dataMutationCount,
+        editAndResend,
+        regenerateLastResponse,
+        sessions,
+        activeSessionId,
+        createNewSession,
+        switchSession,
+        deleteSession,
+        renameSession,
+        refreshSessions,
       }}
     >
       {children}

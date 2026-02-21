@@ -64,6 +64,13 @@ export interface ChatMessageRow {
   createdAt: string;
 }
 
+export interface ChatSessionInfo {
+  sessionId: string;
+  title: string;
+  createdAt: string;
+  messageCount: number;
+}
+
 export interface TemplateRow {
   id: string;
   name: string;
@@ -134,6 +141,8 @@ export interface IStorage {
   insertChatMessage(msg: ChatMessageRow): MutationResult;
   deleteChatSession(sessionId: string): MutationResult;
   getLatestSessionId(): { sessionId: string } | undefined;
+  listChatSessions(): ChatSessionInfo[];
+  renameChatSession(sessionId: string, title: string): void;
 
   // ── Plugin Permissions ──
   getPluginPermissions(pluginId: string): string[] | null;

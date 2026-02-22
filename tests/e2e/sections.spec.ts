@@ -2,14 +2,14 @@ import { test, expect } from "@playwright/test";
 import { setupPage, createProjectViaApi, navigateTo } from "./helpers.js";
 
 test.describe("Project sections", () => {
-  let projectId: string;
+  let _projectId: string;
 
   test.beforeEach(async ({ page }) => {
     await setupPage(page);
 
     // Create a fresh project via API
     const project = await createProjectViaApi(page, "Work");
-    projectId = project.id;
+    _projectId = project.id;
 
     // Reload so the sidebar picks up the new project
     await page.reload();
@@ -123,7 +123,9 @@ test.describe("Project sections", () => {
     await navigateTo(page, "Work");
 
     // The "Add section" button should no longer appear
-    await expect(page.getByRole("button", { name: /Add section/i })).not.toBeVisible({ timeout: 3000 });
+    await expect(page.getByRole("button", { name: /Add section/i })).not.toBeVisible({
+      timeout: 3000,
+    });
 
     // Re-enable for cleanup
     await page.request.put("/api/settings/feature_sections", {

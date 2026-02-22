@@ -27,12 +27,7 @@ function formatTime(isoStr: string): string {
   });
 }
 
-export function Cancelled({
-  tasks,
-  projects,
-  onSelectTask,
-  onRestoreTask,
-}: CancelledProps) {
+export function Cancelled({ tasks, projects, onSelectTask, onRestoreTask }: CancelledProps) {
   const projectMap = useMemo(() => {
     const map = new Map<string, Project>();
     for (const p of projects) map.set(p.id, p);
@@ -78,9 +73,7 @@ export function Cancelled({
     <div>
       <div className="flex items-center gap-3 mb-4 md:mb-6">
         <XCircle size={24} className="text-danger" />
-        <h1 className="text-xl md:text-2xl font-bold text-on-surface">
-          Cancelled
-        </h1>
+        <h1 className="text-xl md:text-2xl font-bold text-on-surface">Cancelled</h1>
       </div>
 
       {cancelledTasks.length === 0 ? (
@@ -94,15 +87,11 @@ export function Cancelled({
           {grouped.map((group) => (
             <div key={group.date}>
               <h2 className="text-xs font-semibold text-on-surface-muted uppercase tracking-wider mb-2 px-1">
-                {group.date === "unknown"
-                  ? "Unknown date"
-                  : formatGroupDate(group.date)}
+                {group.date === "unknown" ? "Unknown date" : formatGroupDate(group.date)}
               </h2>
               <div className="space-y-0.5">
                 {group.tasks.map((task) => {
-                  const project = task.projectId
-                    ? projectMap.get(task.projectId)
-                    : null;
+                  const project = task.projectId ? projectMap.get(task.projectId) : null;
                   const dateField = task.completedAt ?? task.updatedAt;
                   return (
                     <div

@@ -65,17 +65,13 @@ describe("FiltersLabels", () => {
 
   it("shows empty filter message when no saved filters", () => {
     render(<FiltersLabels tasks={[]} onNavigateToFilter={onNavigateToFilter} />);
-    expect(
-      screen.getByText("Your list of filters will show up here."),
-    ).toBeTruthy();
+    expect(screen.getByText("Your list of filters will show up here.")).toBeTruthy();
   });
 
   it("shows empty label message when no tags", () => {
     render(<FiltersLabels tasks={[]} onNavigateToFilter={onNavigateToFilter} />);
     expect(
-      screen.getByText(
-        "No labels yet. Labels are created when you add tags to tasks.",
-      ),
+      screen.getByText("No labels yet. Labels are created when you add tags to tasks."),
     ).toBeTruthy();
   });
 
@@ -94,9 +90,7 @@ describe("FiltersLabels", () => {
   });
 
   it("shows tag counts for pending tasks", async () => {
-    mockListTags.mockResolvedValue([
-      { id: "tag-1", name: "work", color: "#ff0000" },
-    ]);
+    mockListTags.mockResolvedValue([{ id: "tag-1", name: "work", color: "#ff0000" }]);
 
     const tasks = [
       makeTask({
@@ -109,9 +103,7 @@ describe("FiltersLabels", () => {
       }),
     ];
 
-    render(
-      <FiltersLabels tasks={tasks} onNavigateToFilter={onNavigateToFilter} />,
-    );
+    render(<FiltersLabels tasks={tasks} onNavigateToFilter={onNavigateToFilter} />);
 
     await waitFor(() => {
       expect(screen.getByText("2")).toBeTruthy();
@@ -131,10 +123,9 @@ describe("FiltersLabels", () => {
     fireEvent.change(screen.getByPlaceholderText("Filter name"), {
       target: { value: "High priority" },
     });
-    fireEvent.change(
-      screen.getByPlaceholderText("Query (e.g., p1, #work, overdue)"),
-      { target: { value: "p1" } },
-    );
+    fireEvent.change(screen.getByPlaceholderText("Query (e.g., p1, #work, overdue)"), {
+      target: { value: "p1" },
+    });
     fireEvent.click(screen.getByText("Add"));
 
     await waitFor(() => {
@@ -144,9 +135,7 @@ describe("FiltersLabels", () => {
   });
 
   it("clicking on a tag navigates to filter", async () => {
-    mockListTags.mockResolvedValue([
-      { id: "tag-1", name: "work", color: "#ff0000" },
-    ]);
+    mockListTags.mockResolvedValue([{ id: "tag-1", name: "work", color: "#ff0000" }]);
 
     render(<FiltersLabels tasks={[]} onNavigateToFilter={onNavigateToFilter} />);
 
@@ -161,14 +150,10 @@ describe("FiltersLabels", () => {
   it("collapses and expands My Filters section", () => {
     render(<FiltersLabels tasks={[]} onNavigateToFilter={onNavigateToFilter} />);
     // Both sections start expanded
-    expect(
-      screen.getByText("Your list of filters will show up here."),
-    ).toBeTruthy();
+    expect(screen.getByText("Your list of filters will show up here.")).toBeTruthy();
 
     // Click My Filters to collapse
     fireEvent.click(screen.getByText("My Filters"));
-    expect(
-      screen.queryByText("Your list of filters will show up here."),
-    ).toBeNull();
+    expect(screen.queryByText("Your list of filters will show up here.")).toBeNull();
   });
 });

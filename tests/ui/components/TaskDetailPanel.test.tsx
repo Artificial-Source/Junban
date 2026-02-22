@@ -191,13 +191,7 @@ describe("TaskDetailPanel", () => {
   it("calls onOpenFullPage when open full page button is clicked", () => {
     const onOpenFullPage = vi.fn();
     const onClose = vi.fn();
-    render(
-      <TaskDetailPanel
-        {...defaultProps}
-        onOpenFullPage={onOpenFullPage}
-        onClose={onClose}
-      />,
-    );
+    render(<TaskDetailPanel {...defaultProps} onOpenFullPage={onOpenFullPage} onClose={onClose} />);
 
     fireEvent.click(screen.getByLabelText("Open full page"));
     expect(onOpenFullPage).toHaveBeenCalledWith("t1");

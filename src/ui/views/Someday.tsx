@@ -20,9 +20,7 @@ export function Someday({ tasks, onSelectTask, onActivateTask }: SomedayProps) {
     <div>
       <div className="flex items-center gap-3 mb-4 md:mb-6">
         <Lightbulb size={24} className="text-warning" />
-        <h1 className="text-xl md:text-2xl font-bold text-on-surface">
-          Someday / Maybe
-        </h1>
+        <h1 className="text-xl md:text-2xl font-bold text-on-surface">Someday / Maybe</h1>
       </div>
 
       {somedayTasks.length === 0 ? (
@@ -55,13 +53,8 @@ export function Someday({ tasks, onSelectTask, onActivateTask }: SomedayProps) {
                   : "hover:bg-surface-secondary"
               }`}
             >
-              <Lightbulb
-                size={18}
-                className="text-on-surface-muted flex-shrink-0"
-              />
-              <span className="flex-1 text-sm text-on-surface">
-                {task.title}
-              </span>
+              <Lightbulb size={18} className="text-on-surface-muted flex-shrink-0" />
+              <span className="flex-1 text-sm text-on-surface">{task.title}</span>
               {onActivateTask && (
                 <button
                   onClick={(e) => {

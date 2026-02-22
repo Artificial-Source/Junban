@@ -418,8 +418,7 @@ export function TaskDetailPanel({
                         {[...comments]
                           .sort(
                             (a, b) =>
-                              new Date(a.createdAt).getTime() -
-                              new Date(b.createdAt).getTime(),
+                              new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
                           )
                           .map((comment) => (
                             <div
@@ -429,12 +428,8 @@ export function TaskDetailPanel({
                               {editingCommentId === comment.id ? (
                                 <textarea
                                   value={editingCommentContent}
-                                  onChange={(e) =>
-                                    setEditingCommentContent(e.target.value)
-                                  }
-                                  onBlur={() =>
-                                    handleSaveCommentEdit(comment.id)
-                                  }
+                                  onChange={(e) => setEditingCommentContent(e.target.value)}
+                                  onBlur={() => handleSaveCommentEdit(comment.id)}
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter" && !e.shiftKey) {
                                       e.preventDefault();
@@ -458,9 +453,7 @@ export function TaskDetailPanel({
                                       <button
                                         onClick={() => {
                                           setEditingCommentId(comment.id);
-                                          setEditingCommentContent(
-                                            comment.content,
-                                          );
+                                          setEditingCommentContent(comment.content);
                                         }}
                                         className="p-1 rounded text-on-surface-muted hover:text-on-surface hover:bg-surface-tertiary transition-colors"
                                         title="Edit comment"
@@ -470,9 +463,7 @@ export function TaskDetailPanel({
                                     )}
                                     {onDeleteComment && (
                                       <button
-                                        onClick={() =>
-                                          onDeleteComment(comment.id)
-                                        }
+                                        onClick={() => onDeleteComment(comment.id)}
                                         className="p-1 rounded text-on-surface-muted hover:text-error hover:bg-surface-tertiary transition-colors"
                                         title="Delete comment"
                                       >
@@ -484,8 +475,7 @@ export function TaskDetailPanel({
                               )}
                               <span className="text-xs text-on-surface-muted mt-1 block">
                                 {formatRelativeTime(comment.createdAt)}
-                                {comment.updatedAt !== comment.createdAt &&
-                                  " (edited)"}
+                                {comment.updatedAt !== comment.createdAt && " (edited)"}
                               </span>
                             </div>
                           ))}
@@ -493,9 +483,7 @@ export function TaskDetailPanel({
                     )}
 
                     {comments && comments.length === 0 && (
-                      <p className="text-xs text-on-surface-muted italic">
-                        No comments yet.
-                      </p>
+                      <p className="text-xs text-on-surface-muted italic">No comments yet.</p>
                     )}
 
                     {/* Add comment */}
@@ -534,8 +522,7 @@ export function TaskDetailPanel({
                       [...activity]
                         .sort(
                           (a, b) =>
-                            new Date(b.createdAt).getTime() -
-                            new Date(a.createdAt).getTime(),
+                            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
                         )
                         .map((entry) => (
                           <div
@@ -545,9 +532,7 @@ export function TaskDetailPanel({
                             <span className="mt-0.5 flex-shrink-0">
                               {getActivityIcon(entry.action)}
                             </span>
-                            <span className="flex-1">
-                              {formatActivityDescription(entry)}
-                            </span>
+                            <span className="flex-1">{formatActivityDescription(entry)}</span>
                             <span className="flex-shrink-0 whitespace-nowrap">
                               {formatRelativeTime(entry.createdAt)}
                             </span>

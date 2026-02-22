@@ -222,11 +222,7 @@ export function createQueries(db: BaseSQLiteDatabase<"sync", any, typeof schema>
 
     // ── Sections ────────────────────────────────────
     listSections: (projectId: string) =>
-      db
-        .select()
-        .from(schema.sections)
-        .where(eq(schema.sections.projectId, projectId))
-        .all(),
+      db.select().from(schema.sections).where(eq(schema.sections.projectId, projectId)).all(),
 
     getSection: (id: string) =>
       db.select().from(schema.sections).where(eq(schema.sections.id, id)).get(),
@@ -242,11 +238,7 @@ export function createQueries(db: BaseSQLiteDatabase<"sync", any, typeof schema>
 
     // ── Task Comments ──────────────────────────────
     listTaskComments: (taskId: string) =>
-      db
-        .select()
-        .from(schema.taskComments)
-        .where(eq(schema.taskComments.taskId, taskId))
-        .all(),
+      db.select().from(schema.taskComments).where(eq(schema.taskComments.taskId, taskId)).all(),
 
     insertTaskComment: (comment: typeof schema.taskComments.$inferInsert) =>
       db.insert(schema.taskComments).values(comment).run(),
@@ -259,11 +251,7 @@ export function createQueries(db: BaseSQLiteDatabase<"sync", any, typeof schema>
 
     // ── Task Activity ──────────────────────────────
     listTaskActivity: (taskId: string) =>
-      db
-        .select()
-        .from(schema.taskActivity)
-        .where(eq(schema.taskActivity.taskId, taskId))
-        .all(),
+      db.select().from(schema.taskActivity).where(eq(schema.taskActivity.taskId, taskId)).all(),
 
     insertTaskActivity: (activity: typeof schema.taskActivity.$inferInsert) =>
       db.insert(schema.taskActivity).values(activity).run(),

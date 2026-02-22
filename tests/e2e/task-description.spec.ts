@@ -1,10 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  setupPage,
-  createTaskViaApi,
-  openTaskDetail,
-  closeTaskDetail,
-} from "./helpers.js";
+import { setupPage, createTaskViaApi, openTaskDetail, closeTaskDetail } from "./helpers.js";
 
 const dialog = (page: import("@playwright/test").Page) =>
   page.getByRole("dialog", { name: "Task details" });
@@ -31,7 +26,9 @@ test.describe("Task descriptions", () => {
 
     // Type a markdown description
     await descriptionField.click();
-    await descriptionField.fill("## Overview\n\n**Bold text** and regular text.\n\n- Item one\n- Item two\n- Item three");
+    await descriptionField.fill(
+      "## Overview\n\n**Bold text** and regular text.\n\n- Item one\n- Item two\n- Item three",
+    );
 
     // Click on the task title input within the dialog to blur the description
     await dialog(page).locator("input[type='text']").first().click();

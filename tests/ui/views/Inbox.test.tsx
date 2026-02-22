@@ -6,9 +6,7 @@ vi.mock("lucide-react", () => ({
 }));
 
 vi.mock("../../../src/ui/components/TaskInput.js", () => ({
-  TaskInput: (props: any) => (
-    <div data-testid="task-input" data-placeholder={props.placeholder} />
-  ),
+  TaskInput: (props: any) => <div data-testid="task-input" data-placeholder={props.placeholder} />,
 }));
 
 vi.mock("../../../src/ui/components/TaskList.js", () => ({
@@ -69,9 +67,7 @@ describe("Inbox", () => {
 
   it("shows empty message when no tasks", () => {
     render(<Inbox {...defaultProps} />);
-    expect(
-      screen.getByText("Your inbox is empty. Add a task above!"),
-    ).toBeTruthy();
+    expect(screen.getByText("Your inbox is empty. Add a task above!")).toBeTruthy();
   });
 
   it("filters tasks to only those without projectId", () => {
@@ -109,9 +105,7 @@ describe("Inbox", () => {
   });
 
   it("shows singular count for one task", () => {
-    const tasks = [
-      makeTask({ id: "t1", title: "Only task", status: "pending" }),
-    ];
+    const tasks = [makeTask({ id: "t1", title: "Only task", status: "pending" })];
     render(<Inbox {...defaultProps} tasks={tasks} />);
     expect(screen.getByText("1 task")).toBeTruthy();
   });

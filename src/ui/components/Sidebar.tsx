@@ -229,12 +229,8 @@ export function Sidebar({
 
   const renderPluginViewButton = (view: ViewInfo) => {
     const isActive = currentView === "plugin-view" && selectedPluginViewId === view.id;
-    return renderNavButton(
-      `plugin-view-${view.id}`,
-      view.name,
-      view.icon,
-      isActive,
-      () => onNavigate("plugin-view", view.id),
+    return renderNavButton(`plugin-view-${view.id}`, view.name, view.icon, isActive, () =>
+      onNavigate("plugin-view", view.id),
     );
   };
 
@@ -410,8 +406,7 @@ export function Sidebar({
           {collapsed && viewsBySlot.tools.length > 0 && (
             <div className="space-y-0.5 mt-2">
               {viewsBySlot.tools.map((view) => {
-                const isActive =
-                  currentView === "plugin-view" && selectedPluginViewId === view.id;
+                const isActive = currentView === "plugin-view" && selectedPluginViewId === view.id;
                 return (
                   <li key={view.id}>
                     <button

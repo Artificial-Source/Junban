@@ -70,10 +70,7 @@ function TestConsumer() {
       >
         Change STT
       </button>
-      <button
-        data-testid="update-tts-enabled"
-        onClick={() => updateSettings({ ttsEnabled: true })}
-      >
+      <button data-testid="update-tts-enabled" onClick={() => updateSettings({ ttsEnabled: true })}>
         Enable TTS
       </button>
       <button
@@ -109,16 +106,12 @@ describe("VoiceContext", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(
       (key: string) => mockLocalStorage[key] ?? null,
     );
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(
-      (key: string, value: string) => {
-        mockLocalStorage[key] = value;
-      },
-    );
-    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(
-      (key: string) => {
-        delete mockLocalStorage[key];
-      },
-    );
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation((key: string, value: string) => {
+      mockLocalStorage[key] = value;
+    });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation((key: string) => {
+      delete mockLocalStorage[key];
+    });
 
     // Reset mock registry
     mockRegistry.getSTT.mockReturnValue(undefined);
@@ -216,9 +209,7 @@ describe("VoiceContext", () => {
     });
 
     const lastCall = (createDefaultVoiceRegistry as any).mock.calls.at(-1);
-    expect(lastCall[0]).toEqual(
-      expect.objectContaining({ groqApiKey: "gsk_test123" }),
-    );
+    expect(lastCall[0]).toEqual(expect.objectContaining({ groqApiKey: "gsk_test123" }));
   });
 
   it("startListening sets isListening to true", async () => {

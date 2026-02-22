@@ -293,17 +293,14 @@ function AppContent() {
   );
 
   // ── Sections ──
-  const fetchSections = useCallback(
-    async (projectId: string) => {
-      try {
-        const s = await api.listSections(projectId);
-        setSections(s);
-      } catch {
-        setSections([]);
-      }
-    },
-    [],
-  );
+  const fetchSections = useCallback(async (projectId: string) => {
+    try {
+      const s = await api.listSections(projectId);
+      setSections(s);
+    } catch {
+      setSections([]);
+    }
+  }, []);
 
   useEffect(() => {
     if (currentView === "project" && selectedProjectId) {
@@ -701,9 +698,7 @@ function AppContent() {
           />
         ) : null;
       case "stats":
-        return featureSettings.feature_stats !== "false" ? (
-          <Stats tasks={state.tasks} />
-        ) : null;
+        return featureSettings.feature_stats !== "false" ? <Stats tasks={state.tasks} /> : null;
       case "plugin-view": {
         const viewInfo = pluginViews.find((v) => v.id === selectedPluginViewId);
         return selectedPluginViewId ? (

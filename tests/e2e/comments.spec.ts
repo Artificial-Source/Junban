@@ -53,7 +53,9 @@ test.describe("Task comments", () => {
     await dialog(page).getByRole("button", { name: "Comment", exact: true }).click();
 
     // Verify the comment appears within the dialog
-    await expect(dialog(page).getByText("This is my first comment.")).toBeVisible({ timeout: 5000 });
+    await expect(dialog(page).getByText("This is my first comment.")).toBeVisible({
+      timeout: 5000,
+    });
 
     // The comment input should be cleared after submission
     await expect(commentInput).toHaveValue("");
@@ -74,12 +76,16 @@ test.describe("Task comments", () => {
     // Add first comment
     await commentInput.fill("First comment");
     await dialog(page).getByRole("button", { name: "Comment", exact: true }).click();
-    await expect(dialog(page).getByText("First comment", { exact: true }).first()).toBeVisible({ timeout: 5000 });
+    await expect(dialog(page).getByText("First comment", { exact: true }).first()).toBeVisible({
+      timeout: 5000,
+    });
 
     // Add second comment
     await commentInput.fill("Second comment");
     await dialog(page).getByRole("button", { name: "Comment", exact: true }).click();
-    await expect(dialog(page).getByText("Second comment", { exact: true }).first()).toBeVisible({ timeout: 5000 });
+    await expect(dialog(page).getByText("Second comment", { exact: true }).first()).toBeVisible({
+      timeout: 5000,
+    });
 
     // Both comments should be visible
     await expect(dialog(page).getByText("First comment", { exact: true }).first()).toBeVisible();
@@ -103,7 +109,9 @@ test.describe("Task comments", () => {
     await commentInput.press("Enter");
 
     // The comment should appear within the dialog
-    await expect(dialog(page).getByText("Submitted via Enter").first()).toBeVisible({ timeout: 5000 });
+    await expect(dialog(page).getByText("Submitted via Enter").first()).toBeVisible({
+      timeout: 5000,
+    });
   });
 
   test("empty comments cannot be submitted", async ({ page }) => {
@@ -135,7 +143,9 @@ test.describe("Task comments", () => {
     await commentInput.fill("Persistent comment");
 
     await dialog(page).getByRole("button", { name: "Comment", exact: true }).click();
-    await expect(dialog(page).getByText("Persistent comment", { exact: true }).first()).toBeVisible({ timeout: 5000 });
+    await expect(dialog(page).getByText("Persistent comment", { exact: true }).first()).toBeVisible(
+      { timeout: 5000 },
+    );
 
     // Close and reopen the detail panel
     await closeTaskDetail(page);
@@ -145,7 +155,9 @@ test.describe("Task comments", () => {
     await clickCommentsTab(page);
 
     // The comment should still be there
-    await expect(dialog(page).getByText("Persistent comment", { exact: true }).first()).toBeVisible({ timeout: 5000 });
+    await expect(dialog(page).getByText("Persistent comment", { exact: true }).first()).toBeVisible(
+      { timeout: 5000 },
+    );
   });
 
   test("shows empty state when no comments exist", async ({ page }) => {

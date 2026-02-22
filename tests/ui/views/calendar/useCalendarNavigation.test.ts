@@ -81,17 +81,13 @@ describe("useCalendarNavigation", () => {
   });
 
   it("respects initialMode option", () => {
-    const { result } = renderHook(() =>
-      useCalendarNavigation({ initialMode: "month" }),
-    );
+    const { result } = renderHook(() => useCalendarNavigation({ initialMode: "month" }));
     expect(result.current.mode).toBe("month");
   });
 
   it("setMode changes mode and fires callback", () => {
     const onModeChange = vi.fn();
-    const { result } = renderHook(() =>
-      useCalendarNavigation({ onModeChange }),
-    );
+    const { result } = renderHook(() => useCalendarNavigation({ onModeChange }));
 
     act(() => {
       result.current.setMode("day");
@@ -101,9 +97,7 @@ describe("useCalendarNavigation", () => {
   });
 
   it("goNext advances by 1 day in day mode", () => {
-    const { result } = renderHook(() =>
-      useCalendarNavigation({ initialMode: "day" }),
-    );
+    const { result } = renderHook(() => useCalendarNavigation({ initialMode: "day" }));
 
     const initialDate = result.current.selectedDate.getDate();
 
@@ -127,9 +121,7 @@ describe("useCalendarNavigation", () => {
   });
 
   it("goToday sets date to today", () => {
-    const { result } = renderHook(() =>
-      useCalendarNavigation({ initialMode: "day" }),
-    );
+    const { result } = renderHook(() => useCalendarNavigation({ initialMode: "day" }));
 
     // Navigate away from today
     act(() => {
@@ -148,9 +140,7 @@ describe("useCalendarNavigation", () => {
   });
 
   it("periodLabel formats correctly for month mode", () => {
-    const { result } = renderHook(() =>
-      useCalendarNavigation({ initialMode: "month" }),
-    );
+    const { result } = renderHook(() => useCalendarNavigation({ initialMode: "month" }));
 
     // Should contain month name and year
     const label = result.current.periodLabel;
@@ -159,16 +149,12 @@ describe("useCalendarNavigation", () => {
   });
 
   it("isCurrentPeriod is true for today", () => {
-    const { result } = renderHook(() =>
-      useCalendarNavigation({ initialMode: "day" }),
-    );
+    const { result } = renderHook(() => useCalendarNavigation({ initialMode: "day" }));
     expect(result.current.isCurrentPeriod).toBe(true);
   });
 
   it("isCurrentPeriod becomes false after navigating away", () => {
-    const { result } = renderHook(() =>
-      useCalendarNavigation({ initialMode: "month" }),
-    );
+    const { result } = renderHook(() => useCalendarNavigation({ initialMode: "month" }));
 
     act(() => {
       result.current.goNext(); // Next month
@@ -177,9 +163,7 @@ describe("useCalendarNavigation", () => {
   });
 
   it("goNext advances by 1 month in month mode", () => {
-    const { result } = renderHook(() =>
-      useCalendarNavigation({ initialMode: "month" }),
-    );
+    const { result } = renderHook(() => useCalendarNavigation({ initialMode: "month" }));
 
     const initialMonth = result.current.selectedDate.getMonth();
 

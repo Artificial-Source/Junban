@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-import { RecurrencePicker, formatRecurrenceLabel } from "../../../src/ui/components/RecurrencePicker.js";
+import {
+  RecurrencePicker,
+  formatRecurrenceLabel,
+} from "../../../src/ui/components/RecurrencePicker.js";
 
 describe("RecurrencePicker", () => {
   const onChange = vi.fn();
@@ -12,9 +15,7 @@ describe("RecurrencePicker", () => {
   });
 
   it("renders preset options", () => {
-    render(
-      <RecurrencePicker value={null} onChange={onChange} onClose={onClose} />,
-    );
+    render(<RecurrencePicker value={null} onChange={onChange} onClose={onClose} />);
     expect(screen.getByText("None")).toBeTruthy();
     expect(screen.getByText("Daily")).toBeTruthy();
     expect(screen.getByText("Weekly")).toBeTruthy();
@@ -23,44 +24,34 @@ describe("RecurrencePicker", () => {
   });
 
   it("calls onChange when a preset is clicked", () => {
-    render(
-      <RecurrencePicker value={null} onChange={onChange} onClose={onClose} />,
-    );
+    render(<RecurrencePicker value={null} onChange={onChange} onClose={onClose} />);
 
     fireEvent.click(screen.getByText("Daily"));
     expect(onChange).toHaveBeenCalledWith("daily");
   });
 
   it("calls onChange(null) when None is clicked", () => {
-    render(
-      <RecurrencePicker value="daily" onChange={onChange} onClose={onClose} />,
-    );
+    render(<RecurrencePicker value="daily" onChange={onChange} onClose={onClose} />);
 
     fireEvent.click(screen.getByText("None"));
     expect(onChange).toHaveBeenCalledWith(null);
   });
 
   it("highlights the currently selected preset", () => {
-    render(
-      <RecurrencePicker value="weekly" onChange={onChange} onClose={onClose} />,
-    );
+    render(<RecurrencePicker value="weekly" onChange={onChange} onClose={onClose} />);
 
     const weeklyBtn = screen.getByText("Weekly");
     expect(weeklyBtn.className).toContain("bg-accent");
   });
 
   it("shows custom pattern section", () => {
-    render(
-      <RecurrencePicker value={null} onChange={onChange} onClose={onClose} />,
-    );
+    render(<RecurrencePicker value={null} onChange={onChange} onClose={onClose} />);
     expect(screen.getByText("Custom")).toBeTruthy();
     expect(screen.getByText("Every")).toBeTruthy();
   });
 
   it("applies custom pattern when Set button is clicked", () => {
-    render(
-      <RecurrencePicker value={null} onChange={onChange} onClose={onClose} />,
-    );
+    render(<RecurrencePicker value={null} onChange={onChange} onClose={onClose} />);
 
     // Change number input to 3
     const numberInput = screen.getByRole("spinbutton");
@@ -71,9 +62,7 @@ describe("RecurrencePicker", () => {
   });
 
   it("applies custom weeks pattern", () => {
-    render(
-      <RecurrencePicker value={null} onChange={onChange} onClose={onClose} />,
-    );
+    render(<RecurrencePicker value={null} onChange={onChange} onClose={onClose} />);
 
     const numberInput = screen.getByRole("spinbutton");
     fireEvent.change(numberInput, { target: { value: "2" } });
@@ -86,9 +75,7 @@ describe("RecurrencePicker", () => {
   });
 
   it("handles singular day pattern (every 1 day)", () => {
-    render(
-      <RecurrencePicker value={null} onChange={onChange} onClose={onClose} />,
-    );
+    render(<RecurrencePicker value={null} onChange={onChange} onClose={onClose} />);
 
     const numberInput = screen.getByRole("spinbutton");
     fireEvent.change(numberInput, { target: { value: "1" } });

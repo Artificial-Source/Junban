@@ -75,25 +75,39 @@ function TestConsumer() {
       <span data-testid="mutation-count">{dataMutationCount}</span>
       <span data-testid="sessions">{JSON.stringify(sessions)}</span>
       <span data-testid="active-session">{activeSessionId ?? "null"}</span>
-      <button data-testid="send" onClick={() => sendMessage("Hello AI")}>Send</button>
-      <button data-testid="clear" onClick={() => clearChat()}>Clear</button>
-      <button data-testid="restore" onClick={() => restoreMessages()}>Restore</button>
+      <button data-testid="send" onClick={() => sendMessage("Hello AI")}>
+        Send
+      </button>
+      <button data-testid="clear" onClick={() => clearChat()}>
+        Clear
+      </button>
+      <button data-testid="restore" onClick={() => restoreMessages()}>
+        Restore
+      </button>
       <button
         data-testid="update-config"
         onClick={() => updateConfig({ provider: "anthropic", apiKey: "key-123" })}
       >
         Update Config
       </button>
-      <button data-testid="retry" onClick={() => retryLastMessage()}>Retry</button>
-      <button data-testid="voice-on" onClick={() => setVoiceCallMode(true)}>Voice On</button>
-      <button data-testid="voice-off" onClick={() => setVoiceCallMode(false)}>Voice Off</button>
+      <button data-testid="retry" onClick={() => retryLastMessage()}>
+        Retry
+      </button>
+      <button data-testid="voice-on" onClick={() => setVoiceCallMode(true)}>
+        Voice On
+      </button>
+      <button data-testid="voice-off" onClick={() => setVoiceCallMode(false)}>
+        Voice Off
+      </button>
       <button data-testid="edit-resend" onClick={() => editAndResend(0, "Edited text")}>
         Edit
       </button>
       <button data-testid="regenerate" onClick={() => regenerateLastResponse()}>
         Regenerate
       </button>
-      <button data-testid="new-session" onClick={() => createNewSession()}>New Session</button>
+      <button data-testid="new-session" onClick={() => createNewSession()}>
+        New Session
+      </button>
       <button data-testid="switch-session" onClick={() => switchSession("session-2")}>
         Switch
       </button>
@@ -254,9 +268,7 @@ describe("AIContext", () => {
   });
 
   it("sendMessage handles SSE error events with plain string data", async () => {
-    const stream = createSSEStream([
-      { type: "error", data: "Something went wrong" },
-    ]);
+    const stream = createSSEStream([{ type: "error", data: "Something went wrong" }]);
     (api.sendChatMessage as any).mockResolvedValue(stream);
 
     renderWithProviders();
@@ -330,7 +342,9 @@ describe("AIContext", () => {
     const stream = createSSEStream([
       {
         type: "tool_call",
-        data: JSON.stringify([{ id: "call-1", name: "create_task", arguments: '{"title":"Buy milk"}' }]),
+        data: JSON.stringify([
+          { id: "call-1", name: "create_task", arguments: '{"title":"Buy milk"}' },
+        ]),
       },
       { type: "token", data: "Done!" },
       { type: "done", data: "" },

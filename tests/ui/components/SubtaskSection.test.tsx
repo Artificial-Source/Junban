@@ -114,11 +114,7 @@ describe("SubtaskSection", () => {
 
   it("returns null when no children and no onAddSubtask", () => {
     const { container } = render(
-      <SubtaskSection
-        {...defaultProps}
-        allTasks={[parentTask]}
-        onAddSubtask={undefined}
-      />,
+      <SubtaskSection {...defaultProps} allTasks={[parentTask]} onAddSubtask={undefined} />,
     );
     expect(container.innerHTML).toBe("");
   });
@@ -141,13 +137,7 @@ describe("SubtaskSection", () => {
   });
 
   it("handles no subtasks with add button", () => {
-    render(
-      <SubtaskSection
-        {...defaultProps}
-        allTasks={[parentTask]}
-        onAddSubtask={vi.fn()}
-      />,
-    );
+    render(<SubtaskSection {...defaultProps} allTasks={[parentTask]} onAddSubtask={vi.fn()} />);
     // Should show the section with add button
     expect(screen.getByText("Sub-tasks")).toBeTruthy();
     expect(screen.getByText("Add sub-task")).toBeTruthy();

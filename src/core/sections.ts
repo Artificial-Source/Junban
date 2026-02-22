@@ -16,7 +16,7 @@ export class SectionService {
   constructor(
     private queries: IStorage,
     // Accepted for future section events (EventMap currently only has task:* events)
-    private eventBus?: EventBus, // eslint-disable-line @typescript-eslint/no-unused-vars
+    private eventBus?: EventBus,
   ) {
     void this.eventBus;
   }
@@ -58,10 +58,7 @@ export class SectionService {
   }
 
   /** Update a section's mutable fields (name, isCollapsed). */
-  async update(
-    id: string,
-    data: Partial<Pick<Section, "name" | "isCollapsed">>,
-  ): Promise<Section> {
+  async update(id: string, data: Partial<Pick<Section, "name" | "isCollapsed">>): Promise<Section> {
     const existing = this.queries.getSection(id);
     if (!existing) throw new NotFoundError("Section", id);
 

@@ -134,7 +134,6 @@ export function Today({
           onUpdateDueDate={onUpdateDueDate}
         />
       </div>
-
     </div>
   );
 }

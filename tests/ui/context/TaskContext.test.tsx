@@ -40,7 +40,8 @@ import { api } from "../../../src/ui/api/index.js";
 import { TaskProvider, useTaskContext } from "../../../src/ui/context/TaskContext.js";
 
 function TestConsumer() {
-  const { state, createTask, updateTask, completeTask, deleteTask, refreshTasks } = useTaskContext();
+  const { state, createTask, updateTask, completeTask, deleteTask, refreshTasks } =
+    useTaskContext();
   return (
     <div>
       <span data-testid="loading">{String(state.loading)}</span>
@@ -105,7 +106,10 @@ describe("TaskContext", () => {
   it("sets loading state during fetch", async () => {
     let resolveFetch!: (value: any) => void;
     (api.listTasks as any).mockImplementation(
-      () => new Promise((resolve) => { resolveFetch = resolve; }),
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
     );
 
     render(
@@ -260,7 +264,9 @@ describe("TaskContext", () => {
       recurrence: "daily",
     };
     (api.completeTask as any).mockResolvedValue(recurringTask);
-    (api.listTasks as any).mockResolvedValue([{ id: "task-1", title: "Recurring", status: "pending" }]);
+    (api.listTasks as any).mockResolvedValue([
+      { id: "task-1", title: "Recurring", status: "pending" },
+    ]);
 
     render(
       <TaskProvider>

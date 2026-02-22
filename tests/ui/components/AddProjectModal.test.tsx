@@ -94,10 +94,10 @@ describe("AddProjectModal", () => {
     expect(defaultProps.onSubmit).toHaveBeenCalledWith(
       "New Project",
       expect.any(String), // color
-      "",                  // emoji
-      null,                // parentId
-      false,               // isFavorite
-      "list",              // viewStyle
+      "", // emoji
+      null, // parentId
+      false, // isFavorite
+      "list", // viewStyle
     );
   });
 

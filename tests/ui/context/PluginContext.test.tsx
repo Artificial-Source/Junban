@@ -17,15 +17,8 @@ import { api } from "../../../src/ui/api/index.js";
 import { PluginProvider, usePluginContext } from "../../../src/ui/context/PluginContext.js";
 
 function TestConsumer() {
-  const {
-    plugins,
-    commands,
-    statusBarItems,
-    panels,
-    views,
-    executeCommand,
-    refreshPlugins,
-  } = usePluginContext();
+  const { plugins, commands, statusBarItems, panels, views, executeCommand, refreshPlugins } =
+    usePluginContext();
   return (
     <div>
       <span data-testid="plugins">{JSON.stringify(plugins)}</span>
@@ -238,7 +231,10 @@ describe("PluginContext", () => {
   it("mountedRef prevents stale updates after unmount", async () => {
     let resolvePlugins!: (value: any) => void;
     (api.listPlugins as any).mockImplementation(
-      () => new Promise((resolve) => { resolvePlugins = resolve; }),
+      () =>
+        new Promise((resolve) => {
+          resolvePlugins = resolve;
+        }),
     );
 
     const { unmount } = render(

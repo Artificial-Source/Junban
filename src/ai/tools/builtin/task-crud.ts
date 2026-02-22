@@ -133,8 +133,7 @@ export function registerTaskCrudTools(registry: ToolRegistry): void {
           },
           estimatedMinutes: {
             type: "integer",
-            description:
-              "Estimated duration in minutes. Set to 0 or empty string to remove.",
+            description: "Estimated duration in minutes. Set to 0 or empty string to remove.",
           },
           deadline: {
             type: "string",
@@ -143,13 +142,11 @@ export function registerTaskCrudTools(registry: ToolRegistry): void {
           },
           isSomeday: {
             type: "boolean",
-            description:
-              'Set to true to mark as "someday/maybe", false to unmark.',
+            description: 'Set to true to mark as "someday/maybe", false to unmark.',
           },
           sectionId: {
             type: "string",
-            description:
-              "Section ID within a project. Set to empty string to remove from section.",
+            description: "Section ID within a project. Set to empty string to remove from section.",
           },
         },
         required: ["taskId"],

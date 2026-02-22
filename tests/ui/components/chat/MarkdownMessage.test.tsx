@@ -39,9 +39,7 @@ describe("MarkdownMessage", () => {
 
   it("renders saydo:// links as buttons when onSelectTask is provided", () => {
     const onSelectTask = vi.fn();
-    render(
-      <MarkdownMessage content="[Task](saydo://task/abc123)" onSelectTask={onSelectTask} />,
-    );
+    render(<MarkdownMessage content="[Task](saydo://task/abc123)" onSelectTask={onSelectTask} />);
     const button = screen.getByText("Task");
     fireEvent.click(button);
     expect(onSelectTask).toHaveBeenCalledWith("abc123");

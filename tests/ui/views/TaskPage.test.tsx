@@ -15,13 +15,11 @@ vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
 }));
 
 vi.mock("../../../src/ui/components/TaskMetadataSidebar.js", () => ({
-  TaskMetadataSidebar: (props: any) => (
-    <div data-testid="metadata-sidebar" />
-  ),
+  TaskMetadataSidebar: (_props: any) => <div data-testid="metadata-sidebar" />,
 }));
 
 vi.mock("../../../src/ui/components/SubtaskSection.js", () => ({
-  SubtaskSection: (props: any) => <div data-testid="subtask-section" />,
+  SubtaskSection: (_props: any) => <div data-testid="subtask-section" />,
 }));
 
 vi.mock("../../../src/ui/components/ConfirmDialog.js", () => ({

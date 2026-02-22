@@ -1,10 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  setupPage,
-  createTaskViaApi,
-  updateTaskViaApi,
-  navigateTo,
-} from "./helpers.js";
+import { setupPage, createTaskViaApi, updateTaskViaApi, navigateTo } from "./helpers.js";
 
 test.describe("Cancelled tasks view", () => {
   test.beforeEach(async ({ page }) => {
@@ -80,9 +75,7 @@ test.describe("Cancelled tasks view", () => {
 
   test("Cancelled nav item disappears when feature_cancelled is disabled", async ({ page }) => {
     // Verify the Cancelled button exists in the sidebar
-    await expect(
-      page.getByRole("button", { name: "Cancelled", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Cancelled", exact: true })).toBeVisible();
 
     // Disable the feature via API
     await page.request.put("/api/settings/feature_cancelled", {
@@ -93,9 +86,7 @@ test.describe("Cancelled tasks view", () => {
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
     // The Cancelled nav item should no longer be in the sidebar
-    await expect(
-      page.getByRole("button", { name: "Cancelled", exact: true }),
-    ).not.toBeVisible();
+    await expect(page.getByRole("button", { name: "Cancelled", exact: true })).not.toBeVisible();
 
     // Re-enable for cleanup
     await page.request.put("/api/settings/feature_cancelled", {

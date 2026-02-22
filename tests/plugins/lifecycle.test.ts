@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { Plugin } from "../../src/plugins/lifecycle.js";
 import type { PluginAPI, PluginSettingsAccessor } from "../../src/plugins/api.js";
 

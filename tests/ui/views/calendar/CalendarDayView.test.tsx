@@ -9,7 +9,7 @@ vi.mock("lucide-react", () => ({
 
 vi.mock("../../../../src/utils/format-date.js", () => ({
   toDateKey: (date: Date) => date.toISOString().split("T")[0],
-  formatTaskTime: (isoDate: string) => "10:00 AM",
+  formatTaskTime: (_isoDate: string) => "10:00 AM",
 }));
 
 vi.mock("../../../../src/ui/context/SettingsContext.js", () => ({
@@ -111,9 +111,7 @@ describe("CalendarDayView", () => {
       updatedAt: "2026-01-01",
     };
     const taskWithProject = makeTask({ projectId: "p1" });
-    render(
-      <CalendarDayView {...defaultProps} tasks={[taskWithProject]} projects={[project]} />,
-    );
+    render(<CalendarDayView {...defaultProps} tasks={[taskWithProject]} projects={[project]} />);
     expect(screen.getByText("Frontend")).toBeDefined();
   });
 

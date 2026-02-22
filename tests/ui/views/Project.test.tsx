@@ -2,9 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 vi.mock("../../../src/ui/components/TaskInput.js", () => ({
-  TaskInput: (props: any) => (
-    <div data-testid="task-input" data-placeholder={props.placeholder} />
-  ),
+  TaskInput: (props: any) => <div data-testid="task-input" data-placeholder={props.placeholder} />,
 }));
 
 vi.mock("../../../src/ui/components/TaskList.js", () => ({
@@ -115,8 +113,6 @@ describe("Project", () => {
   it("renders TaskInput with project-specific placeholder", () => {
     render(<Project {...defaultProps} />);
     const input = screen.getByTestId("task-input");
-    expect(input.getAttribute("data-placeholder")).toBe(
-      "Add a task to My Project...",
-    );
+    expect(input.getAttribute("data-placeholder")).toBe("Add a task to My Project...");
   });
 });

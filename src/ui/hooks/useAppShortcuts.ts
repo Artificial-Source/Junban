@@ -124,5 +124,14 @@ export function useAppShortcuts(
       shortcutManager.unregister("chord-go-upcoming");
       shortcutManager.unregister("chord-go-stats");
     };
-  }, [undo, redo, setCommandPaletteOpen, setSearchOpen, setFocusModeOpen, setQuickAddOpen, handleNavigate, chordsEnabled]);
+  }, [
+    undo,
+    redo,
+    setCommandPaletteOpen,
+    setSearchOpen,
+    setFocusModeOpen,
+    setQuickAddOpen,
+    handleNavigate,
+    chordsEnabled,
+  ]);
 }

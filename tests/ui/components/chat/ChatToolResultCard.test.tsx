@@ -114,9 +114,7 @@ describe("ChatToolResultCard", () => {
   });
 
   it("skips non-JSON data gracefully", () => {
-    const toolResults = [
-      { toolName: "analyze_workload", data: "not json" },
-    ];
+    const toolResults = [{ toolName: "analyze_workload", data: "not json" }];
     const { container } = render(<ChatToolResultCard toolResults={toolResults} />);
     // Should not crash, just render empty
     expect(container.querySelector(".space-y-2")).toBeDefined();

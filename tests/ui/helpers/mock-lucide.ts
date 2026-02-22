@@ -15,11 +15,17 @@
 function icon(name: string) {
   return (props: any) => {
     // Use createElement-style to avoid JSX in .ts files
-    const el = Object.assign(document.createElementNS("http://www.w3.org/2000/svg", "svg"), {
+    const _el = Object.assign(document.createElementNS("http://www.w3.org/2000/svg", "svg"), {
       // For @testing-library: data-testid on the wrapper
     });
     // Return a props-compatible mock for React rendering
-    return { $$typeof: Symbol.for("react.element"), type: "svg", props: { "data-testid": `${name}-icon`, ...props }, key: null, ref: null };
+    return {
+      $$typeof: Symbol.for("react.element"),
+      type: "svg",
+      props: { "data-testid": `${name}-icon`, ...props },
+      key: null,
+      ref: null,
+    };
   };
 }
 

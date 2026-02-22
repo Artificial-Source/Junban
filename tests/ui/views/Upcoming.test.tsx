@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 vi.mock("lucide-react", () => ({
@@ -14,7 +14,7 @@ vi.mock("../../../src/utils/format-date.js", () => ({
 }));
 
 vi.mock("../../../src/ui/components/TaskInput.js", () => ({
-  TaskInput: (props: any) => <div data-testid="task-input" />,
+  TaskInput: (_props: any) => <div data-testid="task-input" />,
 }));
 
 vi.mock("../../../src/ui/components/TaskList.js", () => ({
@@ -114,9 +114,7 @@ describe("Upcoming", () => {
   });
 
   it("shows overdue tasks in the overdue section", () => {
-    const tasks = [
-      makeTask({ id: "t1", title: "Overdue task", dueDate: pastDate(3) }),
-    ];
+    const tasks = [makeTask({ id: "t1", title: "Overdue task", dueDate: pastDate(3) })];
     render(<Upcoming {...defaultProps} tasks={tasks} />);
     expect(screen.getByTestId("overdue-section")).toBeTruthy();
     expect(screen.getByText("Overdue task")).toBeTruthy();
@@ -132,9 +130,7 @@ describe("Upcoming", () => {
   });
 
   it("shows singular count for 1 task", () => {
-    const tasks = [
-      makeTask({ id: "t1", title: "Only one", dueDate: futureDate(1) }),
-    ];
+    const tasks = [makeTask({ id: "t1", title: "Only one", dueDate: futureDate(1) })];
     render(<Upcoming {...defaultProps} tasks={tasks} />);
     expect(screen.getByText("1 task")).toBeTruthy();
   });

@@ -74,9 +74,7 @@ export async function resetFeatureFlags(page: Page) {
     "feature_stats",
   ];
   await Promise.all(
-    flags.map((flag) =>
-      page.request.put(`/api/settings/${flag}`, { data: { value: "true" } }),
-    ),
+    flags.map((flag) => page.request.put(`/api/settings/${flag}`, { data: { value: "true" } })),
   );
 }
 

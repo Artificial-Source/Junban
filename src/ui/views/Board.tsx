@@ -54,7 +54,7 @@ function DraggableCard({
     : {};
 
   const priority = task.priority ? getPriority(task.priority) : null;
-  const priorityBorder = task.priority ? PRIORITY_BORDER_COLORS[task.priority] ?? "" : "";
+  const priorityBorder = task.priority ? (PRIORITY_BORDER_COLORS[task.priority] ?? "") : "";
   const isOverdue =
     task.dueDate && task.status === "pending" && new Date(task.dueDate) < new Date();
   const priorityCircleColor = task.priority
@@ -198,7 +198,7 @@ function BoardColumn({
 
 /** Card rendered inside the drag overlay (floating ghost). */
 function DragOverlayCard({ task }: { task: Task }) {
-  const priorityBorder = task.priority ? PRIORITY_BORDER_COLORS[task.priority] ?? "" : "";
+  const priorityBorder = task.priority ? (PRIORITY_BORDER_COLORS[task.priority] ?? "") : "";
 
   return (
     <div
@@ -226,9 +226,7 @@ export function Board({
 }: BoardProps) {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   const sortedSections = [...sections].sort((a, b) => a.sortOrder - b.sortOrder);
 
@@ -308,9 +306,7 @@ export function Board({
         ))}
       </div>
 
-      <DragOverlay>
-        {activeDragTask ? <DragOverlayCard task={activeDragTask} /> : null}
-      </DragOverlay>
+      <DragOverlay>{activeDragTask ? <DragOverlayCard task={activeDragTask} /> : null}</DragOverlay>
     </DndContext>
   );
 }

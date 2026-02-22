@@ -1,10 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  setupPage,
-  createTaskViaApi,
-  completeTaskViaApi,
-  navigateTo,
-} from "./helpers.js";
+import { setupPage, createTaskViaApi, completeTaskViaApi, navigateTo } from "./helpers.js";
 
 test.describe("Productivity stats view", () => {
   test.beforeEach(async ({ page }) => {
@@ -14,16 +9,14 @@ test.describe("Productivity stats view", () => {
   test("Stats view renders with the Productivity heading", async ({ page }) => {
     await navigateTo(page, "Stats");
 
-    await expect(
-      page.getByRole("heading", { name: "Productivity" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Productivity" })).toBeVisible();
   });
 
   test("displays completed task count after completing tasks", async ({ page }) => {
     // Create 3 tasks via API
     const task1 = await createTaskViaApi(page, "Stats task one");
     const task2 = await createTaskViaApi(page, "Stats task two");
-    const task3 = await createTaskViaApi(page, "Stats task three");
+    const _task3 = await createTaskViaApi(page, "Stats task three");
 
     // Complete 2 of them
     await completeTaskViaApi(page, task1.id);
@@ -34,9 +27,7 @@ test.describe("Productivity stats view", () => {
 
     await navigateTo(page, "Stats");
 
-    await expect(
-      page.getByRole("heading", { name: "Productivity" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Productivity" })).toBeVisible();
 
     // The stats view should show completed task count (at least 2, may be more from previous runs)
     // Use the main content area to scope and look for "completed tasks" text
@@ -64,9 +55,7 @@ test.describe("Productivity stats view", () => {
 
   test("Stats nav item disappears when feature_stats is disabled", async ({ page }) => {
     // Verify the Stats button exists in the sidebar
-    await expect(
-      page.getByRole("button", { name: "Stats", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stats", exact: true })).toBeVisible();
 
     // Disable the feature via API
     await page.request.put("/api/settings/feature_stats", {
@@ -77,9 +66,7 @@ test.describe("Productivity stats view", () => {
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
     // The Stats nav item should no longer be in the sidebar
-    await expect(
-      page.getByRole("button", { name: "Stats", exact: true }),
-    ).not.toBeVisible();
+    await expect(page.getByRole("button", { name: "Stats", exact: true })).not.toBeVisible();
 
     // Re-enable for cleanup
     await page.request.put("/api/settings/feature_stats", {

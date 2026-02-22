@@ -7,7 +7,14 @@ import { PluginCard } from "../../components/PluginCard.js";
 import { PluginBrowser } from "../../components/PluginBrowser.js";
 
 export function PluginsTab() {
-  const { plugins, refreshPlugins, refreshViews, refreshPanels, refreshStatusBar, refreshCommands } = usePluginContext();
+  const {
+    plugins,
+    refreshPlugins,
+    refreshViews,
+    refreshPanels,
+    refreshStatusBar,
+    refreshCommands,
+  } = usePluginContext();
   const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null);
   const [permissionPlugin, setPermissionPlugin] = useState<PluginInfo | null>(null);
   const [toggling, setToggling] = useState<Set<string>>(new Set());
@@ -49,7 +56,13 @@ export function PluginsTab() {
     setToggling((prev) => new Set(prev).add(pluginId));
     try {
       await api.togglePlugin(pluginId);
-      await Promise.all([refreshPlugins(), refreshViews(), refreshPanels(), refreshStatusBar(), refreshCommands()]);
+      await Promise.all([
+        refreshPlugins(),
+        refreshViews(),
+        refreshPanels(),
+        refreshStatusBar(),
+        refreshCommands(),
+      ]);
     } finally {
       setToggling((prev) => {
         const next = new Set(prev);

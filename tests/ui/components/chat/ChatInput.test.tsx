@@ -103,7 +103,7 @@ describe("ChatInput", () => {
 
   it("submit button is disabled when input is empty", () => {
     render(<ChatInput {...defaultProps} />);
-    const submitButton = screen.getByRole("button", { name: "" }); // send button has no text
+    const _submitButton = screen.getByRole("button", { name: "" }); // send button has no text
     // The submit button should be disabled (via disabled prop)
     const buttons = screen.getAllByRole("button");
     const sendButton = buttons.find((b) => b.getAttribute("type") === "submit");

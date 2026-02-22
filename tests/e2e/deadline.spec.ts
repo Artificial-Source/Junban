@@ -22,7 +22,9 @@ test.describe("Task deadlines", () => {
 
     // The metadata sidebar should show the Deadline label
     const detailPanel = dialog(page);
-    await expect(detailPanel.locator("label", { hasText: "Deadline" })).toBeVisible({ timeout: 5000 });
+    await expect(detailPanel.locator("label", { hasText: "Deadline" })).toBeVisible({
+      timeout: 5000,
+    });
 
     // The formatted date should be visible (e.g. "Feb 28")
     const expectedDate = deadline.toLocaleDateString(undefined, {
@@ -47,7 +49,9 @@ test.describe("Task deadlines", () => {
     const detailPanel = dialog(page);
 
     // Verify deadline is shown first
-    await expect(detailPanel.locator("label", { hasText: "Deadline" })).toBeVisible({ timeout: 5000 });
+    await expect(detailPanel.locator("label", { hasText: "Deadline" })).toBeVisible({
+      timeout: 5000,
+    });
 
     // Click the clear deadline button (X icon next to Deadline label)
     const clearBtn = detailPanel.getByTitle("Clear deadline");

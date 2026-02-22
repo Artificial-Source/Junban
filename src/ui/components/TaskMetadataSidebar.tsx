@@ -203,9 +203,7 @@ export function TaskMetadataSidebar({
             className="mt-1.5 w-full px-2 py-1.5 text-sm text-left rounded-md text-on-surface hover:bg-surface-tertiary transition-colors"
           >
             {task.deadline ? (
-              <span className={
-                new Date(task.deadline) < new Date() ? "text-error" : ""
-              }>
+              <span className={new Date(task.deadline) < new Date() ? "text-error" : ""}>
                 {new Date(task.deadline).toLocaleDateString(undefined, {
                   month: "short",
                   day: "numeric",

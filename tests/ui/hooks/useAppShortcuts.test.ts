@@ -57,9 +57,7 @@ describe("useAppShortcuts", () => {
 
   it("registers search shortcut when setSearchOpen is provided", () => {
     const setSearchOpen = vi.fn();
-    renderHook(() =>
-      useAppShortcuts(setCommandPaletteOpen, undo, redo, setSearchOpen),
-    );
+    renderHook(() => useAppShortcuts(setCommandPaletteOpen, undo, redo, setSearchOpen));
 
     const registeredIds = mockRegister.mock.calls.map((c: any[]) => c[0].id);
     expect(registeredIds).toContain("search");
@@ -75,13 +73,7 @@ describe("useAppShortcuts", () => {
   it("registers focus mode shortcut when setFocusModeOpen is provided", () => {
     const setFocusModeOpen = vi.fn();
     renderHook(() =>
-      useAppShortcuts(
-        setCommandPaletteOpen,
-        undo,
-        redo,
-        undefined,
-        setFocusModeOpen,
-      ),
+      useAppShortcuts(setCommandPaletteOpen, undo, redo, undefined, setFocusModeOpen),
     );
 
     const registeredIds = mockRegister.mock.calls.map((c: any[]) => c[0].id);
@@ -91,14 +83,7 @@ describe("useAppShortcuts", () => {
   it("registers quick-add shortcuts when setQuickAddOpen is provided", () => {
     const setQuickAddOpen = vi.fn();
     renderHook(() =>
-      useAppShortcuts(
-        setCommandPaletteOpen,
-        undo,
-        redo,
-        undefined,
-        undefined,
-        setQuickAddOpen,
-      ),
+      useAppShortcuts(setCommandPaletteOpen, undo, redo, undefined, undefined, setQuickAddOpen),
     );
 
     const registeredIds = mockRegister.mock.calls.map((c: any[]) => c[0].id);
@@ -128,9 +113,7 @@ describe("useAppShortcuts", () => {
 
   it("removes keydown event listener on unmount", () => {
     const removeSpy = vi.spyOn(document, "removeEventListener");
-    const { unmount } = renderHook(() =>
-      useAppShortcuts(setCommandPaletteOpen, undo, redo),
-    );
+    const { unmount } = renderHook(() => useAppShortcuts(setCommandPaletteOpen, undo, redo));
 
     unmount();
     expect(removeSpy).toHaveBeenCalledWith("keydown", expect.any(Function));

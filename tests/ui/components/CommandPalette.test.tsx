@@ -34,17 +34,13 @@ describe("CommandPalette", () => {
   });
 
   it("renders dialog when open", () => {
-    render(
-      <CommandPalette commands={commands} isOpen={true} onClose={onClose} />,
-    );
+    render(<CommandPalette commands={commands} isOpen={true} onClose={onClose} />);
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByPlaceholderText("Type a command...")).toBeTruthy();
   });
 
   it("shows all commands by default", () => {
-    render(
-      <CommandPalette commands={commands} isOpen={true} onClose={onClose} />,
-    );
+    render(<CommandPalette commands={commands} isOpen={true} onClose={onClose} />);
     expect(screen.getByText("Go to Inbox")).toBeTruthy();
     expect(screen.getByText("Go to Today")).toBeTruthy();
     expect(screen.getByText("Go to Upcoming")).toBeTruthy();
@@ -52,9 +48,7 @@ describe("CommandPalette", () => {
   });
 
   it("filters commands based on search query", () => {
-    render(
-      <CommandPalette commands={commands} isOpen={true} onClose={onClose} />,
-    );
+    render(<CommandPalette commands={commands} isOpen={true} onClose={onClose} />);
 
     const input = screen.getByPlaceholderText("Type a command...");
     fireEvent.change(input, { target: { value: "inbox" } });
@@ -65,9 +59,7 @@ describe("CommandPalette", () => {
   });
 
   it("shows no matching commands message", () => {
-    render(
-      <CommandPalette commands={commands} isOpen={true} onClose={onClose} />,
-    );
+    render(<CommandPalette commands={commands} isOpen={true} onClose={onClose} />);
 
     const input = screen.getByPlaceholderText("Type a command...");
     fireEvent.change(input, { target: { value: "zzzznonexistent" } });
@@ -76,9 +68,7 @@ describe("CommandPalette", () => {
   });
 
   it("navigates with arrow keys", () => {
-    render(
-      <CommandPalette commands={commands} isOpen={true} onClose={onClose} />,
-    );
+    render(<CommandPalette commands={commands} isOpen={true} onClose={onClose} />);
 
     const dialog = screen.getByRole("dialog").querySelector("div[class*='bg-surface']")!;
 
@@ -93,9 +83,7 @@ describe("CommandPalette", () => {
   });
 
   it("executes command on Enter and closes", () => {
-    render(
-      <CommandPalette commands={commands} isOpen={true} onClose={onClose} />,
-    );
+    render(<CommandPalette commands={commands} isOpen={true} onClose={onClose} />);
 
     const dialog = screen.getByRole("dialog").querySelector("div[class*='bg-surface']")!;
     fireEvent.keyDown(dialog, { key: "Enter" });
@@ -105,9 +93,7 @@ describe("CommandPalette", () => {
   });
 
   it("closes on Escape", () => {
-    render(
-      <CommandPalette commands={commands} isOpen={true} onClose={onClose} />,
-    );
+    render(<CommandPalette commands={commands} isOpen={true} onClose={onClose} />);
 
     const dialog = screen.getByRole("dialog").querySelector("div[class*='bg-surface']")!;
     fireEvent.keyDown(dialog, { key: "Escape" });
@@ -116,18 +102,14 @@ describe("CommandPalette", () => {
   });
 
   it("closes when clicking backdrop", () => {
-    render(
-      <CommandPalette commands={commands} isOpen={true} onClose={onClose} />,
-    );
+    render(<CommandPalette commands={commands} isOpen={true} onClose={onClose} />);
 
     fireEvent.click(screen.getByRole("dialog"));
     expect(onClose).toHaveBeenCalled();
   });
 
   it("executes command on click", () => {
-    render(
-      <CommandPalette commands={commands} isOpen={true} onClose={onClose} />,
-    );
+    render(<CommandPalette commands={commands} isOpen={true} onClose={onClose} />);
 
     fireEvent.click(screen.getByText("Go to Today"));
     expect(commands[1].callback).toHaveBeenCalled();
@@ -135,9 +117,7 @@ describe("CommandPalette", () => {
   });
 
   it("shows hotkey when defined", () => {
-    render(
-      <CommandPalette commands={commands} isOpen={true} onClose={onClose} />,
-    );
+    render(<CommandPalette commands={commands} isOpen={true} onClose={onClose} />);
     expect(screen.getByText("Ctrl+D")).toBeTruthy();
   });
 });

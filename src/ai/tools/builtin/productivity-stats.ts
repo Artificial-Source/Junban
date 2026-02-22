@@ -19,13 +19,11 @@ export function registerProductivityStatsTool(registry: ToolRegistry): void {
         properties: {
           startDate: {
             type: "string",
-            description:
-              "Start date as YYYY-MM-DD. Defaults to 30 days ago if not provided.",
+            description: "Start date as YYYY-MM-DD. Defaults to 30 days ago if not provided.",
           },
           endDate: {
             type: "string",
-            description:
-              "End date as YYYY-MM-DD. Defaults to today if not provided.",
+            description: "End date as YYYY-MM-DD. Defaults to today if not provided.",
           },
         },
       },
@@ -51,8 +49,7 @@ export function registerProductivityStatsTool(registry: ToolRegistry): void {
         const totalMinutes = stats.reduce((sum, s) => sum + s.minutesTracked, 0);
         const daysWithCompletions = stats.filter((s) => s.tasksCompleted > 0).length;
         const daysInRange = stats.length || 1;
-        const avgCompletionsPerDay =
-          Math.round((totalCompleted / daysInRange) * 10) / 10;
+        const avgCompletionsPerDay = Math.round((totalCompleted / daysInRange) * 10) / 10;
 
         // Daily breakdown (last 7 entries for brevity)
         const recentDays = stats.slice(-7).map((s) => ({
@@ -145,9 +142,8 @@ export function registerProductivityStatsTool(registry: ToolRegistry): void {
           completed: completed.filter(
             (t) => t.completedAt && t.completedAt.split("T")[0] === todayISO,
           ).length,
-          created: allTasks.filter(
-            (t) => t.createdAt && t.createdAt.split("T")[0] === todayISO,
-          ).length,
+          created: allTasks.filter((t) => t.createdAt && t.createdAt.split("T")[0] === todayISO)
+            .length,
           minutesTracked: null,
         },
         summary: {
@@ -156,8 +152,7 @@ export function registerProductivityStatsTool(registry: ToolRegistry): void {
           totalMinutesTracked: null,
           daysWithCompletions: completionDates.size,
           daysInRange,
-          avgCompletionsPerDay:
-            Math.round((totalCompleted / daysInRange) * 10) / 10,
+          avgCompletionsPerDay: Math.round((totalCompleted / daysInRange) * 10) / 10,
           netProgress: totalCompleted - totalCreated,
         },
         recentDays: null,

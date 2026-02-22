@@ -25,7 +25,7 @@ vi.mock("../../../src/core/priorities.js", () => ({
 }));
 
 vi.mock("../../../src/ui/components/DatePicker.js", () => ({
-  DatePicker: (props: any) => <div data-testid="date-picker" />,
+  DatePicker: (_props: any) => <div data-testid="date-picker" />,
 }));
 
 vi.mock("../../../src/ui/components/RecurrencePicker.js", () => ({
@@ -107,9 +107,7 @@ describe("TaskItem", () => {
   it("shows priority label in aria for priority tasks", () => {
     const task = makeTask({ priority: 1 });
     render(<TaskItem {...defaultProps} task={task} />);
-    expect(
-      screen.getByLabelText("Complete task (Priority 1)"),
-    ).toBeTruthy();
+    expect(screen.getByLabelText("Complete task (Priority 1)")).toBeTruthy();
   });
 
   it("shows due date when present", () => {
@@ -141,12 +139,7 @@ describe("TaskItem", () => {
 
   it("handles multi-select on ctrl+click", () => {
     const onMultiSelect = vi.fn();
-    render(
-      <TaskItem
-        {...defaultProps}
-        onMultiSelect={onMultiSelect}
-      />,
-    );
+    render(<TaskItem {...defaultProps} onMultiSelect={onMultiSelect} />);
 
     const row = screen.getByRole("button", { name: /Task: My Task/ });
     fireEvent.click(row, { ctrlKey: true });

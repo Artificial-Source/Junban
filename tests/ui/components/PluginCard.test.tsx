@@ -74,12 +74,7 @@ describe("PluginCard — settings mode", () => {
   it("renders Inactive badge when disabled", () => {
     const disabled = { ...settingsPlugin, enabled: false };
     render(
-      <PluginCard
-        mode="settings"
-        plugin={disabled}
-        expanded={false}
-        onToggleExpand={vi.fn()}
-      />,
+      <PluginCard mode="settings" plugin={disabled} expanded={false} onToggleExpand={vi.fn()} />,
     );
     expect(screen.getByText("Inactive")).toBeDefined();
   });

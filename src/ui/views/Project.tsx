@@ -1,12 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  Plus,
-  Trash2,
-  Check,
-  X,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Trash2, Check, X } from "lucide-react";
 import { TaskInput } from "../components/TaskInput.js";
 import { TaskList } from "../components/TaskList.js";
 import { Board } from "./Board.js";
@@ -135,9 +128,7 @@ function SectionHeader({
       )}
 
       {/* Task count */}
-      <span className="text-xs text-on-surface-muted">
-        {taskCount}
-      </span>
+      <span className="text-xs text-on-surface-muted">{taskCount}</span>
 
       {/* Delete button (visible on hover) */}
       <button

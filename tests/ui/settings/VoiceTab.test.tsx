@@ -33,9 +33,7 @@ vi.mock("../../../src/ui/context/VoiceContext.js", () => ({
       listSTT: () => [
         { id: "browser-stt", name: "Browser Speech Recognition", needsApiKey: false },
       ],
-      listTTS: () => [
-        { id: "browser-tts", name: "Browser Speech Synthesis", needsApiKey: false },
-      ],
+      listTTS: () => [{ id: "browser-tts", name: "Browser Speech Synthesis", needsApiKey: false }],
     },
     ttsVoices: [],
     ttsModels: [],

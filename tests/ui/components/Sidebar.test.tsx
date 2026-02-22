@@ -93,9 +93,7 @@ describe("Sidebar", () => {
   it("shows project task counts when provided", () => {
     const projects = [makeProject({ id: "p1", name: "Work" })];
     const counts = new Map([["p1", 5]]);
-    render(
-      <Sidebar {...defaultProps} projects={projects} projectTaskCounts={counts} />,
-    );
+    render(<Sidebar {...defaultProps} projects={projects} projectTaskCounts={counts} />);
     expect(screen.getByText("5")).toBeTruthy();
   });
 
@@ -134,9 +132,7 @@ describe("Sidebar", () => {
   });
 
   it("shows expand button when collapsed", () => {
-    render(
-      <Sidebar {...defaultProps} collapsed={true} onToggleCollapsed={vi.fn()} />,
-    );
+    render(<Sidebar {...defaultProps} collapsed={true} onToggleCollapsed={vi.fn()} />);
     expect(screen.getByLabelText("Expand sidebar")).toBeTruthy();
   });
 

@@ -43,7 +43,7 @@ vi.mock("../../../src/core/import.js", () => ({
 }));
 
 vi.mock("../../../src/ui/views/settings/components.js", () => ({
-  SegmentedControl: ({ options, value, onChange }: any) => (
+  SegmentedControl: ({ options, value: _value, onChange }: any) => (
     <div data-testid="segmented-control">
       {options.map((opt: any) => (
         <button key={opt.value} onClick={() => onChange(opt.value)}>

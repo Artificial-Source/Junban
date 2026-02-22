@@ -33,7 +33,12 @@ describe("KeyboardTab", () => {
   const shortcuts = [
     { id: "new-task", description: "New task", currentKey: "ctrl+n", defaultKey: "ctrl+n" },
     { id: "search", description: "Search", currentKey: "ctrl+k", defaultKey: "ctrl+k" },
-    { id: "custom", description: "Custom action", currentKey: "ctrl+shift+x", defaultKey: "ctrl+x" },
+    {
+      id: "custom",
+      description: "Custom action",
+      currentKey: "ctrl+shift+x",
+      defaultKey: "ctrl+x",
+    },
   ];
 
   beforeEach(() => {

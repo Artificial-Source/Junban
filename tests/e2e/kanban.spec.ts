@@ -30,15 +30,15 @@ test.describe("Kanban / Board view", () => {
     // Verify the board layout renders -- look for column headers
     // The Board component renders columns with <h3> headers for each section name
     // plus a "No section" column
-    await expect(page.getByRole("heading", { name: "No section" }).or(
-      page.getByText("No section").first()
-    )).toBeVisible({ timeout: 5000 });
-    await expect(page.getByRole("heading", { name: "To Do" }).or(
-      page.getByText("To Do").first()
-    )).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Done" }).or(
-      page.getByText("Done").first()
-    )).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "No section" }).or(page.getByText("No section").first()),
+    ).toBeVisible({ timeout: 5000 });
+    await expect(
+      page.getByRole("heading", { name: "To Do" }).or(page.getByText("To Do").first()),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Done" }).or(page.getByText("Done").first()),
+    ).toBeVisible();
 
     // Board columns have a horizontal scrollable layout
     // Verify the flex container exists (the board wrapper)
@@ -115,9 +115,7 @@ test.describe("Kanban / Board view", () => {
     await expect(boardContainer).not.toBeVisible({ timeout: 3000 });
 
     // The project should still be viewable (with its name heading visible)
-    await expect(
-      page.getByRole("heading", { name: "Fallback Board", level: 1 })
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fallback Board", level: 1 })).toBeVisible();
 
     // Re-enable kanban for cleanup
     await page.request.put("/api/settings/feature_kanban", {

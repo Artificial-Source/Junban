@@ -55,9 +55,7 @@ export function createMockSettings(overrides: Record<string, unknown> = {}) {
     },
     loaded: true,
     updateSetting: vi.fn(),
-    ...Object.fromEntries(
-      Object.entries(overrides).filter(([k]) => k !== "settings"),
-    ),
+    ...Object.fromEntries(Object.entries(overrides).filter(([k]) => k !== "settings")),
   };
 }
 

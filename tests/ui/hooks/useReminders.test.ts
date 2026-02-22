@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderHook } from "@testing-library/react";
 
 const mockFetchDueReminders = vi.fn().mockResolvedValue([]);
 const mockUpdateTask = vi.fn().mockResolvedValue(undefined);

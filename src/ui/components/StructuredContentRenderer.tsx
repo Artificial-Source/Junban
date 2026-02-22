@@ -85,8 +85,7 @@ const progressColorClasses: Record<string, string> = {
 };
 
 const buttonVariantClasses: Record<string, string> = {
-  primary:
-    "bg-accent text-white hover:bg-accent-hover active:scale-[0.97] font-medium",
+  primary: "bg-accent text-white hover:bg-accent-hover active:scale-[0.97] font-medium",
   secondary:
     "bg-surface-tertiary text-on-surface hover:bg-surface-tertiary/80 active:scale-[0.97] border border-border",
   ghost:
@@ -114,14 +113,16 @@ const spacerClasses: Record<string, string> = {
 
 // ── Element renderers ──
 
-function RenderElement({ element, onCommand }: { element: UIElement; onCommand: (id: string) => void }) {
+function RenderElement({
+  element,
+  onCommand,
+}: {
+  element: UIElement;
+  onCommand: (id: string) => void;
+}) {
   switch (element.type) {
     case "text":
-      return (
-        <div className={textVariantClasses[element.variant ?? "body"]}>
-          {element.value}
-        </div>
-      );
+      return <div className={textVariantClasses[element.variant ?? "body"]}>{element.value}</div>;
 
     case "badge":
       return (
@@ -190,10 +191,7 @@ interface StructuredContentRendererProps {
   onCommand?: (commandId: string) => void;
 }
 
-export function StructuredContentRenderer({
-  content,
-  onCommand,
-}: StructuredContentRendererProps) {
+export function StructuredContentRenderer({ content, onCommand }: StructuredContentRendererProps) {
   const handleCommand = async (commandId: string) => {
     if (onCommand) {
       onCommand(commandId);
@@ -203,9 +201,7 @@ export function StructuredContentRenderer({
   };
 
   const layoutClasses =
-    content.layout === "center"
-      ? "flex flex-col items-center gap-4"
-      : "flex flex-col gap-3";
+    content.layout === "center" ? "flex flex-col items-center gap-4" : "flex flex-col gap-3";
 
   return (
     <div className={layoutClasses}>

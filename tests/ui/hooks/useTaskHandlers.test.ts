@@ -26,7 +26,10 @@ vi.mock("../../../src/ui/context/TaskContext.js", () => ({
 }));
 
 vi.mock("../../../src/ui/hooks/useSoundEffect.js", () => ({
-  useSoundEffect: () => (...args: any[]) => mockPlaySound(...args),
+  useSoundEffect:
+    () =>
+    (...args: any[]) =>
+      mockPlaySound(...args),
 }));
 
 vi.mock("../../../src/ui/api/index.js", () => ({
@@ -87,9 +90,7 @@ describe("useTaskHandlers", () => {
       });
     });
 
-    expect(mockCreateTask).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: "p1" }),
-    );
+    expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p1" }));
   });
 
   it("handleCreateTask does not create task for empty title", async () => {
@@ -225,9 +226,7 @@ describe("useTaskHandlers", () => {
     });
 
     expect(result.current.selectedTaskId).toBe("t1");
-    expect(result.current.selectedTask).toEqual(
-      expect.objectContaining({ id: "t1" }),
-    );
+    expect(result.current.selectedTask).toEqual(expect.objectContaining({ id: "t1" }));
   });
 
   it("handleCloseDetail clears selectedTaskId", () => {

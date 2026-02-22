@@ -1,39 +1,47 @@
 # Project Status
 
-Quick-reference for what's done, what's in progress, and what's still missing. Updated 2026-02-22.
+Quick-reference for what's done, what's in progress, and what's still missing. Updated 2026-02-23.
 
 ## Completion Overview
 
 | Area | Done | Remaining | Status |
 |------|------|-----------|--------|
 | Foundation & Infrastructure | 16/16 | 0 | Complete |
-| Core — Task CRUD | 15/15 | 0 | Complete |
-| Parser & NLP | 7/7 | 0 | Complete |
-| UI — Views & Components | 34/35 | 1 | Logo design pending |
+| Core — Task CRUD | 19/19 | 0 | Complete |
+| Parser & NLP | 8/8 | 0 | Complete |
+| UI — Views & Components | 40/41 | 1 | Logo design pending |
 | CLI | 7/8 | 1 | Fuzzy picker idea |
 | Plugin System | 21/21 | 0 | Complete |
-| AI Assistant | 45/57 | 12 | Core done; ideas pending |
-| Storage & Data | 12/12 | 0 | Complete |
-| Testing | 10/10 | 0 | 96 test files, 1773+ tests |
+| AI Assistant | 46/58 | 12 | Core done; ideas pending |
+| Storage & Data | 13/13 | 0 | Complete |
+| Testing | 10/10 | 0 | 153 test files, 1774+ tests |
 | Hardening & Quality | 17/17 | 0 | Complete |
 | Frontend Enhancements | 25/25 | 0 | Complete |
 | QA — Bugs | 14/14 | 0 | Complete |
 | Documentation | 15/15 | 0 | Complete |
-| **Total** | **224/238** | **14** | **94% complete** |
+| **Total** | **251/265** | **14** | **95% complete** |
 
 ## What's Fully Done
 
 - Task CRUD with subtasks, templates, recurrence, filters, priorities
 - SQLite + Markdown dual storage backends
 - 55 React components, 24 views, 13 hooks, 6 contexts
-- AI assistant with 27 tools, 8 providers, chat persistence
+- AI assistant with 28 tools, 8 providers, chat persistence
 - Voice I/O: 8 adapters (STT/TTS), VAD, Web Workers
 - Plugin system with sandboxing, permissions, lifecycle, registry
 - CLI companion with 5 commands
 - Tauri desktop app scaffold + auto-updater
 - CI/CD pipeline (GitHub Actions)
 - Design token system, accessibility audit, performance optimization
-- 96 test files, 1773+ passing tests
+- Project sections with CRUD and drag-and-drop reordering
+- Kanban board view with DnD Kit
+- Productivity stats service, view, and AI tool
+- Task comments and activity tracking
+- Cancelled tasks view, Someday/Maybe view
+- Task deadlines and time estimates with NLP support
+- ChordIndicator for composable multi-key keyboard shortcuts
+- Features settings tab with 9 toggleable features
+- 153 test files, 1774+ passing tests (including 12 Playwright E2E specs)
 
 ## What's Missing
 
@@ -50,7 +58,7 @@ Quick-reference for what's done, what's in progress, and what's still missing. U
 |----|------|-----|
 | A-37 | Weekly review & analytics (`weekly_review` tool) | Completion rates, trends, neglected projects. |
 | A-39 | Meeting notes to tasks (`extract_tasks_from_text` tool) | Paste text, get structured tasks. High utility. |
-| A-36 | AI time estimation (`estimatedMinutes` field) | Track estimates vs actuals. Schema change needed. |
+| A-36 | AI time estimation (track actuals vs estimates) | `estimatedMinutes` field done in S35. Remaining: track actual times, show accuracy stats. |
 
 #### AI Tools — Medium Value
 | ID | Item | Why |
@@ -96,7 +104,6 @@ Quick-reference for what's done, what's in progress, and what's still missing. U
 - CalDAV sync plugin (Nextcloud, iCloud, Google Calendar)
 - Git sync plugin (free alternative to Saydo Sync)
 - WebDAV sync plugin (self-hosted)
-- Kanban board plugin (column-based views)
 - Time tracking plugin (with reports)
 - Habit tracker plugin (streaks)
 - Discord reminder plugin
@@ -107,7 +114,7 @@ Quick-reference for what's done, what's in progress, and what's still missing. U
 
 ## Sprint History
 
-34 sprints completed. See [SPRINTS.md](../planning/SPRINTS.md) for full history.
+35 sprints completed. See [SPRINTS.md](../planning/SPRINTS.md) for full history.
 
 | Sprint | Theme | Tests After |
 |--------|-------|-------------|
@@ -145,10 +152,11 @@ Quick-reference for what's done, what's in progress, and what's still missing. U
 | S32 | Frontend Enhancements | 1018+ |
 | S33 | QA & Polish | 1773 |
 | S34 | Plugin Slot System | 1773 |
+| S35 | v2.0 Big Features | 1774 |
 
 ## Known Technical Debt
 
 1. **`src/main.ts:24`** — TODO: Start UI or CLI based on context (currently assumes UI)
 2. **Roadmap `v1.5` line** — "Local AI voice models" marked as "testing in progress" but actually done (S24)
-3. **No E2E tests** — Unit/integration coverage is strong but no Playwright/Cypress browser tests yet
+3. **E2E tests started** — 12 Playwright E2E spec files added in S35; expand coverage for remaining views
 4. **No `.env` committed** — Only `.env.example` exists; new devs need to create `.env` manually

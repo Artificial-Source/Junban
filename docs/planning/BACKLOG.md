@@ -52,6 +52,10 @@ All work items for ASF Saydo, organized by area and prioritized within each sect
 | C-13 | Bulk operations (complete all, move, tag multiple) | done | S9 | Multi-select + bulk complete/move/tag/delete |
 | C-14 | Sub-tasks (nested hierarchy with parentId) | done | S15 | Self-ref FK, cascade delete/complete, indent/outdent |
 | C-15 | Task templates (reusable with {{variables}}) | done | S16 | TemplateService, instantiate with substitution |
+| C-16 | Project sections service (CRUD + reordering) | done | S35 | SectionsService with drag-and-drop reorder |
+| C-17 | Productivity stats service | done | S35 | StatsService: daily completions, streaks, trends |
+| C-18 | Task comments and activity tracking | done | S35 | Comments CRUD + automatic activity log on task changes |
+| C-19 | Task deadlines and time estimates | done | S35 | deadline, estimatedMinutes fields on tasks |
 
 ## Parser & NLP
 
@@ -64,6 +68,7 @@ All work items for ASF Saydo, organized by area and prioritized within each sect
 | P-05 | Integrated task parser | done | — | Tested, 11 tests |
 | P-06 | Parser inline preview (show parsed result as user types) | done | S2 | UI feature |
 | P-07 | Natural language queries ("what's due this week?") | done | S16 | query-parser.ts + QueryBar component |
+| P-08 | NLP deadline and duration parsing | done | S35 | Parse "deadline Friday" and "~2h" / "~30m" in task input |
 
 ## UI — Views & Components
 
@@ -104,6 +109,12 @@ All work items for ASF Saydo, organized by area and prioritized within each sect
 | U-33 | View completed task details | done | S30 | Completed tasks clickable to view details. GH #29 |
 | U-34 | Fix task creation error | done | S30 | Empty title guard in useTaskHandlers. GH #30 |
 | U-35 | Design proper SVG logo | ready | — | Current placeholder needs redesign. Use specialized design app for final logo. |
+| U-36 | Board / Kanban view | done | S35 | Drag-and-drop columns (by section/status/priority) via DnD Kit |
+| U-37 | Cancelled tasks view | done | S35 | Filtered view for cancelled tasks with restore action |
+| U-38 | Someday / Maybe view | done | S35 | Dedicated view for deferred tasks, hidden from Today/Upcoming |
+| U-39 | Stats / Productivity view | done | S35 | Daily/weekly completion charts, streaks, trends |
+| U-40 | ChordIndicator component | done | S35 | Visual indicator for multi-key shortcut chords (G+I, G+T, etc.) |
+| U-41 | Features settings tab | done | S35 | 9 toggleable features in Settings (board view, stats, comments, etc.) |
 
 ## CLI
 
@@ -205,6 +216,7 @@ All work items for ASF Saydo, organized by area and prioritized within each sect
 | A-55 | Link task titles in AI chat responses | done | S31 | saydo://task/<id> links intercepted in markdown renderer. GH #27 |
 | A-56 | TTS UX improvements (voice preview, audio overlap fix) | done | S30 | Voice preview button + cancellable AudioPlayback handles. GH #31 |
 | A-57 | Smart voice detection for call mode | done | S31 | Grace period buffering in useVAD, smart endpoint toggle + slider in Voice settings. GH #32 |
+| A-58 | Productivity stats AI tool | done | S35 | `productivity_stats` tool: query daily/weekly stats, streaks, trends via AI chat |
 
 ## Storage & Data
 
@@ -222,6 +234,7 @@ All work items for ASF Saydo, organized by area and prioritized within each sect
 | D-10 | sql.js WebView client + bundled migrations | done | S8 | client-web.ts, migrate-web.ts |
 | D-11 | Tauri FS persistence (load/save SQLite) | done | S8 | persistence.ts via @tauri-apps/plugin-fs |
 | D-12 | Add remindAt column to tasks | done | S19 | Migration 0004_silky_karnak.sql |
+| D-13 | New tables: daily_stats, sections, task_comments, task_activity | done | S35 | Migration 0006; deadline + estimatedMinutes columns on tasks |
 
 ## Testing
 
@@ -337,16 +350,16 @@ Competitive parity features drawn from Todoist, TickTick, Linear, Things 3, Noti
 
 | ID | Item | Status | Sprint | Notes |
 |----|------|--------|--------|-------|
-| V2-01 | Task duration / time estimates | ready | — | Add `estimatedMinutes` field. Show daily total in Today view ("3h 20m planned"). Capacity feedback. Inspired by TickTick, Akiflow, Sunsama, Marvin. |
-| V2-02 | Sections within projects | ready | — | Named groups inside a project (e.g., "Design", "Backend"). Become Kanban columns in board view. Inspired by Todoist, TickTick, Things 3. |
-| V2-03 | Kanban / Board view | ready | — | Tasks as cards in columns (by section, status, or priority). Drag between columns. Inspired by Todoist, TickTick, Notion, Linear. |
+| V2-01 | Task duration / time estimates | done | S35 | `estimatedMinutes` field on tasks. NLP parsing for `~2h` / `~30m`. Inspired by TickTick, Akiflow, Sunsama, Marvin. |
+| V2-02 | Sections within projects | done | S35 | SectionsService with CRUD + drag-and-drop reordering. Columns in Board view. Inspired by Todoist, TickTick, Things 3. |
+| V2-03 | Kanban / Board view | done | S35 | Board.tsx with DnD Kit. Columns by section, status, or priority. Drag between columns. Inspired by Todoist, TickTick, Notion, Linear. |
 | V2-04 | Task description with Markdown | ready | — | Rich text in descriptions: bold, italic, code blocks, checklists, links. Render with markdown. Inspired by Todoist, Notion, Things 3. |
-| V2-05 | "When" date vs. Deadline | ready | — | Two date fields: "when I plan to work on it" (soft, controls Today/Upcoming visibility) vs. "hard deadline" (shows warnings). Inspired by Things 3. |
-| V2-06 | Cancelled tasks view | ready | — | Dedicated filtered view for cancelled/won't-do tasks, separate from Completed. Extends existing U-27 status support. Inspired by TickTick. |
-| V2-07 | Composable keyboard shortcuts | ready | — | Pattern-based: `G+I` (go inbox), `G+T` (go today), `G+U` (go upcoming). Single-key in lists: `S` status, `P` priority, `L` label. Inspired by Linear, Akiflow. |
-| V2-08 | Productivity stats & streaks | ready | — | Daily/weekly completion counts, streak tracking, "best day" identification. Stats view in sidebar or settings. Inspired by Todoist Karma, TickTick. |
-| V2-09 | Task comments & activity log | ready | — | Timestamped log of changes per task. Optional user comments/notes with timestamps. Inspired by Todoist, Linear. |
-| V2-10 | Someday / Maybe list | ready | — | Smart list for "not now but eventually" tasks. Hidden from Today/Upcoming to reduce noise. Inspired by Things 3, Akiflow, Amazing Marvin. |
+| V2-05 | "When" date vs. Deadline | done | S35 | `dueDate` (soft, Today/Upcoming) + `deadline` (hard, warnings). NLP: "deadline Friday". Inspired by Things 3. |
+| V2-06 | Cancelled tasks view | done | S35 | Cancelled.tsx with restore action. Separate from Completed. Extends U-27 status support. Inspired by TickTick. |
+| V2-07 | Composable keyboard shortcuts | done | S35 | ChordIndicator component. `G+I` (go inbox), `G+T` (go today), etc. Inspired by Linear, Akiflow. |
+| V2-08 | Productivity stats & streaks | done | S35 | StatsService + Stats.tsx view + `productivity_stats` AI tool. Daily/weekly counts, streaks. Inspired by Todoist Karma, TickTick. |
+| V2-09 | Task comments & activity log | done | S35 | task_comments + task_activity tables. Comments CRUD + auto activity log. Inspired by Todoist, Linear. |
+| V2-10 | Someday / Maybe list | done | S35 | Someday.tsx view. Hidden from Today/Upcoming. Inspired by Things 3, Akiflow, Amazing Marvin. |
 
 ## v2.0 — Smart Features (Tier 2)
 

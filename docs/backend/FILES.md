@@ -19,6 +19,7 @@ Complete index of every non-UI source file in `src/`. Sorted by directory, then 
 | `analyze-patterns.ts` | `src/ai/tools/builtin/analyze-patterns.ts` | 154 | analyze_completion_patterns tool -- productivity pattern mining |
 | `analyze-workload.ts` | `src/ai/tools/builtin/analyze-workload.ts` | 249 | analyze_workload and check_overcommitment tools |
 | `energy-recommendations.ts` | `src/ai/tools/builtin/energy-recommendations.ts` | 145 | get_energy_recommendations tool -- energy-aware task planning |
+| `productivity-stats.ts` | `src/ai/tools/builtin/productivity-stats.ts` | 163 | get_productivity_stats tool -- streaks, completion counts, daily breakdown |
 | `project-crud.ts` | `src/ai/tools/builtin/project-crud.ts` | 247 | Project CRUD tools: create, list, get, update, delete (supports icon, parentId, isFavorite, viewStyle) |
 | `query-tasks.ts` | `src/ai/tools/builtin/query-tasks.ts` | 93 | query_tasks tool -- flexible task search/filter with TaskFilter |
 | `reminder-tools.ts` | `src/ai/tools/builtin/reminder-tools.ts` | 196 | Reminder tools: list, set, snooze, dismiss |
@@ -67,6 +68,8 @@ Complete index of every non-UI source file in `src/`. Sorted by directory, then 
 | `projects.ts` | `src/core/projects.ts` | 80 | ProjectService -- project CRUD with archive, parentId, isFavorite, viewStyle |
 | `query-parser.ts` | `src/core/query-parser.ts` | 171 | Natural language query to TaskFilter parser |
 | `recurrence.ts` | `src/core/recurrence.ts` | 46 | Recurring task next-occurrence calculator |
+| `sections.ts` | `src/core/sections.ts` | 105 | SectionService -- project section CRUD (create, list, get, update, delete, reorder) |
+| `stats.ts` | `src/core/stats.ts` | 167 | StatsService -- daily productivity metrics, streak tracking, completion/creation counts |
 | `tags.ts` | `src/core/tags.ts` | 44 | TagService -- tag CRUD |
 | `tasks.ts` | `src/core/tasks.ts` | 435 | TaskService -- task CRUD, subtasks, batch ops, recurrence |
 | `templates.ts` | `src/core/templates.ts` | 133 | TemplateService -- task template CRUD with variable substitution |
@@ -109,5 +112,5 @@ Complete index of every non-UI source file in `src/`. Sorted by directory, then 
 | `main.ts` | `src/main.ts` | 27 | Entry point -- loads env, bootstraps services, loads plugins |
 | `vite-env.d.ts` | `src/vite-env.d.ts` | 7 | Vite type declarations for SQL raw imports |
 
-**Total non-UI source files:** 86
-**Total non-UI lines of code:** 11,259
+**Total non-UI source files:** 89
+**Total non-UI lines of code:** 11,694

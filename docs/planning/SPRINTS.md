@@ -23,7 +23,7 @@ Two-week sprint cycles. Each sprint has a clear goal and pulls items from the [B
 
 ## Sprint History
 
-34 sprints completed. Individual sprint details are in [`sprints/`](sprints/).
+35 sprints completed. Individual sprint details are in [`sprints/`](sprints/).
 
 | Sprint | Theme | Tests | Details |
 |--------|-------|-------|---------|
@@ -61,6 +61,7 @@ Two-week sprint cycles. Each sprint has a clear goal and pulls items from the [B
 | [S32](sprints/S32-frontend-enhancements.md) | Frontend Enhancements | 1018+ | 23 UI polish items |
 | [S33](sprints/S33-qa-polish.md) | QA & Polish | 1773 | 13 bugs, 2 AI tools, Today redesign |
 | [S34](sprints/S34-plugin-slot-system.md) | Plugin Slot System | 1773 | View slots, structured content, Pomodoro rewrite |
+| [S35](sprints/S35-big-features.md) | Big Features | 1774 | Kanban board, stats, comments, sections, cancelled/someday views |
 
 ---
 
@@ -70,4 +71,4 @@ See [BACKLOG.md](BACKLOG.md) for all items.
 
 | Sprint | Theme | Key Items |
 |--------|-------|-----------|
-| S35+ | Saydo Sync | Sync server, user accounts, E2E encryption |
+| S36+ | Saydo Sync | Sync server, user accounts, E2E encryption |

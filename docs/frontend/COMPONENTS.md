@@ -951,3 +951,15 @@ Extracted sub-components used by `AIChatPanel.tsx`. Each handles a single concer
 - **Key Dependencies:** None
 - **Used By:** `Today.tsx` (header)
 - **Notes:** Uses SVG `stroke-dasharray` / `stroke-dashoffset` for the progress arc. Shows `completed/total` text. Includes `aria-label` for accessibility. Track color: `surface-tertiary`, progress color: `accent`.
+
+---
+
+### ChordIndicator.tsx
+
+- **Path:** `src/ui/components/ChordIndicator.tsx` (30 lines)
+- **Purpose:** Small floating pill at the bottom of the screen that displays the pending chord key while the user is mid-chord (e.g., pressed "g", waiting for the second key).
+- **Key Exports:** `ChordIndicator`
+- **Props:** None
+- **Key Dependencies:** `useSyncExternalStore` (React), `shortcutManager` singleton from `shortcutManagerInstance.js`
+- **Used By:** `App.tsx`
+- **Notes:** Uses `useSyncExternalStore` to subscribe to `shortcutManager.onChordChange()` and read `shortcutManager.getPendingChord()`. Returns `null` when no chord is pending. Renders a fixed-position pill (`bottom-20`, horizontally centered, `z-50`) with a styled `<kbd>` element showing the pending key in uppercase and a "then ..." hint. Uses `animate-fade-in` entrance animation.

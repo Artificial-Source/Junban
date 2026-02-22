@@ -58,6 +58,32 @@ The `src/core/` directory contains the heart of the Saydo application: task mana
 
 ---
 
+### `sections.ts`
+**Path:** `src/core/sections.ts`
+**Lines:** 105
+**Purpose:** Manages project sections (groups of tasks within a project). Sections allow users to organize tasks into logical groups (e.g., "To Do", "In Progress", "Done" for board view).
+**Key Exports:**
+- `SectionService` -- class with methods: `create`, `list`, `get`, `update`, `delete`, `reorder`
+**Key Dependencies:**
+- `IStorage`, `EventBus`, `generateId`, `NotFoundError`, `createLogger`
+**Used By:**
+- `src/bootstrap.ts`, `src/bootstrap-web.ts`
+
+---
+
+### `stats.ts`
+**Path:** `src/core/stats.ts`
+**Lines:** 167
+**Purpose:** Tracks daily productivity metrics and streaks. Records task creation/completion counts per day, tracks minutes worked, and calculates consecutive-day completion streaks.
+**Key Exports:**
+- `StatsService` -- class with methods: `recordTaskCreated`, `recordTaskCompleted`, `getToday`, `getStats`, `getCurrentStreak`, `getBestStreak`
+**Key Dependencies:**
+- `IStorage`, `DailyStatRow`, `generateId`, `createLogger`
+**Used By:**
+- `src/bootstrap.ts`, `src/bootstrap-web.ts`, `src/ai/tools/builtin/productivity-stats.ts`
+
+---
+
 ## Logic
 
 ### `priorities.ts`

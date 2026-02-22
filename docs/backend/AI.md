@@ -2,7 +2,7 @@
 
 The AI subsystem (`src/ai/`) implements Saydo's conversational AI assistant. It provides a pluggable multi-provider LLM architecture with a middleware pipeline, a tool calling system, and session management. The subsystem is designed so that AI is entirely optional: no AI code runs unless the user configures a provider.
 
-**Total files:** 29 | **Total lines:** 3,778
+**Total files:** 30 | **Total lines:** 3,941
 
 ---
 
@@ -326,7 +326,7 @@ Done (yield StreamEvents to UI)
 **Purpose:** Type definitions for the extensible tool system. Shared by built-in tools and plugin-contributed tools.
 **Key Exports:**
 - `ToolDefinition` — `{ name, description, parameters }` (JSON Schema format for LLMs)
-- `ToolContext` — `{ taskService, projectService, tagService? }` (services available to tool executors)
+- `ToolContext` — `{ taskService, projectService, tagService?, statsService? }` (services available to tool executors)
 - `ToolExecutor` — `(args, ctx) => Promise<string>` (returns JSON string)
 - `RegisteredTool` — `{ definition, executor, source }` (source is `"builtin"` or a plugin ID)
 **Key Dependencies:** `TaskService`, `ProjectService`, `TagService`
@@ -556,6 +556,25 @@ Always returns at least one recommendation even if it exceeds the time budget.
 
 ---
 
+#### `productivity-stats.ts`
+**Path:** `src/ai/tools/builtin/productivity-stats.ts`
+**Lines:** 163
+**Purpose:** Productivity statistics tool. Returns current and best streaks, daily completion/creation counts, time tracked, net progress, and a recent 7-day breakdown. Uses `StatsService` when available for accurate persisted data; falls back to task-based computation otherwise.
+**Registered Tools:**
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `get_productivity_stats` | Get streak, completion counts, and daily trends | `startDate` (YYYY-MM-DD, default 30 days ago), `endDate` (YYYY-MM-DD, default today) |
+
+Returns: `{ range, currentStreak, bestStreak, today: { completed, created, minutesTracked }, summary: { totalCompleted, totalCreated, totalMinutesTracked, daysWithCompletions, daysInRange, avgCompletionsPerDay, netProgress }, recentDays }`
+
+**Fallback behavior:** When `StatsService` is unavailable (e.g., Markdown storage mode), computes statistics from task `completedAt` and `createdAt` fields. `bestStreak`, `minutesTracked`, and `recentDays` are `null` in fallback mode.
+
+**Key Dependencies:** `ToolRegistry`, `StatsService` (optional via `ToolContext`)
+**Used By:** `provider.ts` (registration)
+
+---
+
 ## Tool Summary
 
 | Tool Name | Category | Description |
@@ -585,3 +604,4 @@ Always returns at least one recommendation even if it exceeds the time budget.
 | `find_similar_tasks` | Smart Organize | Duplicate/similar task detection |
 | `check_duplicates` | Smart Organize | Title similarity check |
 | `get_energy_recommendations` | Analytics | Energy-aware task suggestions |
+| `get_productivity_stats` | Analytics | Streak, completion counts, daily trends |

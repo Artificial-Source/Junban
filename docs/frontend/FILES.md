@@ -20,11 +20,14 @@
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `src/ui/api/index.ts` | 28 | Barrel export. Combines all submodules into unified `api` object. Re-exports types. |
+| `src/ui/api/index.ts` | 40 | Barrel export. Combines all submodules into unified `api` object. Re-exports types. |
 | `src/ui/api/helpers.ts` | 45 | Shared utilities: `isTauri`, `BASE` URL, `handleResponse`, `handleVoidResponse`, lazy `getServices`. |
 | `src/ui/api/tasks.ts` | 237 | Task CRUD, bulk operations, tree/subtask ops, reminders, reorder, import. |
 | `src/ui/api/projects.ts` | 80 | Project CRUD (list, create, update, delete) and tag listing. |
 | `src/ui/api/templates.ts` | 78 | Template CRUD and instantiation with variable interpolation. |
+| `src/ui/api/comments.ts` | 74 | Task comment CRUD (list, add, update, delete) and task activity listing. |
+| `src/ui/api/sections.ts` | 72 | Project section CRUD (list, create, update, delete) and reorder. |
+| `src/ui/api/stats.ts` | 24 | Productivity stats: daily stats for date range and today. |
 | `src/ui/api/plugins.ts` | 269 | Plugin management, commands, UI registry, permissions, store, install/uninstall, toggle. |
 | `src/ui/api/ai.ts` | 462 | AI provider config, SSE chat streaming, model discovery, load/unload, chat sessions (list, rename, delete, switch, create new). |
 | `src/ui/api/settings.ts` | 65 | App settings get/set, storage info, data export. |
@@ -122,6 +125,7 @@
 | `src/ui/components/EmptyState.tsx` | 26 | Reusable empty state with icon, title, description, and optional action. |
 | `src/ui/components/Skeleton.tsx` | 45 | Skeleton loading components (SkeletonLine, SkeletonTaskItem, SkeletonTaskList). |
 | `src/ui/components/CompletionRing.tsx` | 45 | SVG circle progress ring for daily completion stats. |
+| `src/ui/components/ChordIndicator.tsx` | 30 | Floating pill showing pending chord key while mid-chord (e.g., pressed "g", waiting for second key). |
 | `src/ui/components/ErrorBoundary.tsx` | 57 | React error boundary with fallback UI. |
 
 ---
@@ -135,6 +139,10 @@
 | `src/ui/views/Upcoming.tsx` | 176 | Date-grouped upcoming tasks + overdue section. |
 | `src/ui/views/Project.tsx` | 79 | Single project view. |
 | `src/ui/views/Completed.tsx` | 160 | Completed tasks grouped by date with project filter. |
+| `src/ui/views/Cancelled.tsx` | 157 | Cancelled tasks grouped by cancellation date with restore action. |
+| `src/ui/views/Someday.tsx` | 75 | Someday/Maybe parked tasks view with activate action. |
+| `src/ui/views/Board.tsx` | 313 | Kanban board with draggable task cards and droppable section columns. |
+| `src/ui/views/Stats.tsx` | 213 | Productivity stats: 4 stat cards + 7-day completion bar chart. |
 | `src/ui/views/FiltersLabels.tsx` | 283 | Saved filters and tag/label management. |
 | `src/ui/views/TaskPage.tsx` | 183 | Full-page task detail view. |
 | `src/ui/views/PluginView.tsx` | 70 | Plugin view renderer with text and structured content support. Accepts `viewInfo` prop for contentType/slot. |
@@ -165,6 +173,7 @@
 | `src/ui/views/settings/TemplatesTab.tsx` | 295 | Template CRUD with variable syntax support. |
 | `src/ui/views/settings/KeyboardTab.tsx` | 92 | Keyboard shortcut customization with recording. |
 | `src/ui/views/settings/DataTab.tsx` | 293 | Storage info, export (JSON/CSV/MD), import with preview. |
+| `src/ui/views/settings/FeaturesTab.tsx` | 82 | Feature flag toggles for optional features (sections, kanban, stats, etc.). |
 | `src/ui/views/settings/AboutTab.tsx` | 313 | App info, update checker, open source credits. |
 
 ---
@@ -218,14 +227,14 @@
 | Category | Files | Total Lines |
 |----------|-------|-------------|
 | Root files | 5 | 1,101 |
-| API layer | 8 | 1,264 |
-| Components | 41 | 6,282 |
+| API layer | 11 | 1,446 |
+| Components | 42 | 6,312 |
 | Chat sub-components | 12 | 1,677 |
 | Plugin components | 2 | 1,216 |
-| Views | 11 | 1,664 |
+| Views | 15 | 2,422 |
 | Calendar sub-views | 4 | 706 |
-| Settings tabs | 11 | 2,855 |
+| Settings tabs | 12 | 2,937 |
 | Context providers | 6 | 1,415 |
 | Hooks | 13 | 1,343 |
 | Theme system | 4 | 161 |
-| **Total** | **117** | **19,684** |
+| **Total** | **126** | **20,736** |

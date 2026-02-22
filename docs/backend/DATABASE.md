@@ -6,7 +6,7 @@ The database layer spans two directories: `src/db/` (SQLite-specific code includ
 
 ## Database Schema
 
-Defined in `src/db/schema.ts` using Drizzle ORM. Seven tables:
+Defined in `src/db/schema.ts` using Drizzle ORM. Eleven tables:
 
 ### `tasks`
 | Column | Type | Constraints |
@@ -24,6 +24,10 @@ Defined in `src/db/schema.ts` using Drizzle ORM. Seven tables:
 | `parent_id` | TEXT | FK -> tasks.id (self-ref), ON DELETE CASCADE |
 | `remind_at` | TEXT | nullable, ISO 8601 |
 | `sort_order` | INTEGER | NOT NULL, default 0 |
+| `estimated_minutes` | INTEGER | nullable |
+| `deadline` | TEXT | nullable, ISO 8601 |
+| `is_someday` | INTEGER (boolean) | NOT NULL, default false |
+| `section_id` | TEXT | FK -> sections.id, ON DELETE SET NULL |
 | `created_at` | TEXT | NOT NULL, ISO 8601 |
 | `updated_at` | TEXT | NOT NULL, ISO 8601 |
 
@@ -92,15 +96,56 @@ Defined in `src/db/schema.ts` using Drizzle ORM. Seven tables:
 | `tool_calls` | TEXT | nullable (JSON) |
 | `created_at` | TEXT | NOT NULL |
 
+### `sections`
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | TEXT | PRIMARY KEY |
+| `project_id` | TEXT | NOT NULL, FK -> projects.id, ON DELETE CASCADE |
+| `name` | TEXT | NOT NULL |
+| `sort_order` | INTEGER | NOT NULL, default 0 |
+| `is_collapsed` | INTEGER (boolean) | NOT NULL, default false |
+| `created_at` | TEXT | NOT NULL |
+
+### `task_comments`
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | TEXT | PRIMARY KEY |
+| `task_id` | TEXT | NOT NULL, FK -> tasks.id, ON DELETE CASCADE |
+| `content` | TEXT | NOT NULL |
+| `created_at` | TEXT | NOT NULL |
+| `updated_at` | TEXT | NOT NULL |
+
+### `task_activity`
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | TEXT | PRIMARY KEY |
+| `task_id` | TEXT | NOT NULL, FK -> tasks.id, ON DELETE CASCADE |
+| `action` | TEXT | NOT NULL |
+| `field` | TEXT | nullable |
+| `old_value` | TEXT | nullable |
+| `new_value` | TEXT | nullable |
+| `created_at` | TEXT | NOT NULL |
+
+### `daily_stats`
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | TEXT | PRIMARY KEY |
+| `date` | TEXT | NOT NULL, UNIQUE |
+| `tasks_completed` | INTEGER | NOT NULL, default 0 |
+| `tasks_created` | INTEGER | NOT NULL, default 0 |
+| `minutes_tracked` | INTEGER | NOT NULL, default 0 |
+| `streak` | INTEGER | NOT NULL, default 0 |
+| `created_at` | TEXT | NOT NULL |
+
 ---
 
 ## Database Files
 
 ### `schema.ts`
 **Path:** `src/db/schema.ts`
-**Lines:** 86
-**Purpose:** Drizzle ORM table definitions. Source of truth for the database schema. All seven tables are defined here using `sqliteTable`.
-**Key Exports:** `tasks`, `projects`, `tags`, `taskTags`, `pluginSettings`, `appSettings`, `taskTemplates`, `chatMessages` (Drizzle table objects)
+**Lines:** 139
+**Purpose:** Drizzle ORM table definitions. Source of truth for the database schema. All eleven tables are defined here using `sqliteTable`.
+**Key Exports:** `tasks`, `projects`, `tags`, `taskTags`, `pluginSettings`, `appSettings`, `taskTemplates`, `chatMessages`, `sections`, `taskComments`, `taskActivity`, `dailyStats` (Drizzle table objects)
 **Key Dependencies:** `drizzle-orm/sqlite-core`
 **Used By:** `src/db/client.ts`, `src/db/client-web.ts`, `src/db/queries.ts`, `src/storage/sqlite-backend.ts`
 
@@ -174,12 +219,12 @@ Defined in `src/db/schema.ts` using Drizzle ORM. Seven tables:
 
 ### `interface.ts`
 **Path:** `src/storage/interface.ts`
-**Lines:** 146
+**Lines:** 222
 **Purpose:** Defines the `IStorage` interface and all row types. Both SQLite and Markdown backends implement this interface, making the storage engine interchangeable.
 **Key Exports:**
-- Row types: `TaskRow`, `ProjectRow`, `TagRow`, `TaskTagJoin`, `PluginSettingsRow`, `AppSettingRow`, `ChatMessageRow`, `TemplateRow`
+- Row types: `TaskRow`, `ProjectRow`, `TagRow`, `TaskTagJoin`, `PluginSettingsRow`, `AppSettingRow`, `ChatMessageRow`, `TemplateRow`, `SectionRow`, `TaskCommentRow`, `TaskActivityRow`, `DailyStatRow`
 - `MutationResult` -- `{ changes: number }`
-- `IStorage` -- the complete storage interface with methods for tasks (9 methods), task-tags (5), projects (6), tags (4), plugin settings (2), app settings (3), chat messages (4), plugin permissions (3), task templates (5)
+- `IStorage` -- the complete storage interface with methods for tasks (9 methods), task-tags (5), projects (6), tags (4), plugin settings (2), app settings (3), chat messages (6), plugin permissions (3), task templates (5), sections (5), task comments (4), task activity (2), daily stats (3)
 **Key Dependencies:** None (pure types)
 **Used By:** Every service class in `src/core/`, `src/plugins/`, `src/ai/chat.ts`, `src/bootstrap.ts`, `src/bootstrap-web.ts`
 

@@ -105,6 +105,69 @@
 
 ---
 
+### Board.tsx
+
+- **Path:** `src/ui/views/Board.tsx` (313 lines)
+- **Purpose:** Kanban board view for projects. Displays tasks as draggable cards organized into droppable section columns.
+- **Key Exports:** `Board`
+- **Props:**
+  - `project: Project`
+  - `tasks: Task[]`
+  - `sections: Section[]`
+  - `onMoveTask: (taskId: string, sectionId: string | null) => void`
+  - `onToggleTask: (id: string) => void`
+  - `onSelectTask: (id: string) => void`
+  - `selectedTaskId: string | null`
+- **Key Dependencies:** `@dnd-kit/core` (DndContext, DragOverlay, useDroppable, useDraggable, PointerSensor), `lucide-react` (Calendar, GripVertical), `getPriority` from `core/priorities.js`, `hexToRgba` from `utils/color.js`
+- **Used By:** `App.tsx`
+- **Notes:** Contains three internal sub-components: `DraggableCard` (individual task card with drag handle, priority circle, title, tags, due date), `BoardColumn` (droppable column with header showing section name and task count), and `DragOverlayCard` (floating ghost card rendered during drag with slight rotation and shadow). Groups tasks by `sectionId` -- tasks with no section appear in a "No section" column. Columns are sorted by `sortOrder`. Priority borders (p1=red, p2=amber, p3=accent) shown as left-border colors on cards. Overdue dates highlighted in red. Drag activation requires 8px distance to avoid accidental drags. Drop highlight shown as accent ring on target column.
+
+---
+
+### Cancelled.tsx
+
+- **Path:** `src/ui/views/Cancelled.tsx` (157 lines)
+- **Purpose:** Shows cancelled tasks grouped by cancellation date, with a "Restore" button to move tasks back to pending.
+- **Key Exports:** `Cancelled`
+- **Props:**
+  - `tasks: Task[]`
+  - `projects: Project[]`
+  - `onSelectTask?: (id: string) => void`
+  - `onRestoreTask?: (id: string) => void`
+- **Key Dependencies:** `EmptyState.tsx`, `lucide-react` (XCircle)
+- **Used By:** `App.tsx`
+- **Notes:** Filters tasks by `status === "cancelled"` and sorts by `completedAt` (or `updatedAt` as fallback) in reverse chronological order. Tasks grouped by date with date headers (e.g., "Monday, Feb 15"). Each task row shows an XCircle icon, strikethrough title, project color dot with name, cancellation time, and optional "Restore" button. EmptyState shown when no cancelled tasks exist. Clickable task rows when `onSelectTask` is provided.
+
+---
+
+### Someday.tsx
+
+- **Path:** `src/ui/views/Someday.tsx` (75 lines)
+- **Purpose:** Someday/Maybe view for parked tasks. Shows tasks marked with `isSomeday=true` with an "Activate" button to move them back to active.
+- **Key Exports:** `Someday`
+- **Props:**
+  - `tasks: Task[]`
+  - `onSelectTask?: (id: string) => void`
+  - `onActivateTask?: (id: string) => void`
+- **Key Dependencies:** `EmptyState.tsx`, `lucide-react` (Lightbulb)
+- **Used By:** `App.tsx`
+- **Notes:** Filters tasks by `isSomeday === true && status === "pending"`, sorted by `createdAt` descending. Each task row shows a Lightbulb icon, title, and optional "Activate" button. EmptyState shown when no someday tasks exist. Clickable rows when `onSelectTask` is provided.
+
+---
+
+### Stats.tsx
+
+- **Path:** `src/ui/views/Stats.tsx` (213 lines)
+- **Purpose:** Productivity statistics dashboard with 4 stat cards and a 7-day completion bar chart.
+- **Key Exports:** `Stats`
+- **Props:**
+  - `tasks: Task[]`
+- **Key Dependencies:** `toDateKey` from `utils/format-date.js`, `lucide-react` (BarChart3, Flame, Calendar, Clock)
+- **Used By:** `App.tsx`
+- **Notes:** Four stat cards in a 2-column grid: "Today" (tasks completed today), "This Week" (tasks completed since Monday), "Streak" (consecutive days with at least 1 completion), and "Time Tracked" (total `estimatedMinutes` from completed tasks). Below the cards, a 7-day bar chart shows daily completion counts with today highlighted in accent color. Contains internal helpers: `formatMinutes` (converts minutes to "30m"/"1.5h"), `getWeekStart` (Monday-based), `getLast7Days`, and `computeStreak`. Bar heights proportional to max count, minimum 2px bar for zero-count days at 0.2 opacity.
+
+---
+
 ### TaskPage.tsx
 
 - **Path:** `src/ui/views/TaskPage.tsx` (184 lines)
@@ -379,6 +442,18 @@
 - **Key Dependencies:** `api` (exportAllData, importTasks, getStorageInfo), `core/export.js` (exportJSON, exportCSV, exportMarkdown), `core/import.js` (parseImport), `TaskContext`
 - **Used By:** `Settings.tsx`
 - **Notes:** Contains two sub-components: `StorageSection` (shows current mode SQLite/Markdown and path, with explanation of each mode) and `DataSection` (export/import). Export triggers browser file download via Blob URL. Import has a multi-step flow: file selection -> preview (showing task count, projects, tags, warnings) -> confirm import -> success with result summary. File input accepts `.json`, `.txt`, `.md`. Refreshes task list after successful import.
+
+---
+
+### settings/FeaturesTab.tsx
+
+- **Path:** `src/ui/views/settings/FeaturesTab.tsx` (82 lines)
+- **Purpose:** Feature flag toggles. Lets users enable or disable optional features (project sections, kanban, time estimates, deadlines, comments, stats, someday, cancelled tasks, keyboard chords).
+- **Key Exports:** `FeaturesTab`
+- **Props:** None (reads from `useGeneralSettings` context)
+- **Key Dependencies:** `SettingsContext`, settings `components.tsx` (SettingRow, Toggle)
+- **Used By:** `Settings.tsx`
+- **Notes:** 9 feature flags, each stored as a `feature_*` key in general settings. Toggling a feature hides it from the interface but preserves underlying data. Uses a `FEATURES` array of `{ key, label, description }` objects for declarative rendering. Each feature flag reads as a string `"true"` / `"false"` from settings.
 
 ---
 

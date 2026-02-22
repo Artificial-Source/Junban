@@ -20,6 +20,9 @@ src/ui/api/
   tasks.ts       -- Task CRUD, bulk operations, tree operations, import
   projects.ts    -- Project CRUD, tag listing
   templates.ts   -- Template CRUD and instantiation
+  comments.ts    -- Task comment CRUD and activity listing
+  sections.ts    -- Project section CRUD and reorder
+  stats.ts       -- Productivity stats (daily and today)
   plugins.ts     -- Plugin management, commands, UI registry, store
   ai.ts          -- AI provider config, chat messaging with SSE, model discovery, session management
   settings.ts    -- App settings, storage info, data export
@@ -29,8 +32,8 @@ src/ui/api/
 
 ## index.ts
 
-- **Path:** `src/ui/api/index.ts` (28 lines)
-- **Purpose:** Barrel file that imports all API modules and re-exports them as a single `api` object plus type re-exports.
+- **Path:** `src/ui/api/index.ts` (40 lines)
+- **Purpose:** Barrel file that imports all API modules (tasks, templates, projects, sections, comments, stats, plugins, ai, settings) and re-exports them as a single `api` object plus type re-exports.
 - **Key Exports:**
   - `api` -- unified API object with all functions spread from submodules
   - Type re-exports: `PluginInfo`, `SettingDefinitionInfo`, `PluginCommandInfo`, `StatusBarItemInfo`, `PanelInfo`, `ViewInfo`, `StorePluginInfo`, `AIConfigInfo`, `AIChatMessage`, `AIProviderInfo`, `ModelDiscoveryInfo`, `ChatSessionInfo`
@@ -142,6 +145,72 @@ src/ui/api/
   - `DELETE /api/templates/:id`
   - `POST /api/templates/:id/instantiate`
 - **Notes:** `instantiateTemplate` accepts optional `variables` map for `{{variable}}` interpolation in template title/description.
+
+---
+
+## comments.ts
+
+- **Path:** `src/ui/api/comments.ts` (74 lines)
+- **Purpose:** Task comment CRUD and activity feed listing.
+- **Key Exports:**
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `listTaskComments` | `(taskId) => Promise<TaskComment[]>` | List all comments on a task |
+| `addTaskComment` | `(taskId, content) => Promise<TaskComment>` | Add a comment to a task |
+| `updateTaskComment` | `(commentId, content) => Promise<void>` | Update a comment's content |
+| `deleteTaskComment` | `(commentId) => Promise<void>` | Delete a comment |
+| `listTaskActivity` | `(taskId) => Promise<TaskActivity[]>` | List activity history for a task |
+
+- **REST Endpoints (server mode):**
+  - `GET /api/tasks/:taskId/comments`
+  - `POST /api/tasks/:taskId/comments`
+  - `PATCH /api/comments/:commentId`
+  - `DELETE /api/comments/:commentId`
+  - `GET /api/tasks/:taskId/activity`
+- **Notes:** In Tauri mode, `addTaskComment` generates an ID via `generateId()` and constructs the full `TaskComment` object in-process. All mutations call `svc.save()` after writing. Uses `TaskComment` and `TaskActivity` types from `core/types.js`.
+
+---
+
+## sections.ts
+
+- **Path:** `src/ui/api/sections.ts` (72 lines)
+- **Purpose:** Project section CRUD and reorder operations.
+- **Key Exports:**
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `listSections` | `(projectId) => Promise<Section[]>` | List sections for a project |
+| `createSection` | `(projectId, name) => Promise<Section>` | Create a new section |
+| `updateSection` | `(id, { name?, isCollapsed? }) => Promise<void>` | Update section name or collapsed state |
+| `deleteSection` | `(id) => Promise<void>` | Delete a section |
+| `reorderSections` | `(orderedIds) => Promise<void>` | Set section display order |
+
+- **REST Endpoints (server mode):**
+  - `GET /api/sections?projectId=...`
+  - `POST /api/sections`
+  - `PATCH /api/sections/:id`
+  - `DELETE /api/sections/:id`
+  - `POST /api/sections/reorder`
+- **Notes:** In Tauri mode, delegates to `svc.sectionService` methods. All mutations call `svc.save()` after writing. Uses `Section` type from `core/types.js`.
+
+---
+
+## stats.ts
+
+- **Path:** `src/ui/api/stats.ts` (24 lines)
+- **Purpose:** Fetch productivity statistics for date ranges or today.
+- **Key Exports:**
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `getDailyStats` | `(startDate, endDate) => Promise<DailyStat[]>` | Get daily stats for a date range |
+| `getTodayStats` | `() => Promise<DailyStat>` | Get stats for today |
+
+- **REST Endpoints (server mode):**
+  - `GET /api/stats/daily?startDate=...&endDate=...`
+  - `GET /api/stats/today`
+- **Notes:** In Tauri mode, delegates to `svc.statsService.getStats()` and `svc.statsService.getToday()`. Uses `DailyStat` type from `core/types.js`. Date parameters are `YYYY-MM-DD` format strings.
 
 ---
 

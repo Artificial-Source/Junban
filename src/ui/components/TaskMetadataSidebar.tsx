@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   Calendar,
   AlertTriangle,
@@ -45,6 +45,9 @@ export function TaskMetadataSidebar({
   const [showRemindAtPicker, setShowRemindAtPicker] = useState(false);
   const [showRecurrencePicker, setShowRecurrencePicker] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const dueDateBtnRef = useRef<HTMLButtonElement>(null);
+  const deadlineBtnRef = useRef<HTMLButtonElement>(null);
+  const reminderBtnRef = useRef<HTMLButtonElement>(null);
 
   // Build tag name → color lookup for colored chips
   const tagColors: Record<string, string> = {};
@@ -165,6 +168,7 @@ export function TaskMetadataSidebar({
           <Calendar size={12} /> Date
         </label>
         <button
+          ref={dueDateBtnRef}
           onClick={() => setShowDatePicker((prev) => !prev)}
           className="mt-1.5 w-full px-2 py-1.5 text-sm text-left rounded-md text-on-surface hover:bg-surface-tertiary transition-colors"
         >
@@ -188,6 +192,7 @@ export function TaskMetadataSidebar({
             value={task.dueDate}
             onChange={handleDueDateChange}
             onClose={() => setShowDatePicker(false)}
+            triggerRef={dueDateBtnRef}
           />
         )}
       </div>
@@ -199,6 +204,7 @@ export function TaskMetadataSidebar({
             <AlertTriangle size={12} /> Deadline
           </label>
           <button
+            ref={deadlineBtnRef}
             onClick={() => setShowDeadlinePicker((prev) => !prev)}
             className="mt-1.5 w-full px-2 py-1.5 text-sm text-left rounded-md text-on-surface hover:bg-surface-tertiary transition-colors"
           >
@@ -227,6 +233,7 @@ export function TaskMetadataSidebar({
               value={task.deadline}
               onChange={handleDeadlineChange}
               onClose={() => setShowDeadlinePicker(false)}
+              triggerRef={deadlineBtnRef}
             />
           )}
         </div>
@@ -281,6 +288,7 @@ export function TaskMetadataSidebar({
           <Bell size={12} /> Reminder
         </label>
         <button
+          ref={reminderBtnRef}
           onClick={() => setShowRemindAtPicker((prev) => !prev)}
           className="mt-1.5 w-full px-2 py-1.5 text-sm text-left rounded-md text-on-surface hover:bg-surface-tertiary transition-colors"
         >
@@ -310,6 +318,7 @@ export function TaskMetadataSidebar({
             onChange={handleRemindAtChange}
             showTime={true}
             onClose={() => setShowRemindAtPicker(false)}
+            triggerRef={reminderBtnRef}
           />
         )}
       </div>

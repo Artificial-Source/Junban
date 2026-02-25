@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface DatePickerProps {
@@ -6,6 +7,8 @@ interface DatePickerProps {
   onChange: (date: string | null) => void;
   showTime?: boolean;
   onClose: () => void;
+  /** Ref to the trigger element for positioning the portal */
+  triggerRef?: React.RefObject<HTMLElement | null>;
 }
 
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -34,15 +37,35 @@ function addDays(date: Date, days: number): Date {
   return result;
 }
 
-export function DatePicker({ value, onChange, showTime = false, onClose }: DatePickerProps) {
+export function DatePicker({ value, onChange, showTime = false, onClose, triggerRef }: DatePickerProps) {
   const now = new Date();
   const initialDate = value ? new Date(value) : now;
   const [viewYear, setViewYear] = useState(initialDate.getFullYear());
   const [viewMonth, setViewMonth] = useState(initialDate.getMonth());
   const [timeValue, setTimeValue] = useState(value && showTime ? value.slice(11, 16) : "");
   const ref = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
 
   const selectedDateStr = value ? value.split("T")[0] : null;
+
+  // Compute fixed position from trigger element
+  useEffect(() => {
+    if (!triggerRef?.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const pickerHeight = showTime ? 380 : 330;
+    const pickerWidth = 256; // w-64
+    // Position above the trigger if it would overflow the viewport bottom
+    let top = rect.bottom + 4;
+    if (top + pickerHeight > window.innerHeight) {
+      top = rect.top - pickerHeight - 4;
+    }
+    // Clamp left so picker doesn't overflow right edge
+    let left = rect.left;
+    if (left + pickerWidth > window.innerWidth) {
+      left = window.innerWidth - pickerWidth - 8;
+    }
+    setPosition({ top, left });
+  }, [triggerRef, showTime]);
 
   // Close on click outside
   useEffect(() => {
@@ -113,10 +136,13 @@ export function DatePicker({ value, onChange, showTime = false, onClose }: DateP
   const tomorrow = addDays(now, 1);
   const nextWeek = addDays(now, 7 - now.getDay() + 1); // Next Monday
 
-  return (
+  const usePortal = triggerRef?.current != null;
+
+  const picker = (
     <div
       ref={ref}
-      className="absolute right-0 z-50 mt-1 bg-surface border border-border rounded-lg shadow-lg p-3 w-64"
+      className={`${usePortal ? "fixed" : "absolute right-0 mt-1"} z-50 bg-surface border border-border rounded-lg shadow-lg p-3 w-64`}
+      style={usePortal && position ? { top: position.top, left: position.left } : undefined}
     >
       {/* Quick options */}
       <div className="flex flex-wrap gap-1.5 mb-3">
@@ -214,4 +240,6 @@ export function DatePicker({ value, onChange, showTime = false, onClose }: DateP
       )}
     </div>
   );
+
+  return usePortal ? createPortal(picker, document.body) : picker;
 }

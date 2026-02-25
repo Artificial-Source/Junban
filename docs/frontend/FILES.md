@@ -43,7 +43,7 @@
 | `src/ui/components/TaskInput.tsx` | 107 | Natural language task input with live NLP preview. |
 | `src/ui/components/TaskItem.tsx` | 300 | Single task row with priority circle, metadata, drag handle. `React.memo` wrapped. |
 | `src/ui/components/TaskList.tsx` | 283 | Sortable task list with @dnd-kit, tree flattening, inline subtask creation. Passes onContextMenu through to TaskItem. |
-| `src/ui/components/TaskDetailPanel.tsx` | 350 | Modal task detail with two-column layout, inline editing, subtask section. |
+| `src/ui/components/TaskDetailPanel.tsx` | 672 | Modal task detail with two-column layout, Markdown description preview/edit, subtask section. |
 | `src/ui/components/SubtaskBlock.tsx` | 142 | Individual subtask row with inline editing and DnD sortable wrapper. |
 | `src/ui/components/SubtaskSection.tsx` | 268 | Collapsible subtask list with DnD, progress bar, inline add. |
 | `src/ui/components/InlineAddSubtask.tsx` | 65 | Inline subtask creation input for tree view. |
@@ -56,7 +56,7 @@
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `src/ui/components/Sidebar.tsx` | 530 | Main navigation sidebar with slot-based plugin view rendering (navigation/tools/workspace), projects, workspace tools. Collapsible. |
+| `src/ui/components/Sidebar.tsx` | 596 | Main navigation sidebar with slot-based plugin view rendering (navigation/tools/workspace), projects with progress bars, workspace tools. Collapsible. |
 | `src/ui/components/BottomNavBar.tsx` | 128 | Mobile bottom nav with AI orb (long-press for voice). |
 | `src/ui/components/MobileDrawer.tsx` | 62 | Slide-in drawer for mobile sidebar. |
 | `src/ui/components/CommandPalette.tsx` | 150 | Fuzzy search command palette (Ctrl+K). |
@@ -124,7 +124,7 @@
 | `src/ui/components/Toast.tsx` | 42 | Auto-dismissing toast notification with undo action. |
 | `src/ui/components/EmptyState.tsx` | 26 | Reusable empty state with icon, title, description, and optional action. |
 | `src/ui/components/Skeleton.tsx` | 45 | Skeleton loading components (SkeletonLine, SkeletonTaskItem, SkeletonTaskList). |
-| `src/ui/components/CompletionRing.tsx` | 45 | SVG circle progress ring for daily completion stats. |
+| `src/ui/components/CompletionRing.tsx` | 48 | SVG circle progress ring for task completion stats (Today + Project headers). |
 | `src/ui/components/ChordIndicator.tsx` | 30 | Floating pill showing pending chord key while mid-chord (e.g., pressed "g", waiting for second key). |
 | `src/ui/components/ErrorBoundary.tsx` | 57 | React error boundary with fallback UI. |
 
@@ -135,16 +135,16 @@
 | File | Lines | Purpose |
 |------|-------|---------|
 | `src/ui/views/Inbox.tsx` | 98 | Inbox view -- unassigned pending tasks. Passes onContextMenu to TaskList. |
-| `src/ui/views/Today.tsx` | 142 | Today's tasks + overdue section with reschedule. Passes onContextMenu to TaskList. |
+| `src/ui/views/Today.tsx` | 194 | Today's tasks + overdue section with reschedule + workload capacity bar. Passes onContextMenu to TaskList. |
 | `src/ui/views/Upcoming.tsx` | 181 | Date-grouped upcoming tasks + overdue section. Passes onContextMenu to TaskList. |
-| `src/ui/views/Project.tsx` | 403 | Single project view with list/board modes, sections. Passes onContextMenu to TaskList. |
+| `src/ui/views/Project.tsx` | 415 | Single project view with list/board modes, sections, completion progress. Passes onContextMenu to TaskList. |
 | `src/ui/views/Completed.tsx` | 160 | Completed tasks grouped by date with project filter. |
 | `src/ui/views/Cancelled.tsx` | 157 | Cancelled tasks grouped by cancellation date with restore action. |
 | `src/ui/views/Someday.tsx` | 75 | Someday/Maybe parked tasks view with activate action. |
 | `src/ui/views/Board.tsx` | 313 | Kanban board with draggable task cards and droppable section columns. |
 | `src/ui/views/Stats.tsx` | 213 | Productivity stats: 4 stat cards + 7-day completion bar chart. |
 | `src/ui/views/FiltersLabels.tsx` | 283 | Saved filters and tag/label management. |
-| `src/ui/views/TaskPage.tsx` | 183 | Full-page task detail view. |
+| `src/ui/views/TaskPage.tsx` | 218 | Full-page task detail view with Markdown description preview. |
 | `src/ui/views/PluginView.tsx` | 70 | Plugin view renderer with text and structured content support. Accepts `viewInfo` prop for contentType/slot. |
 | `src/ui/views/Calendar.tsx` | 147 | Calendar view shell with day/week/month mode switcher, navigation controls, and sub-view rendering. |
 | `src/ui/views/AIChat.tsx` | 49 | AI Chat full-page view wrapper. Auto-manages LM Studio model loading/unloading. |
@@ -165,7 +165,7 @@
 |------|-------|---------|
 | `src/ui/views/settings/types.ts` | 10 | `SettingsTab` union type. |
 | `src/ui/views/settings/components.tsx` | 129 | Shared primitives: SegmentedControl, ColorSwatchPicker, SettingRow, SettingSelect, Toggle. |
-| `src/ui/views/settings/GeneralTab.tsx` | 341 | Date/time, task behavior, sound effects, notifications, calendar defaults. |
+| `src/ui/views/settings/GeneralTab.tsx` | 357 | Date/time, task behavior (incl. daily capacity), sound effects, notifications, calendar defaults. |
 | `src/ui/views/settings/AppearanceTab.tsx` | 97 | Theme, accent color, density, font size, reduce animations. |
 | `src/ui/views/settings/AITab.tsx` | 322 | AI provider config, model selection, connection status. |
 | `src/ui/views/settings/VoiceTab.tsx` | 841 | Microphone, STT/TTS providers, voice mode, local models. |
@@ -187,7 +187,7 @@
 | `src/ui/context/PluginContext.tsx` | 138 | Plugin state: plugins, commands, status bar, panels, views. |
 | `src/ui/context/VoiceContext.tsx` | 291 | Voice state: STT/TTS providers, recording, playback, settings. |
 | `src/ui/context/UndoContext.tsx` | 93 | Undo/redo stack with toast notifications. |
-| `src/ui/context/SettingsContext.tsx` | 178 | General settings with live CSS property application. |
+| `src/ui/context/SettingsContext.tsx` | 211 | General settings with live CSS property application (incl. daily_capacity_minutes). |
 
 ---
 

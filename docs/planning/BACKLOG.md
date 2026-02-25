@@ -356,7 +356,7 @@ Competitive parity features drawn from Todoist, TickTick, Linear, Things 3, Noti
 | V2-01 | Task duration / time estimates | done | S35 | `estimatedMinutes` field on tasks. NLP parsing for `~2h` / `~30m`. Inspired by TickTick, Akiflow, Sunsama, Marvin. |
 | V2-02 | Sections within projects | done | S35 | SectionsService with CRUD + drag-and-drop reordering. Columns in Board view. Inspired by Todoist, TickTick, Things 3. |
 | V2-03 | Kanban / Board view | done | S35 | Board.tsx with DnD Kit. Columns by section, status, or priority. Drag between columns. Inspired by Todoist, TickTick, Notion, Linear. |
-| V2-04 | Task description with Markdown | ready | — | Rich text in descriptions: bold, italic, code blocks, checklists, links. Render with markdown. Inspired by Todoist, Notion, Things 3. |
+| V2-04 | Task description with Markdown | done | S37 | Rich text in descriptions: bold, italic, code blocks, checklists, links. Render with MarkdownMessage. Toggle edit/preview mode. Inspired by Todoist, Notion, Things 3. |
 | V2-05 | "When" date vs. Deadline | done | S35 | `dueDate` (soft, Today/Upcoming) + `deadline` (hard, warnings). NLP: "deadline Friday". Inspired by Things 3. |
 | V2-06 | Cancelled tasks view | done | S35 | Cancelled.tsx with restore action. Separate from Completed. Extends U-27 status support. Inspired by TickTick. |
 | V2-07 | Composable keyboard shortcuts | done | S35 | ChordIndicator component. `G+I` (go inbox), `G+T` (go today), etc. Inspired by Linear, Akiflow. |
@@ -372,13 +372,13 @@ Higher-effort features that differentiate Saydo from competitors.
 |----|------|--------|--------|-------|
 | V2-11 | Guided daily planning ritual | ready | — | Step-by-step morning flow: review overdue → pick today's tasks → estimate durations → set goals. AI-assisted. Builds on A-32. Inspired by Sunsama, Akiflow, Any.do Moments. |
 | V2-12 | Daily shutdown / review ritual | ready | — | End-of-day guided reflection: what got done, what slipped, tomorrow's outlook, optional journaling. Builds on A-33. Inspired by Sunsama, Akiflow. |
-| V2-13 | Workload capacity indicator | ready | — | Sum estimated durations vs. configurable daily limit. Yellow when approaching, red when exceeded. "6h planned for a 5h day." Inspired by Sunsama, Marvin. Depends on V2-01. |
+| V2-13 | Workload capacity indicator | done | S37 | WorkloadCapacityBar in Today view. Sums estimatedMinutes vs daily_capacity_minutes setting (4/6/8/10h). Red bar + "+Xh over" when exceeded. Inspired by Sunsama, Marvin. |
 | V2-14 | Planned vs. actual time tracking | ready | — | Track actual time spent per task. Show estimation accuracy over time ("you underestimate coding by 40%"). Inspired by Sunsama, Marvin. Depends on V2-01. |
 | V2-15 | Task relations (blocks / blocked by) | ready | — | Simple dependency: "Task B is blocked by Task A." Show blocked indicator. AI can flag circular deps. Inspired by Linear, Notion. |
 | V2-16 | Dynamic saved views / filters + AI | ready | — | Named filter combos that auto-update. AI integration: describe in plain English ("overdue work tasks this week") → AI generates filter. Inspired by Linear, Todoist Filter Assist. |
 | V2-17 | Eisenhower matrix view | ready | — | Four-quadrant urgent/important grid. Drag tasks between quadrants. Auto-classify from priority + due date. Inspired by TickTick. |
 | V2-18 | Global quick capture (Tauri) | ready | — | System-wide hotkey opens floating task input over any app. Captures task without switching context. Auto-dismisses after entry. Inspired by Things 3, Akiflow. |
-| V2-19 | Project progress tracking | ready | — | Progress ring per project (X/Y tasks done). Project health status (on track, at risk, off track). Target date with milestone markers. Inspired by Things 3, Linear, Motion. |
+| V2-19 | Project progress tracking | done | S37 | CompletionRing in project headers (completed/total). Mini progress bar in sidebar project items. Inspired by Things 3, Linear, Motion. |
 
 ## v2.0 — Plugin Ideas (Tier 3)
 

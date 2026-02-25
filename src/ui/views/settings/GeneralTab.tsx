@@ -126,6 +126,22 @@ export function GeneralTab() {
               ]}
             />
           </SettingRow>
+
+          <SettingRow
+            label="Daily capacity"
+            description="Target work hours per day (shown in Today view)"
+          >
+            <SettingSelect
+              value={settings.daily_capacity_minutes}
+              onChange={(v) => updateSetting("daily_capacity_minutes", v)}
+              options={[
+                { value: "240", label: "4 hours" },
+                { value: "360", label: "6 hours" },
+                { value: "480", label: "8 hours" },
+                { value: "600", label: "10 hours" },
+              ]}
+            />
+          </SettingRow>
         </div>
       </section>
 

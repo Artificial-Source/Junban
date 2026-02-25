@@ -10,6 +10,14 @@ vi.mock("lucide-react", () => ({
   Calendar: (props: any) => <svg data-testid="calendar-icon" {...props} />,
 }));
 
+vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
+  useGeneralSettings: () => ({
+    settings: { daily_capacity_minutes: "480" },
+    loaded: true,
+    updateSetting: vi.fn(),
+  }),
+}));
+
 // Mock child components to isolate Today view tests
 vi.mock("../../../src/ui/components/TaskInput.js", () => ({
   TaskInput: ({ placeholder }: { placeholder?: string }) => (
@@ -155,5 +163,42 @@ describe("Today", () => {
     ];
     render(<Today {...defaultProps} tasks={tasks} />);
     expect(screen.getByText("Nothing else due today.")).toBeTruthy();
+  });
+
+  // ── V2-13: Workload capacity indicator ──
+
+  it("shows workload capacity bar when tasks have estimated minutes", () => {
+    const tasks = [
+      makeTask({ id: "t1", title: "Task 1", estimatedMinutes: 60 }),
+      makeTask({ id: "t2", title: "Task 2", estimatedMinutes: 90 }),
+    ];
+    render(<Today {...defaultProps} tasks={tasks} />);
+    expect(screen.getByText("2h 30m / 8h planned")).toBeTruthy();
+  });
+
+  it("hides workload capacity bar when no estimated minutes", () => {
+    const tasks = [
+      makeTask({ id: "t1", title: "Task 1" }),
+    ];
+    render(<Today {...defaultProps} tasks={tasks} />);
+    expect(screen.queryByText(/planned/)).toBeNull();
+  });
+
+  it("shows over-capacity warning when planned exceeds capacity", () => {
+    const tasks = [
+      makeTask({ id: "t1", title: "Task 1", estimatedMinutes: 300 }),
+      makeTask({ id: "t2", title: "Task 2", estimatedMinutes: 240 }),
+    ];
+    render(<Today {...defaultProps} tasks={tasks} />);
+    expect(screen.getByText("+1h over")).toBeTruthy();
+  });
+
+  it("includes overdue tasks in capacity calculation", () => {
+    const tasks = [
+      makeTask({ id: "t-overdue", title: "Overdue", dueDate: `${yesterday}T10:00:00.000Z`, estimatedMinutes: 120 }),
+      makeTask({ id: "t-today", title: "Today", estimatedMinutes: 60 }),
+    ];
+    render(<Today {...defaultProps} tasks={tasks} />);
+    expect(screen.getByText("3h / 8h planned")).toBeTruthy();
   });
 });

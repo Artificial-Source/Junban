@@ -72,8 +72,8 @@
 
 ### TaskDetailPanel.tsx
 
-- **Path:** `src/ui/components/TaskDetailPanel.tsx` (349 lines)
-- **Purpose:** Modal dialog showing full task details in a two-column layout: content area (title, description, subtasks) on the left and metadata sidebar on the right.
+- **Path:** `src/ui/components/TaskDetailPanel.tsx` (672 lines)
+- **Purpose:** Modal dialog showing full task details in a two-column layout: content area (title, description with Markdown preview, subtasks) on the left and metadata sidebar on the right.
 - **Key Exports:** `TaskDetailPanel`
 - **Props:**
   - `task: Task`
@@ -89,9 +89,9 @@
   - `onDeleteSubtask?: (id) => void`
   - `onUpdateSubtask?: (id, input) => void`
   - `onReorderSubtasks?: (ids) => void`
-- **Key Dependencies:** `SubtaskSection.tsx`, `TaskMetadataSidebar.tsx`, `lucide-react`
+- **Key Dependencies:** `SubtaskSection.tsx`, `TaskMetadataSidebar.tsx`, `MarkdownMessage.tsx`, `lucide-react`
 - **Used By:** `App.tsx` (rendered as overlay when a task is selected)
-- **Notes:** Title and description are inline-editable with auto-save on blur. Arrow key navigation between tasks in the list. Closes on Escape. Mobile-responsive -- stacks columns vertically on small screens.
+- **Notes:** Title is inline-editable. Description toggles between Markdown preview (using `MarkdownMessage`) and edit mode (textarea) — click preview or pencil icon to edit, blur to save. Arrow key navigation between tasks in the list. Closes on Escape. Mobile-responsive -- stacks columns vertically on small screens.
 
 ---
 
@@ -204,8 +204,8 @@
 
 ### Sidebar.tsx
 
-- **Path:** `src/ui/components/Sidebar.tsx` (530 lines)
-- **Purpose:** Main navigation sidebar with slot-based plugin view rendering. Groups views by slot (navigation, tools, workspace). Navigation views (Inbox, Today, etc.), collapsible projects section, tools section (plugin views + AI Chat + Focus Mode), and workspace section (Plugin Store, Settings).
+- **Path:** `src/ui/components/Sidebar.tsx` (596 lines)
+- **Purpose:** Main navigation sidebar with slot-based plugin view rendering. Groups views by slot (navigation, tools, workspace). Navigation views (Inbox, Today, etc.), collapsible projects section with mini progress bars, tools section (plugin views + AI Chat + Focus Mode), and workspace section (Plugin Store, Settings).
 - **Key Exports:** `Sidebar`
 - **Props:**
   - `currentView: string`
@@ -220,13 +220,14 @@
   - `onFocusMode?` -- focus mode trigger
   - `collapsed?: boolean, onToggleCollapsed?` -- sidebar collapse
   - `projectTaskCounts?: Map<string, number>`
+  - `projectCompletedCounts?: Map<string, number>` -- for progress bars on project items
   - `onAddTask?, onSearch?` -- top action buttons
   - `inboxCount?, todayCount?` -- badge counts
   - `onOpenProjectModal?` -- add project button
   - `builtinPluginIds?: Set<string>` -- restricts navigation-slot views to built-in plugins
 - **Key Dependencies:** `lucide-react`, `core/types.js`, `api/index.js` (PanelInfo, ViewInfo)
 - **Used By:** `App.tsx`
-- **Notes:** Plugin views are grouped by slot via `useMemo`: `navigation` views render inline after built-in nav items (restricted to builtin plugins), `tools` views render in a collapsible "Tools" section between My Projects and Workspace, `workspace` views render in the bottom Workspace section. Emoji plugin icons handled alongside Lucide component icons. Collapsed mode shows only icons with hover tooltips (`CollapsedTooltip` internal component). Badge counts on Inbox and Today items. Old "Plugin Panels" and "Custom Views" sections removed in favor of slot-based rendering.
+- **Notes:** Plugin views are grouped by slot via `useMemo`: `navigation` views render inline after built-in nav items (restricted to builtin plugins), `tools` views render in a collapsible "Tools" section between My Projects and Workspace, `workspace` views render in the bottom Workspace section. Emoji plugin icons handled alongside Lucide component icons. Collapsed mode shows only icons with hover tooltips (`CollapsedTooltip` internal component). Badge counts on Inbox and Today items. Project items show a mini progress bar (w-12 h-1) showing completed/total task ratio alongside the pending count. Old "Plugin Panels" and "Custom Views" sections removed in favor of slot-based rendering.
 
 ---
 
@@ -942,15 +943,15 @@ Extracted sub-components used by `AIChatPanel.tsx`. Each handles a single concer
 
 ### CompletionRing.tsx
 
-- **Path:** `src/ui/components/CompletionRing.tsx` (45 lines)
-- **Purpose:** SVG circle progress indicator showing daily task completion ratio.
+- **Path:** `src/ui/components/CompletionRing.tsx` (48 lines)
+- **Purpose:** SVG circle progress indicator showing task completion ratio.
 - **Key Exports:** `CompletionRing`
 - **Props:**
   - `completed: number` -- number of completed tasks
   - `total: number` -- total number of tasks
   - `size?: number` -- diameter in pixels (default 32)
 - **Key Dependencies:** None
-- **Used By:** `Today.tsx` (header)
+- **Used By:** `Today.tsx` (header), `Project.tsx` (project header)
 - **Notes:** Uses SVG `stroke-dasharray` / `stroke-dashoffset` for the progress arc. Shows `completed/total` text. Includes `aria-label` for accessibility. Track color: `surface-tertiary`, progress color: `accent`.
 
 ---

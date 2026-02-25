@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Inbox } from "lucide-react";
+import { ArrowLeft, Inbox, Pencil } from "lucide-react";
 import type { Task, UpdateTaskInput } from "../../core/types.js";
 import { TaskMetadataSidebar } from "../components/TaskMetadataSidebar.js";
 import { SubtaskSection } from "../components/SubtaskSection.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import { MarkdownMessage } from "../components/chat/MarkdownMessage.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 
 interface TaskPageProps {
@@ -36,6 +37,7 @@ export function TaskPage({
   const { settings } = useGeneralSettings();
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
+  const [editingDescription, setEditingDescription] = useState(false);
 
   // Subtask inline edit state
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
@@ -46,6 +48,7 @@ export function TaskPage({
   useEffect(() => {
     setTitle(task.title);
     setDescription(task.description ?? "");
+    setEditingDescription(false);
     setEditingSubtaskId(null);
     setEditingSubtaskTitle("");
     setFocusedSubtaskIdx(-1);
@@ -130,13 +133,45 @@ export function TaskPage({
             className="w-full text-2xl font-bold bg-transparent border-none focus:outline-none focus:ring-0 text-on-surface"
           />
 
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            onBlur={handleDescriptionBlur}
-            placeholder="Add a description..."
-            className="w-full p-0 text-sm bg-transparent border-none text-on-surface placeholder-on-surface-muted/50 focus:outline-none focus:ring-0 min-h-[120px] resize-none"
-          />
+          {/* Description with markdown preview / edit toggle */}
+          <div className="relative group/desc">
+            {editingDescription ? (
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                onBlur={() => {
+                  handleDescriptionBlur();
+                  setEditingDescription(false);
+                }}
+                autoFocus
+                placeholder="Add a description... (supports **markdown**)"
+                className="w-full p-0 text-sm bg-transparent border-none text-on-surface placeholder-on-surface-muted/50 focus:outline-none focus:ring-0 min-h-[120px] resize-none"
+              />
+            ) : description ? (
+              <div
+                className="text-sm text-on-surface cursor-text min-h-[120px] prose-sm"
+                onClick={() => setEditingDescription(true)}
+              >
+                <MarkdownMessage content={description} />
+              </div>
+            ) : (
+              <button
+                onClick={() => setEditingDescription(true)}
+                className="w-full text-left text-sm text-on-surface-muted/50 min-h-[120px]"
+              >
+                Add a description...
+              </button>
+            )}
+            {!editingDescription && description && (
+              <button
+                onClick={() => setEditingDescription(true)}
+                className="absolute top-0 right-0 p-1 rounded-md text-on-surface-muted hover:text-on-surface hover:bg-surface-tertiary opacity-0 group-hover/desc:opacity-100 transition-opacity"
+                title="Edit description"
+              >
+                <Pencil size={14} />
+              </button>
+            )}
+          </div>
 
           <SubtaskSection
             task={task}

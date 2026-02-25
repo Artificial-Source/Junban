@@ -13,8 +13,18 @@ vi.mock("lucide-react", () => {
     MoreHorizontal: icon("more"),
     Maximize2: icon("maximize"),
     Inbox: icon("inbox"),
+    MessageSquare: icon("message-square"),
+    History: icon("history"),
+    PlusCircle: icon("plus-circle"),
+    CheckCircle2: icon("check-circle"),
+    Pencil: icon("pencil"),
+    Send: icon("send"),
   };
 });
+
+vi.mock("../../../src/ui/components/chat/MarkdownMessage.js", () => ({
+  MarkdownMessage: ({ content }: { content: string }) => <div data-testid="markdown-preview">{content}</div>,
+}));
 
 vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
   useGeneralSettings: () => ({
@@ -84,9 +94,10 @@ describe("TaskDetailPanel", () => {
     expect(screen.getByDisplayValue("Detail Task")).toBeTruthy();
   });
 
-  it("displays description in textarea", () => {
+  it("displays description as markdown preview", () => {
     render(<TaskDetailPanel {...defaultProps} />);
-    expect(screen.getByDisplayValue("Some notes")).toBeTruthy();
+    expect(screen.getByTestId("markdown-preview")).toBeTruthy();
+    expect(screen.getByText("Some notes")).toBeTruthy();
   });
 
   it("calls onUpdate when title is changed and blurred", () => {
@@ -100,9 +111,12 @@ describe("TaskDetailPanel", () => {
     expect(onUpdate).toHaveBeenCalledWith("t1", { title: "New Title" });
   });
 
-  it("calls onUpdate when description is changed and blurred", () => {
+  it("enters edit mode on click and calls onUpdate when description is changed and blurred", () => {
     const onUpdate = vi.fn();
     render(<TaskDetailPanel {...defaultProps} onUpdate={onUpdate} />);
+
+    // Click the markdown preview to enter edit mode
+    fireEvent.click(screen.getByTestId("markdown-preview"));
 
     const textarea = screen.getByDisplayValue("Some notes");
     fireEvent.change(textarea, { target: { value: "Updated notes" } });

@@ -115,4 +115,30 @@ describe("Project", () => {
     const input = screen.getByTestId("task-input");
     expect(input.getAttribute("data-placeholder")).toBe("Add a task to My Project...");
   });
+
+  // ── V2-19: Project progress tracking ──
+
+  it("shows CompletionRing when project has tasks", () => {
+    const tasks = [
+      makeTask({ id: "t1", title: "Pending", projectId: "proj-1", status: "pending" }),
+      makeTask({ id: "t2", title: "Done", projectId: "proj-1", status: "completed" }),
+    ];
+    render(<Project {...defaultProps} tasks={tasks} />);
+    expect(screen.getByLabelText("1 of 2 tasks completed")).toBeTruthy();
+  });
+
+  it("hides CompletionRing when project has no tasks", () => {
+    render(<Project {...defaultProps} />);
+    expect(screen.queryByLabelText(/tasks completed/)).toBeNull();
+  });
+
+  it("counts only this project's completed tasks for progress", () => {
+    const tasks = [
+      makeTask({ id: "t1", title: "Pending", projectId: "proj-1", status: "pending" }),
+      makeTask({ id: "t2", title: "Done here", projectId: "proj-1", status: "completed" }),
+      makeTask({ id: "t3", title: "Done other", projectId: "proj-2", status: "completed" }),
+    ];
+    render(<Project {...defaultProps} tasks={tasks} />);
+    expect(screen.getByLabelText("1 of 2 tasks completed")).toBeTruthy();
+  });
 });

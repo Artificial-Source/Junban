@@ -4,6 +4,11 @@ import { render, screen, fireEvent } from "@testing-library/react";
 vi.mock("lucide-react", () => ({
   ArrowLeft: (props: any) => <svg data-testid="arrow-left" {...props} />,
   Inbox: (props: any) => <svg data-testid="inbox-icon" {...props} />,
+  Pencil: (props: any) => <svg data-testid="pencil-icon" {...props} />,
+}));
+
+vi.mock("../../../src/ui/components/chat/MarkdownMessage.js", () => ({
+  MarkdownMessage: ({ content }: { content: string }) => <div data-testid="markdown-preview">{content}</div>,
 }));
 
 vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
@@ -79,10 +84,10 @@ describe("TaskPage", () => {
     expect(input.tagName).toBe("INPUT");
   });
 
-  it("renders the description textarea", () => {
+  it("renders the description as markdown preview", () => {
     render(<TaskPage {...defaultProps} />);
-    const textarea = screen.getByDisplayValue("A description");
-    expect(textarea).toBeTruthy();
+    expect(screen.getByTestId("markdown-preview")).toBeTruthy();
+    expect(screen.getByText("A description")).toBeTruthy();
   });
 
   it("renders the back button", () => {
@@ -127,6 +132,8 @@ describe("TaskPage", () => {
 
   it("calls onUpdate when description changes on blur", () => {
     render(<TaskPage {...defaultProps} />);
+    // Click the markdown preview to enter edit mode
+    fireEvent.click(screen.getByTestId("markdown-preview"));
     const textarea = screen.getByDisplayValue("A description");
     fireEvent.change(textarea, { target: { value: "New description" } });
     fireEvent.blur(textarea);

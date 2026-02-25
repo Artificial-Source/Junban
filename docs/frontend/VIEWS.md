@@ -27,8 +27,8 @@
 
 ### Today.tsx
 
-- **Path:** `src/ui/views/Today.tsx` (143 lines)
-- **Purpose:** Shows tasks due today and overdue tasks with a reschedule option. Includes a CompletionRing in the header.
+- **Path:** `src/ui/views/Today.tsx` (194 lines)
+- **Purpose:** Shows tasks due today and overdue tasks with a reschedule option. Includes a CompletionRing in the header and a workload capacity bar.
 - **Key Exports:** `Today`
 - **Props:**
   - `tasks: Task[]`
@@ -38,9 +38,9 @@
   - `selectedTaskId: string | null`
   - `selectedTaskIds?, onMultiSelect?, onReorder?, onAddSubtask?, onUpdateDueDate?`
   - `autoFocusTrigger?: number`
-- **Key Dependencies:** `TaskInput.tsx`, `TaskList.tsx`, `CompletionRing.tsx`, `OverdueSection.tsx`, `toDateKey` from `utils/format-date.js`, `parseTask` from `parser/task-parser.js`
+- **Key Dependencies:** `TaskInput.tsx`, `TaskList.tsx`, `CompletionRing.tsx`, `OverdueSection.tsx`, `SettingsContext.tsx`, `toDateKey` from `utils/format-date.js`, `parseTask` from `parser/task-parser.js`
 - **Used By:** `App.tsx`
-- **Notes:** Uses OverdueSection component for the overdue section. CompletionRing SVG shows completed/total for today's tasks. TaskInput defaults new tasks to today's date. Reschedule moves all overdue tasks to today.
+- **Notes:** Uses OverdueSection component for the overdue section. CompletionRing SVG shows completed/total for today's tasks. TaskInput defaults new tasks to today's date. Reschedule moves all overdue tasks to today. `WorkloadCapacityBar` (local component) sums `estimatedMinutes` from overdue + today tasks and shows planned vs capacity (from `daily_capacity_minutes` setting). Bar turns red with "+Xh over" text when exceeding capacity. Hidden when no tasks have estimated durations.
 
 ---
 
@@ -59,8 +59,8 @@
 
 ### Project.tsx
 
-- **Path:** `src/ui/views/Project.tsx` (80 lines)
-- **Purpose:** Single project view. Shows pending tasks belonging to the selected project.
+- **Path:** `src/ui/views/Project.tsx` (415 lines)
+- **Purpose:** Single project view with list and board layouts. Shows pending tasks belonging to the selected project with completion progress tracking.
 - **Key Exports:** `Project`
 - **Props:**
   - `project: ProjectType`
@@ -70,9 +70,11 @@
   - `selectedTaskId: string | null`
   - `selectedTaskIds?, onMultiSelect?, onReorder?, onAddSubtask?, onUpdateDueDate?`
   - `autoFocusTrigger?: number`
-- **Key Dependencies:** `TaskInput.tsx`, `TaskList.tsx`
+  - `sections?, onCreateSection?, onUpdateSection?, onDeleteSection?, onMoveTask?`
+  - `viewStyle?: "list" | "board" | "calendar"`
+- **Key Dependencies:** `TaskInput.tsx`, `TaskList.tsx`, `Board.tsx`, `CompletionRing.tsx`, `SettingsContext.tsx`
 - **Used By:** `App.tsx`
-- **Notes:** Filters tasks to only show pending tasks for the current project. TaskInput placeholder customized with project name. Shows project icon (emoji) or color dot, name, and task count in header.
+- **Notes:** Filters tasks to only show pending tasks for the current project. TaskInput placeholder customized with project name. Shows project icon (emoji) or color dot, name, task count, and `CompletionRing` showing completed/total progress in header. Supports sectioned list view and board (kanban) view. Section CRUD with inline editing, collapsible sections, and drag-and-drop task movement between sections.
 
 ---
 
@@ -170,7 +172,7 @@
 
 ### TaskPage.tsx
 
-- **Path:** `src/ui/views/TaskPage.tsx` (184 lines)
+- **Path:** `src/ui/views/TaskPage.tsx` (218 lines)
 - **Purpose:** Full-page task detail view. Two-column layout with content and metadata sidebar.
 - **Key Exports:** `TaskPage`
 - **Props:**
@@ -183,9 +185,9 @@
   - `onSelect: (id: string) => void`
   - `onAddSubtask?, onToggleSubtask?, onReorder?`
   - `availableTags?: string[]`
-- **Key Dependencies:** `SubtaskSection.tsx`, `TaskMetadataSidebar.tsx`, `ConfirmDialog.tsx`, `useGeneralSettings` context
+- **Key Dependencies:** `SubtaskSection.tsx`, `TaskMetadataSidebar.tsx`, `ConfirmDialog.tsx`, `MarkdownMessage.tsx`, `useGeneralSettings` context
 - **Used By:** `App.tsx`
-- **Notes:** Title and description inline-editable with blur-to-save. Breadcrumb navigation at top shows project name (or "Inbox"). Subtask inline editing with save/cancel. Delete honors `confirm_delete` setting via ConfirmDialog. Responsive: stacks vertically on mobile, side-by-side on desktop.
+- **Notes:** Title inline-editable with blur-to-save. Description toggles between Markdown preview (using `MarkdownMessage`) and edit mode (textarea) — click preview or pencil icon to edit, blur to save. Breadcrumb navigation at top shows project name (or "Inbox"). Subtask inline editing with save/cancel. Delete honors `confirm_delete` setting via ConfirmDialog. Responsive: stacks vertically on mobile, side-by-side on desktop.
 
 ---
 
@@ -351,13 +353,13 @@
 
 ### settings/GeneralTab.tsx
 
-- **Path:** `src/ui/views/settings/GeneralTab.tsx` (342 lines)
-- **Purpose:** General settings: Date & Time (week start, date format, time format, default calendar view), Task Behavior (default priority, confirm delete, start view), Sound Effects (enable/disable, volume, per-event toggles with preview), and Notifications (browser notifications, toast notifications, default reminder offset).
+- **Path:** `src/ui/views/settings/GeneralTab.tsx` (357 lines)
+- **Purpose:** General settings: Date & Time (week start, date format, time format, default calendar view), Task Behavior (default priority, confirm delete, start view, daily capacity), Sound Effects (enable/disable, volume, per-event toggles with preview), and Notifications (browser notifications, toast notifications, default reminder offset).
 - **Key Exports:** `GeneralTab`
 - **Props:** None (reads from `useGeneralSettings` context)
 - **Key Dependencies:** `SettingsContext`, settings `components.tsx`, `previewSound` from `utils/sounds.js`, `api` (getAppSetting, setAppSetting), `lucide-react` (Bell, Volume2)
 - **Used By:** `Settings.tsx`
-- **Notes:** Contains three sub-components: `SoundSettings` and `NotificationSettings` (defined in the same file), plus a `dateFormatPreview` helper. Sound section includes per-event preview buttons for complete, create, delete, and reminder events. Notification section handles browser permission requests with fallback for denied/unsupported states. Date format shows live preview. "Default calendar view" setting added for Day/Week/Month mode.
+- **Notes:** Contains three sub-components: `SoundSettings` and `NotificationSettings` (defined in the same file), plus a `dateFormatPreview` helper. Sound section includes per-event preview buttons for complete, create, delete, and reminder events. Notification section handles browser permission requests with fallback for denied/unsupported states. Date format shows live preview. "Default calendar view" setting added for Day/Week/Month mode. "Daily capacity" setting (4h/6h/8h/10h) controls the workload capacity bar in Today view.
 
 ---
 

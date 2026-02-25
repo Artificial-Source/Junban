@@ -47,6 +47,7 @@ interface SidebarProps {
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   projectTaskCounts?: Map<string, number>;
+  projectCompletedCounts?: Map<string, number>;
   onAddTask?: () => void;
   onSearch?: () => void;
   inboxCount?: number;
@@ -109,6 +110,7 @@ export function Sidebar({
   collapsed = false,
   onToggleCollapsed,
   projectTaskCounts,
+  projectCompletedCounts,
   onAddTask,
   onSearch,
   inboxCount,
@@ -236,7 +238,10 @@ export function Sidebar({
 
   const renderProjectButton = (project: Project) => {
     const isActive = currentView === "project" && selectedProjectId === project.id;
-    const projectCount = projectTaskCounts?.get(project.id) ?? 0;
+    const pendingCount = projectTaskCounts?.get(project.id) ?? 0;
+    const completedCount = projectCompletedCounts?.get(project.id) ?? 0;
+    const totalCount = pendingCount + completedCount;
+    const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
     return (
       <button
         onClick={() => onNavigate("project", project.id)}
@@ -259,8 +264,16 @@ export function Sidebar({
           />
         )}
         <span className="flex-1 truncate">{project.name}</span>
-        {projectCount > 0 && (
-          <span className="text-xs tabular-nums text-on-surface-muted">{projectCount}</span>
+        {totalCount > 0 && (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="w-12 h-1 rounded-full bg-surface-tertiary overflow-hidden" title={`${progressPct}% complete`}>
+              <div
+                className="h-full rounded-full bg-accent/60 transition-all duration-300"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+            <span className="text-xs tabular-nums text-on-surface-muted">{pendingCount}</span>
+          </div>
         )}
       </button>
     );

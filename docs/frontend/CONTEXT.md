@@ -184,7 +184,7 @@ This nesting order matters because inner providers can depend on outer ones (e.g
 
 ## SettingsContext.tsx
 
-- **Path:** `src/ui/context/SettingsContext.tsx` (179 lines)
+- **Path:** `src/ui/context/SettingsContext.tsx` (211 lines)
 - **Purpose:** General application settings management. Loads all settings on mount, persists changes to the API, and applies visual effects (accent color, density, font size, animations) immediately.
 - **Key Exports:**
   - `SettingsProvider` -- context provider component
@@ -206,11 +206,12 @@ This nesting order matters because inner providers can depend on outer ones (e.g
   - `start_view: "inbox" | "today" | "upcoming" | "ai-chat"`
   - `sound_enabled, sound_volume, sound_complete, sound_create, sound_delete, sound_reminder` -- sound settings
   - `calendar_default_mode: "day" | "week" | "month"` -- default calendar view mode
+  - `daily_capacity_minutes: string` -- daily work capacity in minutes (default "480" = 8h), shown in Today view capacity bar
 - **Visual Side Effects:** On setting change, immediately applies:
   - `accent_color` -> sets `--color-accent` and `--color-accent-hover` CSS properties (hover color is auto-darkened)
   - `density` -> adds/removes `density-compact` / `density-comfortable` class on `<html>`
   - `font_size` -> adds/removes `font-small` / `font-large` class on `<html>`
   - `reduce_animations` -> toggles `reduce-motion` class on `<html>`
 - **Key Dependencies:** `api` (getAppSetting, setAppSetting)
-- **Used By:** `GeneralTab.tsx`, `AppearanceTab.tsx`, `DatePicker.tsx`, `useSoundEffect.ts`, and any component that reads user preferences
+- **Used By:** `GeneralTab.tsx`, `AppearanceTab.tsx`, `DatePicker.tsx`, `useSoundEffect.ts`, `Today.tsx`, `Project.tsx`, and any component that reads user preferences
 - **Notes:** The provider wraps children in a `<div>` that fades in once settings are loaded, preventing flash of unstyled content. All setting values are stored as strings in the backend. The `darkenColor` helper converts hex to HSL, reduces lightness, and converts back. The context is created with default values so `useGeneralSettings()` can be called without a provider (returns defaults).

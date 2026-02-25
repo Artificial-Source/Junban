@@ -29,6 +29,7 @@ export interface GeneralSettings {
   feature_stats: "true" | "false";
   feature_chords: "true" | "false";
   feature_cancelled: "true" | "false";
+  daily_capacity_minutes: string;
 }
 
 const DEFAULT_SETTINGS: GeneralSettings = {
@@ -59,6 +60,7 @@ const DEFAULT_SETTINGS: GeneralSettings = {
   feature_stats: "true",
   feature_chords: "true",
   feature_cancelled: "true",
+  daily_capacity_minutes: "480",
 };
 
 const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS) as (keyof GeneralSettings)[];

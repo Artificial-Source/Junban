@@ -63,6 +63,7 @@ Two-week sprint cycles. Each sprint has a clear goal and pulls items from the [B
 | [S34](sprints/S34-plugin-slot-system.md) | Plugin Slot System | 1773 | View slots, structured content, Pomodoro rewrite |
 | [S35](sprints/S35-big-features.md) | Big Features | 1774 | Kanban board, stats, comments, sections, cancelled/someday views |
 | [S36](sprints/S36-bug-fixes.md) | Bug Fixes | 1785 | NLP deadline keyword, context menu wiring, ultrawide max-width |
+| S37 | Core UI Enhancements | 1796 | Markdown descriptions, workload capacity bar, project progress tracking |
 
 ---
 

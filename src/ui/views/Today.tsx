@@ -5,6 +5,7 @@ import { TaskInput } from "../components/TaskInput.js";
 import { TaskList } from "../components/TaskList.js";
 import { OverdueSection } from "../components/OverdueSection.js";
 import { CompletionRing } from "../components/CompletionRing.js";
+import { useGeneralSettings } from "../context/SettingsContext.js";
 import type { Task, Project } from "../../core/types.js";
 
 interface TodayProps {
@@ -25,6 +26,40 @@ interface TodayProps {
   onUpdateDueDate?: (taskId: string, dueDate: string | null) => void;
   onContextMenu?: (taskId: string, position: { x: number; y: number }) => void;
   autoFocusTrigger?: number;
+}
+
+function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+function WorkloadCapacityBar({ planned, capacity }: { planned: number; capacity: number }) {
+  const pct = Math.min((planned / capacity) * 100, 100);
+  const over = planned > capacity;
+
+  return (
+    <div className="mb-4 px-1">
+      <div className="flex items-center justify-between text-xs text-on-surface-muted mb-1">
+        <span>
+          {formatDuration(planned)} / {formatDuration(capacity)} planned
+        </span>
+        {over && (
+          <span className="text-error font-medium">
+            +{formatDuration(planned - capacity)} over
+          </span>
+        )}
+      </div>
+      <div className="h-1.5 rounded-full bg-surface-tertiary overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${over ? "bg-error" : "bg-accent"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
 }
 
 function formatTodayHeader(): string {
@@ -51,6 +86,7 @@ export function Today({
   onContextMenu,
   autoFocusTrigger,
 }: TodayProps) {
+  const { settings } = useGeneralSettings();
   const today = toDateKey(new Date());
 
   const projectMap = useMemo(() => {
@@ -78,6 +114,17 @@ export function Today({
   const totalCount = overdueTasks.length + todayTasks.length;
   const ringTotal = todayCompletedCount + todayTasks.length;
 
+  // Workload capacity
+  const capacityMinutes = parseInt(settings.daily_capacity_minutes, 10) || 480;
+  const plannedMinutes = useMemo(
+    () =>
+      [...overdueTasks, ...todayTasks].reduce(
+        (sum, t) => sum + (t.estimatedMinutes ?? 0),
+        0,
+      ),
+    [overdueTasks, todayTasks],
+  );
+
   const handleReschedule = useCallback(async () => {
     const todayISO = new Date().toISOString();
     for (const task of overdueTasks) {
@@ -97,6 +144,11 @@ export function Today({
           {ringTotal > 0 && <CompletionRing completed={todayCompletedCount} total={ringTotal} />}
         </div>
       </div>
+
+      {/* Workload capacity bar */}
+      {plannedMinutes > 0 && (
+        <WorkloadCapacityBar planned={plannedMinutes} capacity={capacityMinutes} />
+      )}
 
       <TaskInput
         onSubmit={onCreateTask}

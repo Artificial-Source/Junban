@@ -238,6 +238,16 @@ function AppContent() {
     return counts;
   }, [state.tasks]);
 
+  const projectCompletedCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of state.tasks) {
+      if (t.status === "completed" && t.projectId) {
+        counts.set(t.projectId, (counts.get(t.projectId) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [state.tasks]);
+
   // ── Project CRUD handlers ──
   const handleCreateProject = useCallback(
     async (
@@ -823,6 +833,7 @@ function AppContent() {
             collapsed={sidebarCollapsed}
             onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
             projectTaskCounts={projectTaskCounts}
+            projectCompletedCounts={projectCompletedCounts}
             onAddTask={handleAddTask}
             onSearch={() => setSearchOpen(true)}
             inboxCount={inboxTaskCount}
@@ -908,6 +919,7 @@ function AppContent() {
           selectedPluginViewId={selectedPluginViewId}
           collapsed={false}
           projectTaskCounts={projectTaskCounts}
+          projectCompletedCounts={projectCompletedCounts}
           onAddTask={() => {
             setDrawerOpen(false);
             handleAddTask();

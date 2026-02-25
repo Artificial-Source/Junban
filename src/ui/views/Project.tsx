@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { ChevronDown, ChevronRight, Plus, Trash2, Check, X } from "lucide-react";
 import { TaskInput } from "../components/TaskInput.js";
 import { TaskList } from "../components/TaskList.js";
 import { Board } from "./Board.js";
+import { CompletionRing } from "../components/CompletionRing.js";
 import type { Task, Project as ProjectType, Section } from "../../core/types.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 
@@ -240,6 +241,11 @@ export function Project({
   const kanbanEnabled = settings.feature_kanban !== "false";
 
   const projectTasks = tasks.filter((t) => t.status === "pending" && t.projectId === project.id);
+  const completedCount = useMemo(
+    () => tasks.filter((t) => t.status === "completed" && t.projectId === project.id).length,
+    [tasks, project.id],
+  );
+  const totalForProgress = projectTasks.length + completedCount;
   const rawViewStyle = viewStyle ?? project.viewStyle ?? "list";
   const effectiveViewStyle = !kanbanEnabled && rawViewStyle === "board" ? "list" : rawViewStyle;
   const hasSections = sectionsEnabled && sections && sections.length > 0;
@@ -263,6 +269,9 @@ export function Project({
           <span className="text-sm text-on-surface-muted">
             {projectTasks.length} {projectTasks.length === 1 ? "task" : "tasks"}
           </span>
+          {totalForProgress > 0 && (
+            <CompletionRing completed={completedCount} total={totalForProgress} />
+          )}
         </div>
         <TaskInput
           onSubmit={onCreateTask}
@@ -314,6 +323,9 @@ export function Project({
         <span className="text-sm text-on-surface-muted">
           {projectTasks.length} {projectTasks.length === 1 ? "task" : "tasks"}
         </span>
+        {totalForProgress > 0 && (
+          <CompletionRing completed={completedCount} total={totalForProgress} />
+        )}
       </div>
       <TaskInput
         onSubmit={onCreateTask}

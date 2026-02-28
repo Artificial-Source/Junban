@@ -56,6 +56,13 @@
   .border-l-3 {
     border-left-width: 3px;
   }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
 }
 
 /* ── Entrance animations ────────────────────────────────── */

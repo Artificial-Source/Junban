@@ -294,8 +294,8 @@ export function Sidebar({
   return (
     <aside
       aria-label="Main navigation"
-      className={`relative z-20 border-r border-border bg-surface-secondary flex flex-col transition-all ${
-        collapsed ? "w-16 overflow-visible" : "w-sidebar overflow-y-auto"
+      className={`relative z-20 border-r border-border bg-surface-secondary flex flex-col transition-[width] duration-200 ${
+        collapsed ? "w-16 overflow-visible" : "w-sidebar"
       }`}
     >
       {/* ── Header ── */}
@@ -373,7 +373,7 @@ export function Sidebar({
         aria-label="Views"
         className={`flex-1 flex flex-col min-h-0 ${collapsed ? "px-2" : "px-3"}`}
       >
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
           {/* Nav items + navigation-slot plugin views */}
           <ul className="space-y-0.5">
             {visibleNavItems.map((item) =>

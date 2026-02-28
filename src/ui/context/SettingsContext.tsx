@@ -35,6 +35,7 @@ export interface GeneralSettings {
   feature_completed: "true" | "false";
   sidebar_nav_order: string;
   sidebar_favorite_views: string;
+  sidebar_section_order: string;
   daily_capacity_minutes: string;
   nudge_enabled: "true" | "false";
   nudge_overdue_alert: "true" | "false";
@@ -78,6 +79,7 @@ const DEFAULT_SETTINGS: GeneralSettings = {
   feature_completed: "true",
   sidebar_nav_order: "",
   sidebar_favorite_views: "",
+  sidebar_section_order: "",
   daily_capacity_minutes: "480",
   nudge_enabled: "true",
   nudge_overdue_alert: "true",

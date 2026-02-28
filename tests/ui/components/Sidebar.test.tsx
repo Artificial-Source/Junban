@@ -16,6 +16,7 @@ vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
       feature_completed: "true",
       sidebar_nav_order: "",
       sidebar_favorite_views: "",
+      sidebar_section_order: "",
       start_view: "inbox",
       ...mockSettings,
     },
@@ -54,6 +55,7 @@ vi.mock("lucide-react", () => {
     Home: icon("home"),
     Link: icon("link"),
     Heart: icon("heart"),
+    GripVertical: icon("grip-vertical"),
   };
 });
 
@@ -291,10 +293,12 @@ describe("Sidebar", () => {
 
   // ── Nav ordering tests ──
 
-  it("renders nav items in stored order from sidebar_nav_order", () => {
-    mockSettings = { sidebar_nav_order: "stats,inbox,today,upcoming,calendar,filters-labels,completed,cancelled,matrix,someday" };
+  it("renders nav items in stored order from sidebar_section_order", () => {
+    mockSettings = { sidebar_section_order: "stats,inbox,today,upcoming,calendar,filters-labels,completed,cancelled,matrix,someday" };
     render(<Sidebar {...defaultProps} />);
-    const buttons = screen.getAllByRole("button").filter((b) => b.closest("ul"));
+    // Get all nav buttons inside the sortable context area
+    const sortable = screen.getByTestId("sortable-context");
+    const buttons = Array.from(sortable.querySelectorAll("button"));
     // Stats should appear before Inbox in the nav
     const statsIdx = buttons.findIndex((b) => b.textContent?.includes("Stats"));
     const inboxIdx = buttons.findIndex((b) => b.textContent?.includes("Inbox"));
@@ -303,9 +307,10 @@ describe("Sidebar", () => {
 
   it("items not in stored order appear at end", () => {
     // Only specify a few items — the rest should appear at end
-    mockSettings = { sidebar_nav_order: "today,inbox" };
+    mockSettings = { sidebar_section_order: "today,inbox" };
     render(<Sidebar {...defaultProps} />);
-    const buttons = screen.getAllByRole("button").filter((b) => b.closest("ul"));
+    const sortable = screen.getByTestId("sortable-context");
+    const buttons = Array.from(sortable.querySelectorAll("button"));
     const todayIdx = buttons.findIndex((b) => b.textContent?.includes("Today"));
     const inboxIdx = buttons.findIndex((b) => b.textContent?.includes("Inbox"));
     const upcomingIdx = buttons.findIndex((b) => b.textContent?.includes("Upcoming"));
@@ -313,10 +318,11 @@ describe("Sidebar", () => {
     expect(inboxIdx).toBeLessThan(upcomingIdx);
   });
 
-  it("empty sidebar_nav_order uses default order", () => {
-    mockSettings = { sidebar_nav_order: "" };
+  it("empty sidebar_section_order uses default order", () => {
+    mockSettings = { sidebar_section_order: "" };
     render(<Sidebar {...defaultProps} />);
-    const buttons = screen.getAllByRole("button").filter((b) => b.closest("ul"));
+    const sortable = screen.getByTestId("sortable-context");
+    const buttons = Array.from(sortable.querySelectorAll("button"));
     const inboxIdx = buttons.findIndex((b) => b.textContent?.includes("Inbox"));
     const todayIdx = buttons.findIndex((b) => b.textContent?.includes("Today"));
     const upcomingIdx = buttons.findIndex((b) => b.textContent?.includes("Upcoming"));
@@ -349,7 +355,7 @@ describe("Sidebar", () => {
     fireEvent.contextMenu(statsBtn);
     fireEvent.click(screen.getByText("Move to top"));
     const call = mockUpdateSetting.mock.calls.find(
-      (c: any[]) => c[0] === "sidebar_nav_order",
+      (c: any[]) => c[0] === "sidebar_section_order",
     );
     expect(call).toBeTruthy();
     const order = (call![1] as string).split(",");
@@ -362,7 +368,7 @@ describe("Sidebar", () => {
     fireEvent.contextMenu(inboxBtn);
     fireEvent.click(screen.getByText("Move to bottom"));
     const call = mockUpdateSetting.mock.calls.find(
-      (c: any[]) => c[0] === "sidebar_nav_order",
+      (c: any[]) => c[0] === "sidebar_section_order",
     );
     expect(call).toBeTruthy();
     const order = (call![1] as string).split(",");
@@ -462,9 +468,8 @@ describe("Sidebar", () => {
   it("shows 'Remove from Favorites' when view is favorited", () => {
     mockSettings = { sidebar_favorite_views: "calendar" };
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
-    // Right-click the Calendar button in the main nav (has context menu handler)
-    const calendarBtn = screen.getByText("Calendar", { selector: "[data-testid='sortable-context'] button span" })?.closest("button")
-      ?? screen.getAllByText("Calendar").pop()!.closest("button")!;
+    // Calendar is now in Favorite Views section (removed from main nav to avoid duplication)
+    const calendarBtn = screen.getByText("Calendar").closest("button")!;
     fireEvent.contextMenu(calendarBtn);
     expect(screen.getByText("Remove from Favorites")).toBeTruthy();
   });
@@ -490,5 +495,92 @@ describe("Sidebar", () => {
     const menu = screen.getByRole("menu");
     const separators = menu.querySelectorAll('[role="separator"]');
     expect(separators.length).toBeGreaterThan(0);
+  });
+
+  // ── Favorite dedup: hide favorited items from main nav ──
+
+  it("hides favorited items from main nav (no duplication)", () => {
+    mockSettings = { sidebar_favorite_views: "calendar" };
+    render(<Sidebar {...defaultProps} />);
+    // Calendar should appear only once (in Favorite Views), not in main nav
+    const calendarElements = screen.getAllByText("Calendar");
+    expect(calendarElements).toHaveLength(1);
+    // Favorite Views section should be visible
+    expect(screen.getByText("Favorite Views")).toBeTruthy();
+  });
+
+  it("shows favorited items only in Favorite Views section", () => {
+    mockSettings = { sidebar_favorite_views: "today,stats" };
+    render(<Sidebar {...defaultProps} />);
+    // Today and Stats removed from main nav, only in Favorite Views
+    expect(screen.getByText("Favorite Views")).toBeTruthy();
+    // Each should appear exactly once
+    const todayElements = screen.getAllByText("Today");
+    const statsElements = screen.getAllByText("Stats");
+    expect(todayElements).toHaveLength(1);
+    expect(statsElements).toHaveLength(1);
+  });
+
+  // ── Section ordering ──
+
+  it("renders sections in default order when sidebar_section_order is empty", () => {
+    mockSettings = {
+      sidebar_favorite_views: "calendar",
+      sidebar_section_order: "",
+    };
+    const projects = [makeProject({ id: "p1", name: "Work" })];
+    const savedFilters = [{ id: "f1", name: "My Filter", query: "status:pending" }];
+    render(<Sidebar {...defaultProps} projects={projects} savedFilters={savedFilters} />);
+    // All sections should appear
+    expect(screen.getByText("Favorite Views")).toBeTruthy();
+    expect(screen.getByText("My Projects")).toBeTruthy();
+    expect(screen.getByText("My Views")).toBeTruthy();
+  });
+
+  it("renders sections with drag handles", () => {
+    mockSettings = { sidebar_favorite_views: "calendar" };
+    const projects = [makeProject({ id: "p1", name: "Work" })];
+    render(<Sidebar {...defaultProps} projects={projects} />);
+    // Should have drag handle buttons for sections
+    const dragHandles = screen.getAllByLabelText(/Drag .+ section/);
+    expect(dragHandles.length).toBeGreaterThanOrEqual(2); // Favorite Views + My Projects at least
+  });
+
+  it("renders sections in stored order from sidebar_section_order", () => {
+    mockSettings = {
+      sidebar_favorite_views: "calendar",
+      sidebar_section_order: "projects,favorite-views",
+    };
+    const projects = [makeProject({ id: "p1", name: "Work" })];
+    render(<Sidebar {...defaultProps} projects={projects} />);
+    // My Projects should come before Favorite Views based on section order
+    const allSections = screen.getByLabelText("Views").querySelectorAll("[data-section-id]");
+    const sectionOrder = Array.from(allSections).map((el) => el.getAttribute("data-section-id"));
+    expect(sectionOrder.indexOf("projects")).toBeLessThan(sectionOrder.indexOf("favorite-views"));
+  });
+
+  it("nav items can be reordered below sections in flat list", () => {
+    mockSettings = {
+      sidebar_favorite_views: "calendar",
+      sidebar_section_order: "favorite-views,inbox,today,upcoming,filters-labels,completed,cancelled,matrix,stats,someday",
+    };
+    render(<Sidebar {...defaultProps} />);
+    const sortable = screen.getByTestId("sortable-context");
+    const allElements = Array.from(sortable.querySelectorAll("[data-section-id], button"));
+    // Favorite Views section should come before Inbox button
+    const favViewIdx = allElements.findIndex((el) => el.getAttribute("data-section-id") === "favorite-views");
+    const inboxIdx = allElements.findIndex((el) => el.textContent?.includes("Inbox"));
+    expect(favViewIdx).toBeLessThan(inboxIdx);
+  });
+
+  it("individual nav items are draggable via SortableNavItem wrapper", () => {
+    render(<Sidebar {...defaultProps} />);
+    const sortable = screen.getByTestId("sortable-context");
+    // Each nav item is wrapped in a div (SortableNavItem) — check Inbox button has a parent div wrapper
+    const inboxBtn = screen.getByText("Inbox").closest("button")!;
+    const wrapper = inboxBtn.parentElement;
+    expect(wrapper?.tagName).toBe("DIV");
+    // Wrapper should have the style from SortableNavItem (opacity)
+    expect(wrapper?.style.opacity).toBe("1");
   });
 });

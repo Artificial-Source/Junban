@@ -277,6 +277,20 @@
 
 ---
 
+## useNudges.ts
+
+- **Path:** `src/ui/hooks/useNudges.ts`
+- **Purpose:** Evaluates contextual nudge rules periodically from existing task state. No API calls — purely derived from in-memory data. Respects per-type enable/disable settings. Session-scoped dismissed set prevents re-showing dismissed nudges.
+- **Key Exports:** `useNudges`
+- **Params:**
+  - `options: UseNudgesOptions` -- `{ tasks: Task[], settings: GeneralSettings, intervalMs?: number }`
+- **Return Value:** `{ activeNudges: Nudge[], dismiss: (id: string) => void }`
+- **Key Dependencies:** `core/nudges.ts` (evaluateNudges), `format-date.ts` (toDateKey), `SettingsContext` (GeneralSettings)
+- **Used By:** `App.tsx`
+- **Notes:** Nudge types: overdue_alert, deadline_approaching, stale_tasks, empty_today, overloaded_day. Each type maps to a `nudge_*` setting key for per-type toggling.
+
+---
+
 ## useCalendarNavigation.ts
 
 - **Path:** `src/ui/views/calendar/useCalendarNavigation.ts` (165 lines)

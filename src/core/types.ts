@@ -25,7 +25,10 @@ export const CreateTaskInput = z.object({
 });
 export type CreateTaskInput = z.infer<typeof CreateTaskInput>;
 
-export const UpdateTaskInput = CreateTaskInput.partial();
+export const UpdateTaskInput = CreateTaskInput.partial().extend({
+  status: TaskStatus.optional(),
+  completedAt: z.string().datetime().nullable().optional(),
+});
 export type UpdateTaskInput = z.infer<typeof UpdateTaskInput>;
 
 export interface Task {

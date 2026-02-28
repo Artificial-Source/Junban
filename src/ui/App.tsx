@@ -345,14 +345,14 @@ function AppContent() {
   // ── Restore / activate handlers for Cancelled & Someday views ──
   const handleRestoreTask = useCallback(
     async (id: string) => {
-      await handleUpdateTask(id, { status: "pending", completedAt: null } as any);
+      await handleUpdateTask(id, { status: "pending", completedAt: null });
     },
     [handleUpdateTask],
   );
 
   const handleActivateTask = useCallback(
     async (id: string) => {
-      await handleUpdateTask(id, { isSomeday: false } as any);
+      await handleUpdateTask(id, { isSomeday: false });
     },
     [handleUpdateTask],
   );
@@ -550,7 +550,7 @@ function AppContent() {
               const newTags = hasTag
                 ? taskTagNames.filter((t) => t !== tag)
                 : [...taskTagNames, tag];
-              handleUpdateTask(task.id, { tags: newTags } as any);
+              handleUpdateTask(task.id, { tags: newTags });
             },
           };
         })
@@ -643,7 +643,7 @@ function AppContent() {
       id: "someday",
       label: task.isSomeday ? "Remove from Someday" : "Move to Someday",
       icon: <Lightbulb size={14} />,
-      onClick: () => handleUpdateTask(task.id, { isSomeday: !task.isSomeday } as any),
+      onClick: () => handleUpdateTask(task.id, { isSomeday: !task.isSomeday }),
     });
 
     // ── Mark as cancelled / Reopen ──
@@ -652,7 +652,7 @@ function AppContent() {
       label: task.status === "cancelled" ? "Reopen" : "Mark as cancelled",
       icon: task.status === "cancelled" ? <CircleDot size={14} /> : <XCircle size={14} />,
       separator: true,
-      onClick: () => handleUpdateTask(task.id, { status: task.status === "cancelled" ? "pending" : "cancelled" } as any),
+      onClick: () => handleUpdateTask(task.id, { status: task.status === "cancelled" ? "pending" : "cancelled" }),
     });
 
     items.push({
@@ -732,7 +732,7 @@ function AppContent() {
 
   const handleMoveTask = useCallback(
     async (taskId: string, sectionId: string | null) => {
-      await handleUpdateTask(taskId, { sectionId } as any);
+      await handleUpdateTask(taskId, { sectionId });
     },
     [handleUpdateTask],
   );

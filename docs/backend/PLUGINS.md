@@ -2,7 +2,7 @@
 
 The plugin subsystem (`src/plugins/`) implements Saydo's Obsidian-style plugin system. It handles plugin discovery, manifest validation, permission-gated loading, lifecycle management, and the API surface that plugins interact with. This document is for **Saydo developers** who need to understand or modify the plugin system internals. For plugin authors, see `docs/plugins/API.md`.
 
-**Total files:** 10 | **Total lines:** 1,083
+**Total files:** 11 | **Total lines:** ~1,123
 
 ---
 

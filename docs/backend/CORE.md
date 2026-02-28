@@ -224,6 +224,19 @@ The `src/core/` directory contains the heart of the Saydo application: task mana
 
 ---
 
+### `nudges.ts`
+**Path:** `src/core/nudges.ts`
+**Purpose:** Pure-logic nudge evaluation. Defines nudge types (overdue_alert, deadline_approaching, stale_tasks, empty_today, overloaded_day) and evaluates them against current task state. No I/O — takes tasks and returns applicable nudges.
+**Key Exports:**
+- `NudgeType` -- union type of nudge categories
+- `Nudge` -- `{ id, type, title, description, priority }`
+- `evaluateNudges(tasks, today)` -- returns active nudges based on task state
+**Key Dependencies:** `types.ts`
+**Used By:**
+- `src/ui/hooks/useNudges.ts`
+
+---
+
 ### `errors.ts`
 **Path:** `src/core/errors.ts`
 **Lines:** 21

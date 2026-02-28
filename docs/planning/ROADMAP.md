@@ -159,8 +159,8 @@ Full browser-based client (requires Saydo Sync).
 
 - Task CRUD with subtasks, templates, recurrence, filters, priorities
 - SQLite + Markdown dual storage backends
-- 55+ React components, 24 views, 13 hooks, 7 contexts
-- AI assistant with 28 tools, 8 providers, chat persistence
+- ~56 React components, 17 views + 10 settings tabs, 14 hooks, 7 contexts
+- AI assistant with 34 tools, 8 providers, chat persistence
 - Voice I/O: 8 adapters (STT/TTS), VAD, Web Workers, voice call mode
 - Plugin system with sandboxing, permissions, lifecycle, registry
 - CLI companion with 5 commands

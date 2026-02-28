@@ -2,7 +2,7 @@
 
 The AI subsystem (`src/ai/`) implements Saydo's conversational AI assistant. It provides a pluggable multi-provider LLM architecture with a middleware pipeline, a tool calling system, and session management. The subsystem is designed so that AI is entirely optional: no AI code runs unless the user configures a provider.
 
-**Total files:** 30 | **Total lines:** 3,941
+**Total files:** 47 | **Total lines:** ~6,378
 
 ---
 
@@ -575,6 +575,38 @@ Returns: `{ range, currentStreak, bestStreak, today: { completed, created, minut
 
 ---
 
+#### `bulk-operations.ts`
+**Path:** `src/ai/tools/builtin/bulk-operations.ts`
+**Purpose:** Bulk operation tools for creating, completing, and updating multiple tasks. Enables "brain dump" workflows where users describe multiple tasks at once.
+**Registered Tools:**
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `bulk_create_tasks` | Create multiple tasks at once (brain dumps, meeting notes) | `tasks[]` (title, priority, dueDate, tags, projectId) |
+| `bulk_complete_tasks` | Complete multiple tasks at once | `taskIds[]` |
+| `bulk_update_tasks` | Update multiple tasks with shared changes | `taskIds[]`, `updates` (priority, dueDate, projectId, tags) |
+
+**Key Dependencies:** `ToolRegistry`
+**Used By:** `provider.ts` (registration)
+
+---
+
+#### `memory-tools.ts`
+**Path:** `src/ai/tools/builtin/memory-tools.ts`
+**Purpose:** AI memory management tools. Allows the AI to save, recall, and forget facts about the user across conversations. Memories are persisted in the `ai_memories` database table.
+**Registered Tools:**
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `save_memory` | Save a fact about the user for future conversations | `content` (string), `category` (preference/habit/context/instruction/pattern) |
+| `recall_memories` | Search saved memories by keyword or category | `query` (optional), `category` (optional) |
+| `forget_memory` | Delete a saved memory by ID | `memoryId` |
+
+**Key Dependencies:** `ToolRegistry`, `ai_memories` table
+**Used By:** `provider.ts` (registration)
+
+---
+
 ## Tool Summary
 
 | Tool Name | Category | Description |
@@ -607,7 +639,13 @@ Returns: `{ range, currentStreak, bestStreak, today: { completed, created, minut
 | `get_productivity_stats` | Analytics | Streak, completion counts, daily trends |
 | `plan_my_day` | Planning | Morning planning with prioritized task order |
 | `daily_review` | Planning | End-of-day review of accomplishments |
+| `bulk_create_tasks` | Bulk Operations | Create multiple tasks at once |
+| `bulk_complete_tasks` | Bulk Operations | Complete multiple tasks at once |
+| `bulk_update_tasks` | Bulk Operations | Update multiple tasks with shared changes |
+| `save_memory` | AI Memory | Save a fact about the user |
+| `recall_memories` | AI Memory | Search saved memories |
+| `forget_memory` | AI Memory | Delete a saved memory |
 
-**Total:** 28 tools
+**Total:** 34 tools across 14 files
 
 All tools are also exposed via the [MCP server](MCP.md) for external AI agents (Claude Desktop, custom assistants, other apps).

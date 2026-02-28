@@ -448,18 +448,19 @@ export async function switchChatSession(sessionId: string): Promise<AIChatMessag
       providerName: providerSetting.value as string,
     });
 
+    const restoredMessages: { role: "user" | "assistant" | "tool"; content: string; toolCallId?: string; toolCalls?: any }[] = [];
     for (const row of rows) {
       if (row.role === "system") continue;
-      const msg = {
+      restoredMessages.push({
         role: row.role as "user" | "assistant" | "tool",
         content: row.content,
         ...(row.toolCallId ? { toolCallId: row.toolCallId } : {}),
         ...(row.toolCalls ? { toolCalls: JSON.parse(row.toolCalls) } : {}),
-      };
-      (session as any).messages.push(msg);
+      });
     }
+    session.restoreMessages(restoredMessages);
 
-    (svc.chatManager as any).session = session;
+    svc.chatManager.setSession(session);
     return session.getMessages() as AIChatMessage[];
   }
 
@@ -478,7 +479,7 @@ export async function createNewChatSession(): Promise<string> {
       currentSession.extractMemories().catch(() => {});
     }
     // Clear current session without deleting from DB
-    (svc.chatManager as any).session = null;
+    svc.chatManager.setSession(null);
     return "";
   }
   const res = await fetch(`${BASE}/ai/sessions/new`, { method: "POST" });

@@ -313,14 +313,14 @@
 ### Settings.tsx
 
 - **Path:** `src/ui/views/Settings.tsx` (322 lines)
-- **Purpose:** Settings view with 9 tabs. Desktop layout shows sidebar tab list + content area in a modal. Mobile layout uses full-screen drill-down navigation (grouped index page -> tab content with back button).
+- **Purpose:** Settings view with 10 tabs. Desktop layout shows sidebar tab list + content area in a modal. Mobile layout uses full-screen drill-down navigation (grouped index page -> tab content with back button).
 - **Key Exports:** `Settings`, `SettingsTab` (re-exported type)
 - **Props:**
   - `activeTab?: SettingsTab`
   - `onClose: () => void`
 - **Key Dependencies:** All settings tab components, `useIsMobile` hook, `lucide-react` (X, SlidersHorizontal, Palette, Bot, Mic, Puzzle, Keyboard, Database, Info, FileText, ArrowLeft, ChevronRight)
 - **Used By:** `App.tsx`
-- **Notes:** Tabs: General, Appearance, AI Assistant, Voice, Plugins, Templates, Keyboard, Data, About. Each tab has its own icon (separate desktop/mobile icon sizes). Closes on Escape (mobile: Escape navigates back to index first). Desktop: modal with backdrop that closes on click-outside. Mobile: full-screen with grouped sections (General, AI & Voice, Extensions, Info) on the index page and drill-down navigation with back button. Syncs `activeTab` prop changes (e.g., from command palette "Open AI settings"). Tab metadata includes optional subtitles shown on mobile index.
+- **Notes:** Tabs: General, Appearance, Features, AI Assistant, Voice, Plugins, Templates, Keyboard, Data, About. Each tab has its own icon (separate desktop/mobile icon sizes). Closes on Escape (mobile: Escape navigates back to index first). Desktop: modal with backdrop that closes on click-outside. Mobile: full-screen with grouped sections (General, AI & Voice, Extensions, Info) on the index page and drill-down navigation with back button. Syncs `activeTab` prop changes (e.g., from command palette "Open AI settings"). Tab metadata includes optional subtitles shown on mobile index.
 
 ---
 
@@ -330,7 +330,7 @@
 
 - **Path:** `src/ui/views/settings/types.ts` (11 lines)
 - **Purpose:** Type definition for the `SettingsTab` union type.
-- **Key Exports:** `SettingsTab` type (`"general" | "appearance" | "ai" | "voice" | "plugins" | "templates" | "keyboard" | "data" | "about"`)
+- **Key Exports:** `SettingsTab` type (`"general" | "appearance" | "features" | "ai" | "voice" | "plugins" | "templates" | "keyboard" | "data" | "about"`)
 - **Used By:** `Settings.tsx`, all tab components
 
 ---
@@ -456,6 +456,17 @@
 - **Key Dependencies:** `SettingsContext`, settings `components.tsx` (SettingRow, Toggle)
 - **Used By:** `Settings.tsx`
 - **Notes:** 9 feature flags, each stored as a `feature_*` key in general settings. Toggling a feature hides it from the interface but preserves underlying data. Uses a `FEATURES` array of `{ key, label, description }` objects for declarative rendering. Each feature flag reads as a string `"true"` / `"false"` from settings.
+
+---
+
+### settings/FeaturesTab.tsx
+
+- **Path:** `src/ui/views/settings/FeaturesTab.tsx` (97 lines)
+- **Purpose:** Feature toggles — lets users enable/disable optional features (sections, kanban, time estimates, deadlines, comments, calendar view, filters/labels, completed view, stats, someday, cancelled, keyboard chords). Disabled features are hidden from the UI but data is preserved.
+- **Key Exports:** `FeaturesTab`
+- **Props:** None
+- **Key Dependencies:** `SettingsContext` (useGeneralSettings), settings `SettingRow`/`Toggle` components
+- **Used By:** `Settings.tsx`
 
 ---
 

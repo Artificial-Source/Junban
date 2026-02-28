@@ -6,7 +6,7 @@ The database layer spans two directories: `src/db/` (SQLite-specific code includ
 
 ## Database Schema
 
-Defined in `src/db/schema.ts` using Drizzle ORM. Eleven tables:
+Defined in `src/db/schema.ts` using Drizzle ORM. Fourteen tables:
 
 ### `tasks`
 | Column | Type | Constraints |
@@ -38,6 +38,9 @@ Defined in `src/db/schema.ts` using Drizzle ORM. Eleven tables:
 | `name` | TEXT | NOT NULL, UNIQUE |
 | `color` | TEXT | NOT NULL, default "#3b82f6" |
 | `icon` | TEXT | nullable |
+| `parent_id` | TEXT | FK -> projects.id (self-ref), ON DELETE SET NULL |
+| `is_favorite` | INTEGER (boolean) | NOT NULL, default false |
+| `view_style` | TEXT | NOT NULL, default "list", enum: list/board/calendar |
 | `sort_order` | INTEGER | NOT NULL, default 0 |
 | `archived` | INTEGER (boolean) | NOT NULL, default false |
 | `created_at` | TEXT | NOT NULL |
@@ -55,6 +58,23 @@ Defined in `src/db/schema.ts` using Drizzle ORM. Eleven tables:
 | `task_id` | TEXT | NOT NULL, FK -> tasks.id, ON DELETE CASCADE |
 | `tag_id` | TEXT | NOT NULL, FK -> tags.id, ON DELETE CASCADE |
 | | | PRIMARY KEY (task_id, tag_id) |
+
+### `task_relations` (junction table)
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `task_id` | TEXT | NOT NULL, FK -> tasks.id, ON DELETE CASCADE |
+| `related_task_id` | TEXT | NOT NULL, FK -> tasks.id, ON DELETE CASCADE |
+| `type` | TEXT | NOT NULL, default "blocks", enum: blocks |
+| | | PRIMARY KEY (task_id, related_task_id) |
+
+### `ai_memories`
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | TEXT | PRIMARY KEY |
+| `content` | TEXT | NOT NULL |
+| `category` | TEXT | NOT NULL, default "context", enum: preference/habit/context/instruction/pattern |
+| `created_at` | TEXT | NOT NULL |
+| `updated_at` | TEXT | NOT NULL |
 
 ### `plugin_settings`
 | Column | Type | Constraints |
@@ -144,8 +164,8 @@ Defined in `src/db/schema.ts` using Drizzle ORM. Eleven tables:
 ### `schema.ts`
 **Path:** `src/db/schema.ts`
 **Lines:** 139
-**Purpose:** Drizzle ORM table definitions. Source of truth for the database schema. All eleven tables are defined here using `sqliteTable`.
-**Key Exports:** `tasks`, `projects`, `tags`, `taskTags`, `pluginSettings`, `appSettings`, `taskTemplates`, `chatMessages`, `sections`, `taskComments`, `taskActivity`, `dailyStats` (Drizzle table objects)
+**Purpose:** Drizzle ORM table definitions. Source of truth for the database schema. All fourteen tables are defined here using `sqliteTable`.
+**Key Exports:** `tasks`, `projects`, `tags`, `taskTags`, `taskRelations`, `pluginSettings`, `appSettings`, `taskTemplates`, `chatMessages`, `sections`, `taskComments`, `taskActivity`, `aiMemories`, `dailyStats` (Drizzle table objects)
 **Key Dependencies:** `drizzle-orm/sqlite-core`
 **Used By:** `src/db/client.ts`, `src/db/client-web.ts`, `src/db/queries.ts`, `src/storage/sqlite-backend.ts`
 

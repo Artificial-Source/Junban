@@ -16,14 +16,16 @@ src/
 │   └── themes.ts            # Built-in theme definitions
 │
 ├── db/                      # Database layer
-│   ├── schema.ts            # Drizzle schema (tasks, projects, tags, task_tags, templates, chat, plugin_settings)
+│   ├── schema.ts            # Drizzle schema (14 tables: tasks, projects, tags, task_tags, task_relations,
+│   │                        #   sections, task_templates, chat_messages, task_comments, task_activity,
+│   │                        #   ai_memories, daily_stats, plugin_settings, app_settings)
 │   ├── client.ts            # better-sqlite3 connection (Node/desktop)
 │   ├── client-web.ts        # sql.js WASM connection (browser/Tauri WebView)
 │   ├── queries.ts           # Query helpers (CRUD)
 │   ├── migrate.ts           # Migration runner (Node)
 │   ├── migrate-web.ts       # Migration runner (WebView, bundled SQL)
-│   ├── persistence.ts       # Tauri FS persistence (load/save SQLite to AppData)
-│   └── migrations/          # SQL migrations (0001-0004)
+│   ├── persistence.ts       # OPFS persistence (load/save SQLite to Origin Private File System)
+│   └── migrations/          # SQL migrations (0000-0008)
 │
 ├── storage/                 # Storage abstraction
 │   ├── interface.ts         # IStorage — common API for both backends
@@ -35,16 +37,19 @@ src/
 │   ├── tasks.ts             # TaskService — CRUD, subtasks, cascade complete
 │   ├── projects.ts          # ProjectService
 │   ├── tags.ts              # TagService
+│   ├── sections.ts          # Project sections (board columns)
+│   ├── stats.ts             # Productivity statistics
 │   ├── templates.ts         # TemplateService — {{variable}} substitution
 │   ├── priorities.ts        # Priority levels and sorting
 │   ├── recurrence.ts        # Recurring task logic
 │   ├── filters.ts           # Task filtering
 │   ├── query-parser.ts      # Natural language query → TaskFilter
-│   ├── actions.ts           # Bulk operations (multi-select)
+│   ├── actions.ts           # Undo action definitions (complete, delete, bulk)
 │   ├── export.ts            # Export to JSON/CSV/Markdown
 │   ├── import.ts            # Import from Todoist/Markdown/JSON
 │   ├── event-bus.ts         # Plugin lifecycle event dispatch
 │   ├── undo.ts              # Undo/redo stack
+│   ├── nudges.ts            # Contextual nudge suggestions
 │   ├── errors.ts            # NotFoundError, ValidationError, StorageError
 │   └── types.ts             # Zod schemas + TypeScript types
 │
@@ -62,7 +67,7 @@ src/
 │   │
 │   ├── core/                # Pipeline and execution
 │   │   ├── pipeline.ts      # LLMPipeline — input → context → provider → tools → response
-│   │   ├── executor.ts      # LLMExecutor — runs tool calls
+│   │   ├── context.ts       # Execution context
 │   │   ├── capabilities.ts  # Provider capability declarations
 │   │   └── middleware.ts     # Error handling, logging middleware
 │   │
@@ -72,13 +77,18 @@ src/
 │   │
 │   ├── tools/               # AI tool system
 │   │   ├── registry.ts      # ToolRegistry + createDefaultToolRegistry()
-│   │   └── builtin/         # 25 tools total
+│   │   ├── types.ts         # Tool type definitions
+│   │   └── builtin/         # 34 tools across 14 files
 │   │       ├── task-crud.ts           # Create/read/update/complete/delete tasks
 │   │       ├── query-tasks.ts         # Search and filter tasks
 │   │       ├── project-crud.ts        # Create/list/get/update/delete projects
 │   │       ├── reminder-tools.ts      # List/set/snooze/dismiss reminders
 │   │       ├── tag-crud.ts            # List/add/remove tags on tasks
 │   │       ├── task-breakdown.ts      # Break down task into subtasks
+│   │       ├── daily-planning.ts      # Plan my day, daily review
+│   │       ├── productivity-stats.ts  # Productivity statistics and trends
+│   │       ├── bulk-operations.ts     # Bulk task operations
+│   │       ├── memory-tools.ts        # AI conversation memory
 │   │       ├── analyze-patterns.ts    # Workload pattern analysis
 │   │       ├── analyze-workload.ts    # Task load, capacity, overcommitment
 │   │       ├── smart-organize.ts      # Auto-tagging, prioritization, duplicate detection
@@ -104,36 +114,51 @@ src/
 │   └── types.ts             # Plugin manifest schema (Zod)
 │
 ├── ui/                      # React frontend
-│   ├── App.tsx              # Root component — routing, layout, keyboard nav, context menu, max-w-7xl constraint
+│   ├── App.tsx              # Root component — routing, layout, keyboard nav, context menu
 │   ├── main.tsx             # React entry point, theme init
 │   ├── index.css            # Global styles
 │   ├── shortcuts.ts         # Keyboard shortcut definitions
+│   ├── shortcutManagerInstance.ts # Singleton ShortcutManager
 │   │
-│   ├── api/                 # Frontend API layer
+│   ├── api/                 # Frontend API layer (11 files)
 │   │   ├── index.ts         # API entry point
 │   │   ├── helpers.ts       # handleResponse<T>, handleVoidResponse
 │   │   ├── tasks.ts         # /api/tasks/*
 │   │   ├── projects.ts      # /api/projects/*
+│   │   ├── sections.ts      # /api/sections/*
+│   │   ├── comments.ts      # /api/comments/*
 │   │   ├── templates.ts     # /api/templates/*
+│   │   ├── stats.ts         # /api/stats/*
 │   │   ├── ai.ts            # /api/ai/*
 │   │   ├── plugins.ts       # /api/plugins/*
 │   │   └── settings.ts      # /api/settings/*
 │   │
-│   ├── context/             # React context
+│   ├── context/             # React context (7 contexts)
+│   │   ├── TaskContext.tsx   # Task state, filters, refresh
 │   │   ├── UndoContext.tsx   # Undo/redo state
 │   │   ├── AIContext.tsx     # AI chat state, streaming, voice call mode, data mutation tracking
 │   │   ├── VoiceContext.tsx  # Voice settings, STT/TTS providers, speak/cancel
-│   │   └── SettingsContext.tsx # General settings (accent color, density, date format, etc.)
+│   │   ├── SettingsContext.tsx # General settings (accent color, density, date format, etc.)
+│   │   ├── PluginContext.tsx # Plugin lifecycle and state
+│   │   └── BlockedTaskIdsContext.tsx # Blocked task dependency tracking
 │   │
-│   ├── hooks/               # Custom hooks
+│   ├── hooks/               # Custom hooks (14 hooks)
+│   │   ├── useRouting.ts          # Hash-based routing
+│   │   ├── useTaskHandlers.ts     # Task CRUD handlers (create, complete, delete, update)
+│   │   ├── useBulkActions.ts      # Multi-select bulk operations
 │   │   ├── useKeyboardNavigation.ts
 │   │   ├── useMultiSelect.ts
-│   │   ├── useVAD.ts        # Voice activity detection
-│   │   ├── useVoiceCall.ts  # Voice call state machine (idle→greeting→listening→processing→speaking)
-│   │   ├── useIsMobile.ts   # Mobile breakpoint detection
-│   │   └── useSoundEffect.ts # Sound effect playback tied to settings
+│   │   ├── useAppCommands.ts      # Command palette commands
+│   │   ├── useAppShortcuts.ts     # Global keyboard shortcut registration
+│   │   ├── useReminders.ts        # Reminder polling and notifications
+│   │   ├── useNudges.ts           # Contextual nudge suggestions
+│   │   ├── useFocusTrap.ts        # Focus trap for modals
+│   │   ├── useVAD.ts              # Voice activity detection
+│   │   ├── useVoiceCall.ts        # Voice call state machine (idle→greeting→listening→processing→speaking)
+│   │   ├── useIsMobile.ts         # Mobile breakpoint detection
+│   │   └── useSoundEffect.ts      # Sound effect playback tied to settings
 │   │
-│   ├── components/          # ~30 UI components
+│   ├── components/          # ~45 UI components + 11 chat sub-components
 │   │   ├── TaskInput.tsx         # NLP-driven task creation with inline preview
 │   │   ├── TaskItem.tsx          # Single task row (priority stripe, tag pills, indent)
 │   │   ├── TaskList.tsx          # Tree rendering with expand/collapse
@@ -142,43 +167,71 @@ src/
 │   │   ├── SubtaskBlock.tsx      # Sub-task display
 │   │   ├── SubtaskSection.tsx    # Sub-task list within detail panel
 │   │   ├── InlineAddSubtask.tsx  # Inline sub-task creation
+│   │   ├── ChatTaskCard.tsx      # Task card rendered in AI chat
+│   │   ├── StructuredContentRenderer.tsx # Renders structured AI responses
 │   │   ├── Sidebar.tsx           # Navigation + project list + search button
+│   │   ├── Breadcrumb.tsx        # Navigation breadcrumbs
 │   │   ├── CommandPalette.tsx    # Ctrl+K with arrow nav
 │   │   ├── SearchModal.tsx       # Ctrl+F global task search with fuzzy matching
 │   │   ├── FocusMode.tsx         # Full-screen overlay (Space/N/P/Esc)
 │   │   ├── QueryBar.tsx          # NL search with debounced filtering
 │   │   ├── AIChatPanel.tsx       # AI sidebar chat + voice call UI
 │   │   ├── VoiceCallOverlay.tsx  # Voice call in-call UI (pulsing indicator, timer)
-│   │   ├── ContextMenu.tsx       # Right-click context menu (Edit, Complete, Priority, Move, Delete)
+│   │   ├── DailyPlanningModal.tsx # AI-powered daily planning
+│   │   ├── DailyReviewModal.tsx  # AI-powered daily review
+│   │   ├── ContextMenu.tsx       # Right-click context menu
 │   │   ├── ConfirmDialog.tsx     # Styled confirmation dialog (replaces window.confirm)
 │   │   ├── BulkActionBar.tsx     # Multi-select toolbar
 │   │   ├── TemplateSelector.tsx  # Template picker modal
+│   │   ├── AddProjectModal.tsx   # Project creation modal
+│   │   ├── CompletionRing.tsx    # Project completion progress ring
+│   │   ├── OverdueSection.tsx    # Overdue tasks section
+│   │   ├── OnboardingModal.tsx   # First-run onboarding
+│   │   ├── QuickAddModal.tsx     # Mobile quick-add
 │   │   ├── BottomNavBar.tsx      # Mobile bottom navigation
 │   │   ├── MobileDrawer.tsx      # Mobile slide-out drawer
 │   │   ├── FAB.tsx               # Mobile floating action button
 │   │   ├── DatePicker.tsx
 │   │   ├── RecurrencePicker.tsx
 │   │   ├── TagsInput.tsx
-│   │   ├── RightActionRail.tsx
+│   │   ├── ChordIndicator.tsx    # Keyboard chord state indicator
+│   │   ├── EmptyState.tsx        # Empty view placeholder
+│   │   ├── Skeleton.tsx          # Loading skeleton
 │   │   ├── StatusBar.tsx         # Plugin-extensible status bar
 │   │   ├── PluginPanel.tsx
+│   │   ├── PluginBrowser.tsx     # Browse/install community plugins
+│   │   ├── PluginCard.tsx        # Plugin card in browser
 │   │   ├── PermissionDialog.tsx  # Plugin permission approval
 │   │   ├── Toast.tsx
-│   │   └── ErrorBoundary.tsx
+│   │   ├── ErrorBoundary.tsx
+│   │   └── chat/                 # Chat sub-components (11 files)
+│   │       ├── ChatInput.tsx, ChatHistory.tsx, MessageBubble.tsx
+│   │       ├── MarkdownMessage.tsx, ToolCallBadge.tsx, ChatToolResultCard.tsx
+│   │       ├── VoiceButton.tsx, TypingIndicator.tsx, MessageActions.tsx
+│   │       ├── SuggestedActions.tsx, WelcomeScreen.tsx
 │   │
-│   ├── views/               # Main views
+│   ├── views/               # Main views (17 views + 10 settings tabs)
 │   │   ├── Inbox.tsx        # All unscheduled tasks + QueryBar
-│   │   ├── Today.tsx        # Tasks due today
+│   │   ├── Today.tsx        # Tasks due today + workload capacity bar
 │   │   ├── Upcoming.tsx     # Tasks grouped by due date
-│   │   ├── Project.tsx      # Single project view
+│   │   ├── Project.tsx      # Single project view (list/board/calendar) + completion ring
+│   │   ├── Board.tsx        # Kanban board view
+│   │   ├── Calendar.tsx     # Calendar view
+│   │   ├── Matrix.tsx       # Eisenhower priority matrix
+│   │   ├── Stats.tsx        # Productivity statistics
 │   │   ├── Completed.tsx    # Historical view
+│   │   ├── Cancelled.tsx    # Cancelled tasks view
+│   │   ├── Someday.tsx      # Someday/maybe tasks
 │   │   ├── TaskPage.tsx     # Single task page
+│   │   ├── AIChat.tsx       # Full-screen AI chat view
 │   │   ├── FiltersLabels.tsx
-│   │   ├── PluginStore.tsx  # Browse/install community plugins
+│   │   ├── FilterView.tsx   # Custom filter results
 │   │   ├── PluginView.tsx   # Plugin-provided custom views
-│   │   └── Settings.tsx     # 8-tab settings
+│   │   └── Settings.tsx     # 10-tab settings
 │   │       └── settings/    # Tab components
 │   │           ├── GeneralTab.tsx
+│   │           ├── AppearanceTab.tsx
+│   │           ├── FeaturesTab.tsx
 │   │           ├── AITab.tsx
 │   │           ├── VoiceTab.tsx
 │   │           ├── PluginsTab.tsx
@@ -189,8 +242,9 @@ src/
 │   │
 │   └── themes/
 │       ├── manager.ts       # ThemeManager (localStorage persistence)
-│       ├── light.css        # Tailwind 4 @theme tokens
-│       └── dark.css         # Tailwind 4 @theme tokens
+│       ├── light.css        # Tailwind 4 @theme tokens (default light)
+│       ├── dark.css         # Tailwind 4 @theme tokens (default dark)
+│       └── nord.css         # Nord theme
 │
 ├── mcp/                     # MCP server (external AI agent bridge)
 │   ├── server.ts            # Entry point (bootstrap + stdio transport)
@@ -207,9 +261,12 @@ src/
 │   └── formatter.ts         # Terminal output formatting
 │
 └── utils/
-    ├── logger.ts            # Structured logger
+    ├── logger.ts            # Structured logger (debug/info/warn/error)
     ├── ids.ts               # nanoid generation
     ├── dates.ts             # Date utilities
+    ├── format-date.ts       # User-facing date/time formatting
+    ├── sounds.ts            # Web Audio API sound effects
+    ├── color.ts             # Color manipulation
     └── tauri.ts             # isTauri() platform detection
 ```
 
@@ -322,15 +379,27 @@ Active — receives events, renders UI, responds to commands
 | createdAt | TEXT | ISO timestamp |
 | updatedAt | TEXT | ISO timestamp |
 
-**projects** — id, name, color, icon, sortOrder, archived, createdAt
+**projects** — id, name, color, icon, parentId (self-ref), isFavorite, viewStyle (list/board/calendar), sortOrder, archived, createdAt
 
 **tags** — id, name, color
 
 **task_tags** — taskId + tagId (composite PK)
 
+**task_relations** — id, sourceTaskId, targetTaskId, relationType (blocks/blocked_by/related)
+
+**sections** — id, projectId, name, sortOrder, createdAt
+
 **task_templates** — id, name, description, variables (JSON)
 
 **chat_messages** — persisted AI conversation history
+
+**task_comments** — id, taskId, content, createdAt
+
+**task_activity** — id, taskId, action, field, oldValue, newValue, createdAt
+
+**ai_memories** — id, content, category, importance, createdAt, updatedAt
+
+**daily_stats** — id, date, tasksCompleted, tasksCreated, focusMinutes, createdAt
 
 **plugin_settings** — pluginId, settings (JSON), updatedAt
 
@@ -387,7 +456,7 @@ Supported: OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, any OpenAI-compatib
 
 ### Tools
 
-The AI has access to 25 structured tools:
+The AI has access to 34 structured tools:
 
 | Tool | Category |
 |---|---|
@@ -399,6 +468,10 @@ The AI has access to 25 structured tools:
 | break_down_task | Productivity |
 | check_duplicates | Productivity |
 | check_overcommitment | Productivity |
+| daily-planning (plan_my_day, daily_review) | Planning |
+| productivity-stats | Analytics |
+| bulk-operations | Batch Operations |
+| memory-tools | AI Memory |
 | analyze-patterns | Intelligence |
 | analyze-workload | Intelligence |
 | smart-organize | Intelligence |

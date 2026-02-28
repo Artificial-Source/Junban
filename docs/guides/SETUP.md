@@ -166,7 +166,7 @@ await client.connect(transport);
 await client.callTool({ name: "create_task", arguments: { title: "Hello from MCP" } });
 ```
 
-See [MCP documentation](../backend/MCP.md) for the full reference (28 tools, 8 resources, 3 prompts).
+See [MCP documentation](../backend/MCP.md) for the full reference (34 tools, 8 resources, 3 prompts).
 
 ## Building the Desktop App (Optional)
 

@@ -82,7 +82,7 @@ Docs: [Plugin API](docs/plugins/API.md) / [Examples](docs/plugins/EXAMPLES.md)
 
 The sidebar chat connects to your LLM provider. It sees your tasks, projects, and schedule — so it gives suggestions that are actually useful.
 
-**28 built-in tools**: task CRUD, project management, tag management, reminders, task breakdown, duplicate detection, overcommitment checks, pattern analysis, workload detection, smart organization, and energy-based scheduling recommendations.
+**34 built-in tools**: task CRUD, project management, tag management, reminders, task breakdown, duplicate detection, overcommitment checks, pattern analysis, workload detection, smart organization, and energy-based scheduling recommendations.
 
 Supported providers: OpenAI, Anthropic, OpenRouter, Ollama, LM Studio — or write a custom provider plugin.
 

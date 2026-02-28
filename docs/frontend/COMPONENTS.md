@@ -173,33 +173,6 @@
 
 ---
 
-### VirtualizedTaskList.tsx
-
-- **Path:** `src/ui/components/VirtualizedTaskList.tsx` (71 lines)
-- **Purpose:** Virtualized wrapper around TaskList for large task lists (>50 items). Uses `@tanstack/react-virtual` for windowed rendering.
-- **Key Exports:** `VirtualizedTaskList`
-- **Props:** Same as `TaskList` props
-- **Key Dependencies:** `@tanstack/react-virtual` (useVirtualizer), `TaskItem.tsx`
-- **Used By:** `TaskList.tsx` (conditional rendering when tasks.length > 50)
-- **Notes:** Estimated row height 52px, overscan 10. Only activates for lists exceeding 50 items to avoid unnecessary overhead on small lists.
-
----
-
-### TaskPreview.tsx
-
-- **Path:** `src/ui/components/TaskPreview.tsx` (73 lines)
-- **Purpose:** Hover popover that shows task metadata (title, description, priority, due date, recurrence, tags) on 300ms hover delay.
-- **Key Exports:** `TaskPreview`
-- **Props:**
-  - `task: Task` -- the task to preview
-  - `anchorRect: DOMRect` -- position reference for the popover
-  - `onClose: () => void`
-- **Key Dependencies:** `lucide-react` (Calendar, Flag, Repeat, Tag)
-- **Used By:** `TaskItem.tsx` (hover handler)
-- **Notes:** `position: fixed` relative to anchor element. Uses `role="tooltip"`. Closes on outside click. Disabled on touch devices.
-
----
-
 ## Navigation Components
 
 ### Sidebar.tsx
@@ -537,6 +510,36 @@ Extracted sub-components used by `AIChatPanel.tsx`. Each handles a single concer
 - **Key Dependencies:** `lucide-react` (PhoneOff), `CallState` type from `../hooks/useVoiceCall.js`
 - **Used By:** `AIChatPanel.tsx`
 - **Notes:** State-dependent colors: greeting=accent, listening=green, processing=accent, speaking=blue. When in grace period, label changes to "Waiting..." and a warning-colored progress bar is shown. Duration formatted as M:SS. Includes `data-testid` attributes for testing. Rendered inline in the input area (not a full-screen overlay).
+
+---
+
+### DailyPlanningModal.tsx
+
+- **Path:** `src/ui/components/DailyPlanningModal.tsx`
+- **Purpose:** AI-powered daily planning modal. Shows overdue tasks, today's tasks, and capacity info to help users plan their day.
+- **Key Exports:** `DailyPlanningModal`
+- **Props:**
+  - `open: boolean`
+  - `onComplete: () => void`
+  - `tasks: Task[]`
+  - `projects: Project[]`
+- **Key Dependencies:** `lucide-react` (AlertTriangle, ListChecks, Clock, Rocket), `format-date.ts`, `SettingsContext`
+- **Used By:** `App.tsx`
+
+---
+
+### DailyReviewModal.tsx
+
+- **Path:** `src/ui/components/DailyReviewModal.tsx`
+- **Purpose:** AI-powered daily review modal. Summarizes completed tasks, shows what's rolling over, and celebrates progress.
+- **Key Exports:** `DailyReviewModal`
+- **Props:**
+  - `open: boolean`
+  - `onComplete: () => void`
+  - `tasks: Task[]`
+  - `onUpdateTask: (id: string, updates: Record<string, unknown>) => void`
+- **Key Dependencies:** `lucide-react` (Trophy, ArrowRight, CalendarCheck, PartyPopper), `format-date.ts`
+- **Used By:** `App.tsx`
 
 ---
 

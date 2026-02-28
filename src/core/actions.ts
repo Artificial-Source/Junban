@@ -19,7 +19,7 @@ export function createCompleteAction(api: ActionAPI, task: Task): UndoableAction
       await api.completeTask(task.id);
     },
     async undo() {
-      await api.updateTask(task.id, { status: "pending", completedAt: null } as any);
+      await api.updateTask(task.id, { status: "pending", completedAt: null });
       await api.refreshTasks();
     },
   };
@@ -80,7 +80,7 @@ export function createBulkCompleteAction(api: ActionAPI, tasks: Task[]): Undoabl
     },
     async undo() {
       for (const id of ids) {
-        await api.updateTask(id, { status: "pending", completedAt: null } as any);
+        await api.updateTask(id, { status: "pending", completedAt: null });
       }
       await api.refreshTasks();
     },

@@ -84,6 +84,11 @@ export class ChatSession {
     });
   }
 
+  /** Restore previously persisted messages (used when rehydrating a session). */
+  restoreMessages(msgs: ChatMessage[]): void {
+    this.messages.push(...msgs);
+  }
+
   /** Rough token estimate: ~4 chars per token for English text. */
   private estimateTokens(): number {
     return this.messages.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0);
@@ -428,6 +433,11 @@ export class ChatManager {
     return this.session;
   }
 
+  /** Replace the current session (e.g., when restoring a persisted session). */
+  setSession(session: ChatSession | null): void {
+    this.session = session;
+  }
+
   clearSession(queries?: IStorage): void {
     logger.info("Chat session cleared", { sessionId: this.session?.sessionId });
     if (this.session && queries) {
@@ -478,6 +488,7 @@ export class ChatManager {
       ...options,
     });
 
+    const restoredMessages: ChatMessage[] = [];
     for (const row of rows) {
       if (row.role === "system") continue;
       const msg: ChatMessage = {
@@ -486,9 +497,10 @@ export class ChatManager {
         ...(row.toolCallId ? { toolCallId: row.toolCallId } : {}),
         ...(row.toolCalls ? { toolCalls: JSON.parse(row.toolCalls) } : {}),
       };
-      (session as any).messages.push(msg);
+      restoredMessages.push(msg);
     }
 
+    session.restoreMessages(restoredMessages);
     this.session = session;
     logger.info("Chat session restored", {
       sessionId: latest.sessionId,

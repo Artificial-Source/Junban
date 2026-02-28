@@ -29,22 +29,22 @@ This file helps AI agents (Claude, ChatGPT, Copilot, etc.) navigate the Saydo co
 docs/
 ├── guides/            Developer guides (setup, contributing, architecture, security)
 ├── frontend/          Per-file reference for everything in src/ui/
-│   ├── COMPONENTS.md    ~47 components with props, deps, who uses them
-│   ├── VIEWS.md         17 views + 12 settings tabs
+│   ├── COMPONENTS.md    ~56 components with props, deps, who uses them
+│   ├── VIEWS.md         17 views + 10 settings tabs
 │   ├── CONTEXT.md       7 React contexts (what state, what functions)
-│   ├── HOOKS.md         13 hooks (params, returns, consumers)
+│   ├── HOOKS.md         14 hooks (params, returns, consumers)
 │   ├── THEMES.md        Theme system, CSS tokens, how to add themes
 │   ├── SHORTCUTS.md     ShortcutManager API, default bindings
 │   └── API_LAYER.md     Frontend-to-backend API bridge (11 modules)
 │
 ├── backend/           Per-file reference for everything outside src/ui/
 │   ├── CORE.md          TaskService, ProjectService, TagService, events, undo
-│   ├── DATABASE.md      11 tables, Drizzle schema, migrations
+│   ├── DATABASE.md      14 tables, Drizzle schema, migrations
 │   ├── STORAGE.md       IStorage interface, SQLite + Markdown backends
 │   ├── PARSER.md        chrono-node NLP, grammar rules, parseTask() pipeline
-│   ├── AI.md            Provider registry, middleware pipeline, 28 tools
+│   ├── AI.md            Provider registry, middleware pipeline, 34 tools
 │   ├── VOICE.md         3 STT + 5 TTS adapters, audio utils, Web Workers
-│   ├── MCP.md           MCP server: 28 tools, 8 resources, 3 prompts (external agent bridge)
+│   ├── MCP.md           MCP server: 34 tools, 8 resources, 3 prompts (external agent bridge)
 │   ├── CLI.md           5 CLI commands (add, list, done, edit, delete)
 │   ├── PLUGINS.md       Loader, sandbox, API factory, command/UI registries
 │   └── UTILS.md         Logger, IDs, dates, sounds, env config

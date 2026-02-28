@@ -6,6 +6,9 @@
 
 import type { TTSProviderPlugin, TTSOptions, Voice } from "../interface.js";
 import type { KokoroWorkerRequest, KokoroWorkerResponse } from "../workers/kokoro-worker-types.js";
+import { createLogger } from "../../../utils/logger.js";
+
+const log = createLogger("voice");
 
 export type ModelStatus = "idle" | "loading" | "ready" | "error";
 
@@ -170,7 +173,7 @@ export class KokoroLocalTTSProvider implements TTSProviderPlugin {
     });
 
     worker.addEventListener("error", (e) => {
-      console.warn("[Kokoro Worker] Error:", e?.message ?? e);
+      log.warn("Kokoro Worker error", { error: e?.message ?? String(e) });
       this.handleWorkerCrash();
     });
 

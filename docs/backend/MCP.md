@@ -15,7 +15,7 @@ External MCP Client (Claude Desktop, custom agent, etc.)
     v
 src/mcp/server.ts  (entry point)
     |
-    ├── registerMcpTools()      → ToolRegistry (all 28 built-in tools)
+    ├── registerMcpTools()      → ToolRegistry (all 34 built-in tools)
     ├── registerMcpResources()  → TaskService, ProjectService, TagService, StatsService
     └── registerMcpPrompts()    → pre-built conversation starters
     |
@@ -122,7 +122,7 @@ const today = await client.readResource({ uri: "saydo://tasks/today" });
 
 ## Tools (28 total)
 
-All 28 tools from `ToolRegistry` are exposed as MCP tools with identical names, descriptions, and parameters. See [AI.md](AI.md) for full tool documentation.
+All 34 tools from `ToolRegistry` are exposed as MCP tools with identical names, descriptions, and parameters. See [AI.md](AI.md) for full tool documentation.
 
 | Category | Tools |
 |----------|-------|

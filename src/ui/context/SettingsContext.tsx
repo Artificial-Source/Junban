@@ -31,6 +31,12 @@ export interface GeneralSettings {
   feature_cancelled: "true" | "false";
   feature_matrix: "true" | "false";
   daily_capacity_minutes: string;
+  nudge_enabled: "true" | "false";
+  nudge_overdue_alert: "true" | "false";
+  nudge_deadline_approaching: "true" | "false";
+  nudge_stale_tasks: "true" | "false";
+  nudge_empty_today: "true" | "false";
+  nudge_overloaded_day: "true" | "false";
 }
 
 const DEFAULT_SETTINGS: GeneralSettings = {
@@ -63,6 +69,12 @@ const DEFAULT_SETTINGS: GeneralSettings = {
   feature_cancelled: "true",
   feature_matrix: "true",
   daily_capacity_minutes: "480",
+  nudge_enabled: "true",
+  nudge_overdue_alert: "true",
+  nudge_deadline_approaching: "true",
+  nudge_stale_tasks: "true",
+  nudge_empty_today: "true",
+  nudge_overloaded_day: "true",
 };
 
 const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS) as (keyof GeneralSettings)[];

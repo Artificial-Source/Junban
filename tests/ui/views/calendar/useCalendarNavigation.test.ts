@@ -99,12 +99,13 @@ describe("useCalendarNavigation", () => {
   it("goNext advances by 1 day in day mode", () => {
     const { result } = renderHook(() => useCalendarNavigation({ initialMode: "day" }));
 
-    const initialDate = result.current.selectedDate.getDate();
+    const initialTime = result.current.selectedDate.getTime();
 
     act(() => {
       result.current.goNext();
     });
-    expect(result.current.selectedDate.getDate()).toBe(initialDate + 1);
+    const diff = result.current.selectedDate.getTime() - initialTime;
+    expect(diff).toBe(24 * 60 * 60 * 1000);
   });
 
   it("goPrev goes back by 7 days in week mode", () => {

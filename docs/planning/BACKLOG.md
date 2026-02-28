@@ -193,7 +193,7 @@ All work items for ASF Saydo, organized by area and prioritized within each sect
 | A-32 | Morning briefing / daily plan (plan_my_day tool) | done | S33 | Query today's tasks + overdue, sort by priority/deadline, suggest an order. Inspired by Sunsama, Morgen. |
 | A-33 | Shutdown / daily review (daily_review tool) | done | S33 | Summarize completions, slipped tasks, tomorrow's outlook. Reflection prompts. Inspired by Sunsama. |
 | A-34 | Overcommitment warning (check_overcommitment tool) | done | S27 | Proactive warning when creating tasks: "You have 8 tasks due tomorrow." Enhance analyze_workload. Inspired by Sunsama. |
-| A-35 | Smart nudges / proactive alerts | idea | — | System-level notifications: overdue at morning, deadline approaching, stale tasks (2+ weeks pending), streaks. Rule-based, no LLM needed. |
+| A-35 | Smart nudges / proactive alerts | done | S41 | Rule-based proactive alerts: overdue, deadline approaching, stale tasks, empty today, overloaded day. evaluateNudges() engine + useNudges hook + settings UI. No LLM needed. |
 | A-36 | AI time estimation (estimatedMinutes field) | idea | — | Track actual completion times. Suggest estimates from similar past tasks. Show accuracy stats. Inspired by Sunsama, Motion. |
 | A-37 | Weekly review & productivity analytics (weekly_review tool) | idea | — | Completion rate, tasks created vs done, busiest day, most productive time, neglected projects. Inspired by Reclaim, Sunsama. |
 | A-38 | Enhanced voice-to-structured-tasks / voice call mode | done | S29 | Voice call overlay with continuous conversation loop (greeting→listening→processing→speaking). Browser STT fallback. |
@@ -370,13 +370,13 @@ Higher-effort features that differentiate Saydo from competitors.
 
 | ID | Item | Status | Sprint | Notes |
 |----|------|--------|--------|-------|
-| V2-11 | Guided daily planning ritual | ready | — | Step-by-step morning flow: review overdue → pick today's tasks → estimate durations → set goals. AI-assisted. Builds on A-32. Inspired by Sunsama, Akiflow, Any.do Moments. |
-| V2-12 | Daily shutdown / review ritual | ready | — | End-of-day guided reflection: what got done, what slipped, tomorrow's outlook, optional journaling. Builds on A-33. Inspired by Sunsama, Akiflow. |
+| V2-11 | Guided daily planning ritual | done | S38-S40 | DailyPlanningModal — step-by-step morning flow: review overdue → pick today's tasks → estimate durations → set goals. AI-assisted. |
+| V2-12 | Daily shutdown / review ritual | done | S38-S40 | DailyReviewModal — end-of-day guided reflection: what got done, what slipped, tomorrow's outlook. |
 | V2-13 | Workload capacity indicator | done | S37 | WorkloadCapacityBar in Today view. Sums estimatedMinutes vs daily_capacity_minutes setting (4/6/8/10h). Red bar + "+Xh over" when exceeded. Inspired by Sunsama, Marvin. |
-| V2-14 | Planned vs. actual time tracking | ready | — | Track actual time spent per task. Show estimation accuracy over time ("you underestimate coding by 40%"). Inspired by Sunsama, Marvin. Depends on V2-01. |
-| V2-15 | Task relations (blocks / blocked by) | ready | — | Simple dependency: "Task B is blocked by Task A." Show blocked indicator. AI can flag circular deps. Inspired by Linear, Notion. |
-| V2-16 | Dynamic saved views / filters + AI | ready | — | Named filter combos that auto-update. AI integration: describe in plain English ("overdue work tasks this week") → AI generates filter. Inspired by Linear, Todoist Filter Assist. |
-| V2-17 | Eisenhower matrix view | ready | — | Four-quadrant urgent/important grid. Drag tasks between quadrants. Auto-classify from priority + due date. Inspired by TickTick. |
+| V2-14 | Planned vs. actual time tracking | done | S38-S40 | actualMinutes column on tasks. Track actual time spent, show estimation accuracy. |
+| V2-15 | Task relations (blocks / blocked by) | done | S38-S40 | task_relations table, BlockedTaskIdsContext, blocked indicator on TaskItem. |
+| V2-16 | Dynamic saved views / filters + AI | done | S38-S40 | FilterView with saved named filters. AI-generated filter support via query parser. |
+| V2-17 | Eisenhower matrix view | done | S38-S40 | Matrix.tsx — four-quadrant urgent/important grid with drag between quadrants. |
 | V2-18 | Global quick capture (Tauri) | ready | — | System-wide hotkey opens floating task input over any app. Captures task without switching context. Auto-dismisses after entry. Inspired by Things 3, Akiflow. |
 | V2-19 | Project progress tracking | done | S37 | CompletionRing in project headers (completed/total). Mini progress bar in sidebar project items. Inspired by Things 3, Linear, Motion. |
 

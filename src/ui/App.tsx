@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { CommandPalette } from "./components/CommandPalette.js";
@@ -22,6 +22,7 @@ import { TemplateSelector } from "./components/TemplateSelector.js";
 import { Toast } from "./components/Toast.js";
 import { useKeyboardNavigation } from "./hooks/useKeyboardNavigation.js";
 import { useMultiSelect } from "./hooks/useMultiSelect.js";
+import { useNudges } from "./hooks/useNudges.js";
 import { useReminders } from "./hooks/useReminders.js";
 import { useRouting, type View } from "./hooks/useRouting.js";
 import { useTaskHandlers } from "./hooks/useTaskHandlers.js";
@@ -556,6 +557,33 @@ function AppContent() {
   );
 
   useReminders({ onReminder: handleReminder, enabled: true });
+
+  // ── Smart nudges ──
+  const { activeNudges, dismiss: dismissNudge } = useNudges({
+    tasks: state.tasks,
+    settings: featureSettings,
+  });
+
+  // Show one nudge at a time via toast (8s auto-dismiss)
+  const shownNudgeRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (activeNudges.length === 0) {
+      shownNudgeRef.current = null;
+      return;
+    }
+    const next = activeNudges[0];
+    if (shownNudgeRef.current === next.id) return;
+    shownNudgeRef.current = next.id;
+
+    showToast(next.message, {
+      label: "Dismiss",
+      onClick: () => dismissNudge(next.id),
+    });
+
+    // Auto-dismiss after 8 seconds
+    const timer = setTimeout(() => dismissNudge(next.id), 8000);
+    return () => clearTimeout(timer);
+  }, [activeNudges, showToast, dismissNudge]);
 
   // ── Keyboard shortcuts ──
   useAppShortcuts(

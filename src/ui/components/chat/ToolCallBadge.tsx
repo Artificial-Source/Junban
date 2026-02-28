@@ -85,10 +85,10 @@ export const ToolCallBadge = memo(function ToolCallBadge({
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full border transition-all duration-300 ${
         isComplete
           ? "bg-surface-secondary border-border text-on-surface-secondary"
-          : "bg-accent/10 border-accent/20 text-accent tool-call-shimmer"
+          : "bg-accent/10 border-accent/30 text-accent"
       }`}
     >
-      <Icon size={12} className={isComplete ? "" : "animate-spin-slow"} />
+      <Icon size={12} />
       {label}
     </span>
   );

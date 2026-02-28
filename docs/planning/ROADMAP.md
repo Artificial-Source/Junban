@@ -134,22 +134,124 @@ Full browser-based client (requires Saydo Sync).
 - [ ] Collaborative features (shared projects, team sync)
 - [ ] Enterprise tier (SSO, admin controls, audit logs)
 
-## Backlog
+---
 
-Ideas for future development:
+## Current Status
 
-- **CalDAV sync plugin** — sync tasks with Nextcloud, iCloud, Google Calendar
-- **Git sync plugin** — version-controlled task storage across devices (free alternative to Saydo Sync)
-- **WebDAV sync plugin** — generic sync for self-hosted setups
-- ~~**Calendar view plugin**~~ — ✅ Implemented as core Calendar view (week grid) in v1.0
-- **Kanban board plugin** — drag-and-drop column-based task management
-- **Time tracking plugin** — track time spent on tasks with reports
-- **Habit tracker plugin** — recurring habit tracking with streaks
-- **Discord reminder plugin** — task reminders via Discord bot
-- **Google Calendar plugin** — two-way sync with Google Calendar
-- **Team sync** — shared projects with conflict resolution
-- **Webhooks plugin** — trigger external services on task events
-- **Email-to-task plugin** — create tasks by forwarding emails
-- **Browser extension** — quick-add tasks from any webpage
-- **Widget support** — system tray / menu bar quick-add
-- **Local AI voice models** — local Whisper STT and Kokoro TTS (adapters written, testing in progress)
+| Area | Done | Remaining | Status |
+|------|------|-----------|--------|
+| Foundation & Infrastructure | 16/16 | 0 | Complete |
+| Core — Task CRUD | 19/19 | 0 | Complete |
+| Parser & NLP | 8/8 | 0 | Complete |
+| UI — Views & Components | 40/41 | 1 | Logo design pending |
+| CLI | 7/8 | 1 | Fuzzy picker idea |
+| Plugin System | 21/21 | 0 | Complete |
+| AI Assistant | 46/58 | 12 | Core done; ideas pending |
+| Storage & Data | 13/13 | 0 | Complete |
+| Testing | 10/10 | 0 | 153 test files, 1796+ tests |
+| Hardening & Quality | 17/17 | 0 | Complete |
+| Frontend Enhancements | 25/25 | 0 | Complete |
+| QA — Bugs | 14/14 | 0 | Complete |
+| Documentation | 15/15 | 0 | Complete |
+| **Total** | **251/265** | **14** | **95% complete** |
+
+### What's Fully Done
+
+- Task CRUD with subtasks, templates, recurrence, filters, priorities
+- SQLite + Markdown dual storage backends
+- 55+ React components, 24 views, 13 hooks, 7 contexts
+- AI assistant with 28 tools, 8 providers, chat persistence
+- Voice I/O: 8 adapters (STT/TTS), VAD, Web Workers, voice call mode
+- Plugin system with sandboxing, permissions, lifecycle, registry
+- CLI companion with 5 commands
+- Tauri desktop app scaffold + auto-updater
+- CI/CD pipeline (GitHub Actions)
+- Design token system, accessibility audit, performance optimization
+- Kanban board, calendar views, matrix view, stats dashboard
+- Task comments, activity tracking, daily rituals
+- Responsive mobile UI, sound effects, saved filters
+- 153 test files, 1796+ passing tests (including 12 Playwright E2E specs)
+
+### Ideas (need scoping)
+
+| ID | Item | Area |
+|----|------|------|
+| A-37 | Weekly review & analytics | AI Tools |
+| A-39 | Meeting notes to tasks | AI Tools |
+| A-36 | AI time estimation (track actuals vs estimates) | AI Tools |
+| A-35 | Smart nudges / proactive alerts | AI Tools |
+| A-41 | Energy-aware suggestions (enhanced) | AI Tools |
+| A-42 | Habit / recurring task intelligence | AI Tools |
+| A-43 | Project planning from description | AI Tools |
+| A-44 | Adaptive learning (preference tracking) | AI Tools |
+| A-48 | Plugin-contributed AI tools | AI Tools |
+| A-18 | AI reminders via integrations | Integrations |
+| A-45 | ICS calendar export/import | Integrations |
+| A-47 | Auto-scheduling into time blocks | Integrations |
+| U-35 | Design proper SVG logo | UI |
+| L-08 | Interactive CLI task picker | CLI |
+
+### Plugin Ideas
+
+- CalDAV sync (Nextcloud, iCloud, Google Calendar)
+- Git sync (free alternative to Saydo Sync)
+- WebDAV sync (self-hosted)
+- Time tracking with reports
+- Habit tracker with streaks
+- Discord reminder bot
+- Webhooks (trigger on task events)
+- Email-to-task
+- Browser extension (quick-add)
+- Widget support (system tray / menu bar)
+
+---
+
+## Sprint History
+
+37 sprints completed across ~19 months of development.
+
+| Sprint | Theme | Tests |
+|--------|-------|-------|
+| S0 | Scaffold | 171 |
+| S1 | First Blood (DB wiring) | 219 |
+| S2 | Feel Good (polish) | 246 |
+| S3 | Plugins: Foundation | 275 |
+| S4 | Plugins: UI | 297 |
+| S5 | AI: Foundation | 321 |
+| S6 | AI: Intelligence | 333 |
+| S7 | CI/CD & Release | 333 |
+| S8 | Styling & Desktop App | 333 |
+| S9 | Power User | 387 |
+| S10 | Milestone Closure | 424 |
+| S11 | Markdown Storage | 528 |
+| S12 | Hardening | 528 |
+| S13 | v1.0 Release | 549 |
+| S14 | Design System | 549 |
+| S15 | Sub-tasks & Focus Mode | 574 |
+| S16 | Templates & NL Queries | 610 |
+| S17 | AI Error Handling | 620 |
+| S18 | Dynamic Model Discovery | 630 |
+| S19 | Reminders | 663 |
+| S20 | Pluggable LLM Core | 682 |
+| S21 | Voice Integration | 735 |
+| S22 | AI Intelligence Tools | 772 |
+| S23 | Rebrand (Docket → Saydo) | 772 |
+| S24 | Local Voice Models | 813 |
+| S25 | Project & Reminder Tools | 857 |
+| S26 | Inworld TTS & Mobile UI | 960 |
+| S27 | Settings & AI Quick Wins | 960 |
+| S28 | Sound Effects | 988 |
+| S29 | Voice Call & Tag Tools | 1018 |
+| S30-31 | GitHub Issues batch | 1018+ |
+| S32 | Frontend Enhancements | 1018+ |
+| S33 | QA & Polish | 1773 |
+| S34 | Plugin Slot System | 1773 |
+| S35 | Big Features | 1774 |
+| S36 | Bug Fixes | 1785 |
+| S37 | Core UI Enhancements | 1796 |
+
+### Known Technical Debt
+
+1. `src/main.ts:24` — TODO: Start UI or CLI based on context (currently assumes UI)
+2. E2E tests started (12 Playwright specs) — expand coverage for remaining views
+3. No `.env` committed — only `.env.example` exists

@@ -594,6 +594,6 @@ export default class DailyPlannerPlugin extends Plugin {
 ## Next Steps
 
 - Read the full [Plugin API Reference](API.md) for all available methods
-- Check [SECURITY.md](../development/SECURITY.md) for sandbox restrictions and best practices
+- Check [SECURITY.md](../guides/SECURITY.md) for sandbox restrictions and best practices
 - Browse `sources.json` in the project root for the community plugin directory
 - Join the ASF community to share your plugin

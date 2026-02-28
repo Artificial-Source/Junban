@@ -332,15 +332,15 @@ All work items for ASF Saydo, organized by area and prioritized within each sect
 | DOC-01 | README.md | done | — | |
 | DOC-02 | CLAUDE.md | done | — | |
 | DOC-03 | docs/README.md (project overview) | done | — | |
-| DOC-04 | docs/development/ARCHITECTURE.md | done | — | |
+| DOC-04 | docs/guides/ARCHITECTURE.md | done | — | |
 | DOC-05 | docs/plugins/API.md | done | — | |
 | DOC-06 | docs/plugins/EXAMPLES.md | done | — | |
 | DOC-07 | docs/planning/ROADMAP.md | done | — | |
-| DOC-08 | docs/development/CONTRIBUTING.md | done | — | |
-| DOC-09 | docs/development/SETUP_LOCAL.md | done | — | |
-| DOC-10 | docs/development/SECURITY.md | done | — | |
+| DOC-08 | docs/guides/CONTRIBUTING.md | done | — | |
+| DOC-09 | docs/guides/SETUP.md | done | — | |
+| DOC-10 | docs/guides/SECURITY.md | done | — | |
 | DOC-11 | docs/planning/BACKLOG.md | done | — | This file |
-| DOC-12 | docs/planning/SPRINTS.md | done | — | Sprint tracking |
+| DOC-12 | Sprint tracking (merged into ROADMAP.md + CONTRIBUTING.md) | done | — | |
 | DOC-13 | Plugin API versioning docs | done | S13 | API Versioning & Stability section in API.md |
 | DOC-14 | v1.0 release planning docs update | done | S13 | ROADMAP, SPRINTS, BACKLOG updated |
 | DOC-15 | Rebrand Docket → Saydo across all docs and code | done | S23 | All identifiers, DB files, localStorage keys updated |

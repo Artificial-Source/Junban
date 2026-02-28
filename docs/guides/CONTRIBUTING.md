@@ -5,7 +5,7 @@ Thank you for considering contributing to Saydo! This guide covers everything yo
 ## Getting Started
 
 1. **Fork the repository** and clone your fork
-2. Follow [SETUP_LOCAL.md](SETUP_LOCAL.md) to get your development environment running
+2. Follow [SETUP.md](SETUP.md) to get your development environment running
 3. Create a branch for your work (see [Branching](#branching) below)
 4. Make your changes
 5. Run `pnpm check` to verify lint, typecheck, and tests pass
@@ -188,6 +188,29 @@ To add your plugin to the community registry:
 - **Plugin sandbox**: Plugins run in a restricted environment by design. Don't try to break out.
 
 See [SECURITY.md](SECURITY.md) for the full threat model.
+
+## Sprint Methodology
+
+Development follows two-week sprint cycles. Each sprint has a clear goal and pulls items from the [Backlog](../planning/BACKLOG.md).
+
+### How Sprints Work
+
+- **Duration**: 2 weeks
+- **Planning**: Select items from backlog at sprint start
+- **Daily work**: Pick the next `ready` item, mark `in-progress`, complete it
+- **Review**: At sprint end, update items to `done`, write retro notes, plan next sprint
+- **Carry-over**: Incomplete items return to backlog or carry into the next sprint
+
+### Sprint Sizing
+
+| Size | Effort | Example |
+|------|--------|---------|
+| S | < 2 hours | Wire a single service to DB, add a test file |
+| M | 2–6 hours | Build a complete view, implement a CLI command end-to-end |
+| L | 1–2 days | Plugin loader with validation, keyboard navigation system |
+| XL | 3–5 days | Sandbox implementation, storage abstraction layer |
+
+See [ROADMAP.md](../planning/ROADMAP.md) for sprint history and project status.
 
 ## Questions?
 

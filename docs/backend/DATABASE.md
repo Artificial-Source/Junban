@@ -293,3 +293,9 @@ Migrations are stored as SQL files in `src/db/migrations/`. Two migration approa
 2. **Browser (web/Tauri):** `migrate-web.ts` imports SQL files as raw strings via Vite and executes them directly against sql.js.
 
 Both approaches apply the same SQL migrations to maintain schema consistency across environments.
+
+---
+
+## See Also
+
+- [STORAGE.md](STORAGE.md) — Concise reference for the IStorage interface and backend selection

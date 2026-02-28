@@ -51,29 +51,49 @@ This is the second ASF project, alongside [ASF Sentinel](https://github.com/asf-
 ```
 src/
 ├── main.ts                  # Entry point — wires everything together
-├── config/                  # Configuration & environment
+├── bootstrap.ts             # Node.js service wiring
+├── bootstrap-web.ts         # Browser/WebView service wiring
+├── config/                  # Configuration & environment (3 files)
 │   ├── env.ts               # Zod-validated env vars
 │   ├── defaults.ts          # Default settings and constants
 │   └── themes.ts            # Built-in theme definitions
-├── db/                      # Database layer
-│   ├── schema.ts            # Drizzle schema definitions
-│   ├── client.ts            # SQLite connection
-│   ├── migrate.ts           # Migration runner
-│   ├── migrations/          # Generated SQL migrations
-│   └── queries.ts           # Query helpers (CRUD for tasks, projects, tags)
-├── core/                    # Core task management logic
+├── db/                      # Database layer (7 files + 8 migrations)
+│   ├── schema.ts            # Drizzle schema definitions (11 tables)
+│   ├── client.ts            # SQLite connection (Node.js / better-sqlite3)
+│   ├── client-web.ts        # SQLite connection (browser / sql.js WASM)
+│   ├── migrate.ts           # Migration runner (Node.js)
+│   ├── migrate-web.ts       # Migration runner (browser)
+│   ├── persistence.ts       # OPFS persistence for browser SQLite
+│   ├── queries.ts           # Query helpers (CRUD for tasks, projects, tags)
+│   └── migrations/          # 8 SQL migration files
+├── storage/                 # Storage abstraction layer (4 files)
+│   ├── interface.ts         # IStorage interface + row types
+│   ├── sqlite-backend.ts    # SQLite implementation via Drizzle
+│   ├── markdown-backend.ts  # Markdown files with YAML frontmatter
+│   └── markdown-utils.ts    # YAML parsing/formatting helpers
+├── core/                    # Core task management logic (17 files)
 │   ├── tasks.ts             # Task CRUD operations
 │   ├── projects.ts          # Project management
 │   ├── tags.ts              # Tag system
+│   ├── sections.ts          # Project sections
+│   ├── stats.ts             # Productivity statistics
+│   ├── templates.ts         # Task templates
 │   ├── priorities.ts        # Priority levels and sorting
 │   ├── recurrence.ts        # Recurring task logic
 │   ├── filters.ts           # Task filtering and search
+│   ├── query-parser.ts      # Natural language query → TaskFilter
+│   ├── export.ts            # Data export (JSON, CSV, Markdown)
+│   ├── import.ts            # Data import (Todoist, plain text)
+│   ├── event-bus.ts         # Internal event system
+│   ├── undo.ts              # Undo/redo stack
+│   ├── actions.ts           # Action definitions for undo
+│   ├── errors.ts            # NotFoundError, ValidationError, StorageError
 │   └── types.ts             # Core type definitions (Zod + TS)
-├── parser/                  # Natural language parsing
-│   ├── nlp.ts               # Date/time extraction from natural input
-│   ├── task-parser.ts       # Full task string parser ("buy milk tomorrow p1 #groceries")
+├── parser/                  # Natural language parsing (3 files)
+│   ├── nlp.ts               # Date/time extraction (chrono-node)
+│   ├── task-parser.ts       # Full task string parser
 │   └── grammar.ts           # Grammar rules for task input
-├── mcp/                     # MCP server (external AI agent bridge)
+├── mcp/                     # MCP server — external AI agent bridge (7 files)
 │   ├── server.ts            # Entry point — bootstrap + stdio transport
 │   ├── tools.ts             # Bridges ToolRegistry → MCP tools
 │   ├── resources.ts         # Read-only resources (tasks, projects, tags, stats)
@@ -81,58 +101,107 @@ src/
 │   ├── schema-converter.ts  # JSON Schema → Zod converter
 │   ├── context.ts           # ToolContext factory
 │   └── errors.ts            # Error mapping to MCP responses
-├── plugins/                 # Plugin system
+├── plugins/                 # Plugin system (11 files + builtin/)
 │   ├── loader.ts            # Plugin discovery and loading
-│   ├── lifecycle.ts         # Plugin lifecycle management (load/unload)
+│   ├── lifecycle.ts         # Plugin lifecycle management
 │   ├── api.ts               # Plugin API surface (what plugins can access)
 │   ├── sandbox.ts           # Sandboxed execution environment
 │   ├── registry.ts          # Community plugin registry client
+│   ├── installer.ts         # Plugin install/uninstall
 │   ├── settings.ts          # Per-plugin settings storage
-│   └── types.ts             # Plugin manifest and API types
-├── ui/                      # React frontend
-│   ├── App.tsx              # Root React component
-│   ├── components/          # Reusable UI components
-│   │   ├── TaskItem.tsx     # Single task row/card
-│   │   ├── TaskInput.tsx    # Natural language task input
-│   │   ├── TaskList.tsx     # Task list container
-│   │   ├── Sidebar.tsx      # Navigation sidebar
-│   │   ├── CommandPalette.tsx # Keyboard command palette
-│   │   └── PluginPanel.tsx  # Plugin UI container
-│   ├── views/               # Main application views
-│   │   ├── Inbox.tsx        # Default inbox view
-│   │   ├── Today.tsx        # Today's tasks
-│   │   ├── Upcoming.tsx     # Upcoming tasks by date
-│   │   ├── Project.tsx      # Single project view
-│   │   ├── Settings.tsx     # App and plugin settings
-│   │   └── PluginStore.tsx  # Browse/install community plugins
-│   └── themes/              # Theme system
-│       ├── manager.ts       # Theme loading and switching
-│       ├── light.css        # Default light theme
-│       └── dark.css         # Default dark theme
-├── ai/                      # AI assistant layer (future)
-│   ├── provider.ts          # Provider abstraction interface
-│   ├── providers/           # Provider implementations
-│   │   ├── openai.ts        # OpenAI API provider
-│   │   ├── anthropic.ts     # Anthropic API provider
-│   │   ├── openrouter.ts    # OpenRouter provider
-│   │   ├── ollama.ts        # Ollama (local) provider
-│   │   └── lmstudio.ts      # LM Studio (local) provider
+│   ├── command-registry.ts  # Plugin command registration
+│   ├── ui-registry.ts       # Plugin UI panel/view registration
+│   ├── types.ts             # Plugin manifest and API types
+│   └── builtin/pomodoro/    # Built-in Pomodoro plugin
+├── ai/                      # AI assistant layer (45 files)
 │   ├── chat.ts              # Chat session management
-│   ├── tools.ts             # AI tool definitions (task CRUD, scheduling)
-│   └── voice.ts             # Voice input processing
-├── cli/                     # CLI companion tool
+│   ├── provider.ts          # Provider setup + default registries
+│   ├── model-discovery.ts   # Dynamic model list fetching
+│   ├── errors.ts            # AI error classification
+│   ├── types.ts             # AI type definitions
+│   ├── core/                # Pipeline architecture (4 files)
+│   │   ├── pipeline.ts      # LLMPipeline — orchestrates execution
+│   │   ├── middleware.ts     # Middleware chain (retry, timeout)
+│   │   ├── context.ts       # Execution context
+│   │   └── capabilities.ts  # Provider capability detection
+│   ├── provider/            # Provider abstraction (8 files)
+│   │   ├── interface.ts     # LLMProviderPlugin interface
+│   │   ├── registry.ts      # Provider registry
+│   │   └── adapters/        # 6 adapters: openai, anthropic, openrouter, ollama, lmstudio, openai-compat
+│   ├── tools/               # Tool system (14 files)
+│   │   ├── registry.ts      # ToolRegistry
+│   │   ├── types.ts         # Tool type definitions
+│   │   └── builtin/         # 12 tools: task-crud, project-crud, tag-crud, reminder-tools,
+│   │                        #   query-tasks, daily-planning, task-breakdown, analyze-patterns,
+│   │                        #   analyze-workload, smart-organize, energy-recommendations,
+│   │                        #   productivity-stats
+│   └── voice/               # Voice I/O (14 files)
+│       ├── interface.ts     # STT/TTS provider interfaces
+│       ├── registry.ts      # Voice provider registry
+│       ├── provider.ts      # Default voice registry setup
+│       ├── audio-utils.ts   # Audio format conversion
+│       ├── adapters/        # 8 adapters: browser-stt, browser-tts, groq-stt, groq-tts,
+│       │                    #   inworld-tts, kokoro-local-tts, piper-local-tts, whisper-local-stt
+│       └── workers/         # 2 Web Workers: kokoro.worker.ts, kokoro-worker-types.ts
+├── ui/                      # React frontend (~128 files)
+│   ├── App.tsx              # Root React component
+│   ├── main.tsx             # React entry point
+│   ├── index.css            # Global styles
+│   ├── shortcuts.ts         # Shortcut definitions
+│   ├── shortcutManagerInstance.ts  # Singleton ShortcutManager
+│   ├── api/                 # Frontend API layer (11 files)
+│   │   ├── index.ts         # API entry point
+│   │   ├── helpers.ts       # handleResponse, handleVoidResponse
+│   │   ├── tasks.ts         # Task API calls
+│   │   ├── projects.ts      # Project API calls
+│   │   ├── sections.ts      # Section API calls
+│   │   ├── comments.ts      # Comment API calls
+│   │   ├── templates.ts     # Template API calls
+│   │   ├── plugins.ts       # Plugin API calls
+│   │   ├── settings.ts      # Settings API calls
+│   │   ├── stats.ts         # Stats API calls
+│   │   └── ai.ts            # AI chat API calls
+│   ├── components/          # Reusable UI components (~47 files)
+│   │   ├── TaskItem.tsx, TaskInput.tsx, TaskList.tsx, TaskDetailPanel.tsx
+│   │   ├── Sidebar.tsx, CommandPalette.tsx, SearchModal.tsx
+│   │   ├── AIChatPanel.tsx, VoiceCallOverlay.tsx
+│   │   ├── chat/            # Chat sub-components (12 files)
+│   │   └── ... (BottomNavBar, FAB, MobileDrawer, DatePicker, etc.)
+│   ├── context/             # React contexts (7 files)
+│   │   ├── AIContext.tsx, TaskContext.tsx, PluginContext.tsx
+│   │   ├── VoiceContext.tsx, SettingsContext.tsx, UndoContext.tsx
+│   │   └── BlockedTaskIdsContext.tsx
+│   ├── hooks/               # Custom hooks (13 files)
+│   │   ├── useRouting.ts, useTaskHandlers.ts, useBulkActions.ts
+│   │   ├── useKeyboardNavigation.ts, useAppCommands.ts, useAppShortcuts.ts
+│   │   ├── useReminders.ts, useSoundEffect.ts, useVoiceCall.ts
+│   │   ├── useVAD.ts, useIsMobile.ts, useMultiSelect.ts
+│   │   └── useFocusTrap.ts
+│   ├── views/               # Application views (17 + calendar/ + settings/)
+│   │   ├── Inbox.tsx, Today.tsx, Upcoming.tsx, Project.tsx
+│   │   ├── Board.tsx, Calendar.tsx, Matrix.tsx, Stats.tsx
+│   │   ├── Completed.tsx, Cancelled.tsx, Someday.tsx
+│   │   ├── Settings.tsx, TaskPage.tsx, AIChat.tsx
+│   │   ├── FiltersLabels.tsx, FilterView.tsx, PluginView.tsx
+│   │   ├── calendar/        # Calendar sub-views (4 files)
+│   │   └── settings/        # Settings tabs (12 files)
+│   └── themes/              # Theme system (4 files)
+│       ├── manager.ts       # Theme loading and switching
+│       ├── light.css        # Default light theme (design tokens)
+│       ├── dark.css         # Default dark theme
+│       └── nord.css         # Nord theme
+├── cli/                     # CLI companion tool (7 files)
 │   ├── index.ts             # CLI entry point (Commander.js)
-│   ├── commands/            # CLI command handlers
-│   │   ├── add.ts           # saydo add "task description"
-│   │   ├── list.ts          # saydo list [--today|--project=X]
-│   │   ├── done.ts          # saydo done <id>
-│   │   ├── edit.ts          # saydo edit <id> [fields]
-│   │   └── delete.ts        # saydo delete <id>
-│   └── formatter.ts         # Terminal output formatting
-└── utils/                   # Shared utilities
+│   ├── formatter.ts         # Terminal output formatting
+│   └── commands/            # 5 commands: add, list, done, edit, delete
+└── utils/                   # Shared utilities (7 files)
     ├── logger.ts            # Structured logger
     ├── ids.ts               # ID generation (nanoid)
-    └── dates.ts             # Date utilities
+    ├── dates.ts             # Date utilities
+    ├── format-date.ts       # User-facing date/time formatting
+    ├── sounds.ts            # Web Audio API sound effects
+    ├── color.ts             # Color manipulation
+    └── tauri.ts             # Tauri detection helper
 ```
 
 ## Development Conventions
@@ -235,11 +304,13 @@ Plugin Discovery → Manifest Validation → Sandbox Creation → Lifecycle Hook
 |------|---------|
 | `src/config/env.ts` | All env var definitions with Zod validation |
 | `src/db/schema.ts` | Database schema (source of truth for tables) |
+| `src/storage/interface.ts` | IStorage interface — storage abstraction for both backends |
 | `src/core/tasks.ts` | Task CRUD — the heart of the app |
 | `src/core/types.ts` | Core type definitions (Task, Project, Tag, etc.) |
 | `src/parser/task-parser.ts` | Natural language task input parser |
-| `src/ai/provider.ts` | AI provider abstraction interface (future) |
-| `src/ai/tools.ts` | AI tool definitions for task operations (future) |
+| `src/ai/provider.ts` | AI provider setup + default registries |
+| `src/ai/tools/registry.ts` | AI tool registry (28 tools) |
+| `src/ai/voice/interface.ts` | STT/TTS provider interfaces |
 | `src/plugins/loader.ts` | Plugin discovery and loading |
 | `src/plugins/api.ts` | Plugin API surface — what plugins can do |
 | `src/plugins/sandbox.ts` | Plugin execution sandbox |
@@ -295,37 +366,34 @@ See [AGENTS.md](AGENTS.md) for a quick-start guide on navigating the codebase wi
 ```
 docs/
 ├── README.md                        # Vision, design principles, why Saydo exists
-├── frontend/                        # File-by-file frontend reference
-│   ├── FILES.md                     # Master index of all 82 UI files
-│   ├── COMPONENTS.md                # 26 components: props, deps, usage
-│   ├── VIEWS.md                     # 10 views + 11 settings tabs
-│   ├── CONTEXT.md                   # 6 React contexts with state/functions
-│   ├── HOOKS.md                     # 12 custom hooks with params/returns
-│   ├── THEMES.md                    # Theme system, CSS tokens, adding themes
-│   ├── SHORTCUTS.md                 # ShortcutManager, all keybindings
-│   └── API_LAYER.md                 # 8 API modules, REST endpoints
-├── backend/                         # File-by-file backend reference
-│   ├── FILES.md                     # Master index of all 96 non-UI files
-│   ├── CORE.md                      # Task/project/tag services, events, undo
-│   ├── DATABASE.md                  # 8 tables, storage abstraction, migrations
-│   ├── PARSER.md                    # NLP pipeline, grammar rules, examples
-│   ├── AI.md                        # 29 files: providers, pipeline, 28 tools
-│   ├── VOICE.md                     # 14 files: STT/TTS adapters, audio utils
-│   ├── MCP.md                       # 7 files: MCP server, tools, resources, prompts
-│   ├── CLI.md                       # 5 CLI commands with usage examples
-│   ├── PLUGINS.md                   # 10 files: loader, sandbox, API, registry
-│   └── UTILS.md                     # Utilities + config modules
-├── development/                     # Developer guides
+├── guides/                          # Getting started & how-to
 │   ├── ARCHITECTURE.md              # High-level system design & data flow
-│   ├── SETUP_LOCAL.md               # Step-by-step local development
-│   ├── CONTRIBUTING.md              # How to contribute
+│   ├── CONTRIBUTING.md              # How to contribute + sprint methodology
 │   ├── SECURITY.md                  # Threat model, plugin sandboxing
-│   └── UX_REFERENCES.md            # Design inspiration & UX patterns
-├── plugins/                         # Plugin documentation
+│   └── SETUP.md                     # Step-by-step local development
+├── frontend/                        # UI code reference
+│   ├── API_LAYER.md                 # 11 API modules, REST endpoints
+│   ├── COMPONENTS.md                # ~47 components: props, deps, usage
+│   ├── CONTEXT.md                   # 7 React contexts with state/functions
+│   ├── HOOKS.md                     # 13 custom hooks with params/returns
+│   ├── SHORTCUTS.md                 # ShortcutManager, all keybindings
+│   ├── THEMES.md                    # Theme system, CSS tokens, adding themes
+│   └── VIEWS.md                     # 17 views + 12 settings tabs
+├── backend/                         # Non-UI code reference
+│   ├── AI.md                        # 45 files: providers, pipeline, 28 tools
+│   ├── CLI.md                       # 5 CLI commands with usage examples
+│   ├── CORE.md                      # Task/project/tag services, events, undo
+│   ├── DATABASE.md                  # 11 tables, Drizzle schema, migrations
+│   ├── MCP.md                       # 7 files: MCP server, tools, resources, prompts
+│   ├── PARSER.md                    # NLP pipeline, grammar rules, examples
+│   ├── PLUGINS.md                   # 11 files: loader, sandbox, API, registry
+│   ├── STORAGE.md                   # IStorage interface + SQLite/Markdown backends
+│   ├── UTILS.md                     # Utilities + config modules
+│   └── VOICE.md                     # 14 files: STT/TTS adapters, audio utils
+├── plugins/                         # Plugin author documentation
 │   ├── API.md                       # Plugin API reference (for authors)
 │   └── EXAMPLES.md                  # Example plugin walkthroughs
 └── planning/                        # Project planning
-    ├── ROADMAP.md                   # Milestones and future plans
     ├── BACKLOG.md                   # All work items, prioritized by area
-    └── SPRINTS.md                   # Sprint planning and tracking
+    └── ROADMAP.md                   # Milestones, status, sprint history
 ```

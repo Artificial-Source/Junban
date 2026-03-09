@@ -112,6 +112,7 @@ export function parseTaskFile(
       deadline: frontmatter.deadline != null ? String(frontmatter.deadline) : null,
       isSomeday: Boolean(frontmatter.isSomeday ?? false),
       sectionId: frontmatter.sectionId != null ? String(frontmatter.sectionId) : null,
+      dreadLevel: frontmatter.dreadLevel != null ? Number(frontmatter.dreadLevel) : null,
       sortOrder: Number(frontmatter.sortOrder ?? 0),
       createdAt: String(frontmatter.createdAt ?? new Date().toISOString()),
       updatedAt: String(frontmatter.updatedAt ?? new Date().toISOString()),
@@ -140,6 +141,7 @@ export function serializeTaskFile(
     deadline?: string | null;
     isSomeday?: boolean;
     sectionId?: string | null;
+    dreadLevel?: number | null;
     sortOrder: number;
     createdAt: string;
     updatedAt: string;
@@ -163,6 +165,7 @@ export function serializeTaskFile(
     deadline: task.deadline ?? null,
     isSomeday: task.isSomeday ?? false,
     sectionId: task.sectionId ?? null,
+    dreadLevel: task.dreadLevel ?? null,
     sortOrder: task.sortOrder,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,

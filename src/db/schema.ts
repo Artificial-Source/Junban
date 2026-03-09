@@ -21,6 +21,7 @@ export const tasks = sqliteTable("tasks", {
   deadline: text("deadline"),
   isSomeday: integer("is_someday", { mode: "boolean" }).notNull().default(false),
   sectionId: text("section_id").references(() => sections.id, { onDelete: "set null" }),
+  dreadLevel: integer("dread_level"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

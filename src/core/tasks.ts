@@ -54,6 +54,7 @@ export class TaskService {
       deadline: input.deadline ?? null,
       isSomeday: input.isSomeday ?? false,
       sectionId: input.sectionId ?? null,
+      dreadLevel: input.dreadLevel ?? null,
       sortOrder: 0,
       createdAt: now,
       updatedAt: now,
@@ -82,6 +83,7 @@ export class TaskService {
       deadline: input.deadline ?? null,
       isSomeday: input.isSomeday ?? false,
       sectionId: input.sectionId ?? null,
+      dreadLevel: input.dreadLevel ?? null,
       tags,
       sortOrder: 0,
       createdAt: now,
@@ -116,6 +118,7 @@ export class TaskService {
       deadline: row.deadline ?? null,
       isSomeday: row.isSomeday ?? false,
       sectionId: row.sectionId ?? null,
+      dreadLevel: row.dreadLevel ?? null,
       tags: tagsByTaskId.get(row.id) ?? [],
     }));
 
@@ -146,6 +149,7 @@ export class TaskService {
       deadline: row.deadline ?? null,
       isSomeday: row.isSomeday ?? false,
       sectionId: row.sectionId ?? null,
+      dreadLevel: row.dreadLevel ?? null,
       tags,
     };
   }
@@ -359,6 +363,7 @@ export class TaskService {
       deadline: task.deadline,
       isSomeday: task.isSomeday,
       sectionId: task.sectionId,
+      dreadLevel: task.dreadLevel,
       sortOrder: task.sortOrder,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
@@ -404,6 +409,7 @@ export class TaskService {
       deadline: row.deadline ?? null,
       isSomeday: row.isSomeday ?? false,
       sectionId: row.sectionId ?? null,
+      dreadLevel: row.dreadLevel ?? null,
       tags: tagsByTaskId.get(row.id) ?? [],
     }));
   }

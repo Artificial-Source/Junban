@@ -22,6 +22,7 @@ export const CreateTaskInput = z.object({
   deadline: z.string().datetime().nullable().optional(),
   isSomeday: z.boolean().optional(),
   sectionId: z.string().nullable().optional(),
+  dreadLevel: z.number().int().min(1).max(5).nullable().optional(),
 });
 export type CreateTaskInput = z.infer<typeof CreateTaskInput>;
 
@@ -49,6 +50,7 @@ export interface Task {
   deadline: string | null;
   isSomeday: boolean;
   sectionId: string | null;
+  dreadLevel: number | null;
   tags: Tag[];
   children?: Task[];
   sortOrder: number;

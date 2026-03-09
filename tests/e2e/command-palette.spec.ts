@@ -32,7 +32,9 @@ test.describe("Command palette", () => {
     await page.getByPlaceholder("Type a command...").fill("today");
 
     // Wait for filtered results
-    await expect(page.locator("#command-palette-list").getByRole("option").first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("#command-palette-list").getByRole("option").first()).toBeVisible({
+      timeout: 5000,
+    });
 
     // Press Enter to execute the first command
     await page.keyboard.press("Enter");
@@ -43,11 +45,15 @@ test.describe("Command palette", () => {
 
   test("closes on Escape", async ({ page }) => {
     await page.keyboard.press("Control+k");
-    await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible({
+      timeout: 5000,
+    });
 
     await page.keyboard.press("Escape");
 
-    await expect(page.getByRole("dialog", { name: "Command palette" })).not.toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("dialog", { name: "Command palette" })).not.toBeVisible({
+      timeout: 5000,
+    });
   });
 
   test("shows empty filter message", async ({ page }) => {

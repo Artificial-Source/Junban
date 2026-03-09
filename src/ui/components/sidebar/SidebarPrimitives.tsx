@@ -54,12 +54,31 @@ export const NAV_ITEMS: Array<{
 export const CORE_VIEWS = new Set(["inbox", "today", "upcoming"]);
 
 export const DEFAULT_SIDEBAR_ORDER = [
-  "inbox", "today", "upcoming", "calendar", "filters-labels",
-  "completed", "cancelled", "matrix", "stats", "someday", "dopamine-menu",
-  "favorite-views", "favorites", "projects", "my-views", "tools",
+  "inbox",
+  "today",
+  "upcoming",
+  "calendar",
+  "filters-labels",
+  "completed",
+  "cancelled",
+  "matrix",
+  "stats",
+  "someday",
+  "dopamine-menu",
+  "favorite-views",
+  "favorites",
+  "projects",
+  "my-views",
+  "tools",
 ];
 
-export const SECTION_IDS = new Set(["favorite-views", "favorites", "projects", "my-views", "tools"]);
+export const SECTION_IDS = new Set([
+  "favorite-views",
+  "favorites",
+  "projects",
+  "my-views",
+  "tools",
+]);
 
 export const NAV_FEATURE_MAP: Record<string, keyof GeneralSettings> = {
   calendar: "feature_calendar",
@@ -80,8 +99,11 @@ export function SortableNavItem({ id, children }: { id: string; children: ReactN
     transition,
     opacity: isDragging ? 0.5 : 1,
   };
+  // Spread attributes but override role to "presentation" so the wrapper doesn't
+  // create a duplicate "button" role alongside the inner <button> element.
+  // This prevents Playwright strict-mode violations when querying by role.
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners} role="presentation">
       {children}
     </div>
   );
@@ -103,7 +125,7 @@ export function SortableSection({
     opacity: isDragging ? 0.5 : 1,
   };
   return (
-    <div ref={setNodeRef} style={style} {...attributes} data-section-id={id}>
+    <div ref={setNodeRef} style={style} {...attributes} role="group" data-section-id={id}>
       {children(listeners ?? {})}
     </div>
   );

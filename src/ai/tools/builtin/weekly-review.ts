@@ -83,9 +83,7 @@ export function registerWeeklyReviewTool(registry: ToolRegistry): void {
 
       const completedInWeek = completedTasks.filter((t) => inWeek(t.completedAt));
       const createdInWeek = allTasks.filter((t) => inWeek(t.createdAt));
-      const cancelledInWeek = cancelledTasks.filter(
-        (t) => inWeek(t.updatedAt),
-      );
+      const cancelledInWeek = cancelledTasks.filter((t) => inWeek(t.updatedAt));
 
       // Completion rate
       const totalActionable = completedInWeek.length + cancelledInWeek.length;
@@ -125,9 +123,8 @@ export function registerWeeklyReviewTool(registry: ToolRegistry): void {
           completed: completedInWeek.filter(
             (t) => t.completedAt && t.completedAt.split("T")[0] === dStr,
           ).length,
-          created: createdInWeek.filter(
-            (t) => t.createdAt && t.createdAt.split("T")[0] === dStr,
-          ).length,
+          created: createdInWeek.filter((t) => t.createdAt && t.createdAt.split("T")[0] === dStr)
+            .length,
         });
       }
 
@@ -199,9 +196,7 @@ export function registerWeeklyReviewTool(registry: ToolRegistry): void {
 
       // Overdue tasks (as of now)
       const overdueTasks = allTasks
-        .filter(
-          (t) => t.status === "pending" && t.dueDate && t.dueDate.split("T")[0] < todayStr,
-        )
+        .filter((t) => t.status === "pending" && t.dueDate && t.dueDate.split("T")[0] < todayStr)
         .sort((a, b) => (a.priority ?? 5) - (b.priority ?? 5));
 
       // Streak calculation
@@ -302,9 +297,7 @@ function generateSuggestions(input: SuggestionInput): string[] {
       .slice(0, 3)
       .map((p) => p.name)
       .join(", ");
-    suggestions.push(
-      `Check in on neglected projects: ${names}.`,
-    );
+    suggestions.push(`Check in on neglected projects: ${names}.`);
   }
 
   if (input.taskFlow.created > input.taskFlow.completed && input.taskFlow.created > 0) {
@@ -324,9 +317,7 @@ function generateSuggestions(input: SuggestionInput): string[] {
   const maxDay = Math.max(...completedCounts);
   const minDay = Math.min(...completedCounts);
   if (maxDay > 0 && minDay === 0 && completedCounts.filter((c) => c === 0).length >= 3) {
-    suggestions.push(
-      "Try spreading your work more evenly across the week to avoid burnout.",
-    );
+    suggestions.push("Try spreading your work more evenly across the week to avoid burnout.");
   }
 
   if (input.streakDays > 0) {

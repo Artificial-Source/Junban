@@ -78,12 +78,7 @@ describe("weekly_review", () => {
     await taskService.complete(t1.id);
     await taskService.complete(t2.id);
 
-    const result = await exec(
-      registry,
-      "weekly_review",
-      { weekStartDate: monday },
-      ctx,
-    );
+    const result = await exec(registry, "weekly_review", { weekStartDate: monday }, ctx);
 
     // completedInWeek = 2 (t1, t2), createdInWeek = 3 (all created today which may or may not be in the week)
     // The actual numbers depend on whether today is within the specified week
@@ -114,12 +109,7 @@ describe("weekly_review", () => {
     await taskService.complete(t1.id);
     await taskService.complete(t2.id);
 
-    const result = await exec(
-      registry,
-      "weekly_review",
-      { weekStartDate: monday },
-      ctx,
-    );
+    const result = await exec(registry, "weekly_review", { weekStartDate: monday }, ctx);
 
     // The busiest day should exist and have the highest completion count
     if (result.busiestDay && result.busiestDay.completed > 0) {
@@ -182,12 +172,7 @@ describe("weekly_review", () => {
     await taskService.complete(t1.id);
     await taskService.complete(t2.id);
 
-    const result = await exec(
-      registry,
-      "weekly_review",
-      { weekStartDate: monday },
-      ctx,
-    );
+    const result = await exec(registry, "weekly_review", { weekStartDate: monday }, ctx);
 
     // Top accomplishments should exist if tasks were completed within the week
     if (result.topAccomplishments.length > 0) {
@@ -209,12 +194,7 @@ describe("weekly_review", () => {
     });
     await taskService.complete(t.id);
 
-    const result = await exec(
-      registry,
-      "weekly_review",
-      { weekStartDate: monday },
-      ctx,
-    );
+    const result = await exec(registry, "weekly_review", { weekStartDate: monday }, ctx);
 
     // productiveTimeCounts should have the 4 buckets
     expect(result.productiveTimeCounts).toHaveProperty("morning");
@@ -237,12 +217,7 @@ describe("weekly_review", () => {
 
   it("rejects gracefully with invalid date (still returns data)", async () => {
     // Even with a weird date, the tool should not crash
-    const result = await exec(
-      registry,
-      "weekly_review",
-      { weekStartDate: "2025-01-06" },
-      ctx,
-    );
+    const result = await exec(registry, "weekly_review", { weekStartDate: "2025-01-06" }, ctx);
     expect(result.weekStartDate).toBe("2025-01-06");
     expect(result.dailyStats).toHaveLength(7);
   });
@@ -256,12 +231,7 @@ describe("weekly_review", () => {
   });
 
   it("daily stats always has 7 entries", async () => {
-    const result = await exec(
-      registry,
-      "weekly_review",
-      { weekStartDate: "2025-06-02" },
-      ctx,
-    );
+    const result = await exec(registry, "weekly_review", { weekStartDate: "2025-06-02" }, ctx);
     expect(result.dailyStats).toHaveLength(7);
     // First day should be Monday
     expect(result.dailyStats[0].dayName).toBe("Monday");

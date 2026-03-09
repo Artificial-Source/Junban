@@ -25,7 +25,12 @@ interface ToolPair {
  */
 export function buildAutoScheduleTools(
   store: TimeBlockStore,
-  getSettings: () => { workDayStart: string; workDayEnd: string; defaultDurationMinutes: number; gridIntervalMinutes: number },
+  getSettings: () => {
+    workDayStart: string;
+    workDayEnd: string;
+    defaultDurationMinutes: number;
+    gridIntervalMinutes: number;
+  },
 ): ToolPair[] {
   const tools: ToolPair[] = [];
 
@@ -46,7 +51,8 @@ export function buildAutoScheduleTools(
           mode: {
             type: "string",
             enum: ["suggest", "auto"],
-            description: "Mode: 'suggest' returns a preview, 'auto' applies immediately (default: suggest)",
+            description:
+              "Mode: 'suggest' returns a preview, 'auto' applies immediately (default: suggest)",
           },
           respectLocked: {
             type: "boolean",
@@ -108,34 +114,42 @@ export function buildAutoScheduleTools(
 
       if (mode === "auto") {
         const ids = await applySchedule(result.proposed, store);
-        return JSON.stringify({
-          applied: true,
-          blocksCreated: ids.length,
-          totalScheduledMinutes: result.totalScheduledMinutes,
-          warnings: result.warnings,
-          blocks: result.proposed.map((p, i) => ({
-            id: ids[i],
-            title: p.title,
-            startTime: p.startTime,
-            endTime: p.endTime,
-          })),
-        }, null, 2);
+        return JSON.stringify(
+          {
+            applied: true,
+            blocksCreated: ids.length,
+            totalScheduledMinutes: result.totalScheduledMinutes,
+            warnings: result.warnings,
+            blocks: result.proposed.map((p, i) => ({
+              id: ids[i],
+              title: p.title,
+              startTime: p.startTime,
+              endTime: p.endTime,
+            })),
+          },
+          null,
+          2,
+        );
       }
 
       // Suggest mode
-      return JSON.stringify({
-        applied: false,
-        proposed: result.proposed.map((p) => ({
-          title: p.title,
-          startTime: p.startTime,
-          endTime: p.endTime,
-          score: Math.round(p.score * 100) / 100,
-        })),
-        warnings: result.warnings,
-        totalScheduledMinutes: result.totalScheduledMinutes,
-        totalRequestedMinutes: result.totalRequestedMinutes,
-        couldNotFit: result.warnings.filter((w) => w.reason.includes("No available")).length,
-      }, null, 2);
+      return JSON.stringify(
+        {
+          applied: false,
+          proposed: result.proposed.map((p) => ({
+            title: p.title,
+            startTime: p.startTime,
+            endTime: p.endTime,
+            score: Math.round(p.score * 100) / 100,
+          })),
+          warnings: result.warnings,
+          totalScheduledMinutes: result.totalScheduledMinutes,
+          totalRequestedMinutes: result.totalRequestedMinutes,
+          couldNotFit: result.warnings.filter((w) => w.reason.includes("No available")).length,
+        },
+        null,
+        2,
+      );
     },
   });
 
@@ -211,18 +225,22 @@ export function buildAutoScheduleTools(
 
       const ids = await applySchedule(result.proposed, store);
 
-      return JSON.stringify({
-        removedBlocks: removedCount,
-        createdBlocks: ids.length,
-        totalScheduledMinutes: result.totalScheduledMinutes,
-        warnings: result.warnings,
-        blocks: result.proposed.map((p, i) => ({
-          id: ids[i],
-          title: p.title,
-          startTime: p.startTime,
-          endTime: p.endTime,
-        })),
-      }, null, 2);
+      return JSON.stringify(
+        {
+          removedBlocks: removedCount,
+          createdBlocks: ids.length,
+          totalScheduledMinutes: result.totalScheduledMinutes,
+          warnings: result.warnings,
+          blocks: result.proposed.map((p, i) => ({
+            id: ids[i],
+            title: p.title,
+            startTime: p.startTime,
+            endTime: p.endTime,
+          })),
+        },
+        null,
+        2,
+      );
     },
   });
 

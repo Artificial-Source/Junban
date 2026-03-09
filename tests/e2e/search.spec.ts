@@ -7,7 +7,7 @@ test.describe("Search modal", () => {
   });
 
   test("opens with keyboard shortcut", async ({ page }) => {
-    await page.keyboard.press("/");
+    await page.keyboard.press("Control+f");
 
     const dialog = page.getByRole("dialog", { name: "Search tasks" });
     await expect(dialog).toBeVisible({ timeout: 5000 });
@@ -20,7 +20,7 @@ test.describe("Search modal", () => {
     await page.reload();
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
-    await page.keyboard.press("/");
+    await page.keyboard.press("Control+f");
     await expect(page.getByRole("dialog", { name: "Search tasks" })).toBeVisible();
 
     await page.getByPlaceholder("Search tasks...").fill("searchable");
@@ -28,11 +28,13 @@ test.describe("Search modal", () => {
     // Should show the matching task
     await expect(page.getByText("Unique searchable task").first()).toBeVisible({ timeout: 5000 });
     // Should not show the non-matching task
-    await expect(page.getByRole("dialog", { name: "Search tasks" }).getByText("Another task here")).not.toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: "Search tasks" }).getByText("Another task here"),
+    ).not.toBeVisible();
   });
 
   test("shows empty results message", async ({ page }) => {
-    await page.keyboard.press("/");
+    await page.keyboard.press("Control+f");
     await expect(page.getByRole("dialog", { name: "Search tasks" })).toBeVisible();
 
     await page.getByPlaceholder("Search tasks...").fill("nonexistent xyz");
@@ -45,7 +47,7 @@ test.describe("Search modal", () => {
     await page.reload();
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
-    await page.keyboard.press("/");
+    await page.keyboard.press("Control+f");
     await page.getByPlaceholder("Search tasks...").fill("Clickable");
 
     // Click the search result

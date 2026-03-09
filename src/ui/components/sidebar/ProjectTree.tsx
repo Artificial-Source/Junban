@@ -58,11 +58,7 @@ export function ProjectTree({
                   onClick={() => toggleParentExpanded(project.id)}
                   className="p-0.5 mr-0.5 rounded text-on-surface-muted hover:text-on-surface-secondary transition-colors"
                 >
-                  {isParentExpanded ? (
-                    <ChevronDown size={12} />
-                  ) : (
-                    <ChevronRight size={12} />
-                  )}
+                  {isParentExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                 </button>
               )}
               <div className={`flex-1 ${!hasChildren ? "ml-5" : ""}`}>
@@ -134,10 +130,7 @@ export function ProjectButton({
         {project.icon ? (
           <span className="text-base leading-none">{project.icon}</span>
         ) : (
-          <div
-            className="w-3 h-3 rounded-full"
-            style={{ backgroundColor: project.color }}
-          />
+          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: project.color }} />
         )}
         <CollapsedTooltip visible={collapsed} label={project.name} />
       </button>
@@ -168,7 +161,10 @@ export function ProjectButton({
       <span className="flex-1 truncate">{project.name}</span>
       {totalCount > 0 && (
         <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="w-12 h-1 rounded-full bg-surface-tertiary overflow-hidden" title={`${progressPct}% complete`}>
+          <div
+            className="w-12 h-1 rounded-full bg-surface-tertiary overflow-hidden"
+            title={`${progressPct}% complete`}
+          >
             <div
               className="h-full rounded-full bg-accent/60 transition-all duration-300"
               style={{ width: `${progressPct}%` }}

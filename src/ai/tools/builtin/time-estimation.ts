@@ -30,9 +30,7 @@ export function registerTimeEstimationTools(registry: ToolRegistry): void {
 
       // Get all completed tasks with actual time tracked
       const allTasks = await ctx.taskService.list({ status: "completed" });
-      const tasksWithTime = allTasks.filter(
-        (t) => t.actualMinutes != null && t.actualMinutes > 0,
-      );
+      const tasksWithTime = allTasks.filter((t) => t.actualMinutes != null && t.actualMinutes > 0);
 
       if (tasksWithTime.length === 0) {
         return JSON.stringify({

@@ -519,7 +519,9 @@ export class TaskService {
     return { blocks, blockedBy };
   }
 
-  async listAllRelations(): Promise<Array<{ taskId: string; relatedTaskId: string; type: string }>> {
+  async listAllRelations(): Promise<
+    Array<{ taskId: string; relatedTaskId: string; type: string }>
+  > {
     return this.queries.listTaskRelations();
   }
 

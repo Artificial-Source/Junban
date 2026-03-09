@@ -61,7 +61,10 @@ export function deleteTag(idx: MarkdownIndexes, id: string): MutationResult {
 
 // ── Plugin Settings ──
 
-export function loadPluginSettings(idx: MarkdownIndexes, pluginId: string): PluginSettingsRow | undefined {
+export function loadPluginSettings(
+  idx: MarkdownIndexes,
+  pluginId: string,
+): PluginSettingsRow | undefined {
   return idx.pluginSettingsMap.get(pluginId);
 }
 
@@ -172,7 +175,11 @@ export function getPluginPermissions(idx: MarkdownIndexes, pluginId: string): st
   return idx.pluginPermissions.get(pluginId) ?? null;
 }
 
-export function setPluginPermissions(idx: MarkdownIndexes, pluginId: string, permissions: string[]): void {
+export function setPluginPermissions(
+  idx: MarkdownIndexes,
+  pluginId: string,
+  permissions: string[],
+): void {
   idx.pluginPermissions.set(pluginId, permissions);
   persistPluginPermissions(idx);
 }
@@ -200,7 +207,11 @@ export function insertTemplate(idx: MarkdownIndexes, template: TemplateRow): Mut
   return OK;
 }
 
-export function updateTemplate(idx: MarkdownIndexes, id: string, data: Partial<TemplateRow>): MutationResult {
+export function updateTemplate(
+  idx: MarkdownIndexes,
+  id: string,
+  data: Partial<TemplateRow>,
+): MutationResult {
   const existing = idx.templateIndex.get(id);
   if (!existing) return NOOP;
   idx.templateIndex.set(id, { ...existing, ...data });
@@ -231,7 +242,11 @@ export function insertSection(idx: MarkdownIndexes, section: SectionRow): Mutati
   return OK;
 }
 
-export function updateSection(idx: MarkdownIndexes, id: string, data: Partial<SectionRow>): MutationResult {
+export function updateSection(
+  idx: MarkdownIndexes,
+  id: string,
+  data: Partial<SectionRow>,
+): MutationResult {
   const existing = idx.sectionIndex.get(id);
   if (!existing) return NOOP;
   idx.sectionIndex.set(id, { ...existing, ...data });
@@ -269,7 +284,11 @@ export function insertTaskComment(idx: MarkdownIndexes, comment: TaskCommentRow)
   return OK;
 }
 
-export function updateTaskComment(idx: MarkdownIndexes, id: string, data: Partial<TaskCommentRow>): MutationResult {
+export function updateTaskComment(
+  idx: MarkdownIndexes,
+  id: string,
+  data: Partial<TaskCommentRow>,
+): MutationResult {
   for (const [taskId, comments] of idx.taskCommentIndex) {
     const i = comments.findIndex((c) => c.id === id);
     if (i >= 0) {
@@ -299,7 +318,10 @@ export function listTaskActivity(idx: MarkdownIndexes, taskId: string): TaskActi
   return idx.taskActivityIndex.get(taskId) ?? [];
 }
 
-export function insertTaskActivity(idx: MarkdownIndexes, activity: TaskActivityRow): MutationResult {
+export function insertTaskActivity(
+  idx: MarkdownIndexes,
+  activity: TaskActivityRow,
+): MutationResult {
   let activities = idx.taskActivityIndex.get(activity.taskId);
   if (!activities) {
     activities = [];
@@ -322,7 +344,11 @@ export function upsertDailyStat(idx: MarkdownIndexes, stat: DailyStatRow): Mutat
   return OK;
 }
 
-export function listDailyStats(idx: MarkdownIndexes, startDate: string, endDate: string): DailyStatRow[] {
+export function listDailyStats(
+  idx: MarkdownIndexes,
+  startDate: string,
+  endDate: string,
+): DailyStatRow[] {
   const results: DailyStatRow[] = [];
   for (const stat of idx.dailyStatIndex.values()) {
     if (stat.date >= startDate && stat.date <= endDate) {
@@ -339,18 +365,23 @@ export function listTaskRelations(idx: MarkdownIndexes): TaskRelationRow[] {
 }
 
 export function getTaskRelations(idx: MarkdownIndexes, taskId: string): TaskRelationRow[] {
-  return idx.taskRelationList.filter(
-    (r) => r.taskId === taskId || r.relatedTaskId === taskId,
-  );
+  return idx.taskRelationList.filter((r) => r.taskId === taskId || r.relatedTaskId === taskId);
 }
 
-export function insertTaskRelation(idx: MarkdownIndexes, relation: TaskRelationRow): MutationResult {
+export function insertTaskRelation(
+  idx: MarkdownIndexes,
+  relation: TaskRelationRow,
+): MutationResult {
   idx.taskRelationList.push({ ...relation });
   persistTaskRelations(idx);
   return OK;
 }
 
-export function deleteTaskRelation(idx: MarkdownIndexes, taskId: string, relatedTaskId: string): MutationResult {
+export function deleteTaskRelation(
+  idx: MarkdownIndexes,
+  taskId: string,
+  relatedTaskId: string,
+): MutationResult {
   const i = idx.taskRelationList.findIndex(
     (r) => r.taskId === taskId && r.relatedTaskId === relatedTaskId,
   );
@@ -381,10 +412,20 @@ export function insertAiMemory(idx: MarkdownIndexes, row: AiMemoryRow): void {
   persistAiMemories(idx);
 }
 
-export function updateAiMemory(idx: MarkdownIndexes, id: string, content: string, category: AiMemoryRow["category"]): void {
+export function updateAiMemory(
+  idx: MarkdownIndexes,
+  id: string,
+  content: string,
+  category: AiMemoryRow["category"],
+): void {
   const existing = idx.aiMemoryIndex.get(id);
   if (!existing) return;
-  idx.aiMemoryIndex.set(id, { ...existing, content, category, updatedAt: new Date().toISOString() });
+  idx.aiMemoryIndex.set(id, {
+    ...existing,
+    content,
+    category,
+    updatedAt: new Date().toISOString(),
+  });
   persistAiMemories(idx);
 }
 

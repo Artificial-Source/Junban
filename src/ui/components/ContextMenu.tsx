@@ -176,7 +176,9 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
             {item.icon && <span className="w-4 flex-shrink-0">{item.icon}</span>}
             <span className="flex-1">{item.label}</span>
             {item.shortcut && (
-              <span className="text-on-surface-muted text-xs ml-4 flex-shrink-0">{item.shortcut}</span>
+              <span className="text-on-surface-muted text-xs ml-4 flex-shrink-0">
+                {item.shortcut}
+              </span>
             )}
             {item.submenu && <span className="text-on-surface-muted text-xs">&#9656;</span>}
           </button>
@@ -204,7 +206,9 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
                     {sub.icon && <span className="w-4 flex-shrink-0">{sub.icon}</span>}
                     <span className="flex-1">{sub.label}</span>
                     {sub.shortcut && (
-                      <span className="text-on-surface-muted text-xs ml-4 flex-shrink-0">{sub.shortcut}</span>
+                      <span className="text-on-surface-muted text-xs ml-4 flex-shrink-0">
+                        {sub.shortcut}
+                      </span>
                     )}
                   </button>
                   {sub.separator && (
@@ -214,9 +218,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
               ))}
             </div>
           )}
-          {item.separator && (
-            <div className="my-1 border-t border-border/50" role="separator" />
-          )}
+          {item.separator && <div className="my-1 border-t border-border/50" role="separator" />}
         </div>
       ))}
     </div>

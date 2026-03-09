@@ -49,8 +49,8 @@ test.describe("Productivity stats view", () => {
     const mainContent = page.locator("#main-content");
     await expect(mainContent.getByText("Today").first()).toBeVisible();
 
-    // There should be at least 1 task completed today
-    await expect(mainContent.getByText("tasks completed").first()).toBeVisible();
+    // There should be at least 1 task completed today (may be singular "task completed")
+    await expect(mainContent.getByText(/tasks? completed/).first()).toBeVisible();
   });
 
   test("Stats nav item disappears when feature_stats is disabled", async ({ page }) => {

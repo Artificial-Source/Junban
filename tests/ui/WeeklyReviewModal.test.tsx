@@ -34,8 +34,20 @@ function makeData(overrides: Partial<WeeklyReviewData> = {}): WeeklyReviewData {
     },
     streak: { currentDays: 5, isActive: true },
     topAccomplishments: [
-      { id: "a1", title: "Shipped feature", priority: 1, completedAt: "2025-06-02T10:00:00Z", projectId: null },
-      { id: "a2", title: "Wrote tests", priority: 2, completedAt: "2025-06-03T14:00:00Z", projectId: null },
+      {
+        id: "a1",
+        title: "Shipped feature",
+        priority: 1,
+        completedAt: "2025-06-02T10:00:00Z",
+        projectId: null,
+      },
+      {
+        id: "a2",
+        title: "Wrote tests",
+        priority: 2,
+        completedAt: "2025-06-03T14:00:00Z",
+        projectId: null,
+      },
     ],
     suggestions: [
       "Tackle your 3 overdue tasks early in the week.",
@@ -81,16 +93,12 @@ describe("WeeklyReviewModal", () => {
 
   it("renders nothing when not open", () => {
     const data = makeData();
-    const { container } = render(
-      <WeeklyReviewModal open={false} onClose={vi.fn()} data={data} />,
-    );
+    const { container } = render(<WeeklyReviewModal open={false} onClose={vi.fn()} data={data} />);
     expect(container.innerHTML).toBe("");
   });
 
   it("renders nothing when data is null", () => {
-    const { container } = render(
-      <WeeklyReviewModal open={true} onClose={vi.fn()} data={null} />,
-    );
+    const { container } = render(<WeeklyReviewModal open={true} onClose={vi.fn()} data={null} />);
     expect(container.innerHTML).toBe("");
   });
 

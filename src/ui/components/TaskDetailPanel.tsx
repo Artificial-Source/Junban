@@ -121,7 +121,9 @@ export function TaskDetailPanel({
         setRelBlockedBy(r.blockedBy);
       }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [task.id]);
 
   // Close more menu on outside click

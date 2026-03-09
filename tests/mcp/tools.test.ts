@@ -51,9 +51,7 @@ describe("MCP Tools", () => {
       name: "create_task",
       arguments: { title: "Do laundry" },
     });
-    const created = JSON.parse(
-      (createResult.content[0] as { type: "text"; text: string }).text,
-    );
+    const created = JSON.parse((createResult.content[0] as { type: "text"; text: string }).text);
 
     // Complete
     const completeResult = await env.client.callTool({
@@ -94,9 +92,7 @@ describe("MCP Tools", () => {
       arguments: { status: "pending" },
     });
 
-    const parsed = JSON.parse(
-      (result.content[0] as { type: "text"; text: string }).text,
-    );
+    const parsed = JSON.parse((result.content[0] as { type: "text"; text: string }).text);
     expect(parsed.count).toBe(2);
   });
 
@@ -111,9 +107,7 @@ describe("MCP Tools", () => {
       arguments: {},
     });
 
-    const parsed = JSON.parse(
-      (listResult.content[0] as { type: "text"; text: string }).text,
-    );
+    const parsed = JSON.parse((listResult.content[0] as { type: "text"; text: string }).text);
     expect(parsed.projects).toHaveLength(1);
     expect(parsed.projects[0].name).toBe("Work");
   });

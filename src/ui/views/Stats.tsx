@@ -109,7 +109,11 @@ export function Stats({ tasks }: StatsProps) {
   // Estimation accuracy stats
   const accuracyStats = useMemo(() => {
     const tracked = completedTasks.filter(
-      (t) => t.estimatedMinutes != null && t.estimatedMinutes > 0 && t.actualMinutes != null && t.actualMinutes > 0,
+      (t) =>
+        t.estimatedMinutes != null &&
+        t.estimatedMinutes > 0 &&
+        t.actualMinutes != null &&
+        t.actualMinutes > 0,
     );
     if (tracked.length === 0) return null;
 
@@ -122,7 +126,13 @@ export function Stats({ tasks }: StatsProps) {
     const avgEstimated = tracked.reduce((s, t) => s + t.estimatedMinutes!, 0) / tracked.length;
     const avgActual = tracked.reduce((s, t) => s + t.actualMinutes!, 0) / tracked.length;
 
-    return { accuracy, avgVariance: Math.round(avgVariance * 100), count: tracked.length, avgEstimated: Math.round(avgEstimated), avgActual: Math.round(avgActual) };
+    return {
+      accuracy,
+      avgVariance: Math.round(avgVariance * 100),
+      count: tracked.length,
+      avgEstimated: Math.round(avgEstimated),
+      avgActual: Math.round(avgActual),
+    };
   }, [completedTasks]);
 
   return (
@@ -242,7 +252,8 @@ export function Stats({ tasks }: StatsProps) {
             </div>
             <div className="rounded-xl border border-border bg-surface-secondary p-3 text-center">
               <p className="text-xl font-bold text-on-surface">
-                {formatMinutes(accuracyStats.avgEstimated)} → {formatMinutes(accuracyStats.avgActual)}
+                {formatMinutes(accuracyStats.avgEstimated)} →{" "}
+                {formatMinutes(accuracyStats.avgActual)}
               </p>
               <p className="text-xs text-on-surface-muted">Avg est. → actual</p>
             </div>

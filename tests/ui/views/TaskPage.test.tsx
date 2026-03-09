@@ -8,7 +8,9 @@ vi.mock("lucide-react", () => ({
 }));
 
 vi.mock("../../../src/ui/components/chat/MarkdownMessage.js", () => ({
-  MarkdownMessage: ({ content }: { content: string }) => <div data-testid="markdown-preview">{content}</div>,
+  MarkdownMessage: ({ content }: { content: string }) => (
+    <div data-testid="markdown-preview">{content}</div>
+  ),
 }));
 
 vi.mock("../../../src/ui/context/SettingsContext.js", () => ({

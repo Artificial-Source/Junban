@@ -82,13 +82,12 @@ export function AIProvider({ children }: { children: ReactNode }) {
     sendMessage,
   });
 
-  const { createNewSession, switchSession, deleteSession, renameSession } =
-    useAISessionManagement({
-      setMessages,
-      setActiveSessionId,
-      activeSessionId,
-      refreshSessions,
-    });
+  const { createNewSession, switchSession, deleteSession, renameSession } = useAISessionManagement({
+    setMessages,
+    setActiveSessionId,
+    activeSessionId,
+    refreshSessions,
+  });
 
   const setVoiceCallMode = useCallback((active: boolean) => {
     setVoiceCallActive(active);

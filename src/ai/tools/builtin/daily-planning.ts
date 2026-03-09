@@ -249,9 +249,7 @@ export function registerPlanMyDayTool(registry: ToolRegistry): void {
             const dueDateStr = t.dueDate!.split("T")[0];
             const [dy, dm, dd] = dueDateStr.split("-").map(Number);
             const [ty, tm, td] = todayISO.split("-").map(Number);
-            return Math.round(
-              (Date.UTC(ty, tm - 1, td) - Date.UTC(dy, dm - 1, dd)) / 86400000,
-            );
+            return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(dy, dm - 1, dd)) / 86400000);
           })(),
         })),
         unscheduledHighPriority: unscheduledHighPriority.slice(0, MAX_LIST_SIZE).map(taskSummary),

@@ -34,33 +34,25 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 
 describe("TaskJar pool building", () => {
   it("includes pending tasks due today", () => {
-    const tasks = [
-      makeTask({ id: "a", dueDate: `${today}T10:00:00.000Z` }),
-    ];
+    const tasks = [makeTask({ id: "a", dueDate: `${today}T10:00:00.000Z` })];
     const pool = buildJarPool(tasks);
     expect(pool.map((t) => t.id)).toEqual(["a"]);
   });
 
   it("includes overdue tasks", () => {
-    const tasks = [
-      makeTask({ id: "a", dueDate: `${yesterday}T10:00:00.000Z` }),
-    ];
+    const tasks = [makeTask({ id: "a", dueDate: `${yesterday}T10:00:00.000Z` })];
     const pool = buildJarPool(tasks);
     expect(pool.map((t) => t.id)).toEqual(["a"]);
   });
 
   it("excludes tasks due in the future", () => {
-    const tasks = [
-      makeTask({ id: "a", dueDate: `${tomorrow}T10:00:00.000Z` }),
-    ];
+    const tasks = [makeTask({ id: "a", dueDate: `${tomorrow}T10:00:00.000Z` })];
     const pool = buildJarPool(tasks);
     expect(pool).toEqual([]);
   });
 
   it("excludes completed tasks", () => {
-    const tasks = [
-      makeTask({ id: "a", status: "completed", dueDate: `${today}T10:00:00.000Z` }),
-    ];
+    const tasks = [makeTask({ id: "a", status: "completed", dueDate: `${today}T10:00:00.000Z` })];
     const pool = buildJarPool(tasks);
     expect(pool).toEqual([]);
   });
@@ -87,21 +79,14 @@ describe("TaskJar random selection", () => {
   });
 
   it("selects from the pool for 2+ tasks", () => {
-    const pool = [
-      makeTask({ id: "a" }),
-      makeTask({ id: "b" }),
-      makeTask({ id: "c" }),
-    ];
+    const pool = [makeTask({ id: "a" }), makeTask({ id: "b" }), makeTask({ id: "c" })];
     const result = pickRandom(pool);
     expect(result).not.toBeNull();
     expect(pool.some((t) => t.id === result!.id)).toBe(true);
   });
 
   it("can exclude the current task when shaking again", () => {
-    const pool = [
-      makeTask({ id: "a" }),
-      makeTask({ id: "b" }),
-    ];
+    const pool = [makeTask({ id: "a" }), makeTask({ id: "b" })];
     // With exclude, should always pick the other one
     const result = pickRandom(pool, "a");
     expect(result?.id).toBe("b");

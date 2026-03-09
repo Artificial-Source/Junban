@@ -20,7 +20,12 @@ export async function dismissOnboarding(page: Page) {
 
 /** Navigate to a view via the sidebar. */
 export async function navigateTo(page: Page, viewLabel: string) {
-  await page.getByRole("button", { name: viewLabel, exact: true }).click();
+  // Nav buttons may include a count badge (e.g. "Today 2"), so match the button
+  // whose accessible name starts with the label.
+  await page
+    .getByRole("navigation", { name: "Views" })
+    .getByRole("button", { name: new RegExp(`^${viewLabel}`) })
+    .click();
 }
 
 /** Create a task using the task input field. */
@@ -73,6 +78,9 @@ export async function resetFeatureFlags(page: Page) {
     "feature_cancelled",
     "feature_stats",
     "feature_matrix",
+    "feature_calendar",
+    "feature_filters_labels",
+    "feature_completed",
   ];
   await Promise.all(
     flags.map((flag) => page.request.put(`/api/settings/${flag}`, { data: { value: "true" } })),
@@ -152,11 +160,7 @@ export function localDateKey(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export async function addRelationViaApi(
-  page: Page,
-  taskId: string,
-  relatedTaskId: string,
-) {
+export async function addRelationViaApi(page: Page, taskId: string, relatedTaskId: string) {
   await page.request.post(`/api/tasks/${taskId}/relations`, {
     data: { relatedTaskId, type: "blocks" },
   });

@@ -208,7 +208,11 @@ export const TaskItem = React.memo(function TaskItem({
 
       {/* Priority-colored circle (unified checkbox + completion) */}
       <motion.button
-        variants={!reducedMotion && task.priority === 1 && task.status === "pending" ? subtlePulse : undefined}
+        variants={
+          !reducedMotion && task.priority === 1 && task.status === "pending"
+            ? subtlePulse
+            : undefined
+        }
         animate="animate"
         whileHover={reducedMotion ? undefined : { scale: 1.15 }}
         whileTap={reducedMotion ? undefined : { scale: 0.9 }}
@@ -293,10 +297,7 @@ export const TaskItem = React.memo(function TaskItem({
 
           {/* Dread level indicator */}
           {task.dreadLevel != null && task.dreadLevel > 0 && task.status !== "completed" && (
-            <span
-              className="flex-shrink-0"
-              title={`Dread level: ${task.dreadLevel}/5`}
-            >
+            <span className="flex-shrink-0" title={`Dread level: ${task.dreadLevel}/5`}>
               <FrogIcon size={14} color={getDreadLevelColor(task.dreadLevel).fill} />
             </span>
           )}

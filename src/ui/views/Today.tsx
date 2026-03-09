@@ -53,9 +53,7 @@ function WorkloadCapacityBar({ planned, capacity }: { planned: number; capacity:
           {formatDuration(planned)} / {formatDuration(capacity)} planned
         </span>
         {over && (
-          <span className="text-error font-medium">
-            +{formatDuration(planned - capacity)} over
-          </span>
+          <span className="text-error font-medium">+{formatDuration(planned - capacity)} over</span>
         )}
       </div>
       <div className="h-1.5 rounded-full bg-surface-tertiary overflow-hidden">
@@ -127,11 +125,7 @@ export function Today({
   // Workload capacity
   const capacityMinutes = parseInt(settings.daily_capacity_minutes, 10) || 480;
   const plannedMinutes = useMemo(
-    () =>
-      [...overdueTasks, ...todayTasks].reduce(
-        (sum, t) => sum + (t.estimatedMinutes ?? 0),
-        0,
-      ),
+    () => [...overdueTasks, ...todayTasks].reduce((sum, t) => sum + (t.estimatedMinutes ?? 0), 0),
     [overdueTasks, todayTasks],
   );
 
@@ -153,19 +147,13 @@ export function Today({
       return d >= weekStartStr && d <= weekEndStr;
     }
 
-    const completedInWeek = tasks.filter(
-      (t) => t.status === "completed" && inWeek(t.completedAt),
-    );
+    const completedInWeek = tasks.filter((t) => t.status === "completed" && inWeek(t.completedAt));
     const createdInWeek = tasks.filter((t) => inWeek(t.createdAt));
-    const cancelledInWeek = tasks.filter(
-      (t) => t.status === "cancelled" && inWeek(t.updatedAt),
-    );
+    const cancelledInWeek = tasks.filter((t) => t.status === "cancelled" && inWeek(t.updatedAt));
 
     const totalActionable = completedInWeek.length + cancelledInWeek.length;
     const completionRate =
-      totalActionable > 0
-        ? Math.round((completedInWeek.length / totalActionable) * 100)
-        : 0;
+      totalActionable > 0 ? Math.round((completedInWeek.length / totalActionable) * 100) : 0;
 
     const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const dailyStats = [];
@@ -179,9 +167,8 @@ export function Today({
         completed: completedInWeek.filter(
           (t) => t.completedAt && t.completedAt.split("T")[0] === dStr,
         ).length,
-        created: createdInWeek.filter(
-          (t) => t.createdAt && t.createdAt.split("T")[0] === dStr,
-        ).length,
+        created: createdInWeek.filter((t) => t.createdAt && t.createdAt.split("T")[0] === dStr)
+          .length,
       });
     }
 
@@ -207,9 +194,7 @@ export function Today({
 
     const todayStr = toDateKey(now);
     const overdueList = tasks
-      .filter(
-        (t) => t.status === "pending" && t.dueDate && t.dueDate.split("T")[0] < todayStr,
-      )
+      .filter((t) => t.status === "pending" && t.dueDate && t.dueDate.split("T")[0] < todayStr)
       .sort((a, b) => (a.priority ?? 5) - (b.priority ?? 5));
 
     // Streak
@@ -219,9 +204,7 @@ export function Today({
       const d = new Date(todayStr + "T00:00:00");
       d.setDate(d.getDate() - i);
       const dStr = toDateKey(d);
-      const has = completedAll.some(
-        (t) => t.completedAt && t.completedAt.split("T")[0] === dStr,
-      );
+      const has = completedAll.some((t) => t.completedAt && t.completedAt.split("T")[0] === dStr);
       if (has) streakDays++;
       else if (i > 0) break;
     }
@@ -238,7 +221,8 @@ export function Today({
       }));
 
     // Neglected projects
-    const neglectedProjects: { id: string; name: string; overdueCount: number; reason: string }[] = [];
+    const neglectedProjects: { id: string; name: string; overdueCount: number; reason: string }[] =
+      [];
     for (const project of projects) {
       const pTasks = tasks.filter((t) => t.projectId === project.id);
       const pOverdue = pTasks.filter(
@@ -272,7 +256,10 @@ export function Today({
     }
     if (neglectedProjects.length > 0) {
       suggestions.push(
-        `Check in on neglected projects: ${neglectedProjects.slice(0, 3).map((p) => p.name).join(", ")}.`,
+        `Check in on neglected projects: ${neglectedProjects
+          .slice(0, 3)
+          .map((p) => p.name)
+          .join(", ")}.`,
       );
     }
     if (createdInWeek.length > completedInWeek.length && createdInWeek.length > 0) {
@@ -281,9 +268,7 @@ export function Today({
       );
     }
     if (streakDays > 0) {
-      suggestions.push(
-        `Keep your ${streakDays}-day streak going!`,
-      );
+      suggestions.push(`Keep your ${streakDays}-day streak going!`);
     }
 
     setWeeklyReviewData({

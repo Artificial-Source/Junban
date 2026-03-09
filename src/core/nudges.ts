@@ -49,9 +49,7 @@ export function evaluateNudges(ctx: NudgeContext): Nudge[] {
 
   // ── overdue_alert ──
   if (ctx.enabledTypes.has("overdue_alert")) {
-    const overdue = pending.filter(
-      (t) => t.dueDate && t.dueDate.slice(0, 10) < ctx.todayKey,
-    );
+    const overdue = pending.filter((t) => t.dueDate && t.dueDate.slice(0, 10) < ctx.todayKey);
     if (overdue.length > 0) {
       nudges.push({
         id: `overdue_alert:${ctx.todayKey}`,
@@ -116,9 +114,7 @@ export function evaluateNudges(ctx: NudgeContext): Nudge[] {
 
   // ── empty_today ──
   if (ctx.enabledTypes.has("empty_today")) {
-    const todayTasks = pending.filter(
-      (t) => t.dueDate && t.dueDate.slice(0, 10) === ctx.todayKey,
-    );
+    const todayTasks = pending.filter((t) => t.dueDate && t.dueDate.slice(0, 10) === ctx.todayKey);
     if (todayTasks.length === 0) {
       nudges.push({
         id: `empty_today:${ctx.todayKey}`,
@@ -134,10 +130,7 @@ export function evaluateNudges(ctx: NudgeContext): Nudge[] {
     const todayAndOverdue = pending.filter(
       (t) => t.dueDate && t.dueDate.slice(0, 10) <= ctx.todayKey,
     );
-    const totalMinutes = todayAndOverdue.reduce(
-      (sum, t) => sum + (t.estimatedMinutes ?? 0),
-      0,
-    );
+    const totalMinutes = todayAndOverdue.reduce((sum, t) => sum + (t.estimatedMinutes ?? 0), 0);
     if (totalMinutes > ctx.capacityMinutes) {
       const totalHours = Math.round(totalMinutes / 60);
       const overHours = Math.round((totalMinutes - ctx.capacityMinutes) / 60);

@@ -198,7 +198,11 @@ export function loadTasks(idx: MarkdownIndexes): void {
   }
 }
 
-export function loadTasksFromDir(idx: MarkdownIndexes, dirPath: string, projectId: string | null): void {
+export function loadTasksFromDir(
+  idx: MarkdownIndexes,
+  dirPath: string,
+  projectId: string | null,
+): void {
   if (!fs.existsSync(dirPath)) return;
 
   const files = fs.readdirSync(dirPath).filter((f) => f.endsWith(".md"));

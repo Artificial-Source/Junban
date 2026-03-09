@@ -1,8 +1,21 @@
 import { useState, useMemo, useCallback } from "react";
 import {
-  Pencil, Check, Undo2, Trash2, Flag, FolderInput,
-  Calendar as CalendarIcon, Bell, ArrowUpRight, Copy, Link,
-  Tag as TagIcon, ListPlus, Lightbulb, XCircle, CircleDot,
+  Pencil,
+  Check,
+  Undo2,
+  Trash2,
+  Flag,
+  FolderInput,
+  Calendar as CalendarIcon,
+  Bell,
+  ArrowUpRight,
+  Copy,
+  Link,
+  Tag as TagIcon,
+  ListPlus,
+  Lightbulb,
+  XCircle,
+  CircleDot,
 } from "lucide-react";
 import type { ContextMenuItem } from "../components/ContextMenu.js";
 import type { Project as ProjectType } from "../../core/types.js";
@@ -46,12 +59,9 @@ export function useTaskContextMenu({
     position: { x: number; y: number };
   } | null>(null);
 
-  const handleContextMenu = useCallback(
-    (taskId: string, position: { x: number; y: number }) => {
-      setContextMenu({ taskId, position });
-    },
-    [],
-  );
+  const handleContextMenu = useCallback((taskId: string, position: { x: number; y: number }) => {
+    setContextMenu({ taskId, position });
+  }, []);
 
   const contextMenuItems = useMemo((): ContextMenuItem[] => {
     if (!contextMenu) return [];
@@ -72,7 +82,8 @@ export function useTaskContextMenu({
     const nextSaturdayISO = nextSaturday.toISOString();
 
     const dayAbbr = (d: Date) => d.toLocaleDateString(undefined, { weekday: "short" });
-    const shortDate = (d: Date) => d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    const shortDate = (d: Date) =>
+      d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 
     // ── Due date submenu ──
     const dueDateSubmenu: ContextMenuItem[] = [
@@ -120,10 +131,30 @@ export function useTaskContextMenu({
 
     // ── Priority submenu ──
     const prioritySubmenu: ContextMenuItem[] = [
-      { id: "priority-1", label: "Priority 1", icon: <Flag size={14} className="text-priority-1" />, onClick: () => handleUpdateTask(task.id, { priority: 1 }) },
-      { id: "priority-2", label: "Priority 2", icon: <Flag size={14} className="text-priority-2" />, onClick: () => handleUpdateTask(task.id, { priority: 2 }) },
-      { id: "priority-3", label: "Priority 3", icon: <Flag size={14} className="text-priority-3" />, onClick: () => handleUpdateTask(task.id, { priority: 3 }) },
-      { id: "priority-4", label: "Priority 4", icon: <Flag size={14} className="text-priority-4" />, onClick: () => handleUpdateTask(task.id, { priority: 4 }) },
+      {
+        id: "priority-1",
+        label: "Priority 1",
+        icon: <Flag size={14} className="text-priority-1" />,
+        onClick: () => handleUpdateTask(task.id, { priority: 1 }),
+      },
+      {
+        id: "priority-2",
+        label: "Priority 2",
+        icon: <Flag size={14} className="text-priority-2" />,
+        onClick: () => handleUpdateTask(task.id, { priority: 2 }),
+      },
+      {
+        id: "priority-3",
+        label: "Priority 3",
+        icon: <Flag size={14} className="text-priority-3" />,
+        onClick: () => handleUpdateTask(task.id, { priority: 3 }),
+      },
+      {
+        id: "priority-4",
+        label: "Priority 4",
+        icon: <Flag size={14} className="text-priority-4" />,
+        onClick: () => handleUpdateTask(task.id, { priority: 4 }),
+      },
     ];
     if (task.priority) {
       prioritySubmenu.push({
@@ -190,23 +221,24 @@ export function useTaskContextMenu({
 
     // ── Labels/Tags submenu ──
     const taskTagNames = task.tags.map((t: { name: string }) => t.name);
-    const labelsSubmenu: ContextMenuItem[] = availableTags.length > 0
-      ? availableTags.map((tag) => {
-          const hasTag = taskTagNames.includes(tag);
-          return {
-            id: `tag-${tag}`,
-            label: tag,
-            icon: hasTag ? <Check size={14} /> : undefined,
-            keepOpen: true,
-            onClick: () => {
-              const newTags = hasTag
-                ? taskTagNames.filter((t: string) => t !== tag)
-                : [...taskTagNames, tag];
-              handleUpdateTask(task.id, { tags: newTags });
-            },
-          };
-        })
-      : [{ id: "no-tags", label: "No labels yet", disabled: true }];
+    const labelsSubmenu: ContextMenuItem[] =
+      availableTags.length > 0
+        ? availableTags.map((tag) => {
+            const hasTag = taskTagNames.includes(tag);
+            return {
+              id: `tag-${tag}`,
+              label: tag,
+              icon: hasTag ? <Check size={14} /> : undefined,
+              keepOpen: true,
+              onClick: () => {
+                const newTags = hasTag
+                  ? taskTagNames.filter((t: string) => t !== tag)
+                  : [...taskTagNames, tag];
+                handleUpdateTask(task.id, { tags: newTags });
+              },
+            };
+          })
+        : [{ id: "no-tags", label: "No labels yet", disabled: true }];
 
     // ── Build items ──
     const items: ContextMenuItem[] = [
@@ -304,7 +336,10 @@ export function useTaskContextMenu({
       label: task.status === "cancelled" ? "Reopen" : "Mark as cancelled",
       icon: task.status === "cancelled" ? <CircleDot size={14} /> : <XCircle size={14} />,
       separator: true,
-      onClick: () => handleUpdateTask(task.id, { status: task.status === "cancelled" ? "pending" : "cancelled" }),
+      onClick: () =>
+        handleUpdateTask(task.id, {
+          status: task.status === "cancelled" ? "pending" : "cancelled",
+        }),
     });
 
     items.push({
@@ -330,7 +365,19 @@ export function useTaskContextMenu({
     });
 
     return items;
-  }, [contextMenu, tasks, projects, availableTags, handleSelectTask, handleToggleTask, handleUpdateTask, handleDeleteTask, handleDuplicateTask, handleCopyTaskLink, handleNavigate]);
+  }, [
+    contextMenu,
+    tasks,
+    projects,
+    availableTags,
+    handleSelectTask,
+    handleToggleTask,
+    handleUpdateTask,
+    handleDeleteTask,
+    handleDuplicateTask,
+    handleCopyTaskLink,
+    handleNavigate,
+  ]);
 
   return {
     contextMenu,

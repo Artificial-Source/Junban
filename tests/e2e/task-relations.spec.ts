@@ -1,10 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  setupPage,
-  createTaskViaApi,
-  addRelationViaApi,
-  openTaskDetail,
-} from "./helpers.js";
+import { setupPage, createTaskViaApi, addRelationViaApi, openTaskDetail } from "./helpers.js";
 
 test.describe("Task Relations (V2-15)", () => {
   test.beforeEach(async ({ page }) => {

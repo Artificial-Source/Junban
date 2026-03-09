@@ -68,6 +68,11 @@ const FEATURES: {
     label: "Keyboard chords",
     description: "Multi-key shortcuts like g then i to jump to Inbox",
   },
+  {
+    key: "feature_matrix",
+    label: "Eisenhower Matrix",
+    description: "Priority matrix view for urgent/important categorization",
+  },
 ];
 
 export function FeaturesTab() {

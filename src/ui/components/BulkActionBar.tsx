@@ -114,6 +114,7 @@ export function BulkActionBar({
         )}
         <button
           onClick={onClear}
+          aria-label="Clear selection"
           className="px-2 py-1 text-xs rounded-md text-on-surface-muted hover:text-on-surface-secondary hover:bg-surface-tertiary transition-colors"
         >
           <X size={14} />

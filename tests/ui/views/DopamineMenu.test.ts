@@ -81,9 +81,7 @@ describe("DopamineMenu filter logic", () => {
   });
 
   it("returns empty when no tasks match", () => {
-    const tasks = [
-      makeTask({ id: "a", estimatedMinutes: 60, priority: 1 }),
-    ];
+    const tasks = [makeTask({ id: "a", estimatedMinutes: 60, priority: 1 })];
     const result = filterQuickWins(tasks);
     expect(result).toEqual([]);
   });

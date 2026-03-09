@@ -1,10 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  setupPage,
-  createTaskViaApi,
-  createProjectViaApi,
-  completeTaskViaApi,
-} from "./helpers.js";
+import { setupPage, createTaskViaApi, createProjectViaApi, completeTaskViaApi } from "./helpers.js";
 
 test.describe("Project progress tracking", () => {
   test.beforeEach(async ({ page }) => {
@@ -25,7 +20,7 @@ test.describe("Project progress tracking", () => {
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
     // Navigate to the project
-    await page.getByRole("button", { name: "Progress Project" }).click();
+    await page.getByRole("button", { name: /^Progress Project/ }).click();
 
     // The CompletionRing should show 1 of 3 completed
     await expect(page.getByLabel("1 of 3 tasks completed")).toBeVisible({ timeout: 5000 });

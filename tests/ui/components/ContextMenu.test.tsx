@@ -176,9 +176,7 @@ describe("ContextMenu", () => {
       {
         id: "labels",
         label: "Labels",
-        submenu: [
-          { id: "tag-work", label: "Work", keepOpen: true, onClick },
-        ],
+        submenu: [{ id: "tag-work", label: "Work", keepOpen: true, onClick }],
       },
     ];
     render(<ContextMenu items={items} position={{ x: 0, y: 0 }} onClose={onClose} />);
@@ -195,9 +193,7 @@ describe("ContextMenu", () => {
       {
         id: "priority",
         label: "Priority",
-        submenu: [
-          { id: "p1", label: "P1", onClick },
-        ],
+        submenu: [{ id: "p1", label: "P1", onClick }],
       },
     ];
     render(<ContextMenu items={items} position={{ x: 0, y: 0 }} onClose={onClose} />);
@@ -214,9 +210,7 @@ describe("ContextMenu", () => {
       {
         id: "labels",
         label: "Labels",
-        submenu: [
-          { id: "no-tags", label: "No labels yet", disabled: true, onClick },
-        ],
+        submenu: [{ id: "no-tags", label: "No labels yet", disabled: true, onClick }],
       },
     ];
     render(<ContextMenu items={items} position={{ x: 0, y: 0 }} onClose={onClose} />);

@@ -295,7 +295,10 @@ describe("Sidebar", () => {
   // ── Nav ordering tests ──
 
   it("renders nav items in stored order from sidebar_section_order", () => {
-    mockSettings = { sidebar_section_order: "stats,inbox,today,upcoming,calendar,filters-labels,completed,cancelled,matrix,someday" };
+    mockSettings = {
+      sidebar_section_order:
+        "stats,inbox,today,upcoming,calendar,filters-labels,completed,cancelled,matrix,someday",
+    };
     render(<Sidebar {...defaultProps} />);
     // Get all nav buttons inside the sortable context area
     const sortable = screen.getByTestId("sortable-context");
@@ -355,9 +358,7 @@ describe("Sidebar", () => {
     const statsBtn = screen.getByText("Stats").closest("button")!;
     fireEvent.contextMenu(statsBtn);
     fireEvent.click(screen.getByText("Move to top"));
-    const call = mockUpdateSetting.mock.calls.find(
-      (c: any[]) => c[0] === "sidebar_section_order",
-    );
+    const call = mockUpdateSetting.mock.calls.find((c: any[]) => c[0] === "sidebar_section_order");
     expect(call).toBeTruthy();
     const order = (call![1] as string).split(",");
     expect(order[0]).toBe("stats");
@@ -368,9 +369,7 @@ describe("Sidebar", () => {
     const inboxBtn = screen.getByText("Inbox").closest("button")!;
     fireEvent.contextMenu(inboxBtn);
     fireEvent.click(screen.getByText("Move to bottom"));
-    const call = mockUpdateSetting.mock.calls.find(
-      (c: any[]) => c[0] === "sidebar_section_order",
-    );
+    const call = mockUpdateSetting.mock.calls.find((c: any[]) => c[0] === "sidebar_section_order");
     expect(call).toBeTruthy();
     const order = (call![1] as string).split(",");
     expect(order[order.length - 1]).toBe("inbox");
@@ -563,13 +562,16 @@ describe("Sidebar", () => {
   it("nav items can be reordered below sections in flat list", () => {
     mockSettings = {
       sidebar_favorite_views: "calendar",
-      sidebar_section_order: "favorite-views,inbox,today,upcoming,filters-labels,completed,cancelled,matrix,stats,someday",
+      sidebar_section_order:
+        "favorite-views,inbox,today,upcoming,filters-labels,completed,cancelled,matrix,stats,someday",
     };
     render(<Sidebar {...defaultProps} />);
     const sortable = screen.getByTestId("sortable-context");
     const allElements = Array.from(sortable.querySelectorAll("[data-section-id], button"));
     // Favorite Views section should come before Inbox button
-    const favViewIdx = allElements.findIndex((el) => el.getAttribute("data-section-id") === "favorite-views");
+    const favViewIdx = allElements.findIndex(
+      (el) => el.getAttribute("data-section-id") === "favorite-views",
+    );
     const inboxIdx = allElements.findIndex((el) => el.textContent?.includes("Inbox"));
     expect(favViewIdx).toBeLessThan(inboxIdx);
   });

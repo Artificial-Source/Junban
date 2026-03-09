@@ -30,7 +30,12 @@ describe("memory-tools", () => {
 
   describe("save_memory", () => {
     it("saves a memory with default category", async () => {
-      const result = await exec(registry, "save_memory", { content: "User likes morning work" }, ctx);
+      const result = await exec(
+        registry,
+        "save_memory",
+        { content: "User likes morning work" },
+        ctx,
+      );
       expect(result.success).toBe(true);
       expect(result.content).toBe("User likes morning work");
       expect(result.category).toBe("context");
@@ -107,8 +112,18 @@ describe("memory-tools", () => {
   describe("full workflow", () => {
     it("save, recall, forget cycle works", async () => {
       // Save two memories
-      const m1 = await exec(registry, "save_memory", { content: "Daily standup at 10am", category: "habit" }, ctx);
-      const m2 = await exec(registry, "save_memory", { content: "Uses Vim keybindings", category: "preference" }, ctx);
+      const m1 = await exec(
+        registry,
+        "save_memory",
+        { content: "Daily standup at 10am", category: "habit" },
+        ctx,
+      );
+      const m2 = await exec(
+        registry,
+        "save_memory",
+        { content: "Uses Vim keybindings", category: "preference" },
+        ctx,
+      );
 
       // Recall all
       let recalled = await exec(registry, "recall_memories", {}, ctx);

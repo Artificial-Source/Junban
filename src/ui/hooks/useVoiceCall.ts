@@ -119,7 +119,13 @@ export function useVoiceCall({
 
     if (callState === "processing" && wasStreaming && !isStreaming) {
       const lastMsg = messages[messages.length - 1];
-      log.debug("AI done streaming", { role: lastMsg?.role, hasContent: !!lastMsg?.content, contentLength: lastMsg?.content?.length, isError: lastMsg?.isError, ttsAvailable });
+      log.debug("AI done streaming", {
+        role: lastMsg?.role,
+        hasContent: !!lastMsg?.content,
+        contentLength: lastMsg?.content?.length,
+        isError: lastMsg?.isError,
+        ttsAvailable,
+      });
       if (lastMsg?.role === "assistant" && lastMsg.content && !lastMsg.isError && ttsAvailable) {
         setCallStateDebug("speaking", "AI response ready, speaking via TTS");
         speak(lastMsg.content).catch((err) => {

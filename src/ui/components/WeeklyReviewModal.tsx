@@ -187,7 +187,11 @@ export function WeeklyReviewModal({ open, onClose, data }: WeeklyReviewModalProp
             <div className="h-2 rounded-full bg-surface-tertiary overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${
-                  data.completionRate >= 70 ? "bg-success" : data.completionRate >= 40 ? "bg-warning" : "bg-error"
+                  data.completionRate >= 70
+                    ? "bg-success"
+                    : data.completionRate >= 40
+                      ? "bg-warning"
+                      : "bg-error"
                 }`}
                 style={{ width: `${data.completionRate}%` }}
               />
@@ -221,13 +225,17 @@ export function WeeklyReviewModal({ open, onClose, data }: WeeklyReviewModalProp
             </div>
             {data.busiestDay && data.busiestDay.completed > 0 && (
               <p className="text-xs text-on-surface-muted mt-2">
-                Busiest day: <span className="font-medium text-on-surface">{data.busiestDay.dayName}</span>{" "}
-                ({data.busiestDay.completed} tasks)
+                Busiest day:{" "}
+                <span className="font-medium text-on-surface">{data.busiestDay.dayName}</span> (
+                {data.busiestDay.completed} tasks)
               </p>
             )}
             {data.productiveTime && (
               <p className="text-xs text-on-surface-muted mt-1">
-                Most productive: <span className="font-medium text-on-surface capitalize">{data.productiveTime}</span>
+                Most productive:{" "}
+                <span className="font-medium text-on-surface capitalize">
+                  {data.productiveTime}
+                </span>
               </p>
             )}
           </div>

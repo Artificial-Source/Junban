@@ -84,83 +84,83 @@ export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProp
 
   return (
     <AnimatedPresence>
-    {isOpen && (
-    <motion.div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-8 md:pt-24 bg-black/50"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Command palette"
-      onClick={onClose}
-      variants={reducedMotion ? undefined : backdrop}
-      initial={reducedMotion ? undefined : "initial"}
-      animate="animate"
-      exit="exit"
-    >
-      <motion.div
-        className="w-full max-w-lg mx-3 md:mx-0 bg-surface rounded-lg shadow-2xl overflow-hidden border border-border"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-        variants={reducedMotion ? undefined : scaleIn}
-        initial={reducedMotion ? undefined : "initial"}
-        animate="animate"
-        exit="exit"
-      >
-        <div className="flex items-center gap-3 px-4 border-b border-border">
-          <Search size={16} className="text-on-surface-muted flex-shrink-0" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Type a command..."
-            className="w-full py-3 bg-transparent text-on-surface placeholder-on-surface-muted focus:outline-none"
-            autoFocus
-            role="combobox"
-            aria-expanded={filtered.length > 0}
-            aria-controls="command-palette-list"
-            aria-activedescendant={
-              filtered[selectedIndex] ? `cmd-${filtered[selectedIndex].id}` : undefined
-            }
-          />
-        </div>
-        <ul
-          ref={listRef}
-          id="command-palette-list"
-          role="listbox"
-          aria-label="Commands"
-          className="max-h-64 overflow-auto py-1"
+      {isOpen && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-start justify-center pt-8 md:pt-24 bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Command palette"
+          onClick={onClose}
+          variants={reducedMotion ? undefined : backdrop}
+          initial={reducedMotion ? undefined : "initial"}
+          animate="animate"
+          exit="exit"
         >
-          {filtered.map((cmd, index) => (
-            <li
-              key={cmd.id}
-              id={`cmd-${cmd.id}`}
-              role="option"
-              aria-selected={index === selectedIndex}
+          <motion.div
+            className="w-full max-w-lg mx-3 md:mx-0 bg-surface rounded-lg shadow-2xl overflow-hidden border border-border"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={handleKeyDown}
+            variants={reducedMotion ? undefined : scaleIn}
+            initial={reducedMotion ? undefined : "initial"}
+            animate="animate"
+            exit="exit"
+          >
+            <div className="flex items-center gap-3 px-4 border-b border-border">
+              <Search size={16} className="text-on-surface-muted flex-shrink-0" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Type a command..."
+                className="w-full py-3 bg-transparent text-on-surface placeholder-on-surface-muted focus:outline-none"
+                autoFocus
+                role="combobox"
+                aria-expanded={filtered.length > 0}
+                aria-controls="command-palette-list"
+                aria-activedescendant={
+                  filtered[selectedIndex] ? `cmd-${filtered[selectedIndex].id}` : undefined
+                }
+              />
+            </div>
+            <ul
+              ref={listRef}
+              id="command-palette-list"
+              role="listbox"
+              aria-label="Commands"
+              className="max-h-64 overflow-auto py-1"
             >
-              <button
-                onClick={() => handleSelect(cmd)}
-                tabIndex={-1}
-                className={`w-full text-left px-4 py-2 flex justify-between text-sm transition-colors ${
-                  index === selectedIndex
-                    ? "bg-accent/10 text-accent"
-                    : "text-on-surface hover:bg-surface-secondary"
-                }`}
-              >
-                <span>{cmd.name}</span>
-                {cmd.hotkey && (
-                  <kbd className="text-xs text-on-surface-muted bg-surface-tertiary px-1.5 py-0.5 rounded">
-                    {cmd.hotkey}
-                  </kbd>
-                )}
-              </button>
-            </li>
-          ))}
-          {filtered.length === 0 && (
-            <li className="px-4 py-2 text-sm text-on-surface-muted">No matching commands</li>
-          )}
-        </ul>
-      </motion.div>
-    </motion.div>
-    )}
+              {filtered.map((cmd, index) => (
+                <li
+                  key={cmd.id}
+                  id={`cmd-${cmd.id}`}
+                  role="option"
+                  aria-selected={index === selectedIndex}
+                >
+                  <button
+                    onClick={() => handleSelect(cmd)}
+                    tabIndex={-1}
+                    className={`w-full text-left px-4 py-2 flex justify-between text-sm transition-colors ${
+                      index === selectedIndex
+                        ? "bg-accent/10 text-accent"
+                        : "text-on-surface hover:bg-surface-secondary"
+                    }`}
+                  >
+                    <span>{cmd.name}</span>
+                    {cmd.hotkey && (
+                      <kbd className="text-xs text-on-surface-muted bg-surface-tertiary px-1.5 py-0.5 rounded">
+                        {cmd.hotkey}
+                      </kbd>
+                    )}
+                  </button>
+                </li>
+              ))}
+              {filtered.length === 0 && (
+                <li className="px-4 py-2 text-sm text-on-surface-muted">No matching commands</li>
+              )}
+            </ul>
+          </motion.div>
+        </motion.div>
+      )}
     </AnimatedPresence>
   );
 }

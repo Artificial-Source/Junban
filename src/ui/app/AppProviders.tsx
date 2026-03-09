@@ -15,9 +15,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
           <PluginProvider>
             <AIProvider>
               <VoiceProvider>
-                <UndoProvider>
-                  {children}
-                </UndoProvider>
+                <UndoProvider>{children}</UndoProvider>
               </VoiceProvider>
             </AIProvider>
           </PluginProvider>

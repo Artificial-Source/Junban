@@ -31,9 +31,7 @@ describe("MCP Prompts", () => {
     const content = result.messages[0].content;
     expect(content).toBeDefined();
     const text =
-      typeof content === "string"
-        ? content
-        : (content as { type: string; text: string }).text;
+      typeof content === "string" ? content : (content as { type: string; text: string }).text;
     expect(text).toContain("high");
     expect(text).toContain("Plan my day");
   });
@@ -45,9 +43,7 @@ describe("MCP Prompts", () => {
     });
     const content = result.messages[0].content;
     const text =
-      typeof content === "string"
-        ? content
-        : (content as { type: string; text: string }).text;
+      typeof content === "string" ? content : (content as { type: string; text: string }).text;
     expect(text).toContain("medium");
   });
 
@@ -61,9 +57,7 @@ describe("MCP Prompts", () => {
 
     const content = result.messages[0].content;
     const text =
-      typeof content === "string"
-        ? content
-        : (content as { type: string; text: string }).text;
+      typeof content === "string" ? content : (content as { type: string; text: string }).text;
     expect(text).toContain("2026-02-25");
     expect(text).toContain("Review my day");
   });
@@ -75,9 +69,7 @@ describe("MCP Prompts", () => {
     });
     const content = result.messages[0].content;
     const text =
-      typeof content === "string"
-        ? content
-        : (content as { type: string; text: string }).text;
+      typeof content === "string" ? content : (content as { type: string; text: string }).text;
     const today = new Date().toISOString().split("T")[0];
     expect(text).toContain(today);
   });
@@ -92,9 +84,7 @@ describe("MCP Prompts", () => {
 
     const content = result.messages[0].content;
     const text =
-      typeof content === "string"
-        ? content
-        : (content as { type: string; text: string }).text;
+      typeof content === "string" ? content : (content as { type: string; text: string }).text;
     expect(text).toContain("Buy milk tomorrow p2 #groceries");
     expect(text).toContain("create_task");
   });

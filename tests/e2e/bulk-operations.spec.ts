@@ -1,9 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  setupPage,
-  createTaskViaApi,
-  createProjectViaApi,
-} from "./helpers.js";
+import { setupPage, createTaskViaApi, createProjectViaApi } from "./helpers.js";
 
 test.describe("Bulk operations", () => {
   test.beforeEach(async ({ page }) => {
@@ -37,8 +33,8 @@ test.describe("Bulk operations", () => {
 
     await expect(page.getByText("2 selected")).toBeVisible();
 
-    // Click Complete button in bulk action bar
-    await page.getByRole("button", { name: "Complete" }).click();
+    // Click Complete button in bulk action bar (scope to avoid sidebar "Completed" match)
+    await page.getByRole("button", { name: "Complete", exact: true }).first().click();
 
     // Tasks should disappear from pending list
     await expect(page.getByText("Complete me A")).not.toBeVisible({ timeout: 5000 });
@@ -56,7 +52,7 @@ test.describe("Bulk operations", () => {
 
     await expect(page.getByText("2 selected")).toBeVisible();
 
-    await page.getByRole("button", { name: "Delete" }).click();
+    await page.getByRole("button", { name: "Delete", exact: true }).first().click();
 
     await expect(page.getByText("Delete me A")).not.toBeVisible({ timeout: 5000 });
     await expect(page.getByText("Delete me B")).not.toBeVisible();
@@ -75,7 +71,7 @@ test.describe("Bulk operations", () => {
     await expect(page.getByText("2 selected")).toBeVisible();
 
     // Click Move, then select project
-    await page.getByRole("button", { name: "Move" }).click();
+    await page.getByRole("button", { name: "Move", exact: true }).first().click();
     await page.getByText("Bulk Target").last().click();
 
     // Tasks should disappear from Inbox (moved to project)

@@ -33,12 +33,7 @@ describe("extract_tasks_from_text", () => {
 - Send follow-up email to Sarah
 - Schedule team standup for next week`;
 
-    const result = await exec(
-      registry,
-      "extract_tasks_from_text",
-      { text, dryRun: true },
-      ctx,
-    );
+    const result = await exec(registry, "extract_tasks_from_text", { text, dryRun: true }, ctx);
 
     expect(result.created).toBe(false);
     expect(result.count).toBeGreaterThan(0);
@@ -54,12 +49,7 @@ describe("extract_tasks_from_text", () => {
 - Update documentation
 - Fix the login bug`;
 
-    const result = await exec(
-      registry,
-      "extract_tasks_from_text",
-      { text, dryRun: false },
-      ctx,
-    );
+    const result = await exec(registry, "extract_tasks_from_text", { text, dryRun: false }, ctx);
 
     expect(result.created).toBe(true);
     expect(result.count).toBeGreaterThan(0);
@@ -95,12 +85,7 @@ describe("extract_tasks_from_text", () => {
   });
 
   it("handles empty text", async () => {
-    const result = await exec(
-      registry,
-      "extract_tasks_from_text",
-      { text: "", dryRun: true },
-      ctx,
-    );
+    const result = await exec(registry, "extract_tasks_from_text", { text: "", dryRun: true }, ctx);
 
     expect(result.error).toBe("No text provided");
     expect(result.tasks).toEqual([]);
@@ -113,12 +98,7 @@ describe("extract_tasks_from_text", () => {
 It was a great meeting.
 Everyone seemed happy.`;
 
-    const result = await exec(
-      registry,
-      "extract_tasks_from_text",
-      { text, dryRun: true },
-      ctx,
-    );
+    const result = await exec(registry, "extract_tasks_from_text", { text, dryRun: true }, ctx);
 
     expect(result.tasks).toEqual([]);
     expect(result.count).toBe(0);
@@ -131,12 +111,7 @@ Everyone seemed happy.`;
 2. Send the proposal
 3. Update the timeline`;
 
-    const result = await exec(
-      registry,
-      "extract_tasks_from_text",
-      { text, dryRun: true },
-      ctx,
-    );
+    const result = await exec(registry, "extract_tasks_from_text", { text, dryRun: true }, ctx);
 
     expect(result.count).toBe(3);
     const titles = result.tasks.map((t: { title: string }) => t.title);
@@ -150,12 +125,7 @@ Everyone seemed happy.`;
 Send the report to the client
 Deploy the staging environment`;
 
-    const result = await exec(
-      registry,
-      "extract_tasks_from_text",
-      { text, dryRun: true },
-      ctx,
-    );
+    const result = await exec(registry, "extract_tasks_from_text", { text, dryRun: true }, ctx);
 
     expect(result.count).toBe(3);
   });
@@ -164,12 +134,7 @@ Deploy the staging environment`;
     const text = `- Fix the critical production bug
 - Update documentation whenever possible`;
 
-    const result = await exec(
-      registry,
-      "extract_tasks_from_text",
-      { text, dryRun: true },
-      ctx,
-    );
+    const result = await exec(registry, "extract_tasks_from_text", { text, dryRun: true }, ctx);
 
     expect(result.count).toBe(2);
     const criticalTask = result.tasks.find((t: { title: string }) =>
@@ -185,12 +150,7 @@ Deploy the staging environment`;
   it("defaults dryRun to true when not specified", async () => {
     const text = `- Review the design`;
 
-    const result = await exec(
-      registry,
-      "extract_tasks_from_text",
-      { text },
-      ctx,
-    );
+    const result = await exec(registry, "extract_tasks_from_text", { text }, ctx);
 
     expect(result.created).toBe(false);
 
@@ -210,12 +170,7 @@ TODO: Review the architecture document
 
 Next meeting is on Friday.`;
 
-    const result = await exec(
-      registry,
-      "extract_tasks_from_text",
-      { text, dryRun: true },
-      ctx,
-    );
+    const result = await exec(registry, "extract_tasks_from_text", { text, dryRun: true }, ctx);
 
     expect(result.count).toBeGreaterThanOrEqual(2);
   });
@@ -235,12 +190,7 @@ Next meeting is on Friday.`;
   });
 
   it("handles whitespace-only text", async () => {
-    const result = await exec(
-      registry,
-      "extract_tasks_from_text",
-      { text: "   \n  \n  " },
-      ctx,
-    );
+    const result = await exec(registry, "extract_tasks_from_text", { text: "   \n  \n  " }, ctx);
 
     expect(result.error).toBe("No text provided");
   });

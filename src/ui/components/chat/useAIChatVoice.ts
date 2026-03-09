@@ -142,7 +142,11 @@ export function useAIChatVoice({
     if (!voice.settings.ttsEnabled || voice.settings.voiceMode === "off") return;
 
     const lastMsg = messages[messages.length - 1];
-    if (lastMsg?.role === "assistant" && lastMsg.content && !(lastMsg as unknown as Record<string, unknown>).isError) {
+    if (
+      lastMsg?.role === "assistant" &&
+      lastMsg.content &&
+      !(lastMsg as unknown as Record<string, unknown>).isError
+    ) {
       voice.speak(lastMsg.content).catch(() => {});
     }
   }, [isStreaming, messages, voice, voiceCall.isCallActive]);

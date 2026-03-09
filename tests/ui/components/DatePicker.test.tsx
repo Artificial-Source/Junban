@@ -93,7 +93,14 @@ describe("DatePicker", () => {
   });
 
   it("renders as portal when fixedPosition is provided", () => {
-    render(<DatePicker value={null} onChange={onChange} onClose={onClose} fixedPosition={{ x: 200, y: 300 }} />);
+    render(
+      <DatePicker
+        value={null}
+        onChange={onChange}
+        onClose={onClose}
+        fixedPosition={{ x: 200, y: 300 }}
+      />,
+    );
     // The picker should render as a portal in document.body with fixed positioning
     const picker = document.querySelector(".fixed.z-50");
     expect(picker).toBeTruthy();
@@ -105,7 +112,14 @@ describe("DatePicker", () => {
     Object.defineProperty(window, "innerWidth", { value: 400, writable: true });
     Object.defineProperty(window, "innerHeight", { value: 300, writable: true });
 
-    render(<DatePicker value={null} onChange={onChange} onClose={onClose} fixedPosition={{ x: 500, y: 500 }} />);
+    render(
+      <DatePicker
+        value={null}
+        onChange={onChange}
+        onClose={onClose}
+        fixedPosition={{ x: 500, y: 500 }}
+      />,
+    );
     const picker = document.querySelector(".fixed.z-50") as HTMLElement;
     expect(picker).toBeTruthy();
     // Position should be clamped — not at 500/500

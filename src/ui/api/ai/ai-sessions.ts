@@ -90,7 +90,12 @@ export async function switchChatSession(sessionId: string): Promise<AIChatMessag
       providerName: providerSetting.value as string,
     });
 
-    const restoredMessages: { role: "user" | "assistant" | "tool"; content: string; toolCallId?: string; toolCalls?: any }[] = [];
+    const restoredMessages: {
+      role: "user" | "assistant" | "tool";
+      content: string;
+      toolCallId?: string;
+      toolCalls?: any;
+    }[] = [];
     for (const row of rows) {
       if (row.role === "system") continue;
       restoredMessages.push({

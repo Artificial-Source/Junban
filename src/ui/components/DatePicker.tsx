@@ -39,7 +39,14 @@ function addDays(date: Date, days: number): Date {
   return result;
 }
 
-export function DatePicker({ value, onChange, showTime = false, onClose, triggerRef, fixedPosition }: DatePickerProps) {
+export function DatePicker({
+  value,
+  onChange,
+  showTime = false,
+  onClose,
+  triggerRef,
+  fixedPosition,
+}: DatePickerProps) {
   const now = new Date();
   const initialDate = value ? new Date(value) : now;
   const [viewYear, setViewYear] = useState(initialDate.getFullYear());

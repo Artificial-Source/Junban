@@ -27,9 +27,7 @@ test.describe("Saved views / filters", () => {
     // Create a filter via the API settings directly
     await page.request.put("/api/settings/saved_filters", {
       data: {
-        value: JSON.stringify([
-          { id: "test-filter-1", name: "My P1 Tasks", query: "p1" },
-        ]),
+        value: JSON.stringify([{ id: "test-filter-1", name: "My P1 Tasks", query: "p1" }]),
       },
     });
 
@@ -50,9 +48,7 @@ test.describe("Saved views / filters", () => {
     // Create a saved filter
     await page.request.put("/api/settings/saved_filters", {
       data: {
-        value: JSON.stringify([
-          { id: "sidebar-filter", name: "P1 Filter", query: "p1" },
-        ]),
+        value: JSON.stringify([{ id: "sidebar-filter", name: "P1 Filter", query: "p1" }]),
       },
     });
 

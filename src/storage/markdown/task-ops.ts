@@ -76,7 +76,11 @@ export function insertTaskWithId(idx: MarkdownIndexes, task: TaskRow): MutationR
   return insertTask(idx, task);
 }
 
-export function updateTask(idx: MarkdownIndexes, id: string, data: Partial<TaskRow>): MutationResult {
+export function updateTask(
+  idx: MarkdownIndexes,
+  id: string,
+  data: Partial<TaskRow>,
+): MutationResult {
   const entry = idx.taskIndex.get(id);
   if (!entry) return NOOP;
 
@@ -141,7 +145,11 @@ export function deleteManyTasks(idx: MarkdownIndexes, ids: string[]): MutationRe
   return { changes };
 }
 
-export function updateManyTasks(idx: MarkdownIndexes, ids: string[], data: Partial<TaskRow>): MutationResult {
+export function updateManyTasks(
+  idx: MarkdownIndexes,
+  ids: string[],
+  data: Partial<TaskRow>,
+): MutationResult {
   let changes = 0;
   for (const id of ids) {
     if (updateTask(idx, id, data).changes > 0) changes++;
@@ -152,11 +160,7 @@ export function updateManyTasks(idx: MarkdownIndexes, ids: string[], data: Parti
 export function listTasksDueForReminder(idx: MarkdownIndexes, beforeTime: string): TaskRow[] {
   const results: TaskRow[] = [];
   for (const entry of idx.taskIndex.values()) {
-    if (
-      entry.row.remindAt &&
-      entry.row.remindAt <= beforeTime &&
-      entry.row.status === "pending"
-    ) {
+    if (entry.row.remindAt && entry.row.remindAt <= beforeTime && entry.row.status === "pending") {
       results.push(entry.row);
     }
   }

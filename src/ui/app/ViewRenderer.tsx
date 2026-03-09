@@ -45,7 +45,10 @@ interface ViewRendererProps {
   handleSelectTask: (id: string) => void;
   handleUpdateTask: (id: string, data: any) => void;
   handleDeleteTask: (id: string) => void;
-  handleMultiSelect: (id: string, event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => void;
+  handleMultiSelect: (
+    id: string,
+    event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+  ) => void;
   handleReorder: (orderedIds: string[]) => void;
   handleAddSubtask: (parentId: string, title: string) => void;
   handleUpdateDueDate: (id: string, date: string | null) => void;
@@ -101,216 +104,214 @@ export function ViewRenderer({
 
   const viewContent = (() => {
     switch (currentView) {
-    case "inbox":
-      return (
-        <Inbox
-          tasks={tasks}
-          onCreateTask={handleCreateTask}
-          onToggleTask={handleToggleTask}
-          onSelectTask={handleSelectTask}
-          selectedTaskId={selectedTaskId}
-          selectedTaskIds={multiSelectedIds}
-          onMultiSelect={handleMultiSelect}
-          onReorder={handleReorder}
-          onAddSubtask={handleAddSubtask}
-          onUpdateDueDate={handleUpdateDueDate}
-          onContextMenu={handleContextMenu}
-          autoFocusTrigger={addTaskTrigger}
-        />
-      );
-    case "today":
-      return (
-        <Today
-          tasks={tasks}
-          projects={projects}
-          onCreateTask={handleCreateTask}
-          onToggleTask={handleToggleTask}
-          onSelectTask={handleSelectTask}
-          onUpdateTask={handleUpdateTask}
-          selectedTaskId={selectedTaskId}
-          selectedTaskIds={multiSelectedIds}
-          onMultiSelect={handleMultiSelect}
-          onReorder={handleReorder}
-          onAddSubtask={handleAddSubtask}
-          onUpdateDueDate={handleUpdateDueDate}
-          onContextMenu={handleContextMenu}
-          autoFocusTrigger={addTaskTrigger}
-        />
-      );
-    case "upcoming":
-      return (
-        <Upcoming
-          tasks={tasks}
-          projects={projects}
-          onCreateTask={handleCreateTask}
-          onToggleTask={handleToggleTask}
-          onSelectTask={handleSelectTask}
-          onUpdateTask={handleUpdateTask}
-          selectedTaskId={selectedTaskId}
-          selectedTaskIds={multiSelectedIds}
-          onMultiSelect={handleMultiSelect}
-          onReorder={handleReorder}
-          onAddSubtask={handleAddSubtask}
-          onUpdateDueDate={handleUpdateDueDate}
-          onContextMenu={handleContextMenu}
-          autoFocusTrigger={addTaskTrigger}
-        />
-      );
-    case "project": {
-      const project = projects.find((p) => p.id === selectedProjectId);
-      if (!project) {
-        return <p className="text-on-surface-muted">Project not found.</p>;
+      case "inbox":
+        return (
+          <Inbox
+            tasks={tasks}
+            onCreateTask={handleCreateTask}
+            onToggleTask={handleToggleTask}
+            onSelectTask={handleSelectTask}
+            selectedTaskId={selectedTaskId}
+            selectedTaskIds={multiSelectedIds}
+            onMultiSelect={handleMultiSelect}
+            onReorder={handleReorder}
+            onAddSubtask={handleAddSubtask}
+            onUpdateDueDate={handleUpdateDueDate}
+            onContextMenu={handleContextMenu}
+            autoFocusTrigger={addTaskTrigger}
+          />
+        );
+      case "today":
+        return (
+          <Today
+            tasks={tasks}
+            projects={projects}
+            onCreateTask={handleCreateTask}
+            onToggleTask={handleToggleTask}
+            onSelectTask={handleSelectTask}
+            onUpdateTask={handleUpdateTask}
+            selectedTaskId={selectedTaskId}
+            selectedTaskIds={multiSelectedIds}
+            onMultiSelect={handleMultiSelect}
+            onReorder={handleReorder}
+            onAddSubtask={handleAddSubtask}
+            onUpdateDueDate={handleUpdateDueDate}
+            onContextMenu={handleContextMenu}
+            autoFocusTrigger={addTaskTrigger}
+          />
+        );
+      case "upcoming":
+        return (
+          <Upcoming
+            tasks={tasks}
+            projects={projects}
+            onCreateTask={handleCreateTask}
+            onToggleTask={handleToggleTask}
+            onSelectTask={handleSelectTask}
+            onUpdateTask={handleUpdateTask}
+            selectedTaskId={selectedTaskId}
+            selectedTaskIds={multiSelectedIds}
+            onMultiSelect={handleMultiSelect}
+            onReorder={handleReorder}
+            onAddSubtask={handleAddSubtask}
+            onUpdateDueDate={handleUpdateDueDate}
+            onContextMenu={handleContextMenu}
+            autoFocusTrigger={addTaskTrigger}
+          />
+        );
+      case "project": {
+        const project = projects.find((p) => p.id === selectedProjectId);
+        if (!project) {
+          return <p className="text-on-surface-muted">Project not found.</p>;
+        }
+        return (
+          <Project
+            project={project}
+            tasks={tasks}
+            onCreateTask={handleCreateTask}
+            onToggleTask={handleToggleTask}
+            onSelectTask={handleSelectTask}
+            selectedTaskId={selectedTaskId}
+            selectedTaskIds={multiSelectedIds}
+            onMultiSelect={handleMultiSelect}
+            onReorder={handleReorder}
+            onAddSubtask={handleAddSubtask}
+            onUpdateDueDate={handleUpdateDueDate}
+            onContextMenu={handleContextMenu}
+            autoFocusTrigger={addTaskTrigger}
+            viewStyle={project.viewStyle}
+            sections={sections}
+            onCreateSection={handleCreateSection}
+            onUpdateSection={handleUpdateSection}
+            onDeleteSection={handleDeleteSection}
+            onMoveTask={handleMoveTask}
+          />
+        );
       }
-      return (
-        <Project
-          project={project}
-          tasks={tasks}
-          onCreateTask={handleCreateTask}
-          onToggleTask={handleToggleTask}
-          onSelectTask={handleSelectTask}
-          selectedTaskId={selectedTaskId}
-          selectedTaskIds={multiSelectedIds}
-          onMultiSelect={handleMultiSelect}
-          onReorder={handleReorder}
-          onAddSubtask={handleAddSubtask}
-          onUpdateDueDate={handleUpdateDueDate}
-          onContextMenu={handleContextMenu}
-          autoFocusTrigger={addTaskTrigger}
-          viewStyle={project.viewStyle}
-          sections={sections}
-          onCreateSection={handleCreateSection}
-          onUpdateSection={handleUpdateSection}
-          onDeleteSection={handleDeleteSection}
-          onMoveTask={handleMoveTask}
-        />
-      );
-    }
-    case "task": {
-      const routeTask = selectedRouteTaskId
-        ? tasks.find((t: any) => t.id === selectedRouteTaskId)
-        : null;
-      if (!routeTask) {
-        return <p className="text-on-surface-muted">Task not found.</p>;
+      case "task": {
+        const routeTask = selectedRouteTaskId
+          ? tasks.find((t: any) => t.id === selectedRouteTaskId)
+          : null;
+        if (!routeTask) {
+          return <p className="text-on-surface-muted">Task not found.</p>;
+        }
+        return (
+          <TaskPage
+            task={routeTask}
+            allTasks={tasks}
+            projects={projects}
+            onUpdate={handleUpdateTask}
+            onDelete={(id: string) => {
+              handleDeleteTask(id);
+              handleNavigate("inbox");
+            }}
+            onNavigateBack={() => window.history.back()}
+            onSelect={(id: string) => handleNavigate("task", id)}
+            onAddSubtask={handleAddSubtask}
+            onToggleSubtask={handleToggleTask}
+            onReorder={handleReorder}
+            availableTags={availableTags}
+          />
+        );
       }
-      return (
-        <TaskPage
-          task={routeTask}
-          allTasks={tasks}
-          projects={projects}
-          onUpdate={handleUpdateTask}
-          onDelete={(id: string) => {
-            handleDeleteTask(id);
-            handleNavigate("inbox");
-          }}
-          onNavigateBack={() => window.history.back()}
-          onSelect={(id: string) => handleNavigate("task", id)}
-          onAddSubtask={handleAddSubtask}
-          onToggleSubtask={handleToggleTask}
-          onReorder={handleReorder}
-          availableTags={availableTags}
-        />
-      );
+      case "calendar":
+        return (
+          <Calendar
+            tasks={tasks}
+            projects={projects}
+            onSelectTask={handleSelectTask}
+            onToggleTask={handleToggleTask}
+            onUpdateDueDate={handleUpdateDueDate}
+            mode={calendarMode}
+            onModeChange={setCalendarMode}
+          />
+        );
+      case "filters-labels":
+        return (
+          <FiltersLabels
+            tasks={tasks}
+            onNavigateToFilter={() => {
+              handleNavigate("inbox");
+            }}
+          />
+        );
+      case "completed":
+        return <Completed tasks={tasks} projects={projects} onSelectTask={handleSelectTask} />;
+      case "cancelled":
+        return featureSettings.feature_cancelled !== "false" ? (
+          <Cancelled
+            tasks={tasks}
+            projects={projects}
+            onSelectTask={handleSelectTask}
+            onRestoreTask={handleRestoreTask}
+          />
+        ) : null;
+      case "someday":
+        return featureSettings.feature_someday !== "false" ? (
+          <Someday
+            tasks={tasks}
+            onSelectTask={handleSelectTask}
+            onActivateTask={handleActivateTask}
+          />
+        ) : null;
+      case "stats":
+        return featureSettings.feature_stats !== "false" ? <Stats tasks={tasks} /> : null;
+      case "matrix":
+        return featureSettings.feature_matrix !== "false" ? (
+          <Matrix
+            tasks={tasks}
+            onToggleTask={handleToggleTask}
+            onSelectTask={handleSelectTask}
+            onUpdateTask={handleUpdateTask}
+            selectedTaskId={selectedTaskId}
+          />
+        ) : null;
+      case "filter":
+        return selectedFilterId ? (
+          <FilterView
+            filterId={selectedFilterId}
+            tasks={tasks}
+            onToggleTask={handleToggleTask}
+            onSelectTask={handleSelectTask}
+            selectedTaskId={selectedTaskId}
+            selectedTaskIds={multiSelectedIds}
+            onMultiSelect={handleMultiSelect}
+            onReorder={handleReorder}
+            onAddSubtask={handleAddSubtask}
+            onUpdateDueDate={handleUpdateDueDate}
+            onContextMenu={handleContextMenu}
+          />
+        ) : null;
+      case "plugin-view": {
+        const viewInfo = pluginViews.find((v) => v.id === selectedPluginViewId);
+        return selectedPluginViewId ? (
+          <PluginView viewId={selectedPluginViewId} viewInfo={viewInfo} />
+        ) : (
+          <p className="text-on-surface-muted">No plugin view selected.</p>
+        );
+      }
+      case "ai-chat":
+        return (
+          <AIChat onOpenSettings={() => setSettingsOpen(true)} onSelectTask={handleSelectTask} />
+        );
+      case "dopamine-menu":
+        return (
+          <DopamineMenu
+            tasks={tasks}
+            onToggleTask={handleToggleTask}
+            onSelectTask={handleSelectTask}
+            selectedTaskId={selectedTaskId}
+            selectedTaskIds={multiSelectedIds}
+            onMultiSelect={handleMultiSelect}
+            onReorder={handleReorder}
+            onAddSubtask={handleAddSubtask}
+            onUpdateDueDate={handleUpdateDueDate}
+            onContextMenu={handleContextMenu}
+          />
+        );
+      default:
+        return null;
     }
-    case "calendar":
-      return (
-        <Calendar
-          tasks={tasks}
-          projects={projects}
-          onSelectTask={handleSelectTask}
-          onToggleTask={handleToggleTask}
-          onUpdateDueDate={handleUpdateDueDate}
-          mode={calendarMode}
-          onModeChange={setCalendarMode}
-        />
-      );
-    case "filters-labels":
-      return (
-        <FiltersLabels
-          tasks={tasks}
-          onNavigateToFilter={() => {
-            handleNavigate("inbox");
-          }}
-        />
-      );
-    case "completed":
-      return (
-        <Completed tasks={tasks} projects={projects} onSelectTask={handleSelectTask} />
-      );
-    case "cancelled":
-      return featureSettings.feature_cancelled !== "false" ? (
-        <Cancelled
-          tasks={tasks}
-          projects={projects}
-          onSelectTask={handleSelectTask}
-          onRestoreTask={handleRestoreTask}
-        />
-      ) : null;
-    case "someday":
-      return featureSettings.feature_someday !== "false" ? (
-        <Someday
-          tasks={tasks}
-          onSelectTask={handleSelectTask}
-          onActivateTask={handleActivateTask}
-        />
-      ) : null;
-    case "stats":
-      return featureSettings.feature_stats !== "false" ? <Stats tasks={tasks} /> : null;
-    case "matrix":
-      return featureSettings.feature_matrix !== "false" ? (
-        <Matrix
-          tasks={tasks}
-          onToggleTask={handleToggleTask}
-          onSelectTask={handleSelectTask}
-          onUpdateTask={handleUpdateTask}
-          selectedTaskId={selectedTaskId}
-        />
-      ) : null;
-    case "filter":
-      return selectedFilterId ? (
-        <FilterView
-          filterId={selectedFilterId}
-          tasks={tasks}
-          onToggleTask={handleToggleTask}
-          onSelectTask={handleSelectTask}
-          selectedTaskId={selectedTaskId}
-          selectedTaskIds={multiSelectedIds}
-          onMultiSelect={handleMultiSelect}
-          onReorder={handleReorder}
-          onAddSubtask={handleAddSubtask}
-          onUpdateDueDate={handleUpdateDueDate}
-          onContextMenu={handleContextMenu}
-        />
-      ) : null;
-    case "plugin-view": {
-      const viewInfo = pluginViews.find((v) => v.id === selectedPluginViewId);
-      return selectedPluginViewId ? (
-        <PluginView viewId={selectedPluginViewId} viewInfo={viewInfo} />
-      ) : (
-        <p className="text-on-surface-muted">No plugin view selected.</p>
-      );
-    }
-    case "ai-chat":
-      return (
-        <AIChat onOpenSettings={() => setSettingsOpen(true)} onSelectTask={handleSelectTask} />
-      );
-    case "dopamine-menu":
-      return (
-        <DopamineMenu
-          tasks={tasks}
-          onToggleTask={handleToggleTask}
-          onSelectTask={handleSelectTask}
-          selectedTaskId={selectedTaskId}
-          selectedTaskIds={multiSelectedIds}
-          onMultiSelect={handleMultiSelect}
-          onReorder={handleReorder}
-          onAddSubtask={handleAddSubtask}
-          onUpdateDueDate={handleUpdateDueDate}
-          onContextMenu={handleContextMenu}
-        />
-      );
-    default:
-      return null;
-  }
   })();
 
   if (reducedMotion) {

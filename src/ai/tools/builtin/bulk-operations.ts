@@ -97,8 +97,7 @@ export function registerBulkOperationTools(registry: ToolRegistry): void {
   registry.register(
     {
       name: "bulk_complete_tasks",
-      description:
-        "Mark multiple tasks as completed at once. Provide task IDs (from query_tasks).",
+      description: "Mark multiple tasks as completed at once. Provide task IDs (from query_tasks).",
       parameters: {
         type: "object",
         properties: {

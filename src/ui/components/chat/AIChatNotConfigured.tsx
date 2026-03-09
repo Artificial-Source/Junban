@@ -36,9 +36,7 @@ export function AIChatNotConfigured({ onClose, onOpenSettings, isView }: AIChatN
         <h4 className={`font-medium ${isView ? "text-lg mb-2" : "text-sm mb-2"} text-on-surface`}>
           AI Assistant
         </h4>
-        <p
-          className={`${isView ? "text-sm mb-6 max-w-md" : "text-xs mb-4"} text-on-surface-muted`}
-        >
+        <p className={`${isView ? "text-sm mb-6 max-w-md" : "text-xs mb-4"} text-on-surface-muted`}>
           Configure an AI provider in Settings to start chatting.
         </p>
         <button

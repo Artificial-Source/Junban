@@ -9,7 +9,5 @@ import "./themes/manager.js"; // Initialize theme before render
 const isQuickCapture = window.location.pathname === "/quick-capture";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    {isQuickCapture ? <QuickCapture /> : <App />}
-  </React.StrictMode>,
+  <React.StrictMode>{isQuickCapture ? <QuickCapture /> : <App />}</React.StrictMode>,
 );

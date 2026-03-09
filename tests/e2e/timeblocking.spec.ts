@@ -2,7 +2,13 @@ import { test, expect } from "@playwright/test";
 import { setupPage, localDateKey } from "./helpers";
 
 const TB_PERMISSIONS = [
-  "task:read", "task:write", "commands", "ui:view", "ui:status", "storage", "settings",
+  "task:read",
+  "task:write",
+  "commands",
+  "ui:view",
+  "ui:status",
+  "storage",
+  "settings",
 ];
 
 test.describe("Timeblocking Plugin", () => {
@@ -16,7 +22,9 @@ test.describe("Timeblocking Plugin", () => {
     await page.reload();
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
     // Wait for plugin views to load
-    await expect(page.getByRole("button", { name: /Timeblocking/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: /Timeblocking/i })).toBeVisible({
+      timeout: 10000,
+    });
   });
 
   test("navigates to timeblocking view", async ({ page }) => {
@@ -26,7 +34,9 @@ test.describe("Timeblocking Plugin", () => {
     // Wait for the view to render (lazy-loaded via proxy)
     await expect(page.getByTestId("view-mode-selector")).toBeVisible({ timeout: 15000 });
     // Use locator scoped to main content to avoid matching sidebar "Today" nav
-    await expect(page.locator("#main-content").getByRole("button", { name: "Today" })).toBeVisible();
+    await expect(
+      page.locator("#main-content").getByRole("button", { name: "Today" }),
+    ).toBeVisible();
     await expect(page.getByTestId("date-range-label")).toBeVisible();
   });
 

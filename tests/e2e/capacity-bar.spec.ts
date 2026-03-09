@@ -39,8 +39,8 @@ test.describe("Workload capacity bar", () => {
     // Wait for tasks to appear
     await expect(page.getByText("Big task 1")).toBeVisible({ timeout: 5000 });
 
-    // Should show the "over" indicator
-    await expect(page.getByText(/over/)).toBeVisible({ timeout: 5000 });
+    // Should show "+Xh over" in the capacity bar
+    await expect(page.getByText(/\+.*over/)).toBeVisible({ timeout: 5000 });
   });
 
   test("hidden when no estimates", async ({ page }) => {

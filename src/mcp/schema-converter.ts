@@ -44,7 +44,7 @@ function propertyToZod(prop: JsonSchemaProperty, isRequired: boolean): z.ZodType
         schema =
           literals.length === 1
             ? literals[0]
-            : z.union(literals as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
+            : z.union(literals as unknown as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
       } else {
         schema = prop.type === "integer" ? z.number().int() : z.number();
       }
@@ -86,7 +86,7 @@ function propertyToZod(prop: JsonSchemaProperty, isRequired: boolean): z.ZodType
  * Zod raw shape suitable for McpServer.registerTool()'s inputSchema.
  */
 export function jsonSchemaToZod(schema: Record<string, unknown>): Record<string, z.ZodTypeAny> {
-  const obj = schema as JsonSchemaObject;
+  const obj = schema as unknown as JsonSchemaObject;
   const properties = obj.properties ?? {};
   const required = new Set(obj.required ?? []);
 

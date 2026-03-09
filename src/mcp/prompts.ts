@@ -46,13 +46,9 @@ export function registerMcpPrompts(server: McpServer): void {
   server.registerPrompt(
     "daily-review",
     {
-      description:
-        "End-of-day review prompt — summarizes what was accomplished and what's left.",
+      description: "End-of-day review prompt — summarizes what was accomplished and what's left.",
       argsSchema: {
-        date: z
-          .string()
-          .optional()
-          .describe("Date to review (YYYY-MM-DD). Defaults to today."),
+        date: z.string().optional().describe("Date to review (YYYY-MM-DD). Defaults to today."),
       },
     },
     (args) => {
@@ -81,10 +77,13 @@ export function registerMcpPrompts(server: McpServer): void {
   server.registerPrompt(
     "quick-capture",
     {
-      description:
-        "Quick task capture — takes a natural language task description and creates it.",
+      description: "Quick task capture — takes a natural language task description and creates it.",
       argsSchema: {
-        task: z.string().describe("Natural language task description (e.g., 'Buy groceries tomorrow p2 #shopping')"),
+        task: z
+          .string()
+          .describe(
+            "Natural language task description (e.g., 'Buy groceries tomorrow p2 #shopping')",
+          ),
       },
     },
     (args) => {

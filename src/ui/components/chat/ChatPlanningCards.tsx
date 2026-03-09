@@ -557,7 +557,10 @@ export function WeeklyReviewCard({ data }: { data: Record<string, unknown> }) {
           </p>
           <div className="space-y-0.5">
             {neglectedProjects.slice(0, 3).map((p, i) => (
-              <div key={i} className="flex items-center justify-between text-xs px-2 py-1 rounded-md">
+              <div
+                key={i}
+                className="flex items-center justify-between text-xs px-2 py-1 rounded-md"
+              >
                 <span className="text-on-surface">{p.name}</span>
                 <span className="text-[10px] text-on-surface-muted">{p.reason}</span>
               </div>

@@ -36,7 +36,12 @@ function parseLLMResponse(raw: string): ExtractedTask[] {
   let arr: unknown[];
   if (Array.isArray(parsed)) {
     arr = parsed;
-  } else if (parsed && typeof parsed === "object" && "tasks" in parsed && Array.isArray((parsed as Record<string, unknown>).tasks)) {
+  } else if (
+    parsed &&
+    typeof parsed === "object" &&
+    "tasks" in parsed &&
+    Array.isArray((parsed as Record<string, unknown>).tasks)
+  ) {
     arr = (parsed as Record<string, unknown>).tasks as unknown[];
   } else {
     return [];
@@ -49,10 +54,17 @@ function parseLLMResponse(raw: string): ExtractedTask[] {
     if (typeof obj.title !== "string" || obj.title.trim().length === 0) continue;
     tasks.push({
       title: obj.title.trim(),
-      priority: typeof obj.priority === "number" && obj.priority >= 1 && obj.priority <= 4 ? obj.priority : null,
+      priority:
+        typeof obj.priority === "number" && obj.priority >= 1 && obj.priority <= 4
+          ? obj.priority
+          : null,
       dueDate: typeof obj.dueDate === "string" && obj.dueDate.length > 0 ? obj.dueDate : null,
-      description: typeof obj.description === "string" && obj.description.length > 0 ? obj.description : null,
-      assigneeHint: typeof obj.assigneeHint === "string" && obj.assigneeHint.length > 0 ? obj.assigneeHint : null,
+      description:
+        typeof obj.description === "string" && obj.description.length > 0 ? obj.description : null,
+      assigneeHint:
+        typeof obj.assigneeHint === "string" && obj.assigneeHint.length > 0
+          ? obj.assigneeHint
+          : null,
     });
   }
   return tasks;
@@ -97,7 +109,8 @@ export function registerExtractTasksFromTextTool(registry: ToolRegistry): void {
           },
           dryRun: {
             type: "boolean",
-            description: "If true (default), return preview without creating tasks. If false, create the tasks.",
+            description:
+              "If true (default), return preview without creating tasks. If false, create the tasks.",
           },
         },
         required: ["text"],
@@ -178,7 +191,9 @@ export function registerExtractTasksFromTextTool(registry: ToolRegistry): void {
           });
           created.push({ id: task.id, title: task.title });
         } catch (err) {
-          errors.push(`Failed to create "${t.title}": ${err instanceof Error ? err.message : String(err)}`);
+          errors.push(
+            `Failed to create "${t.title}": ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
@@ -198,11 +213,15 @@ export function registerExtractTasksFromTextTool(registry: ToolRegistry): void {
  * Looks for bullet points, numbered lists, and action-oriented lines.
  */
 function heuristicExtract(text: string): ExtractedTask[] {
-  const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = text
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
   const tasks: ExtractedTask[] = [];
 
   // Common action verbs that indicate a task
-  const actionVerbs = /^(review|send|update|create|schedule|prepare|follow[\s-]?up|contact|call|email|write|fix|implement|deploy|check|set[\s-]?up|complete|finalize|submit|organize|plan|discuss|investigate|research|design|test|build|draft|arrange|confirm|approve|cancel|assign|notify|share|clean|move|order|book|coordinate)/i;
+  const actionVerbs =
+    /^(review|send|update|create|schedule|prepare|follow[\s-]?up|contact|call|email|write|fix|implement|deploy|check|set[\s-]?up|complete|finalize|submit|organize|plan|discuss|investigate|research|design|test|build|draft|arrange|confirm|approve|cancel|assign|notify|share|clean|move|order|book|coordinate)/i;
 
   // Patterns that indicate list items
   const listPrefix = /^(?:[-*+]|\d+[.)]\s*|(?:TODO|ACTION|AI|TASK)[:\s]+)/i;

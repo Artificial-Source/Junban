@@ -56,10 +56,7 @@ export function MemorySection() {
             <span className="text-xs text-on-surface-muted">
               {memories.length} {memories.length === 1 ? "memory" : "memories"}
             </span>
-            <button
-              onClick={handleClearAll}
-              className="text-xs text-danger hover:text-danger/80"
-            >
+            <button onClick={handleClearAll} className="text-xs text-danger hover:text-danger/80">
               Clear all
             </button>
           </div>
@@ -73,10 +70,7 @@ export function MemorySection() {
       ) : (
         <div className="space-y-2 max-w-lg">
           {memories.map((memory) => (
-            <div
-              key={memory.id}
-              className="border border-border rounded-lg p-3 bg-surface"
-            >
+            <div key={memory.id} className="border border-border rounded-lg p-3 bg-surface">
               {editingId === memory.id ? (
                 <div className="space-y-2">
                   <textarea
@@ -89,9 +83,7 @@ export function MemorySection() {
                   <div className="flex items-center gap-2">
                     <select
                       value={editCategory}
-                      onChange={(e) =>
-                        setEditCategory(e.target.value as AiMemoryRow["category"])
-                      }
+                      onChange={(e) => setEditCategory(e.target.value as AiMemoryRow["category"])}
                       className="px-2 py-1 text-xs border border-border rounded bg-surface text-on-surface"
                     >
                       <option value="preference">preference</option>

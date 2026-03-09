@@ -953,9 +953,7 @@ function apiPlugin() {
           const { method, args } = body as { method: string; args: unknown[] };
 
           // Get the timeblocking plugin instance
-          const plugin = svc.pluginLoader
-            .getAll()
-            .find((p) => p.manifest.id === "timeblocking");
+          const plugin = svc.pluginLoader.getAll().find((p) => p.manifest.id === "timeblocking");
           if (!plugin || !plugin.enabled) {
             res.statusCode = 404;
             res.setHeader("Content-Type", "application/json");
@@ -2098,9 +2096,7 @@ function apiPlugin() {
       // /api/tasks/:id/relations
       server.middlewares.use(async (req, res, next) => {
         // DELETE /api/tasks/:id/relations/:relatedId
-        const delRelMatch = req.url?.match(
-          /^\/api\/tasks\/([^/]+)\/relations\/([^/]+)$/,
-        );
+        const delRelMatch = req.url?.match(/^\/api\/tasks\/([^/]+)\/relations\/([^/]+)$/);
         if (delRelMatch && req.method === "DELETE") {
           try {
             const svc = await getServices();
@@ -2124,8 +2120,7 @@ function apiPlugin() {
           try {
             const svc = await getServices();
             const taskId = decodeURIComponent(relMatch[1]);
-            const { blocks, blockedBy } =
-              await svc.taskService.getRelations(taskId);
+            const { blocks, blockedBy } = await svc.taskService.getRelations(taskId);
             // Hydrate task objects
             const blocksTasks = [];
             for (const id of blocks) {
@@ -2138,9 +2133,7 @@ function apiPlugin() {
               if (t) blockedByTasks.push(t);
             }
             res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify({ blocks: blocksTasks, blockedBy: blockedByTasks }),
-            );
+            res.end(JSON.stringify({ blocks: blocksTasks, blockedBy: blockedByTasks }));
           } catch (err: any) {
             res.statusCode = err.name === "NotFoundError" ? 404 : 500;
             res.setHeader("Content-Type", "application/json");

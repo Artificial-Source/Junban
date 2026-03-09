@@ -25,7 +25,12 @@ import {
   ProjectList,
   ReminderList,
 } from "./ChatTaskResults";
-import { DayPlanCard, DailyReviewCard, BulkResultCard, WeeklyReviewCard } from "./ChatPlanningCards";
+import {
+  DayPlanCard,
+  DailyReviewCard,
+  BulkResultCard,
+  WeeklyReviewCard,
+} from "./ChatPlanningCards";
 
 interface ToolResult {
   toolName: string;

@@ -15,14 +15,6 @@ interface UseNudgesResult {
   dismiss: (id: string) => void;
 }
 
-const _NUDGE_TYPE_SETTINGS: Record<NudgeType, keyof GeneralSettings> = {
-  overdue_alert: "nudge_overdue_alert",
-  deadline_approaching: "nudge_deadline_approaching",
-  stale_tasks: "nudge_stale_tasks",
-  empty_today: "nudge_empty_today",
-  overloaded_day: "nudge_overloaded_day",
-};
-
 /**
  * Evaluates nudge rules periodically from existing task state.
  * No API calls — purely derived from in-memory data.

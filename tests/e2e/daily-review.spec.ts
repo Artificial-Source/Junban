@@ -1,5 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { setupPage, createTaskViaApi, completeTaskViaApi, navigateTo, localDateKey } from "./helpers.js";
+import {
+  setupPage,
+  createTaskViaApi,
+  completeTaskViaApi,
+  navigateTo,
+  localDateKey,
+} from "./helpers.js";
 
 test.describe("Daily Review Modal", () => {
   test.beforeEach(async ({ page }) => {

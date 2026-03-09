@@ -110,15 +110,11 @@ describe("auto_schedule_day tool", () => {
   });
 
   it("suggest mode should return proposal without creating blocks", async () => {
-    const tasks = [
-      makeTask({ id: "t1", title: "Important", estimatedMinutes: 60 }),
-    ];
+    const tasks = [makeTask({ id: "t1", title: "Important", estimatedMinutes: 60 })];
     const tool = getAutoScheduleTool();
     const ctx = createMockContext(tasks);
 
-    const result = JSON.parse(
-      await tool.executor({ date: "2026-03-10", mode: "suggest" }, ctx),
-    );
+    const result = JSON.parse(await tool.executor({ date: "2026-03-10", mode: "suggest" }, ctx));
 
     expect(result.applied).toBe(false);
     expect(result.proposed).toHaveLength(1);
@@ -129,15 +125,11 @@ describe("auto_schedule_day tool", () => {
   });
 
   it("auto mode should create blocks", async () => {
-    const tasks = [
-      makeTask({ id: "t1", title: "Important", estimatedMinutes: 60 }),
-    ];
+    const tasks = [makeTask({ id: "t1", title: "Important", estimatedMinutes: 60 })];
     const tool = getAutoScheduleTool();
     const ctx = createMockContext(tasks);
 
-    const result = JSON.parse(
-      await tool.executor({ date: "2026-03-10", mode: "auto" }, ctx),
-    );
+    const result = JSON.parse(await tool.executor({ date: "2026-03-10", mode: "auto" }, ctx));
 
     expect(result.applied).toBe(true);
     expect(result.blocksCreated).toBe(1);
@@ -155,9 +147,7 @@ describe("auto_schedule_day tool", () => {
     const tool = getAutoScheduleTool();
     const ctx = createMockContext(tasks);
 
-    const result = JSON.parse(
-      await tool.executor({ date: "2026-03-10", mode: "suggest" }, ctx),
-    );
+    const result = JSON.parse(await tool.executor({ date: "2026-03-10", mode: "suggest" }, ctx));
 
     expect(result.proposed).toHaveLength(1);
     expect(result.proposed[0].title).toBe("Active");
@@ -173,15 +163,11 @@ describe("auto_schedule_day tool", () => {
       locked: true,
     });
 
-    const tasks = [
-      makeTask({ id: "t1", title: "After meeting", estimatedMinutes: 60 }),
-    ];
+    const tasks = [makeTask({ id: "t1", title: "After meeting", estimatedMinutes: 60 })];
     const tool = getAutoScheduleTool();
     const ctx = createMockContext(tasks);
 
-    const result = JSON.parse(
-      await tool.executor({ date: "2026-03-10", mode: "suggest" }, ctx),
-    );
+    const result = JSON.parse(await tool.executor({ date: "2026-03-10", mode: "suggest" }, ctx));
 
     if (result.proposed?.length > 0) {
       expect(result.proposed[0].startTime >= "12:00").toBe(true);
@@ -228,15 +214,11 @@ describe("reschedule_day tool", () => {
       locked: true,
     });
 
-    const tasks = [
-      makeTask({ id: "t1", title: "Rescheduled Task", estimatedMinutes: 30 }),
-    ];
+    const tasks = [makeTask({ id: "t1", title: "Rescheduled Task", estimatedMinutes: 30 })];
     const tool = getRescheduleTool();
     const ctx = createMockContext(tasks);
 
-    const result = JSON.parse(
-      await tool.executor({ date: "2026-03-10" }, ctx),
-    );
+    const result = JSON.parse(await tool.executor({ date: "2026-03-10" }, ctx));
 
     expect(result.removedBlocks).toBe(1); // only unlocked
     expect(result.createdBlocks).toBeGreaterThanOrEqual(1);
@@ -260,9 +242,7 @@ describe("reschedule_day tool", () => {
     const tool = getRescheduleTool();
     const ctx = createMockContext([]);
 
-    const result = JSON.parse(
-      await tool.executor({ date: "2026-03-10", keepManual: false }, ctx),
-    );
+    const result = JSON.parse(await tool.executor({ date: "2026-03-10", keepManual: false }, ctx));
 
     expect(result.removedBlocks).toBe(1);
   });

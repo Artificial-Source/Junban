@@ -1,4 +1,12 @@
-import { useState, useEffect, useRef, useCallback, Component, type ReactNode, type ErrorInfo } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  Component,
+  type ReactNode,
+  type ErrorInfo,
+} from "react";
 import { api } from "../api/index.js";
 import {
   StructuredContentRenderer,
@@ -72,19 +80,24 @@ export function PluginView({ viewId, viewInfo }: PluginViewProps) {
     let retryTimer: ReturnType<typeof setTimeout>;
 
     const attempt = () => {
-      resolveBuiltinComponent(viewInfo.pluginId).then((component) => {
-        if (!cancelled && component) {
-          setResolvedComponent(() => component);
-        } else if (!cancelled && !component) {
-          retryTimer = setTimeout(attempt, 1000);
-        }
-      }).catch(() => {
-        if (!cancelled) retryTimer = setTimeout(attempt, 1000);
-      });
+      resolveBuiltinComponent(viewInfo.pluginId)
+        .then((component) => {
+          if (!cancelled && component) {
+            setResolvedComponent(() => component);
+          } else if (!cancelled && !component) {
+            retryTimer = setTimeout(attempt, 1000);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) retryTimer = setTimeout(attempt, 1000);
+        });
     };
     attempt();
 
-    return () => { cancelled = true; clearTimeout(retryTimer); };
+    return () => {
+      cancelled = true;
+      clearTimeout(retryTimer);
+    };
   }, [isReact, viewInfo?.component, viewInfo?.pluginId]);
 
   useEffect(() => {

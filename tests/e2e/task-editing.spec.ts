@@ -1,9 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  setupPage,
-  createTaskViaApi,
-  openTaskDetail,
-} from "./helpers.js";
+import { setupPage, createTaskViaApi, openTaskDetail } from "./helpers.js";
 
 test.describe("Task editing", () => {
   test.beforeEach(async ({ page }) => {
@@ -47,7 +43,9 @@ test.describe("Task editing", () => {
     await openTaskDetail(page, "Priority task");
 
     // P1 should be displayed
-    await expect(page.getByRole("dialog", { name: "Task details" }).getByText("P1").first()).toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: "Task details" }).getByText("P1").first(),
+    ).toBeVisible();
   });
 
   test("set due date", async ({ page }) => {
@@ -62,8 +60,8 @@ test.describe("Task editing", () => {
     // Click the due date area to set it
     await dialog.getByText("Due date").first().click();
 
-    // Click "Today" quick option if available
-    const todayBtn = page.getByRole("button", { name: "Today" });
+    // Click "Today" quick option in date picker (scope to dialog to avoid sidebar "Today" button)
+    const todayBtn = dialog.getByRole("button", { name: "Today" });
     if (await todayBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
       await todayBtn.click();
     }

@@ -1,24 +1,24 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import {
-  X,
-  Search,
-  Loader2,
-  ArrowLeft,
-} from "lucide-react";
-import {
-  api,
-  type StorePluginInfo,
-} from "../api/index.js";
+import { X, Search, Loader2, ArrowLeft } from "lucide-react";
+import { api, type StorePluginInfo } from "../api/index.js";
 import { usePluginContext } from "../context/PluginContext.js";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
-import type { BrowserPlugin, FilterTab, PluginBrowserProps } from "./plugin-browser/plugin-browser-types.js";
+import type {
+  BrowserPlugin,
+  FilterTab,
+  PluginBrowserProps,
+} from "./plugin-browser/plugin-browser-types.js";
 import { mergePlugins } from "./plugin-browser/merge-plugins.js";
 import { PluginListItem } from "./plugin-browser/PluginListItem.js";
 import { PluginDetail } from "./plugin-browser/PluginDetail.js";
 
 // Re-export types for backward compatibility
-export type { BrowserPlugin, FilterTab, PluginBrowserProps } from "./plugin-browser/plugin-browser-types.js";
+export type {
+  BrowserPlugin,
+  FilterTab,
+  PluginBrowserProps,
+} from "./plugin-browser/plugin-browser-types.js";
 
 // ── Main Component ───────────────────────────────────
 

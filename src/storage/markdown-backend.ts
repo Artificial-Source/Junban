@@ -4,18 +4,40 @@ import { StorageError } from "../core/errors.js";
 import { createLogger } from "../utils/logger.js";
 import type { MarkdownIndexes } from "./markdown/types.js";
 import type {
-  IStorage, TaskRow, ProjectRow, TagRow, TaskTagJoin,
-  PluginSettingsRow, AppSettingRow, ChatMessageRow, ChatSessionInfo,
-  TemplateRow, SectionRow, TaskCommentRow, TaskActivityRow,
-  DailyStatRow, TaskRelationRow, AiMemoryRow, MutationResult,
+  IStorage,
+  TaskRow,
+  ProjectRow,
+  TagRow,
+  TaskTagJoin,
+  PluginSettingsRow,
+  AppSettingRow,
+  ChatMessageRow,
+  ChatSessionInfo,
+  TemplateRow,
+  SectionRow,
+  TaskCommentRow,
+  TaskActivityRow,
+  DailyStatRow,
+  TaskRelationRow,
+  AiMemoryRow,
+  MutationResult,
 } from "./interface.js";
 import * as taskOps from "./markdown/task-ops.js";
 import * as projectOps from "./markdown/project-ops.js";
 import * as metadataOps from "./markdown/metadata-ops.js";
 import {
-  loadTags, loadProjects, loadTasks, loadAppSettings, loadPluginData,
-  loadChatData, loadTemplates, loadSections, loadDailyStatsFile,
-  loadTaskMeta, loadTaskRelations, loadAiMemories,
+  loadTags,
+  loadProjects,
+  loadTasks,
+  loadAppSettings,
+  loadPluginData,
+  loadChatData,
+  loadTemplates,
+  loadSections,
+  loadDailyStatsFile,
+  loadTaskMeta,
+  loadTaskRelations,
+  loadAiMemories,
 } from "./markdown/persistence.js";
 
 const logger = createLogger("storage-md");

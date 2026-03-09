@@ -42,8 +42,14 @@ interface DopamineMenuProps {
 }
 
 const CONFETTI_COLORS = [
-  "#6366f1", "#f59e0b", "#10b981", "#ef4444", "#ec4899",
-  "#8b5cf6", "#14b8a6", "#f97316",
+  "#6366f1",
+  "#f59e0b",
+  "#10b981",
+  "#ef4444",
+  "#ec4899",
+  "#8b5cf6",
+  "#14b8a6",
+  "#f97316",
 ];
 
 function ConfettiOverlay({ onDone }: { onDone: () => void }) {
@@ -57,8 +63,8 @@ function ConfettiOverlay({ onDone }: { onDone: () => void }) {
       id: i,
       color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
       left: `${10 + ((i * 37 + 13) % 80)}%`,
-      delay: `${(i * 13 % 300) / 1000}s`,
-      size: 4 + (i * 7 % 6),
+      delay: `${((i * 13) % 300) / 1000}s`,
+      size: 4 + ((i * 7) % 6),
     })),
   );
 
@@ -119,9 +125,7 @@ export function DopamineMenu({
         <Zap size={28} className="text-amber-400" />
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-on-surface">Quick Wins</h1>
-          <p className="text-sm text-on-surface-muted">
-            Need a quick win? Pick one!
-          </p>
+          <p className="text-sm text-on-surface-muted">Need a quick win? Pick one!</p>
         </div>
       </div>
 

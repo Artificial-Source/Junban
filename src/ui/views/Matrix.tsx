@@ -33,15 +33,41 @@ interface QuadrantConfig {
 }
 
 const QUADRANTS: QuadrantConfig[] = [
-  { id: "q1", title: "Do First", subtitle: "Urgent + Important", bgClass: "bg-error/5", borderClass: "border-error/20" },
-  { id: "q2", title: "Schedule", subtitle: "Important", bgClass: "bg-accent/5", borderClass: "border-accent/20" },
-  { id: "q3", title: "Delegate", subtitle: "Urgent", bgClass: "bg-warning/5", borderClass: "border-warning/20" },
-  { id: "q4", title: "Eliminate", subtitle: "Neither", bgClass: "bg-surface-secondary", borderClass: "border-border" },
+  {
+    id: "q1",
+    title: "Do First",
+    subtitle: "Urgent + Important",
+    bgClass: "bg-error/5",
+    borderClass: "border-error/20",
+  },
+  {
+    id: "q2",
+    title: "Schedule",
+    subtitle: "Important",
+    bgClass: "bg-accent/5",
+    borderClass: "border-accent/20",
+  },
+  {
+    id: "q3",
+    title: "Delegate",
+    subtitle: "Urgent",
+    bgClass: "bg-warning/5",
+    borderClass: "border-warning/20",
+  },
+  {
+    id: "q4",
+    title: "Eliminate",
+    subtitle: "Neither",
+    bgClass: "bg-surface-secondary",
+    borderClass: "border-border",
+  },
 ];
 
 function classifyTask(task: Task, today: string): Quadrant {
-  const isHighPriority = task.priority !== null && task.priority !== undefined && task.priority <= 2;
-  const isUrgent = task.dueDate !== null && task.dueDate !== undefined && task.dueDate.split("T")[0] <= today;
+  const isHighPriority =
+    task.priority !== null && task.priority !== undefined && task.priority <= 2;
+  const isUrgent =
+    task.dueDate !== null && task.dueDate !== undefined && task.dueDate.split("T")[0] <= today;
 
   if (isHighPriority && isUrgent) return "q1";
   if (isHighPriority) return "q2";
@@ -128,9 +154,7 @@ function DroppableQuadrant({
           />
         ))}
         {tasks.length === 0 && (
-          <p className="text-xs text-on-surface-muted/50 text-center py-4">
-            Drop tasks here
-          </p>
+          <p className="text-xs text-on-surface-muted/50 text-center py-4">Drop tasks here</p>
         )}
       </div>
       <div className="mt-2 text-xs text-on-surface-muted text-right">
@@ -152,10 +176,7 @@ export function Matrix({
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  const pendingTasks = useMemo(
-    () => tasks.filter((t) => t.status === "pending"),
-    [tasks],
-  );
+  const pendingTasks = useMemo(() => tasks.filter((t) => t.status === "pending"), [tasks]);
 
   const quadrantTasks = useMemo(() => {
     const map: Record<Quadrant, Task[]> = { q1: [], q2: [], q3: [], q4: [] };
@@ -167,7 +188,7 @@ export function Matrix({
   }, [pendingTasks, today]);
 
   const draggedTask = draggedTaskId
-    ? pendingTasks.find((t) => t.id === draggedTaskId) ?? null
+    ? (pendingTasks.find((t) => t.id === draggedTaskId) ?? null)
     : null;
 
   const handleDragStart = useCallback((event: DragStartEvent) => {

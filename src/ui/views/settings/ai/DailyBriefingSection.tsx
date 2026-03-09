@@ -7,10 +7,7 @@ export function DailyBriefingSection() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    Promise.all([
-      api.getAppSetting("ai_daily_briefing"),
-      api.getAppSetting("ai_default_energy"),
-    ])
+    Promise.all([api.getAppSetting("ai_daily_briefing"), api.getAppSetting("ai_default_energy")])
       .then(([briefing, energyVal]) => {
         if (briefing === "on") setEnabled(true);
         if (energyVal) setEnergy(energyVal);

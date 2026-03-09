@@ -6,6 +6,7 @@
 import { NotFoundError, ValidationError, StorageError } from "../core/errors.js";
 
 export interface McpErrorContent {
+  [key: string]: unknown;
   content: Array<{ type: "text"; text: string }>;
   isError: true;
 }

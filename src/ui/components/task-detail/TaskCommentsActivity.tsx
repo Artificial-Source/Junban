@@ -1,12 +1,10 @@
-import {
-  MessageSquare,
-  History,
-  Pencil,
-  Trash2,
-  Send,
-} from "lucide-react";
+import { MessageSquare, History, Pencil, Trash2, Send } from "lucide-react";
 import type { TaskComment, TaskActivity } from "../../../core/types.js";
-import { formatRelativeTime, getActivityIcon, formatActivityDescription } from "./task-detail-utils.js";
+import {
+  formatRelativeTime,
+  getActivityIcon,
+  formatActivityDescription,
+} from "./task-detail-utils.js";
 
 interface TaskCommentsActivityProps {
   activeTab: "comments" | "activity";
@@ -58,9 +56,7 @@ export function TaskCommentsActivity({
           <MessageSquare size={14} />
           Comments
           {comments && comments.length > 0 && (
-            <span className="text-xs text-on-surface-muted ml-0.5">
-              ({comments.length})
-            </span>
+            <span className="text-xs text-on-surface-muted ml-0.5">({comments.length})</span>
           )}
         </button>
         <button
@@ -74,9 +70,7 @@ export function TaskCommentsActivity({
           <History size={14} />
           Activity
           {activity && activity.length > 0 && (
-            <span className="text-xs text-on-surface-muted ml-0.5">
-              ({activity.length})
-            </span>
+            <span className="text-xs text-on-surface-muted ml-0.5">({activity.length})</span>
           )}
         </button>
       </div>
@@ -88,15 +82,9 @@ export function TaskCommentsActivity({
           {comments && comments.length > 0 && (
             <div className="space-y-2">
               {[...comments]
-                .sort(
-                  (a, b) =>
-                    new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-                )
+                .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
                 .map((comment) => (
-                  <div
-                    key={comment.id}
-                    className="group rounded-lg bg-surface-secondary px-3 py-2"
-                  >
+                  <div key={comment.id} className="group rounded-lg bg-surface-secondary px-3 py-2">
                     {editingCommentId === comment.id ? (
                       <textarea
                         value={editingCommentContent}
@@ -192,18 +180,13 @@ export function TaskCommentsActivity({
         <div className="space-y-1">
           {activity && activity.length > 0 ? (
             [...activity]
-              .sort(
-                (a, b) =>
-                  new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-              )
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
               .map((entry) => (
                 <div
                   key={entry.id}
                   className="flex items-start gap-2.5 py-1.5 text-xs text-on-surface-muted"
                 >
-                  <span className="mt-0.5 flex-shrink-0">
-                    {getActivityIcon(entry.action)}
-                  </span>
+                  <span className="mt-0.5 flex-shrink-0">{getActivityIcon(entry.action)}</span>
                   <span className="flex-1">{formatActivityDescription(entry)}</span>
                   <span className="flex-shrink-0 whitespace-nowrap">
                     {formatRelativeTime(entry.createdAt)}
@@ -211,9 +194,7 @@ export function TaskCommentsActivity({
                 </div>
               ))
           ) : (
-            <p className="text-xs text-on-surface-muted italic py-1">
-              No activity recorded.
-            </p>
+            <p className="text-xs text-on-surface-muted italic py-1">No activity recorded.</p>
           )}
         </div>
       )}

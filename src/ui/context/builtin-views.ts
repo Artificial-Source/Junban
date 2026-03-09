@@ -16,7 +16,9 @@ const cachedComponents = new Map<string, (props: any) => any>();
  * Returns null if the pluginId has no built-in React component.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function resolveBuiltinComponent(pluginId: string): Promise<((props: any) => any) | null> {
+export async function resolveBuiltinComponent(
+  pluginId: string,
+): Promise<((props: any) => any) | null> {
   if (cachedComponents.has(pluginId)) {
     return cachedComponents.get(pluginId)!;
   }

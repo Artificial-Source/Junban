@@ -403,11 +403,11 @@ export function TaskMetadataSidebar({
         </div>
       )}
 
-      {/* Actual time */}
-      {settings.feature_duration !== "false" && (
+      {/* Actual time — only visible for completed tasks */}
+      {settings.feature_duration !== "false" && task.status === "completed" && (
         <div>
           <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider flex items-center gap-1.5">
-            <Clock size={12} /> Actual time
+            <Clock size={12} /> Actual time (minutes)
           </label>
           <input
             type="number"
@@ -420,15 +420,19 @@ export function TaskMetadataSidebar({
             }}
             className="mt-1.5 w-full text-sm bg-transparent border border-border rounded-md px-3 py-1.5 text-on-surface placeholder-on-surface-muted/50 focus:outline-none focus:ring-1 focus:ring-accent"
           />
-          {task.estimatedMinutes != null && task.actualMinutes != null && task.actualMinutes > 0 && (
-            <span className={`text-xs mt-0.5 block ${
-              task.actualMinutes <= task.estimatedMinutes * 1.2
-                ? "text-success"
-                : "text-warning"
-            }`}>
-              {Math.round((task.actualMinutes / task.estimatedMinutes) * 100)}% of estimate
-            </span>
-          )}
+          {task.estimatedMinutes != null &&
+            task.actualMinutes != null &&
+            task.actualMinutes > 0 && (
+              <span
+                className={`text-xs mt-0.5 block ${
+                  task.actualMinutes <= task.estimatedMinutes * 1.2
+                    ? "text-success"
+                    : "text-warning"
+                }`}
+              >
+                {Math.round((task.actualMinutes / task.estimatedMinutes) * 100)}% of estimate
+              </span>
+            )}
         </div>
       )}
 

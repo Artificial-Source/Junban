@@ -94,9 +94,7 @@ describe("useNudges", () => {
   it("filters nudges by per-type settings", () => {
     const tasks: Task[] = []; // empty → would fire empty_today
     const settings = makeSettings({ nudge_empty_today: "false" });
-    const { result } = renderHook(() =>
-      useNudges({ tasks, settings, intervalMs: NO_INTERVAL }),
-    );
+    const { result } = renderHook(() => useNudges({ tasks, settings, intervalMs: NO_INTERVAL }));
 
     expect(result.current.activeNudges.find((n) => n.type === "empty_today")).toBeUndefined();
   });
@@ -104,9 +102,7 @@ describe("useNudges", () => {
   it("returns empty when globally disabled", () => {
     const tasks: Task[] = [];
     const settings = makeSettings({ nudge_enabled: "false" });
-    const { result } = renderHook(() =>
-      useNudges({ tasks, settings, intervalMs: NO_INTERVAL }),
-    );
+    const { result } = renderHook(() => useNudges({ tasks, settings, intervalMs: NO_INTERVAL }));
 
     expect(result.current.activeNudges).toHaveLength(0);
   });
@@ -166,7 +162,11 @@ describe("useNudges", () => {
   it("produces no duplicate IDs", () => {
     const tasks = [
       makeTask({ id: "t1", dueDate: "2026-02-26T00:00:00.000Z" }),
-      makeTask({ id: "t2", dueDate: "2026-02-27T00:00:00.000Z", createdAt: "2026-02-01T00:00:00.000Z" }),
+      makeTask({
+        id: "t2",
+        dueDate: "2026-02-27T00:00:00.000Z",
+        createdAt: "2026-02-01T00:00:00.000Z",
+      }),
     ];
     const { result } = renderHook(() =>
       useNudges({ tasks, settings: makeSettings(), intervalMs: NO_INTERVAL }),

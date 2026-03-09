@@ -185,7 +185,15 @@ export function useSidebarContextMenu({
     }
 
     return items;
-  }, [ctxMenu, favoriteViewIds, settings, onOpenSettings, orderedSidebarItems, hasHiddenViews, updateSetting]);
+  }, [
+    ctxMenu,
+    favoriteViewIds,
+    settings,
+    onOpenSettings,
+    orderedSidebarItems,
+    hasHiddenViews,
+    updateSetting,
+  ]);
 }
 
 /** Context menu items for right-clicking empty sidebar space. */

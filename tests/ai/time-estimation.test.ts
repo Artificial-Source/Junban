@@ -93,9 +93,7 @@ describe("time-estimation tools", () => {
       registerTimeEstimationTools(registry);
       const { ctx } = createToolContext();
 
-      const result = JSON.parse(
-        await registry.execute("time_tracking_summary", {}, ctx),
-      );
+      const result = JSON.parse(await registry.execute("time_tracking_summary", {}, ctx));
       expect(result.success).toBe(true);
       expect(result.totalTasks).toBe(0);
     });
@@ -123,9 +121,7 @@ describe("time-estimation tools", () => {
       await taskService.update(t2.id, { actualMinutes: 90 });
       await taskService.complete(t2.id);
 
-      const result = JSON.parse(
-        await registry.execute("time_tracking_summary", {}, ctx),
-      );
+      const result = JSON.parse(await registry.execute("time_tracking_summary", {}, ctx));
       expect(result.success).toBe(true);
       expect(result.totalTasks).toBe(2);
       expect(result.totalEstimatedMinutes).toBe(90);

@@ -108,8 +108,7 @@ export function parseTaskFile(
       remindAt: frontmatter.remindAt != null ? String(frontmatter.remindAt) : null,
       estimatedMinutes:
         frontmatter.estimatedMinutes != null ? Number(frontmatter.estimatedMinutes) : null,
-      actualMinutes:
-        frontmatter.actualMinutes != null ? Number(frontmatter.actualMinutes) : null,
+      actualMinutes: frontmatter.actualMinutes != null ? Number(frontmatter.actualMinutes) : null,
       deadline: frontmatter.deadline != null ? String(frontmatter.deadline) : null,
       isSomeday: Boolean(frontmatter.isSomeday ?? false),
       sectionId: frontmatter.sectionId != null ? String(frontmatter.sectionId) : null,

@@ -42,7 +42,8 @@ export function DailyPlanningModal({
   const today = toDateKey(new Date());
 
   const overdueTasks = useMemo(
-    () => tasks.filter((t) => t.status === "pending" && t.dueDate && t.dueDate.split("T")[0] < today),
+    () =>
+      tasks.filter((t) => t.status === "pending" && t.dueDate && t.dueDate.split("T")[0] < today),
     [tasks, today],
   );
 
@@ -217,7 +218,10 @@ export function DailyPlanningModal({
                       min={0}
                       value={estimates.get(task.id) ?? task.estimatedMinutes ?? 0}
                       onChange={(e) =>
-                        handleEstimateChange(task.id, Math.max(0, parseInt(e.target.value, 10) || 0))
+                        handleEstimateChange(
+                          task.id,
+                          Math.max(0, parseInt(e.target.value, 10) || 0),
+                        )
                       }
                       className="w-16 text-xs text-center rounded border border-border bg-surface px-1 py-1 focus:outline-none focus:ring-1 focus:ring-accent"
                     />
@@ -241,9 +245,7 @@ export function DailyPlanningModal({
                 ~{formatDuration(totalPlanned)} estimated
               </p>
             )}
-            <p className="text-sm text-on-surface-muted mt-3">
-              Let's make today count.
-            </p>
+            <p className="text-sm text-on-surface-muted mt-3">Let's make today count.</p>
           </div>
         );
 

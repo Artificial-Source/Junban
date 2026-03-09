@@ -48,7 +48,11 @@ export function stopTimer(taskId: string, storage: IStorage): number {
       actualMinutes: current + elapsedMinutes,
       updatedAt: new Date().toISOString(),
     });
-    logger.debug("Timer stopped, minutes accumulated", { taskId, elapsedMinutes, total: current + elapsedMinutes });
+    logger.debug("Timer stopped, minutes accumulated", {
+      taskId,
+      elapsedMinutes,
+      total: current + elapsedMinutes,
+    });
   }
 
   return elapsedMinutes;

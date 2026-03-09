@@ -288,10 +288,7 @@ export async function addTaskRelation(
   );
 }
 
-export async function removeTaskRelation(
-  taskId: string,
-  relatedTaskId: string,
-): Promise<void> {
+export async function removeTaskRelation(taskId: string, relatedTaskId: string): Promise<void> {
   if (isTauri()) {
     const svc = await getServices();
     await svc.taskService.removeRelation(taskId, relatedTaskId);

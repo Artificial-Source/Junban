@@ -49,7 +49,11 @@ export function insertProject(idx: MarkdownIndexes, project: ProjectRow): Mutati
   return OK;
 }
 
-export function updateProject(idx: MarkdownIndexes, id: string, data: Partial<ProjectRow>): MutationResult {
+export function updateProject(
+  idx: MarkdownIndexes,
+  id: string,
+  data: Partial<ProjectRow>,
+): MutationResult {
   const entry = idx.projectIndex.get(id);
   if (!entry) return NOOP;
 

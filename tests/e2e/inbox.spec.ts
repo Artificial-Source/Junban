@@ -28,8 +28,8 @@ test.describe("Inbox view", () => {
     await input.press("Enter");
 
     await expect(page.getByText("Finish report").first()).toBeVisible({ timeout: 5000 });
-    // Tag should be visible
-    await expect(page.getByText("#work").first()).toBeVisible();
+    // Tag should be visible (displayed without # prefix)
+    await expect(page.getByText("work").first()).toBeVisible();
   });
 
   test("complete a task", async ({ page }) => {
@@ -40,8 +40,8 @@ test.describe("Inbox view", () => {
     // Click the completion checkbox
     await page.getByLabel("Complete task").first().click();
 
-    // Task should disappear from Inbox (completed tasks are hidden)
-    await expect(page.getByText("Task to complete")).not.toBeVisible({ timeout: 5000 });
+    // Recently completed tasks stay in Inbox with line-through style
+    await expect(page.getByLabel("Mark task incomplete")).toBeVisible({ timeout: 5000 });
   });
 
   test("open detail panel", async ({ page }) => {
@@ -53,7 +53,7 @@ test.describe("Inbox view", () => {
 
     const dialog = page.getByRole("dialog", { name: "Task details" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByDisplayValue("Detail test task")).toBeVisible();
+    await expect(dialog.getByRole("textbox").first()).toHaveValue("Detail test task");
   });
 
   test("delete task from detail panel", async ({ page }) => {

@@ -7,10 +7,7 @@ import { toDateKey } from "../../utils/format-date.js";
 export function buildJarPool(tasks: Task[]): Task[] {
   const today = toDateKey(new Date());
   return tasks.filter(
-    (t) =>
-      t.status === "pending" &&
-      t.dueDate !== null &&
-      t.dueDate.split("T")[0] <= today,
+    (t) => t.status === "pending" && t.dueDate !== null && t.dueDate.split("T")[0] <= today,
   );
 }
 

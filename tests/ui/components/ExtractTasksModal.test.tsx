@@ -292,10 +292,7 @@ describe("ExtractTasksModal", () => {
     fireEvent.click(screen.getByText(/Create 1 Task$/));
 
     await waitFor(() => {
-      expect(onCreateTasks).toHaveBeenCalledWith(
-        expect.any(Array),
-        "p1",
-      );
+      expect(onCreateTasks).toHaveBeenCalledWith(expect.any(Array), "p1");
     });
   });
 

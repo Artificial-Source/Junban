@@ -48,14 +48,21 @@ export function useBulkActions(multiSelectedIds: Set<string>, clearSelection: ()
       },
       refreshTasks,
     }),
-    [completeTask, deleteTask, updateTask, createTask, completeManyTasks, deleteManyTasks, updateManyTasks, refreshTasks],
+    [
+      completeTask,
+      deleteTask,
+      updateTask,
+      createTask,
+      completeManyTasks,
+      deleteManyTasks,
+      updateManyTasks,
+      refreshTasks,
+    ],
   );
 
   const handleBulkComplete = async () => {
     const ids = Array.from(multiSelectedIds);
-    const tasks = ids
-      .map((id) => state.tasks.find((t) => t.id === id))
-      .filter(Boolean) as Task[];
+    const tasks = ids.map((id) => state.tasks.find((t) => t.id === id)).filter(Boolean) as Task[];
     if (tasks.length > 0) {
       await undoManager.perform(createBulkCompleteAction(actionApi, tasks));
     } else {
@@ -67,9 +74,7 @@ export function useBulkActions(multiSelectedIds: Set<string>, clearSelection: ()
 
   const handleBulkDelete = async () => {
     const ids = Array.from(multiSelectedIds);
-    const tasks = ids
-      .map((id) => state.tasks.find((t) => t.id === id))
-      .filter(Boolean) as Task[];
+    const tasks = ids.map((id) => state.tasks.find((t) => t.id === id)).filter(Boolean) as Task[];
     if (tasks.length > 0) {
       await undoManager.perform(createBulkDeleteAction(actionApi, tasks));
     } else {
@@ -81,9 +86,7 @@ export function useBulkActions(multiSelectedIds: Set<string>, clearSelection: ()
 
   const handleBulkMoveToProject = async (projectId: string | null) => {
     const ids = Array.from(multiSelectedIds);
-    const tasks = ids
-      .map((id) => state.tasks.find((t) => t.id === id))
-      .filter(Boolean) as Task[];
+    const tasks = ids.map((id) => state.tasks.find((t) => t.id === id)).filter(Boolean) as Task[];
     if (tasks.length > 0) {
       await undoManager.perform(createBulkUpdateAction(actionApi, tasks, { projectId }));
     } else {

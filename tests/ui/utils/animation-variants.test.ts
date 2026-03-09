@@ -144,7 +144,9 @@ describe("animation-variants", () => {
     it("springBouncy uses spring type with lower damping", () => {
       const t = springBouncy as Record<string, unknown>;
       expect(t.type).toBe("spring");
-      expect((t.damping as number)).toBeLessThan((springSnappy as Record<string, unknown>).damping as number);
+      expect(t.damping as number).toBeLessThan(
+        (springSnappy as Record<string, unknown>).damping as number,
+      );
     });
   });
 });

@@ -30,7 +30,10 @@ interface ExtractTasksModalProps {
 
 const PRIORITY_LABELS: Record<number, { label: string; className: string }> = {
   1: { label: "P1", className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
-  2: { label: "P2", className: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
+  2: {
+    label: "P2",
+    className: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+  },
   3: { label: "P3", className: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
   4: { label: "P4", className: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400" },
 };
@@ -91,7 +94,9 @@ export function ExtractTasksModal({
   const [text, setText] = useState("");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [extractedTasks, setExtractedTasks] = useState<ExtractedTaskItem[]>([]);
-  const [phase, setPhase] = useState<"input" | "loading" | "preview" | "success" | "error">("input");
+  const [phase, setPhase] = useState<"input" | "loading" | "preview" | "success" | "error">(
+    "input",
+  );
   const [errorMessage, setErrorMessage] = useState("");
   const [createdCount, setCreatedCount] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -109,7 +114,9 @@ export function ExtractTasksModal({
         const tasks = extractTasksFromText(text);
         if (tasks.length === 0) {
           setPhase("error");
-          setErrorMessage("No actionable tasks found. Try pasting text with bullet points or action items.");
+          setErrorMessage(
+            "No actionable tasks found. Try pasting text with bullet points or action items.",
+          );
           return;
         }
         setExtractedTasks(tasks);
@@ -128,9 +135,7 @@ export function ExtractTasksModal({
   }, []);
 
   const handleEditTitle = useCallback((index: number, newTitle: string) => {
-    setExtractedTasks((prev) =>
-      prev.map((t, i) => (i === index ? { ...t, title: newTitle } : t)),
-    );
+    setExtractedTasks((prev) => prev.map((t, i) => (i === index ? { ...t, title: newTitle } : t)));
   }, []);
 
   const handleCreateSelected = useCallback(async () => {
@@ -214,14 +219,19 @@ export function ExtractTasksModal({
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder={"Paste your text here...\n\nExample:\n- Review the Q4 report\n- Send follow-up email to Sarah\n- Schedule team standup for next week"}
+                placeholder={
+                  "Paste your text here...\n\nExample:\n- Review the Q4 report\n- Send follow-up email to Sarah\n- Schedule team standup for next week"
+                }
                 className="w-full h-48 px-3 py-2 text-sm bg-surface-secondary border border-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-accent text-on-surface placeholder-on-surface-muted"
                 autoFocus
               />
 
               {/* Project selector */}
               <div className="flex items-center gap-2">
-                <label htmlFor="extract-project" className="text-sm text-on-surface-muted whitespace-nowrap">
+                <label
+                  htmlFor="extract-project"
+                  className="text-sm text-on-surface-muted whitespace-nowrap"
+                >
                   Assign to project:
                 </label>
                 <select
@@ -270,7 +280,8 @@ export function ExtractTasksModal({
           {phase === "preview" && (
             <div className="space-y-4">
               <p className="text-sm text-on-surface-muted">
-                Found {extractedTasks.length} task{extractedTasks.length !== 1 ? "s" : ""}. Uncheck any you don't want to create.
+                Found {extractedTasks.length} task{extractedTasks.length !== 1 ? "s" : ""}. Uncheck
+                any you don't want to create.
               </p>
 
               <div className="space-y-2 max-h-64 overflow-auto">
@@ -305,9 +316,7 @@ export function ExtractTasksModal({
                           </span>
                         )}
                         {task.dueDate && (
-                          <span className="text-xs text-on-surface-muted">
-                            {task.dueDate}
-                          </span>
+                          <span className="text-xs text-on-surface-muted">{task.dueDate}</span>
                         )}
                         {task.assigneeHint && (
                           <span className="text-xs text-on-surface-muted">

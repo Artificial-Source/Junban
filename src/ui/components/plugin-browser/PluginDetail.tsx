@@ -1,10 +1,4 @@
-import {
-  Download,
-  Trash2,
-  Loader2,
-  ExternalLink,
-  Shield,
-} from "lucide-react";
+import { Download, Trash2, Loader2, ExternalLink, Shield } from "lucide-react";
 import { getGradient, formatDownloads } from "../PluginCard.js";
 import { PluginSettings } from "../PluginCard.js";
 import type { BrowserPlugin } from "./plugin-browser-types.js";

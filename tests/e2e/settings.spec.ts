@@ -312,8 +312,8 @@ test.describe("Features settings tab", () => {
     const content = settingsContent(page);
     // Each feature has a toggle button that's a small rounded-full button
     const toggleButtons = content.locator("button.rounded-full.bg-accent");
-    // All 9 should be enabled (bg-accent)
-    await expect(toggleButtons).toHaveCount(9);
+    // All 13 should be enabled (bg-accent)
+    await expect(toggleButtons).toHaveCount(13);
   });
 
   test("toggling a feature off changes its visual state", async ({ page }) => {
@@ -449,9 +449,7 @@ test.describe("About settings tab", () => {
     // The About tab should show some content — scroll to ensure visibility
     const content = settingsContent(page);
     // Look for any distinctive About tab content
-    await expect(
-      content.getByText("About").first(),
-    ).toBeVisible({ timeout: 5000 });
+    await expect(content.getByText("About").first()).toBeVisible({ timeout: 5000 });
   });
 });
 

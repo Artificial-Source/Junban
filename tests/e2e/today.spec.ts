@@ -1,10 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  setupPage,
-  createTaskViaApi,
-  navigateTo,
-  localDateKey,
-} from "./helpers.js";
+import { setupPage, createTaskViaApi, navigateTo, localDateKey } from "./helpers.js";
 
 test.describe("Today view", () => {
   test.beforeEach(async ({ page }) => {
@@ -73,9 +68,9 @@ test.describe("Today view", () => {
 
     const input = page.getByPlaceholder(/Add a task/i);
     await input.click();
-    await input.fill("Auto-today task");
+    await input.fill("Quick errand for now");
     await input.press("Enter");
 
-    await expect(page.getByText("Auto-today task")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Quick errand for now")).toBeVisible({ timeout: 5000 });
   });
 });

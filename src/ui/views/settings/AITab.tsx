@@ -178,7 +178,9 @@ export function AITab() {
                     {currentProvider?.optionalApiKey && !currentProvider?.needsApiKey && (
                       <span className="font-normal text-on-surface-muted ml-1">(optional)</span>
                     )}
-                    {config?.hasApiKey && <span className="font-normal text-success ml-2">Set</span>}
+                    {config?.hasApiKey && (
+                      <span className="font-normal text-success ml-2">Set</span>
+                    )}
                   </label>
                   <input
                     type="password"

@@ -41,93 +41,119 @@ export function registerMcpResources(server: McpServer, services: AppServices): 
 
   // --- Static resources ---
 
-  server.registerResource("pending_tasks", "saydo://tasks/pending", { description: "All pending tasks", mimeType: "application/json" }, async () => {
-    const tasks = await taskService.list({ status: "pending" });
-    return {
-      contents: [
-        {
-          uri: "saydo://tasks/pending",
-          mimeType: "application/json",
-          text: JSON.stringify(tasks.map(summarizeTask)),
-        },
-      ],
-    };
-  });
+  server.registerResource(
+    "pending_tasks",
+    "saydo://tasks/pending",
+    { description: "All pending tasks", mimeType: "application/json" },
+    async () => {
+      const tasks = await taskService.list({ status: "pending" });
+      return {
+        contents: [
+          {
+            uri: "saydo://tasks/pending",
+            mimeType: "application/json",
+            text: JSON.stringify(tasks.map(summarizeTask)),
+          },
+        ],
+      };
+    },
+  );
 
-  server.registerResource("today_tasks", "saydo://tasks/today", { description: "Tasks due today (including overdue)", mimeType: "application/json" }, async () => {
-    const today = new Date().toISOString().split("T")[0];
-    const pending = await taskService.list({ status: "pending" });
-    const todayTasks = pending.filter(
-      (t) => t.dueDate && t.dueDate.split("T")[0] <= today,
-    );
-    return {
-      contents: [
-        {
-          uri: "saydo://tasks/today",
-          mimeType: "application/json",
-          text: JSON.stringify(todayTasks.map(summarizeTask)),
-        },
-      ],
-    };
-  });
+  server.registerResource(
+    "today_tasks",
+    "saydo://tasks/today",
+    { description: "Tasks due today (including overdue)", mimeType: "application/json" },
+    async () => {
+      const today = new Date().toISOString().split("T")[0];
+      const pending = await taskService.list({ status: "pending" });
+      const todayTasks = pending.filter((t) => t.dueDate && t.dueDate.split("T")[0] <= today);
+      return {
+        contents: [
+          {
+            uri: "saydo://tasks/today",
+            mimeType: "application/json",
+            text: JSON.stringify(todayTasks.map(summarizeTask)),
+          },
+        ],
+      };
+    },
+  );
 
-  server.registerResource("overdue_tasks", "saydo://tasks/overdue", { description: "Overdue tasks (due before today)", mimeType: "application/json" }, async () => {
-    const today = new Date().toISOString().split("T")[0];
-    const pending = await taskService.list({ status: "pending" });
-    const overdue = pending.filter(
-      (t) => t.dueDate && t.dueDate.split("T")[0] < today,
-    );
-    return {
-      contents: [
-        {
-          uri: "saydo://tasks/overdue",
-          mimeType: "application/json",
-          text: JSON.stringify(overdue.map(summarizeTask)),
-        },
-      ],
-    };
-  });
+  server.registerResource(
+    "overdue_tasks",
+    "saydo://tasks/overdue",
+    { description: "Overdue tasks (due before today)", mimeType: "application/json" },
+    async () => {
+      const today = new Date().toISOString().split("T")[0];
+      const pending = await taskService.list({ status: "pending" });
+      const overdue = pending.filter((t) => t.dueDate && t.dueDate.split("T")[0] < today);
+      return {
+        contents: [
+          {
+            uri: "saydo://tasks/overdue",
+            mimeType: "application/json",
+            text: JSON.stringify(overdue.map(summarizeTask)),
+          },
+        ],
+      };
+    },
+  );
 
-  server.registerResource("all_projects", "saydo://projects", { description: "All non-archived projects", mimeType: "application/json" }, async () => {
-    const projects = await projectService.list();
-    const active = projects.filter((p) => !p.archived);
-    return {
-      contents: [
-        {
-          uri: "saydo://projects",
-          mimeType: "application/json",
-          text: JSON.stringify(active),
-        },
-      ],
-    };
-  });
+  server.registerResource(
+    "all_projects",
+    "saydo://projects",
+    { description: "All non-archived projects", mimeType: "application/json" },
+    async () => {
+      const projects = await projectService.list();
+      const active = projects.filter((p) => !p.archived);
+      return {
+        contents: [
+          {
+            uri: "saydo://projects",
+            mimeType: "application/json",
+            text: JSON.stringify(active),
+          },
+        ],
+      };
+    },
+  );
 
-  server.registerResource("all_tags", "saydo://tags", { description: "All tags", mimeType: "application/json" }, async () => {
-    const tags = await tagService.list();
-    return {
-      contents: [
-        {
-          uri: "saydo://tags",
-          mimeType: "application/json",
-          text: JSON.stringify(tags),
-        },
-      ],
-    };
-  });
+  server.registerResource(
+    "all_tags",
+    "saydo://tags",
+    { description: "All tags", mimeType: "application/json" },
+    async () => {
+      const tags = await tagService.list();
+      return {
+        contents: [
+          {
+            uri: "saydo://tags",
+            mimeType: "application/json",
+            text: JSON.stringify(tags),
+          },
+        ],
+      };
+    },
+  );
 
-  server.registerResource("today_stats", "saydo://stats/today", { description: "Today's productivity stats and current streak", mimeType: "application/json" }, async () => {
-    const todayStat = await statsService.getToday();
-    const streak = await statsService.getCurrentStreak();
-    return {
-      contents: [
-        {
-          uri: "saydo://stats/today",
-          mimeType: "application/json",
-          text: JSON.stringify({ ...todayStat, currentStreak: streak }),
-        },
-      ],
-    };
-  });
+  server.registerResource(
+    "today_stats",
+    "saydo://stats/today",
+    { description: "Today's productivity stats and current streak", mimeType: "application/json" },
+    async () => {
+      const todayStat = await statsService.getToday();
+      const streak = await statsService.getCurrentStreak();
+      return {
+        contents: [
+          {
+            uri: "saydo://stats/today",
+            mimeType: "application/json",
+            text: JSON.stringify({ ...todayStat, currentStreak: streak }),
+          },
+        ],
+      };
+    },
+  );
 
   // --- Dynamic resource templates ---
 

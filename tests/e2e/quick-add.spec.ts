@@ -10,7 +10,7 @@ test.describe("Quick add modal", () => {
     await page.keyboard.press("Control+n");
 
     await expect(page.getByText("Quick Add")).toBeVisible({ timeout: 5000 });
-    await expect(page.getByPlaceholder(/Add a task/i)).toBeFocused();
+    await expect(page.getByPlaceholder(/Add a task/i).last()).toBeFocused();
   });
 
   test("creates task and closes", async ({ page }) => {

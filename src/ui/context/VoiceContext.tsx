@@ -181,7 +181,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   const speak = useCallback(
     async (text: string) => {
-      log.debug("speak() called", { provider: ttsProvider?.id, enabled: settings.ttsEnabled, textLen: text.length });
+      log.debug("speak() called", {
+        provider: ttsProvider?.id,
+        enabled: settings.ttsEnabled,
+        textLen: text.length,
+      });
       if (!ttsProvider || !settings.ttsEnabled) {
         log.debug("speak() skipped — no provider or TTS disabled");
         return;

@@ -1,10 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  setupPage,
-  createTaskViaApi,
-  navigateTo,
-  localDateKey,
-} from "./helpers.js";
+import { setupPage, createTaskViaApi, navigateTo, localDateKey } from "./helpers.js";
 
 test.describe("Upcoming view", () => {
   test.beforeEach(async ({ page }) => {

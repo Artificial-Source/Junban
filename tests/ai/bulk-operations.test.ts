@@ -31,13 +31,18 @@ describe("bulk_create_tasks", () => {
   });
 
   it("creates multiple tasks at once", async () => {
-    const result = await exec(registry, "bulk_create_tasks", {
-      tasks: [
-        { title: "Buy milk" },
-        { title: "Buy eggs", priority: 2 },
-        { title: "Buy bread", tags: ["groceries"] },
-      ],
-    }, ctx);
+    const result = await exec(
+      registry,
+      "bulk_create_tasks",
+      {
+        tasks: [
+          { title: "Buy milk" },
+          { title: "Buy eggs", priority: 2 },
+          { title: "Buy bread", tags: ["groceries"] },
+        ],
+      },
+      ctx,
+    );
 
     expect(result.success).toBe(true);
     expect(result.count).toBe(3);
@@ -48,17 +53,22 @@ describe("bulk_create_tasks", () => {
   });
 
   it("creates tasks with all optional fields", async () => {
-    const result = await exec(registry, "bulk_create_tasks", {
-      tasks: [
-        {
-          title: "Complex task",
-          priority: 1,
-          dueDate: "2026-03-01",
-          tags: ["work", "urgent"],
-          estimatedMinutes: 60,
-        },
-      ],
-    }, ctx);
+    const result = await exec(
+      registry,
+      "bulk_create_tasks",
+      {
+        tasks: [
+          {
+            title: "Complex task",
+            priority: 1,
+            dueDate: "2026-03-01",
+            tags: ["work", "urgent"],
+            estimatedMinutes: 60,
+          },
+        ],
+      },
+      ctx,
+    );
 
     expect(result.success).toBe(true);
     expect(result.count).toBe(1);
@@ -67,9 +77,14 @@ describe("bulk_create_tasks", () => {
   });
 
   it("creates a single task", async () => {
-    const result = await exec(registry, "bulk_create_tasks", {
-      tasks: [{ title: "Solo task" }],
-    }, ctx);
+    const result = await exec(
+      registry,
+      "bulk_create_tasks",
+      {
+        tasks: [{ title: "Solo task" }],
+      },
+      ctx,
+    );
 
     expect(result.success).toBe(true);
     expect(result.count).toBe(1);
@@ -95,12 +110,43 @@ describe("bulk_complete_tasks", () => {
   });
 
   it("completes multiple tasks by ID", async () => {
-    const t1 = await taskService.create({ title: "Task 1", priority: null, dueDate: null, dueTime: false, tags: [], projectId: null, recurrence: null, remindAt: null, estimatedMinutes: null, deadline: null, isSomeday: false, sectionId: null });
-    const t2 = await taskService.create({ title: "Task 2", priority: null, dueDate: null, dueTime: false, tags: [], projectId: null, recurrence: null, remindAt: null, estimatedMinutes: null, deadline: null, isSomeday: false, sectionId: null });
+    const t1 = await taskService.create({
+      title: "Task 1",
+      priority: null,
+      dueDate: null,
+      dueTime: false,
+      tags: [],
+      projectId: null,
+      recurrence: null,
+      remindAt: null,
+      estimatedMinutes: null,
+      deadline: null,
+      isSomeday: false,
+      sectionId: null,
+    });
+    const t2 = await taskService.create({
+      title: "Task 2",
+      priority: null,
+      dueDate: null,
+      dueTime: false,
+      tags: [],
+      projectId: null,
+      recurrence: null,
+      remindAt: null,
+      estimatedMinutes: null,
+      deadline: null,
+      isSomeday: false,
+      sectionId: null,
+    });
 
-    const result = await exec(registry, "bulk_complete_tasks", {
-      taskIds: [t1.id, t2.id],
-    }, ctx);
+    const result = await exec(
+      registry,
+      "bulk_complete_tasks",
+      {
+        taskIds: [t1.id, t2.id],
+      },
+      ctx,
+    );
 
     expect(result.success).toBe(true);
     expect(result.count).toBe(2);
@@ -110,11 +156,29 @@ describe("bulk_complete_tasks", () => {
   });
 
   it("completes a single task", async () => {
-    const t = await taskService.create({ title: "Only task", priority: null, dueDate: null, dueTime: false, tags: [], projectId: null, recurrence: null, remindAt: null, estimatedMinutes: null, deadline: null, isSomeday: false, sectionId: null });
+    const t = await taskService.create({
+      title: "Only task",
+      priority: null,
+      dueDate: null,
+      dueTime: false,
+      tags: [],
+      projectId: null,
+      recurrence: null,
+      remindAt: null,
+      estimatedMinutes: null,
+      deadline: null,
+      isSomeday: false,
+      sectionId: null,
+    });
 
-    const result = await exec(registry, "bulk_complete_tasks", {
-      taskIds: [t.id],
-    }, ctx);
+    const result = await exec(
+      registry,
+      "bulk_complete_tasks",
+      {
+        taskIds: [t.id],
+      },
+      ctx,
+    );
 
     expect(result.success).toBe(true);
     expect(result.count).toBe(1);
@@ -140,13 +204,44 @@ describe("bulk_update_tasks", () => {
   });
 
   it("updates priority on multiple tasks", async () => {
-    const t1 = await taskService.create({ title: "Task A", priority: null, dueDate: null, dueTime: false, tags: [], projectId: null, recurrence: null, remindAt: null, estimatedMinutes: null, deadline: null, isSomeday: false, sectionId: null });
-    const t2 = await taskService.create({ title: "Task B", priority: null, dueDate: null, dueTime: false, tags: [], projectId: null, recurrence: null, remindAt: null, estimatedMinutes: null, deadline: null, isSomeday: false, sectionId: null });
+    const t1 = await taskService.create({
+      title: "Task A",
+      priority: null,
+      dueDate: null,
+      dueTime: false,
+      tags: [],
+      projectId: null,
+      recurrence: null,
+      remindAt: null,
+      estimatedMinutes: null,
+      deadline: null,
+      isSomeday: false,
+      sectionId: null,
+    });
+    const t2 = await taskService.create({
+      title: "Task B",
+      priority: null,
+      dueDate: null,
+      dueTime: false,
+      tags: [],
+      projectId: null,
+      recurrence: null,
+      remindAt: null,
+      estimatedMinutes: null,
+      deadline: null,
+      isSomeday: false,
+      sectionId: null,
+    });
 
-    const result = await exec(registry, "bulk_update_tasks", {
-      taskIds: [t1.id, t2.id],
-      changes: { priority: 1 },
-    }, ctx);
+    const result = await exec(
+      registry,
+      "bulk_update_tasks",
+      {
+        taskIds: [t1.id, t2.id],
+        changes: { priority: 1 },
+      },
+      ctx,
+    );
 
     expect(result.success).toBe(true);
     expect(result.count).toBe(2);
@@ -160,25 +255,74 @@ describe("bulk_update_tasks", () => {
   });
 
   it("updates tags on multiple tasks", async () => {
-    const t1 = await taskService.create({ title: "Tag me 1", priority: null, dueDate: null, dueTime: false, tags: [], projectId: null, recurrence: null, remindAt: null, estimatedMinutes: null, deadline: null, isSomeday: false, sectionId: null });
-    const t2 = await taskService.create({ title: "Tag me 2", priority: null, dueDate: null, dueTime: false, tags: [], projectId: null, recurrence: null, remindAt: null, estimatedMinutes: null, deadline: null, isSomeday: false, sectionId: null });
+    const t1 = await taskService.create({
+      title: "Tag me 1",
+      priority: null,
+      dueDate: null,
+      dueTime: false,
+      tags: [],
+      projectId: null,
+      recurrence: null,
+      remindAt: null,
+      estimatedMinutes: null,
+      deadline: null,
+      isSomeday: false,
+      sectionId: null,
+    });
+    const t2 = await taskService.create({
+      title: "Tag me 2",
+      priority: null,
+      dueDate: null,
+      dueTime: false,
+      tags: [],
+      projectId: null,
+      recurrence: null,
+      remindAt: null,
+      estimatedMinutes: null,
+      deadline: null,
+      isSomeday: false,
+      sectionId: null,
+    });
 
-    const result = await exec(registry, "bulk_update_tasks", {
-      taskIds: [t1.id, t2.id],
-      changes: { tags: ["important", "work"] },
-    }, ctx);
+    const result = await exec(
+      registry,
+      "bulk_update_tasks",
+      {
+        taskIds: [t1.id, t2.id],
+        changes: { tags: ["important", "work"] },
+      },
+      ctx,
+    );
 
     expect(result.success).toBe(true);
     expect(result.count).toBe(2);
   });
 
   it("updates due date on a single task", async () => {
-    const t = await taskService.create({ title: "Due soon", priority: null, dueDate: null, dueTime: false, tags: [], projectId: null, recurrence: null, remindAt: null, estimatedMinutes: null, deadline: null, isSomeday: false, sectionId: null });
+    const t = await taskService.create({
+      title: "Due soon",
+      priority: null,
+      dueDate: null,
+      dueTime: false,
+      tags: [],
+      projectId: null,
+      recurrence: null,
+      remindAt: null,
+      estimatedMinutes: null,
+      deadline: null,
+      isSomeday: false,
+      sectionId: null,
+    });
 
-    const result = await exec(registry, "bulk_update_tasks", {
-      taskIds: [t.id],
-      changes: { dueDate: "2026-03-15" },
-    }, ctx);
+    const result = await exec(
+      registry,
+      "bulk_update_tasks",
+      {
+        taskIds: [t.id],
+        changes: { dueDate: "2026-03-15" },
+      },
+      ctx,
+    );
 
     expect(result.success).toBe(true);
     expect(result.count).toBe(1);

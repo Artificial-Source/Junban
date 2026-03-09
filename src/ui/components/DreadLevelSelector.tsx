@@ -85,19 +85,12 @@ export function DreadLevelSelector({ value, onChange, compact = false }: DreadLe
             aria-checked={value === level}
             aria-label={`${info.label} (${level} of 5)`}
             onClick={() => handleClick(level)}
-            className={`rounded-md transition-all duration-150 ${
-              compact ? "p-0.5" : "p-1"
-            } ${
-              isActive
-                ? "opacity-100 scale-110"
-                : "opacity-30 hover:opacity-60"
+            className={`rounded-md transition-all duration-150 ${compact ? "p-0.5" : "p-1"} ${
+              isActive ? "opacity-100 scale-110" : "opacity-30 hover:opacity-60"
             }`}
             title={info.label}
           >
-            <FrogIcon
-              size={compact ? 14 : 18}
-              color={isActive ? info.fill : "currentColor"}
-            />
+            <FrogIcon size={compact ? 14 : 18} color={isActive ? info.fill : "currentColor"} />
           </button>
         );
       })}

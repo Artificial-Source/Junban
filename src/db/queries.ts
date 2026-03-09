@@ -284,8 +284,7 @@ export function createQueries(db: BaseSQLiteDatabase<"sync", any, typeof schema>
         .all(),
 
     // ── Task Relations ────────────────────────────────
-    listTaskRelations: () =>
-      db.select().from(schema.taskRelations).all(),
+    listTaskRelations: () => db.select().from(schema.taskRelations).all(),
 
     getTaskRelations: (taskId: string) =>
       db

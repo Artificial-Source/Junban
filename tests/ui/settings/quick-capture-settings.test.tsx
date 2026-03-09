@@ -119,7 +119,10 @@ describe("Quick Capture Settings", () => {
     fireEvent.click(screen.getByText("Reset"));
 
     await waitFor(() => {
-      expect(api.setAppSetting).toHaveBeenCalledWith("quick_capture_hotkey", "CmdOrCtrl+Shift+Space");
+      expect(api.setAppSetting).toHaveBeenCalledWith(
+        "quick_capture_hotkey",
+        "CmdOrCtrl+Shift+Space",
+      );
     });
   });
 

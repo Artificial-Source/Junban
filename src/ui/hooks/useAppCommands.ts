@@ -88,7 +88,11 @@ export function useAppCommands(
         callback: () => themeManager.setTheme("dark"),
       },
       { id: "ai-chat-toggle", name: "Toggle AI Chat", callback: () => handleNavigate("ai-chat") },
-      { id: "nav-dopamine-menu", name: "Quick Wins / Dopamine Menu", callback: () => handleNavigate("dopamine-menu") },
+      {
+        id: "nav-dopamine-menu",
+        name: "Quick Wins / Dopamine Menu",
+        callback: () => handleNavigate("dopamine-menu"),
+      },
       { id: "focus-mode", name: "Enter Focus Mode", callback: () => setFocusModeOpen(true) },
       ...(setQuickAddOpen
         ? [{ id: "quick-add-task", name: "Quick Add Task", callback: () => setQuickAddOpen(true) }]
@@ -99,7 +103,13 @@ export function useAppCommands(
         callback: () => setTemplateSelectorOpen(true),
       },
       ...(setExtractTasksOpen
-        ? [{ id: "extract-tasks-from-text", name: "Extract tasks from text", callback: () => setExtractTasksOpen(true) }]
+        ? [
+            {
+              id: "extract-tasks-from-text",
+              name: "Extract tasks from text",
+              callback: () => setExtractTasksOpen(true),
+            },
+          ]
         : []),
     ];
 

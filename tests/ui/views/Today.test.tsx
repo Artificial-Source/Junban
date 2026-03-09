@@ -191,9 +191,7 @@ describe("Today", () => {
   });
 
   it("hides workload capacity bar when no estimated minutes", () => {
-    const tasks = [
-      makeTask({ id: "t1", title: "Task 1" }),
-    ];
+    const tasks = [makeTask({ id: "t1", title: "Task 1" })];
     render(<Today {...defaultProps} tasks={tasks} />);
     expect(screen.queryByText(/planned/)).toBeNull();
   });
@@ -209,7 +207,12 @@ describe("Today", () => {
 
   it("includes overdue tasks in capacity calculation", () => {
     const tasks = [
-      makeTask({ id: "t-overdue", title: "Overdue", dueDate: `${yesterday}T10:00:00.000Z`, estimatedMinutes: 120 }),
+      makeTask({
+        id: "t-overdue",
+        title: "Overdue",
+        dueDate: `${yesterday}T10:00:00.000Z`,
+        estimatedMinutes: 120,
+      }),
       makeTask({ id: "t-today", title: "Today", estimatedMinutes: 60 }),
     ];
     render(<Today {...defaultProps} tasks={tasks} />);

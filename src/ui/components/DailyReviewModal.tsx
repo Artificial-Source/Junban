@@ -25,12 +25,7 @@ function formatDuration(minutes: number): string {
   return `${h}h ${m}m`;
 }
 
-export function DailyReviewModal({
-  open,
-  onComplete,
-  tasks,
-  onUpdateTask,
-}: DailyReviewModalProps) {
+export function DailyReviewModal({ open, onComplete, tasks, onUpdateTask }: DailyReviewModalProps) {
   const [step, setStep] = useState(0);
 
   const today = toDateKey(new Date());
@@ -68,7 +63,8 @@ export function DailyReviewModal({
   );
 
   const todayTotal = completedToday.length + pendingToday.length;
-  const completionRate = todayTotal > 0 ? Math.round((completedToday.length / todayTotal) * 100) : 0;
+  const completionRate =
+    todayTotal > 0 ? Math.round((completedToday.length / todayTotal) * 100) : 0;
 
   const handleMoveToTomorrow = useCallback(
     (id: string) => {
@@ -177,7 +173,9 @@ export function DailyReviewModal({
                 </p>
               )}
             </div>
-            <div className={`text-center text-sm font-medium ${heavy ? "text-warning" : "text-accent"}`}>
+            <div
+              className={`text-center text-sm font-medium ${heavy ? "text-warning" : "text-accent"}`}
+            >
               {heavy ? "Heavy day ahead — consider trimming" : "Looks manageable"}
             </div>
             {tomorrowTasks.length > 0 && (
@@ -200,9 +198,7 @@ export function DailyReviewModal({
         return (
           <div className="text-center py-4">
             {completedToday.length > 0 && (
-              <p className="text-lg font-semibold text-on-surface mb-2">
-                Great work today!
-              </p>
+              <p className="text-lg font-semibold text-on-surface mb-2">Great work today!</p>
             )}
             <p className="text-sm text-on-surface-muted">
               {completedToday.length} {completedToday.length === 1 ? "task" : "tasks"} completed

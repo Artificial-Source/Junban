@@ -1,10 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  setupPage,
-  createProjectViaApi,
-  createTaskViaApi,
-  completeTaskViaApi,
-} from "./helpers.js";
+import { setupPage, createProjectViaApi, createTaskViaApi, completeTaskViaApi } from "./helpers.js";
 
 test.describe("Project view", () => {
   test.beforeEach(async ({ page }) => {
@@ -13,10 +8,10 @@ test.describe("Project view", () => {
 
   test("create project via modal", async ({ page }) => {
     // Click the add project button in sidebar
-    await page.getByRole("button", { name: "Add project" }).click();
+    await page.getByRole("button", { name: "New project" }).click();
 
     // Fill in the project name
-    const nameInput = page.getByPlaceholder("Project name");
+    const nameInput = page.getByPlaceholder("My project");
     await nameInput.fill("Test Project");
     await page.getByRole("button", { name: "Create" }).click();
 
@@ -29,7 +24,7 @@ test.describe("Project view", () => {
     await page.reload();
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
-    await expect(page.getByText("Sidebar Project")).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Sidebar Project/ })).toBeVisible();
   });
 
   test("add tasks to project", async ({ page }) => {
@@ -41,7 +36,7 @@ test.describe("Project view", () => {
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
     // Navigate to the project
-    await page.getByText("Task Project").click();
+    await page.getByRole("button", { name: /^Task Project/ }).click();
 
     await expect(page.getByText("Project task 1")).toBeVisible({ timeout: 5000 });
     await expect(page.getByText("Project task 2")).toBeVisible();
@@ -55,7 +50,7 @@ test.describe("Project view", () => {
     await page.reload();
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
-    await page.getByText("Count Project").click();
+    await page.getByRole("button", { name: /^Count Project/ }).click();
 
     await expect(page.getByText("2 tasks")).toBeVisible({ timeout: 5000 });
   });
@@ -69,7 +64,7 @@ test.describe("Project view", () => {
     await page.reload();
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
-    await page.getByText("Ring Project").click();
+    await page.getByRole("button", { name: /^Ring Project/ }).click();
 
     // Completion ring should show (SVG circle element)
     await expect(page.locator("svg circle").first()).toBeVisible({ timeout: 5000 });
@@ -83,7 +78,7 @@ test.describe("Project view", () => {
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
     // Navigate to the empty project
-    await page.getByText("Empty Project").click();
+    await page.getByRole("button", { name: /^Empty Project/ }).click();
 
     // Should show "0 tasks" or an empty state message
     await expect(page.getByText("0 tasks")).toBeVisible({ timeout: 5000 });

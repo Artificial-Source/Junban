@@ -81,13 +81,14 @@ export function AIChatPanel({
     setLastKnownMessageCount(messages.length);
   }, [messages.length]);
 
-  const { voice, voiceCall, vad, handleVoiceResult, ttsAvailable, showCallButton } =
-    useAIChatVoice({
+  const { voice, voiceCall, vad, handleVoiceResult, ttsAvailable, showCallButton } = useAIChatVoice(
+    {
       isStreaming,
       messages,
       sendMessage,
       setVoiceCallMode,
-    });
+    },
+  );
 
   const handleSubmit = useCallback(
     (text: string) => {
@@ -222,9 +223,17 @@ export function AIChatPanel({
   const PanelWrapper = reducedMotion ? "aside" : motion.aside;
   const panelMotionProps = reducedMotion
     ? {}
-    : { variants: slideInRight, initial: "initial" as const, animate: "animate" as const, exit: "exit" as const };
+    : {
+        variants: slideInRight,
+        initial: "initial" as const,
+        animate: "animate" as const,
+        exit: "exit" as const,
+      };
   return (
-    <PanelWrapper className="w-full h-full md:w-80 md:h-auto border-l-0 md:border-l border-border flex flex-col bg-surface" {...panelMotionProps}>
+    <PanelWrapper
+      className="w-full h-full md:w-80 md:h-auto border-l-0 md:border-l border-border flex flex-col bg-surface"
+      {...panelMotionProps}
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <h3 className="font-semibold text-sm text-on-surface flex items-center gap-2">

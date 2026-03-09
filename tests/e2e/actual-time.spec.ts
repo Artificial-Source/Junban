@@ -34,8 +34,8 @@ test.describe("Actual Time Tracking (V2-14)", () => {
 
     await openTaskDetail(page, "Persist Actual");
 
-    // Fill in actual minutes
-    const input = page.getByRole("spinbutton");
+    // Fill in actual minutes (last spinbutton is the actual time input)
+    const input = page.getByRole("spinbutton").last();
     await input.fill("45");
     // Blur to trigger save
     await input.blur();
@@ -46,7 +46,7 @@ test.describe("Actual Time Tracking (V2-14)", () => {
     await openTaskDetail(page, "Persist Actual");
 
     // Assert the value persisted
-    await expect(page.getByRole("spinbutton")).toHaveValue("45");
+    await expect(page.getByRole("spinbutton").last()).toHaveValue("45");
   });
 
   test("stats shows estimation accuracy", async ({ page }) => {

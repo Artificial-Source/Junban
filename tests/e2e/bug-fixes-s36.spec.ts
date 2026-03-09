@@ -232,8 +232,8 @@ test.describe("Right-click context menu on tasks", () => {
     const menu = page.getByRole("menu");
     await expect(menu).toBeVisible({ timeout: 3000 });
 
-    // "Move to project" should appear when projects exist
-    await expect(menu.getByRole("menuitem", { name: "Move to project" })).toBeVisible();
+    // "Move to..." should appear when projects exist
+    await expect(menu.getByRole("menuitem", { name: "Move to..." })).toBeVisible();
   });
 
   test("context menu closes on Escape", async ({ page }) => {
@@ -281,10 +281,12 @@ test.describe("Right-click context menu on tasks", () => {
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
     // Project sidebar button includes task count ("Work 1"), so use text match
-    await page.locator('button', { hasText: 'Work' }).filter({ has: page.locator('text=Work') }).first().click();
-    await expect(
-      page.getByRole("heading", { name: "Work", exact: true, level: 1 }),
-    ).toBeVisible();
+    await page
+      .locator("button", { hasText: "Work" })
+      .filter({ has: page.locator("text=Work") })
+      .first()
+      .click();
+    await expect(page.getByRole("heading", { name: "Work", exact: true, level: 1 })).toBeVisible();
 
     const taskItem = page.getByText("Project context task").first();
     await taskItem.click({ button: "right" });

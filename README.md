@@ -6,6 +6,67 @@ Local-first. No accounts. No tracking. Your data stays on your machine.
 
 Built by the [AI Strategic Forum (ASF)](https://github.com/ASF-GROUP) community.
 
+<p align="center">
+  <img src="screenshots/today-light.png" alt="Today view — light mode" width="700" />
+</p>
+
+<p align="center">
+  <img src="screenshots/today-dark.png" alt="Today view — dark mode" width="700" />
+</p>
+
+<details>
+<summary>More screenshots</summary>
+
+### Inbox
+<p align="center">
+  <img src="screenshots/inbox-light.png" alt="Inbox — light mode" width="700" />
+</p>
+<p align="center">
+  <img src="screenshots/inbox-dark.png" alt="Inbox — dark mode" width="700" />
+</p>
+
+### Upcoming
+<p align="center">
+  <img src="screenshots/upcoming-dark.png" alt="Upcoming view" width="700" />
+</p>
+
+### Calendar
+<p align="center">
+  <img src="screenshots/calendar-dark.png" alt="Calendar view" width="700" />
+</p>
+
+### Eisenhower Matrix
+<p align="center">
+  <img src="screenshots/matrix-dark.png" alt="Eisenhower Matrix" width="700" />
+</p>
+
+### AI Chat
+<p align="center">
+  <img src="screenshots/ai-chat-dark.png" alt="AI Chat sidebar" width="700" />
+</p>
+
+### Command Palette
+<p align="center">
+  <img src="screenshots/command-palette-dark.png" alt="Command Palette" width="700" />
+</p>
+
+### Task Detail
+<p align="center">
+  <img src="screenshots/task-detail-dark.png" alt="Task detail panel" width="700" />
+</p>
+
+### Settings
+<p align="center">
+  <img src="screenshots/settings-dark.png" alt="Settings — Appearance" width="700" />
+</p>
+
+### Stats
+<p align="center">
+  <img src="screenshots/stats-dark.png" alt="Stats dashboard" width="700" />
+</p>
+
+</details>
+
 ## Why Saydo
 
 Most task managers are either too simple (no AI, no extensibility) or too complex (enterprise bloat). Saydo sits in the middle:

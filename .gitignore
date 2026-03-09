@@ -62,6 +62,7 @@ docs/development/
 .cache/
 *.tsbuildinfo
 
-# Dev / E2E test screenshots
+# Dev / E2E test screenshots (except README screenshots)
 *.png
+!screenshots/*.png
 .claude/worktrees/

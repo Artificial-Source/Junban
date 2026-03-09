@@ -575,7 +575,7 @@ describe("Sidebar", () => {
 
   it("individual nav items are draggable via SortableNavItem wrapper", () => {
     render(<Sidebar {...defaultProps} />);
-    const sortable = screen.getByTestId("sortable-context");
+    screen.getByTestId("sortable-context");
     // Each nav item is wrapped in a div (SortableNavItem) — check Inbox button has a parent div wrapper
     const inboxBtn = screen.getByText("Inbox").closest("button")!;
     const wrapper = inboxBtn.parentElement;

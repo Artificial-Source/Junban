@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";

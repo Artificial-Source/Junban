@@ -4,7 +4,6 @@ import {
   createProjectViaApi,
   createTaskViaApi,
   completeTaskViaApi,
-  navigateTo,
 } from "./helpers.js";
 
 test.describe("Project view", () => {

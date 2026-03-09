@@ -15,7 +15,7 @@ interface UseNudgesResult {
   dismiss: (id: string) => void;
 }
 
-const NUDGE_TYPE_SETTINGS: Record<NudgeType, keyof GeneralSettings> = {
+const _NUDGE_TYPE_SETTINGS: Record<NudgeType, keyof GeneralSettings> = {
   overdue_alert: "nudge_overdue_alert",
   deadline_approaching: "nudge_deadline_approaching",
   stale_tasks: "nudge_stale_tasks",

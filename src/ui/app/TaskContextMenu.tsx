@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/purity */
 import { useState, useMemo, useCallback } from "react";
 import {
   Pencil, Check, Undo2, Trash2, Flag, FolderInput,

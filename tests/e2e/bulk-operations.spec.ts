@@ -63,7 +63,7 @@ test.describe("Bulk operations", () => {
   });
 
   test("bulk move to project", async ({ page }) => {
-    const project = await createProjectViaApi(page, "Bulk Target");
+    const _project = await createProjectViaApi(page, "Bulk Target");
     await createTaskViaApi(page, "Move task A");
     await createTaskViaApi(page, "Move task B");
     await page.reload();

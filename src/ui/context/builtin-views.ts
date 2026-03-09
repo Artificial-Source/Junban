@@ -9,7 +9,7 @@ import React from "react";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let cachedTimeblockingProxy: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let cachedComponents = new Map<string, (props: any) => any>();
+const cachedComponents = new Map<string, (props: any) => any>();
 
 /**
  * Resolve a built-in React component for a plugin view.

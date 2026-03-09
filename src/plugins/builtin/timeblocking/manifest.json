@@ -1,0 +1,48 @@
+{
+  "id": "timeblocking",
+  "icon": "📅",
+  "name": "Timeblocking",
+  "version": "1.0.0",
+  "author": "ASF",
+  "description": "Akiflow-inspired time blocking — drag tasks onto a day/week timeline to schedule your day.",
+  "main": "index.ts",
+  "minSaydoVersion": "1.0.0",
+  "permissions": ["task:read", "task:write", "commands", "ui:view", "ui:status", "storage", "settings"],
+  "settings": [
+    {
+      "id": "defaultDurationMinutes",
+      "name": "Default Block Duration",
+      "type": "select",
+      "default": "30",
+      "options": ["15", "30", "45", "60", "90", "120"]
+    },
+    {
+      "id": "workDayStart",
+      "name": "Work Day Start",
+      "type": "select",
+      "default": "09:00",
+      "options": ["06:00", "07:00", "08:00", "09:00", "10:00"]
+    },
+    {
+      "id": "workDayEnd",
+      "name": "Work Day End",
+      "type": "select",
+      "default": "17:00",
+      "options": ["16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00"]
+    },
+    {
+      "id": "gridIntervalMinutes",
+      "name": "Grid Interval",
+      "type": "select",
+      "default": "30",
+      "options": ["15", "30", "60"]
+    },
+    {
+      "id": "weekStartDay",
+      "name": "Week Start Day",
+      "type": "select",
+      "default": "monday",
+      "options": ["sunday", "monday"]
+    }
+  ]
+}

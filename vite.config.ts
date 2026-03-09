@@ -684,16 +684,18 @@ function apiPlugin() {
         next();
       });
 
-      // Initialize plugins on first request
-      let pluginsInitialized = false;
+      // Initialize plugins on first request (promise lock prevents double-init)
+      let pluginInitPromise: Promise<void> | null = null;
       async function ensurePlugins() {
-        if (!pluginsInitialized) {
-          const svc = await getServices();
-          // Use Vite's SSR module loader so .ts plugin files resolve correctly
-          svc.pluginLoader.setModuleLoader((path) => server.ssrLoadModule(path));
-          await svc.pluginLoader.loadAll();
-          pluginsInitialized = true;
+        if (!pluginInitPromise) {
+          pluginInitPromise = (async () => {
+            const svc = await getServices();
+            // Use Vite's SSR module loader so .ts plugin files resolve correctly
+            svc.pluginLoader.setModuleLoader((path) => server.ssrLoadModule(path));
+            await svc.pluginLoader.loadAll();
+          })();
         }
+        await pluginInitPromise;
       }
 
       // GET /api/plugins — list all discovered plugins
@@ -935,6 +937,107 @@ function apiPlugin() {
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "Internal server error";
           res.statusCode = message.includes("Invalid JSON") ? 400 : 500;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: message }));
+        }
+      });
+
+      // POST /api/plugins/timeblocking/rpc — RPC bridge for timeblocking plugin store
+      server.middlewares.use(async (req, res, next) => {
+        if (req.url !== "/api/plugins/timeblocking/rpc" || req.method !== "POST") return next();
+
+        try {
+          const svc = await getServices();
+          await ensurePlugins();
+          const body = await parseBody(req);
+          const { method, args } = body as { method: string; args: unknown[] };
+
+          // Get the timeblocking plugin instance
+          const plugin = svc.pluginLoader
+            .getAll()
+            .find((p) => p.manifest.id === "timeblocking");
+          if (!plugin || !plugin.enabled) {
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "Timeblocking plugin not loaded" }));
+            return;
+          }
+
+          // Access the store from the plugin instance
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const instance = plugin.instance as any;
+          const store = instance?.store;
+          if (!store) {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "Timeblocking store not available" }));
+            return;
+          }
+
+          // Route method calls
+          let result: unknown;
+          switch (method) {
+            case "listBlocks":
+              result = store.listBlocks(args[0] as string | undefined);
+              break;
+            case "listBlocksInRange":
+              result = store.listBlocksInRange(args[0] as string, args[1] as string);
+              break;
+            case "listSlots":
+              result = store.listSlots(args[0] as string | undefined);
+              break;
+            case "listSlotsInRange":
+              result = store.listSlotsInRange(args[0] as string, args[1] as string);
+              break;
+            case "createBlock":
+              result = await store.createBlock(args[0]);
+              break;
+            case "updateBlock":
+              result = await store.updateBlock(args[0] as string, args[1]);
+              break;
+            case "deleteBlock":
+              result = await store.deleteBlock(args[0] as string);
+              break;
+            case "createSlot":
+              result = await store.createSlot(args[0]);
+              break;
+            case "addTaskToSlot":
+              result = await store.addTaskToSlot(args[0] as string, args[1] as string);
+              break;
+            case "reorderSlotTasks":
+              result = await store.reorderSlotTasks(args[0] as string, args[1] as string[]);
+              break;
+            case "getSettings": {
+              const key = args[0] as string;
+              const definitions = plugin.manifest.settings ?? [];
+              const val = svc.settingsManager.get("timeblocking", key, definitions);
+              result = val;
+              break;
+            }
+            case "setSettings": {
+              const sKey = args[0] as string;
+              const sVal = args[1] as string;
+              await svc.settingsManager.set("timeblocking", sKey, sVal);
+              result = { ok: true };
+              break;
+            }
+            case "listTasks": {
+              const tasks = await svc.taskService.list();
+              result = tasks;
+              break;
+            }
+            default:
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: `Unknown method: ${method}` }));
+              return;
+          }
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ result: result ?? null }));
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Internal server error";
+          res.statusCode = 500;
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ error: message }));
         }

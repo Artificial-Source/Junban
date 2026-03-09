@@ -5,6 +5,7 @@ import {
   type StructuredContent,
 } from "../components/StructuredContentRenderer.js";
 import type { ViewInfo } from "../api/plugins.js";
+import { resolveBuiltinComponent } from "../context/builtin-views.js";
 
 interface PluginErrorBoundaryProps {
   pluginId: string;
@@ -55,9 +56,36 @@ interface PluginViewProps {
 
 export function PluginView({ viewId, viewInfo }: PluginViewProps) {
   const [content, setContent] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [resolvedComponent, setResolvedComponent] = useState<((props: any) => any) | null>(null);
   const mountedRef = useRef(true);
   const isStructured = viewInfo?.contentType === "structured";
   const isReact = viewInfo?.contentType === "react";
+
+  // Lazily resolve built-in React components that couldn't be serialized via REST.
+  // Retries on failure since the plugin server may not be ready yet.
+  useEffect(() => {
+    if (!isReact || viewInfo?.component) return;
+    if (!viewInfo?.pluginId) return;
+
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout>;
+
+    const attempt = () => {
+      resolveBuiltinComponent(viewInfo.pluginId).then((component) => {
+        if (!cancelled && component) {
+          setResolvedComponent(() => component);
+        } else if (!cancelled && !component) {
+          retryTimer = setTimeout(attempt, 1000);
+        }
+      }).catch(() => {
+        if (!cancelled) retryTimer = setTimeout(attempt, 1000);
+      });
+    };
+    attempt();
+
+    return () => { cancelled = true; clearTimeout(retryTimer); };
+  }, [isReact, viewInfo?.component, viewInfo?.pluginId]);
 
   useEffect(() => {
     // Don't poll for content when rendering a React component
@@ -88,13 +116,19 @@ export function PluginView({ viewId, viewInfo }: PluginViewProps) {
     await api.executePluginCommand(commandId);
   }, []);
 
-  if (isReact && viewInfo?.component) {
-    const PluginComponent = viewInfo.component;
+  // React view with component from Tauri mode or resolved built-in
+  const PluginComponent = viewInfo?.component ?? resolvedComponent;
+  if (isReact && PluginComponent) {
     return (
-      <PluginErrorBoundary pluginId={viewInfo.pluginId}>
+      <PluginErrorBoundary pluginId={viewInfo!.pluginId}>
         <PluginComponent />
       </PluginErrorBoundary>
     );
+  }
+
+  // React view still loading its component
+  if (isReact && !PluginComponent) {
+    return <div className="p-6 text-on-surface-muted text-sm">Loading plugin view...</div>;
   }
 
   if (isStructured) {

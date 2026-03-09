@@ -67,6 +67,20 @@ Built by the [AI Strategic Forum (ASF)](https://github.com/ASF-GROUP) community.
 
 ---
 
+## Download
+
+> **v1.0.0** — Desktop app for Windows, macOS, and Linux.
+
+| Platform | Download |
+|----------|----------|
+| **Windows** | [`.msi` installer](https://github.com/ASF-GROUP/Saydo/releases/latest/download/ASF.Saydo_1.0.0_x64-setup.msi) |
+| **macOS (Apple Silicon)** | [`.dmg`](https://github.com/ASF-GROUP/Saydo/releases/latest/download/ASF.Saydo_1.0.0_aarch64.dmg) |
+| **macOS (Intel)** | [`.dmg`](https://github.com/ASF-GROUP/Saydo/releases/latest/download/ASF.Saydo_1.0.0_x64.dmg) |
+| **Linux (Debian/Ubuntu)** | [`.deb`](https://github.com/ASF-GROUP/Saydo/releases/latest/download/asf-saydo_1.0.0_amd64.deb) |
+| **Linux (AppImage)** | [`.AppImage`](https://github.com/ASF-GROUP/Saydo/releases/latest/download/asf-saydo_1.0.0_amd64.AppImage) |
+
+Or browse all releases: [**GitHub Releases**](https://github.com/ASF-GROUP/Saydo/releases)
+
 ## Why Saydo
 
 Most task managers are either too simple (no AI, no extensibility) or too complex (enterprise bloat). Saydo sits in the middle:
@@ -77,25 +91,18 @@ Most task managers are either too simple (no AI, no extensibility) or too comple
 - **Extend with plugins** — describe what you want to Claude or ChatGPT, drop the file in a folder, done
 - **Own your data** — SQLite or Markdown files. Export anytime. No vendor lock-in
 
-## Quick start
+## Development
+
+Want to run from source or contribute? See the [local setup guide](docs/guides/SETUP.md), or:
 
 ```bash
 git clone https://github.com/ASF-GROUP/Saydo.git && cd Saydo
 pnpm install
 cp .env.example .env
 mkdir -p data && pnpm db:migrate
-pnpm dev
+pnpm dev          # Web app at http://localhost:5173
+pnpm tauri:dev    # Desktop app (requires Rust + Tauri CLI)
 ```
-
-Open `http://localhost:5173`. Type a task. Press Enter.
-
-For the desktop app (requires Rust + Tauri CLI):
-
-```bash
-pnpm tauri:dev
-```
-
-> See the [local setup guide](docs/guides/SETUP.md) for details.
 
 ## Features
 

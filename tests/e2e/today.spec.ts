@@ -33,7 +33,7 @@ test.describe("Today view", () => {
 
     await navigateTo(page, "Today");
 
-    await expect(page.getByText("Overdue task")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Overdue task", { exact: true })).toBeVisible({ timeout: 5000 });
     await expect(page.getByText(/overdue/i).first()).toBeVisible();
   });
 
@@ -68,9 +68,9 @@ test.describe("Today view", () => {
 
     const input = page.getByPlaceholder(/Add a task/i);
     await input.click();
-    await input.fill("Quick errand for now");
+    await input.fill("Quick errand soon");
     await input.press("Enter");
 
-    await expect(page.getByText("Quick errand for now")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Quick errand soon")).toBeVisible({ timeout: 5000 });
   });
 });

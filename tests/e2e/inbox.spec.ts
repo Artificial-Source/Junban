@@ -64,13 +64,12 @@ test.describe("Inbox view", () => {
     await openTaskDetail(page, "Task to delete");
 
     const dialog = page.getByRole("dialog", { name: "Task details" });
-    await dialog.getByLabel(/delete/i).click();
+    await dialog.getByRole("button", { name: "Delete task" }).click();
 
-    // Confirm deletion if a confirmation dialog appears
-    const confirmBtn = page.getByRole("button", { name: "Delete" });
-    if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await confirmBtn.click();
-    }
+    // Confirm deletion in the confirmation dialog
+    const confirmDialog = page.getByRole("dialog", { name: "Delete task" });
+    await expect(confirmDialog).toBeVisible({ timeout: 3000 });
+    await confirmDialog.getByRole("button", { name: "Delete" }).click();
 
     await expect(page.getByText("Task to delete")).not.toBeVisible({ timeout: 5000 });
   });

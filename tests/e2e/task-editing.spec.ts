@@ -57,8 +57,8 @@ test.describe("Task editing", () => {
 
     const dialog = page.getByRole("dialog", { name: "Task details" });
 
-    // Click the due date area to set it
-    await dialog.getByText("Due date").first().click();
+    // Click the "No date" button to open date picker
+    await dialog.getByRole("button", { name: "No date" }).click();
 
     // Click "Today" quick option in date picker (scope to dialog to avoid sidebar "Today" button)
     const todayBtn = dialog.getByRole("button", { name: "Today" });
@@ -83,13 +83,12 @@ test.describe("Task editing", () => {
     const dialog = page.getByRole("dialog", { name: "Task details" });
 
     // Click delete button
-    await dialog.getByLabel(/delete/i).click();
+    await dialog.getByRole("button", { name: "Delete task" }).click();
 
-    // Handle confirmation dialog if present
-    const confirmBtn = page.getByRole("button", { name: "Delete" });
-    if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await confirmBtn.click();
-    }
+    // Confirm deletion in the confirmation dialog
+    const confirmDialog = page.getByRole("dialog", { name: "Delete task" });
+    await expect(confirmDialog).toBeVisible({ timeout: 3000 });
+    await confirmDialog.getByRole("button", { name: "Delete" }).click();
 
     // Task should be removed
     await expect(page.getByText("Task to delete")).not.toBeVisible({ timeout: 5000 });

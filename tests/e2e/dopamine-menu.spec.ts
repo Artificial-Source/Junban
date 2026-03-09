@@ -20,6 +20,9 @@ test.describe("Dopamine Menu (Quick Wins)", () => {
       priority: 1,
     });
 
+    await page.reload();
+    await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
+
     await page.getByRole("button", { name: "Quick Wins", exact: true }).click();
     await expect(page.getByText("Quick 5min task")).toBeVisible({ timeout: 5000 });
     await expect(page.getByText("Easy p4 task")).toBeVisible();

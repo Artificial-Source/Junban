@@ -13,10 +13,10 @@ test.describe("Project view", () => {
     // Fill in the project name
     const nameInput = page.getByPlaceholder("My project");
     await nameInput.fill("Test Project");
-    await page.getByRole("button", { name: "Create" }).click();
+    await page.getByRole("button", { name: "Add", exact: true }).click();
 
     // Project should appear in sidebar
-    await expect(page.getByText("Test Project")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Test Project").first()).toBeVisible({ timeout: 5000 });
   });
 
   test("project shows in sidebar", async ({ page }) => {
@@ -68,8 +68,8 @@ test.describe("Project view", () => {
 
     // Completion ring should show (SVG circle element)
     await expect(page.locator("svg circle").first()).toBeVisible({ timeout: 5000 });
-    // Should show "1 of 2" or similar completion text
-    await expect(page.getByText(/1\s*of\s*2/).first()).toBeVisible();
+    // Should show "1/2" completion text
+    await expect(page.getByText("1/2").first()).toBeVisible();
   });
 
   test("empty project shows empty state", async ({ page }) => {

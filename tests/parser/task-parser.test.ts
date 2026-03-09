@@ -139,4 +139,29 @@ describe("parseTask", () => {
     // deadline should be Friday, dueDate should be tomorrow
     expect(result.deadline!.getDay()).toBe(5);
   });
+
+  it("parses ~30m duration", () => {
+    const result = parseTask("write tests ~30m");
+    expect(result.title).toBe("write tests");
+    expect(result.estimatedMinutes).toBe(30);
+  });
+
+  it("parses ~2h duration", () => {
+    const result = parseTask("deep work ~2h #focus");
+    expect(result.title).toBe("deep work");
+    expect(result.estimatedMinutes).toBe(120);
+    expect(result.tags).toEqual(["focus"]);
+  });
+
+  it("parses ~1h30m compound duration", () => {
+    const result = parseTask("meeting ~1h30m p2");
+    expect(result.title).toBe("meeting");
+    expect(result.estimatedMinutes).toBe(90);
+    expect(result.priority).toBe(2);
+  });
+
+  it("returns null estimatedMinutes when no duration", () => {
+    const result = parseTask("buy milk");
+    expect(result.estimatedMinutes).toBeNull();
+  });
 });

@@ -5,6 +5,7 @@ import {
   extractProject,
   extractRecurrence,
   extractDeadline,
+  extractDuration,
 } from "../../src/parser/grammar.js";
 
 describe("extractPriority", () => {
@@ -291,5 +292,55 @@ describe("extractDeadline", () => {
     const result = extractDeadline("buy milk tomorrow");
     expect(result.deadlineText).toBeNull();
     expect(result.text).toBe("buy milk tomorrow");
+  });
+});
+
+describe("extractDuration", () => {
+  it("extracts ~30m", () => {
+    const result = extractDuration("write report ~30m");
+    expect(result.estimatedMinutes).toBe(30);
+    expect(result.text).toBe("write report");
+  });
+
+  it("extracts ~1h", () => {
+    const result = extractDuration("meeting ~1h");
+    expect(result.estimatedMinutes).toBe(60);
+    expect(result.text).toBe("meeting");
+  });
+
+  it("extracts ~1.5h", () => {
+    const result = extractDuration("deep work ~1.5h");
+    expect(result.estimatedMinutes).toBe(90);
+    expect(result.text).toBe("deep work");
+  });
+
+  it("extracts compound ~1h30m", () => {
+    const result = extractDuration("project planning ~1h30m");
+    expect(result.estimatedMinutes).toBe(90);
+    expect(result.text).toBe("project planning");
+  });
+
+  it("extracts ~2h15m", () => {
+    const result = extractDuration("workshop ~2h15m");
+    expect(result.estimatedMinutes).toBe(135);
+    expect(result.text).toBe("workshop");
+  });
+
+  it("returns null when no duration present", () => {
+    const result = extractDuration("buy milk");
+    expect(result.estimatedMinutes).toBeNull();
+    expect(result.text).toBe("buy milk");
+  });
+
+  it("does not match without ~ prefix", () => {
+    const result = extractDuration("took 30m to arrive");
+    expect(result.estimatedMinutes).toBeNull();
+    expect(result.text).toBe("took 30m to arrive");
+  });
+
+  it("handles duration at the beginning", () => {
+    const result = extractDuration("~45m code review");
+    expect(result.estimatedMinutes).toBe(45);
+    expect(result.text).toBe("code review");
   });
 });

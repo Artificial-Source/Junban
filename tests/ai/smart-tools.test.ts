@@ -44,7 +44,7 @@ describe("Default tool registry includes smart tools", () => {
     expect(names).toContain("bulk_create_tasks");
     expect(names).toContain("bulk_complete_tasks");
     expect(names).toContain("bulk_update_tasks");
-    expect(registry.size).toBe(34);
+    expect(registry.size).toBe(36);
   });
 });
 

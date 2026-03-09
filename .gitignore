@@ -64,3 +64,4 @@ docs/development/
 
 # Dev / E2E test screenshots
 *.png
+.claude/worktrees/

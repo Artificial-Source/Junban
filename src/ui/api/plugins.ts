@@ -42,6 +42,9 @@ export interface PanelInfo {
   title: string;
   icon: string;
   content: string;
+  contentType?: "text" | "react";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  component?: (props: any) => any;
 }
 
 export interface ViewInfo {
@@ -49,8 +52,10 @@ export interface ViewInfo {
   name: string;
   icon: string;
   slot: "navigation" | "tools" | "workspace";
-  contentType: "text" | "structured";
+  contentType: "text" | "structured" | "react";
   pluginId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  component?: (props: any) => any;
 }
 
 export interface StorePluginInfo {
@@ -153,6 +158,8 @@ export async function getPluginPanels(): Promise<PanelInfo[]> {
       title: panel.title,
       icon: panel.icon,
       content: svc.uiRegistry.getPanelContent(panel.id) ?? "",
+      contentType: panel.contentType,
+      component: panel.component,
     }));
   }
   const res = await fetch(`${BASE}/plugins/ui/panels`);
@@ -169,6 +176,7 @@ export async function getPluginViews(): Promise<ViewInfo[]> {
       slot: view.slot,
       contentType: view.contentType,
       pluginId: view.pluginId,
+      component: view.component,
     }));
   }
   const res = await fetch(`${BASE}/plugins/ui/views`);

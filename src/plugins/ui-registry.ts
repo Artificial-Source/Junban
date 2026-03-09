@@ -1,14 +1,19 @@
+/** A React component type — generic to avoid React import in shared module. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type PluginComponent = (props: any) => any;
+
 export interface PanelRegistration {
   id: string;
   pluginId: string;
   title: string;
   icon: string;
-  component?: unknown;
+  contentType?: "text" | "react";
+  component?: PluginComponent;
   getContent?: () => string;
 }
 
 export type ViewSlot = "navigation" | "tools" | "workspace";
-export type ViewContentType = "text" | "structured";
+export type ViewContentType = "text" | "structured" | "react";
 
 export interface ViewRegistration {
   id: string;
@@ -17,7 +22,7 @@ export interface ViewRegistration {
   icon: string;
   slot: ViewSlot;
   contentType: ViewContentType;
-  component?: unknown;
+  component?: PluginComponent;
   getContent?: () => string;
 }
 

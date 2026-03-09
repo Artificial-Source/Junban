@@ -1,10 +1,11 @@
 import type { Permission, SettingDefinition } from "./types.js";
+import { createLogger } from "../utils/logger.js";
 import type { CreateTaskInput } from "../core/types.js";
 import type { TaskService } from "../core/tasks.js";
 import type { EventBus, EventName, EventCallback } from "../core/event-bus.js";
 import type { PluginSettingsManager } from "./settings.js";
 import type { CommandRegistry } from "./command-registry.js";
-import type { UIRegistry, ViewSlot, ViewContentType } from "./ui-registry.js";
+import type { UIRegistry, ViewSlot, ViewContentType, PluginComponent } from "./ui-registry.js";
 import type { LLMProviderRegistry } from "../ai/provider/registry.js";
 import type { ToolRegistry } from "../ai/tools/registry.js";
 import type { LLMProviderPlugin } from "../ai/provider/interface.js";
@@ -92,8 +93,20 @@ export function createPluginAPI(options: PluginAPIOptions) {
 
     ui: {
       addSidebarPanel: hasPermission("ui:panel")
-        ? (panel: { id: string; title: string; icon: string; component?: unknown; render?: () => string }) => {
-            uiRegistry.addPanel({ ...panel, pluginId, getContent: panel.render });
+        ? (panel: {
+            id: string;
+            title: string;
+            icon: string;
+            contentType?: "text" | "react";
+            component?: PluginComponent;
+            render?: () => string;
+          }) => {
+            uiRegistry.addPanel({
+              ...panel,
+              pluginId,
+              contentType: panel.contentType ?? "text",
+              getContent: panel.render,
+            });
           }
         : undefined,
       addView: hasPermission("ui:view")
@@ -103,7 +116,7 @@ export function createPluginAPI(options: PluginAPIOptions) {
             icon: string;
             slot?: ViewSlot;
             contentType?: ViewContentType;
-            component?: unknown;
+            component?: PluginComponent;
             render?: () => string;
           }) => {
             uiRegistry.addView({
@@ -136,6 +149,20 @@ export function createPluginAPI(options: PluginAPIOptions) {
           },
           keys: async (): Promise<string[]> => {
             return settingsManager.keys(pluginId);
+          },
+        }
+      : undefined,
+
+    network: hasPermission("network")
+      ? {
+          fetch: async (url: string, init?: RequestInit): Promise<Response> => {
+            const networkLogger = createLogger("plugin-network");
+            networkLogger.info("Plugin fetch request", {
+              pluginId,
+              url,
+              method: init?.method ?? "GET",
+            });
+            return fetch(url, init);
           },
         }
       : undefined,

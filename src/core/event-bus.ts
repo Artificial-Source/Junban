@@ -9,6 +9,8 @@ export interface EventMap {
   "task:complete": Task;
   "task:update": { task: Task; changes: Partial<Task> };
   "task:delete": Task;
+  "task:moved": { task: Task; fromProjectId: string | null; toProjectId: string | null };
+  "task:estimated": { task: Task; previousMinutes: number | null; newMinutes: number | null };
   "task:reorder": string[];
   "section:create": Section;
   "section:update": Section;

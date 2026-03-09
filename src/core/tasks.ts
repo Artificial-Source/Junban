@@ -173,6 +173,24 @@ export class TaskService {
     logger.debug("Task updated", { id, fields: Object.keys(fields) });
     this.eventBus?.emit("task:update", { task: updated, changes: fields });
 
+    // Emit task:moved when projectId changes
+    if ("projectId" in fields && existing.projectId !== updated.projectId) {
+      this.eventBus?.emit("task:moved", {
+        task: updated,
+        fromProjectId: existing.projectId,
+        toProjectId: updated.projectId,
+      });
+    }
+
+    // Emit task:estimated when estimatedMinutes changes
+    if ("estimatedMinutes" in fields && existing.estimatedMinutes !== updated.estimatedMinutes) {
+      this.eventBus?.emit("task:estimated", {
+        task: updated,
+        previousMinutes: existing.estimatedMinutes,
+        newMinutes: updated.estimatedMinutes,
+      });
+    }
+
     return updated;
   }
 

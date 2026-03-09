@@ -1,10 +1,52 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Component, type ReactNode, type ErrorInfo } from "react";
 import { api } from "../api/index.js";
 import {
   StructuredContentRenderer,
   type StructuredContent,
 } from "../components/StructuredContentRenderer.js";
 import type { ViewInfo } from "../api/plugins.js";
+
+interface PluginErrorBoundaryProps {
+  pluginId: string;
+  children: ReactNode;
+}
+
+interface PluginErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class PluginErrorBoundary extends Component<PluginErrorBoundaryProps, PluginErrorBoundaryState> {
+  constructor(props: PluginErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): PluginErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo): void {
+    console.error(`Plugin "${this.props.pluginId}" crashed:`, error, info.componentStack);
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return (
+        <div className="p-6 text-red-500 text-sm">
+          <p className="font-semibold">Plugin Error</p>
+          <p className="mt-1 text-on-surface-muted">
+            The plugin &quot;{this.props.pluginId}&quot; encountered an error and was disabled.
+          </p>
+          <pre className="mt-2 text-xs bg-surface-secondary p-2 rounded overflow-auto">
+            {this.state.error?.message}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 interface PluginViewProps {
   viewId: string;
@@ -15,8 +57,12 @@ export function PluginView({ viewId, viewInfo }: PluginViewProps) {
   const [content, setContent] = useState("");
   const mountedRef = useRef(true);
   const isStructured = viewInfo?.contentType === "structured";
+  const isReact = viewInfo?.contentType === "react";
 
   useEffect(() => {
+    // Don't poll for content when rendering a React component
+    if (isReact) return;
+
     mountedRef.current = true;
 
     const fetchContent = async () => {
@@ -36,11 +82,20 @@ export function PluginView({ viewId, viewInfo }: PluginViewProps) {
       mountedRef.current = false;
       clearInterval(interval);
     };
-  }, [viewId, isStructured]);
+  }, [viewId, isStructured, isReact]);
 
   const handleCommand = useCallback(async (commandId: string) => {
     await api.executePluginCommand(commandId);
   }, []);
+
+  if (isReact && viewInfo?.component) {
+    const PluginComponent = viewInfo.component;
+    return (
+      <PluginErrorBoundary pluginId={viewInfo.pluginId}>
+        <PluginComponent />
+      </PluginErrorBoundary>
+    );
+  }
 
   if (isStructured) {
     let parsed: StructuredContent | null = null;
@@ -69,3 +124,5 @@ export function PluginView({ viewId, viewInfo }: PluginViewProps) {
     </div>
   );
 }
+
+export { PluginErrorBoundary };

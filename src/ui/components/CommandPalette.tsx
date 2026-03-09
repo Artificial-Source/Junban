@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { motion } from "framer-motion";
 import { Search } from "lucide-react";
+import { AnimatedPresence } from "./AnimatedPresence.js";
+import { useReducedMotion } from "./useReducedMotion.js";
+import { scaleIn, backdrop } from "../utils/animation-variants.js";
 
 interface Command {
   id: string;
@@ -76,20 +80,30 @@ export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProp
     [filtered, selectedIndex, handleSelect, onClose],
   );
 
-  if (!isOpen) return null;
+  const reducedMotion = useReducedMotion();
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-8 md:pt-24 bg-black/50 animate-fade-in"
+    <AnimatedPresence>
+    {isOpen && (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-8 md:pt-24 bg-black/50"
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
       onClick={onClose}
+      variants={reducedMotion ? undefined : backdrop}
+      initial={reducedMotion ? undefined : "initial"}
+      animate="animate"
+      exit="exit"
     >
-      <div
-        className="w-full max-w-lg mx-3 md:mx-0 bg-surface rounded-lg shadow-2xl overflow-hidden border border-border animate-drop-fade-in"
+      <motion.div
+        className="w-full max-w-lg mx-3 md:mx-0 bg-surface rounded-lg shadow-2xl overflow-hidden border border-border"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
+        variants={reducedMotion ? undefined : scaleIn}
+        initial={reducedMotion ? undefined : "initial"}
+        animate="animate"
+        exit="exit"
       >
         <div className="flex items-center gap-3 px-4 border-b border-border">
           <Search size={16} className="text-on-surface-muted flex-shrink-0" />
@@ -144,7 +158,9 @@ export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProp
             <li className="px-4 py-2 text-sm text-on-surface-muted">No matching commands</li>
           )}
         </ul>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
+    )}
+    </AnimatedPresence>
   );
 }

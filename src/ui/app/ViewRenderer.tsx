@@ -1,3 +1,7 @@
+import { motion } from "framer-motion";
+import { AnimatedPresence } from "../components/AnimatedPresence.js";
+import { useReducedMotion } from "../components/useReducedMotion.js";
+import { crossfade } from "../utils/animation-variants.js";
 import { Inbox } from "../views/Inbox.js";
 import { Today } from "../views/Today.js";
 import { Upcoming } from "../views/Upcoming.js";
@@ -91,7 +95,11 @@ export function ViewRenderer({
   handleMoveTask,
   setSettingsOpen,
 }: ViewRendererProps) {
-  switch (currentView) {
+  const reducedMotion = useReducedMotion();
+  const viewKey = `${currentView}-${selectedProjectId ?? ""}-${selectedPluginViewId ?? ""}-${selectedFilterId ?? ""}`;
+
+  const viewContent = (() => {
+    switch (currentView) {
     case "inbox":
       return (
         <Inbox
@@ -287,4 +295,24 @@ export function ViewRenderer({
     default:
       return null;
   }
+  })();
+
+  if (reducedMotion) {
+    return <>{viewContent}</>;
+  }
+
+  return (
+    <AnimatedPresence mode="wait">
+      <motion.div
+        key={viewKey}
+        variants={crossfade}
+        initial="initial"
+        animate="animate"
+        exit="exit"
+        className="flex-1 flex flex-col"
+      >
+        {viewContent}
+      </motion.div>
+    </AnimatedPresence>
+  );
 }

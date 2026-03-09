@@ -1,4 +1,5 @@
 import React, { useCallback, useContext, useState } from "react";
+import { motion } from "framer-motion";
 import {
   DndContext,
   DragOverlay,
@@ -23,6 +24,9 @@ import { TaskItem } from "./TaskItem.js";
 import { InlineAddSubtask } from "./InlineAddSubtask.js";
 import { EmptyState } from "./EmptyState.js";
 import { BlockedTaskIdsContext } from "../context/BlockedTaskIdsContext.js";
+import { AnimatedPresence } from "./AnimatedPresence.js";
+import { useReducedMotion } from "./useReducedMotion.js";
+import { listItem, staggerContainer } from "../utils/animation-variants.js";
 
 interface ChildStats {
   children: Task[];
@@ -148,6 +152,7 @@ export function TaskList({
   const blockedTaskIds = blockedTaskIdsProp ?? blockedFromContext;
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const reducedMotion = useReducedMotion();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -237,43 +242,60 @@ export function TaskList({
       onDragCancel={handleDragCancel}
     >
       <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
-        <div role="list" aria-label="Tasks" className="space-y-0">
-          {visibleTasks.map((entry) => {
-            if (entry.showAddSubtask) {
-              return (
-                <InlineAddSubtask
-                  key={`add-subtask-${entry.task.id}`}
-                  parentId={entry.task.id}
-                  depth={entry.depth}
-                  onAdd={onAddSubtask!}
-                />
-              );
-            }
+        <motion.div
+          role="list"
+          aria-label="Tasks"
+          className="space-y-0"
+          variants={reducedMotion ? undefined : staggerContainer}
+          initial={reducedMotion ? undefined : "initial"}
+          animate="animate"
+        >
+          <AnimatedPresence>
+            {visibleTasks.map((entry) => {
+              if (entry.showAddSubtask) {
+                return (
+                  <InlineAddSubtask
+                    key={`add-subtask-${entry.task.id}`}
+                    parentId={entry.task.id}
+                    depth={entry.depth}
+                    onAdd={onAddSubtask!}
+                  />
+                );
+              }
 
-            const { task, depth } = entry;
-            const stats = childStatsMap.get(task.id);
-            return (
-              <SortableTaskItem
-                key={task.id}
-                task={task}
-                onToggle={onToggle}
-                onSelect={onSelect}
-                isSelected={selectedTaskId === task.id}
-                isMultiSelected={selectedTaskIds?.has(task.id) ?? false}
-                showCheckbox={!!isMultiSelectActive}
-                onMultiSelect={onMultiSelect}
-                depth={depth}
-                completedChildCount={stats?.completed ?? 0}
-                totalChildCount={stats?.total ?? 0}
-                expanded={expandedIds.has(task.id)}
-                onToggleExpand={handleToggleExpand}
-                onUpdateDueDate={onUpdateDueDate}
-                onContextMenu={onContextMenu}
-                isBlocked={blockedTaskIds?.has(task.id)}
-              />
-            );
-          })}
-        </div>
+              const { task, depth } = entry;
+              const stats = childStatsMap.get(task.id);
+              return (
+                <motion.div
+                  key={task.id}
+                  variants={reducedMotion ? undefined : listItem}
+                  initial={reducedMotion ? undefined : "initial"}
+                  animate="animate"
+                  exit="exit"
+                  layout={!reducedMotion}
+                >
+                  <SortableTaskItem
+                    task={task}
+                    onToggle={onToggle}
+                    onSelect={onSelect}
+                    isSelected={selectedTaskId === task.id}
+                    isMultiSelected={selectedTaskIds?.has(task.id) ?? false}
+                    showCheckbox={!!isMultiSelectActive}
+                    onMultiSelect={onMultiSelect}
+                    depth={depth}
+                    completedChildCount={stats?.completed ?? 0}
+                    totalChildCount={stats?.total ?? 0}
+                    expanded={expandedIds.has(task.id)}
+                    onToggleExpand={handleToggleExpand}
+                    onUpdateDueDate={onUpdateDueDate}
+                    onContextMenu={onContextMenu}
+                    isBlocked={blockedTaskIds?.has(task.id)}
+                  />
+                </motion.div>
+              );
+            })}
+          </AnimatedPresence>
+        </motion.div>
       </SortableContext>
       <DragOverlay>
         {activeDragTask ? (

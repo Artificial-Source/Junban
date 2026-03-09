@@ -221,6 +221,35 @@
 
 /* ── Typing shimmer indicator ────────────────────────── */
 
+/* ── Completion burst particles ────────────────────────── */
+
+@keyframes burst-out {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(var(--burst-angle)) translateX(0) scale(1);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(var(--burst-angle)) translateX(18px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--burst-angle)) translateX(24px) scale(0.3);
+  }
+}
+
+.completion-burst-particle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--burst-color);
+  transform: translate(-50%, -50%);
+  animation: burst-out 0.5s ease-out forwards;
+}
+
 .typing-shimmer {
   background: linear-gradient(
     90deg,

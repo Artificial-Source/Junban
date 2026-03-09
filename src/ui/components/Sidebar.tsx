@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, type MouseEvent as ReactMouseEvent } from "react";
+import { motion } from "framer-motion";
 import {
   KeyboardSensor,
   PointerSensor,
@@ -8,6 +9,8 @@ import {
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { ChevronLeft, ChevronRight, Inbox, Plus, Search, Settings, MessageSquare } from "lucide-react";
+import { useReducedMotion } from "./useReducedMotion.js";
+import { springGentle } from "../utils/animation-variants.js";
 import type { Project } from "../../core/types.js";
 import type { PanelInfo, ViewInfo } from "../api/index.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
@@ -203,13 +206,21 @@ export function Sidebar({
     updateSetting,
   });
 
+  const reducedMotion = useReducedMotion();
   const countMap: Record<string, number | undefined> = { inbox: inboxCount, today: todayCount };
   const isMac = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
 
+  const SidebarTag = reducedMotion ? "aside" : motion.aside;
+  const sidebarMotionProps = reducedMotion
+    ? {}
+    : { layout: true as const, transition: springGentle };
+
   return (
-    <aside aria-label="Main navigation"
-      className={`relative z-20 border-r border-border bg-surface-secondary flex flex-col transition-[width] duration-200 ${
-        collapsed ? "w-16 overflow-visible" : "w-sidebar"}`}>
+    <SidebarTag aria-label="Main navigation"
+      className={`relative z-20 border-r border-border bg-surface-secondary flex flex-col ${
+        reducedMotion ? "transition-[width] duration-200 " : ""}${
+        collapsed ? "w-16 overflow-visible" : "w-sidebar"}`}
+      {...sidebarMotionProps}>
       {/* Header */}
       <div className={`py-4 ${collapsed ? "px-2" : "px-4"}`}>
         <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"}`}>
@@ -231,10 +242,12 @@ export function Sidebar({
           )}
         </div>
         {onAddTask && (
-          <button onClick={onAddTask}
-            className={`mt-3 w-full flex items-center rounded-lg bg-accent text-white font-medium text-sm transition-colors hover:bg-accent-hover active:scale-[0.98] ${
+          <motion.button onClick={onAddTask}
+            whileHover={reducedMotion ? undefined : { scale: 1.02 }}
+            whileTap={reducedMotion ? undefined : { scale: 0.98 }}
+            className={`mt-3 w-full flex items-center rounded-lg bg-accent text-white font-medium text-sm transition-colors hover:bg-accent-hover ${
               collapsed ? "justify-center p-2" : "gap-2 px-3 py-2"}`}>
-            <Plus size={18} />{!collapsed && "Add task"}</button>
+            <Plus size={18} />{!collapsed && "Add task"}</motion.button>
         )}
         {onSearch && !collapsed && (
           <button onClick={onSearch}
@@ -307,6 +320,6 @@ export function Sidebar({
         <ContextMenu items={emptyContextMenuItems} position={emptySpaceMenu}
           onClose={() => setEmptySpaceMenu(null)} />
       )}
-    </aside>
+    </SidebarTag>
   );
 }

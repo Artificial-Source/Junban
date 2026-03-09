@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
+import { motion } from "framer-motion";
 import {
   Calendar,
-  Check,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -16,6 +16,9 @@ import { useGeneralSettings } from "../context/SettingsContext.js";
 import { DatePicker } from "./DatePicker.js";
 import { formatRecurrenceLabel } from "./RecurrencePicker.js";
 import { hexToRgba } from "../../utils/color.js";
+import { useReducedMotion } from "./useReducedMotion.js";
+import { CompletionBurst } from "./CompletionBurst.js";
+import { checkmark, springSnappy, subtlePulse } from "../utils/animation-variants.js";
 
 /** Priority → row styling: left border + optional background wash */
 const PRIORITY_ROW_STYLES: Record<number, { border: string; bg: string }> = {
@@ -119,6 +122,18 @@ export const TaskItem = React.memo(function TaskItem({
     task.tags.length > 0 || task.dueDate || task.recurrence || task.remindAt || hasDuration;
 
   // Priority-based circle colors
+  const reducedMotion = useReducedMotion();
+  const [showBurst, setShowBurst] = useState(false);
+
+  // Trigger burst on completion
+  useEffect(() => {
+    if (prevStatusRef.current === "pending" && task.status === "completed") {
+      setShowBurst(true);
+      const timer = setTimeout(() => setShowBurst(false), 600);
+      return () => clearTimeout(timer);
+    }
+  }, [task.status]);
+
   const priorityColorClass = task.priority
     ? `border-priority-${task.priority}`
     : "border-on-surface-muted";
@@ -191,7 +206,11 @@ export const TaskItem = React.memo(function TaskItem({
       )}
 
       {/* Priority-colored circle (unified checkbox + completion) */}
-      <button
+      <motion.button
+        variants={!reducedMotion && task.priority === 1 && task.status === "pending" ? subtlePulse : undefined}
+        animate="animate"
+        whileHover={reducedMotion ? undefined : { scale: 1.15 }}
+        whileTap={reducedMotion ? undefined : { scale: 0.9 }}
         onClick={(e) => {
           e.stopPropagation();
           if (showCheckbox && onMultiSelect) {
@@ -209,7 +228,7 @@ export const TaskItem = React.memo(function TaskItem({
               ? "Mark task incomplete"
               : `Complete task${priority ? ` (${priority.label})` : ""}`
         }
-        className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all duration-200 ${
+        className={`relative w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all duration-200 ${
           task.status === "completed"
             ? "bg-success border-success"
             : showCheckbox && isMultiSelected
@@ -217,11 +236,38 @@ export const TaskItem = React.memo(function TaskItem({
               : `${priorityColorClass} ${priorityHoverClass}`
         }`}
       >
-        {task.status === "completed" && <Check size={12} className="text-white" />}
-        {showCheckbox && isMultiSelected && task.status !== "completed" && (
-          <Check size={12} className="text-white" />
+        {task.status === "completed" && (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className="text-white">
+            <motion.path
+              d="M5 13l4 4L19 7"
+              stroke="currentColor"
+              strokeWidth={3}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              variants={checkmark}
+              initial={reducedMotion ? "animate" : "initial"}
+              animate="animate"
+              transition={springSnappy}
+            />
+          </svg>
         )}
-      </button>
+        {showCheckbox && isMultiSelected && task.status !== "completed" && (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className="text-white">
+            <motion.path
+              d="M5 13l4 4L19 7"
+              stroke="currentColor"
+              strokeWidth={3}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              variants={checkmark}
+              initial={reducedMotion ? "animate" : "initial"}
+              animate="animate"
+              transition={springSnappy}
+            />
+          </svg>
+        )}
+        <CompletionBurst active={showBurst} />
+      </motion.button>
       {priority && <span className="sr-only">{priority.label}</span>}
 
       {/* Content area: title + metadata */}

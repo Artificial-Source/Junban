@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { motion } from "framer-motion";
 import { X, Bot, Trash2 } from "lucide-react";
+import { useReducedMotion } from "./useReducedMotion.js";
+import { slideInRight } from "../utils/animation-variants.js";
 import { useAIContext } from "../context/AIContext.js";
 import { VoiceCallOverlay } from "./VoiceCallOverlay.js";
 import {
@@ -93,6 +96,7 @@ export function AIChatPanel({
     [sendMessage],
   );
 
+  const reducedMotion = useReducedMotion();
   const isNewMessage = messages.length > lastKnownMessageCount;
 
   // ── Not Configured State ──
@@ -215,8 +219,12 @@ export function AIChatPanel({
   }
 
   // ── Panel Mode ──
+  const PanelWrapper = reducedMotion ? "aside" : motion.aside;
+  const panelMotionProps = reducedMotion
+    ? {}
+    : { variants: slideInRight, initial: "initial" as const, animate: "animate" as const, exit: "exit" as const };
   return (
-    <aside className="w-full h-full md:w-80 md:h-auto border-l-0 md:border-l border-border flex flex-col bg-surface">
+    <PanelWrapper className="w-full h-full md:w-80 md:h-auto border-l-0 md:border-l border-border flex flex-col bg-surface" {...panelMotionProps}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <h3 className="font-semibold text-sm text-on-surface flex items-center gap-2">
@@ -323,6 +331,6 @@ export function AIChatPanel({
           showCallButton={showCallButton}
         />
       )}
-    </aside>
+    </PanelWrapper>
   );
 }

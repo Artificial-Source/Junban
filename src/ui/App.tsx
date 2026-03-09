@@ -42,6 +42,7 @@ import { api } from "./api/index.js";
 import { toDateKey } from "../utils/format-date.js";
 import { SkeletonTaskList } from "./components/Skeleton.js";
 import { QuickAddModal } from "./components/QuickAddModal.js";
+import { ExtractTasksModal } from "./components/ExtractTasksModal.js";
 import { OnboardingModal } from "./components/OnboardingModal.js";
 import { BlockedTaskIdsContext } from "./context/BlockedTaskIdsContext.js";
 import { AppProviders } from "./app/AppProviders.js";
@@ -85,6 +86,7 @@ function AppContent() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [extractTasksOpen, setExtractTasksOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [savedFilters, setSavedFilters] = useState<Array<{ id: string; name: string; query: string; color?: string }>>([]);
   const [sections, setSections] = useState<Section[]>([]);
@@ -178,6 +180,24 @@ function AppContent() {
     playSound("create");
   }, [state.tasks, createTask, playSound]);
 
+  const handleExtractedTasksCreate = useCallback(async (
+    tasks: Array<{ title: string; priority: number | null; dueDate: string | null; description: string | null }>,
+    projectId: string | null,
+  ) => {
+    for (const t of tasks) {
+      await createTask({
+        title: t.title,
+        priority: t.priority,
+        dueDate: t.dueDate,
+        dueTime: false,
+        description: t.description,
+        projectId,
+        tags: [],
+      });
+    }
+    playSound("create");
+  }, [createTask, playSound]);
+
   const handleCopyTaskLink = useCallback(async (taskId: string) => {
     const url = `${window.location.origin}${window.location.pathname}#/task/${taskId}`;
     try { await navigator.clipboard.writeText(url); showToast("Link copied to clipboard"); } catch { showToast("Could not copy link"); }
@@ -240,7 +260,7 @@ function AppContent() {
   useAppShortcuts(setCommandPaletteOpen, undo, redo, setSearchOpen, setFocusModeOpen, setQuickAddOpen, handleNavigate, featureSettings.feature_chords !== "false");
   const handleOpenSettings = useCallback(() => { setSettingsOpen(true); }, []);
   const handleOpenSettingsTab = useCallback((tab: SettingsTab) => { openSettingsTab(tab); setSettingsOpen(true); }, [openSettingsTab]);
-  const commands = useAppCommands(handleNavigate, handleOpenSettingsTab, setFocusModeOpen, setTemplateSelectorOpen, projects, pluginCommands, executeCommand, setQuickAddOpen);
+  const commands = useAppCommands(handleNavigate, handleOpenSettingsTab, setFocusModeOpen, setTemplateSelectorOpen, projects, pluginCommands, executeCommand, setQuickAddOpen, setExtractTasksOpen);
 
   // ── Task detail nav ──
   const selectedTaskIdx = selectedTask ? visibleTasks.findIndex((t) => t.id === selectedTask.id) : -1;
@@ -383,6 +403,7 @@ function AppContent() {
       <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} tasks={state.tasks} projects={projects} onSelectTask={handleSelectTask} />
       <AddProjectModal open={projectModalOpen} onClose={() => setProjectModalOpen(false)} onSubmit={handleCreateProject} projects={projects} />
       <QuickAddModal open={quickAddOpen} onClose={() => setQuickAddOpen(false)} onCreateTask={handleCreateTask} />
+      <ExtractTasksModal open={extractTasksOpen} onClose={() => setExtractTasksOpen(false)} projects={projects} onCreateTasks={handleExtractedTasksCreate} />
       <OnboardingModal open={onboardingOpen} onComplete={() => { setOnboardingOpen(false); api.setAppSetting("onboarding_completed", "true"); }} />
       {toast && <Toast message={toast.message} actionLabel={toast.actionLabel} onAction={toast.onAction} onDismiss={dismissToast} />}
       {contextMenu && contextMenuItems.length > 0 && <ContextMenu items={contextMenuItems} position={contextMenu.position} onClose={() => setContextMenu(null)} />}

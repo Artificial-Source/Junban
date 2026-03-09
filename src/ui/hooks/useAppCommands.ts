@@ -13,6 +13,7 @@ export function useAppCommands(
   pluginCommands: PluginCommandInfo[],
   executeCommand: (id: string) => void,
   setQuickAddOpen?: React.Dispatch<React.SetStateAction<boolean>>,
+  setExtractTasksOpen?: React.Dispatch<React.SetStateAction<boolean>>,
 ) {
   return useMemo(() => {
     const cmds = [
@@ -96,6 +97,9 @@ export function useAppCommands(
         name: "Create Task from Template",
         callback: () => setTemplateSelectorOpen(true),
       },
+      ...(setExtractTasksOpen
+        ? [{ id: "extract-tasks-from-text", name: "Extract tasks from text", callback: () => setExtractTasksOpen(true) }]
+        : []),
     ];
 
     for (const project of projects) {
@@ -125,5 +129,6 @@ export function useAppCommands(
     setFocusModeOpen,
     setTemplateSelectorOpen,
     setQuickAddOpen,
+    setExtractTasksOpen,
   ]);
 }

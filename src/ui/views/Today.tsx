@@ -8,6 +8,7 @@ import { CompletionRing } from "../components/CompletionRing.js";
 import { DailyPlanningModal } from "../components/DailyPlanningModal.js";
 import { DailyReviewModal } from "../components/DailyReviewModal.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
+import { TaskJar } from "../components/TaskJar.js";
 import type { Task, Project } from "../../core/types.js";
 
 interface TodayProps {
@@ -156,6 +157,7 @@ export function Today({
           </button>
         </div>
         <div className="flex items-center gap-3">
+          <TaskJar tasks={tasks} onSelectTask={onSelectTask} />
           <span className="text-sm text-on-surface-muted">
             {totalCount} {totalCount === 1 ? "task" : "tasks"}
           </span>

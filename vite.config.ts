@@ -2230,10 +2230,6 @@ export default defineConfig(({ command }) => ({
           dest: "",
         },
         {
-          src: "node_modules/@ricky0123/vad-web/dist/silero_vad.onnx",
-          dest: "",
-        },
-        {
           src: "node_modules/onnxruntime-web/dist/*.wasm",
           dest: "",
         },
@@ -2247,6 +2243,9 @@ export default defineConfig(({ command }) => ({
       // Point to the self-contained web build for browser/worker compatibility.
       "kokoro-js": path.resolve(__dirname, "node_modules/kokoro-js/dist/kokoro.web.js"),
     },
+  },
+  worker: {
+    format: "es",
   },
   build: {
     rollupOptions: {

@@ -56,6 +56,7 @@ vi.mock("lucide-react", () => {
     Link: icon("link"),
     Heart: icon("heart"),
     GripVertical: icon("grip-vertical"),
+    Zap: icon("zap"),
   };
 });
 
@@ -385,9 +386,9 @@ describe("Sidebar", () => {
 
   it("does not show 'Move to bottom' for last item", () => {
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
-    // Someday is last by default
-    const somedayBtn = screen.getByText("Someday").closest("button")!;
-    fireEvent.contextMenu(somedayBtn);
+    // Quick Wins is last by default
+    const quickWinsBtn = screen.getByText("Quick Wins").closest("button")!;
+    fireEvent.contextMenu(quickWinsBtn);
     expect(screen.queryByText("Move to bottom")).toBeNull();
   });
 

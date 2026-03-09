@@ -8,6 +8,12 @@ vi.mock("lucide-react", () => ({
   ChevronDown: (props: any) => <svg data-testid="chevron-down" {...props} />,
   ChevronRight: (props: any) => <svg data-testid="chevron-right" {...props} />,
   Calendar: (props: any) => <svg data-testid="calendar-icon" {...props} />,
+  Dices: (props: any) => <svg data-testid="dices-icon" {...props} />,
+  X: (props: any) => <svg data-testid="x-icon" {...props} />,
+}));
+
+vi.mock("../../../src/ui/components/TaskJar.js", () => ({
+  TaskJar: () => <div data-testid="task-jar" />,
 }));
 
 vi.mock("../../../src/ui/context/SettingsContext.js", () => ({

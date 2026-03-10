@@ -8,15 +8,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Inbox,
-  Plus,
-  Search,
-  Settings,
-  MessageSquare,
-} from "lucide-react";
+import { Inbox } from "lucide-react";
 import { useReducedMotion } from "./useReducedMotion.js";
 import { springGentle } from "../utils/animation-variants.js";
 import type { Project } from "../../core/types.js";
@@ -24,12 +16,10 @@ import type { PanelInfo, ViewInfo } from "../api/index.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 import { ContextMenu } from "./ContextMenu.js";
 import {
-  CollapsedTooltip,
   NAV_ITEMS,
   DEFAULT_SIDEBAR_ORDER,
   SECTION_IDS,
   NAV_FEATURE_MAP,
-  renderNavButton,
 } from "./sidebar/SidebarPrimitives.js";
 import { ViewNavigation } from "./sidebar/ViewNavigation.js";
 import {
@@ -37,6 +27,8 @@ import {
   useSidebarEmptyContextMenu,
   type ContextMenuState,
 } from "./sidebar/SidebarContextMenu.js";
+import { SidebarHeader } from "./sidebar/SidebarHeader.js";
+import { WorkspaceSection } from "./sidebar/WorkspaceSection.js";
 
 interface SidebarProps {
   currentView: string;
@@ -131,7 +123,6 @@ export function Sidebar({
       string,
       { id: string; label: string; icon: typeof Inbox | string; countKey?: "inbox" | "today" }
     >(NAV_ITEMS.map((item) => [item.id, item]));
-    // Include builtin plugin navigation views so they're sortable in the sidebar
     for (const view of pluginViews) {
       if (view.slot === "navigation" && builtinPluginIds.has(view.pluginId)) {
         const viewId = `plugin-view-${view.id}`;
@@ -170,7 +161,6 @@ export function Sidebar({
     for (const item of visibleNavItems) {
       if (!favoriteViewIds.has(item.id)) visibleIds.add(item.id);
     }
-    // Include builtin plugin navigation views as sortable sidebar items
     for (const view of viewsBySlot.navigation) {
       visibleIds.add(`plugin-view-${view.id}`);
     }
@@ -199,7 +189,6 @@ export function Sidebar({
     for (const id of DEFAULT_SIDEBAR_ORDER) {
       if (visibleIds.has(id) && !seen.has(id)) result.push(id);
     }
-    // Append plugin navigation views not yet in the saved order
     for (const view of viewsBySlot.navigation) {
       const viewId = `plugin-view-${view.id}`;
       if (!seen.has(viewId)) {
@@ -244,7 +233,6 @@ export function Sidebar({
   }, []);
 
   const handleEmptySpaceContextMenu = useCallback((e: ReactMouseEvent) => {
-    // Only trigger if clicking empty space, not on a button or interactive element
     const target = e.target as HTMLElement;
     if (target.closest("button") || target.closest("a") || target.closest("[role='menuitem']"))
       return;
@@ -279,8 +267,6 @@ export function Sidebar({
 
   const reducedMotion = useReducedMotion();
   const countMap: Record<string, number | undefined> = { inbox: inboxCount, today: todayCount };
-  const isMac =
-    typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
 
   const SidebarTag = reducedMotion ? "aside" : motion.aside;
   const sidebarMotionProps = reducedMotion
@@ -295,75 +281,13 @@ export function Sidebar({
       }${collapsed ? "w-16 overflow-visible" : "w-sidebar"}`}
       {...sidebarMotionProps}
     >
-      {/* Header */}
-      <div className={`py-4 ${collapsed ? "px-2" : "px-4"}`}>
-        <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"}`}>
-          {!collapsed ? (
-            <div className="flex items-center gap-2">
-              <img src="/images/logo.svg" alt="Saydo logo" className="w-6 h-6" />
-              <h2 className="text-base font-bold text-on-surface tracking-tight">Saydo</h2>
-            </div>
-          ) : (
-            <img src="/images/logo.svg" alt="Saydo logo" className="w-6 h-6" />
-          )}
-          {onToggleCollapsed && !collapsed && (
-            <button
-              onClick={onToggleCollapsed}
-              aria-label="Collapse sidebar"
-              className="p-1.5 rounded-md text-on-surface-muted hover:bg-surface-tertiary hover:text-on-surface transition-colors"
-            >
-              <ChevronLeft size={16} />
-            </button>
-          )}
-          {onToggleCollapsed && collapsed && (
-            <button
-              onClick={onToggleCollapsed}
-              aria-label="Expand sidebar"
-              className="group relative mt-2 p-1.5 rounded-md text-on-surface-muted hover:bg-surface-tertiary hover:text-on-surface transition-colors"
-            >
-              <ChevronRight size={16} />
-              <CollapsedTooltip visible label="Expand sidebar" />
-            </button>
-          )}
-        </div>
-        {onAddTask && (
-          <motion.button
-            onClick={onAddTask}
-            whileHover={reducedMotion ? undefined : { scale: 1.02 }}
-            whileTap={reducedMotion ? undefined : { scale: 0.98 }}
-            className={`mt-3 w-full flex items-center rounded-lg bg-accent text-white font-medium text-sm transition-colors hover:bg-accent-hover ${
-              collapsed ? "justify-center p-2" : "gap-2 px-3 py-2"
-            }`}
-          >
-            <Plus size={18} />
-            {!collapsed && "Add task"}
-          </motion.button>
-        )}
-        {onSearch && !collapsed && (
-          <button
-            onClick={onSearch}
-            className="mt-2 w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-sm text-on-surface-muted hover:bg-surface-tertiary hover:text-on-surface transition-colors"
-          >
-            <Search size={16} />
-            <span className="flex-1 text-left">Search</span>
-            <kbd className="hidden sm:inline text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-tertiary text-on-surface-muted border border-border/50">
-              {isMac ? "⌘K" : "Ctrl+K"}
-            </kbd>
-          </button>
-        )}
-        {onSearch && collapsed && (
-          <button
-            onClick={onSearch}
-            aria-label="Search"
-            className="group relative mt-2 w-full flex items-center justify-center p-2 rounded-md text-on-surface-muted hover:bg-surface-tertiary hover:text-on-surface transition-colors"
-          >
-            <Search size={16} />
-            <CollapsedTooltip visible label="Search" />
-          </button>
-        )}
-      </div>
+      <SidebarHeader
+        collapsed={collapsed}
+        onToggleCollapsed={onToggleCollapsed}
+        onAddTask={onAddTask}
+        onSearch={onSearch}
+      />
 
-      {/* Navigation */}
       <nav
         aria-label="Views"
         className={`flex-1 flex flex-col min-h-0 ${collapsed ? "px-2" : "px-3"}`}
@@ -405,57 +329,14 @@ export function Sidebar({
           />
         </div>
 
-        {/* Workspace */}
-        <div
-          className={`shrink-0 border-t border-border/60 ${collapsed ? "pt-2 pb-3" : "pt-3 pb-3"}`}
-        >
-          {!collapsed && (
-            <h3 className="text-[11px] font-semibold text-on-surface-muted uppercase tracking-wider mb-1 px-3">
-              Workspace
-            </h3>
-          )}
-          <ul className="space-y-0.5">
-            {viewsBySlot.workspace.map((view) => {
-              const isActive = currentView === "plugin-view" && selectedPluginViewId === view.id;
-              return (
-                <li key={`plugin-view-${view.id}`}>
-                  {renderNavButton(
-                    `plugin-view-${view.id}`,
-                    view.name,
-                    view.icon,
-                    isActive,
-                    () => onNavigate("plugin-view", view.id),
-                    collapsed,
-                  )}
-                </li>
-              );
-            })}
-            <li>
-              {renderNavButton(
-                "ai-chat",
-                "AI Chat",
-                MessageSquare,
-                currentView === "ai-chat",
-                () => onNavigate("ai-chat"),
-                collapsed,
-              )}
-            </li>
-            {onOpenSettings && (
-              <li>
-                <button
-                  onClick={onOpenSettings}
-                  className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface ${
-                    collapsed ? "justify-center" : "gap-3"
-                  }`}
-                >
-                  <Settings size={18} strokeWidth={1.75} />
-                  {!collapsed && "Settings"}
-                  <CollapsedTooltip visible={collapsed} label="Settings" />
-                </button>
-              </li>
-            )}
-          </ul>
-        </div>
+        <WorkspaceSection
+          collapsed={collapsed}
+          currentView={currentView}
+          selectedPluginViewId={selectedPluginViewId}
+          workspaceViews={viewsBySlot.workspace}
+          onNavigate={onNavigate}
+          onOpenSettings={onOpenSettings}
+        />
       </nav>
 
       {ctxMenu && contextMenuItems.length > 0 && (

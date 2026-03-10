@@ -1,33 +1,15 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import {
-  Calendar,
-  ChevronDown,
-  ChevronRight,
-  Clock,
-  GripVertical,
-  Pencil,
-  Repeat,
-  Bell,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 import type { Task } from "../../core/types.js";
 import { getPriority } from "../../core/priorities.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
-import { FrogIcon, getDreadLevelColor } from "./DreadLevelSelector.js";
-import { DatePicker } from "./DatePicker.js";
-import { formatRecurrenceLabel } from "./RecurrencePicker.js";
-import { hexToRgba } from "../../utils/color.js";
 import { useReducedMotion } from "./useReducedMotion.js";
 import { CompletionBurst } from "./CompletionBurst.js";
 import { checkmark, springSnappy, subtlePulse } from "../utils/animation-variants.js";
-
-/** Priority → row styling: left border + optional background wash */
-const PRIORITY_ROW_STYLES: Record<number, { border: string; bg: string }> = {
-  1: { border: "border-l-3 border-l-priority-1", bg: "bg-priority-1/[0.06]" },
-  2: { border: "border-l-3 border-l-priority-2", bg: "bg-priority-2/[0.04]" },
-  3: { border: "border-l-2 border-l-priority-3", bg: "" },
-  4: { border: "", bg: "" },
-};
+import { TaskItemContent } from "./task-item/TaskItemContent.js";
+import { TaskItemActions } from "./task-item/TaskItemActions.js";
+import { formatDuration, getRowClassName } from "./task-item/task-item-utils.js";
 
 interface TaskItemProps {
   task: Task;
@@ -74,7 +56,6 @@ export const TaskItem = React.memo(function TaskItem({
   isBlocked,
 }: TaskItemProps) {
   const { settings } = useGeneralSettings();
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [animClass, setAnimClass] = useState("");
   const prevStatusRef = useRef(task.status);
 
@@ -111,16 +92,7 @@ export const TaskItem = React.memo(function TaskItem({
 
   const durationEnabled = settings.feature_duration !== "false";
   const hasDuration = durationEnabled && task.estimatedMinutes != null && task.estimatedMinutes > 0;
-  const formattedDuration = hasDuration
-    ? task.estimatedMinutes! < 60
-      ? `${task.estimatedMinutes}m`
-      : Number.isInteger(task.estimatedMinutes! / 60)
-        ? `${task.estimatedMinutes! / 60}h`
-        : `${(task.estimatedMinutes! / 60).toFixed(1)}h`
-    : "";
-
-  const hasMetadataLine =
-    task.tags.length > 0 || task.dueDate || task.recurrence || task.remindAt || hasDuration;
+  const formattedDuration = hasDuration ? formatDuration(task.estimatedMinutes!) : "";
 
   // Priority-based circle colors
   const reducedMotion = useReducedMotion();
@@ -142,6 +114,13 @@ export const TaskItem = React.memo(function TaskItem({
     ? `hover:bg-priority-${task.priority}/15`
     : "hover:bg-on-surface-muted/15";
 
+  const rowClassName = getRowClassName(
+    !!isMultiSelected,
+    isSelected,
+    task.status,
+    task.priority,
+  );
+
   return (
     <div
       ref={innerRef}
@@ -155,15 +134,7 @@ export const TaskItem = React.memo(function TaskItem({
           onSelect(task.id);
         }
       }}
-      className={`group relative flex items-center gap-2 px-3 py-2 border-b border-border/30 cursor-pointer transition-all duration-150 ${animClass} ${
-        isMultiSelected
-          ? "bg-accent/10 ring-1 ring-accent"
-          : isSelected
-            ? "bg-accent/5 ring-1 ring-accent/50"
-            : task.status !== "completed" && task.priority && PRIORITY_ROW_STYLES[task.priority]
-              ? `${PRIORITY_ROW_STYLES[task.priority].bg} hover:bg-surface-secondary`
-              : "hover:bg-surface-secondary"
-      } ${task.status !== "completed" && task.priority && PRIORITY_ROW_STYLES[task.priority] ? PRIORITY_ROW_STYLES[task.priority].border : ""}`}
+      className={`group relative flex items-center gap-2 px-3 py-2 border-b border-border/30 cursor-pointer transition-all duration-150 ${animClass} ${rowClassName}`}
       onClick={handleClick}
       onContextMenu={(e) => {
         if (onContextMenu) {
@@ -276,137 +247,23 @@ export const TaskItem = React.memo(function TaskItem({
       {priority && <span className="sr-only">{priority.label}</span>}
 
       {/* Content area: title + metadata */}
-      <div className="flex-1 min-w-0">
-        {/* Line 1: Title + subtask progress */}
-        <div className="flex items-center gap-2">
-          <span
-            className={`text-sm truncate ${
-              task.status === "completed" ? "line-through text-on-surface-muted" : "text-on-surface"
-            }`}
-          >
-            {task.title}
-          </span>
-
-          {/* Duration badge */}
-          {hasDuration && (
-            <span className="text-xs px-1.5 py-0 rounded-md bg-surface-tertiary text-on-surface-secondary font-mono flex items-center gap-0.5 flex-shrink-0">
-              <Clock size={10} />
-              {formattedDuration}
-            </span>
-          )}
-
-          {/* Dread level indicator */}
-          {task.dreadLevel != null && task.dreadLevel > 0 && task.status !== "completed" && (
-            <span className="flex-shrink-0" title={`Dread level: ${task.dreadLevel}/5`}>
-              <FrogIcon size={14} color={getDreadLevelColor(task.dreadLevel).fill} />
-            </span>
-          )}
-
-          {/* Blocked badge */}
-          {isBlocked && task.status === "pending" && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-error/10 text-error flex-shrink-0">
-              Blocked
-            </span>
-          )}
-
-          {/* Subtask progress indicator (when collapsed) */}
-          {totalChildCount > 0 && !expanded && (
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <div className="h-1 w-12 rounded-full bg-surface-tertiary overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-accent transition-all"
-                  style={{
-                    width: `${totalChildCount > 0 ? (completedChildCount / totalChildCount) * 100 : 0}%`,
-                  }}
-                />
-              </div>
-              <span className="text-xs text-on-surface-muted">
-                {completedChildCount}/{totalChildCount}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Line 2: Metadata (tags, due date, reminder, recurrence) */}
-        {hasMetadataLine && (
-          <div className="flex items-center gap-2 mt-0.5">
-            {task.tags.map((tag) => (
-              <span
-                key={tag.id}
-                className={`font-mono text-xs px-1.5 py-0 rounded-md ${
-                  tag.color ? "" : "bg-surface-tertiary text-on-surface-secondary"
-                }`}
-                style={
-                  tag.color
-                    ? { backgroundColor: hexToRgba(tag.color, 0.15), color: tag.color }
-                    : undefined
-                }
-              >
-                {tag.name}
-              </span>
-            ))}
-            {task.dueDate && (
-              <span
-                className={`text-xs flex items-center gap-1 flex-shrink-0 ${
-                  isOverdue ? "text-error font-medium" : "text-on-surface-muted"
-                }`}
-              >
-                <Calendar size={11} />
-                {new Date(task.dueDate).toLocaleDateString()}
-              </span>
-            )}
-            {task.remindAt && <Bell size={12} className="text-warning flex-shrink-0" />}
-            {task.recurrence && (
-              <span className="text-xs flex items-center gap-0.5 text-on-surface-muted flex-shrink-0">
-                <Repeat size={11} />
-                {formatRecurrenceLabel(task.recurrence)}
-              </span>
-            )}
-            {hasDuration && (
-              <span className="text-xs flex items-center gap-0.5 text-on-surface-muted flex-shrink-0">
-                <Clock size={11} />
-                {formattedDuration}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
+      <TaskItemContent
+        task={task}
+        isOverdue={!!isOverdue}
+        hasDuration={!!hasDuration}
+        formattedDuration={formattedDuration}
+        isBlocked={isBlocked}
+        totalChildCount={totalChildCount}
+        completedChildCount={completedChildCount}
+        expanded={expanded}
+      />
 
       {/* Hover action buttons */}
-      <div className="relative flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-150 flex-shrink-0">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect(task.id);
-          }}
-          aria-label="Edit task"
-          className="p-2 md:p-1 rounded hover:bg-surface-tertiary text-on-surface-muted hover:text-on-surface transition-colors"
-        >
-          <Pencil size={14} />
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowDatePicker((prev) => !prev);
-          }}
-          aria-label="Set due date"
-          className="p-2 md:p-1 rounded hover:bg-surface-tertiary text-on-surface-muted hover:text-on-surface transition-colors"
-        >
-          <Calendar size={14} />
-        </button>
-        {showDatePicker && (
-          <DatePicker
-            value={task.dueDate}
-            onChange={(date) => {
-              if (onUpdateDueDate) {
-                onUpdateDueDate(task.id, date);
-              }
-              setShowDatePicker(false);
-            }}
-            onClose={() => setShowDatePicker(false)}
-          />
-        )}
-      </div>
+      <TaskItemActions
+        task={task}
+        onSelect={onSelect}
+        onUpdateDueDate={onUpdateDueDate}
+      />
     </div>
   );
 });

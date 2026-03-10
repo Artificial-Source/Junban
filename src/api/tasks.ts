@@ -113,10 +113,25 @@ export function taskRoutes(services: AppServices): Hono {
     return c.json({ imported, errors });
   });
 
+  // GET /tasks/:id — get a single task
+  app.get("/:id", async (c) => {
+    const id = c.req.param("id");
+    const task = await services.taskService.get(id);
+    if (!task) return c.json({ error: "Task not found" }, 404);
+    return c.json(task);
+  });
+
   // POST /tasks/:id/complete
   app.post("/:id/complete", async (c) => {
     const id = c.req.param("id");
     const task = await services.taskService.complete(id);
+    return c.json(task);
+  });
+
+  // POST /tasks/:id/uncomplete
+  app.post("/:id/uncomplete", async (c) => {
+    const id = c.req.param("id");
+    const task = await services.taskService.uncomplete(id);
     return c.json(task);
   });
 

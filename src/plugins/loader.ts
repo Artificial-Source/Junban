@@ -195,10 +195,13 @@ export class PluginLoader {
       }
     }
 
-    // Compute effective permissions: intersection of requested and approved
-    const effectivePermissions = approvedPermissions
-      ? requestedPermissions.filter((p) => approvedPermissions.includes(p))
-      : requestedPermissions;
+    // Compute effective permissions:
+    // Built-in extensions always get their full requested permissions (manifest is trusted).
+    // Community plugins get the intersection of requested and user-approved permissions.
+    const effectivePermissions =
+      loaded.builtin || !approvedPermissions
+        ? requestedPermissions
+        : requestedPermissions.filter((p) => approvedPermissions.includes(p));
 
     // Warn if plugin targets a newer API major version
     if (loaded.manifest.targetApiVersion) {

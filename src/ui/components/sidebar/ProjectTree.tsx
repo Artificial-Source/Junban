@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { Project } from "@/core/types.js";
+import type { Project } from "../../../core/types.js";
 import { CollapsedTooltip } from "./SidebarPrimitives.js";
 
 interface ProjectTreeProps {

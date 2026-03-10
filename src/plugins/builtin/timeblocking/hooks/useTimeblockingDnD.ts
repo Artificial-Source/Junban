@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { arrayMove } from "@dnd-kit/sortable";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../../core/types.js";
 import type { TimeBlock, TimeSlot } from "../types.js";
 import type { TimeBlockStore } from "../store.js";
 import { isOverlapping } from "../slot-helpers.js";

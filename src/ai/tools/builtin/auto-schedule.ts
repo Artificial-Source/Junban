@@ -6,13 +6,13 @@
  */
 
 import type { ToolDefinition, ToolExecutor } from "../types.js";
-import type { TimeBlockStore } from "@/plugins/builtin/timeblocking/store.js";
+import type { TimeBlockStore } from "../../../plugins/builtin/timeblocking/store.js";
 import {
   autoSchedule,
   applySchedule,
   type SchedulerSettings,
-} from "@/plugins/builtin/timeblocking/auto-scheduler.js";
-import type { Task } from "@/core/types.js";
+} from "../../../plugins/builtin/timeblocking/auto-scheduler.js";
+import type { Task } from "../../../core/types.js";
 
 interface ToolPair {
   definition: ToolDefinition;

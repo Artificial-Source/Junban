@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../../core/types.js";
 import type { TimeBlock, TimeSlot } from "../types.js";
 import type { TimeBlockStore } from "../store.js";
 import type TimeblockingPlugin from "../index.js";

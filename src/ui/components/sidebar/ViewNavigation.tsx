@@ -3,7 +3,7 @@ import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import type { SensorDescriptor, SensorOptions } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { Plus, Star, Heart, Filter, type LucideIcon } from "lucide-react";
-import type { Project } from "@/core/types.js";
+import type { Project } from "../../../core/types.js";
 import type { PanelInfo, ViewInfo } from "../../api/index.js";
 import { PluginErrorBoundary } from "../../views/PluginView.js";
 import {

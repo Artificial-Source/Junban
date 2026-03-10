@@ -4,7 +4,7 @@
  */
 
 import type { TimeBlockStore } from "./store.js";
-import type { ToolDefinition, ToolExecutor } from "@/ai/tools/types.js";
+import type { ToolDefinition, ToolExecutor } from "../../../ai/tools/types.js";
 import { isOverlapping } from "./slot-helpers.js";
 
 interface ToolPair {

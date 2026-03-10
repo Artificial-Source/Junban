@@ -4,7 +4,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown, ChevronUp, Check } from "lucide-react";
 import type { TimeSlot } from "../types.js";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../../core/types.js";
 import { getSlotProgress, getSlotColor } from "../slot-helpers.js";
 import { timeToMinutes } from "./TimelineColumn.js";
 

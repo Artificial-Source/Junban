@@ -4,8 +4,8 @@ import {
   enumerateMicrophones,
   triggerMicPermissionPrompt,
   type MicrophoneInfo,
-} from "@/ai/voice/audio-utils.js";
-import type { VoiceSettings } from "@/ui/context/VoiceContext.js";
+} from "../../../../ai/voice/audio-utils.js";
+import type { VoiceSettings } from "../../../../ui/context/VoiceContext.js";
 
 export function MicrophoneSection({
   selectedId,

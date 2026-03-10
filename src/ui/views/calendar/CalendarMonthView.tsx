@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { toDateKey } from "@/utils/format-date.js";
-import type { Task, Project } from "@/core/types.js";
+import { toDateKey } from "../../../utils/format-date.js";
+import type { Task, Project } from "../../../core/types.js";
 
 interface CalendarMonthViewProps {
   selectedDate: Date;

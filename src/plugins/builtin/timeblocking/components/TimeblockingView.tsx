@@ -12,7 +12,7 @@ import { ReplanBanner } from "./ReplanBanner.js";
 import { SettingsPopover } from "./SettingsPopover.js";
 import { FocusTimer } from "./FocusTimer.js";
 import { SchedulePreviewBar } from "./SchedulePreviewBar.js";
-import { ContextMenu } from "@/ui/components/ContextMenu.js";
+import { ContextMenu } from "../../../../ui/components/ContextMenu.js";
 import { VIEW_MODE_LABELS, getPixelsPerHour, formatDateRange } from "../utils/timeblocking-utils.js";
 import { useTimeblockingState } from "../hooks/useTimeblockingState.js";
 import { useTimeblockingData } from "../hooks/useTimeblockingData.js";

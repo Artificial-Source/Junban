@@ -3,7 +3,7 @@
  * Registers: save_memory, recall_memories, forget_memory
  */
 
-import { generateId } from "@/utils/ids.js";
+import { generateId } from "../../../utils/ids.js";
 import type { ToolRegistry } from "../registry.js";
 
 export function registerMemoryTools(registry: ToolRegistry): void {

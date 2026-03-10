@@ -1,8 +1,8 @@
 import { useState, useRef, useCallback } from "react";
 import { Mic, Loader2, Volume2 } from "lucide-react";
 import type { useVoiceContext } from "../../context/VoiceContext.js";
-import { BrowserSTTProvider } from "@/ai/voice/adapters/browser-stt.js";
-import { createAudioRecorder } from "@/ai/voice/audio-utils.js";
+import { BrowserSTTProvider } from "../../../ai/voice/adapters/browser-stt.js";
+import { createAudioRecorder } from "../../../ai/voice/audio-utils.js";
 
 interface VoiceButtonProps {
   onResult: (text: string) => void;

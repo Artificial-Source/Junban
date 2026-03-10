@@ -4,7 +4,7 @@
  */
 
 import type { ToolRegistry } from "../registry.js";
-import type { TaskFilter } from "@/core/filters.js";
+import type { TaskFilter } from "../../../core/filters.js";
 
 export function registerQueryTasksTool(registry: ToolRegistry): void {
   registry.register(

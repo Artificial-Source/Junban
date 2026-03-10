@@ -1,5 +1,5 @@
 import { PlusCircle, CheckCircle2, Pencil, History } from "lucide-react";
-import type { TaskActivity } from "@/core/types.js";
+import type { TaskActivity } from "../../../core/types.js";
 
 /** Format an ISO timestamp into a short relative string. */
 export function formatRelativeTime(isoStr: string): string {

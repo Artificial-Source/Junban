@@ -30,13 +30,13 @@ function apiPlugin() {
     name: "saydo-api",
     configureServer(server: ViteDevServer) {
       // Lazy-load bootstrap to avoid issues with Vite's module resolution
-      let services: Awaited<ReturnType<typeof import("./src/bootstrap.js").bootstrap>> | null =
-        null;
+      let services: any = null;
 
       async function getServices() {
         if (!services) {
-          const { bootstrap } = await import("./src/bootstrap.js");
-          services = bootstrap();
+          // Use ssrLoadModule so Vite's @/ alias resolves for transitive imports
+          const mod = await server.ssrLoadModule("./src/bootstrap.ts");
+          services = mod.bootstrap();
         }
         return services;
       }
@@ -2241,16 +2241,21 @@ export default defineConfig(({ command }) => ({
       ],
     }),
   ],
-  server: useBackend
-    ? {
-        proxy: {
-          "/api": {
-            target: "http://localhost:4822",
-            changeOrigin: true,
+  server: {
+    ...(useBackend
+      ? {
+          proxy: {
+            "/api": {
+              target: "http://localhost:4822",
+              changeOrigin: true,
+            },
           },
-        },
-      }
-    : undefined,
+        }
+      : {}),
+    watch: {
+      ignored: ["**/src-tauri/target/**"],
+    },
+  },
   resolve: {
     alias: {
       "@": "/src",

@@ -1,11 +1,11 @@
 import React from "react";
 import { Plugin } from "../../lifecycle.js";
-import { createLogger } from "@/utils/logger.js";
+import { createLogger } from "../../../utils/logger.js";
 import { TimeBlockStore } from "./store.js";
 import { TimeblockingContext } from "./context.js";
 import { TimeblockingView as TimeblockingViewComponent } from "./components/TimeblockingView.js";
 import { buildTimeblockingTools } from "./ai-tools.js";
-import { buildAutoScheduleTools } from "@/ai/tools/builtin/auto-schedule.js";
+import { buildAutoScheduleTools } from "../../../ai/tools/builtin/auto-schedule.js";
 
 const log = createLogger("timeblocking");
 

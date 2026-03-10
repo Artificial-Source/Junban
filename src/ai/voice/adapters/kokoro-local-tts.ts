@@ -6,7 +6,7 @@
 
 import type { TTSProviderPlugin, TTSOptions, Voice } from "../interface.js";
 import type { KokoroWorkerRequest, KokoroWorkerResponse } from "../workers/kokoro-worker-types.js";
-import { createLogger } from "@/utils/logger.js";
+import { createLogger } from "../../../utils/logger.js";
 
 const log = createLogger("voice");
 

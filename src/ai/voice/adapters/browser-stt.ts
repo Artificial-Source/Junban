@@ -4,7 +4,7 @@
  */
 
 import type { STTProviderPlugin, STTOptions } from "../interface.js";
-import { createLogger } from "@/utils/logger.js";
+import { createLogger } from "../../../utils/logger.js";
 
 const log = createLogger("voice");
 

@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { Circle, CheckCircle2 } from "lucide-react";
-import { toDateKey } from "@/utils/format-date.js";
+import { toDateKey } from "../../../utils/format-date.js";
 import { getWeekDays } from "./useCalendarNavigation.js";
-import type { Task, Project } from "@/core/types.js";
+import type { Task, Project } from "../../../core/types.js";
 
 interface CalendarWeekViewProps {
   selectedDate: Date;

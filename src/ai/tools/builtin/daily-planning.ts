@@ -4,7 +4,7 @@
  */
 
 import type { ToolRegistry } from "../registry.js";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../core/types.js";
 
 const PRIORITY_WEIGHT: Record<number, number> = { 1: 4, 2: 3, 3: 2, 4: 1 };
 const OVERLOADED_TASK_THRESHOLD = 5;

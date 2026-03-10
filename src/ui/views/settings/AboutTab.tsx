@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { ExternalLink, Bug, MessageSquarePlus } from "lucide-react";
-import { isTauri } from "@/utils/tauri.js";
-import { APP_VERSION } from "@/config/defaults.js";
+import { isTauri } from "../../../utils/tauri.js";
+import { APP_VERSION } from "../../../config/defaults.js";
 import { api } from "../../api/index.js";
 
 interface Credit {

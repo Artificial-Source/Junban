@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { Calendar, ChevronDown, ChevronRight, AlertCircle, Clock, Inbox } from "lucide-react";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../../core/types.js";
 
 interface TaskSidebarProps {
   tasks: Task[];

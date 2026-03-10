@@ -3,7 +3,7 @@ import { Plus, Clock, Repeat, Copy, Clipboard, Edit3, Link, Unlink, Lock, Unlock
 import { createElement } from "react";
 import type { TimeBlock, TimeSlot } from "../types.js";
 import type { TimeBlockStore } from "../store.js";
-import type { ContextMenuItem } from "@/ui/components/ContextMenu.js";
+import type { ContextMenuItem } from "../../../../ui/components/ContextMenu.js";
 import { timeToMinutes, minutesToTime } from "../components/TimelineColumn.js";
 import type { ContextMenuState } from "./useTimeblockingState.js";
 

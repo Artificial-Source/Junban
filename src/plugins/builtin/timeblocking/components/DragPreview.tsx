@@ -1,4 +1,4 @@
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../../core/types.js";
 import type { TimeBlock } from "../types.js";
 
 interface TaskDragPreviewProps {

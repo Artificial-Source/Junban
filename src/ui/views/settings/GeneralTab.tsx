@@ -3,8 +3,8 @@ import { Bell, Lightbulb, Volume2, Zap } from "lucide-react";
 import { api } from "../../api/index.js";
 import { useGeneralSettings, type GeneralSettings } from "../../context/SettingsContext.js";
 import { SegmentedControl, SettingRow, SettingSelect, Toggle } from "./components.js";
-import { previewSound, type SoundEvent } from "@/utils/sounds.js";
-import { isTauri } from "@/utils/tauri.js";
+import { previewSound, type SoundEvent } from "../../../utils/sounds.js";
+import { isTauri } from "../../../utils/tauri.js";
 
 // ── Main component ──
 

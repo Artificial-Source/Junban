@@ -5,7 +5,7 @@
 
 import { useState, useCallback } from "react";
 import type { TimeBlockStore } from "../store.js";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../../core/types.js";
 import {
   autoSchedule,
   applySchedule,

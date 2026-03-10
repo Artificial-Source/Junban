@@ -7,8 +7,8 @@ import { useRef, useEffect, useCallback } from "react";
 import { useVoiceContext } from "../../context/VoiceContext.js";
 import { useVAD } from "../../hooks/useVAD.js";
 import { useVoiceCall } from "../../hooks/useVoiceCall.js";
-import { BrowserSTTProvider } from "@/ai/voice/adapters/browser-stt.js";
-import type { ChatMessage } from "@/ai/types.js";
+import { BrowserSTTProvider } from "../../../ai/voice/adapters/browser-stt.js";
+import type { ChatMessage } from "../../../ai/types.js";
 
 export interface UseAIChatVoiceOptions {
   isStreaming: boolean;

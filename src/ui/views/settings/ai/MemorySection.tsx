@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { useAIContext } from "@/ui/context/AIContext.js";
-import { api } from "@/ui/api/index.js";
-import type { AiMemoryRow } from "@/storage/interface.js";
+import { useAIContext } from "../../../../ui/context/AIContext.js";
+import { api } from "../../../../ui/api/index.js";
+import type { AiMemoryRow } from "../../../../storage/interface.js";
 import { CATEGORY_COLORS } from "./ai-tab-constants.js";
 
 export function MemorySection() {

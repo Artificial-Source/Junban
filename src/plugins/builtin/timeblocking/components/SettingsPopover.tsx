@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { Settings, X } from "lucide-react";
-import { useClickOutside } from "@/ui/hooks/useClickOutside.js";
+import { useClickOutside } from "../../../../ui/hooks/useClickOutside.js";
 
 interface SettingsPopoverProps {
   workDayStart: string;

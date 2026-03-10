@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { themeManager } from "../../themes/manager.js";
 import { useGeneralSettings } from "../../context/SettingsContext.js";
-import { DEFAULT_PROJECT_COLORS } from "@/config/defaults.js";
+import { DEFAULT_PROJECT_COLORS } from "../../../config/defaults.js";
 import { SegmentedControl, ColorSwatchPicker, SettingRow, Toggle } from "./components.js";
 
 export function AppearanceTab() {

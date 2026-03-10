@@ -1,5 +1,5 @@
 import { MessageSquare, History, Pencil, Trash2, Send } from "lucide-react";
-import type { TaskComment, TaskActivity } from "@/core/types.js";
+import type { TaskComment, TaskActivity } from "../../../core/types.js";
 import {
   formatRelativeTime,
   getActivityIcon,

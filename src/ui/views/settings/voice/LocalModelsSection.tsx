@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Download, Loader2, AlertCircle, CheckCircle2, Trash2 } from "lucide-react";
-import type { VoiceProviderRegistry } from "@/ai/voice/registry.js";
-import type { ModelStatus } from "@/ai/voice/adapters/whisper-local-stt.js";
+import type { VoiceProviderRegistry } from "../../../../ai/voice/registry.js";
+import type { ModelStatus } from "../../../../ai/voice/adapters/whisper-local-stt.js";
 
 export interface LocalModelInfo {
   id: string;

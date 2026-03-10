@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { api } from "../../api/index.js";
-import type { TaskTemplate, CreateTemplateInput } from "@/core/types.js";
-import { createLogger } from "@/utils/logger.js";
+import type { TaskTemplate, CreateTemplateInput } from "../../../core/types.js";
+import { createLogger } from "../../../utils/logger.js";
 
 const logger = createLogger("templates-tab");
 

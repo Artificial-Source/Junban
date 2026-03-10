@@ -1,5 +1,5 @@
 import { X, Link } from "lucide-react";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../core/types.js";
 import * as taskApi from "../../api/tasks.js";
 
 interface TaskRelationsProps {

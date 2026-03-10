@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { api } from "@/ui/api/index.js";
+import { api } from "../../../../ui/api/index.js";
 
 export function CustomInstructionsSection() {
   const [instructions, setInstructions] = useState("");

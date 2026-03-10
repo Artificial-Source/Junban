@@ -5,7 +5,7 @@
  */
 
 import type { ToolRegistry } from "../registry.js";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../core/types.js";
 
 type EnergyLevel = "low" | "medium" | "high";
 

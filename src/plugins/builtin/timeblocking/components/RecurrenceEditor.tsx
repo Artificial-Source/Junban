@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { Repeat, X } from "lucide-react";
-import { useClickOutside } from "@/ui/hooks/useClickOutside.js";
+import { useClickOutside } from "../../../../ui/hooks/useClickOutside.js";
 import type { RecurrenceRule } from "../types.js";
 
 interface RecurrenceEditorProps {

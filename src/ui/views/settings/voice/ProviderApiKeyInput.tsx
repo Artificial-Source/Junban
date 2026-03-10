@@ -1,4 +1,4 @@
-import type { VoiceSettings } from "@/ui/context/VoiceContext.js";
+import type { VoiceSettings } from "../../../../ui/context/VoiceContext.js";
 
 /** Maps a voice provider ID to the settings key holding its API key. */
 export const PROVIDER_KEY_MAP: Record<

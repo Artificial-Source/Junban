@@ -4,7 +4,7 @@
  */
 
 import type { ToolRegistry } from "../registry.js";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../core/types.js";
 
 const STOP_WORDS = new Set([
   "a",

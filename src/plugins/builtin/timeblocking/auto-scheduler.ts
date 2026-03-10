@@ -8,7 +8,7 @@
 
 import type { TimeBlock } from "./types.js";
 import type { TimeBlockStore } from "./store.js";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../core/types.js";
 
 // ---------------------------------------------------------------------------
 // Types

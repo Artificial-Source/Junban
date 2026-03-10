@@ -10,7 +10,7 @@ import type {
   CreateTimeSlotInput,
   UpdateTimeBlockInput,
 } from "./types.js";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../core/types.js";
 
 const RPC_URL = "/api/plugins/timeblocking/rpc";
 

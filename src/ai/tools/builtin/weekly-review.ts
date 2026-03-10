@@ -4,7 +4,7 @@
  */
 
 import type { ToolRegistry } from "../registry.js";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../core/types.js";
 
 const MAX_LIST_SIZE = 10;
 const MAX_TITLE_LENGTH = 60;

@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { Circle, CheckCircle2, CalendarOff } from "lucide-react";
-import { toDateKey, formatTaskTime } from "@/utils/format-date.js";
+import { toDateKey, formatTaskTime } from "../../../utils/format-date.js";
 import { useGeneralSettings } from "../../context/SettingsContext.js";
 import { EmptyState } from "../../components/EmptyState.js";
-import type { Task, Project } from "@/core/types.js";
+import type { Task, Project } from "../../../core/types.js";
 
 interface CalendarDayViewProps {
   selectedDate: Date;

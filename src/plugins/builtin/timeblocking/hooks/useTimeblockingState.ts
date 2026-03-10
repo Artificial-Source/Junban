@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from "react";
 import { PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import type { Task } from "@/core/types.js";
+import type { Task } from "../../../../core/types.js";
 import type { TimeBlock, TimeSlot } from "../types.js";
 import type { TimeBlockStore } from "../store.js";
 import { isTaskScheduled } from "../task-linking.js";

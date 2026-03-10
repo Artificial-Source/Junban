@@ -42,7 +42,7 @@ Refinements to the core experience before plugins.
 The conversational AI layer.
 
 - [x] AI provider abstraction interface
-- [x] OpenAI, Anthropic, OpenRouter, Ollama, LM Studio providers
+- [x] OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, DeepSeek, Gemini, Mistral, Kimi, DashScope, Groq, ZAI providers
 - [x] AI chat panel in sidebar with SSE streaming
 - [x] Chat session management and persistence
 - [x] AI tool definitions (task CRUD, scheduling, reminders)
@@ -174,40 +174,39 @@ Full browser-based client (requires Saydo Sync).
 | UI — Views & Components | 40/41 | 1 | Logo design pending |
 | CLI | 7/8 | 1 | Fuzzy picker idea |
 | Plugin System | 21/21 | 0 | Complete |
-| AI Assistant | 46/58 | 12 | Core done; ideas pending |
+| AI Assistant | 55/67 | 12 | 12 providers, 38 MCP tools, OAuth, ideas pending |
 | Storage & Data | 13/13 | 0 | Complete |
-| Testing | 10/10 | 0 | 181 test files, 2159 tests |
+| Testing | 10/10 | 0 | 202 test files, 2455 tests |
 | Hardening & Quality | 17/17 | 0 | Complete |
 | Frontend Enhancements | 25/25 | 0 | Complete |
-| QA — Bugs | 14/14 | 0 | Complete |
+| QA — Bugs | 17/17 | 0 | Complete |
 | Documentation | 15/15 | 0 | Complete |
-| **Total** | **251/265** | **14** | **95% complete** |
+| **Total** | **263/277** | **14** | **95% complete** |
 
 ### What's Fully Done
 
 - Task CRUD with subtasks, templates, recurrence, filters, priorities
 - SQLite + Markdown dual storage backends
-- ~56 React components, 17 views + 10 settings tabs, 14 hooks, 7 contexts
-- AI assistant with 34 tools, 8 providers, chat persistence
+- ~70+ React components, 19+ views + 10 settings tabs, 17 hooks, 9 contexts
+- AI assistant with 38 tools, 12 providers (OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, DeepSeek, Gemini, Mistral, Kimi, DashScope, Groq, ZAI), OpenAI OAuth, chat persistence
 - Voice I/O: 8 adapters (STT/TTS), VAD, Web Workers, voice call mode
 - Plugin system with sandboxing, permissions, lifecycle, registry
+- Timeblocking plugin: day/week views, DnD, recurrence, AI auto-scheduling
+- Motivation engine: Eat the Frog, Dopamine Menu, Task Jar, Framer Motion animations
+- MCP server: 38 tools + 8 resources + 3 prompts (Claude Desktop integration)
 - CLI companion with 5 commands
-- Tauri desktop app scaffold + auto-updater
+- Tauri desktop app scaffold + auto-updater + global quick capture
 - CI/CD pipeline (GitHub Actions)
 - Design token system, accessibility audit, performance optimization
 - Kanban board, calendar views, matrix view, stats dashboard
-- Task comments, activity tracking, daily rituals
+- Task comments, activity tracking, daily/weekly review rituals
 - Responsive mobile UI, sound effects, saved filters
-- 181 test files, 2159 passing tests (including 33+ Playwright E2E spec files)
+- 202 test files, 2455 passing tests (including 33+ Playwright E2E spec files)
 
 ### Ideas (need scoping)
 
 | ID | Item | Area |
 |----|------|------|
-| A-37 | Weekly review & analytics | AI Tools |
-| A-39 | Meeting notes to tasks | AI Tools |
-| A-36 | AI time estimation (track actuals vs estimates) | AI Tools |
-| A-35 | Smart nudges / proactive alerts | AI Tools |
 | A-41 | Energy-aware suggestions (enhanced) | AI Tools |
 | A-42 | Habit / recurring task intelligence | AI Tools |
 | A-43 | Project planning from description | AI Tools |
@@ -215,13 +214,11 @@ Full browser-based client (requires Saydo Sync).
 | A-48 | Plugin-contributed AI tools | AI Tools |
 | A-18 | AI reminders via integrations | Integrations |
 | A-45 | ICS calendar export/import | Integrations |
-| A-47 | Auto-scheduling into time blocks | Integrations |
 | U-35 | Design proper SVG logo | UI |
 | L-08 | Interactive CLI task picker | CLI |
 
 ### Plugin Ideas
 
-- **Timeblocking** (Akiflow-style) — v1.1, sprints S38–S42 (see BACKLOG.md)
 - Calendar sync via automation connectors (n8n, Activepieces, Pipedream, Make) — v1.2
 - CalDAV sync (Nextcloud, iCloud, Google Calendar)
 - Git sync (free alternative to Saydo Sync)
@@ -238,7 +235,7 @@ Full browser-based client (requires Saydo Sync).
 
 ## Sprint History
 
-45 sprints completed across ~21 months of development.
+51 sprints completed across ~23 months of development.
 
 | Sprint | Theme | Tests |
 |--------|-------|-------|
@@ -287,9 +284,16 @@ Full browser-based client (requires Saydo Sync).
 | S43 | Timeblocking Polish + E2E | 2146 |
 | S44 | Module Decomposition II (DX-08–14) | 2159 |
 | S45 | Lint Cleanup | 2159 |
+| S46 | Housekeeping + Global Quick Capture | 2386 |
+| S47 | AI Intelligence Tools (time estimation, weekly review, meeting notes) | 2386 |
+| S48 | Motivation Engine (Eat the Frog, Dopamine Menu, Task Jar, animations) | 2386 |
+| S49 | AI Auto-scheduling | 2386 |
+| S50 | Clean Slate + 7 New Providers + OAuth | 2455 |
+| S51 | Module Decomposition III (DX-15–25) | 2455 |
 
 ### Known Technical Debt
 
 1. `src/main.ts:24` — TODO: Start UI or CLI based on context (currently assumes UI)
 2. E2E tests expanded (33+ Playwright spec files) — continue expanding coverage
 3. No `.env` committed — only `.env.example` exists
+4. ~~`auto_schedule_day` + `reschedule_day` not available in MCP~~ — Fixed: MCP server now loads plugins

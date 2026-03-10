@@ -29,6 +29,10 @@ console.info = (...args: unknown[]) => process.stderr.write(args.join(" ") + "\n
 async function main(): Promise<void> {
   // Bootstrap services (same pattern as CLI)
   const services = bootstrap();
+
+  // Load plugins so plugin-contributed tools (e.g. timeblocking auto-schedule) are registered
+  await services.pluginLoader.loadAll();
+
   const toolContext = createToolContext(services);
 
   // Create MCP server

@@ -868,7 +868,7 @@ function AppContent() {
                         handleUpdateSection={handleUpdateSection}
                         handleDeleteSection={handleDeleteSection}
                         handleMoveTask={handleMoveTask}
-                        setSettingsOpen={setSettingsOpen}
+                        handleOpenSettingsTab={handleOpenSettingsTab}
                       />
                     </AppStateProvider>
                   </div>

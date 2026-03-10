@@ -21,6 +21,7 @@ import { DopamineMenu } from "../views/DopamineMenu.js";
 import { useAppState } from "../context/AppStateContext.js";
 import type { UpdateTaskInput } from "../../core/types.js";
 import type { CalendarMode } from "../hooks/useRouting.js";
+import type { SettingsTab } from "../views/settings/types.js";
 
 /** Parsed task input from TaskInput / QuickAdd — mirrors useTaskHandlers.handleCreateTask param. */
 export interface ParsedTaskInput {
@@ -60,7 +61,7 @@ interface ViewRendererProps {
   handleUpdateSection: (id: string, data: { name?: string; isCollapsed?: boolean }) => void;
   handleDeleteSection: (id: string) => void;
   handleMoveTask: (taskId: string, sectionId: string | null) => void;
-  setSettingsOpen: (v: boolean) => void;
+  handleOpenSettingsTab: (tab: SettingsTab) => void;
 }
 
 export function ViewRenderer({
@@ -83,7 +84,7 @@ export function ViewRenderer({
   handleUpdateSection,
   handleDeleteSection,
   handleMoveTask,
-  setSettingsOpen,
+  handleOpenSettingsTab,
 }: ViewRendererProps) {
   const {
     currentView,
@@ -294,7 +295,7 @@ export function ViewRenderer({
       }
       case "ai-chat":
         return (
-          <AIChat onOpenSettings={() => setSettingsOpen(true)} onSelectTask={handleSelectTask} />
+          <AIChat onOpenSettings={() => handleOpenSettingsTab("ai")} onSelectTask={handleSelectTask} />
         );
       case "dopamine-menu":
         return (

@@ -1,0 +1,19 @@
+{
+  "domain": "performance",
+  "severity_counts": {
+    "critical": 0,
+    "warning": 0,
+    "suggestion": 1
+  },
+  "findings": [
+    {
+      "severity": "suggestion",
+      "id": "PERF-R6-01",
+      "title": "Markdown backend updateManyTasks rewrites each file individually",
+      "file": "src/storage/markdown/task-ops.ts",
+      "lines": [148, 158],
+      "detail": "updateManyTasks loops over ids calling updateTask (which does fs.writeFileSync) one at a time. For bulk updates of 100+ tasks, this could be slow. The SQLite backend handles this in a single UPDATE statement. Not a bug — expected given the Markdown storage model — but worth noting for users who pick Markdown with large task counts.",
+      "impact": "Low — Markdown backend is designed for smaller task sets and the user consciously opts in."
+    }
+  ]
+}

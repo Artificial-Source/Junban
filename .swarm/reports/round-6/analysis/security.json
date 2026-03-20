@@ -1,0 +1,46 @@
+{
+  "domain": "security",
+  "severity_counts": {
+    "critical": 0,
+    "warning": 2,
+    "suggestion": 2
+  },
+  "findings": [
+    {
+      "severity": "warning",
+      "id": "SEC-R6-01",
+      "title": "POST /tasks/bulk/update passes unvalidated `changes` to updateMany",
+      "file": "src/api/tasks.ts",
+      "line": 79,
+      "detail": "The `ids` array is length-checked, but `changes` is destructured from raw JSON and passed directly to `services.taskService.updateMany(ids, changes)` without Zod safeParse. An attacker could inject arbitrary fields (e.g., `id`, `createdAt`) that the service layer may blindly merge. Should validate `changes` against `UpdateTaskInput.safeParse()`.",
+      "impact": "Medium — could corrupt task data by overwriting protected fields. Mitigated by better-sqlite3 ignoring unknown columns, but Markdown backend merges all fields."
+    },
+    {
+      "severity": "warning",
+      "id": "SEC-R6-02",
+      "title": "PUT /settings/:key accepts any value type via `body.value as string`",
+      "file": "src/api/settings.ts",
+      "line": 116,
+      "detail": "The settings PUT endpoint casts `body.value as string` without type checking. If `body.value` is an object, number, or null, it will be stringified incorrectly or stored as 'undefined'. The key allowlist prevents writes to sensitive keys, but there is no schema validation on the value itself. Should add `z.object({ value: z.string() }).safeParse(body)`.",
+      "impact": "Low — the key allowlist limits blast radius, but malformed values could break UI settings parsing."
+    },
+    {
+      "severity": "suggestion",
+      "id": "SEC-R6-03",
+      "title": "POST /tasks/reorder and POST /tasks/import lack body validation",
+      "file": "src/api/tasks.ts",
+      "lines": [89, 96],
+      "detail": "`/reorder` destructures `orderedIds` without checking it is a string array. `/import` destructures `importedTasks` without validating the array or individual items. Both should have Zod schemas. Lower severity because the import loop already has per-item try/catch and reorder delegates to TaskService which validates internally.",
+      "impact": "Low — graceful failures exist, but explicit validation would give better error messages."
+    },
+    {
+      "severity": "suggestion",
+      "id": "SEC-R6-04",
+      "title": "Several AI/plugin endpoints use `as` type assertions instead of Zod",
+      "file": "src/api/ai.ts",
+      "lines": [69, 134, 161, 348, 436],
+      "detail": "PUT /ai/config, POST models/load, POST models/unload, PUT sessions/:id/title, PUT memories/:id all destructure via `as { ... }` casts. These are internal-facing endpoints (the AI config, model load/unload), and most have secondary validation (e.g., isAllowedBaseUrl). Low priority but inconsistent with the Zod validation pattern used elsewhere.",
+      "impact": "Low — all are internal-facing; the app is local-first with no external network exposure by default."
+    }
+  ]
+}

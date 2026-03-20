@@ -80,7 +80,11 @@ export function taskRoutes(services: AppServices): Hono {
     if (!Array.isArray(ids) || ids.length > 500) {
       return c.json({ error: "ids must be an array with at most 500 items" }, 400);
     }
-    const tasks = await services.taskService.updateMany(ids, changes);
+    const parsed = UpdateTaskInput.safeParse(changes);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid update payload", details: parsed.error.flatten() }, 400);
+    }
+    const tasks = await services.taskService.updateMany(ids, parsed.data);
     return c.json(tasks);
   });
 

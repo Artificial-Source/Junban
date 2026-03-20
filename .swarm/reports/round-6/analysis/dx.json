@@ -1,0 +1,27 @@
+{
+  "domain": "dx",
+  "severity_counts": {
+    "critical": 0,
+    "warning": 0,
+    "suggestion": 2
+  },
+  "findings": [
+    {
+      "severity": "suggestion",
+      "id": "DX-R6-01",
+      "title": "AppProviders context ordering is correct but AIProvider depends on TaskContext",
+      "file": "src/ui/app/AppProviders.tsx",
+      "detail": "Provider order is: Settings > Task > Plugin > AI > Voice > Undo. AIProvider calls useTaskContext() (line 34 of AIContext.tsx), confirming it must be nested inside TaskProvider. This is correctly ordered. VoiceProvider is independent. UndoProvider is also independent. No issues found.",
+      "impact": "None — this is a clean pass confirmation."
+    },
+    {
+      "severity": "suggestion",
+      "id": "DX-R6-02",
+      "title": "PERF-301 TODO: SettingsProvider makes ~52 individual API calls on mount",
+      "file": "src/ui/context/SettingsContext.tsx",
+      "line": 199,
+      "detail": "Already documented as TODO PERF-301 in the code. On mount, SettingsProvider calls `api.getAppSetting()` once per key (~52 keys). A single batch GET endpoint would reduce this to 1 request. This is a known issue and is explicitly annotated.",
+      "impact": "Low — only affects initial page load latency, settings are small."
+    }
+  ]
+}

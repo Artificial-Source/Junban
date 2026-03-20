@@ -113,7 +113,10 @@ export function settingsRoutes(services: AppServices): Hono {
       return c.json({ error: `Setting key "${key}" is not allowed` }, 400);
     }
     const body = await c.req.json();
-    services.storage.setAppSetting(key, body.value as string);
+    if (typeof body.value !== "string") {
+      return c.json({ error: "value must be a string" }, 400);
+    }
+    services.storage.setAppSetting(key, body.value);
     return c.json({ ok: true });
   });
 

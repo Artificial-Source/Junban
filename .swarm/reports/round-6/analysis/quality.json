@@ -1,0 +1,27 @@
+{
+  "domain": "quality",
+  "severity_counts": {
+    "critical": 0,
+    "warning": 1,
+    "suggestion": 1
+  },
+  "findings": [
+    {
+      "severity": "warning",
+      "id": "QUAL-R6-01",
+      "title": "POST /plugins/timeblocking/rpc is an open RPC dispatcher with no schema validation",
+      "file": "src/api/plugins.ts",
+      "lines": [149, 222],
+      "detail": "The timeblocking RPC endpoint accepts `{ method: string, args: unknown[] }`, uses a switch on `method`, and casts `args` elements with `as string`, `as string[]` etc. None of the args are validated. If the method names were to grow or the store API changed, there would be no compile-time or runtime safety on the RPC boundary. This is a 73-line switch block that acts as a hand-rolled RPC dispatcher. A proper validation layer per method or typed Zod discriminated union would make this safer.",
+      "impact": "Medium — this is the largest unvalidated mutation surface in the API layer. Currently only used by the timeblocking plugin UI."
+    },
+    {
+      "severity": "suggestion",
+      "id": "QUAL-R6-02",
+      "title": "React contexts all follow correct memoization patterns",
+      "file": "src/ui/context/",
+      "detail": "All 6 context providers (Settings, Task, Plugin, AI, Voice, Undo) use useMemo for their context value objects and useCallback for stable function references. No inline object/array literals in JSX value props were found. useEffect dependency arrays are correct: TaskContext's refreshTasks in [] deps is fine (useCallback with no deps), AIContext's refreshConfig in [] is fine (useCallback with no deps), PluginContext correctly includes all refresh callbacks, SettingsContext's mount-only effect with [] is intentional. No issues found.",
+      "impact": "None — clean pass."
+    }
+  ]
+}

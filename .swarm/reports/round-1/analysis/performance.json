@@ -1,0 +1,250 @@
+{
+  "domain": "performance",
+  "severity_counts": {
+    "critical": 7,
+    "warning": 14,
+    "suggestion": 9
+  },
+  "findings": [
+    {
+      "severity": "critical",
+      "file": "src/ui/components/TaskList.tsx",
+      "line": 0,
+      "issue": "No list virtualization. TaskList renders all tasks in the DOM. With hundreds or thousands of tasks, this causes excessive DOM nodes and slow renders. No react-window, react-virtual, or @tanstack/virtual is used anywhere in the codebase.",
+      "recommendation": "Use @tanstack/react-virtual for the TaskList component to only render visible rows. This is the single biggest scalability bottleneck.",
+      "code_snippet": ""
+    },
+    {
+      "severity": "critical",
+      "file": "src/ui/context/PluginContext.tsx",
+      "line": 112,
+      "issue": "PluginContext.Provider value is a new object literal on every render. Unlike TaskContext and UndoContext which use useMemo, PluginContext creates a new value object every render, causing all consumers to re-render on every PluginProvider state change.",
+      "recommendation": "Wrap the value prop in useMemo, matching the pattern used by TaskContext (line 202) and UndoContext (line 81).",
+      "code_snippet": "value={{\n  plugins,\n  commands,\n  statusBarItems,\n  panels,\n  views,\n  refreshPlugins,\n  ...\n}}"
+    },
+    {
+      "severity": "critical",
+      "file": "src/ui/context/VoiceContext.tsx",
+      "line": 258,
+      "issue": "VoiceContext.Provider value is a new object literal on every render. Same issue as PluginContext — no useMemo on the context value. Every state change (isListening, isSpeaking, etc.) forces all VoiceContext consumers to re-render.",
+      "recommendation": "Wrap the value prop in useMemo with all state/callback dependencies.",
+      "code_snippet": "value={{\n  settings,\n  updateSettings,\n  registry,\n  sttProvider,\n  ttsProvider,\n  ...\n}}"
+    },
+    {
+      "severity": "critical",
+      "file": "src/ui/app/ViewRenderer.tsx",
+      "line": 5,
+      "issue": "No code splitting / lazy loading for views. All 17+ views (Inbox, Today, Upcoming, Calendar, Stats, Matrix, Board, DopamineMenu, AIChat, etc.) are eagerly imported in ViewRenderer.tsx. Only one view is shown at a time, but all code is loaded upfront.",
+      "recommendation": "Use React.lazy() + Suspense for each view. Only the current view's code should be loaded. This could reduce initial bundle size significantly.",
+      "code_snippet": "import { Inbox } from '../views/Inbox.js';\nimport { Today } from '../views/Today.js';\nimport { Upcoming } from '../views/Upcoming.js';\n// ... 14 more eager imports"
+    },
+    {
+      "severity": "critical",
+      "file": "src/ui/app/useAppState.ts",
+      "line": 126,
+      "issue": "Every task count change triggers 3 API calls. useEffect depends on taskCount (state.tasks.length), so adding/completing/deleting any single task triggers fetchProjects(), fetchTags(), and fetchBlockedTaskIds() — 3 unnecessary network round-trips on every task mutation.",
+      "recommendation": "Remove taskCount dependency. Fetch projects/tags/blockedIds only on mount and after AI data mutations. Use event-driven updates instead of polling on task count.",
+      "code_snippet": "const taskCount = state.tasks.length;\nuseEffect(() => {\n  fetchProjects();\n  fetchTags();\n  fetchBlockedTaskIds();\n}, [taskCount, fetchProjects, fetchTags, fetchBlockedTaskIds]);"
+    },
+    {
+      "severity": "critical",
+      "file": "src/ui/app/useAppState.ts",
+      "line": 188,
+      "issue": "Redundant task filtering — visibleTasks, inboxTaskCount, and todayTaskCount all iterate state.tasks independently with overlapping filter logic. With 1000 tasks, 'today' view causes 4 separate full-array scans on every task state change (visibleTasks + inboxTaskCount + todayTaskCount + projectTaskCounts).",
+      "recommendation": "Compute all derived counts in a single useMemo pass over state.tasks. Return visibleTasks, inboxCount, todayCount, projectCounts, and completedCounts from one iteration.",
+      "code_snippet": "const visibleTasks = useMemo(() => { ... }, [state.tasks, ...]);\nconst inboxTaskCount = useMemo(() => state.tasks.filter(...).length, [state.tasks]);\nconst todayTaskCount = useMemo(() => { ... state.tasks.filter(...) }, [state.tasks]);\nconst projectTaskCounts = useMemo(() => { for (const t of state.tasks) ... }, [state.tasks]);"
+    },
+    {
+      "severity": "critical",
+      "file": "src/ui/views/PluginView.tsx",
+      "line": 120,
+      "issue": "PluginView polls server every 500ms for structured views. This creates 2 HTTP requests/second per open plugin view, parsing and setting state each time even if content hasn't changed.",
+      "recommendation": "Use a content hash or ETag to skip re-renders when content hasn't changed. Consider WebSocket or SSE for live updates instead of polling. At minimum, compare new content with previous before calling setContent.",
+      "code_snippet": "const interval = setInterval(fetchContent, isStructured ? 500 : 1000);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/components/CommandPalette.tsx",
+      "line": 33,
+      "issue": "Command filtering runs on every render without useMemo. The filter is not memoized and runs during render, including when unrelated state changes cause re-renders.",
+      "recommendation": "Wrap in useMemo with [commands, query] dependencies.",
+      "code_snippet": "const filtered = commands.filter((cmd) => cmd.name.toLowerCase().includes(query.toLowerCase()));"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/components/CommandPalette.tsx",
+      "line": 40,
+      "issue": "useEffect depends on 'filtered' array reference which changes on every render (since filtered is not memoized). This causes the scrollIntoView effect to run on every render.",
+      "recommendation": "Memoize the filtered array first, then this effect will only run when query or commands actually change.",
+      "code_snippet": "useEffect(() => {\n  if (!isOpen) return;\n  const selected = filtered[selectedIndex];\n  ...\n}, [isOpen, filtered, selectedIndex]);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/components/SearchModal.tsx",
+      "line": 42,
+      "issue": "SearchModal filters all tasks on every keystroke with no debounce. The useMemo recomputes on each character typed. For large task lists with long descriptions and many tags, this does a .toLowerCase().includes() on every task title + description + tag for every keystroke.",
+      "recommendation": "Add a debounced query state (200-300ms) so filtering only runs after the user pauses typing.",
+      "code_snippet": "const results = useMemo(() => {\n  if (!query.trim()) return [];\n  const q = query.toLowerCase();\n  return tasks.filter((t) => t.title.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q) || t.tags.some(...)).slice(0, 20);\n}, [tasks, query]);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/hooks/useBulkActions.ts",
+      "line": 65,
+      "issue": "O(n*m) complexity in bulk operations — for each selected ID, does a .find() over all tasks. With 50 selected tasks and 1000 total, this is 50 linear scans. Repeated in handleBulkComplete, handleBulkDelete, handleBulkMoveToProject, and handleBulkAddTag.",
+      "recommendation": "Build a Map<string, Task> once from state.tasks, then look up by ID in O(1).",
+      "code_snippet": "const tasks = ids.map((id) => state.tasks.find((t) => t.id === id)).filter(Boolean) as Task[];"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/hooks/useBulkActions.ts",
+      "line": 98,
+      "issue": "handleBulkAddTag does sequential API calls in a loop — one updateTask per selected task. With 20 selected tasks, this creates 20 serial network requests.",
+      "recommendation": "Use updateManyTasks or batch the operations. If tags must differ per task, at least use Promise.all for parallel execution.",
+      "code_snippet": "for (const id of ids) {\n  const task = state.tasks.find((t) => t.id === id);\n  if (task) {\n    const existingTags = task.tags.map((t) => t.name);\n    if (!existingTags.includes(tag)) {\n      await updateTask(id, { tags: [...existingTags, tag] });\n    }\n  }\n}"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/context/TaskContext.tsx",
+      "line": 37,
+      "issue": "TASK_ADDED action creates a new array on every add via spread. This is fine for correctness but combined with the single TaskContext causing all consumers to re-render, it means every task addition re-renders the entire app.",
+      "recommendation": "Consider splitting TaskContext into separate state (tasks) and dispatch (actions) contexts so components that only call actions don't re-render when state changes.",
+      "code_snippet": "case 'TASK_ADDED':\n  return { ...state, tasks: [...state.tasks, action.task] };"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/context/SettingsContext.tsx",
+      "line": 0,
+      "issue": "SettingsContext stores ~50 settings as individual string properties. Any setting change re-renders all consumers, including components that only care about unrelated settings (e.g., changing accent_color re-renders nudge logic).",
+      "recommendation": "Split into granular contexts (AppearanceSettings, FeatureSettings, NudgeSettings) or use a selector pattern to prevent unnecessary re-renders.",
+      "code_snippet": ""
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/context/AIContext.tsx",
+      "line": 56,
+      "issue": "AIContext refreshes tasks on every AI chat response. The useEffect watches dataMutationCount and calls refreshTasks(), which replaces the entire task array, cascading re-renders across all task consumers.",
+      "recommendation": "Only refresh tasks when a tool call actually mutated task data. Use granular updates (TASK_ADDED/TASK_UPDATED) instead of full refreshTasks().",
+      "code_snippet": ""
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/views/Completed.tsx",
+      "line": 38,
+      "issue": "Completed view renders all completed tasks without pagination. For users with hundreds of completed tasks, this creates excessive DOM nodes and slow initial render.",
+      "recommendation": "Add pagination (e.g., 'load more' button) or use virtual scrolling. Show last 50 completed tasks by default.",
+      "code_snippet": "const completedTasks = useMemo(() => {\n  return tasks.filter(...).sort(...);\n}, [tasks, filterProjectId]);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/views/Stats.tsx",
+      "line": 107,
+      "issue": "Math.max(...dailyCounts.map(d => d.count), 1) called during render without useMemo. Spread into Math.max creates a temporary array. Minor but unnecessary computation on every render.",
+      "recommendation": "Compute maxCount inside the dailyCounts useMemo or wrap in its own useMemo.",
+      "code_snippet": "const maxCount = Math.max(...dailyCounts.map((d) => d.count), 1);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/views/Cancelled.tsx",
+      "line": 0,
+      "issue": "Same issue as Completed.tsx — no pagination for cancelled tasks list.",
+      "recommendation": "Add pagination or virtual scrolling.",
+      "code_snippet": ""
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/components/Sidebar.tsx",
+      "line": 74,
+      "issue": "Default parameter value 'new Set()' creates a new Set on every render when builtinPluginIds is not passed. This defeats reference equality checks.",
+      "recommendation": "Use a module-level constant: const EMPTY_SET = new Set<string>(); and reference that as the default.",
+      "code_snippet": "builtinPluginIds = new Set(),"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/context/PluginContext.tsx",
+      "line": 104,
+      "issue": "PluginContext polls status bar and panels every 30 seconds unconditionally, even when no plugins are active or the app tab is not visible. Combined with the un-memoized context value, each poll triggers consumer re-renders.",
+      "recommendation": "Use document.visibilityState to pause polling when the tab is not active. Skip polling when plugins list is empty.",
+      "code_snippet": "const interval = setInterval(() => {\n  refreshStatusBar();\n  refreshPanels();\n}, 30000);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/hooks/useNudges.ts",
+      "line": 73,
+      "issue": "Nudge evaluation runs on mount AND re-runs whenever tasks change (via the evaluate callback dependency), AND also runs on a 5-minute interval. The tasks dependency means it runs on every task mutation, which is redundant with the interval.",
+      "recommendation": "Remove the tasks dependency from the useEffect (keep it only in the evaluate callback). Let the interval handle periodic re-evaluation. Or debounce the task-change evaluation.",
+      "code_snippet": "useEffect(() => {\n  evaluate();\n  if (!enabled) return;\n  const timer = setInterval(evaluate, intervalMs);\n  return () => clearInterval(timer);\n}, [evaluate, enabled, intervalMs]);"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/components/TaskItem.tsx",
+      "line": 122,
+      "issue": "Inline style objects created per render: style={{ ...style, ...indentPadding }}. The spread creates a new object reference on every render, though React.memo on TaskItem mitigates this for unchanged tasks.",
+      "recommendation": "Use useMemo for the merged style object when style or indentPadding changes.",
+      "code_snippet": "style={{ ...style, ...indentPadding }}"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/app/useAppState.ts",
+      "line": 195,
+      "issue": "toDateKey(new Date()) called multiple times in the same render cycle across different useMemo blocks. Each call creates a new Date object.",
+      "recommendation": "Compute today = toDateKey(new Date()) once at the top of the hook and reference it in all useMemo blocks (already done for visibleTasks but not for todayTaskCount which computes it independently).",
+      "code_snippet": "const todayTaskCount = useMemo(() => {\n  const today = toDateKey(new Date());\n  return state.tasks.filter(...).length;\n}, [state.tasks]);"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/components/chat/MessageBubble.tsx",
+      "line": 59,
+      "issue": "JSON.parse called during render for tool call results. If tool results are large, this is expensive on every re-render.",
+      "recommendation": "Memoize the parsed results with useMemo.",
+      "code_snippet": "resultByTool.set(tr.toolName, JSON.parse(tr.data));"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/components/chat/ChatToolResultCard.tsx",
+      "line": 106,
+      "issue": "JSON.parse inside render without memoization. Parses tool result data on every render.",
+      "recommendation": "Wrap in useMemo keyed on result.data.",
+      "code_snippet": "parsed = JSON.parse(result.data);"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/components/chat/ToolCallBadge.tsx",
+      "line": 81,
+      "issue": "JSON.parse(args) called during render without memoization.",
+      "recommendation": "Wrap in useMemo keyed on args string.",
+      "code_snippet": "const parsed = JSON.parse(args);"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/hooks/useTaskHandlers.ts",
+      "line": 85,
+      "issue": "Multiple handler functions do state.tasks.find() to look up a single task by ID. This is O(n) per lookup. Four handlers (handleToggleTask, handleDeleteTask, handleUpdateDueDate, handleMoveTask) each do a linear scan.",
+      "recommendation": "Create a memoized taskMap = new Map(state.tasks.map(t => [t.id, t])) and use O(1) lookups.",
+      "code_snippet": "const task = state.tasks.find((t) => t.id === id);"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/core/filters.ts",
+      "line": 14,
+      "issue": "filterTasks does a linear scan with multiple condition checks. For the tag filter, it uses .some() inside .filter(), making it O(n*t) where t = tags per task.",
+      "recommendation": "For frequently-used filters (status, projectId), consider indexed lookup maps in the storage layer rather than post-fetch filtering. Minor concern unless task counts reach thousands.",
+      "code_snippet": "if (filter.tag && !task.tags.some((t) => t.name === filter.tag)) return false;"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/context/TaskContext.tsx",
+      "line": 88,
+      "issue": "refreshTasks() fetches ALL tasks from API with no filtering or pagination. api.listTasks() returns every task regardless of status. As the task count grows, this becomes the primary bottleneck.",
+      "recommendation": "Add server-side pagination or at minimum filter by status (exclude completed/cancelled from the default fetch). Load archived tasks on demand.",
+      "code_snippet": "const tasks = await api.listTasks();"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/components/PluginBrowser.tsx",
+      "line": 44,
+      "issue": "PluginBrowser has 4 sequential useEffect hooks that each trigger independent state updates on mount, causing multiple re-renders in rapid succession.",
+      "recommendation": "Combine the initial data fetching into a single useEffect that batches state updates.",
+      "code_snippet": ""
+    }
+  ]
+}

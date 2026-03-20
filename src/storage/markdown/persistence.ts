@@ -5,6 +5,7 @@ import { parseTaskFile } from "../markdown-utils.js";
 import { StorageError } from "../../core/errors.js";
 import type {
   TagRow,
+  ProjectRow,
   ChatMessageRow,
   TemplateRow,
   SectionRow,
@@ -166,9 +167,9 @@ export function loadProjects(idx: MarkdownIndexes): void {
 
     const content = fs.readFileSync(metaPath, "utf-8");
     const meta = YAML.parse(content);
-    const row = {
+    const row: ProjectRow = {
       id: meta.id,
-      name: entry.name, // directory name
+      name: meta.name ?? entry.name, // prefer stored name, fall back to directory name
       color: meta.color ?? "#3b82f6",
       icon: meta.icon ?? null,
       parentId: meta.parentId ?? null,
@@ -177,12 +178,7 @@ export function loadProjects(idx: MarkdownIndexes): void {
       sortOrder: meta.sortOrder ?? 0,
       archived: meta.archived ?? false,
       createdAt: meta.createdAt ?? new Date().toISOString(),
-    } as any;
-
-    // Store the original name from the directory
-    if (meta.name) {
-      row.name = meta.name;
-    }
+    };
 
     idx.projectIndex.set(row.id, { row, dirPath });
   }

@@ -54,7 +54,11 @@ export async function switchChatSession(sessionId: string): Promise<AIChatMessag
     // Fire-and-forget memory extraction from current session
     const currentSession = svc.chatManager.getSession();
     if (currentSession) {
-      currentSession.extractMemories().catch(() => {});
+      currentSession
+        .extractMemories()
+        .catch((err: unknown) =>
+          console.warn("[ai-sessions] Memory extraction failed:", err),
+        );
     }
     const providerSetting = svc.storage.getAppSetting("ai_provider");
     if (!providerSetting?.value) return [];
@@ -129,7 +133,11 @@ export async function createNewChatSession(): Promise<string> {
     // Fire-and-forget memory extraction from current session
     const currentSession = svc.chatManager.getSession();
     if (currentSession) {
-      currentSession.extractMemories().catch(() => {});
+      currentSession
+        .extractMemories()
+        .catch((err: unknown) =>
+          console.warn("[ai-sessions] Memory extraction failed:", err),
+        );
     }
     // Clear current session without deleting from DB
     svc.chatManager.setSession(null);

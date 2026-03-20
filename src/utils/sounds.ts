@@ -1,5 +1,12 @@
 export type SoundEvent = "complete" | "create" | "delete" | "reminder";
 
+// Musical note frequencies (Hz)
+const NOTE_C5 = 523.25;
+const NOTE_E4 = 329.63;
+const NOTE_A4 = 440;
+const NOTE_D5 = 587.33;
+const NOTE_G5 = 783.99;
+
 let audioCtx: AudioContext | null = null;
 
 function getAudioContext(): AudioContext {
@@ -33,31 +40,31 @@ function scheduleNote(
 function playComplete(ctx: AudioContext, volume: number) {
   const now = ctx.currentTime;
   // C5 → G5, ascending major fifth = "success"
-  scheduleNote(ctx, 523.25, now, 0.13, volume, "sine");
-  scheduleNote(ctx, 783.99, now + 0.13, 0.13, volume, "sine");
+  scheduleNote(ctx, NOTE_C5, now, 0.13, volume, "sine");
+  scheduleNote(ctx, NOTE_G5, now + 0.13, 0.13, volume, "sine");
 }
 
 function playCreate(ctx: AudioContext, volume: number) {
   const now = ctx.currentTime;
   // A4, triangle, short tick = "acknowledged"
-  scheduleNote(ctx, 440, now, 0.1, volume, "triangle");
+  scheduleNote(ctx, NOTE_A4, now, 0.1, volume, "triangle");
 }
 
 function playDelete(ctx: AudioContext, volume: number) {
   const now = ctx.currentTime;
   // A4 → E4, descending fourth = "going away"
-  scheduleNote(ctx, 440, now, 0.115, volume, "sine");
-  scheduleNote(ctx, 329.63, now + 0.115, 0.115, volume, "sine");
+  scheduleNote(ctx, NOTE_A4, now, 0.115, volume, "sine");
+  scheduleNote(ctx, NOTE_E4, now + 0.115, 0.115, volume, "sine");
 }
 
 function playReminder(ctx: AudioContext, volume: number) {
   const now = ctx.currentTime;
   // D5+G5 chord × 2 pulses = "attention"
   const pulseVol = volume * 0.7;
-  scheduleNote(ctx, 587.33, now, 0.12, pulseVol, "sine");
-  scheduleNote(ctx, 783.99, now, 0.12, pulseVol, "sine");
-  scheduleNote(ctx, 587.33, now + 0.21, 0.12, pulseVol, "sine");
-  scheduleNote(ctx, 783.99, now + 0.21, 0.12, pulseVol, "sine");
+  scheduleNote(ctx, NOTE_D5, now, 0.12, pulseVol, "sine");
+  scheduleNote(ctx, NOTE_G5, now, 0.12, pulseVol, "sine");
+  scheduleNote(ctx, NOTE_D5, now + 0.21, 0.12, pulseVol, "sine");
+  scheduleNote(ctx, NOTE_G5, now + 0.21, 0.12, pulseVol, "sine");
 }
 
 const SOUND_MAP: Record<SoundEvent, (ctx: AudioContext, volume: number) => void> = {

@@ -26,13 +26,31 @@ export interface StreamErrorData {
   retryAfterMs?: number;
 }
 
+/** Shape of errors from AI provider SDKs (OpenAI, Anthropic, etc.). */
+interface ProviderErrorShape {
+  status?: number;
+  headers?: Record<string, string>;
+  code?: string;
+}
+
+/** Extract provider error fields via duck-typing. */
+function asProviderError(err: unknown): ProviderErrorShape {
+  const obj = err as Record<string, unknown>;
+  return {
+    status: typeof obj?.status === "number" ? obj.status : undefined,
+    headers:
+      obj?.headers && typeof obj.headers === "object"
+        ? (obj.headers as Record<string, string>)
+        : undefined,
+    code: typeof obj?.code === "string" ? obj.code : undefined,
+  };
+}
+
 export function classifyProviderError(err: unknown, providerName?: string): AIError {
   if (err instanceof AIError) return err;
 
   const message = err instanceof Error ? err.message : String(err);
-
-  // Duck-type on .status — both OpenAI and Anthropic SDKs set this on APIError
-  const status = (err as any)?.status as number | undefined;
+  const { status, headers, code } = asProviderError(err);
 
   if (status === 401 || status === 403) {
     return new AIError(
@@ -44,7 +62,7 @@ export function classifyProviderError(err: unknown, providerName?: string): AIEr
 
   if (status === 429) {
     let retryAfterMs: number | undefined;
-    const retryAfter = (err as any)?.headers?.["retry-after"];
+    const retryAfter = headers?.["retry-after"];
     if (retryAfter) {
       const seconds = parseInt(retryAfter, 10);
       if (!isNaN(seconds)) retryAfterMs = seconds * 1000;
@@ -62,7 +80,6 @@ export function classifyProviderError(err: unknown, providerName?: string): AIEr
   }
 
   // Network errors (ECONNREFUSED, ENOTFOUND, fetch failures, etc.)
-  const code = (err as any)?.code as string | undefined;
   const isNetworkError =
     code === "ECONNREFUSED" ||
     code === "ENOTFOUND" ||

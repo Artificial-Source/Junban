@@ -49,9 +49,20 @@ export class PluginInstaller {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await pipeline(Readable.fromWeb(res.body as any), fileStream);
 
-      // Extract
+      // Extract — use filter to reject path traversal entries (zip slip)
       fs.mkdirSync(tempExtractDir, { recursive: true });
-      await tar.extract({ file: tempFile, cwd: tempExtractDir });
+      await tar.extract({
+        file: tempFile,
+        cwd: tempExtractDir,
+        filter: (entryPath: string) => {
+          const resolved = path.resolve(tempExtractDir, entryPath);
+          if (!resolved.startsWith(tempExtractDir + path.sep) && resolved !== tempExtractDir) {
+            logger.warn(`Rejecting tar entry with path traversal: ${entryPath}`);
+            return false;
+          }
+          return true;
+        },
+      });
 
       // Find manifest.json — could be in root or a subdirectory
       let manifestDir = tempExtractDir;

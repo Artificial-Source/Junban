@@ -91,7 +91,9 @@ export async function bootstrapWeb(): Promise<WebAppServices> {
 
   // Flush DB to disk on window close
   window.addEventListener("beforeunload", () => {
-    saveDbFile(sqlite.export()).catch(() => {});
+    saveDbFile(sqlite.export()).catch((err: unknown) => {
+      console.error("[bootstrap-web] Failed to persist DB to OPFS:", err);
+    });
   });
 
   return {

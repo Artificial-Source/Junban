@@ -57,9 +57,8 @@ export function parseQuery(input: string, referenceDate?: Date): ParsedQuery {
   text = text.replace(/(?:\bin\s+project\s+(\w+)|\bproject[:\s]+(\w+)|\+(\w+))/gi, (_, a, b, c) => {
     // We can't filter by project name directly in TaskFilter (only projectId),
     // so we store the project name and let the caller resolve it.
-    // For now, we encode it as a special search prefix.
     const projectName = a ?? b ?? c;
-    (filter as any).projectName = projectName;
+    filter.projectName = projectName;
     return "";
   });
 

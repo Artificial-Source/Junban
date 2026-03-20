@@ -1,8 +1,10 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { secureHeaders } from "hono/secure-headers";
 import { serve } from "@hono/node-server";
 import { bootstrap } from "./bootstrap.js";
 import { loadEnv } from "./config/env.js";
+import { NotFoundError, ValidationError } from "./core/errors.js";
 import { createLogger, setDefaultLogLevel } from "./utils/logger.js";
 import { taskRoutes } from "./api/tasks.js";
 import { projectRoutes } from "./api/projects.js";
@@ -37,11 +39,23 @@ try {
 // Build Hono app
 const app = new Hono();
 
-// CORS middleware
+// Security headers
+app.use("*", secureHeaders());
+
+// CORS middleware — restrict to localhost origins only
+const ALLOWED_ORIGINS = [
+  `http://localhost:${API_PORT}`,
+  "http://localhost:5173", // Vite dev server
+  "http://127.0.0.1:5173",
+  "http://localhost:4173", // Vite preview
+  "http://127.0.0.1:4173",
+  "tauri://localhost", // Tauri webview
+  "https://tauri.localhost", // Tauri webview (Windows)
+];
 app.use(
   "*",
   cors({
-    origin: "*",
+    origin: ALLOWED_ORIGINS,
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "x-api-key", "Authorization"],
   }),
@@ -50,34 +64,36 @@ app.use(
 // Global error handler
 app.onError((err, c) => {
   const message = err instanceof Error ? err.message : "Internal server error";
-  const status =
-    (err as any).name === "NotFoundError"
-      ? 404
-      : message.includes("Invalid JSON")
-        ? 400
-        : message.includes("cycle")
-          ? 400
-          : 500;
+  let status: 400 | 404 | 500 = 500;
+  if (err instanceof NotFoundError) {
+    status = 404;
+  } else if (err instanceof ValidationError) {
+    status = 400;
+  } else if (message.includes("Invalid JSON") || message.includes("cycle")) {
+    status = 400;
+  }
   logger.error(`API error: ${message}`);
-  return c.json({ error: message }, status as any);
+  return c.json({ error: message }, status);
 });
 
-// POST /api/test-reset — delete all data (for E2E tests)
-app.post("/api/test-reset", async (c) => {
-  const tasks = await services.taskService.list();
-  if (tasks.length > 0) {
-    await services.taskService.deleteMany(tasks.map((t) => t.id));
-  }
-  const projects = await services.projectService.list();
-  for (const p of projects) {
-    await services.projectService.delete(p.id);
-  }
-  const tags = await services.tagService.list();
-  for (const t of tags) {
-    await services.tagService.delete(t.id);
-  }
-  return c.json({ ok: true });
-});
+// POST /api/test-reset — delete all data (for E2E tests only)
+if (process.env.NODE_ENV === "test" || process.env.E2E_MODE === "true") {
+  app.post("/api/test-reset", async (c) => {
+    const tasks = await services.taskService.list();
+    if (tasks.length > 0) {
+      await services.taskService.deleteMany(tasks.map((t) => t.id));
+    }
+    const projects = await services.projectService.list();
+    for (const p of projects) {
+      await services.projectService.delete(p.id);
+    }
+    const tags = await services.tagService.list();
+    for (const t of tags) {
+      await services.tagService.delete(t.id);
+    }
+    return c.json({ ok: true });
+  });
+}
 
 // Mount route modules
 app.route("/api/tasks", taskRoutes(services));

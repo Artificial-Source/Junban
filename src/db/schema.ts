@@ -13,6 +13,7 @@ export const tasks = sqliteTable("tasks", {
   completedAt: text("completed_at"),
   projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
   recurrence: text("recurrence"),
+  // Self-referential FK requires `(): any` — Drizzle circular reference limitation
   parentId: text("parent_id").references((): any => tasks.id, { onDelete: "cascade" }),
   remindAt: text("remind_at"),
   sortOrder: integer("sort_order").notNull().default(0),

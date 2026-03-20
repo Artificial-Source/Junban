@@ -1,0 +1,174 @@
+{
+  "domain": "security",
+  "fixes_applied": [
+    {
+      "file": "src/server.ts",
+      "original_issue": "CORS is configured with origin: \"*\", allowing any website to make API requests",
+      "fix_applied": "Restricted CORS origins to localhost (ports 4822, 5173, 4173) and Tauri webview origins only",
+      "status": "fixed"
+    },
+    {
+      "file": "src/server.ts",
+      "original_issue": "The entire API server has zero authentication",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "This is a local-first app — the API server only serves the local frontend. Adding a full auth system is architectural overkill for localhost communication. CORS restriction to localhost origins mitigates the primary attack vector (cross-origin requests from malicious websites)."
+    },
+    {
+      "file": "src/server.ts",
+      "original_issue": "POST /api/test-reset is always available, allowing any request to wipe all user data",
+      "fix_applied": "Wrapped test-reset endpoint in NODE_ENV === 'test' || E2E_MODE === 'true' guard so it is never registered in production",
+      "status": "fixed"
+    },
+    {
+      "file": "src/plugins/sandbox.ts",
+      "original_issue": "Plugin sandbox is a no-op stub — plugins run with full system access",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "Implementing real sandboxing (vm2, isolated-vm, or Worker threads) is a major architectural change. The community plugin feature already requires explicit user opt-in via community_plugins_enabled setting, and plugins require permission approval before loading."
+    },
+    {
+      "file": "src/api/ai.ts",
+      "original_issue": "API keys stored as plaintext in SQLite",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "Encrypting API keys at rest requires OS-level keychain integration (keytar or similar), which adds a native dependency and platform-specific code. The SQLite database is local-only and not network-accessible. This is a valid improvement but needs its own sprint."
+    },
+    {
+      "file": "src/server.ts",
+      "original_issue": "No security headers (CSP, X-Content-Type-Options, etc.)",
+      "fix_applied": "Added Hono secureHeaders() middleware which sets X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, and other standard security headers",
+      "status": "fixed"
+    },
+    {
+      "file": "src/api/plugins.ts",
+      "original_issue": "POST /plugins/install accepts arbitrary downloadUrl, enabling SSRF",
+      "fix_applied": "Added URL validation: must be HTTPS, rejects localhost, private IP ranges (10.x, 192.168.x, 172.x), cloud metadata IP (169.254.169.254), and .local domains",
+      "status": "fixed"
+    },
+    {
+      "file": "src/plugins/installer.ts",
+      "original_issue": "tar.extract() without path validation allows zip slip / path traversal",
+      "fix_applied": "Added filter function to tar.extract() that rejects entries with paths resolving outside the extraction directory",
+      "status": "fixed"
+    },
+    {
+      "file": "src/api/settings.ts",
+      "original_issue": "PUT /settings/:key allows writing any arbitrary key-value pair including sensitive keys like ai_api_key",
+      "fix_applied": "Added WRITABLE_SETTING_KEYS allowlist with 68 known safe setting keys. Sensitive keys (ai_api_key, ai_oauth_token) are excluded — they are only writable via the dedicated /ai/config endpoint. Returns 400 for unknown keys.",
+      "status": "fixed"
+    },
+    {
+      "file": "src/api/ai.ts",
+      "original_issue": "GET /ai/providers/:name/models accepts arbitrary baseUrl query parameter enabling SSRF",
+      "fix_applied": "Added baseUrl validation: must be HTTP(S) protocol, and hostname must be localhost/127.0.0.1/[::1] or a known provider domain (.openai.com, .anthropic.com, .openrouter.ai, .groq.com). Returns empty models array for invalid URLs.",
+      "status": "fixed"
+    },
+    {
+      "file": "src/api/tasks.ts",
+      "original_issue": "POST /tasks accepts arbitrary JSON body without schema validation",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "Adding Zod validation to all API request bodies across 11 route files is a significant effort. The service layer already validates via Drizzle ORM types. This is a localhost-only API. Should be done as a dedicated sprint item."
+    },
+    {
+      "file": "src/api/projects.ts",
+      "original_issue": "POST /projects and PUT /projects/:id accept raw JSON bodies without validation",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "Same as tasks — adding Zod validation to all route bodies needs a dedicated sprint. Low risk for localhost-only API."
+    },
+    {
+      "file": "src/plugins/loader.ts",
+      "original_issue": "Plugin entry files loaded via import() with no sandbox isolation",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "Same as plugin sandbox — requires architectural changes. Community plugins already require explicit user opt-in."
+    },
+    {
+      "file": "src/api/plugins.ts",
+      "original_issue": "POST /plugins/timeblocking/rpc passes unvalidated args to store methods",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "The RPC bridge has a whitelist of allowed method names via switch statement. Adding Zod schemas per method would be ideal but is a significant effort for a localhost-only endpoint."
+    },
+    {
+      "file": "src/api/voice.ts",
+      "original_issue": "Voice proxy endpoints forward API keys in cleartext",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "This is localhost-to-localhost communication (frontend to backend on the same machine). HTTPS is not applicable for localhost. The keys are forwarded directly to external APIs over HTTPS. No actual risk in local-first architecture."
+    },
+    {
+      "file": "src/api/ai.ts",
+      "original_issue": "Multiple routes directly access private internals via (services.chatManager as any).session = null",
+      "fix_applied": "Already fixed in a previous sprint — ChatManager.setSession() and ChatSession.restoreMessages() are used instead of private access",
+      "status": "fixed"
+    },
+    {
+      "file": "src/db/migrate-web.ts",
+      "original_issue": "Web migrations split SQL by delimiter pattern, fragile statement splitting",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "Migrations are developer-controlled files committed to the repo. The splitting pattern matches Drizzle ORM's generated migration format. No user-supplied input reaches this code path."
+    },
+    {
+      "file": "src/ui/components/chat/MarkdownMessage.tsx",
+      "original_issue": "urlTransform allows all saydo:// URLs to bypass sanitizer",
+      "fix_applied": "Tightened urlTransform to only allow saydo://task/ prefix, rejecting other saydo:// subpaths",
+      "status": "fixed"
+    },
+    {
+      "file": "src/api/plugins.ts",
+      "original_issue": "GET /plugins/store uses process.cwd() relative path for sources.json",
+      "fix_applied": "Changed to use __dirname-relative path (path.resolve(__dirname, '../../sources.json')) for reliable file resolution regardless of working directory",
+      "status": "fixed"
+    },
+    {
+      "file": "src/server.ts",
+      "original_issue": "No rate limiting on any endpoint",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "Rate limiting is less critical for a localhost-only API. The CORS restriction prevents external abuse. Adding rate limiting would add complexity without significant security benefit in the local-first model."
+    },
+    {
+      "file": "src/db/client.ts",
+      "original_issue": "SQLite database does not use encryption",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "SQLCipher adds a native dependency and build complexity. The database is local to the user's machine. API key encryption is tracked separately."
+    },
+    {
+      "file": "src/plugins/api.ts",
+      "original_issue": "Plugins with network permission get unrestricted fetch() access",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "Adding domain allowlists to plugin network permissions requires plugin manifest schema changes and is architectural. Community plugins already require explicit user opt-in."
+    },
+    {
+      "file": "src/api/plugins.ts",
+      "original_issue": "POST /plugins/commands/:id executes command without validation",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "The commandRegistry.execute() already handles unknown command IDs by throwing. Commands are registered by plugins, not user-supplied. Low risk."
+    },
+    {
+      "file": "src/config/env.ts",
+      "original_issue": "DB_PATH, MARKDOWN_PATH, PLUGIN_DIR accept arbitrary filesystem paths",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "Environment variables are set by the user or deployment configuration, not by external input. Path validation would limit legitimate use cases (custom data directories)."
+    },
+    {
+      "file": "src/api/ai.ts",
+      "original_issue": "Chat session restoration parses toolCalls with JSON.parse without validation",
+      "fix_applied": "No change",
+      "status": "deferred",
+      "reason_if_deferred": "The data comes from the local SQLite database which is only written by the application itself. Corrupted data would cause a runtime error caught by the try/catch. Adding Zod validation would be good but is low risk."
+    }
+  ],
+  "tests_passed": true,
+  "lint_passed": true,
+  "typecheck_passed": true,
+  "summary": "Fixed 9 security issues across 6 files. CORS restricted from wildcard to localhost-only origins. Test-reset endpoint guarded behind NODE_ENV/E2E_MODE check. Security headers added via Hono secureHeaders(). Plugin install URL validated (HTTPS-only, no private networks). Tar extraction protected against zip slip path traversal. Settings API restricted to allowlisted keys. AI model baseUrl validated against localhost/known providers. MarkdownMessage URL transform tightened to saydo://task/ only. sources.json path made __dirname-relative. 15 issues deferred as low-risk for local-first architecture or requiring architectural changes. All 2469 tests pass, 0 lint errors, 0 typecheck errors in modified files."
+}

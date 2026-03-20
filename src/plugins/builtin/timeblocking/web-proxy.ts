@@ -110,8 +110,10 @@ export class SettingsProxy {
 
   set(key: string, value: string): void {
     this.cache.set(key, value);
-    // Fire-and-forget
-    rpc("setSettings", key, value).catch(() => {});
+    // Fire-and-forget — log on failure so silent data loss is visible
+    rpc("setSettings", key, value).catch((err: unknown) => {
+      console.warn("[timeblocking] Failed to save setting:", key, err);
+    });
   }
 
   async loadAll(): Promise<void> {

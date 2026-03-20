@@ -49,12 +49,14 @@ export function FiltersLabels({ tasks, onNavigateToFilter }: FiltersLabelsProps)
     api
       .listTags()
       .then(setTags)
-      .catch(() => {});
+      .catch((err: unknown) => console.error("[filters] Failed to load tags:", err));
   }, []);
 
   const persistFilters = useCallback((filters: SavedFilter[]) => {
     setSavedFilters(filters);
-    api.setAppSetting(SAVED_FILTERS_KEY, JSON.stringify(filters)).catch(() => {});
+    api
+      .setAppSetting(SAVED_FILTERS_KEY, JSON.stringify(filters))
+      .catch((err: unknown) => console.error("[filters] Failed to persist filters:", err));
   }, []);
 
   const handleAddFilter = () => {

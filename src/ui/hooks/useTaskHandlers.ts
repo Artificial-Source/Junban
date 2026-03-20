@@ -20,6 +20,12 @@ export function useTaskHandlers(
   const playSound = useSoundEffect();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
+  // O(1) task lookups instead of O(n) per lookup
+  const taskMap = useMemo(
+    () => new Map(state.tasks.map((t) => [t.id, t])),
+    [state.tasks],
+  );
+
   // Adapter: bridges TaskContext methods to the ActionAPI shape expected by action creators.
   // The action creators call through this, getting both the API call AND local state dispatch.
   // On undo, refreshTasks re-syncs state from the server.
@@ -82,7 +88,7 @@ export function useTaskHandlers(
   };
 
   const handleToggleTask = async (id: string) => {
-    const task = state.tasks.find((t) => t.id === id);
+    const task = taskMap.get(id);
     if (!task) return;
     if (task.status === "completed") {
       // Uncomplete: wrap in update action so it's undoable
@@ -110,7 +116,7 @@ export function useTaskHandlers(
   };
 
   const handleUpdateTask = async (id: string, input: Parameters<typeof updateTask>[1]) => {
-    const task = state.tasks.find((t) => t.id === id);
+    const task = taskMap.get(id);
     if (!task) {
       // Fallback: no snapshot available, just update without undo
       await updateTask(id, input);
@@ -131,7 +137,7 @@ export function useTaskHandlers(
   };
 
   const handleDeleteTask = async (id: string) => {
-    const task = state.tasks.find((t) => t.id === id);
+    const task = taskMap.get(id);
     if (task) {
       await undoManager.perform(createDeleteAction(actionApi, task as Task));
     } else {
@@ -143,7 +149,7 @@ export function useTaskHandlers(
 
   const handleUpdateDueDate = useCallback(
     async (taskId: string, dueDate: string | null) => {
-      const task = state.tasks.find((t) => t.id === taskId);
+      const task = taskMap.get(taskId);
       const newFields: UpdateTaskInput = dueDate
         ? { dueDate: new Date(dueDate).toISOString(), dueTime: false }
         : { dueDate: null, dueTime: false };
@@ -158,7 +164,7 @@ export function useTaskHandlers(
         await updateTask(taskId, newFields);
       }
     },
-    [updateTask, undoManager, actionApi, state.tasks],
+    [updateTask, undoManager, actionApi, taskMap],
   );
 
   const handleAddSubtask = useCallback(
@@ -200,7 +206,7 @@ export function useTaskHandlers(
     }
   }, []);
 
-  const selectedTask = selectedTaskId ? state.tasks.find((t) => t.id === selectedTaskId) : null;
+  const selectedTask = selectedTaskId ? taskMap.get(selectedTaskId) ?? null : null;
 
   return {
     selectedTaskId,

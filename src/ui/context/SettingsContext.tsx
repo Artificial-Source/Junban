@@ -201,7 +201,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         const next = { ...DEFAULT_SETTINGS };
         SETTING_KEYS.forEach((key, i) => {
           if (values[i] !== null) {
-            (next as any)[key] = values[i];
+            (next as Record<keyof GeneralSettings, string>)[key] = values[i] as string;
           }
         });
         setSettings(next);
@@ -232,7 +232,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (key === "font_family") applyFontFamily(value as GeneralSettings["font_family"]);
         return next;
       });
-      api.setAppSetting(key, String(value)).catch(() => {});
+      api
+        .setAppSetting(key, String(value))
+        .catch((err: unknown) => console.error("[settings] Failed to persist setting:", key, err));
     },
     [],
   );

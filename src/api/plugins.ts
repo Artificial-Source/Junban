@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import type { AppServices } from "../bootstrap.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function pluginRoutes(services: AppServices): Hono {
   const app = new Hono();
@@ -84,7 +87,7 @@ export function pluginRoutes(services: AppServices): Hono {
   // GET /plugins/store — read sources.json
   app.get("/store", async (c) => {
     try {
-      const sourcesPath = path.resolve(process.cwd(), "sources.json");
+      const sourcesPath = path.resolve(__dirname, "../../sources.json");
       const data = fs.readFileSync(sourcesPath, "utf-8");
       return c.json(JSON.parse(data));
     } catch {
@@ -97,6 +100,32 @@ export function pluginRoutes(services: AppServices): Hono {
     await ensurePlugins();
     const body = await c.req.json();
     const { pluginId, downloadUrl } = body as { pluginId: string; downloadUrl: string };
+
+    // Validate download URL — must be HTTPS and not targeting internal/private networks
+    try {
+      const url = new URL(downloadUrl);
+      if (url.protocol !== "https:") {
+        return c.json({ success: false, error: "Download URL must use HTTPS" }, 400);
+      }
+      const hostname = url.hostname.toLowerCase();
+      if (
+        hostname === "localhost" ||
+        hostname === "127.0.0.1" ||
+        hostname === "[::1]" ||
+        hostname.startsWith("10.") ||
+        hostname.startsWith("192.168.") ||
+        hostname.startsWith("172.") ||
+        hostname === "169.254.169.254" ||
+        hostname.endsWith(".local")
+      ) {
+        return c.json(
+          { success: false, error: "Download URL must not target internal networks" },
+          400,
+        );
+      }
+    } catch {
+      return c.json({ success: false, error: "Invalid download URL" }, 400);
+    }
 
     const { PluginInstaller } = await import("../plugins/installer.js");
     const installer = new PluginInstaller(path.resolve(process.cwd(), "plugins"));

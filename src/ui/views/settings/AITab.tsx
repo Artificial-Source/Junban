@@ -26,7 +26,7 @@ export function AITab() {
     api
       .listAIProviders()
       .then(setProviders)
-      .catch(() => {});
+      .catch((err: unknown) => console.error("[settings:ai] Failed to load providers:", err));
   }, []);
 
   useEffect(() => {
@@ -153,7 +153,9 @@ export function AITab() {
           setAvailableModels(models);
           setModelsFailed(false);
         })
-        .catch(() => {});
+        .catch((err: unknown) =>
+          console.warn("[settings:ai] Failed to fetch models:", err),
+        );
     }
   };
 

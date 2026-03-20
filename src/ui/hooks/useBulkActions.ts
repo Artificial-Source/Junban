@@ -7,7 +7,7 @@ import {
   createBulkDeleteAction,
   createBulkUpdateAction,
 } from "../../core/actions.js";
-import type { Task, UpdateTaskInput } from "../../core/types.js";
+import type { Task, CreateTaskInput, UpdateTaskInput } from "../../core/types.js";
 
 export function useBulkActions(multiSelectedIds: Set<string>, clearSelection: () => void) {
   const {
@@ -36,7 +36,7 @@ export function useBulkActions(multiSelectedIds: Set<string>, clearSelection: ()
         await updateTask(id, input);
         return {} as Task;
       },
-      createTask: async (input: any) => {
+      createTask: async (input: CreateTaskInput) => {
         await createTask(input);
         return {} as Task;
       },

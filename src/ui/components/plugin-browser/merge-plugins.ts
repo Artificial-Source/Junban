@@ -27,7 +27,7 @@ export function mergePlugins(installed: PluginInfo[], store: StorePluginInfo[]):
       installed: !!ip,
       enabled: ip?.enabled ?? false,
       builtin: ip?.builtin ?? false,
-      permissions: ip?.permissions ?? (sp as any).permissions ?? [],
+      permissions: ip?.permissions ?? sp.permissions ?? [],
       settings: ip?.settings ?? [],
     });
   }

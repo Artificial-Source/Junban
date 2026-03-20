@@ -1,0 +1,330 @@
+{
+  "domain": "dx",
+  "severity_counts": {
+    "critical": 12,
+    "warning": 18,
+    "suggestion": 10
+  },
+  "findings": [
+    {
+      "severity": "critical",
+      "file": "src/api/ai.ts",
+      "line": 296,
+      "issue": "Bypasses encapsulation with `(services.chatManager as any).session = null` to reset session state. This breaks if the internal field is renamed or restructured.",
+      "recommendation": "Add a public `resetSession()` method to ChatManager instead of reaching into private fields.",
+      "code_snippet": "(services.chatManager as any).session = null;"
+    },
+    {
+      "severity": "critical",
+      "file": "src/api/ai.ts",
+      "line": 371,
+      "issue": "Pushes messages directly into session internals via `(session as any).messages.push(msg)`, bypassing any validation or state management.",
+      "recommendation": "Add a public `restoreMessages(msgs)` method to ChatSession that validates and sets messages properly.",
+      "code_snippet": "(session as any).messages.push(msg);"
+    },
+    {
+      "severity": "critical",
+      "file": "src/api/ai.ts",
+      "line": 374,
+      "issue": "Another private field access via `as any` to set the session on the chat manager.",
+      "recommendation": "Add `setSession(session)` to ChatManager's public API.",
+      "code_snippet": "(services.chatManager as any).session = session;"
+    },
+    {
+      "severity": "critical",
+      "file": "src/core/query-parser.ts",
+      "line": 62,
+      "issue": "Injects an undeclared `projectName` field onto TaskFilter via `(filter as any).projectName`. Consumers must know about this hidden contract.",
+      "recommendation": "Add `projectName?: string` to the TaskFilter type so it is part of the declared interface.",
+      "code_snippet": "(filter as any).projectName = projectName;"
+    },
+    {
+      "severity": "critical",
+      "file": "src/core/tasks.ts",
+      "line": 496,
+      "issue": "Uses `as any` to bypass type checking when updating parentId. Suggests the update type is too narrow.",
+      "recommendation": "Ensure `parentId` is an accepted field in the task update input type.",
+      "code_snippet": "return this.update(id, { parentId: prevSibling.id } as any);"
+    },
+    {
+      "severity": "critical",
+      "file": "src/core/tasks.ts",
+      "line": 585,
+      "issue": "Same `as any` bypass for parentId in outdent operation.",
+      "recommendation": "Fix the task update input type to include `parentId`.",
+      "code_snippet": "return this.update(id, { parentId: parent.parentId } as any);"
+    },
+    {
+      "severity": "critical",
+      "file": "src/storage/markdown/metadata-ops.ts",
+      "line": 262,
+      "issue": "Accesses `sectionId` through `as any` cast, indicating the TaskRow type is missing this field.",
+      "recommendation": "Add `sectionId` to the TaskRow type or use a properly typed accessor.",
+      "code_snippet": "if ((entry.row as any).sectionId === id) {"
+    },
+    {
+      "severity": "critical",
+      "file": "src/storage/markdown/metadata-ops.ts",
+      "line": 263,
+      "issue": "Passes `{ sectionId: null } as any` to updateTask, bypassing type safety.",
+      "recommendation": "Fix the task update input type to include `sectionId`.",
+      "code_snippet": "updateTask(idx, taskId, { sectionId: null } as any);"
+    },
+    {
+      "severity": "critical",
+      "file": "src/storage/markdown/persistence.ts",
+      "line": 180,
+      "issue": "Constructs a ProjectRow object and casts the whole thing `as any`, masking any missing or incorrect fields.",
+      "recommendation": "Use the actual ProjectRow type. If fields are missing, add them or use Partial<ProjectRow>.",
+      "code_snippet": "} as any;"
+    },
+    {
+      "severity": "critical",
+      "file": "src/ui/context/SettingsContext.tsx",
+      "line": 204,
+      "issue": "Uses `(next as any)[key]` for dynamic property assignment, bypassing all type checking on settings values.",
+      "recommendation": "Use a typed Record or a setter function that validates key-value pairs against the settings type.",
+      "code_snippet": "(next as any)[key] = values[i];"
+    },
+    {
+      "severity": "critical",
+      "file": "src/ui/components/plugin-browser/StorePluginCard.tsx",
+      "line": 182,
+      "issue": "Accesses `permissions` via `(storePlugin as any).permissions` three times, indicating the store plugin type is missing this field.",
+      "recommendation": "Add `permissions?: string[]` to the StorePlugin type definition.",
+      "code_snippet": "(storePlugin as any).permissions"
+    },
+    {
+      "severity": "critical",
+      "file": "src/ui/api/ai/ai-sessions.ts",
+      "line": 103,
+      "issue": "`toolCalls?: any` in a type literal — the shape of tool calls is well-known but left untyped.",
+      "recommendation": "Use the existing ToolCall type from `src/ai/tools/types.ts` or define a proper interface.",
+      "code_snippet": "toolCalls?: any;"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ai/errors.ts",
+      "line": 35,
+      "issue": "Uses `(err as any)?.status` to duck-type error status codes. While pragmatic, it loses all type information.",
+      "recommendation": "Define a `ProviderAPIError` interface with `status?: number; code?: string; headers?: Record<string, string>` and use a type guard.",
+      "code_snippet": "const status = (err as any)?.status as number | undefined;"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ai/errors.ts",
+      "line": 47,
+      "issue": "Another `as any` duck-type access for `headers['retry-after']`.",
+      "recommendation": "Use the same `ProviderAPIError` type guard approach.",
+      "code_snippet": "const retryAfter = (err as any)?.headers?.[\"retry-after\"];"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ai/errors.ts",
+      "line": 65,
+      "issue": "`(err as any)?.code` for network error classification — same duck-typing pattern.",
+      "recommendation": "Consolidate into a single type guard function `isNodeError(err): err is NodeJS.ErrnoException`.",
+      "code_snippet": "const code = (err as any)?.code as string | undefined;"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ai/voice/adapters/browser-stt.ts",
+      "line": 32,
+      "issue": "Accesses `(window as any).SpeechRecognition` — Web Speech API not in standard TS lib types.",
+      "recommendation": "Add a `@types/dom-speech-recognition` package or a local `.d.ts` declaration file.",
+      "code_snippet": "(window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ai/voice/adapters/browser-stt.ts",
+      "line": 52,
+      "issue": "`event: any` in onresult callback — SpeechRecognitionEvent type exists.",
+      "recommendation": "Type as `SpeechRecognitionEvent` (from a types package or local declaration).",
+      "code_snippet": "recognition.onresult = (event: any) => {"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ai/voice/adapters/piper-local-tts.ts",
+      "line": 103,
+      "issue": "Uses `(dir as any).keys()` to iterate OPFS directory entries — missing FileSystemDirectoryHandle async iterator types.",
+      "recommendation": "Add a type declaration for the async iterable entries of FileSystemDirectoryHandle.",
+      "code_snippet": "for await (const name of (dir as any).keys()) {"
+    },
+    {
+      "severity": "warning",
+      "file": "src/server.ts",
+      "line": 54,
+      "issue": "Uses `(err as any).name` for error classification in the global error handler.",
+      "recommendation": "Use `err instanceof NotFoundError` or a type guard instead of duck-typing `.name`.",
+      "code_snippet": "(err as any).name === \"NotFoundError\""
+    },
+    {
+      "severity": "warning",
+      "file": "src/server.ts",
+      "line": 62,
+      "issue": "Casts HTTP status code `as any` to satisfy Hono's strict status type.",
+      "recommendation": "Use a union type for valid HTTP status codes or Hono's StatusCode type.",
+      "code_snippet": "return c.json({ error: message }, status as any);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/server.ts",
+      "line": 106,
+      "issue": "Production `console.log` for server startup. Should use the structured logger.",
+      "recommendation": "Remove the console.log — the logger.info on line 105 already logs the same information.",
+      "code_snippet": "console.log(`API server listening on port ${info.port}`);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/views/Calendar.tsx",
+      "line": 31,
+      "issue": "`(settings as any).calendar_default_mode` — the settings type is missing this key.",
+      "recommendation": "Add `calendar_default_mode` to the GeneralSettings type.",
+      "code_snippet": "const defaultMode = (settings as any).calendar_default_mode as CalendarMode | undefined;"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/views/settings/AboutTab.tsx",
+      "line": 212,
+      "issue": "`(storageInfo as any).mode` — accessing an untyped property from API response.",
+      "recommendation": "Type the storage info API response properly.",
+      "code_snippet": "(storageInfo as any).mode === \"markdown\" ? \"Markdown\" : \"SQLite\""
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/hooks/useBulkActions.ts",
+      "line": 39,
+      "issue": "`createTask: async (input: any)` — untyped function parameter in a hook.",
+      "recommendation": "Use the CreateTaskInput type from core/types.ts.",
+      "code_snippet": "createTask: async (input: any) => {"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/views/settings/voice/LocalModelsSection.tsx",
+      "line": 22,
+      "issue": "`provider: any` parameter in a public function.",
+      "recommendation": "Type as the voice provider interface.",
+      "code_snippet": "export function toLocalModelInfo(provider: any, type: \"STT\" | \"TTS\"): LocalModelInfo | null {"
+    },
+    {
+      "severity": "warning",
+      "file": "src/api/ai.ts",
+      "line": 398,
+      "issue": "Casts `category as any` when calling updateAiMemory.",
+      "recommendation": "Ensure the category parameter type matches the storage interface.",
+      "code_snippet": "services.storage.updateAiMemory(id, content, category as any);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/api/tasks.ts",
+      "line": 249,
+      "issue": "Returns `listAllRelations() as any` — throws away the actual return type.",
+      "recommendation": "Define and use a proper TaskRelation[] return type.",
+      "code_snippet": "return svc.taskService.listAllRelations() as any;"
+    },
+    {
+      "severity": "warning",
+      "file": "src/plugins/installer.ts",
+      "line": 50,
+      "issue": "Casts `res.body as any` for streaming pipeline. Node ReadableStream vs Web ReadableStream mismatch.",
+      "recommendation": "Use a proper type assertion or convert the stream type explicitly.",
+      "code_snippet": "await pipeline(Readable.fromWeb(res.body as any), fileStream);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/components/plugin-browser/merge-plugins.ts",
+      "line": 30,
+      "issue": "Falls back to `(sp as any).permissions` — store plugin type incomplete.",
+      "recommendation": "Add permissions to the store plugin type.",
+      "code_snippet": "permissions: ip?.permissions ?? (sp as any).permissions ?? [],"
+    },
+    {
+      "severity": "warning",
+      "file": "src/api/plugins.ts",
+      "line": 130,
+      "issue": "Casts `plugin.instance as any` to access methods on plugin instances.",
+      "recommendation": "Add the needed methods to the Plugin interface or use a type guard.",
+      "code_snippet": "const instance = plugin.instance as any;"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/plugins/builtin/timeblocking/web-proxy.ts",
+      "line": 114,
+      "issue": "Silent `.catch(() => {})` on settings save — failures are completely swallowed.",
+      "recommendation": "Log the error at minimum: `.catch(err => logger.warn('Failed to save timeblocking settings', err))`.",
+      "code_snippet": "rpc(\"setSettings\", key, value).catch(() => {});"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/context/SettingsContext.tsx",
+      "line": 235,
+      "issue": "Silent `.catch(() => {})` on settings persistence — user thinks setting was saved but it wasn't.",
+      "recommendation": "Surface the error to the user or at least log it.",
+      "code_snippet": "api.setAppSetting(key, String(value)).catch(() => {});"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/bootstrap-web.ts",
+      "line": 94,
+      "issue": "Silent `.catch(() => {})` on database persistence to OPFS — data loss goes unnoticed.",
+      "recommendation": "Log the error: `.catch(err => logger.error('Failed to persist DB', err))`.",
+      "code_snippet": "saveDbFile(sqlite.export()).catch(() => {});"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/context/builtin-views.ts",
+      "line": 10,
+      "issue": "Multiple `any` types with eslint-disable comments for plugin component caching. While documented, it weakens the type boundary.",
+      "recommendation": "Define a `BuiltinPluginComponent = React.FC<Record<string, unknown>>` type alias and use it throughout.",
+      "code_snippet": "let cachedTimeblockingProxy: any = null;"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/plugins/ui-registry.ts",
+      "line": 3,
+      "issue": "Global `PluginComponent` type is `(props: any) => any` — the broadest possible function type.",
+      "recommendation": "Use `React.FC<Record<string, unknown>>` or a more specific props type.",
+      "code_snippet": "export type PluginComponent = (props: any) => any;"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/utils/sounds.ts",
+      "line": 36,
+      "issue": "Magic numbers for audio frequencies (523.25, 783.99, 440, 329.63, 587.33) without named constants.",
+      "recommendation": "Extract named constants like `NOTE_C5 = 523.25`, `NOTE_G5 = 783.99`, etc.",
+      "code_snippet": "scheduleNote(ctx, 523.25, now, 0.13, volume, \"sine\");"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/utils/ids.ts",
+      "line": 5,
+      "issue": "Magic number 21 for ID length and 63 for bitmask used without named constants.",
+      "recommendation": "Extract `const ID_LENGTH = 21` and `const ALPHABET_MASK = 63`.",
+      "code_snippet": "const bytes = new Uint8Array(21);"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/plugins/builtin/timeblocking/utils/timeblocking-utils.ts",
+      "line": 14,
+      "issue": "Magic numbers for column widths (80, 64, 48, 40) without explanation of the unit or rationale.",
+      "recommendation": "Add a comment explaining units (px?) and extract as named constants.",
+      "code_snippet": "if (dayCount === 1) return 80;"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/db/schema.ts",
+      "line": 16,
+      "issue": "Uses `(): any => tasks.id` for self-referential foreign key — Drizzle circular reference workaround.",
+      "recommendation": "This is a known Drizzle limitation. Add a comment explaining why `any` is necessary here.",
+      "code_snippet": "parentId: text(\"parent_id\").references((): any => tasks.id, { onDelete: \"cascade\" }),"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ai/voice/adapters/whisper-local-stt.ts",
+      "line": 21,
+      "issue": "`private pipelineInstance: any = null` — the Transformers.js pipeline return type is available.",
+      "recommendation": "Import and use the Pipeline type from `@huggingface/transformers` if available, or define a minimal interface.",
+      "code_snippet": "private pipelineInstance: any = null;"
+    }
+  ]
+}

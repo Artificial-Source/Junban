@@ -77,6 +77,7 @@ export interface StorePluginInfo {
   icon?: string;
   downloads?: number;
   longDescription?: string;
+  permissions?: string[];
 }
 
 export async function listPlugins(): Promise<PluginInfo[]> {

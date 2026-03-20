@@ -10,11 +10,17 @@ export const VIEW_MODE_LABELS: Array<{ value: ViewMode; label: string }> = [
   { value: 7, label: "Week" },
 ];
 
+/** Pixels per hour for the timeline grid — wider columns when fewer days are shown. */
+const PX_PER_HOUR_1DAY = 80;
+const PX_PER_HOUR_2_3DAY = 64;
+const PX_PER_HOUR_4_5DAY = 48;
+const PX_PER_HOUR_WEEK = 40;
+
 export function getPixelsPerHour(dayCount: ViewMode): number {
-  if (dayCount === 1) return 80;
-  if (dayCount <= 3) return 64;
-  if (dayCount <= 5) return 48;
-  return 40;
+  if (dayCount === 1) return PX_PER_HOUR_1DAY;
+  if (dayCount <= 3) return PX_PER_HOUR_2_3DAY;
+  if (dayCount <= 5) return PX_PER_HOUR_4_5DAY;
+  return PX_PER_HOUR_WEEK;
 }
 
 export function formatDateRange(startDate: Date, dayCount: number): string {

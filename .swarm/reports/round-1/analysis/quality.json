@@ -1,0 +1,250 @@
+{
+  "domain": "quality",
+  "severity_counts": {
+    "critical": 8,
+    "warning": 14,
+    "suggestion": 8
+  },
+  "findings": [
+    {
+      "severity": "critical",
+      "file": "src/api/ai.ts",
+      "line": 296,
+      "issue": "ChatManager.session is private but mutated via `as any` cast in 3 places — breaks encapsulation, bypasses type checks, and may corrupt session state",
+      "recommendation": "Add public `clearSession()` and `setSession(session)` methods to ChatManager, remove `as any` casts",
+      "code_snippet": "(services.chatManager as any).session = null;"
+    },
+    {
+      "severity": "critical",
+      "file": "src/api/ai.ts",
+      "line": 371,
+      "issue": "ChatSession.messages is private but mutated via `as any` cast — breaks encapsulation, bypasses message validation",
+      "recommendation": "Add a public `restoreMessages(msgs)` method to ChatSession",
+      "code_snippet": "(session as any).messages.push(msg);"
+    },
+    {
+      "severity": "critical",
+      "file": "src/server.ts",
+      "line": 54,
+      "issue": "Global error handler uses string matching on error messages for status codes — fragile, breaks if message text changes",
+      "recommendation": "Use `instanceof` checks (NotFoundError, ValidationError) or a status property on custom error classes instead of message string matching",
+      "code_snippet": "(err as any).name === \"NotFoundError\" ? 404 : message.includes(\"Invalid JSON\") ? 400 : message.includes(\"cycle\") ? 400 : 500"
+    },
+    {
+      "severity": "critical",
+      "file": "src/core/tasks.ts",
+      "line": 0,
+      "issue": "TaskService (587 lines) has no dedicated test file — the core CRUD service of the entire application lacks direct unit test coverage",
+      "recommendation": "Create tests/core/tasks.test.ts with comprehensive coverage of create, update, delete, complete, indent/outdent, relations, and recurrence",
+      "code_snippet": ""
+    },
+    {
+      "severity": "critical",
+      "file": "src/db/queries.ts",
+      "line": 0,
+      "issue": "Database query layer (348 lines) has no test file — data access layer untested directly",
+      "recommendation": "Create tests/db/queries.test.ts covering all CRUD operations, edge cases for NULL handling, and concurrent access",
+      "code_snippet": ""
+    },
+    {
+      "severity": "critical",
+      "file": "src/core/projects.ts",
+      "line": 0,
+      "issue": "ProjectService has no dedicated test file — critical path for project CRUD untested",
+      "recommendation": "Create tests/core/projects.test.ts",
+      "code_snippet": ""
+    },
+    {
+      "severity": "critical",
+      "file": "src/core/event-bus.ts",
+      "line": 0,
+      "issue": "EventBus has no test file — event dispatch reliability is untested, could silently break plugin/AI integrations",
+      "recommendation": "Create tests/core/event-bus.test.ts covering subscribe, unsubscribe, emit, error isolation",
+      "code_snippet": ""
+    },
+    {
+      "severity": "critical",
+      "file": "src/storage/markdown/metadata-ops.ts",
+      "line": 262,
+      "issue": "Markdown storage uses `as any` to access TaskRow.sectionId and pass updates — indicates type model mismatch between storage backends",
+      "recommendation": "Ensure TaskRow type includes sectionId, or create a proper typed update interface for the markdown backend",
+      "code_snippet": "if ((entry.row as any).sectionId === id) { updateTask(idx, taskId, { sectionId: null } as any); }"
+    },
+    {
+      "severity": "warning",
+      "file": "src/api/ai.ts",
+      "line": 398,
+      "issue": "Category parameter cast to `as any` when calling updateAiMemory — type mismatch between API and storage layer",
+      "recommendation": "Define a proper union type for memory categories and use it consistently",
+      "code_snippet": "services.storage.updateAiMemory(id, content, category as any);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/core/query-parser.ts",
+      "line": 62,
+      "issue": "Undeclared `projectName` property added to TaskFilter via `as any` — creates a shadow type contract not enforced by TypeScript",
+      "recommendation": "Add `projectName?: string` to the TaskFilter type definition",
+      "code_snippet": "(filter as any).projectName = projectName;"
+    },
+    {
+      "severity": "warning",
+      "file": "src/core/tasks.ts",
+      "line": 496,
+      "issue": "Update call uses `as any` to pass `parentId` — suggests UpdateTaskInput type is incomplete",
+      "recommendation": "Add `parentId` to UpdateTaskInput type if task nesting is a supported feature",
+      "code_snippet": "return this.update(id, { parentId: prevSibling.id } as any);"
+    },
+    {
+      "severity": "warning",
+      "file": "src/storage/markdown/persistence.ts",
+      "line": 180,
+      "issue": "Project row construction uses `as any` — the constructed object doesn't match ProjectRow type",
+      "recommendation": "Ensure all required ProjectRow fields are populated or adjust the type to match what markdown storage actually provides",
+      "code_snippet": "} as any;"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/context/builtin-views.ts",
+      "line": 9,
+      "issue": "File has 5 eslint-disable + `as any` usages in 55 lines — high density of type suppressions for a bridge module",
+      "recommendation": "Define proper types for plugin component resolution (e.g., `PluginComponent = React.FC<Record<string, unknown>>`)",
+      "code_snippet": "let cachedTimeblockingProxy: any = null; const cachedComponents = new Map<string, (props: any) => any>();"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/components/plugin-browser/StorePluginCard.tsx",
+      "line": 182,
+      "issue": "StorePlugin type is missing `permissions` field — accessed via `as any` cast 3 times",
+      "recommendation": "Add `permissions?: string[]` to the StorePlugin type definition",
+      "code_snippet": "(storePlugin as any).permissions"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ai/errors.ts",
+      "line": 35,
+      "issue": "AI error classification accesses `.status`, `.headers`, `.code` via `as any` — no proper error type narrowing",
+      "recommendation": "Define an interface for provider error shapes (e.g., `ProviderError { status?: number; code?: string; headers?: Record<string, string> }`) and use type guards",
+      "code_snippet": "const status = (err as any)?.status; const retryAfter = (err as any)?.headers?.[\"retry-after\"]; const code = (err as any)?.code;"
+    },
+    {
+      "severity": "warning",
+      "file": "multiple (16 files)",
+      "line": 0,
+      "issue": "22 instances of `.catch(() => {})` — silently swallowing errors across settings persistence, AI memory extraction, sound playback, and clipboard operations",
+      "recommendation": "At minimum log a warning in catch handlers for operations that affect data persistence (settings, AI memories). Fire-and-forget is acceptable for purely cosmetic operations (sounds, clipboard)",
+      "code_snippet": ".catch(() => {})"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ui/components/ExtractTasksModal.tsx and src/ai/tools/builtin/extract-tasks-from-text.ts",
+      "line": 46,
+      "issue": "Duplicated task extraction logic — identical LIST_PREFIX regex and ACTION_VERBS regex defined independently in both files with comment 'Mirrors the logic in the AI tool'",
+      "recommendation": "Extract shared constants (LIST_PREFIX, ACTION_VERBS) and the core extraction function to a shared utility module (e.g., src/utils/task-extraction.ts)",
+      "code_snippet": "const LIST_PREFIX = /^(?:[-*+]|\\d+[.)]\\s*|(?:TODO|ACTION|AI|TASK)[:\\s]+)/i;"
+    },
+    {
+      "severity": "warning",
+      "file": "src/ai/core/ (4 files)",
+      "line": 0,
+      "issue": "AI pipeline core (pipeline.ts, middleware.ts, context.ts, capabilities.ts) has zero test coverage — these handle retry logic, timeouts, and provider capability detection",
+      "recommendation": "Create tests/ai/core/ test files, especially for middleware chain and retry logic",
+      "code_snippet": ""
+    },
+    {
+      "severity": "warning",
+      "file": "src/storage/markdown/ (5 files)",
+      "line": 0,
+      "issue": "Markdown storage backend has no per-module tests for task-ops, project-ops, metadata-ops, persistence, types — only integration-level coverage exists",
+      "recommendation": "Create unit tests for individual markdown operation modules",
+      "code_snippet": ""
+    },
+    {
+      "severity": "warning",
+      "file": "src/core/sections.ts, src/core/stats.ts, src/core/tags.ts, src/core/templates.ts",
+      "line": 0,
+      "issue": "Four core service modules lack dedicated test files — sections, stats, tags, and templates",
+      "recommendation": "Create corresponding test files in tests/core/",
+      "code_snippet": ""
+    },
+    {
+      "severity": "warning",
+      "file": "src/ (46 files)",
+      "line": 0,
+      "issue": "46 source files exceed 300 lines — largest is tasks.ts at 587, chat.ts at 512, sqlite-backend.ts at 450",
+      "recommendation": "Target files >400 lines for decomposition in future sprints. tasks.ts could split task relations and recurrence into separate modules",
+      "code_snippet": ""
+    },
+    {
+      "severity": "warning",
+      "file": "src/ (overall)",
+      "line": 0,
+      "issue": "Test coverage gap: 290 of 415 source files (70%) have no corresponding test file. While integration tests cover some, core modules (tasks, projects, tags, event-bus, db/queries) are critical gaps",
+      "recommendation": "Prioritize test creation for: core/tasks.ts, core/projects.ts, core/event-bus.ts, db/queries.ts, ai/core/pipeline.ts",
+      "code_snippet": ""
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ (19 files)",
+      "line": 0,
+      "issue": "33 total `as any` casts across 19 source files — undermines TypeScript strict mode benefits",
+      "recommendation": "Systematically replace with proper types, type guards, or generic helpers. Target zero `as any` in core/ and storage/ directories first",
+      "code_snippet": ""
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/app/AppLayout.tsx",
+      "line": 242,
+      "issue": "ErrorBoundary only wraps the main view area — sidebar, AI chat panel, and task detail panel are unprotected",
+      "recommendation": "Wrap Sidebar, AIChatPanel, and TaskDetailPanel each in their own ErrorBoundary to prevent a plugin or AI crash from taking down the entire UI",
+      "code_snippet": ""
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/api/ai.ts",
+      "line": 294,
+      "issue": "Memory extraction fire-and-forget on session switch could silently lose user memories",
+      "recommendation": "Log failures from extractMemories() and consider awaiting it with a timeout before switching sessions",
+      "code_snippet": "currentSession.extractMemories().catch(() => {});"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/server.ts",
+      "line": 62,
+      "issue": "HTTP status code cast to `as any` suggests Hono's type for status codes is more restrictive than needed",
+      "recommendation": "Use Hono's `StatusCode` type or cast to a specific numeric literal union instead of `any`",
+      "code_snippet": "return c.json({ error: message }, status as any);"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/main.ts",
+      "line": 24,
+      "issue": "Single TODO comment in entry point — minor but indicates incomplete wiring",
+      "recommendation": "Implement or remove the TODO",
+      "code_snippet": "// TODO: Start UI or CLI based on context"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ai/voice/adapters/piper-local-tts.ts",
+      "line": 53,
+      "issue": "4 `as any` casts for piper-tts library — library types may be incomplete",
+      "recommendation": "Create a local type declaration file (piper-tts.d.ts) with proper types for the library API",
+      "code_snippet": "await tts.download(this.defaultVoice as any, ...)"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ai/voice/adapters/browser-stt.ts",
+      "line": 32,
+      "issue": "Browser Speech Recognition API accessed via `(window as any)` — standard Web Speech API types available via @types/dom-speech-recognition",
+      "recommendation": "Install `@types/dom-speech-recognition` or add a local `.d.ts` declaration for SpeechRecognition",
+      "code_snippet": "(window as any).SpeechRecognition || (window as any).webkitSpeechRecognition"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/views/Calendar.tsx",
+      "line": 31,
+      "issue": "Settings object accessed via `as any` to read calendar_default_mode — settings type doesn't include this key",
+      "recommendation": "Add calendar_default_mode to the settings type definition",
+      "code_snippet": "const defaultMode = (settings as any).calendar_default_mode as CalendarMode | undefined;"
+    }
+  ]
+}

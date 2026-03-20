@@ -259,8 +259,8 @@ export function deleteSection(idx: MarkdownIndexes, id: string): MutationResult 
   idx.sectionIndex.delete(id);
   // Clear sectionId on tasks that referenced this section
   for (const [taskId, entry] of idx.taskIndex) {
-    if ((entry.row as any).sectionId === id) {
-      updateTask(idx, taskId, { sectionId: null } as any);
+    if (entry.row.sectionId === id) {
+      updateTask(idx, taskId, { sectionId: null });
     }
   }
   persistSections(idx);

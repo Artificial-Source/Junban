@@ -1,0 +1,192 @@
+{
+  "domain": "performance",
+  "fixes_applied": [
+    {
+      "file": "src/ui/components/TaskList.tsx",
+      "original_issue": "No list virtualization — all tasks rendered in DOM",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "Requires adding @tanstack/react-virtual dependency and significant refactoring of TaskList component — too risky for a targeted fix pass"
+    },
+    {
+      "file": "src/ui/context/PluginContext.tsx",
+      "original_issue": "PluginContext.Provider value is a new object literal on every render, causing all consumers to re-render",
+      "fix_applied": "Wrapped context value in useMemo with all state/callback dependencies. Also added visibility check and empty-plugins guard to the 30s polling interval.",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/context/VoiceContext.tsx",
+      "original_issue": "VoiceContext.Provider value is a new object literal on every render",
+      "fix_applied": "Wrapped context value in useMemo with all state/callback dependencies",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/app/ViewRenderer.tsx",
+      "original_issue": "No code splitting — all 17+ views eagerly imported",
+      "fix_applied": "Converted 11 less-frequently-used views to React.lazy() with Suspense fallback. Kept Inbox, Today, Upcoming, Project, and PluginView as eager imports since they are the most common landing views.",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/app/useAppState.ts",
+      "original_issue": "Every task count change triggers 3 API calls (fetchProjects, fetchTags, fetchBlockedTaskIds)",
+      "fix_applied": "Removed taskCount dependency from useEffect. Now fetches on mount only, with AI dataMutationCount driving subsequent refreshes (including blockedTaskIds).",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/app/useAppState.ts",
+      "original_issue": "Redundant task filtering — 4 separate full-array scans (visibleTasks, inboxTaskCount, todayTaskCount, projectTaskCounts)",
+      "fix_applied": "Consolidated into a single useMemo pass that computes inboxTasks, todayTasks, inboxTaskCount, todayTaskCount, projectTaskCounts, and projectCompletedCounts in one iteration. visibleTasks now reuses pre-computed arrays for inbox/today views.",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/views/PluginView.tsx",
+      "original_issue": "PluginView polls server every 500ms for structured views with no change detection",
+      "fix_applied": "Added content comparison via lastContentRef to skip re-renders when content unchanged. Added document.visibilityState check to skip polling when tab is hidden. Increased intervals from 500ms/1000ms to 2000ms/3000ms.",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/components/CommandPalette.tsx",
+      "original_issue": "Command filtering runs on every render without useMemo",
+      "fix_applied": "Wrapped filtered array in useMemo with [commands, query] dependencies",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/components/SearchModal.tsx",
+      "original_issue": "SearchModal filters all tasks on every keystroke with no debounce",
+      "fix_applied": "Added 200ms debounced query state. Filtering now uses debouncedQuery instead of raw query.",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/hooks/useBulkActions.ts",
+      "original_issue": "O(n*m) complexity in bulk operations — .find() over all tasks for each selected ID. handleBulkAddTag does sequential API calls.",
+      "fix_applied": "Built memoized taskMap (Map<string, Task>) for O(1) lookups. Changed handleBulkAddTag to use Promise.all for parallel execution.",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/context/TaskContext.tsx",
+      "original_issue": "Single TaskContext causes all consumers to re-render on any task state change",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "Splitting TaskContext into state/dispatch contexts requires architectural changes across all consumers — too risky for targeted fix pass"
+    },
+    {
+      "file": "src/ui/context/SettingsContext.tsx",
+      "original_issue": "Any setting change re-renders all consumers including unrelated ones",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "Splitting into granular contexts requires changes across all settings consumers — architectural change"
+    },
+    {
+      "file": "src/ui/context/AIContext.tsx",
+      "original_issue": "AIContext refreshes all tasks on every AI chat response via dataMutationCount",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "Replacing full refreshTasks with granular updates requires changes to the AI tool execution pipeline to track which tasks were mutated — too risky"
+    },
+    {
+      "file": "src/ui/views/Completed.tsx",
+      "original_issue": "Completed view renders all completed tasks without pagination",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "Adding pagination or virtual scrolling requires UI design decisions and component changes — should be a separate feature PR"
+    },
+    {
+      "file": "src/ui/views/Stats.tsx",
+      "original_issue": "Math.max(...dailyCounts.map(d => d.count), 1) computed during render without useMemo",
+      "fix_applied": "Wrapped maxCount in useMemo with [dailyCounts] dependency",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/views/Cancelled.tsx",
+      "original_issue": "No pagination for cancelled tasks list",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "Same as Completed.tsx — requires UI design decisions for pagination"
+    },
+    {
+      "file": "src/ui/components/Sidebar.tsx",
+      "original_issue": "Default parameter 'new Set()' creates a new Set on every render",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "Change gets reverted by formatter/linter. The React Compiler also has a pre-existing error on orderedSidebarItems memoization in this file that needs separate investigation."
+    },
+    {
+      "file": "src/ui/context/PluginContext.tsx",
+      "original_issue": "PluginContext polls every 30s unconditionally even when no plugins or tab not visible",
+      "fix_applied": "Added plugins.length === 0 guard to skip polling when no plugins. Added document.visibilityState check inside interval callback.",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/hooks/useNudges.ts",
+      "original_issue": "Nudge evaluation runs on every task mutation due to evaluate callback dependency on tasks",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "The evaluate callback legitimately depends on tasks for correctness. Removing tasks from evaluate's deps would make it stale. A debounce would help but introduces complexity — better addressed as a separate change."
+    },
+    {
+      "file": "src/ui/hooks/useTaskHandlers.ts",
+      "original_issue": "Multiple handlers do state.tasks.find() — O(n) per lookup",
+      "fix_applied": "Created memoized taskMap (Map<string, Task>) for O(1) lookups. Replaced all 5 state.tasks.find() calls with taskMap.get().",
+      "status": "fixed"
+    },
+    {
+      "file": "src/ui/components/chat/MessageBubble.tsx",
+      "original_issue": "JSON.parse called during render for tool call results",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "The JSON.parse is inside a helper function (extractInlineTaskData) called from render — wrapping in useMemo requires restructuring the component. Low impact since it only parses small tool results."
+    },
+    {
+      "file": "src/ui/components/chat/ChatToolResultCard.tsx",
+      "original_issue": "JSON.parse inside render without memoization",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "The JSON.parse is inside ToolResultVisual function component — wrapping in useMemo requires adding hooks to what's currently a simple function. Low impact since tool results are small."
+    },
+    {
+      "file": "src/ui/components/chat/ToolCallBadge.tsx",
+      "original_issue": "JSON.parse(args) called during render without memoization",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "Same pattern — args are typically <200 bytes. The parse is fast and the component rerenders infrequently."
+    },
+    {
+      "file": "src/ui/components/TaskItem.tsx",
+      "original_issue": "Inline style objects created per render via spread",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "TaskItem already has React.memo. The style spread creates a small object — useMemo overhead may be comparable to the spread itself."
+    },
+    {
+      "file": "src/ui/app/useAppState.ts",
+      "original_issue": "toDateKey(new Date()) called multiple times in same render cycle",
+      "fix_applied": "Extracted today = toDateKey(new Date()) as a shared useMemo value used by the consolidated single-pass computation.",
+      "status": "fixed"
+    },
+    {
+      "file": "src/core/filters.ts",
+      "original_issue": "filterTasks uses O(n*t) tag filtering",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "Indexed lookups require storage layer changes. Current performance is acceptable for expected task counts (<10k)."
+    },
+    {
+      "file": "src/ui/context/TaskContext.tsx",
+      "original_issue": "refreshTasks() fetches ALL tasks with no filtering/pagination",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "Adding server-side pagination requires API changes and state management restructuring — architectural change"
+    },
+    {
+      "file": "src/ui/components/PluginBrowser.tsx",
+      "original_issue": "4 sequential useEffect hooks trigger independent state updates on mount",
+      "fix_applied": "",
+      "status": "deferred",
+      "reason_if_deferred": "Combining effects requires understanding the data dependencies between the 4 effects. Low impact since it only runs on PluginBrowser mount."
+    }
+  ],
+  "tests_passed": true,
+  "lint_passed": true,
+  "typecheck_passed": true,
+  "summary": "Applied 13 performance fixes across 10 files. Key improvements: (1) useMemo on PluginContext and VoiceContext values prevents unnecessary consumer re-renders, (2) React.lazy code splitting for 11 views reduces initial bundle size, (3) consolidated task filtering in useAppState from 4 separate array scans to 1 single-pass computation, (4) removed cascading API calls triggered by task count changes, (5) PluginView polling reduced from 500ms to 2s with change detection and visibility checks, (6) O(1) task lookups via memoized Maps in useTaskHandlers and useBulkActions, (7) debounced search in SearchModal, (8) memoized command filtering in CommandPalette. Deferred 15 issues that require architectural changes (context splitting, list virtualization, pagination) or have low impact (small JSON.parse, style spreads)."
+}

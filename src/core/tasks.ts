@@ -493,7 +493,7 @@ export class TaskService {
     }
 
     // Make this task a child of prevSibling
-    return this.update(id, { parentId: prevSibling.id } as any);
+    return this.update(id, { parentId: prevSibling.id });
   }
 
   // ── Task Relations ──
@@ -582,6 +582,6 @@ export class TaskService {
     if (!parent) throw new NotFoundError("Task", task.parentId);
 
     // Move to parent's parent (or top level if parent is top level)
-    return this.update(id, { parentId: parent.parentId } as any);
+    return this.update(id, { parentId: parent.parentId });
   }
 }

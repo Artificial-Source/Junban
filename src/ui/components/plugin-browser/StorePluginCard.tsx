@@ -179,15 +179,14 @@ export function StorePluginCard({
               </p>
             )}
 
-            {(storePlugin as any).permissions &&
-              ((storePlugin as any).permissions as string[]).length > 0 && (
+            {storePlugin.permissions && storePlugin.permissions.length > 0 && (
                 <div className="mt-3">
                   <p className="text-xs font-medium text-on-surface-secondary mb-1 flex items-center gap-1">
                     <Shield size={10} />
                     Permissions
                   </p>
                   <div className="flex flex-wrap gap-1">
-                    {((storePlugin as any).permissions as string[]).map((p) => (
+                    {storePlugin.permissions.map((p) => (
                       <span
                         key={p}
                         className="text-xs font-mono px-1.5 py-0.5 rounded bg-warning/10 text-warning"

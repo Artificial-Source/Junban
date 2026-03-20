@@ -16,7 +16,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={components}
-      urlTransform={(url) => (url.startsWith("saydo://") ? url : defaultUrlTransform(url))}
+      urlTransform={(url) => (url.startsWith("saydo://task/") ? url : defaultUrlTransform(url))}
     >
       {content}
     </ReactMarkdown>

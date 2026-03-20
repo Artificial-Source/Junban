@@ -2,6 +2,10 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AppServices } from "../bootstrap.js";
 import type { ProviderRegistration } from "../ai/provider/registry.js";
+import type { ChatMessage } from "../ai/types.js";
+import { createLogger } from "../utils/logger.js";
+
+const logger = createLogger("api:ai");
 
 export function aiRoutes(services: AppServices): Hono {
   const app = new Hono();
@@ -84,6 +88,29 @@ export function aiRoutes(services: AppServices): Hono {
     try {
       const providerName = c.req.param("name");
       const baseUrlOverride = c.req.query("baseUrl");
+
+      // Validate baseUrl override — only allow HTTP(S) on localhost or known provider domains
+      if (baseUrlOverride) {
+        try {
+          const parsed = new URL(baseUrlOverride);
+          if (!["http:", "https:"].includes(parsed.protocol)) {
+            return c.json({ models: [] });
+          }
+          const host = parsed.hostname.toLowerCase();
+          const isLocalhost = host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+          const isKnownProvider =
+            host.endsWith(".openai.com") ||
+            host.endsWith(".anthropic.com") ||
+            host.endsWith(".openrouter.ai") ||
+            host.endsWith(".groq.com");
+          if (!isLocalhost && !isKnownProvider) {
+            return c.json({ models: [] });
+          }
+        } catch {
+          return c.json({ models: [] });
+        }
+      }
+
       const apiKeySetting = services.storage.getAppSetting("ai_api_key");
       const baseUrlSetting = services.storage.getAppSetting("ai_base_url");
 
@@ -291,9 +318,13 @@ export function aiRoutes(services: AppServices): Hono {
   app.post("/sessions/new", async (c) => {
     const currentSession = services.chatManager.getSession();
     if (currentSession) {
-      currentSession.extractMemories().catch(() => {});
+      currentSession
+        .extractMemories()
+        .catch((err: unknown) =>
+          logger.warn(`Memory extraction failed: ${err instanceof Error ? err.message : err}`),
+        );
     }
-    (services.chatManager as any).session = null;
+    services.chatManager.setSession(null);
     return c.json({ sessionId: "" });
   });
 
@@ -310,7 +341,11 @@ export function aiRoutes(services: AppServices): Hono {
   app.post("/sessions/:id/switch", async (c) => {
     const currentSession = services.chatManager.getSession();
     if (currentSession) {
-      currentSession.extractMemories().catch(() => {});
+      currentSession
+        .extractMemories()
+        .catch((err: unknown) =>
+          logger.warn(`Memory extraction failed: ${err instanceof Error ? err.message : err}`),
+        );
     }
     const sessionId = decodeURIComponent(c.req.param("id"));
     const providerSetting = services.storage.getAppSetting("ai_provider");
@@ -360,18 +395,19 @@ export function aiRoutes(services: AppServices): Hono {
       providerName: providerSetting.value as string,
     });
 
+    const restoredMessages: ChatMessage[] = [];
     for (const row of rows) {
       if (row.role === "system") continue;
-      const msg = {
+      restoredMessages.push({
         role: row.role as "user" | "assistant" | "tool",
         content: row.content,
         ...(row.toolCallId ? { toolCallId: row.toolCallId } : {}),
         ...(row.toolCalls ? { toolCalls: JSON.parse(row.toolCalls) } : {}),
-      };
-      (session as any).messages.push(msg);
+      });
     }
+    session.restoreMessages(restoredMessages);
 
-    (services.chatManager as any).session = session;
+    services.chatManager.setSession(session);
     const messages = session.getMessages();
     return c.json(messages);
   });
@@ -394,8 +430,11 @@ export function aiRoutes(services: AppServices): Hono {
   app.put("/memories/:id", async (c) => {
     const id = decodeURIComponent(c.req.param("id"));
     const body = await c.req.json();
-    const { content, category } = body as { content: string; category: string };
-    services.storage.updateAiMemory(id, content, category as any);
+    const { content, category } = body as {
+      content: string;
+      category: "preference" | "habit" | "context" | "instruction" | "pattern";
+    };
+    services.storage.updateAiMemory(id, content, category);
     return c.json({ ok: true });
   });
 

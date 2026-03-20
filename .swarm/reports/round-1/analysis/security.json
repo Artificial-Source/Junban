@@ -1,0 +1,260 @@
+{
+  "domain": "security",
+  "severity_counts": {
+    "critical": 5,
+    "warning": 11,
+    "suggestion": 9
+  },
+  "findings": [
+    {
+      "severity": "critical",
+      "file": "src/server.ts",
+      "line": 44,
+      "vulnerability_type": "Misconfiguration",
+      "issue": "CORS is configured with `origin: \"*\"`, allowing any website to make authenticated API requests to the server. Combined with no authentication on any route, any website the user visits can read/write all tasks, projects, AI config (including API keys), and delete all data.",
+      "recommendation": "Restrict CORS origin to the Vite dev server URL (e.g., `http://localhost:5173`) and the Tauri webview origin. In production, use a whitelist.",
+      "code_snippet": "cors({ origin: \"*\", allowMethods: [\"GET\", \"POST\", \"PUT\", \"PATCH\", \"DELETE\", \"OPTIONS\"], allowHeaders: [\"Content-Type\", \"x-api-key\", \"Authorization\"] })",
+      "cwe": "CWE-942"
+    },
+    {
+      "severity": "critical",
+      "file": "src/server.ts",
+      "line": 37,
+      "vulnerability_type": "Missing Authentication",
+      "issue": "The entire API server has zero authentication. All routes (task CRUD, AI config with API keys, plugin install, data wipe via /api/test-reset) are accessible to anyone who can reach the port. Combined with wildcard CORS, any website can fully control the application.",
+      "recommendation": "Add authentication middleware. At minimum, generate a random bearer token on startup and require it for all API requests. The Tauri frontend can read it from a shared file or env var.",
+      "code_snippet": "const app = new Hono();\n// No auth middleware anywhere",
+      "cwe": "CWE-306"
+    },
+    {
+      "severity": "critical",
+      "file": "src/server.ts",
+      "line": 66,
+      "vulnerability_type": "Destructive Endpoint Without Protection",
+      "issue": "POST /api/test-reset deletes ALL tasks, projects, and tags. This endpoint is always available in production (not guarded by NODE_ENV or any flag). Any unauthenticated request can wipe all user data.",
+      "recommendation": "Guard this endpoint behind a `NODE_ENV === 'test'` or `E2E_MODE` check. Never expose data-wiping endpoints in production builds.",
+      "code_snippet": "app.post(\"/api/test-reset\", async (c) => {\n  const tasks = await services.taskService.list();\n  if (tasks.length > 0) {\n    await services.taskService.deleteMany(tasks.map((t) => t.id));\n  }",
+      "cwe": "CWE-749"
+    },
+    {
+      "severity": "critical",
+      "file": "src/plugins/sandbox.ts",
+      "line": 16,
+      "vulnerability_type": "Missing Sandbox Isolation",
+      "issue": "The plugin sandbox is a no-op stub. Plugins run via `import()` in the same Node.js process with full access to `require`, `fs`, `child_process`, `process.env`, network, and the entire system. Permission checks only gate the Plugin API surface, not actual system access. A malicious community plugin can execute arbitrary code.",
+      "recommendation": "Implement actual sandboxing using Node.js `vm` module with a restricted context, or use Worker threads with limited capabilities. Until then, clearly warn users that installing community plugins grants full system access.",
+      "code_snippet": "export function createSandbox(_options: SandboxOptions) {\n  // No sandbox isolation\n  return {\n    execute: async (_entryFile: string) => {},\n    destroy: () => {},\n  };\n}",
+      "cwe": "CWE-693"
+    },
+    {
+      "severity": "critical",
+      "file": "src/api/ai.ts",
+      "line": 30,
+      "vulnerability_type": "Sensitive Data Exposure",
+      "issue": "GET /ai/config returns `hasApiKey: !!apiKeySetting?.value` which is safe, but PUT /ai/config stores the API key as plaintext in SQLite via `setAppSetting(\"ai_api_key\", apiKey)`. The key is stored in plain text alongside all other settings. Similarly, OAuth tokens are stored in plaintext. Any local process or extension with DB read access can extract all AI provider credentials.",
+      "recommendation": "Encrypt API keys at rest using a key derived from OS-level secrets (e.g., macOS Keychain, Windows Credential Manager, Linux Secret Service via `keytar`). At minimum, use reversible encryption with a machine-specific key.",
+      "code_snippet": "if (apiKey) services.storage.setAppSetting(\"ai_api_key\", apiKey);",
+      "cwe": "CWE-312"
+    },
+    {
+      "severity": "warning",
+      "file": "src/api/plugins.ts",
+      "line": 99,
+      "vulnerability_type": "SSRF / Arbitrary URL Fetch",
+      "issue": "POST /plugins/install accepts an arbitrary `downloadUrl` from the request body and fetches it server-side via `installer.install(pluginId, downloadUrl)`. An attacker (or compromised frontend) can use this to make the server fetch internal network resources (e.g., `http://169.254.169.254/` for cloud metadata, `file:///etc/passwd`).",
+      "recommendation": "Validate that `downloadUrl` is HTTPS and matches an allowlist of trusted domains (e.g., GitHub releases). Reject `file://`, `http://localhost`, private IP ranges, and cloud metadata IPs.",
+      "code_snippet": "const { pluginId, downloadUrl } = body as { pluginId: string; downloadUrl: string };\nconst result = await installer.install(pluginId, downloadUrl);",
+      "cwe": "CWE-918"
+    },
+    {
+      "severity": "warning",
+      "file": "src/plugins/installer.ts",
+      "line": 54,
+      "vulnerability_type": "Zip Slip / Tar Path Traversal",
+      "issue": "The plugin installer uses `tar.extract()` without explicitly stripping or validating entry paths. A malicious tarball could contain entries with `../` paths that write files outside the extraction directory, potentially overwriting system files or application code.",
+      "recommendation": "Use `tar.extract()` with the `strip` option or a `filter` function that rejects entries containing `..` in their path. Alternatively, validate all extracted paths are within `tempExtractDir` after extraction.",
+      "code_snippet": "await tar.extract({ file: tempFile, cwd: tempExtractDir });",
+      "cwe": "CWE-22"
+    },
+    {
+      "severity": "warning",
+      "file": "src/api/tasks.ts",
+      "line": 25,
+      "vulnerability_type": "Missing Input Validation",
+      "issue": "POST /tasks accepts arbitrary JSON body and passes it directly to `taskService.create(body)` without schema validation. While Drizzle ORM provides some type checking, unexpected fields could cause runtime errors or data corruption. The same pattern applies to PATCH /tasks/:id (line 226), POST /tasks/import (line 78), and bulk operations.",
+      "recommendation": "Validate request bodies against Zod schemas (e.g., `CreateTaskInput` from `core/types.ts`) before passing to service methods. Return 400 with validation errors for invalid input.",
+      "code_snippet": "const body = await c.req.json();\nconst task = await services.taskService.create(body);",
+      "cwe": "CWE-20"
+    },
+    {
+      "severity": "warning",
+      "file": "src/api/settings.ts",
+      "line": 26,
+      "vulnerability_type": "Unrestricted Setting Writes",
+      "issue": "PUT /settings/:key allows writing any arbitrary key-value pair to app settings with no validation or allowlist. An attacker could overwrite critical settings like `ai_api_key`, `community_plugins_enabled`, or inject new settings that alter application behavior.",
+      "recommendation": "Validate the `key` parameter against an allowlist of known setting keys. Restrict sensitive keys (like `ai_api_key`) to only be writable through their dedicated endpoints.",
+      "code_snippet": "const key = decodeURIComponent(c.req.param(\"key\"));\nconst body = await c.req.json();\nservices.storage.setAppSetting(key, body.value as string);",
+      "cwe": "CWE-284"
+    },
+    {
+      "severity": "warning",
+      "file": "src/plugins/loader.ts",
+      "line": 247,
+      "vulnerability_type": "Arbitrary Code Execution via Plugin Load",
+      "issue": "Plugin entry files are loaded via `await import(entryFile)` where the path is constructed from plugin directory + manifest.main. Since the sandbox is a no-op, any code in the plugin entry file executes with full Node.js privileges. Combined with the unauthenticated install endpoint, this is a remote code execution chain.",
+      "recommendation": "Implement real sandboxing (vm2, isolated-vm, or Worker threads). Add code signing or checksum verification for downloaded plugins. Show clear security warnings to users before installing community plugins.",
+      "code_snippet": "const entryFile = path.join(loaded.path, loaded.manifest.main);\nconst module = this.moduleLoader\n  ? await this.moduleLoader(entryFile)\n  : await import(entryFile);",
+      "cwe": "CWE-94"
+    },
+    {
+      "severity": "warning",
+      "file": "src/api/plugins.ts",
+      "line": 119,
+      "vulnerability_type": "Unrestricted RPC Bridge",
+      "issue": "POST /plugins/timeblocking/rpc accepts a `method` name and `args` array from the client and invokes methods on the timeblocking store. While method names are validated via a switch statement, the args are passed directly without type validation, potentially allowing type confusion attacks.",
+      "recommendation": "Validate each method's arguments with Zod schemas. Consider using a proper RPC framework with type-safe contracts instead of dynamic method dispatch.",
+      "code_snippet": "const { method, args } = body as { method: string; args: unknown[] };",
+      "cwe": "CWE-20"
+    },
+    {
+      "severity": "warning",
+      "file": "src/api/voice.ts",
+      "line": 16,
+      "vulnerability_type": "API Key Forwarding via Proxy",
+      "issue": "The voice proxy endpoints accept API keys via the `x-api-key` header and forward them to external services (Groq, Inworld). While this avoids CORS issues, the API keys transit through the server in cleartext. If the server logs request headers or an attacker can intercept traffic to the server, keys are exposed.",
+      "recommendation": "Ensure the server never logs request headers containing API keys. Use HTTPS between the frontend and backend server. Consider storing voice API keys server-side (like the AI API key) rather than passing them per-request.",
+      "code_snippet": "const apiKey = c.req.header(\"x-api-key\");\nfetch(\"https://api.groq.com/openai/v1/audio/transcriptions\", {\n  headers: { Authorization: `Bearer ${apiKey}` },",
+      "cwe": "CWE-319"
+    },
+    {
+      "severity": "warning",
+      "file": "src/api/ai.ts",
+      "line": 296,
+      "vulnerability_type": "Unsafe Internal Access",
+      "issue": "Multiple routes directly access private internals via `(services.chatManager as any).session = null` and `(session as any).messages.push(msg)`, bypassing encapsulation. This creates fragile code paths that could lead to inconsistent state if internal implementation changes.",
+      "recommendation": "Add proper public methods to ChatManager for session management (e.g., `clearCurrentSession()`, `switchToSession(id)`) instead of directly mutating private state.",
+      "code_snippet": "(services.chatManager as any).session = null;",
+      "cwe": "CWE-668"
+    },
+    {
+      "severity": "warning",
+      "file": "src/api/projects.ts",
+      "line": 15,
+      "vulnerability_type": "Missing Input Validation",
+      "issue": "POST /projects and PUT /projects/:id accept raw JSON bodies without validation. Same pattern in tags, templates, sections, and comments routes. No Zod validation on incoming data.",
+      "recommendation": "Apply Zod schema validation to all request bodies across all API routes. Create shared validation middleware.",
+      "code_snippet": "const body = await c.req.json();\nawait services.projectService.create(body.name, body);",
+      "cwe": "CWE-20"
+    },
+    {
+      "severity": "warning",
+      "file": "src/db/migrate-web.ts",
+      "line": 9,
+      "vulnerability_type": "SQL Statement Splitting",
+      "issue": "Web migrations split SQL by `--> statement-breakpoint` delimiter and execute each statement individually. If a migration file contains SQL injection via the delimiter pattern, it could execute unintended SQL. While migrations are developer-controlled, this pattern is fragile.",
+      "recommendation": "Use a proper migration runner that handles statement boundaries correctly. Consider using the same Drizzle migration runner for both Node.js and web contexts.",
+      "code_snippet": "for (const stmt of sql.split(\"--> statement-breakpoint\")) {\n  const trimmed = stmt.trim();\n  if (trimmed) sqlite.run(trimmed);\n}",
+      "cwe": "CWE-89"
+    },
+    {
+      "severity": "warning",
+      "file": "src/api/ai.ts",
+      "line": 86,
+      "vulnerability_type": "Open Redirect / SSRF",
+      "issue": "GET /ai/providers/:name/models accepts a `baseUrl` query parameter and passes it to `fetchAvailableModels()`. This allows the server to make requests to arbitrary URLs, potentially targeting internal services.",
+      "recommendation": "Validate baseUrl format and restrict to HTTP(S) URLs on non-private IP ranges. Consider maintaining a server-side whitelist of known provider base URLs.",
+      "code_snippet": "const baseUrlOverride = c.req.query(\"baseUrl\");\nconst models = await fetchAvailableModels(providerName, { apiKey: apiKeySetting?.value, baseUrl: baseUrlOverride || baseUrlSetting?.value });",
+      "cwe": "CWE-918"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/server.ts",
+      "line": 37,
+      "vulnerability_type": "Missing Security Headers",
+      "issue": "The Hono server does not set security headers like Content-Security-Policy, X-Content-Type-Options, X-Frame-Options, or Strict-Transport-Security.",
+      "recommendation": "Add Hono's `secureHeaders()` middleware or manually set CSP, X-Content-Type-Options: nosniff, X-Frame-Options: DENY, and other security headers.",
+      "code_snippet": "const app = new Hono();\n// No security headers middleware",
+      "cwe": "CWE-693"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/server.ts",
+      "line": 37,
+      "vulnerability_type": "Missing Rate Limiting",
+      "issue": "No rate limiting on any endpoint. The AI chat endpoint (POST /ai/chat) could be abused to make unlimited API calls to the configured AI provider, burning through API credits. The test-reset endpoint could be called repeatedly.",
+      "recommendation": "Add rate limiting middleware, especially on the AI chat, plugin install, and destructive endpoints.",
+      "code_snippet": "// No rate limiting middleware",
+      "cwe": "CWE-770"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/ui/components/chat/MarkdownMessage.tsx",
+      "line": 19,
+      "vulnerability_type": "Custom URL Scheme Bypass",
+      "issue": "The `urlTransform` allows `saydo://` URLs to bypass the default URL sanitizer. While `saydo://task/` links are handled safely via onClick, a malicious AI response could craft `saydo://` URLs that bypass default URL filtering. The `react-markdown` library's `defaultUrlTransform` filters `javascript:` and `data:` URIs, but custom scheme bypass could be exploited in future code changes.",
+      "recommendation": "Tighten the custom URL transform to only allow `saydo://task/` prefix specifically, rejecting other `saydo://` subpaths.",
+      "code_snippet": "urlTransform={(url) => (url.startsWith(\"saydo://\") ? url : defaultUrlTransform(url))}",
+      "cwe": "CWE-79"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/db/client.ts",
+      "line": 14,
+      "vulnerability_type": "Database Hardening",
+      "issue": "The SQLite database does not use encryption. While this is expected for a local-first app, sensitive data like AI API keys and OAuth tokens are stored in plaintext. WAL mode and foreign keys are enabled, which is good.",
+      "recommendation": "Consider using SQLCipher or similar encrypted SQLite for protecting sensitive credentials at rest. At minimum, store secrets in OS keychain rather than in the SQLite database.",
+      "code_snippet": "const sqlite = new Database(dbPath);\nsqlite.pragma(\"journal_mode = WAL\");\nsqlite.pragma(\"foreign_keys = ON\");",
+      "cwe": "CWE-311"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/plugins/api.ts",
+      "line": 267,
+      "vulnerability_type": "Unrestricted Network Access",
+      "issue": "Plugins with the `network` permission get unrestricted `fetch()` access. There is no URL filtering, no domain allowlist, and no request/response size limits. A plugin could exfiltrate user data to arbitrary servers.",
+      "recommendation": "Add domain allowlist support to the network permission (e.g., declare allowed domains in manifest.json). Log and limit request frequency. Add response size limits.",
+      "code_snippet": "fetch: has(\"network\")\n  ? async (url: string, init?: RequestInit): Promise<Response> => {\n      return fetch(url, init);\n    }",
+      "cwe": "CWE-284"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/api/plugins.ts",
+      "line": 32,
+      "vulnerability_type": "Command Injection via Plugin Commands",
+      "issue": "POST /plugins/commands/:id takes a command ID from the URL and executes it via `commandRegistry.execute(id)`. While the commands are registered by plugins (not user-controlled strings), the endpoint itself has no validation that the command ID is legitimate.",
+      "recommendation": "Ensure `commandRegistry.execute()` safely handles unknown command IDs (returns error rather than throwing). Add logging for command execution for audit trail.",
+      "code_snippet": "const id = decodeURIComponent(c.req.param(\"id\"));\nservices.commandRegistry.execute(id);",
+      "cwe": "CWE-20"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/config/env.ts",
+      "line": 4,
+      "vulnerability_type": "Path Traversal in Configuration",
+      "issue": "The `DB_PATH`, `MARKDOWN_PATH`, and `PLUGIN_DIR` environment variables accept arbitrary filesystem paths without validation. While env vars are typically trusted, a misconfigured or malicious env var could point to sensitive system directories.",
+      "recommendation": "Validate that configured paths are within expected directories. At minimum, resolve paths and log warnings if they point outside the application's data directory.",
+      "code_snippet": "DB_PATH: z.string().default(\"./data/saydo.db\"),\nMARKDOWN_PATH: z.string().default(\"./tasks/\"),\nPLUGIN_DIR: z.string().default(\"./plugins/\"),",
+      "cwe": "CWE-22"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/api/ai.ts",
+      "line": 369,
+      "vulnerability_type": "Unsafe JSON Deserialization",
+      "issue": "Chat session restoration parses stored `toolCalls` from the database using `JSON.parse(row.toolCalls)` without validation. If the database content is corrupted or tampered with, this could cause unexpected behavior.",
+      "recommendation": "Validate the parsed toolCalls against a Zod schema after JSON.parse to ensure expected structure.",
+      "code_snippet": "...(row.toolCalls ? { toolCalls: JSON.parse(row.toolCalls) } : {})",
+      "cwe": "CWE-502"
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/api/plugins.ts",
+      "line": 87,
+      "vulnerability_type": "Information Disclosure",
+      "issue": "GET /plugins/store reads and serves the raw sources.json file via `path.resolve(process.cwd(), 'sources.json')`. While this is intended functionality, the CWD-relative path resolution could expose unexpected files if the server is started from a different directory.",
+      "recommendation": "Use an absolute path based on the project root or __dirname rather than process.cwd().",
+      "code_snippet": "const sourcesPath = path.resolve(process.cwd(), \"sources.json\");",
+      "cwe": "CWE-200"
+    }
+  ]
+}

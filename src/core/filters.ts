@@ -3,6 +3,8 @@ import type { Task } from "./types.js";
 export interface TaskFilter {
   status?: "pending" | "completed" | "cancelled";
   projectId?: string;
+  /** Project name for query-parser resolution (caller resolves to projectId). */
+  projectName?: string;
   tag?: string;
   priority?: number;
   dueBefore?: string;

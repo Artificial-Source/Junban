@@ -246,7 +246,8 @@ export async function listTaskRelations(): Promise<
 > {
   if (useDirectServices()) {
     const svc = await getServices();
-    return svc.taskService.listAllRelations() as any;
+    const relations = await svc.taskService.listAllRelations();
+    return relations as Array<{ taskId: string; relatedTaskId: string; type: "blocks" }>;
   }
   const res = await fetch(`${BASE}/tasks/relations`);
   return handleResponse<Array<{ taskId: string; relatedTaskId: string; type: "blocks" }>>(res);

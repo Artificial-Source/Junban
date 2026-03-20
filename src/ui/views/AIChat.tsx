@@ -23,14 +23,16 @@ export function AIChat({ onOpenSettings, onSelectTask }: AIChatViewProps) {
       .then(() => {
         autoLoadedModelRef.current = aiConfig.model;
       })
-      .catch(() => {});
+      .catch((err: unknown) => console.warn("[ai-chat] Failed to auto-load model:", err));
 
     return () => {
       // Auto-unload model when view unmounts
       if (autoLoadedModelRef.current) {
         const modelToUnload = autoLoadedModelRef.current;
         autoLoadedModelRef.current = null;
-        api.unloadModel("lmstudio", modelToUnload).catch(() => {});
+        api
+          .unloadModel("lmstudio", modelToUnload)
+          .catch((err: unknown) => console.warn("[ai-chat] Failed to unload model:", err));
       }
     };
   }, [aiConfig]);

@@ -23,7 +23,7 @@ function StorageSection() {
     api
       .getStorageInfo()
       .then(setStorageInfo)
-      .catch(() => {});
+      .catch((err: unknown) => console.error("[settings:data] Failed to load storage info:", err));
   }, []);
 
   return (
@@ -83,7 +83,7 @@ function DataSection() {
       api
         .listProjects()
         .then(setProjects)
-        .catch(() => {});
+        .catch((err: unknown) => console.error("[settings:data] Failed to load projects:", err));
     }
   }, [showFilters]);
 

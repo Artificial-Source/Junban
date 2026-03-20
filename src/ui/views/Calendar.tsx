@@ -28,7 +28,7 @@ export function Calendar({
   onModeChange,
 }: CalendarProps) {
   const { settings } = useGeneralSettings();
-  const defaultMode = (settings as any).calendar_default_mode as CalendarMode | undefined;
+  const defaultMode = settings.calendar_default_mode as CalendarMode | undefined;
 
   const nav = useCalendarNavigation({
     initialMode: modeProp ?? defaultMode ?? "week",

@@ -403,6 +403,41 @@ private handleComplete = (task: Task) => { /* ... */ };
 | `section:delete` | `Section` | After a section is deleted |
 | `section:reorder` | `string[]` | After sections are reordered |
 
+### Lifecycle Hooks (Alternative)
+
+Instead of manually subscribing to events, you can override lifecycle hook methods on the `Plugin` class. These are simpler and require no cleanup -- the loader calls them automatically and handles errors for you.
+
+**Available hooks:**
+
+| Method | Equivalent Event |
+|--------|-----------------|
+| `onTaskCreate(task)` | `events.on("task:create", ...)` |
+| `onTaskComplete(task)` | `events.on("task:complete", ...)` |
+| `onTaskUpdate(task, changes)` | `events.on("task:update", ...)` |
+| `onTaskDelete(task)` | `events.on("task:delete", ...)` |
+
+**Example:**
+
+```typescript
+class MyPlugin extends Plugin {
+  async onTaskCreate(task: Task) {
+    console.log(`New task: ${task.title}`);
+  }
+
+  async onTaskComplete(task: Task) {
+    // Award points, play a sound, etc.
+  }
+}
+```
+
+**Why use hooks instead of events?**
+
+- **No cleanup needed**: You don't have to call `events.off()` in `onUnload()`. The loader manages everything.
+- **Crash-isolated**: If your hook throws, the app continues normally. Other plugins are not affected.
+- **Cleaner code**: Just override a method -- no binding, no arrow-function workarounds.
+
+These hooks are equivalent to `this.app.events.on("task:create", ...)` but with less boilerplate. Use whichever style you prefer.
+
 ## 7. Commands
 
 **Permission:** `commands`

@@ -1,5 +1,6 @@
 import React from "react";
 import { Plugin } from "../../lifecycle.js";
+import type { Task } from "../../../core/types.js";
 import { createLogger } from "../../../utils/logger.js";
 import { TimeBlockStore } from "./store.js";
 import { TimeblockingContext } from "./context.js";
@@ -24,10 +25,6 @@ export default class TimeblockingPlugin extends Plugin {
   async onLoad(): Promise<void> {
     this.store = new TimeBlockStore(this.app.storage);
     await this.store.initialize();
-
-    this.app.events.on("task:delete", (task) => {
-      this.unlinkTask(task.id);
-    });
 
     this.app.ui.addView({
       id: "timeblocking",
@@ -119,7 +116,7 @@ export default class TimeblockingPlugin extends Plugin {
     log.info("Timeblocking plugin unloaded");
   }
 
-  onTaskDelete(task: { id: string }): void {
+  onTaskDelete(task: Task): void {
     this.unlinkTask(task.id);
   }
 

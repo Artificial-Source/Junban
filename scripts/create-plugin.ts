@@ -109,6 +109,13 @@ export default class ${className} extends Plugin {
     // Clean up any resources (listeners, timers, etc.)
     console.log("[${id}] Plugin unloaded.");
   }
+
+  // Optional: override lifecycle hooks instead of manual event subscription.
+  // These are crash-isolated and require no cleanup in onUnload().
+  // async onTaskCreate(task) { /* called when any task is created */ }
+  // async onTaskComplete(task) { /* called when any task is completed */ }
+  // async onTaskUpdate(task, changes) { /* called when any task is updated */ }
+  // async onTaskDelete(task) { /* called when any task is deleted */ }
 }
 `;
 }

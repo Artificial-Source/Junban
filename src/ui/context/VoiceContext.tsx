@@ -24,6 +24,7 @@ import type {
 import { BrowserTTSProvider } from "../../ai/voice/adapters/browser-tts.js";
 import { playAudioBuffer } from "../../ai/voice/audio-utils.js";
 import { createLogger } from "../../utils/logger.js";
+import { encryptValue, decryptValue, isEncryptedValue } from "../../utils/crypto.js";
 
 const log = createLogger("voice");
 
@@ -61,6 +62,9 @@ const DEFAULT_SETTINGS: VoiceSettings = {
 
 const STORAGE_KEY = "saydo-voice-settings";
 
+/** Voice setting keys that contain sensitive data (API keys). */
+const VOICE_SENSITIVE_KEYS: (keyof VoiceSettings)[] = ["groqApiKey", "inworldApiKey"];
+
 function loadSettings(): VoiceSettings {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
   try {
@@ -72,9 +76,34 @@ function loadSettings(): VoiceSettings {
   return DEFAULT_SETTINGS;
 }
 
-function saveSettings(settings: VoiceSettings): void {
+/**
+ * Decrypt sensitive voice settings after initial load.
+ * Returns the settings with API keys decrypted (if they were encrypted).
+ */
+async function decryptSettings(settings: VoiceSettings): Promise<VoiceSettings> {
+  const decrypted = { ...settings };
+  for (const key of VOICE_SENSITIVE_KEYS) {
+    const val = decrypted[key];
+    if (typeof val === "string" && val && isEncryptedValue(val)) {
+      (decrypted[key] as string) = await decryptValue(val);
+    }
+  }
+  return decrypted;
+}
+
+/**
+ * Save settings to localStorage, encrypting sensitive keys.
+ */
+async function saveSettings(settings: VoiceSettings): Promise<void> {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    const toStore = { ...settings };
+    for (const key of VOICE_SENSITIVE_KEYS) {
+      const val = toStore[key];
+      if (typeof val === "string" && val && !isEncryptedValue(val)) {
+        (toStore[key] as string) = await encryptValue(val);
+      }
+    }
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
   } catch {
     // ignore
   }
@@ -109,6 +138,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [ttsModels, setTTSModels] = useState<TTSModel[]>([]);
   const speechCancelledRef = useRef(false);
   const playbackCancelRef = useRef<(() => void) | null>(null);
+
+  // Decrypt sensitive settings on mount (async)
+  useEffect(() => {
+    decryptSettings(settings).then((decrypted) => {
+      // Only update if something actually changed (was encrypted)
+      if (
+        decrypted.groqApiKey !== settings.groqApiKey ||
+        decrypted.inworldApiKey !== settings.inworldApiKey
+      ) {
+        setSettings(decrypted);
+      }
+    });
+    // Only run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Build registry whenever API keys change — useMemo avoids the double-create
   // that useState+useEffect caused (init on mount, then useEffect re-creates,
@@ -162,7 +206,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const updateSettings = useCallback((patch: Partial<VoiceSettings>) => {
     setSettings((prev) => {
       const next = { ...prev, ...patch };
-      saveSettings(next);
+      // Fire-and-forget async save (encrypts sensitive keys before storing)
+      void saveSettings(next);
       return next;
     });
   }, []);

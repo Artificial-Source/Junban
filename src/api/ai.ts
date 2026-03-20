@@ -5,6 +5,7 @@ import type { ProviderRegistration } from "../ai/provider/registry.js";
 import { deserializeChatMessages } from "../ai/message-utils.js";
 import { DEFAULT_LMSTUDIO_BASE_URL } from "../config/defaults.js";
 import { createLogger } from "../utils/logger.js";
+import { getSecureSetting, setSecureSetting } from "../storage/encrypted-settings.js";
 
 const logger = createLogger("api:ai");
 
@@ -50,16 +51,16 @@ export function aiRoutes(services: AppServices): Hono {
     const providerSetting = services.storage.getAppSetting("ai_provider");
     const modelSetting = services.storage.getAppSetting("ai_model");
     const baseUrlSetting = services.storage.getAppSetting("ai_base_url");
-    const apiKeySetting = services.storage.getAppSetting("ai_api_key");
+    const apiKey = await getSecureSetting(services.storage, "ai_api_key");
     const authTypeSetting = services.storage.getAppSetting("ai_auth_type");
-    const oauthTokenSetting = services.storage.getAppSetting("ai_oauth_token");
+    const oauthToken = await getSecureSetting(services.storage, "ai_oauth_token");
     return c.json({
       provider: providerSetting?.value ?? null,
       model: modelSetting?.value ?? null,
       baseUrl: baseUrlSetting?.value ?? null,
-      hasApiKey: !!apiKeySetting?.value,
+      hasApiKey: !!apiKey,
       authType: authTypeSetting?.value ?? undefined,
-      hasOAuthToken: !!oauthTokenSetting?.value,
+      hasOAuthToken: !!oauthToken,
     });
   });
 
@@ -75,7 +76,7 @@ export function aiRoutes(services: AppServices): Hono {
       oauthToken?: string;
     };
     if (provider) services.storage.setAppSetting("ai_provider", provider);
-    if (apiKey) services.storage.setAppSetting("ai_api_key", apiKey);
+    if (apiKey) await setSecureSetting(services.storage, "ai_api_key", apiKey);
     if (model !== undefined) {
       if (model) {
         services.storage.setAppSetting("ai_model", model);
@@ -97,7 +98,7 @@ export function aiRoutes(services: AppServices): Hono {
         services.storage.deleteAppSetting("ai_auth_type");
       }
     }
-    if (oauthToken) services.storage.setAppSetting("ai_oauth_token", oauthToken);
+    if (oauthToken) await setSecureSetting(services.storage, "ai_oauth_token", oauthToken);
     services.chatManager.clearSession(services.storage);
     return c.json({ ok: true });
   });
@@ -113,12 +114,12 @@ export function aiRoutes(services: AppServices): Hono {
         return c.json({ models: [] });
       }
 
-      const apiKeySetting = services.storage.getAppSetting("ai_api_key");
+      const apiKey = await getSecureSetting(services.storage, "ai_api_key");
       const baseUrlSetting = services.storage.getAppSetting("ai_base_url");
 
       const { fetchAvailableModels } = await import("../ai/model-discovery.js");
       const models = await fetchAvailableModels(providerName, {
-        apiKey: apiKeySetting?.value,
+        apiKey: apiKey ?? undefined,
         baseUrl: baseUrlOverride || baseUrlSetting?.value,
       });
       return c.json({ models });
@@ -141,14 +142,14 @@ export function aiRoutes(services: AppServices): Hono {
     }
 
     const baseUrlSetting = services.storage.getAppSetting("ai_base_url");
-    const apiKeySetting = services.storage.getAppSetting("ai_api_key");
+    const apiKey = await getSecureSetting(services.storage, "ai_api_key");
 
     if (providerName === "lmstudio") {
       const { loadLMStudioModel } = await import("../ai/model-discovery.js");
       await loadLMStudioModel(
         modelKey,
         baseUrlOverride || baseUrlSetting?.value || DEFAULT_LMSTUDIO_BASE_URL,
-        apiKeySetting?.value,
+        apiKey ?? undefined,
       );
     }
     return c.json({ ok: true });
@@ -169,14 +170,14 @@ export function aiRoutes(services: AppServices): Hono {
     }
 
     const baseUrlSetting = services.storage.getAppSetting("ai_base_url");
-    const apiKeySetting = services.storage.getAppSetting("ai_api_key");
+    const apiKey = await getSecureSetting(services.storage, "ai_api_key");
 
     if (providerName === "lmstudio") {
       const { unloadLMStudioModel } = await import("../ai/model-discovery.js");
       await unloadLMStudioModel(
         modelKey,
         baseUrlOverride || baseUrlSetting?.value || DEFAULT_LMSTUDIO_BASE_URL,
-        apiKeySetting?.value,
+        apiKey ?? undefined,
       );
     }
     return c.json({ ok: true });
@@ -207,19 +208,19 @@ export function aiRoutes(services: AppServices): Hono {
 
     try {
       const { gatherContext } = await import("../ai/chat.js");
-      const apiKeySetting = services.storage.getAppSetting("ai_api_key");
+      const apiKey = await getSecureSetting(services.storage, "ai_api_key");
       const modelSetting = services.storage.getAppSetting("ai_model");
       const baseUrlSetting = services.storage.getAppSetting("ai_base_url");
       const authTypeSetting = services.storage.getAppSetting("ai_auth_type");
-      const oauthTokenSetting = services.storage.getAppSetting("ai_oauth_token");
+      const oauthToken = await getSecureSetting(services.storage, "ai_oauth_token");
 
       const executor = services.aiProviderRegistry.createExecutor({
         provider: providerSetting.value as string,
-        apiKey: apiKeySetting?.value,
+        apiKey: apiKey ?? undefined,
         model: modelSetting?.value,
         baseUrl: baseUrlSetting?.value,
         authType: authTypeSetting?.value as "api-key" | "oauth" | undefined,
-        oauthToken: oauthTokenSetting?.value,
+        oauthToken: oauthToken ?? undefined,
       });
 
       const toolServices = {
@@ -278,13 +279,13 @@ export function aiRoutes(services: AppServices): Hono {
       try {
         const providerSetting = services.storage.getAppSetting("ai_provider");
         if (providerSetting?.value) {
-          const apiKeySetting = services.storage.getAppSetting("ai_api_key");
+          const apiKey = await getSecureSetting(services.storage, "ai_api_key");
           const modelSetting = services.storage.getAppSetting("ai_model");
           const baseUrlSetting = services.storage.getAppSetting("ai_base_url");
 
           const executor = services.aiProviderRegistry.createExecutor({
             provider: providerSetting.value as string,
-            apiKey: apiKeySetting?.value,
+            apiKey: apiKey ?? undefined,
             model: modelSetting?.value,
             baseUrl: baseUrlSetting?.value,
           });
@@ -366,19 +367,19 @@ export function aiRoutes(services: AppServices): Hono {
       return c.json([]);
     }
 
-    const apiKeySetting = services.storage.getAppSetting("ai_api_key");
+    const apiKey = await getSecureSetting(services.storage, "ai_api_key");
     const modelSetting = services.storage.getAppSetting("ai_model");
     const baseUrlSetting = services.storage.getAppSetting("ai_base_url");
     const authTypeSetting = services.storage.getAppSetting("ai_auth_type");
-    const oauthTokenSetting = services.storage.getAppSetting("ai_oauth_token");
+    const oauthToken = await getSecureSetting(services.storage, "ai_oauth_token");
 
     const executor = services.aiProviderRegistry.createExecutor({
       provider: providerSetting.value as string,
-      apiKey: apiKeySetting?.value,
+      apiKey: apiKey ?? undefined,
       model: modelSetting?.value,
       baseUrl: baseUrlSetting?.value,
       authType: authTypeSetting?.value as "api-key" | "oauth" | undefined,
-      oauthToken: oauthTokenSetting?.value,
+      oauthToken: oauthToken ?? undefined,
     });
 
     const rows = services.storage.listChatMessages(sessionId);

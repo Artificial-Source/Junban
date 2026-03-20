@@ -7,6 +7,7 @@ import type { TaskService } from "../core/tasks.js";
 import type { ProjectService } from "../core/projects.js";
 import type { TagService } from "../core/tags.js";
 import type { EventBus } from "../core/event-bus.js";
+import type { EventCallback, EventName } from "../core/event-bus.js";
 import type { PluginSettingsManager } from "./settings.js";
 import type { CommandRegistry } from "./command-registry.js";
 import type { UIRegistry } from "./ui-registry.js";
@@ -15,6 +16,10 @@ import type { LLMProviderRegistry } from "../ai/provider/registry.js";
 import type { ToolRegistry } from "../ai/tools/registry.js";
 import { createLogger } from "../utils/logger.js";
 import { NotFoundError, ValidationError } from "../core/errors.js";
+import {
+  PLUGIN_LOAD_TIMEOUT_MS,
+  PLUGIN_UNLOAD_TIMEOUT_MS,
+} from "../config/defaults.js";
 
 const logger = createLogger("plugin-loader");
 
@@ -46,12 +51,27 @@ export interface PluginServices {
 export class PluginLoader {
   private plugins: Map<string, LoadedPlugin> = new Map();
   private moduleLoader: ((path: string) => Promise<any>) | null = null;
+  /** EventBus listeners registered per plugin, cleaned up on unload. */
+  private pluginListeners: Map<
+    string,
+    Array<{ event: EventName; callback: EventCallback<any> }>
+  > = new Map();
 
   constructor(
     private pluginDir: string,
     private services: PluginServices,
     private builtinDir?: string,
   ) {}
+
+  /** Create a promise that rejects after the given timeout. */
+  private static lifecycleTimeout(pluginId: string, ms: number): Promise<never> {
+    return new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Plugin "${pluginId}" timed out after ${ms}ms`)),
+        ms,
+      ),
+    );
+  }
 
   /** Set a custom module loader (e.g. Vite's ssrLoadModule for dev). */
   setModuleLoader(loader: (path: string) => Promise<any>): void {
@@ -138,7 +158,9 @@ export class PluginLoader {
         const result = PluginManifest.safeParse(raw);
 
         if (!result.success) {
-          logger.warn(`Invalid manifest in built-in ${entry.name}: ${result.error.message}`);
+          logger.warn(
+            `Invalid manifest in built-in ${entry.name}: ${result.error.message}`,
+          );
           continue;
         }
 
@@ -152,7 +174,9 @@ export class PluginLoader {
 
         this.plugins.set(manifest.id, loaded);
         discovered.push(loaded);
-        logger.info(`Discovered built-in extension: ${manifest.name} v${manifest.version}`);
+        logger.info(
+          `Discovered built-in extension: ${manifest.name} v${manifest.version}`,
+        );
       } catch (err) {
         logger.warn(
           `Failed to read manifest in built-in ${entry.name}: ${err instanceof Error ? err.message : err}`,
@@ -180,7 +204,8 @@ export class PluginLoader {
 
     // Block community plugins when restricted mode is on
     if (!loaded.builtin) {
-      const setting = this.services.queries.getAppSetting("community_plugins_enabled");
+      const setting =
+        this.services.queries.getAppSetting("community_plugins_enabled");
       if (setting?.value !== "true") {
         logger.info(`Community plugins disabled, skipping "${pluginId}"`);
         return;
@@ -188,19 +213,24 @@ export class PluginLoader {
     }
 
     // Check permissions
-    const approvedPermissions = this.services.queries.getPluginPermissions(pluginId);
+    const approvedPermissions =
+      this.services.queries.getPluginPermissions(pluginId);
     const requestedPermissions = (loaded.manifest.permissions ?? []) as Permission[];
 
     if (approvedPermissions === null) {
       if (loaded.builtin) {
         // Built-in extensions stay inactive until explicitly activated by the user
-        logger.info(`Built-in extension "${pluginId}" not activated, skipping load`);
+        logger.info(
+          `Built-in extension "${pluginId}" not activated, skipping load`,
+        );
         return;
       }
       if (requestedPermissions.length > 0) {
         // Community plugin never approved — mark as pending and skip loading
         loaded.pendingApproval = true;
-        logger.info(`Plugin "${pluginId}" requires permission approval, skipping load`);
+        logger.info(
+          `Plugin "${pluginId}" requires permission approval, skipping load`,
+        );
         return;
       }
     }
@@ -215,7 +245,9 @@ export class PluginLoader {
 
     // Warn if plugin targets a newer API major version
     if (loaded.manifest.targetApiVersion) {
-      const [pluginMajor] = loaded.manifest.targetApiVersion.split(".").map(Number);
+      const [pluginMajor] = loaded.manifest.targetApiVersion
+        .split(".")
+        .map(Number);
       const [currentMajor] = PLUGIN_API_VERSION.split(".").map(Number);
       if (pluginMajor > currentMajor) {
         logger.warn(
@@ -252,7 +284,22 @@ export class PluginLoader {
       const PluginClass = module.default;
 
       if (!PluginClass || typeof PluginClass !== "function") {
-        throw new ValidationError(`Plugin "${pluginId}" does not have a default export class`);
+        throw new ValidationError(
+          `Plugin "${pluginId}" does not have a default export class`,
+        );
+      }
+
+      // Validate that the constructor produces a Plugin-like instance
+      const testInstance = new PluginClass();
+      if (typeof testInstance.onLoad !== "function") {
+        throw new ValidationError(
+          `Plugin "${pluginId}" default export must have an onLoad() method`,
+        );
+      }
+      if (typeof testInstance.onUnload !== "function") {
+        throw new ValidationError(
+          `Plugin "${pluginId}" default export must have an onUnload() method`,
+        );
       }
 
       // Instantiate and wire up
@@ -260,14 +307,22 @@ export class PluginLoader {
       instance.app = api;
       instance.settings = api.settings;
 
-      // Call onLoad
-      await instance.onLoad();
+      // Call onLoad with timeout
+      await Promise.race([
+        instance.onLoad(),
+        PluginLoader.lifecycleTimeout(pluginId, PLUGIN_LOAD_TIMEOUT_MS),
+      ]);
+
+      // Wire EventBus listeners to plugin task lifecycle hooks
+      this.registerTaskHooks(pluginId, instance);
 
       loaded.instance = instance;
       loaded.enabled = true;
       loaded.pendingApproval = false;
       logger.info(`Loaded plugin: ${loaded.manifest.name}`);
     } catch (err) {
+      // Clean up any EventBus listeners registered during failed load
+      this.removeTaskHooks(pluginId);
       // Clean up any commands/UI registered during failed load
       this.services.commandRegistry.unregisterByPlugin(pluginId);
       this.services.uiRegistry.removeByPlugin(pluginId);
@@ -312,12 +367,18 @@ export class PluginLoader {
     logger.info(`Unloading plugin: ${pluginId}`);
 
     try {
-      await loaded.instance.onUnload();
+      await Promise.race([
+        loaded.instance.onUnload(),
+        PluginLoader.lifecycleTimeout(pluginId, PLUGIN_UNLOAD_TIMEOUT_MS),
+      ]);
     } catch (err) {
       logger.error(
         `Error in onUnload for "${pluginId}": ${err instanceof Error ? err.message : err}`,
       );
     }
+
+    // Remove EventBus listeners registered for this plugin
+    this.removeTaskHooks(pluginId);
 
     // Clean up registered commands and UI
     this.services.commandRegistry.unregisterByPlugin(pluginId);
@@ -369,7 +430,10 @@ export class PluginLoader {
   /** Discover a single plugin by ID (after install). */
   async discoverOne(pluginId: string): Promise<LoadedPlugin | null> {
     // Validate pluginId to prevent path traversal
-    if (!pluginId || !/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(pluginId)) {
+    if (
+      !pluginId ||
+      !/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(pluginId)
+    ) {
       logger.warn(`Invalid plugin ID: ${pluginId}`);
       return null;
     }
@@ -387,7 +451,9 @@ export class PluginLoader {
       const result = PluginManifest.safeParse(raw);
 
       if (!result.success) {
-        logger.warn(`Invalid manifest for ${pluginId}: ${result.error.message}`);
+        logger.warn(
+          `Invalid manifest for ${pluginId}: ${result.error.message}`,
+        );
         return null;
       }
 
@@ -398,7 +464,9 @@ export class PluginLoader {
       };
 
       this.plugins.set(result.data.id, loaded);
-      logger.info(`Discovered plugin: ${result.data.name} v${result.data.version}`);
+      logger.info(
+        `Discovered plugin: ${result.data.name} v${result.data.version}`,
+      );
       return loaded;
     } catch (err) {
       logger.warn(
@@ -408,11 +476,94 @@ export class PluginLoader {
     }
   }
 
+  /** Register EventBus listeners that delegate to a plugin's task lifecycle hooks. */
+  private registerTaskHooks(pluginId: string, instance: Plugin): void {
+    const listeners: Array<{
+      event: EventName;
+      callback: EventCallback<any>;
+    }> = [];
+    const eb = this.services.eventBus;
+
+    if (instance.onTaskCreate) {
+      const cb: EventCallback<"task:create"> = (task) => {
+        try {
+          instance.onTaskCreate!(task);
+        } catch (err) {
+          logger.error(
+            `Plugin "${pluginId}" onTaskCreate error: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      };
+      eb.on("task:create", cb);
+      listeners.push({ event: "task:create", callback: cb });
+    }
+
+    if (instance.onTaskComplete) {
+      const cb: EventCallback<"task:complete"> = (task) => {
+        try {
+          instance.onTaskComplete!(task);
+        } catch (err) {
+          logger.error(
+            `Plugin "${pluginId}" onTaskComplete error: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      };
+      eb.on("task:complete", cb);
+      listeners.push({ event: "task:complete", callback: cb });
+    }
+
+    if (instance.onTaskUpdate) {
+      const cb: EventCallback<"task:update"> = ({ task, changes }) => {
+        try {
+          instance.onTaskUpdate!(task, changes);
+        } catch (err) {
+          logger.error(
+            `Plugin "${pluginId}" onTaskUpdate error: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      };
+      eb.on("task:update", cb);
+      listeners.push({ event: "task:update", callback: cb });
+    }
+
+    if (instance.onTaskDelete) {
+      const cb: EventCallback<"task:delete"> = (task) => {
+        try {
+          instance.onTaskDelete!(task);
+        } catch (err) {
+          logger.error(
+            `Plugin "${pluginId}" onTaskDelete error: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      };
+      eb.on("task:delete", cb);
+      listeners.push({ event: "task:delete", callback: cb });
+    }
+
+    if (listeners.length > 0) {
+      this.pluginListeners.set(pluginId, listeners);
+    }
+  }
+
+  /** Remove all EventBus listeners for a plugin. */
+  private removeTaskHooks(pluginId: string): void {
+    const listeners = this.pluginListeners.get(pluginId);
+    if (!listeners) return;
+
+    const eb = this.services.eventBus;
+    for (const { event, callback } of listeners) {
+      eb.off(event, callback);
+    }
+    this.pluginListeners.delete(pluginId);
+  }
+
   /** Remove a plugin from the internal map (after uninstall). */
   remove(pluginId: string): void {
     const loaded = this.plugins.get(pluginId);
     if (loaded?.builtin) {
-      throw new ValidationError(`Cannot remove built-in extension "${pluginId}"`);
+      throw new ValidationError(
+        `Cannot remove built-in extension "${pluginId}"`,
+      );
     }
     this.plugins.delete(pluginId);
     logger.info(`Removed plugin "${pluginId}" from loader`);

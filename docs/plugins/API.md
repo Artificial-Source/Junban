@@ -459,11 +459,17 @@ this.app.ui.addView({
 
 **Content Types:**
 
-| Type | Description |
-|------|-------------|
-| `text` | Plain text returned by `render()` |
-| `structured` | JSON string returned by `render()` describing a structured UI layout |
-| `react` | React component passed via `component` |
+| Type | Description | When to Use |
+|------|-------------|-------------|
+| `text` | Plain text returned by `render()`. Rendered as a simple text block. | Static info, summaries, logs. |
+| `structured` | JSON string returned by `render()` describing a structured UI layout with elements like buttons, progress bars, badges, and text. | Interactive views without React (timers, dashboards). Works in all plugin types. |
+| `react` | React component passed via the `component` property. Full React rendering with hooks, state, and event handlers. | Rich interactive UIs. Best for built-in plugins that ship with the app. Community plugins should prefer `structured` for portability. |
+
+**Choosing a content type:**
+
+- Use `text` for the simplest case -- just showing a string.
+- Use `structured` when you need interactive elements (buttons, progress bars) but want your plugin to work without bundling React. The JSON format supports: `text`, `button`, `progress`, `badge`, `row`, `spacer`, and more.
+- Use `react` when you need full control over rendering. Note that React components only work for built-in plugins that are compiled alongside Saydo. Community plugins distributed as standalone files should use `structured` instead.
 
 ### Status Bar (`ui:status`)
 
@@ -478,6 +484,8 @@ const handle = this.app.ui.addStatusBarItem({
 // Update later:
 handle.update({ text: "Running", icon: "play" });
 ```
+
+The `addStatusBarItem()` call returns a handle object with an `update()` method. Call `handle.update({ text, icon })` to change the displayed text or icon at any time -- this is how you build live-updating status indicators (e.g., a running timer).
 
 Status bar items are auto-removed when the plugin is unloaded.
 
@@ -504,6 +512,19 @@ await this.settings.set("workMinutes", 30);             // Override the value
 ```
 
 Each setting has: `id`, `name`, `type`, `default`, and optional `description`.
+
+### Settings UI (Automatic Rendering)
+
+When a plugin declares `settings` in its manifest, Saydo automatically renders a settings form in the plugin settings panel (Settings > Plugins > Your Plugin). No UI code is needed from the plugin author.
+
+| Type | Rendered As |
+|------|-------------|
+| `text` | Text input. Supports optional `placeholder`. |
+| `number` | Number input with stepper. Supports optional `min` and `max`. |
+| `boolean` | Toggle switch. |
+| `select` | Dropdown menu. Requires `options` array of strings. |
+
+Each setting's `name` is used as the label and `description` (if provided) appears as helper text below the input. The `default` value is used until the user changes it.
 
 ## 10. Storage
 

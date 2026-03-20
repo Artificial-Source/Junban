@@ -41,6 +41,7 @@ export interface StatusBarItemInfo {
   id: string;
   text: string;
   icon: string;
+  onClick?: () => void;
 }
 
 export interface PanelInfo {
@@ -151,6 +152,7 @@ export async function getStatusBarItems(): Promise<StatusBarItemInfo[]> {
       id: item.id,
       text: item.text,
       icon: item.icon,
+      onClick: item.onClick,
     }));
   }
   const res = await fetch(`${BASE}/plugins/ui/status-bar`);

@@ -51,6 +51,21 @@ export function pluginRoutes(services: AppServices): Hono {
     return c.json(items);
   });
 
+  // POST /plugins/ui/status-bar/:id/click
+  app.post("/ui/status-bar/:id/click", async (c) => {
+    await ensurePlugins();
+    const id = decodeURIComponent(c.req.param("id"));
+    const items = services.uiRegistry.getStatusBarItems();
+    const item = items.find((i) => i.id === id);
+    if (!item) {
+      return c.json({ error: "Status bar item not found" }, 404);
+    }
+    if (item.onClick) {
+      item.onClick();
+    }
+    return c.json({ ok: true });
+  });
+
   // GET /plugins/ui/panels
   app.get("/ui/panels", async (c) => {
     await ensurePlugins();

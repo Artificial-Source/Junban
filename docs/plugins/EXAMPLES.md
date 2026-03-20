@@ -593,6 +593,201 @@ export default class PomodoroPlugin extends Plugin {
 
 ---
 
+## Example 6: Plugin with Settings
+
+A plugin that uses manifest-defined settings to control its behavior. The settings form is automatically rendered in the plugin settings panel -- no UI code needed.
+
+### `plugins/focus-mode/manifest.json`
+
+```json
+{
+  "id": "focus-mode",
+  "name": "Focus Mode",
+  "version": "1.0.0",
+  "author": "Your Name",
+  "description": "Hides low-priority tasks to help you focus.",
+  "main": "index.ts",
+  "minSaydoVersion": "1.0.0",
+  "permissions": ["task:read", "commands", "ui:status"],
+  "settings": [
+    {
+      "id": "minPriority",
+      "name": "Minimum Priority",
+      "type": "select",
+      "default": "2",
+      "options": ["1", "2", "3", "4"],
+      "description": "Only show tasks at this priority level or higher (1 = highest)"
+    },
+    {
+      "id": "showCount",
+      "name": "Show Task Count",
+      "type": "boolean",
+      "default": true,
+      "description": "Display the number of focus tasks in the status bar"
+    },
+    {
+      "id": "maxTasks",
+      "name": "Max Tasks Shown",
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 20,
+      "description": "Maximum number of tasks to show in focus mode"
+    }
+  ]
+}
+```
+
+### `plugins/focus-mode/index.ts`
+
+```typescript
+import { Plugin } from "../../src/plugins/lifecycle.js";
+
+export default class FocusModePlugin extends Plugin {
+  private statusHandle: { update: (data: { text?: string }) => void } | null = null;
+
+  async onLoad() {
+    this.app.commands.register({
+      id: "show-focus",
+      name: "Focus Mode: Show Focus Tasks",
+      callback: () => this.showFocusTasks(),
+    });
+
+    if (this.settings.get<boolean>("showCount")) {
+      this.statusHandle = this.app.ui.addStatusBarItem({
+        id: "focus-count",
+        text: "Focus: ...",
+        icon: "target",
+      });
+      await this.updateCount();
+    }
+  }
+
+  async onUnload() {
+    this.statusHandle = null;
+  }
+
+  private async updateCount() {
+    const tasks = await this.getFocusTasks();
+    this.statusHandle?.update({ text: `Focus: ${tasks.length}` });
+  }
+
+  private async getFocusTasks() {
+    const minPriority = Number(this.settings.get<string>("minPriority"));
+    const maxTasks = this.settings.get<number>("maxTasks");
+    const all = await this.app.tasks.list({ status: "pending" });
+    return all
+      .filter((t) => t.priority !== null && t.priority <= minPriority)
+      .slice(0, maxTasks);
+  }
+
+  private async showFocusTasks() {
+    const tasks = await this.getFocusTasks();
+    console.log(`[FocusMode] ${tasks.length} focus tasks:`);
+    for (const t of tasks) {
+      console.log(`  P${t.priority}: ${t.title}`);
+    }
+    this.statusHandle?.update({ text: `Focus: ${tasks.length}` });
+  }
+}
+```
+
+**What this teaches:**
+
+- Defining settings in `manifest.json` (select, boolean, number types)
+- Reading settings with `this.settings.get<T>(id)` at runtime
+- Settings are automatically rendered as a form in Settings > Plugins > Focus Mode
+
+**Permissions needed:**
+
+- `task:read` -- to list and filter tasks
+- `commands` -- to register the focus command
+- `ui:status` -- for the status bar counter
+
+---
+
+## Example 7: Plugin with UI View
+
+A plugin that registers a custom view using `structured` content -- a JSON layout rendered by Saydo without needing React.
+
+### `plugins/project-overview/manifest.json`
+
+```json
+{
+  "id": "project-overview",
+  "name": "Project Overview",
+  "version": "1.0.0",
+  "author": "Your Name",
+  "description": "A dashboard view showing project stats.",
+  "main": "index.ts",
+  "minSaydoVersion": "1.0.0",
+  "permissions": ["task:read", "project:read", "ui:view"]
+}
+```
+
+### `plugins/project-overview/index.ts`
+
+```typescript
+import { Plugin } from "../../src/plugins/lifecycle.js";
+
+export default class ProjectOverviewPlugin extends Plugin {
+  async onLoad() {
+    this.app.ui.addView({
+      id: "project-overview",
+      name: "Project Overview",
+      icon: "bar-chart",
+      slot: "tools",
+      contentType: "structured",
+      render: () => this.buildView(),
+    });
+  }
+
+  async onUnload() {}
+
+  private buildView(): string {
+    // render() is synchronous, so we build from cached/static data.
+    // For dynamic data, fetch it in onLoad() or via a command and store it.
+    return JSON.stringify({
+      layout: "stack",
+      elements: [
+        { type: "text", value: "Project Overview", variant: "title" },
+        { type: "spacer", size: "md" },
+        {
+          type: "row",
+          gap: "lg",
+          elements: [
+            { type: "badge", value: "3 Active", color: "accent" },
+            { type: "badge", value: "12 Tasks", color: "default" },
+            { type: "badge", value: "2 Overdue", color: "danger" },
+          ],
+        },
+        { type: "spacer", size: "md" },
+        {
+          type: "text",
+          value: "Use the command palette to refresh data.",
+          variant: "muted",
+        },
+      ],
+    });
+  }
+}
+```
+
+**What this teaches:**
+
+- Registering a custom view with `ui.addView()`
+- Using `contentType: "structured"` with a JSON layout
+- Structured elements: `text`, `row`, `badge`, `spacer`
+- Views appear in the sidebar under the specified `slot`
+
+**Permissions needed:**
+
+- `task:read` -- to read task counts
+- `project:read` -- to list projects
+- `ui:view` -- to register the view
+
+---
+
 ## Next Steps
 
 - Read the full [Plugin API Reference](API.md) for all methods and types

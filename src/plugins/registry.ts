@@ -23,10 +23,20 @@ const _RegistrySchema = z.object({
 export type RegistryEntry = z.infer<typeof RegistryEntry>;
 export type Registry = z.infer<typeof _RegistrySchema>;
 
+/** TTL for the in-memory remote registry cache (5 minutes). */
+export const REGISTRY_CACHE_TTL_MS = 5 * 60 * 1000;
+
+interface RegistryCache {
+  data: RegistryEntry[];
+  fetchedAt: number;
+}
+
 /**
  * Plugin registry client — fetches and parses the community plugin directory.
  */
 export class PluginRegistry {
+  private remoteCache: Map<string, RegistryCache> = new Map();
+
   constructor(private registryPath: string) {}
 
   /** Load the registry from a local JSON file. */
@@ -43,14 +53,33 @@ export class PluginRegistry {
     }
   }
 
-  /** Fetch the registry from a remote URL. */
-  async fetchRemote(url: string): Promise<RegistryEntry[]> {
+  /**
+   * Fetch the registry from a remote URL.
+   * Results are cached in memory for {@link REGISTRY_CACHE_TTL_MS} (default 5 min).
+   * Pass `forceRefresh: true` to bypass the cache.
+   */
+  async fetchRemote(
+    url: string,
+    opts?: { forceRefresh?: boolean },
+  ): Promise<RegistryEntry[]> {
+    // Return cached data if still fresh
+    if (!opts?.forceRefresh) {
+      const cached = this.remoteCache.get(url);
+      if (cached && Date.now() - cached.fetchedAt < REGISTRY_CACHE_TTL_MS) {
+        return cached.data;
+      }
+    }
+
     try {
       const res = await fetch(url);
       if (!res.ok) return [];
       const json = await res.json();
       const parsed = _RegistrySchema.safeParse(json);
       if (parsed.success) {
+        this.remoteCache.set(url, {
+          data: parsed.data.plugins,
+          fetchedAt: Date.now(),
+        });
         return parsed.data.plugins;
       }
       return [];

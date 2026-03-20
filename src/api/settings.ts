@@ -86,6 +86,18 @@ function isSensitiveKey(key: string): boolean {
 export function settingsRoutes(services: AppServices): Hono {
   const app = new Hono();
 
+  // GET /settings — return all settings as a key-value object (sensitive keys excluded)
+  app.get("/", async (c) => {
+    const rows = services.storage.listAllAppSettings();
+    const result: Record<string, string> = {};
+    for (const row of rows) {
+      if (!isSensitiveKey(row.key)) {
+        result[row.key] = row.value;
+      }
+    }
+    return c.json(result);
+  });
+
   // GET /settings/storage — storage mode info
   app.get("/storage", async (c) => {
     const env = loadEnv();

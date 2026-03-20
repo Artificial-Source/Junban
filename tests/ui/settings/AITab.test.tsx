@@ -20,6 +20,7 @@ vi.mock("../../../src/ui/api/index.js", () => ({
     listAIProviders: (...args: any[]) => mockListAIProviders(...args),
     fetchModels: (...args: any[]) => mockFetchModels(...args),
     loadModel: vi.fn().mockResolvedValue(undefined),
+    getAllSettings: vi.fn().mockResolvedValue({}),
     getAppSetting: vi.fn().mockResolvedValue(null),
     setAppSetting: vi.fn().mockResolvedValue(undefined),
     getAiMemories: vi.fn().mockResolvedValue([]),

@@ -77,6 +77,7 @@ export function createMockApi() {
     createNewChatSession: vi.fn().mockResolvedValue(""),
 
     // settings
+    getAllSettings: vi.fn().mockResolvedValue({}),
     getAppSetting: vi.fn().mockResolvedValue(null),
     setAppSetting: vi.fn().mockResolvedValue(undefined),
     exportAllData: vi.fn().mockResolvedValue({ tasks: [], projects: [], tags: [] }),

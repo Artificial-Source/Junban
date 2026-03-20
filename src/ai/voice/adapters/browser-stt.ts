@@ -28,28 +28,24 @@ export class BrowserSTTProvider implements STTProviderPlugin {
   /** Start live recognition from the microphone. Returns a promise with the transcript. */
   startLiveRecognition(opts?: STTOptions): Promise<string> {
     return new Promise((resolve, reject) => {
-      const SpeechRecognition =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (!SpeechRecognition) {
+      const SpeechRecognitionCtor =
+        window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognitionCtor) {
         reject(new Error("SpeechRecognition not supported in this browser"));
         return;
       }
 
-      const recognition = new SpeechRecognition();
+      const recognition = new SpeechRecognitionCtor();
       recognition.continuous = false;
       recognition.interimResults = false;
       recognition.lang = opts?.language ?? "en-US";
       // Increase max silence before the API auto-stops (Chrome default is very short)
       // Not all browsers support this but it doesn't hurt to set it
-      try {
-        (recognition as any).maxAlternatives = 1;
-      } catch {
-        /* ignore */
-      }
+      recognition.maxAlternatives = 1;
 
       let resolved = false;
 
-      recognition.onresult = (event: any) => {
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
         if (resolved) return;
         resolved = true;
         const transcript = event.results[0]?.[0]?.transcript ?? "";
@@ -58,7 +54,7 @@ export class BrowserSTTProvider implements STTProviderPlugin {
         resolve(transcript);
       };
 
-      recognition.onerror = (event: any) => {
+      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
         if (resolved) return;
         const errorType = event.error;
         log.debug("BrowserSTT onerror", { errorType });

@@ -6,6 +6,7 @@ import { SettingsProvider } from "../../../src/ui/context/SettingsContext.js";
 // Mock api
 vi.mock("../../../src/ui/api/index.js", () => ({
   api: {
+    getAllSettings: vi.fn().mockResolvedValue({}),
     getAppSetting: vi.fn().mockResolvedValue(null),
     setAppSetting: vi.fn().mockResolvedValue(undefined),
   },

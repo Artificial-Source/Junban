@@ -67,6 +67,7 @@ interface StorageQueries {
 
   // ── App Settings ──
   getAppSetting(key: string): AppSettingRow | undefined;
+  listAllAppSettings(): AppSettingRow[];
   setAppSetting(key: string, value: string): void;
   deleteAppSetting(key: string): MutationResult;
 
@@ -257,6 +258,10 @@ export class SQLiteBackend implements IStorage {
 
   getAppSetting(key: string): AppSettingRow | undefined {
     return this.q.getAppSetting(key);
+  }
+
+  listAllAppSettings(): AppSettingRow[] {
+    return this.q.listAllAppSettings();
   }
 
   setAppSetting(key: string, value: string): void {

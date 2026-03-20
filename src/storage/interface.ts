@@ -190,6 +190,7 @@ export interface IStorage {
 
   // ── App Settings ──
   getAppSetting(key: string): AppSettingRow | undefined;
+  listAllAppSettings(): AppSettingRow[];
   setAppSetting(key: string, value: string): void;
   deleteAppSetting(key: string): MutationResult;
 

@@ -203,22 +203,19 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<GeneralSettings>(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
 
-  // Load all settings on mount
-  // TODO: PERF-301 — Replace 52 individual api.getAppSetting() calls with a single
-  // batch endpoint (GET /api/settings) that returns all settings as a JSON object.
-  // Requires adding the endpoint in src/api/settings.ts and a corresponding
-  // api.getAllSettings() helper in src/ui/api/settings.ts.
+  // Load all settings on mount via single batch fetch
   useEffect(() => {
     let mounted = true;
-    Promise.all(SETTING_KEYS.map((key) => api.getAppSetting(key)))
-      .then((values) => {
+    api
+      .getAllSettings()
+      .then((allSettings) => {
         if (!mounted) return;
         const next = { ...DEFAULT_SETTINGS };
-        SETTING_KEYS.forEach((key, i) => {
-          if (values[i] !== null) {
-            (next as Record<keyof GeneralSettings, string>)[key] = values[i] as string;
+        for (const key of SETTING_KEYS) {
+          if (key in allSettings) {
+            (next as Record<keyof GeneralSettings, string>)[key] = allSettings[key];
           }
-        });
+        }
         setSettings(next);
         applyAccentColor(next.accent_color);
         applyDensity(next.density);

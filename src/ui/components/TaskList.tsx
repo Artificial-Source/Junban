@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useState } from "react";
+import React, { useCallback, useContext, useRef, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   DndContext,
@@ -18,6 +18,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ClipboardList } from "lucide-react";
 import type { Task } from "../../core/types.js";
 import { TaskItem } from "./TaskItem.js";
@@ -27,6 +28,15 @@ import { BlockedTaskIdsContext } from "../context/BlockedTaskIdsContext.js";
 import { AnimatedPresence } from "./AnimatedPresence.js";
 import { useReducedMotion } from "./useReducedMotion.js";
 import { listItem, staggerContainer } from "../utils/animation-variants.js";
+
+/** Virtualize only when the flattened list exceeds this many items. */
+const VIRTUALIZE_THRESHOLD = 50;
+
+/** Estimated row height in pixels for the virtualizer. */
+const ESTIMATED_ROW_HEIGHT = 48;
+
+/** Height of the inline "add subtask" row. */
+const ADD_SUBTASK_ROW_HEIGHT = 40;
 
 interface ChildStats {
   children: Task[];
@@ -134,6 +144,12 @@ function buildChildStats(tasks: Task[]): Map<string, ChildStats> {
   return map;
 }
 
+interface FlatEntry {
+  task: Task;
+  depth: number;
+  showAddSubtask?: boolean;
+}
+
 export function TaskList({
   tasks,
   onToggle,
@@ -153,6 +169,7 @@ export function TaskList({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const reducedMotion = useReducedMotion();
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -194,6 +211,39 @@ export function TaskList({
     });
   }, []);
 
+  // Build tree structure from flat list
+  const childStatsMap = useMemo(() => buildChildStats(tasks), [tasks]);
+  const topLevel = useMemo(() => tasks.filter((t) => !t.parentId), [tasks]);
+
+  // Flatten visible tree for DnD ordering
+  const visibleTasks = useMemo(() => {
+    function flattenVisible(items: Task[], depth: number): FlatEntry[] {
+      const result: FlatEntry[] = [];
+      for (const item of items) {
+        const stats = childStatsMap.get(item.id);
+        result.push({ task: item, depth });
+        if (stats && expandedIds.has(item.id)) {
+          result.push(...flattenVisible(stats.children, depth + 1));
+          // Mark last child to show inline add subtask
+          if (onAddSubtask) {
+            result.push({ task: item, depth: depth + 1, showAddSubtask: true });
+          }
+        }
+      }
+      return result;
+    }
+    return flattenVisible(topLevel, 0);
+  }, [topLevel, childStatsMap, expandedIds, onAddSubtask]);
+
+  const isMultiSelectActive = selectedTaskIds && selectedTaskIds.size > 0;
+  const taskIds = useMemo(
+    () => visibleTasks.filter((v) => !v.showAddSubtask).map((v) => v.task.id),
+    [visibleTasks],
+  );
+
+  const activeDragTask = activeDragId ? tasks.find((t) => t.id === activeDragId) : null;
+  const shouldVirtualize = visibleTasks.length > VIRTUALIZE_THRESHOLD;
+
   if (tasks.length === 0) {
     return (
       <EmptyState
@@ -202,36 +252,6 @@ export function TaskList({
       />
     );
   }
-
-  // Build tree structure from flat list
-  const childStatsMap = buildChildStats(tasks);
-  const topLevel = tasks.filter((t) => !t.parentId);
-
-  // Flatten visible tree for DnD ordering
-  function flattenVisible(
-    items: Task[],
-    depth: number,
-  ): Array<{ task: Task; depth: number; showAddSubtask?: boolean }> {
-    const result: Array<{ task: Task; depth: number; showAddSubtask?: boolean }> = [];
-    for (const item of items) {
-      const stats = childStatsMap.get(item.id);
-      result.push({ task: item, depth });
-      if (stats && expandedIds.has(item.id)) {
-        result.push(...flattenVisible(stats.children, depth + 1));
-        // Mark last child to show inline add subtask
-        if (onAddSubtask) {
-          result.push({ task: item, depth: depth + 1, showAddSubtask: true });
-        }
-      }
-    }
-    return result;
-  }
-
-  const visibleTasks = flattenVisible(topLevel, 0);
-  const isMultiSelectActive = selectedTaskIds && selectedTaskIds.size > 0;
-  const taskIds = visibleTasks.filter((v) => !v.showAddSubtask).map((v) => v.task.id);
-
-  const activeDragTask = activeDragId ? tasks.find((t) => t.id === activeDragId) : null;
 
   return (
     <DndContext
@@ -242,60 +262,80 @@ export function TaskList({
       onDragCancel={handleDragCancel}
     >
       <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
-        <motion.div
-          role="list"
-          aria-label="Tasks"
-          className="space-y-0"
-          variants={reducedMotion ? undefined : staggerContainer}
-          initial={reducedMotion ? undefined : "initial"}
-          animate="animate"
-        >
-          <AnimatedPresence>
-            {visibleTasks.map((entry) => {
-              if (entry.showAddSubtask) {
-                return (
-                  <InlineAddSubtask
-                    key={`add-subtask-${entry.task.id}`}
-                    parentId={entry.task.id}
-                    depth={entry.depth}
-                    onAdd={onAddSubtask!}
-                  />
-                );
-              }
+        {shouldVirtualize ? (
+          <VirtualizedTaskRows
+            visibleTasks={visibleTasks}
+            childStatsMap={childStatsMap}
+            onToggle={onToggle}
+            onSelect={onSelect}
+            selectedTaskId={selectedTaskId}
+            selectedTaskIds={selectedTaskIds}
+            isMultiSelectActive={!!isMultiSelectActive}
+            onMultiSelect={onMultiSelect}
+            expandedIds={expandedIds}
+            onToggleExpand={handleToggleExpand}
+            onUpdateDueDate={onUpdateDueDate}
+            onContextMenu={onContextMenu}
+            onAddSubtask={onAddSubtask}
+            blockedTaskIds={blockedTaskIds}
+            scrollContainerRef={scrollContainerRef}
+          />
+        ) : (
+          <motion.div
+            role="list"
+            aria-label="Tasks"
+            className="space-y-0"
+            variants={reducedMotion ? undefined : staggerContainer}
+            initial={reducedMotion ? undefined : "initial"}
+            animate="animate"
+          >
+            <AnimatedPresence>
+              {visibleTasks.map((entry) => {
+                if (entry.showAddSubtask) {
+                  return (
+                    <InlineAddSubtask
+                      key={`add-subtask-${entry.task.id}`}
+                      parentId={entry.task.id}
+                      depth={entry.depth}
+                      onAdd={onAddSubtask!}
+                    />
+                  );
+                }
 
-              const { task, depth } = entry;
-              const stats = childStatsMap.get(task.id);
-              return (
-                <motion.div
-                  key={task.id}
-                  variants={reducedMotion ? undefined : listItem}
-                  initial={reducedMotion ? undefined : "initial"}
-                  animate="animate"
-                  exit="exit"
-                  layout={!reducedMotion}
-                >
-                  <SortableTaskItem
-                    task={task}
-                    onToggle={onToggle}
-                    onSelect={onSelect}
-                    isSelected={selectedTaskId === task.id}
-                    isMultiSelected={selectedTaskIds?.has(task.id) ?? false}
-                    showCheckbox={!!isMultiSelectActive}
-                    onMultiSelect={onMultiSelect}
-                    depth={depth}
-                    completedChildCount={stats?.completed ?? 0}
-                    totalChildCount={stats?.total ?? 0}
-                    expanded={expandedIds.has(task.id)}
-                    onToggleExpand={handleToggleExpand}
-                    onUpdateDueDate={onUpdateDueDate}
-                    onContextMenu={onContextMenu}
-                    isBlocked={blockedTaskIds?.has(task.id)}
-                  />
-                </motion.div>
-              );
-            })}
-          </AnimatedPresence>
-        </motion.div>
+                const { task, depth } = entry;
+                const stats = childStatsMap.get(task.id);
+                return (
+                  <motion.div
+                    key={task.id}
+                    variants={reducedMotion ? undefined : listItem}
+                    initial={reducedMotion ? undefined : "initial"}
+                    animate="animate"
+                    exit="exit"
+                    layout={!reducedMotion}
+                  >
+                    <SortableTaskItem
+                      task={task}
+                      onToggle={onToggle}
+                      onSelect={onSelect}
+                      isSelected={selectedTaskId === task.id}
+                      isMultiSelected={selectedTaskIds?.has(task.id) ?? false}
+                      showCheckbox={!!isMultiSelectActive}
+                      onMultiSelect={onMultiSelect}
+                      depth={depth}
+                      completedChildCount={stats?.completed ?? 0}
+                      totalChildCount={stats?.total ?? 0}
+                      expanded={expandedIds.has(task.id)}
+                      onToggleExpand={handleToggleExpand}
+                      onUpdateDueDate={onUpdateDueDate}
+                      onContextMenu={onContextMenu}
+                      isBlocked={blockedTaskIds?.has(task.id)}
+                    />
+                  </motion.div>
+                );
+              })}
+            </AnimatedPresence>
+          </motion.div>
+        )}
       </SortableContext>
       <DragOverlay>
         {activeDragTask ? (
@@ -310,5 +350,132 @@ export function TaskList({
         ) : null}
       </DragOverlay>
     </DndContext>
+  );
+}
+
+/** Virtualized rendering for large task lists (> VIRTUALIZE_THRESHOLD items). */
+function VirtualizedTaskRows({
+  visibleTasks,
+  childStatsMap,
+  onToggle,
+  onSelect,
+  selectedTaskId,
+  selectedTaskIds,
+  isMultiSelectActive,
+  onMultiSelect,
+  expandedIds,
+  onToggleExpand,
+  onUpdateDueDate,
+  onContextMenu,
+  onAddSubtask,
+  blockedTaskIds,
+  scrollContainerRef,
+}: {
+  visibleTasks: FlatEntry[];
+  childStatsMap: Map<string, ChildStats>;
+  onToggle: (id: string) => void;
+  onSelect: (id: string) => void;
+  selectedTaskId: string | null;
+  selectedTaskIds?: Set<string>;
+  isMultiSelectActive: boolean;
+  onMultiSelect?: (
+    id: string,
+    event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+  ) => void;
+  expandedIds: Set<string>;
+  onToggleExpand: (id: string) => void;
+  onUpdateDueDate?: (taskId: string, dueDate: string | null) => void;
+  onContextMenu?: (taskId: string, position: { x: number; y: number }) => void;
+  onAddSubtask?: (parentId: string, title: string) => void;
+  blockedTaskIds?: Set<string>;
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const virtualizer = useVirtualizer({
+    count: visibleTasks.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: (index) =>
+      visibleTasks[index]?.showAddSubtask ? ADD_SUBTASK_ROW_HEIGHT : ESTIMATED_ROW_HEIGHT,
+    overscan: 10,
+  });
+
+  return (
+    <div
+      ref={scrollContainerRef}
+      role="list"
+      aria-label="Tasks"
+      className="overflow-auto"
+      style={{ maxHeight: "calc(100vh - 200px)" }}
+    >
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          width: "100%",
+          position: "relative",
+        }}
+      >
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const entry = visibleTasks[virtualRow.index];
+          if (!entry) return null;
+
+          if (entry.showAddSubtask) {
+            return (
+              <div
+                key={`add-subtask-${entry.task.id}`}
+                data-index={virtualRow.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                <InlineAddSubtask
+                  parentId={entry.task.id}
+                  depth={entry.depth}
+                  onAdd={onAddSubtask!}
+                />
+              </div>
+            );
+          }
+
+          const { task, depth } = entry;
+          const stats = childStatsMap.get(task.id);
+          return (
+            <div
+              key={task.id}
+              data-index={virtualRow.index}
+              ref={virtualizer.measureElement}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              <SortableTaskItem
+                task={task}
+                onToggle={onToggle}
+                onSelect={onSelect}
+                isSelected={selectedTaskId === task.id}
+                isMultiSelected={selectedTaskIds?.has(task.id) ?? false}
+                showCheckbox={isMultiSelectActive}
+                onMultiSelect={onMultiSelect}
+                depth={depth}
+                completedChildCount={stats?.completed ?? 0}
+                totalChildCount={stats?.total ?? 0}
+                expanded={expandedIds.has(task.id)}
+                onToggleExpand={onToggleExpand}
+                onUpdateDueDate={onUpdateDueDate}
+                onContextMenu={onContextMenu}
+                isBlocked={blockedTaskIds?.has(task.id)}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

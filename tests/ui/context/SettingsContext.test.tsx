@@ -5,6 +5,7 @@ import { SettingsProvider, useGeneralSettings } from "../../../src/ui/context/Se
 // Mock the api module
 vi.mock("../../../src/ui/api/index.js", () => ({
   api: {
+    getAllSettings: vi.fn().mockResolvedValue({}),
     getAppSetting: vi.fn().mockResolvedValue(null),
     setAppSetting: vi.fn().mockResolvedValue(undefined),
   },
@@ -85,11 +86,10 @@ describe("SettingsContext", () => {
   });
 
   it("loads settings from api on mount", async () => {
-    (api.getAppSetting as any).mockImplementation((key: string) => {
-      if (key === "accent_color") return Promise.resolve("#ef4444");
-      if (key === "density") return Promise.resolve("compact");
-      if (key === "start_view") return Promise.resolve("today");
-      return Promise.resolve(null);
+    (api.getAllSettings as any).mockResolvedValue({
+      accent_color: "#ef4444",
+      density: "compact",
+      start_view: "today",
     });
 
     render(

@@ -228,6 +228,10 @@ export class MarkdownBackend implements IStorage {
     return metadataOps.getAppSetting(this.idx, key);
   }
 
+  listAllAppSettings(): AppSettingRow[] {
+    return Array.from(this.idx.appSettings.values());
+  }
+
   setAppSetting(key: string, value: string): void {
     metadataOps.setAppSetting(this.idx, key, value);
   }

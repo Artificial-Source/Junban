@@ -116,6 +116,8 @@ export function createQueries(db: BaseSQLiteDatabase<"sync", any, typeof schema>
     getAppSetting: (key: string) =>
       db.select().from(schema.appSettings).where(eq(schema.appSettings.key, key)).get(),
 
+    listAllAppSettings: () => db.select().from(schema.appSettings).all(),
+
     setAppSetting: (key: string, value: string) => {
       const now = new Date().toISOString();
       db.insert(schema.appSettings)

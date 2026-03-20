@@ -10,6 +10,7 @@ import { checkmark, springSnappy, subtlePulse } from "../utils/animation-variant
 import { TaskItemContent } from "./task-item/TaskItemContent.js";
 import { TaskItemActions } from "./task-item/TaskItemActions.js";
 import { formatDuration, getRowClassName } from "./task-item/task-item-utils.js";
+import { useToday } from "../hooks/useToday.js";
 
 interface TaskItemProps {
   task: Task;
@@ -56,6 +57,7 @@ export const TaskItem = React.memo(function TaskItem({
   isBlocked,
 }: TaskItemProps) {
   const { settings } = useGeneralSettings();
+  const { today } = useToday();
   const [animClass, setAnimClass] = useState("");
   const [showBurst, setShowBurst] = useState(false);
   const prevStatusRef = useRef(task.status);
@@ -85,7 +87,7 @@ export const TaskItem = React.memo(function TaskItem({
 
   const priority = task.priority ? getPriority(task.priority) : null;
   const isOverdue =
-    task.dueDate && task.status === "pending" && new Date(task.dueDate) < new Date();
+    task.dueDate && task.status === "pending" && task.dueDate.split("T")[0] < today;
 
   const handleClick = (e: React.MouseEvent) => {
     if (onMultiSelect && (e.ctrlKey || e.metaKey || e.shiftKey)) {

@@ -1,0 +1,50 @@
+{
+  "domain": "quality",
+  "severity_counts": {
+    "critical": 0,
+    "warning": 1,
+    "suggestion": 2
+  },
+  "findings": [
+    {
+      "severity": "warning",
+      "id": "QUAL-R5-01",
+      "title": "Silent .catch(() => {}) swallows stream cancellation errors",
+      "description": "In useAISendMessage.ts line 64, reader.cancel().catch(() => {}) silently swallows errors from aborting an AI streaming response. While stream cancel errors are often benign, completely swallowing them makes debugging impossible if a real issue occurs.",
+      "files": [
+        "src/ui/context/ai/useAISendMessage.ts"
+      ],
+      "fix": "Log at debug level: reader.cancel().catch(e => log.debug('stream cancel', e))"
+    },
+    {
+      "severity": "suggestion",
+      "id": "QUAL-R5-02",
+      "title": "console.log usage in CLI and MCP files (16 occurrences)",
+      "description": "16 console.log/debug calls across 7 files. CLI commands (5 files, 12 calls) legitimately use console.log for terminal output. MCP server (3 calls) redirects console.log to stderr for protocol compliance. Logger.ts has 1 call as its output mechanism. All usages are appropriate — no stray debug logging found.",
+      "files": [
+        "src/cli/commands/add.ts",
+        "src/cli/commands/list.ts",
+        "src/cli/commands/edit.ts",
+        "src/cli/commands/delete.ts",
+        "src/cli/commands/done.ts",
+        "src/mcp/server.ts",
+        "src/utils/logger.ts"
+      ],
+      "fix": "No action needed — all console.log usage is intentional."
+    },
+    {
+      "severity": "suggestion",
+      "id": "QUAL-R5-03",
+      "title": "10 silent .catch(() => fallback) patterns in UI code",
+      "description": "10 .catch(() => ...) patterns across 5 UI files silently handle API errors with fallback values. Most are appropriate for graceful degradation (e.g., AboutTab catching storage info failures). FilterView.tsx line 68 silently sets savedFilter to null on error, which could mask real issues.",
+      "files": [
+        "src/ui/views/FilterView.tsx",
+        "src/ui/views/PluginView.tsx",
+        "src/ui/views/settings/AITab.tsx",
+        "src/ui/views/settings/AboutTab.tsx",
+        "src/ui/hooks/useReminders.ts"
+      ],
+      "fix": "Consider adding log.debug() to the FilterView and PluginView catch handlers for diagnosability."
+    }
+  ]
+}

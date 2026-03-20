@@ -1,0 +1,70 @@
+{
+  "domain": "dx",
+  "severity_counts": {
+    "critical": 0,
+    "warning": 2,
+    "suggestion": 2
+  },
+  "findings": [
+    {
+      "severity": "warning",
+      "id": "DX-R5-01",
+      "title": "useToday hook exists but is never imported",
+      "description": "src/ui/hooks/useToday.ts was created (presumably in round 4) but never wired into TaskItem.tsx or Today.tsx. The hook is dead code — the components still call new Date() inline in the render path.",
+      "files": [
+        "src/ui/hooks/useToday.ts",
+        "src/ui/components/TaskItem.tsx",
+        "src/ui/views/Today.tsx"
+      ],
+      "fix": "Import and use useToday() in TaskItem.tsx and Today.tsx, or delete the unused hook."
+    },
+    {
+      "severity": "warning",
+      "id": "DX-R5-02",
+      "title": "Zero Zod validation in any API route",
+      "description": "All 11 API route files (tasks, projects, tags, sections, comments, templates, settings, stats, plugins, ai, voice) parse request bodies with raw c.req.json() and query params with c.req.query() — no Zod validation anywhere. Any malformed input passes straight to core services.",
+      "files": [
+        "src/api/tasks.ts",
+        "src/api/projects.ts",
+        "src/api/tags.ts",
+        "src/api/sections.ts",
+        "src/api/comments.ts",
+        "src/api/templates.ts",
+        "src/api/settings.ts",
+        "src/api/plugins.ts",
+        "src/api/ai.ts",
+        "src/api/voice.ts",
+        "src/api/stats.ts"
+      ],
+      "fix": "Add Zod schema parsing to request body and query parameter extraction in API handlers. Use zValidator middleware from @hono/zod-validator or manual .safeParse() calls."
+    },
+    {
+      "severity": "suggestion",
+      "id": "DX-R5-03",
+      "title": "11 eslint-disable comments for @typescript-eslint/no-explicit-any",
+      "description": "11 eslint-disable directives across 6 files suppress the no-explicit-any rule. Most are in plugin system boundaries (PluginView, plugin API, builtin-views) where dynamic typing is somewhat justified, but some could be tightened.",
+      "files": [
+        "src/plugins/ui-registry.ts",
+        "src/plugins/installer.ts",
+        "src/ui/api/plugins.ts",
+        "src/api/plugins.ts",
+        "src/ui/views/PluginView.tsx",
+        "src/ui/context/builtin-views.ts"
+      ],
+      "fix": "Review each disable comment; replace with narrower types (unknown, Record<string, unknown>) where possible."
+    },
+    {
+      "severity": "suggestion",
+      "id": "DX-R5-04",
+      "title": "9 'as any' casts in production code",
+      "description": "9 'as any' casts remain across 5 files: browser-stt (Web Speech API), piper-local-tts (third-party lib types), installer (Node streams), and api/plugins (plugin instance). Most are at third-party API boundaries.",
+      "files": [
+        "src/ai/voice/adapters/browser-stt.ts",
+        "src/ai/voice/adapters/piper-local-tts.ts",
+        "src/plugins/installer.ts",
+        "src/api/plugins.ts"
+      ],
+      "fix": "Low priority — most are at untyped browser/third-party API boundaries. Consider adding type declarations for SpeechRecognition."
+    }
+  ]
+}

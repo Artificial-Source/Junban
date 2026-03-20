@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import { parseTask } from "../../parser/task-parser.js";
-import { toDateKey } from "../../utils/format-date.js";
+import { useToday } from "../hooks/useToday.js";
 import { TaskInput } from "../components/TaskInput.js";
 import { OverdueSection } from "../components/OverdueSection.js";
 import { EatTheFrog } from "../components/EatTheFrog.js";
@@ -56,7 +56,7 @@ export function Today({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
   const [weeklyReviewData, setWeeklyReviewData] = useState<WeeklyReviewData | null>(null);
-  const today = toDateKey(new Date());
+  const { today, todayDate } = useToday();
 
   const projectMap = useMemo(() => {
     const map = new Map<string, Project>();
@@ -125,7 +125,7 @@ export function Today({
         onSubmit={onCreateTask}
         placeholder="Add a task for today..."
         autoFocusTrigger={autoFocusTrigger}
-        defaultDueDate={new Date(today + "T00:00:00")}
+        defaultDueDate={todayDate}
       />
 
       {/* Eat the Frog — highest dread task */}

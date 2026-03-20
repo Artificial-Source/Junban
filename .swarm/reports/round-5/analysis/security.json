@@ -1,0 +1,24 @@
+{
+  "domain": "security",
+  "severity_counts": {
+    "critical": 0,
+    "warning": 1,
+    "suggestion": 0
+  },
+  "findings": [
+    {
+      "severity": "warning",
+      "id": "SEC-R5-01",
+      "title": "No input validation on API request bodies",
+      "description": "All 11 API route files accept raw JSON from c.req.json() without schema validation. While this is a local-first app (no remote attack surface by default), when running with pnpm server or pnpm dev:full the Hono server binds to a port. Malformed or oversized payloads could trigger unexpected behavior in core services or SQLite. This overlaps with DX-R5-02 but has a security dimension.",
+      "files": [
+        "src/api/tasks.ts",
+        "src/api/projects.ts",
+        "src/api/ai.ts",
+        "src/api/plugins.ts",
+        "src/api/voice.ts"
+      ],
+      "fix": "Add Zod validation middleware to all routes that accept request bodies. Especially critical for ai.ts (streaming chat) and plugins.ts (plugin install from URL)."
+    }
+  ]
+}

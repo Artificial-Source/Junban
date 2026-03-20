@@ -1,0 +1,41 @@
+{
+  "domain": "performance",
+  "severity_counts": {
+    "critical": 0,
+    "warning": 2,
+    "suggestion": 1
+  },
+  "findings": [
+    {
+      "severity": "warning",
+      "id": "PERF-R5-01",
+      "title": "SettingsContext.Provider value not memoized",
+      "description": "SettingsContext.Provider receives an inline object literal { settings, loaded, updateSetting } without useMemo. Every SettingsProvider re-render creates a new object reference, causing all useGeneralSettings() consumers to re-render even when settings haven't changed. This is the only context provider in the app missing useMemo on its value — all others (TaskContext, AIContext, PluginContext, UndoContext, VoiceContext) correctly use useMemo.",
+      "files": [
+        "src/ui/context/SettingsContext.tsx"
+      ],
+      "fix": "Wrap the provider value in useMemo: const value = useMemo(() => ({ settings, loaded, updateSetting }), [settings, loaded, updateSetting]);"
+    },
+    {
+      "severity": "warning",
+      "id": "PERF-R5-02",
+      "title": "TaskItem.tsx and Today.tsx still call new Date() in render path",
+      "description": "Despite useToday hook existing, TaskItem.tsx creates new Date() on line 88 for overdue checking, and Today.tsx creates new Date() on lines 59, 101, and 133. These allocations happen on every render for every task item. The useToday hook was created to fix this but was never wired in.",
+      "files": [
+        "src/ui/components/TaskItem.tsx",
+        "src/ui/views/Today.tsx"
+      ],
+      "fix": "Import useToday() in Today.tsx for lines 59 and 101. For TaskItem.tsx, either pass today as a prop from the parent or accept the per-render Date allocation (it's lightweight)."
+    },
+    {
+      "severity": "suggestion",
+      "id": "PERF-R5-03",
+      "title": "Settings loaded via 52 individual API calls",
+      "description": "SettingsContext.tsx loads settings by calling api.getAppSetting() once per key (52 keys). There is already a TODO comment (PERF-301) acknowledging this. Each call is a separate HTTP round-trip when running against the Hono server.",
+      "files": [
+        "src/ui/context/SettingsContext.tsx"
+      ],
+      "fix": "Add a batch GET /api/settings endpoint that returns all settings as a single JSON object. Already documented as PERF-301 in the code."
+    }
+  ]
+}

@@ -49,11 +49,7 @@ async function discoverOpenRouterModels(config: AIProviderConfig): Promise<Model
           !m.id.includes(":free") &&
           !m.id.includes(":extended"),
       )
-      .sort((a, b) => {
-        const priceA = parseFloat(a.pricing?.prompt ?? "0");
-        const priceB = parseFloat(b.pricing?.prompt ?? "0");
-        return priceB - priceA;
-      })
+      .sort((a, b) => a.name.localeCompare(b.name))
       .map((m) => ({
         id: m.id,
         label: m.name,

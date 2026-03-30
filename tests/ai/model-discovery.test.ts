@@ -227,13 +227,13 @@ describe("fetchAvailableModels", () => {
     });
 
     const models = await fetchAvailableModels("openrouter", { apiKey: "sk-or-test" });
-    // Only tool-capable models returned
-    expect(ids(models)).toEqual(["expensive/model", "cheap/model"]);
+    // Only tool-capable models returned, sorted alphabetically by name
+    expect(ids(models)).toEqual(["cheap/model", "expensive/model"]);
     // Non-tool model filtered out
     expect(ids(models)).not.toContain("some/no-tools");
-    // Sorted by price descending (expensive first = more capable)
-    expect(models[0].label).toBe("Expensive Model");
-    expect(models[1].label).toBe("Cheap Model");
+    // Alphabetical order
+    expect(models[0].label).toBe("Cheap Model");
+    expect(models[1].label).toBe("Expensive Model");
   });
 
   it("returns empty array for openrouter without api key", async () => {

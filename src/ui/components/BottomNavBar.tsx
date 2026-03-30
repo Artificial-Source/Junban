@@ -1,5 +1,5 @@
 import { useRef, useCallback } from "react";
-import { Inbox, CalendarDays, Clock, Menu, Mic } from "lucide-react";
+import { Inbox, CalendarDays, Clock, Menu, MessageCircle } from "lucide-react";
 
 interface BottomNavBarProps {
   currentView: string;
@@ -109,7 +109,7 @@ export function BottomNavBar({
                 : "bg-accent text-white shadow-accent/20"
             }`}
           >
-            <Mic size={22} />
+            <MessageCircle size={22} />
           </button>
         </div>
 

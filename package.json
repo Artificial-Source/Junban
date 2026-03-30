@@ -70,7 +70,7 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@tauri-apps/plugin-updater": "^2.10.0",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^12.8.0",
     "chrono-node": "^2.7.0",
     "commander": "^13.1.0",
     "drizzle-orm": "^0.45.1",

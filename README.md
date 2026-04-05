@@ -43,20 +43,20 @@ Built by the [AI Strategic Forum (ASF)](https://github.com/ASF-GROUP) community.
 
 <div align="center">
 
-| Inbox (light) | Inbox (dark) |
-|:---:|:---:|
+|                               Inbox (light)                               |                              Inbox (dark)                               |
+| :-----------------------------------------------------------------------: | :---------------------------------------------------------------------: |
 | <img src="screenshots/inbox-light.png" alt="Inbox — light" width="400" /> | <img src="screenshots/inbox-dark.png" alt="Inbox — dark" width="400" /> |
 
-| Upcoming | Calendar |
-|:---:|:---:|
+|                                Upcoming                                |                                Calendar                                |
+| :--------------------------------------------------------------------: | :--------------------------------------------------------------------: |
 | <img src="screenshots/upcoming-dark.png" alt="Upcoming" width="400" /> | <img src="screenshots/calendar-dark.png" alt="Calendar" width="400" /> |
 
-| Eisenhower Matrix | Command Palette |
-|:---:|:---:|
+|                         Eisenhower Matrix                          |                                   Command Palette                                    |
+| :----------------------------------------------------------------: | :----------------------------------------------------------------------------------: |
 | <img src="screenshots/matrix-dark.png" alt="Matrix" width="400" /> | <img src="screenshots/command-palette-dark.png" alt="Command Palette" width="400" /> |
 
-| Task Detail | Settings |
-|:---:|:---:|
+|                                 Task Detail                                  |                                Settings                                |
+| :--------------------------------------------------------------------------: | :--------------------------------------------------------------------: |
 | <img src="screenshots/task-detail-dark.png" alt="Task Detail" width="400" /> | <img src="screenshots/settings-dark.png" alt="Settings" width="400" /> |
 
 <img src="screenshots/stats-dark.png" alt="Stats dashboard" width="720" />
@@ -69,17 +69,30 @@ Built by the [AI Strategic Forum (ASF)](https://github.com/ASF-GROUP) community.
 
 ## Download
 
-> **v1.0.0** — Desktop app for Windows, macOS, and Linux.
+Desktop app for Windows, macOS, and Linux.
 
-| Platform | Download |
-|----------|----------|
-| **Windows** | [`.exe` installer](https://github.com/ASF-GROUP/Junban/releases/latest/download/ASF.Junban_1.0.0_x64-setup.exe) · [`.msi`](https://github.com/ASF-GROUP/Junban/releases/latest/download/ASF.Junban_1.0.0_x64_en-US.msi) |
-| **macOS (Apple Silicon)** | [`.dmg`](https://github.com/ASF-GROUP/Junban/releases/latest/download/ASF.Junban_1.0.0_aarch64.dmg) |
-| **macOS (Intel)** | [`.dmg`](https://github.com/ASF-GROUP/Junban/releases/latest/download/ASF.Junban_1.0.0_x64.dmg) |
-| **Linux (Debian/Ubuntu)** | [`.deb`](https://github.com/ASF-GROUP/Junban/releases/latest/download/ASF.Junban_1.0.0_amd64.deb) |
-| **Linux (AppImage)** | [`.AppImage`](https://github.com/ASF-GROUP/Junban/releases/latest/download/ASF.Junban_1.0.0_amd64.AppImage) |
+👉 **Download from the latest release page:** [github.com/ASF-GROUP/Junban/releases/latest](https://github.com/ASF-GROUP/Junban/releases/latest)
 
-Or browse all releases: [**GitHub Releases**](https://github.com/ASF-GROUP/Junban/releases)
+> We use the release page (instead of hardcoded asset URLs) because installer filenames include the app version.
+
+| Platform                  | Pick this asset on the latest release page |
+| ------------------------- | ------------------------------------------ |
+| **Windows**               | `.exe` installer (recommended) or `.msi`   |
+| **macOS (Apple Silicon)** | `.dmg` with `aarch64` in the filename      |
+| **macOS (Intel)**         | `.dmg` with `x64` in the filename          |
+| **Linux (Debian/Ubuntu)** | `.deb` with `amd64` in the filename        |
+| **Linux (AppImage)**      | `.AppImage` with `amd64` in the filename   |
+
+### Download trust & verification (current)
+
+- Download only from the official [ASF-GROUP/Junban Releases](https://github.com/ASF-GROUP/Junban/releases) page.
+- Confirm the asset is attached to a published release with notes/tag in this repository.
+- We do not currently publish standalone checksum instructions for manual installs in this README.
+- For desktop installs, in-app updates use Tauri updater metadata from this same Releases source.
+
+- **Windows:** use `.exe` for the normal installer; `.msi` is mainly for managed or enterprise-friendly installs.
+- **macOS:** if Gatekeeper warns on first launch, open the app from Finder or approve it in System Settings.
+- **Linux:** use `.deb` on Debian/Ubuntu; use `AppImage` for a portable build on other distros.
 
 ## Why Junban
 
@@ -128,14 +141,14 @@ Supported providers: **OpenAI** / **Anthropic** / **OpenRouter** / **Ollama** / 
 
 Full speech-to-text and text-to-speech pipeline with voice activity detection (VAD).
 
-| Provider | Type | Notes |
-|----------|------|-------|
+| Provider           | Type      | Notes                         |
+| ------------------ | --------- | ----------------------------- |
 | Browser Speech API | STT + TTS | Zero config, works everywhere |
-| Groq | STT + TTS | Whisper STT + PlayAI TTS |
-| Inworld AI | TTS | High-quality, 15 languages |
-| Whisper (local) | STT | Runs on your machine |
-| Kokoro (local) | TTS | Neural TTS via Web Worker |
-| Piper (local) | TTS | Lightweight local TTS |
+| Groq               | STT + TTS | Whisper STT + PlayAI TTS      |
+| Inworld AI         | TTS       | High-quality, 15 languages    |
+| Whisper (local)    | STT       | Runs on your machine          |
+| Kokoro (local)     | TTS       | Neural TTS via Web Worker     |
+| Piper (local)      | TTS       | Lightweight local TTS         |
 
 ### Plugins
 
@@ -162,32 +175,32 @@ Plugins can register commands, add sidebar panels, add views, hook into task eve
 
 ### And more...
 
-| | |
-|---|---|
-| **Dual storage** | SQLite (default) or Markdown files with YAML frontmatter |
-| **Sub-tasks & templates** | Break down work, reuse common patterns |
-| **Recurring tasks** | Daily, weekly, monthly — with natural language scheduling |
-| **Reminders** | Set reminders on any task, get notified when they're due |
-| **Eisenhower Matrix** | Prioritize with the urgent/important quadrant view |
-| **Focus mode** | Distraction-free, keyboard-driven |
-| **CLI companion** | `junban add`, `junban list`, `junban done` from the terminal |
-| **Themes** | Light / Dark / Nord + accent colors + custom CSS |
-| **Sound effects** | Satisfying audio feedback for task actions |
-| **1930+ tests** | Solid coverage across the entire codebase |
+|                           |                                                              |
+| ------------------------- | ------------------------------------------------------------ |
+| **Dual storage**          | SQLite (default) or Markdown files with YAML frontmatter     |
+| **Sub-tasks & templates** | Break down work, reuse common patterns                       |
+| **Recurring tasks**       | Daily, weekly, monthly — with natural language scheduling    |
+| **Reminders**             | Set reminders on any task, get notified when they're due     |
+| **Eisenhower Matrix**     | Prioritize with the urgent/important quadrant view           |
+| **Focus mode**            | Distraction-free, keyboard-driven                            |
+| **CLI companion**         | `junban add`, `junban list`, `junban done` from the terminal |
+| **Themes**                | Light / Dark / Nord + accent colors + custom CSS             |
+| **Sound effects**         | Satisfying audio feedback for task actions                   |
+| **1930+ tests**           | Solid coverage across the entire codebase                    |
 
 ## Tech stack
 
-| | |
-|---|---|
-| **Runtime** | Node.js 22, TypeScript |
-| **Desktop** | Tauri v2 |
-| **Frontend** | React 19, Tailwind CSS 4 |
-| **Database** | SQLite (better-sqlite3 / sql.js) + Drizzle ORM |
-| **AI** | OpenAI, Anthropic, OpenRouter, Ollama, LM Studio |
-| **Voice** | Browser, Groq, Inworld AI, Whisper, Kokoro, Piper |
-| **CLI** | Commander.js |
-| **Tests** | Vitest (1930+) |
-| **Build** | Vite 6 |
+|              |                                                   |
+| ------------ | ------------------------------------------------- |
+| **Runtime**  | Node.js 22, TypeScript                            |
+| **Desktop**  | Tauri v2                                          |
+| **Frontend** | React 19, Tailwind CSS 4                          |
+| **Database** | SQLite (better-sqlite3 / sql.js) + Drizzle ORM    |
+| **AI**       | OpenAI, Anthropic, OpenRouter, Ollama, LM Studio  |
+| **Voice**    | Browser, Groq, Inworld AI, Whisper, Kokoro, Piper |
+| **CLI**      | Commander.js                                      |
+| **Tests**    | Vitest (1930+)                                    |
+| **Build**    | Vite 6                                            |
 
 ## Status
 
@@ -199,15 +212,15 @@ Next milestone: **Junban Sync** — optional paid cross-device sync.
 
 ## Docs
 
-| | |
-|---|---|
-| [Architecture](docs/guides/ARCHITECTURE.md) | How the codebase is organized |
-| [Local setup](docs/guides/SETUP.md) | Getting it running |
-| [Contributing](docs/guides/CONTRIBUTING.md) | How to help |
-| [Security](docs/guides/SECURITY.md) | Threat model, plugin sandboxing |
-| [Plugin API](docs/plugins/API.md) | Building plugins |
-| [Plugin examples](docs/plugins/EXAMPLES.md) | Walkthroughs |
-| [Roadmap](docs/planning/ROADMAP.md) | What's planned |
+|                                             |                                 |
+| ------------------------------------------- | ------------------------------- |
+| [Architecture](docs/guides/ARCHITECTURE.md) | How the codebase is organized   |
+| [Local setup](docs/guides/SETUP.md)         | Getting it running              |
+| [Contributing](docs/guides/CONTRIBUTING.md) | How to help                     |
+| [Security](docs/guides/SECURITY.md)         | Threat model, plugin sandboxing |
+| [Plugin API](docs/plugins/API.md)           | Building plugins                |
+| [Plugin examples](docs/plugins/EXAMPLES.md) | Walkthroughs                    |
+| [Roadmap](docs/planning/ROADMAP.md)         | What's planned                  |
 
 ## Contributing
 

@@ -3,7 +3,7 @@ import { setupPage, openSettings, closeSettings } from "./helpers.js";
 
 // Helper: scope to the settings dialog content area
 const settingsContent = (page: import("@playwright/test").Page) =>
-  page.locator(".fixed").filter({ hasText: "Settings" });
+  page.locator(".flex-1.overflow-y-auto.p-6").last();
 
 // ── Settings modal & navigation ─────────────────────────────────────────
 
@@ -283,24 +283,31 @@ test.describe("Features settings tab", () => {
     await setupPage(page);
   });
 
-  test("displays all 9 feature toggles", async ({ page }) => {
+  test("displays all feature toggles", async ({ page }) => {
     await openSettings(page, "Features");
 
     const features = [
+      "Calendar",
+      "Completed tasks",
+      "Cancelled tasks",
+      "Someday / Maybe",
+      "Eisenhower Matrix",
+      "Productivity stats",
+      "Filters & Labels",
+      "Quick Wins",
       "Project sections",
       "Kanban / Board view",
       "Time estimates",
       "Deadlines",
       "Comments & activity",
-      "Productivity stats",
-      "Someday / Maybe",
-      "Cancelled tasks view",
       "Keyboard chords",
+      "Eat the Frog",
+      "Smart Nudges",
     ];
 
     const content = settingsContent(page);
     for (const feature of features) {
-      await expect(content.getByText(feature, { exact: true }).first()).toBeVisible();
+      await expect(content.getByText(feature, { exact: true })).toBeVisible();
     }
   });
 
@@ -311,9 +318,8 @@ test.describe("Features settings tab", () => {
     // Count the toggle buttons within the features section (each SettingRow has one toggle)
     const content = settingsContent(page);
     // Each feature has a toggle button that's a small rounded-full button
-    const toggleButtons = content.locator("button.rounded-full.bg-accent");
-    // All 13 should be enabled (bg-accent)
-    await expect(toggleButtons).toHaveCount(13);
+    const toggleButtons = content.locator("button.inline-flex.h-5.w-9.rounded-full.bg-accent");
+    await expect(toggleButtons).toHaveCount(16);
   });
 
   test("toggling a feature off changes its visual state", async ({ page }) => {
@@ -321,8 +327,9 @@ test.describe("Features settings tab", () => {
 
     const content = settingsContent(page);
     // Find the toggle in the "Productivity stats" row
-    const statsRow = content.getByText("Productivity stats").locator("..").locator("..");
-    const statsToggle = statsRow.locator("button.rounded-full");
+    const statsToggle = content.locator(
+      "xpath=.//p[normalize-space()='Productivity stats']/ancestor::div[contains(@class,'flex items-center justify-between')][1]//button",
+    );
     await expect(statsToggle).toHaveClass(/bg-accent/);
 
     await statsToggle.click();
@@ -446,10 +453,10 @@ test.describe("About settings tab", () => {
 
   test("displays app info", async ({ page }) => {
     await openSettings(page, "About");
-    // The About tab should show some content — scroll to ensure visibility
     const content = settingsContent(page);
-    // Look for any distinctive About tab content
-    await expect(content.getByText("About").first()).toBeVisible({ timeout: 5000 });
+    await expect(content.getByText("ASF Junban").first()).toBeVisible({ timeout: 5000 });
+    await expect(content.getByText("Open Source Credits")).toBeVisible();
+    await expect(content.getByText("Feedback")).toBeVisible();
   });
 });
 

@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from "react";
 import { useTaskContext } from "../context/TaskContext.js";
 import { useUndoContext } from "../context/UndoContext.js";
 import { useSoundEffect } from "./useSoundEffect.js";
-import { api } from "../api/index.js";
+import { indentTask, outdentTask, reorderTasks } from "../api/tasks.js";
 import {
   createCompleteAction,
   createDeleteAction,
@@ -181,7 +181,7 @@ export function useTaskHandlers(
 
   const handleIndent = useCallback(async (id: string) => {
     try {
-      await api.indentTask(id);
+      await indentTask(id);
     } catch {
       // Non-critical
     }
@@ -189,7 +189,7 @@ export function useTaskHandlers(
 
   const handleOutdent = useCallback(async (id: string) => {
     try {
-      await api.outdentTask(id);
+      await outdentTask(id);
     } catch {
       // Non-critical
     }
@@ -197,7 +197,7 @@ export function useTaskHandlers(
 
   const handleReorder = useCallback(async (orderedIds: string[]) => {
     try {
-      await api.reorderTasks(orderedIds);
+      await reorderTasks(orderedIds);
     } catch {
       // Non-critical — visual order already reflects the change
     }

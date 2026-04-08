@@ -22,6 +22,15 @@ const tauri = JSON.parse(fs.readFileSync(tauriPath, "utf-8"));
 tauri.version = VERSION;
 fs.writeFileSync(tauriPath, JSON.stringify(tauri, null, 2) + "\n");
 
+// src/config/defaults.ts
+const defaultsPath = path.join(root, "src", "config", "defaults.ts");
+let defaults = fs.readFileSync(defaultsPath, "utf-8");
+defaults = defaults.replace(
+  /export const APP_VERSION = ".*";/,
+  `export const APP_VERSION = "${VERSION}";`,
+);
+fs.writeFileSync(defaultsPath, defaults);
+
 // Cargo.toml
 const cargoPath = path.join(root, "src-tauri", "Cargo.toml");
 let cargo = fs.readFileSync(cargoPath, "utf-8");
@@ -37,4 +46,4 @@ for (const p of sources.plugins) {
 }
 fs.writeFileSync(sourcesPath, JSON.stringify(sources, null, 2) + "\n");
 
-console.log(`Updated all version references to ${VERSION}`);
+console.log(`Updated release version references to ${VERSION}`);

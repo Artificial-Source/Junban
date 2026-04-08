@@ -1,6 +1,6 @@
 # Frontend Context Providers Reference
 
-> Every context provider in `src/ui/context/` (8 context files + `ai/` subdirectory with 3 granular contexts).
+> Overview of the app's context providers and how they relate to each other. The exact number of context files may evolve; this doc focuses on the stable provider responsibilities and dependencies.
 
 ---
 
@@ -12,14 +12,14 @@ The providers are nested in `App.tsx` in this order (outermost first):
 SettingsProvider
   TaskProvider
     PluginProvider
-      AIProvider
-        VoiceProvider
-          UndoProvider
-            AppStateProvider
-              <AppContent />
+      UndoProvider
+        AppStateProvider
+          <AppContent />
 ```
 
-This nesting order matters because inner providers can depend on outer ones (e.g., AIProvider references tasks from TaskProvider, AppStateProvider aggregates read-only state from all above providers).
+`AIProvider` and `VoiceProvider` are now feature-scoped instead of app-global. They mount only around AI/voice entry points like `AIChat`, `AITab`, and `VoiceTab`, which keeps those chunks off the default startup path while preserving the same feature APIs.
+
+This nesting order still matters because inner providers can depend on outer ones (for example, feature-scoped AI still depends on `TaskProvider`, and `AppStateProvider` aggregates read-only state from the global providers above it).
 
 ---
 
@@ -90,6 +90,7 @@ This nesting order matters because inner providers can depend on outer ones (e.g
 - **Key Dependencies:** `api` (getAIConfig, updateAIConfig, sendChatMessage, getChatMessages, clearChat, listChatSessions, createNewChatSession, switchChatSession, deleteChatSession, renameChatSession), `useTaskContext` (refreshTasks)
 - **Used By:** `AIChatPanel.tsx`, `AITab.tsx` (settings), `SessionHistory.tsx`, any component tracking `dataMutationCount`
 - **Notes:** Messages are loaded via `restoreMessages` to restore chat history across page refreshes (tool messages are filtered out). The `sendMessage` function handles the full SSE lifecycle: creates user message, opens stream, processes events per round (with `roundFinalized` tracking for multi-round tool use), and creates assistant messages. After the stream ends, a safety-net refresh fires if any mutations were detected. Sessions list is refreshed after every `sendMessage` completes (a new session may have been auto-created). The `isConfigured` check also handles plugin providers (names containing `:`).
+- **Mounting:** This provider is no longer mounted at the app root. It is wrapped around AI surfaces on demand via `src/ui/context/AIFeatureProvider.tsx` and `src/ui/context/AIVoiceFeatureProviders.tsx`.
 
 ---
 
@@ -154,6 +155,7 @@ This nesting order matters because inner providers can depend on outer ones (e.g
 - **Key Dependencies:** `VoiceProviderRegistry` from `ai/voice/registry.js`, `createDefaultVoiceRegistry` from `ai/voice/provider.js`, `BrowserTTSProvider` from `ai/voice/adapters/browser-tts.js`, `playAudioBuffer` from `ai/voice/audio-utils.js`, `localStorage` for persistence
 - **Used By:** `AIChatPanel.tsx`, `VoiceTab.tsx`, `useVoiceCall.ts`, `useVAD.ts`
 - **Notes:** Settings are persisted to `localStorage` under `junban-voice-settings`. The provider registry is rebuilt via `useMemo` when API keys change, avoiding double-creates from `useState`+`useEffect`. Voice list and model list refresh when the TTS provider changes. The `speak` function strips markdown formatting (code blocks, inline code, markdown punctuation), truncates to 5000 chars for browser TTS or 2000 chars for API TTS, and supports both `BrowserTTSProvider.speakDirect()` and API-based `synthesize()` + `playAudioBuffer()`. Cancellation handles both `window.speechSynthesis.cancel()` and audio buffer cancellation via a ref.
+- **Mounting:** This provider is feature-scoped. `src/ui/context/VoiceFeatureProvider.tsx` mounts it for the Voice settings tab, and `src/ui/context/AIVoiceFeatureProviders.tsx` mounts it for AI chat.
 
 ---
 
@@ -263,13 +265,14 @@ This nesting order matters because inner providers can depend on outer ones (e.g
 
 The `AIContext.tsx` facade composes three granular contexts from `src/ui/context/ai/`:
 
-| File | Context | Purpose |
-|------|---------|---------|
-| `AIConfigContext.tsx` | `AIConfigContext` | AI provider configuration state (`config`, `isConfigured`, `updateConfig`, `refreshConfig`) |
-| `AIChatContext.tsx` | `AIChatContext` | Chat messages and streaming (`messages`, `isStreaming`, `sendMessage`, `clearChat`, `retryLastMessage`, `editAndResend`, `regenerateLastResponse`, `voiceCallActive`, `dataMutationCount`) |
-| `AISessionContext.tsx` | `AISessionContext` | Multi-session management (`sessions`, `activeSessionId`, `createNewSession`, `switchSession`, `deleteSession`, `renameSession`) |
+| File                   | Context            | Purpose                                                                                                                                                                                    |
+| ---------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AIConfigContext.tsx`  | `AIConfigContext`  | AI provider configuration state (`config`, `isConfigured`, `updateConfig`, `refreshConfig`)                                                                                                |
+| `AIChatContext.tsx`    | `AIChatContext`    | Chat messages and streaming (`messages`, `isStreaming`, `sendMessage`, `clearChat`, `retryLastMessage`, `editAndResend`, `regenerateLastResponse`, `voiceCallActive`, `dataMutationCount`) |
+| `AISessionContext.tsx` | `AISessionContext` | Multi-session management (`sessions`, `activeSessionId`, `createNewSession`, `switchSession`, `deleteSession`, `renameSession`)                                                            |
 
 Supporting hooks in `src/ui/context/ai/`:
+
 - `useAISendMessage.ts` -- SSE stream processing, tool call handling, mutation tracking
 - `useAIMessageActions.ts` -- edit/resend, regenerate, retry logic
 - `useAISessionManagement.ts` -- session CRUD and switching

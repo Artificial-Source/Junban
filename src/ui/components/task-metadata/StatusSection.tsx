@@ -20,10 +20,10 @@ export function StatusSection({ task, onUpdate }: StatusSectionProps) {
 
   return (
     <div>
-      <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider">
+      <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-on-surface-muted">
         Status
       </label>
-      <div className="flex gap-1.5 mt-1.5 flex-wrap">
+      <div className="flex flex-wrap gap-2">
         {STATUS_OPTIONS.map((opt) => {
           const Icon = opt.icon;
           const isActive = task.status === opt.value;
@@ -31,7 +31,7 @@ export function StatusSection({ task, onUpdate }: StatusSectionProps) {
             <button
               key={opt.value}
               onClick={() => handleStatusChange(opt.value)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                 isActive
                   ? `bg-surface-tertiary ${opt.color} ring-1 ring-current/20`
                   : "bg-surface-tertiary text-on-surface-muted hover:text-on-surface-secondary"

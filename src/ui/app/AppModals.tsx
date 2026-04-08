@@ -1,18 +1,10 @@
-import { CommandPalette } from "../components/CommandPalette.js";
-import { SearchModal } from "../components/SearchModal.js";
-import { AddProjectModal } from "../components/AddProjectModal.js";
-import { FocusMode } from "../components/FocusMode.js";
-import { TemplateSelector } from "../components/TemplateSelector.js";
+import { lazy, Suspense } from "react";
 import { Toast } from "../components/Toast.js";
-import { Settings } from "../views/Settings.js";
-import { ChordIndicator } from "../components/ChordIndicator.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { DatePicker } from "../components/DatePicker.js";
-import { QuickAddModal } from "../components/QuickAddModal.js";
-import { ExtractTasksModal } from "../components/ExtractTasksModal.js";
-import { OnboardingModal } from "../components/OnboardingModal.js";
 import { StatusBar } from "../components/StatusBar.js";
-import type { SettingsTab } from "../views/Settings.js";
+import { ErrorBoundary } from "../components/ErrorBoundary.js";
+import type { SettingsTab } from "../views/settings/types.js";
 import type { ContextMenuItem } from "../components/ContextMenu.js";
 import type { Task, Project as ProjectType, UpdateTaskInput } from "../../core/types.js";
 import type { ParsedTaskInput } from "./ViewRenderer.js";
@@ -23,6 +15,45 @@ interface AppCommand {
   callback: () => void;
   hotkey?: string;
 }
+
+const FocusMode = lazy(() =>
+  import("../components/FocusMode.js").then((module) => ({ default: module.FocusMode })),
+);
+const Settings = lazy(() =>
+  import("../views/Settings.js").then((module) => ({ default: module.Settings })),
+);
+const ChordIndicator = lazy(() =>
+  import("../components/ChordIndicator.js").then((module) => ({ default: module.ChordIndicator })),
+);
+const CommandPalette = lazy(() =>
+  import("../components/CommandPalette.js").then((module) => ({ default: module.CommandPalette })),
+);
+const SearchModal = lazy(() =>
+  import("../components/SearchModal.js").then((module) => ({ default: module.SearchModal })),
+);
+const AddProjectModal = lazy(() =>
+  import("../components/AddProjectModal.js").then((module) => ({
+    default: module.AddProjectModal,
+  })),
+);
+const QuickAddModal = lazy(() =>
+  import("../components/QuickAddModal.js").then((module) => ({ default: module.QuickAddModal })),
+);
+const TemplateSelector = lazy(() =>
+  import("../components/TemplateSelector.js").then((module) => ({
+    default: module.TemplateSelector,
+  })),
+);
+const ExtractTasksModal = lazy(() =>
+  import("../components/ExtractTasksModal.js").then((module) => ({
+    default: module.ExtractTasksModal,
+  })),
+);
+const OnboardingModal = lazy(() =>
+  import("../components/OnboardingModal.js").then((module) => ({
+    default: module.OnboardingModal,
+  })),
+);
 
 interface AppModalsProps {
   // Settings
@@ -159,62 +190,122 @@ export function AppModals({
   setCustomDatePicker,
   handleUpdateTask,
 }: AppModalsProps) {
+  const modalFallback = null;
+
   return (
     <>
-      {settingsOpen && <Settings activeTab={settingsTab ?? undefined} onClose={onCloseSettings} />}
-      {focusModeOpen && (
-        <FocusMode
-          tasks={tasks.filter((t) => t.status === "pending")}
-          onComplete={handleToggleTask}
-          onClose={onCloseFocusMode}
-        />
+      {settingsOpen && (
+        <ErrorBoundary fallback={modalFallback}>
+          <Suspense fallback={modalFallback}>
+            <Settings activeTab={settingsTab ?? undefined} onClose={onCloseSettings} />
+          </Suspense>
+        </ErrorBoundary>
       )}
-      <TemplateSelector
-        open={templateSelectorOpen}
-        onClose={onCloseTemplateSelector}
-        onTaskCreated={() => {
-          refreshTasks();
-          onCloseTemplateSelector();
-        }}
-      />
+      {focusModeOpen && (
+        <ErrorBoundary fallback={modalFallback}>
+          <Suspense fallback={modalFallback}>
+            <FocusMode
+              tasks={tasks.filter((t) => t.status === "pending")}
+              onComplete={handleToggleTask}
+              onClose={onCloseFocusMode}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {templateSelectorOpen && (
+        <ErrorBoundary fallback={modalFallback}>
+          <Suspense fallback={modalFallback}>
+            <TemplateSelector
+              open={templateSelectorOpen}
+              onClose={onCloseTemplateSelector}
+              onTaskCreated={() => {
+                refreshTasks();
+                onCloseTemplateSelector();
+              }}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
       <div className="hidden md:block">
         <StatusBar />
       </div>
-      <CommandPalette
-        commands={commands}
-        isOpen={commandPaletteOpen}
-        onClose={onCloseCommandPalette}
-      />
-      {featureChordsEnabled && <ChordIndicator />}
-      <SearchModal
-        isOpen={searchOpen}
-        onClose={onCloseSearch}
-        tasks={tasks}
-        projects={projects}
-        onSelectTask={handleSelectTask}
-      />
-      <AddProjectModal
-        open={projectModalOpen}
-        onClose={onCloseProjectModal}
-        onSubmit={handleCreateProject}
-        projects={projects}
-      />
-      <QuickAddModal
-        open={quickAddOpen}
-        onClose={onCloseQuickAdd}
-        onCreateTask={handleCreateTask}
-      />
-      <ExtractTasksModal
-        open={extractTasksOpen}
-        onClose={onCloseExtractTasks}
-        projects={projects}
-        onCreateTasks={handleExtractedTasksCreate}
-      />
-      <OnboardingModal
-        open={onboardingOpen}
-        onComplete={onCompleteOnboarding}
-        onRequestOpenSettings={(tab) => handleOpenSettingsTab(tab as SettingsTab)}
-      />
+      {commandPaletteOpen && (
+        <ErrorBoundary fallback={modalFallback}>
+          <Suspense fallback={modalFallback}>
+            <CommandPalette
+              commands={commands}
+              isOpen={commandPaletteOpen}
+              onClose={onCloseCommandPalette}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {featureChordsEnabled && (
+        <ErrorBoundary fallback={modalFallback}>
+          <Suspense fallback={modalFallback}>
+            <ChordIndicator />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {searchOpen && (
+        <ErrorBoundary fallback={modalFallback}>
+          <Suspense fallback={modalFallback}>
+            <SearchModal
+              isOpen={searchOpen}
+              onClose={onCloseSearch}
+              tasks={tasks}
+              projects={projects}
+              onSelectTask={handleSelectTask}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {projectModalOpen && (
+        <ErrorBoundary fallback={modalFallback}>
+          <Suspense fallback={modalFallback}>
+            <AddProjectModal
+              open={projectModalOpen}
+              onClose={onCloseProjectModal}
+              onSubmit={handleCreateProject}
+              projects={projects}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {quickAddOpen && (
+        <ErrorBoundary fallback={modalFallback}>
+          <Suspense fallback={modalFallback}>
+            <QuickAddModal
+              open={quickAddOpen}
+              onClose={onCloseQuickAdd}
+              onCreateTask={handleCreateTask}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {extractTasksOpen && (
+        <ErrorBoundary fallback={modalFallback}>
+          <Suspense fallback={modalFallback}>
+            <ExtractTasksModal
+              open={extractTasksOpen}
+              onClose={onCloseExtractTasks}
+              projects={projects}
+              onCreateTasks={handleExtractedTasksCreate}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {onboardingOpen && (
+        <ErrorBoundary fallback={modalFallback}>
+          <Suspense fallback={modalFallback}>
+            <OnboardingModal
+              open={onboardingOpen}
+              onComplete={onCompleteOnboarding}
+              onRequestOpenSettings={(tab) => handleOpenSettingsTab(tab as SettingsTab)}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
       {toast && (
         <Toast
           message={toast.message}

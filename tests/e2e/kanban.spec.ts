@@ -40,10 +40,8 @@ test.describe("Kanban / Board view", () => {
       page.getByRole("heading", { name: "Done" }).or(page.getByText("Done").first()),
     ).toBeVisible();
 
-    // Board columns have a horizontal scrollable layout
-    // Verify the flex container exists (the board wrapper)
-    const boardContainer = page.locator(".flex.gap-4.overflow-x-auto");
-    await expect(boardContainer).toBeVisible();
+    const boardColumnHeadings = page.getByRole("heading", { level: 3 });
+    await expect(boardColumnHeadings.filter({ hasText: "No section" })).toBeVisible();
   });
 
   test("board columns show task counts", async ({ page }) => {
@@ -109,10 +107,9 @@ test.describe("Kanban / Board view", () => {
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
     await navigateTo(page, "Fallback Board");
 
-    // The board layout should not be present -- no horizontal scrollable flex container
-    // Instead, it should fall back to a standard list view
-    const boardContainer = page.locator(".flex.gap-4.overflow-x-auto");
-    await expect(boardContainer).not.toBeVisible({ timeout: 3000 });
+    await expect(page.getByRole("heading", { name: "Column A", level: 3 })).not.toBeVisible({
+      timeout: 3000,
+    });
 
     // The project should still be viewable (with its name heading visible)
     await expect(page.getByRole("heading", { name: "Fallback Board", level: 1 })).toBeVisible();

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { shortcutManager } from "../shortcutManagerInstance.js";
 import { themeManager } from "../themes/manager.js";
-import { api } from "../api/index.js";
+import { getAppSetting } from "../api/settings.js";
 
 export function useAppShortcuts(
   setCommandPaletteOpen: React.Dispatch<React.SetStateAction<boolean>>,
@@ -102,7 +102,7 @@ export function useAppShortcuts(
     }
 
     // Load custom bindings from settings
-    api.getAppSetting("keyboard_shortcuts").then((val) => {
+    getAppSetting("keyboard_shortcuts").then((val) => {
       if (val) {
         try {
           shortcutManager.loadCustomBindings(JSON.parse(val));

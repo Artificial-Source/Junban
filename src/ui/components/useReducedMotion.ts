@@ -3,13 +3,15 @@
  * Returns `true` when either indicates animations should be reduced.
  */
 import { useState, useEffect } from "react";
-import { useGeneralSettings } from "../context/SettingsContext.js";
 
 export function useReducedMotion(): boolean {
-  const { settings } = useGeneralSettings();
   const [osPrefersReduced, setOsPrefersReduced] = useState(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
     return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+  const [appPrefersReduced, setAppPrefersReduced] = useState(() => {
+    if (typeof document === "undefined") return false;
+    return document.documentElement.classList.contains("reduce-motion");
   });
 
   useEffect(() => {
@@ -20,5 +22,17 @@ export function useReducedMotion(): boolean {
     return () => mql.removeEventListener("change", handler);
   }, []);
 
-  return osPrefersReduced || settings.reduce_animations === "true";
+  useEffect(() => {
+    if (typeof document === "undefined" || typeof MutationObserver === "undefined") return;
+
+    const root = document.documentElement;
+    const sync = () => setAppPrefersReduced(root.classList.contains("reduce-motion"));
+    sync();
+
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
+  return osPrefersReduced || appPrefersReduced;
 }

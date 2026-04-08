@@ -45,14 +45,14 @@ See [Plugin Registry Submission](#plugin-registry-submission) below.
 
 ### Branching
 
-| Branch | Purpose |
-|--------|---------|
-| `main` | Stable, deployable |
-| `feat/<name>` | New features |
-| `fix/<name>` | Bug fixes |
-| `docs/<name>` | Documentation changes |
+| Branch          | Purpose               |
+| --------------- | --------------------- |
+| `main`          | Stable, deployable    |
+| `feat/<name>`   | New features          |
+| `fix/<name>`    | Bug fixes             |
+| `docs/<name>`   | Documentation changes |
 | `plugin/<name>` | Plugin system changes |
-| `test/<name>` | Test additions |
+| `test/<name>`   | Test additions        |
 
 ### Commits
 
@@ -74,7 +74,42 @@ refactor(ui): extract TaskInput into separate component
 - **Description**: Explain what and why, not just how
 - **Size**: Keep PRs focused. One feature or fix per PR. Large PRs are harder to review.
 - **Tests**: Include tests for new logic. Fix failing tests before submitting.
-- **Docs**: Update relevant documentation if behavior changes
+- **Docs**: Update the mapped documentation in the same PR when behavior, API surface, workflow, or file organization changes. Use `docs/README.md` as the ownership map.
+
+### Documentation Requirements
+
+Documentation is required when changes affect:
+
+- public API surface
+- user-visible behavior
+- architecture or startup flow
+- file organization or extension points
+
+Use this mapping:
+
+- `src/ui/components/**` -> `docs/frontend/COMPONENTS.md`
+- `src/ui/views/**` -> `docs/frontend/VIEWS.md`
+- `src/ui/context/**` -> `docs/frontend/CONTEXT.md`
+- `src/ui/hooks/**` -> `docs/frontend/HOOKS.md`
+- `src/ui/themes/**` -> `docs/frontend/THEMES.md`
+- `src/ui/api/**` -> `docs/frontend/API_LAYER.md`
+- `src/core/**` -> `docs/backend/CORE.md`
+- `src/db/**` -> `docs/backend/DATABASE.md`
+- `src/storage/**` -> `docs/backend/STORAGE.md`
+- `src/parser/**` -> `docs/backend/PARSER.md`
+- `src/ai/**` -> `docs/backend/AI.md`
+- `src/ai/voice/**` -> `docs/backend/VOICE.md`
+- `src/mcp/**` -> `docs/backend/MCP.md`
+- `src/plugins/**` internals -> `docs/backend/PLUGINS.md`
+- plugin author API changes -> `docs/plugins/API.md` and `docs/plugins/EXAMPLES.md`
+- `src/cli/**` -> `docs/backend/CLI.md`
+- architecture, deployment shape, roadmap status -> `docs/guides/ARCHITECTURE.md`, `docs/planning/ROADMAP.md`, and `CLAUDE.md` if contributor workflow changes
+
+Before opening a PR:
+
+1. Run `git diff --name-only`.
+2. Match changed source paths to the docs above.
+3. Update those docs in the same PR or explicitly confirm no behavior/API change.
 
 ### Code Review
 
@@ -191,7 +226,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model.
 
 ## Sprint Methodology
 
-Development follows two-week sprint cycles. Each sprint has a clear goal and pulls items from the [Backlog](../planning/BACKLOG.md).
+Development follows milestone-based planning tracked in the [Roadmap](../planning/ROADMAP.md). Contributors should align larger work with roadmap priorities or approved issues.
 
 ### How Sprints Work
 
@@ -203,12 +238,12 @@ Development follows two-week sprint cycles. Each sprint has a clear goal and pul
 
 ### Sprint Sizing
 
-| Size | Effort | Example |
-|------|--------|---------|
-| S | < 2 hours | Wire a single service to DB, add a test file |
-| M | 2–6 hours | Build a complete view, implement a CLI command end-to-end |
-| L | 1–2 days | Plugin loader with validation, keyboard navigation system |
-| XL | 3–5 days | Sandbox implementation, storage abstraction layer |
+| Size | Effort    | Example                                                   |
+| ---- | --------- | --------------------------------------------------------- |
+| S    | < 2 hours | Wire a single service to DB, add a test file              |
+| M    | 2–6 hours | Build a complete view, implement a CLI command end-to-end |
+| L    | 1–2 days  | Plugin loader with validation, keyboard navigation system |
+| XL   | 3–5 days  | Sandbox implementation, storage abstraction layer         |
 
 See [ROADMAP.md](../planning/ROADMAP.md) for sprint history and project status.
 

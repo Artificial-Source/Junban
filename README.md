@@ -14,6 +14,7 @@ Local-first. No accounts. No tracking. Your data stays on your machine.
   <a href="https://github.com/ASF-GROUP/Junban">Home</a> &nbsp;&middot;&nbsp;
   <a href="docs/guides/SETUP.md">Setup</a> &nbsp;&middot;&nbsp;
   <a href="docs/guides/ARCHITECTURE.md">Architecture</a> &nbsp;&middot;&nbsp;
+  <a href="docs/guides/RELEASES.md">Releases</a> &nbsp;&middot;&nbsp;
   <a href="docs/plugins/API.md">Plugin API</a> &nbsp;&middot;&nbsp;
   <a href="docs/planning/ROADMAP.md">Roadmap</a>
 </p>
@@ -89,6 +90,7 @@ Desktop app for Windows, macOS, and Linux.
 - Confirm the asset is attached to a published release with notes/tag in this repository.
 - We do not currently publish standalone checksum instructions for manual installs in this README.
 - For desktop installs, in-app updates use Tauri updater metadata from this same Releases source.
+- The in-app updater can be checked from `Settings -> About`, and release history is tracked in [CHANGELOG.md](CHANGELOG.md).
 
 - **Windows:** use `.exe` for the normal installer; `.msi` is mainly for managed or enterprise-friendly installs.
 - **macOS:** if Gatekeeper warns on first launch, open the app from Finder or approve it in System Settings.
@@ -131,7 +133,7 @@ call dentist 9am #health
 
 ### AI Assistant
 
-A conversational sidebar that sees your tasks, projects, and schedule. **34 built-in tools** for task CRUD, project management, scheduling, pattern analysis, workload detection, and energy-based recommendations.
+A conversational sidebar that sees your tasks, projects, and schedule. **40 built-in tools** for task CRUD, project management, scheduling, pattern analysis, workload detection, and energy-based recommendations.
 
 Supported providers: **OpenAI** / **Anthropic** / **OpenRouter** / **Ollama** / **LM Studio** — or write a custom provider plugin.
 
@@ -175,18 +177,18 @@ Plugins can register commands, add sidebar panels, add views, hook into task eve
 
 ### And more...
 
-|                           |                                                              |
-| ------------------------- | ------------------------------------------------------------ |
-| **Dual storage**          | SQLite (default) or Markdown files with YAML frontmatter     |
-| **Sub-tasks & templates** | Break down work, reuse common patterns                       |
-| **Recurring tasks**       | Daily, weekly, monthly — with natural language scheduling    |
-| **Reminders**             | Set reminders on any task, get notified when they're due     |
-| **Eisenhower Matrix**     | Prioritize with the urgent/important quadrant view           |
-| **Focus mode**            | Distraction-free, keyboard-driven                            |
-| **CLI companion**         | `junban add`, `junban list`, `junban done` from the terminal |
-| **Themes**                | Light / Dark / Nord + accent colors + custom CSS             |
-| **Sound effects**         | Satisfying audio feedback for task actions                   |
-| **1930+ tests**           | Solid coverage across the entire codebase                    |
+|                                   |                                                              |
+| --------------------------------- | ------------------------------------------------------------ |
+| **Dual storage**                  | SQLite (default) or Markdown files with YAML frontmatter     |
+| **Sub-tasks & templates**         | Break down work, reuse common patterns                       |
+| **Recurring tasks**               | Daily, weekly, monthly — with natural language scheduling    |
+| **Reminders**                     | Set reminders on any task, get notified when they're due     |
+| **Eisenhower Matrix**             | Prioritize with the urgent/important quadrant view           |
+| **Focus mode**                    | Distraction-free, keyboard-driven                            |
+| **CLI companion**                 | `junban add`, `junban list`, `junban done` from the terminal |
+| **Themes**                        | Light / Dark / Nord + accent colors + custom CSS             |
+| **Sound effects**                 | Satisfying audio feedback for task actions                   |
+| **240 automated test/spec files** | Solid coverage across the entire codebase                    |
 
 ## Tech stack
 
@@ -199,7 +201,7 @@ Plugins can register commands, add sidebar panels, add views, hook into task eve
 | **AI**       | OpenAI, Anthropic, OpenRouter, Ollama, LM Studio  |
 | **Voice**    | Browser, Groq, Inworld AI, Whisper, Kokoro, Piper |
 | **CLI**      | Commander.js                                      |
-| **Tests**    | Vitest (1930+)                                    |
+| **Tests**    | Vitest + Playwright                               |
 | **Build**    | Vite 6                                            |
 
 ## Status
@@ -216,6 +218,7 @@ Next milestone: **Junban Sync** — optional paid cross-device sync.
 | ------------------------------------------- | ------------------------------- |
 | [Architecture](docs/guides/ARCHITECTURE.md) | How the codebase is organized   |
 | [Local setup](docs/guides/SETUP.md)         | Getting it running              |
+| [Releases](docs/guides/RELEASES.md)         | Packaging, updates, changelog   |
 | [Contributing](docs/guides/CONTRIBUTING.md) | How to help                     |
 | [Security](docs/guides/SECURITY.md)         | Threat model, plugin sandboxing |
 | [Plugin API](docs/plugins/API.md)           | Building plugins                |

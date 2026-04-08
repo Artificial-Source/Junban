@@ -9,20 +9,22 @@ test.describe("Quick add modal", () => {
   test("opens with Ctrl+N", async ({ page }) => {
     await page.keyboard.press("Control+n");
 
-    await expect(page.getByText("Quick Add")).toBeVisible({ timeout: 5000 });
-    await expect(page.getByPlaceholder(/Add a task/i).last()).toBeFocused();
+    const input = page.getByPlaceholder(/Add a task/i).last();
+    await expect(page.getByText("Quick Add", { exact: true })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByLabel("Close")).toBeVisible();
+    await expect(input).toBeFocused();
   });
 
   test("creates task and closes", async ({ page }) => {
     await page.keyboard.press("Control+n");
-    await expect(page.getByText("Quick Add")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Quick Add", { exact: true })).toBeVisible({ timeout: 5000 });
 
     const input = page.getByPlaceholder(/Add a task/i).last();
     await input.fill("Quick added task");
     await input.press("Enter");
 
     // Modal should close after submission
-    await expect(page.getByText("Quick Add")).not.toBeVisible({ timeout: 5000 });
+    await expect(page.getByLabel("Close")).not.toBeVisible({ timeout: 5000 });
 
     // Task should appear in Inbox
     await expect(page.getByText("Quick added task")).toBeVisible({ timeout: 5000 });
@@ -30,10 +32,10 @@ test.describe("Quick add modal", () => {
 
   test("closes with Escape", async ({ page }) => {
     await page.keyboard.press("Control+n");
-    await expect(page.getByText("Quick Add")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Quick Add", { exact: true })).toBeVisible({ timeout: 5000 });
 
     await page.keyboard.press("Escape");
 
-    await expect(page.getByText("Quick Add")).not.toBeVisible({ timeout: 5000 });
+    await expect(page.getByLabel("Close")).not.toBeVisible({ timeout: 5000 });
   });
 });

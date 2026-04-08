@@ -1,84 +1,80 @@
-# Vision & Design
+# Documentation
 
-## What is ASF?
+This is the canonical documentation entry point for Junban contributors and AI agents.
 
-[AI Strategic Forum (ASF)](https://github.com/ASF-GROUP) is a community for AI enthusiasts focused on curated news, long-form analysis, and open-source tools. ASF values accuracy over speed, sources over vibes, and transparency over persuasion.
+## Start Here
 
-## What is Junban?
+| You want to...             | Read this first                                    |
+| -------------------------- | -------------------------------------------------- |
+| Understand the project     | [`../CLAUDE.md`](../CLAUDE.md)                     |
+| Find the right doc quickly | [`../AGENTS.md`](../AGENTS.md)                     |
+| Set up local development   | [`guides/SETUP.md`](guides/SETUP.md)               |
+| Contribute safely          | [`guides/CONTRIBUTING.md`](guides/CONTRIBUTING.md) |
+| Understand architecture    | [`guides/ARCHITECTURE.md`](guides/ARCHITECTURE.md) |
+| Check roadmap and status   | [`planning/ROADMAP.md`](planning/ROADMAP.md)       |
+| Review security model      | [`guides/SECURITY.md`](guides/SECURITY.md)         |
 
-A task manager that fills a gap: no good open-source option combines a clean UI, real AI integration, a plugin system, and full data ownership.
+## Structure
 
-| Existing tool | Where it falls short |
-|---|---|
-| Todoist / TickTick | Closed source, weak AI, no extensibility, your data in their cloud |
-| Obsidian Tasks | Notes app with tasks bolted on, not a task manager |
-| Taskwarrior | Terminal-only, steep learning curve |
-| Vikunja / Planka | No plugins, no AI |
+```text
+docs/
+├── README.md        Canonical docs index and maintenance policy
+├── guides/          Setup, contributing, architecture, security, releases
+├── frontend/        UI reference docs for views, components, context, hooks, themes
+├── backend/         Core, database, parser, AI, voice, MCP, CLI, storage, plugins
+├── plugins/         Plugin-author documentation and examples
+└── planning/        Public roadmap and project status
+```
 
-Junban is minimal out of the box. The plugin system is how you add what you need — and it's designed so anyone can ask an AI to generate a working plugin.
+## Ownership Map
 
-## Design principles
+| If you change...                                | You must update...                                              |
+| ----------------------------------------------- | --------------------------------------------------------------- |
+| `src/ui/components/**`                          | `docs/frontend/COMPONENTS.md`                                   |
+| `src/ui/views/**`                               | `docs/frontend/VIEWS.md`                                        |
+| `src/ui/context/**`                             | `docs/frontend/CONTEXT.md`                                      |
+| `src/ui/hooks/**`                               | `docs/frontend/HOOKS.md`                                        |
+| `src/ui/themes/**` or design tokens             | `docs/frontend/THEMES.md`                                       |
+| `src/ui/api/**`                                 | `docs/frontend/API_LAYER.md`                                    |
+| `src/core/**`                                   | `docs/backend/CORE.md`                                          |
+| `src/db/**`                                     | `docs/backend/DATABASE.md`                                      |
+| `src/storage/**`                                | `docs/backend/STORAGE.md`                                       |
+| `src/parser/**`                                 | `docs/backend/PARSER.md`                                        |
+| `src/ai/**`                                     | `docs/backend/AI.md`                                            |
+| `src/ai/voice/**`                               | `docs/backend/VOICE.md`                                         |
+| `src/mcp/**`                                    | `docs/backend/MCP.md`                                           |
+| `src/plugins/**` internals                      | `docs/backend/PLUGINS.md`                                       |
+| Plugin author API surface                       | `docs/plugins/API.md` and `docs/plugins/EXAMPLES.md`            |
+| `src/cli/**`                                    | `docs/backend/CLI.md`                                           |
+| High-level structure, startup, deployment shape | `guides/ARCHITECTURE.md`, `planning/ROADMAP.md`, `../CLAUDE.md` |
 
-### Local-first, private by default
+## Documentation Maintenance Policy
 
-Data lives on your machine. Zero network calls by default. No accounts, no telemetry. AI features require your own API keys going directly to your provider — or run fully local with Ollama.
+Documentation is part of the feature, not follow-up work.
 
-### AI-native, not bolted on
+Rules:
 
-The AI assistant is a core part of the design — conversational sidebar, voice input, task context awareness. External AI agents can also connect via the MCP server to manage tasks programmatically. But AI is completely optional. The app works fine without it.
+1. Any change to public behavior, exported API, file organization, or user-facing workflow must update the corresponding documentation in the same PR.
+2. If code changes touch one of the source areas in the ownership map above, the mapped doc must be reviewed and updated or explicitly confirmed unchanged.
+3. Keep one canonical source per topic. Link across docs instead of copying the same explanation into multiple files.
+4. Prefer durable docs over brittle inventories. When counts/examples drift easily, update wording to describe the system accurately without depending on fragile exact numbers unless the number is intentionally tracked.
+5. Remove scratch/debug artifacts from the repo root after debugging sessions.
 
-### Vibe-code extensible
+## Practical Workflow
 
-The plugin API is designed so that describing what you want to Claude or ChatGPT produces a working plugin. If the API is too complicated for AI to generate correct code, it's too complicated.
+Before opening a PR:
 
-Inspired by [Obsidian](https://obsidian.md/) and [Pi's extension model](https://github.com/badlogic/pi-mono).
+1. Run `git diff --name-only`.
+2. Check whether any changed source path maps to a doc in the ownership table.
+3. Update that doc in the same PR.
+4. If roadmap/status claims changed, update `docs/planning/ROADMAP.md` too.
+5. If contributor or agent workflow changed, update `AGENTS.md` and/or `CLAUDE.md`.
 
-### Minimal by default
+## Open Source Release Notes
 
-Clean UI, no feature bloat. A developer wants Git sync and keyboard shortcuts. A PM wants Kanban. A student wants Pomodoro. The core doesn't pick sides — plugins do.
+For external readers:
 
-### No vendor lock-in
-
-SQLite or Markdown files. Export anytime (JSON, CSV, Markdown). Switching away should be trivial. MIT licensed.
-
-### Honest business model
-
-Free forever. Revenue from optional paid sync hosting (like Obsidian Sync), not dark patterns or artificial limitations.
-
-## Platform strategy
-
-| Phase | Platform | Status |
-|---|---|---|
-| v1 | Desktop (Mac, Windows, Linux via Tauri) | Shipped |
-| v1.5 | Cross-device sync service | Planned |
-| v2 | Mobile (native + PWA) | Planned (needs sync) |
-| v3 | Web app | Planned (needs sync) |
-
-## Business model
-
-| Tier | Price | What you get |
-|---|---|---|
-| Junban | Free | Full app, all features, all plugins, local storage |
-| Junban Sync | Paid (TBD) | ASF-hosted sync for cross-device access |
-| Junban Enterprise | Paid (future) | Team features, admin controls, SSO |
-
-The core app will never be paywalled.
-
-## Plugin ecosystem
-
-A community plugin store (like Obsidian's) where plugins are reviewed by ASF maintainers for safety before listing. Anyone can build plugins:
-
-- **Developers**: write TypeScript, use the full Plugin API
-- **Everyone else**: describe what you want to an AI, get a working plugin back
-
-See [Plugin API](plugins/API.md) for the reference and [examples](plugins/EXAMPLES.md) for walkthroughs.
-
-## ASF values
-
-| Value | Meaning |
-|---|---|
-| Accuracy > Speed | Get it right, not just first |
-| Disclosure > Persuasion | Be transparent about biases and limitations |
-| Sources > Vibes | Cite, link, verify |
-| Label speculation | If it's a guess, say so |
-| No hidden promotion | Disclose affiliations |
+- Product overview and downloads live in [`../README.md`](../README.md)
+- Security reporting policy lives in [`../.github/SECURITY.md`](../.github/SECURITY.md)
+- Full security model lives in [`guides/SECURITY.md`](guides/SECURITY.md)
+- Release process lives in [`guides/RELEASES.md`](guides/RELEASES.md)

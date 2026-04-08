@@ -57,7 +57,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "asf-saydo"
+name = "asf-junban"
 version = "1.0.0"
 dependencies = [
  "serde",

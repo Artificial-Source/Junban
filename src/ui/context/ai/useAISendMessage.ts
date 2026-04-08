@@ -6,6 +6,7 @@ import {
   DATA_MUTATING_TOOLS,
   parseStreamError,
 } from "./ai-context-types.js";
+import { dispatchAIDataMutatedEvent } from "../ai-events.js";
 
 interface UseAISendMessageParams {
   voiceCallActiveRef: MutableRefObject<boolean>;
@@ -155,6 +156,7 @@ export function useAISendMessage({
                   }
                   if (hadDataMutation) {
                     setDataMutationCount((c) => c + 1);
+                    dispatchAIDataMutatedEvent();
                   }
                   // Finalize current round — next tokens will start a new message
                   assistantContent = "";
@@ -202,6 +204,7 @@ export function useAISendMessage({
         }
         if (hadDataMutation) {
           setDataMutationCount((c) => c + 1);
+          dispatchAIDataMutatedEvent();
         }
         // Refresh sessions list (new session may have been created)
         refreshSessions();

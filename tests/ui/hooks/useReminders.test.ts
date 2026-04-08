@@ -4,11 +4,9 @@ import { renderHook } from "@testing-library/react";
 const mockFetchDueReminders = vi.fn().mockResolvedValue([]);
 const mockUpdateTask = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("../../../src/ui/api/index.js", () => ({
-  api: {
-    fetchDueReminders: (...args: any[]) => mockFetchDueReminders(...args),
-    updateTask: (...args: any[]) => mockUpdateTask(...args),
-  },
+vi.mock("../../../src/ui/api/tasks.js", () => ({
+  fetchDueReminders: (...args: any[]) => mockFetchDueReminders(...args),
+  updateTask: (...args: any[]) => mockUpdateTask(...args),
 }));
 
 import { useReminders } from "../../../src/ui/hooks/useReminders.js";

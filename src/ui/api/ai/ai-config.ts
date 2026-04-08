@@ -63,7 +63,8 @@ export async function updateAIConfig(config: {
       }
     }
     if (config.oauthToken) svc.storage.setAppSetting("ai_oauth_token", config.oauthToken);
-    svc.chatManager.clearSession(svc.storage);
+    const ai = await svc.getAIRuntime();
+    ai.chatManager.clearSession(svc.storage);
     svc.save();
     return;
   }

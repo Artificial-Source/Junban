@@ -8,13 +8,18 @@ import React, {
   useMemo,
 } from "react";
 import {
-  api,
+  executePluginCommand,
+  getPluginPanels,
+  getPluginViews,
+  getStatusBarItems,
+  listPluginCommands,
+  listPlugins,
   type PluginInfo,
   type PluginCommandInfo,
   type StatusBarItemInfo,
   type PanelInfo,
   type ViewInfo,
-} from "../api/index.js";
+} from "../api/plugins.js";
 
 interface PluginContextValue {
   plugins: PluginInfo[];
@@ -42,7 +47,7 @@ export function PluginProvider({ children }: { children: React.ReactNode }) {
 
   const refreshPlugins = useCallback(async () => {
     try {
-      const data = await api.listPlugins();
+      const data = await listPlugins();
       if (mountedRef.current) setPlugins(data);
     } catch {
       // Non-critical
@@ -51,7 +56,7 @@ export function PluginProvider({ children }: { children: React.ReactNode }) {
 
   const refreshCommands = useCallback(async () => {
     try {
-      const data = await api.listPluginCommands();
+      const data = await listPluginCommands();
       if (mountedRef.current) setCommands(data);
     } catch {
       // Non-critical
@@ -60,7 +65,7 @@ export function PluginProvider({ children }: { children: React.ReactNode }) {
 
   const refreshStatusBar = useCallback(async () => {
     try {
-      const data = await api.getStatusBarItems();
+      const data = await getStatusBarItems();
       if (mountedRef.current) setStatusBarItems(data);
     } catch {
       // Non-critical
@@ -69,7 +74,7 @@ export function PluginProvider({ children }: { children: React.ReactNode }) {
 
   const refreshPanels = useCallback(async () => {
     try {
-      const data = await api.getPluginPanels();
+      const data = await getPluginPanels();
       if (mountedRef.current) setPanels(data);
     } catch {
       // Non-critical
@@ -78,7 +83,7 @@ export function PluginProvider({ children }: { children: React.ReactNode }) {
 
   const refreshViews = useCallback(async () => {
     try {
-      const data = await api.getPluginViews();
+      const data = await getPluginViews();
       if (mountedRef.current) setViews(data);
     } catch {
       // Non-critical
@@ -87,7 +92,7 @@ export function PluginProvider({ children }: { children: React.ReactNode }) {
 
   const executeCommand = useCallback(
     async (id: string) => {
-      await api.executePluginCommand(id);
+      await executePluginCommand(id);
       // Refresh relevant state after command execution
       await Promise.all([refreshStatusBar(), refreshPanels()]);
     },
@@ -98,12 +103,31 @@ export function PluginProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     mountedRef.current = true;
     refreshPlugins();
-    refreshCommands();
-    refreshStatusBar();
-    refreshPanels();
     refreshViews();
+
+    const scheduleDeferredFetches = () => {
+      refreshCommands();
+      refreshStatusBar();
+      refreshPanels();
+    };
+
+    let idleHandle: number | null = null;
+    let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | null = null;
+
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      idleHandle = window.requestIdleCallback(scheduleDeferredFetches, { timeout: 1500 });
+    } else {
+      timeoutHandle = globalThis.setTimeout(scheduleDeferredFetches, 300);
+    }
+
     return () => {
       mountedRef.current = false;
+      if (idleHandle !== null && typeof window !== "undefined" && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(idleHandle);
+      }
+      if (timeoutHandle !== null) {
+        globalThis.clearTimeout(timeoutHandle);
+      }
     };
   }, [refreshPlugins, refreshCommands, refreshStatusBar, refreshPanels, refreshViews]);
 

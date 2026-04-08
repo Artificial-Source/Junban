@@ -70,12 +70,10 @@ vi.mock("../../../src/ui/hooks/useSoundEffect.js", () => ({
       mockPlaySound(...args),
 }));
 
-vi.mock("../../../src/ui/api/index.js", () => ({
-  api: {
-    indentTask: (...args: any[]) => mockIndentTask(...args),
-    outdentTask: (...args: any[]) => mockOutdentTask(...args),
-    reorderTasks: (...args: any[]) => mockReorderTasks(...args),
-  },
+vi.mock("../../../src/ui/api/tasks.js", () => ({
+  indentTask: (...args: any[]) => mockIndentTask(...args),
+  outdentTask: (...args: any[]) => mockOutdentTask(...args),
+  reorderTasks: (...args: any[]) => mockReorderTasks(...args),
 }));
 
 import { useTaskHandlers } from "../../../src/ui/hooks/useTaskHandlers.js";

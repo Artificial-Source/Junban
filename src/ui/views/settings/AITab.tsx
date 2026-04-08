@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAIContext } from "../../context/AIContext.js";
+import { AIFeatureProvider } from "../../context/AIFeatureProvider.js";
 import { api, type AIProviderInfo, type ModelDiscoveryInfo } from "../../api/index.js";
 import { PROVIDER_HELP } from "./ai/ai-tab-constants.js";
 import { MemorySection } from "./ai/MemorySection.js";
@@ -7,6 +8,14 @@ import { CustomInstructionsSection } from "./ai/CustomInstructionsSection.js";
 import { DailyBriefingSection } from "./ai/DailyBriefingSection.js";
 
 export function AITab() {
+  return (
+    <AIFeatureProvider>
+      <AITabContent />
+    </AIFeatureProvider>
+  );
+}
+
+function AITabContent() {
   const { config, isConfigured, updateConfig, refreshConfig } = useAIContext();
   const [providers, setProviders] = useState<AIProviderInfo[]>([]);
   const [provider, setProvider] = useState("");

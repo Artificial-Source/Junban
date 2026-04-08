@@ -23,10 +23,8 @@ vi.mock("../../../src/ui/themes/manager.js", () => ({
 
 const mockGetAppSetting = vi.fn();
 
-vi.mock("../../../src/ui/api/index.js", () => ({
-  api: {
-    getAppSetting: (...args: any[]) => mockGetAppSetting(...args),
-  },
+vi.mock("../../../src/ui/api/settings.js", () => ({
+  getAppSetting: (...args: any[]) => mockGetAppSetting(...args),
 }));
 
 import { useAppShortcuts } from "../../../src/ui/hooks/useAppShortcuts.js";

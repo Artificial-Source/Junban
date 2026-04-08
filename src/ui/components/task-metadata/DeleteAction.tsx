@@ -22,7 +22,7 @@ export function DeleteAction({ taskId, onDelete }: DeleteActionProps) {
           }
           onDelete(taskId);
         }}
-        className="text-sm text-error hover:text-error/80 flex items-center gap-1.5 transition-colors w-full"
+        className="flex w-full items-center gap-2 rounded-xl px-1 py-1 text-sm text-error transition-colors hover:text-error/80"
       >
         <Trash2 size={14} />
         Delete task

@@ -1,6 +1,6 @@
 # Frontend Views Reference
 
-> Every file in `src/ui/views/`, `src/ui/views/calendar/`, and `src/ui/views/settings/`.
+> Overview of the main views in `src/ui/views/`, calendar subviews, and settings tabs. This document is meant to explain view responsibilities and routing, not to be a fragile inventory ledger.
 
 ---
 

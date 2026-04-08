@@ -1,6 +1,6 @@
 # Frontend Components Reference
 
-> Every file in `src/ui/components/`, grouped by category.
+> Overview of the key components in `src/ui/components/`, grouped by category. Treat exact file sizes as incidental; use the code as the source of truth when a component is actively changing.
 
 ---
 
@@ -578,7 +578,7 @@ Extracted sub-components used by `AIChatPanel.tsx`. Each handles a single concer
   - `divider` — horizontal rule
   - `row` — flex container with nested elements, configurable gap and justify
   - `spacer` — vertical spacing (sm=8px, md=16px, lg=24px)
-  Unknown element types are silently skipped for forward compatibility. Recursive rendering via internal `RenderElement` component.
+    Unknown element types are silently skipped for forward compatibility. Recursive rendering via internal `RenderElement` component.
 
 ---
 

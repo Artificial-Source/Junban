@@ -21,6 +21,7 @@ interface AIChatPanelProps {
   onClose: () => void;
   onOpenSettings: () => void;
   onSelectTask?: (taskId: string) => void;
+  focusedTaskId?: string | null;
   mode?: "panel" | "view";
 }
 
@@ -28,6 +29,7 @@ export function AIChatPanel({
   onClose,
   onOpenSettings,
   onSelectTask,
+  focusedTaskId,
   mode = "panel",
 }: AIChatPanelProps) {
   const isView = mode === "view";
@@ -48,6 +50,7 @@ export function AIChatPanel({
     switchSession,
     deleteSession,
     renameSession,
+    setFocusedTaskId,
   } = useAIContext();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -55,6 +58,13 @@ export function AIChatPanel({
   const [restored, setRestored] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [lastKnownMessageCount, setLastKnownMessageCount] = useState(0);
+
+  useEffect(() => {
+    setFocusedTaskId(focusedTaskId ?? null);
+    return () => {
+      setFocusedTaskId(null);
+    };
+  }, [focusedTaskId, setFocusedTaskId]);
 
   // Restore chat history on first open
   useEffect(() => {

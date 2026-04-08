@@ -1,8 +1,8 @@
 import { type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 import { Plus, Star, Heart, Filter, type LucideIcon } from "lucide-react";
 import type { Project } from "../../../core/types.js";
-import type { PanelInfo, ViewInfo } from "../../api/index.js";
-import { PluginErrorBoundary } from "../../views/PluginView.js";
+import type { PanelInfo, ViewInfo } from "../../api/plugins.js";
+import { PluginErrorBoundary } from "./PluginErrorBoundary.js";
 import { SortableSection, SectionHeader, renderNavButton } from "./SidebarPrimitives.js";
 import { ProjectTree, ProjectButton } from "./ProjectTree.js";
 

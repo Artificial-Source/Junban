@@ -10,9 +10,8 @@ import {
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { Inbox } from "lucide-react";
 import { useReducedMotion } from "./useReducedMotion.js";
-import { springGentle } from "../utils/animation-variants.js";
 import type { Project } from "../../core/types.js";
-import type { PanelInfo, ViewInfo } from "../api/index.js";
+import type { PanelInfo, ViewInfo } from "../api/plugins.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 import { ContextMenu } from "./ContextMenu.js";
 import {
@@ -259,13 +258,20 @@ export function Sidebar({
   const SidebarTag = reducedMotion ? "aside" : motion.aside;
   const sidebarMotionProps = reducedMotion
     ? {}
-    : { layout: true as const, transition: springGentle };
+    : {
+        initial: false,
+        animate: { width: collapsed ? 64 : 272 },
+        transition: {
+          duration: 0.24,
+          ease: [0.22, 1, 0.36, 1] as const,
+        },
+      };
 
   return (
     <SidebarTag
       aria-label="Main navigation"
       className={`relative z-20 border-r border-border bg-surface-secondary flex flex-col ${
-        reducedMotion ? "transition-[width] duration-200 " : ""
+        reducedMotion ? "transition-[width] duration-200 ease-out " : ""
       }${collapsed ? "w-16 overflow-visible" : "w-sidebar"}`}
       {...sidebarMotionProps}
     >

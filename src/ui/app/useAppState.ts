@@ -1,8 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useTaskContext } from "../context/TaskContext.js";
 import { usePluginContext } from "../context/PluginContext.js";
-import { useAIContext } from "../context/AIContext.js";
-import { useVoiceContext } from "../context/VoiceContext.js";
 import { useUndoContext } from "../context/UndoContext.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
@@ -10,9 +8,14 @@ import { useSoundEffect } from "../hooks/useSoundEffect.js";
 import { useNudges } from "../hooks/useNudges.js";
 import { useGlobalShortcut } from "../hooks/useGlobalShortcut.js";
 import { useQuickCaptureWindow } from "../hooks/useQuickCaptureWindow.js";
-import { api } from "../api/index.js";
+import { listTaskRelations } from "../api/tasks.js";
+import { listProjects, listTags } from "../api/projects.js";
+import { listSections } from "../api/sections.js";
+import { listTaskActivity, listTaskComments } from "../api/comments.js";
+import { getAppSetting } from "../api/settings.js";
 import { toDateKey } from "../../utils/format-date.js";
 import { isTauri } from "../../utils/tauri.js";
+import { AI_DATA_MUTATED_EVENT } from "../context/ai-events.js";
 import type {
   Project as ProjectType,
   Section,
@@ -89,13 +92,11 @@ export function useAppState(routing: {
     () => new Set(plugins.filter((p) => p.builtin).map((p) => p.id)),
     [plugins],
   );
-  const voice = useVoiceContext();
-  const { dataMutationCount, setFocusedTaskId } = useAIContext();
 
   // ── Data fetching ──
   const fetchProjects = useCallback(async () => {
     try {
-      const p = await api.listProjects();
+      const p = await listProjects();
       setProjects(p);
     } catch {
       /* Non-critical */
@@ -104,7 +105,7 @@ export function useAppState(routing: {
 
   const fetchTags = useCallback(async () => {
     try {
-      const tags = await api.listTags();
+      const tags = await listTags();
       setAvailableTags(tags.map((t) => t.name));
     } catch {
       /* Non-critical */
@@ -113,7 +114,7 @@ export function useAppState(routing: {
 
   const fetchBlockedTaskIds = useCallback(async () => {
     try {
-      const relations = await api.listTaskRelations();
+      const relations = await listTaskRelations();
       const blocked = new Set<string>();
       for (const r of relations) blocked.add(r.relatedTaskId);
       setBlockedTaskIds(blocked);
@@ -129,23 +130,26 @@ export function useAppState(routing: {
     fetchBlockedTaskIds();
   }, [taskCount, fetchProjects, fetchTags, fetchBlockedTaskIds]);
   useEffect(() => {
-    if (dataMutationCount > 0) {
+    const handleAIDataMutation = () => {
       fetchProjects();
       fetchTags();
-    }
-  }, [dataMutationCount, fetchProjects, fetchTags]);
+    };
+
+    window.addEventListener(AI_DATA_MUTATED_EVENT, handleAIDataMutation);
+    return () => window.removeEventListener(AI_DATA_MUTATED_EVENT, handleAIDataMutation);
+  }, [fetchProjects, fetchTags]);
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
   }, [sidebarCollapsed]);
   useEffect(() => {
-    api.getAppSetting("onboarding_completed").then((val) => {
+    getAppSetting("onboarding_completed").then((val) => {
       if (!val) setOnboardingOpen(true);
     });
   }, []);
 
   const fetchSavedFilters = useCallback(async () => {
     try {
-      const val = await api.getAppSetting("saved_filters");
+      const val = await getAppSetting("saved_filters");
       if (val) setSavedFilters(JSON.parse(val));
     } catch {
       /* non-critical */
@@ -160,7 +164,7 @@ export function useAppState(routing: {
 
   const fetchSections = useCallback(async (projectId: string) => {
     try {
-      const s = await api.listSections(projectId);
+      const s = await listSections(projectId);
       setSections(s);
     } catch {
       setSections([]);
@@ -174,8 +178,8 @@ export function useAppState(routing: {
   const fetchCommentsAndActivity = useCallback(async (taskId: string) => {
     try {
       const [comments, activity] = await Promise.all([
-        api.listTaskComments(taskId),
-        api.listTaskActivity(taskId),
+        listTaskComments(taskId),
+        listTaskActivity(taskId),
       ]);
       setTaskComments(comments);
       setTaskActivity(activity);
@@ -393,8 +397,6 @@ export function useAppState(routing: {
     pluginViews,
     executeCommand,
     builtinPluginIds,
-    setFocusedTaskId,
-    voice,
 
     // Fetchers
     fetchProjects,

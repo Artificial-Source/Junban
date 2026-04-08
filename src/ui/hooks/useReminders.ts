@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
-import { api } from "../api/index.js";
+import { fetchDueReminders, updateTask } from "../api/tasks.js";
 
 interface UseRemindersOptions {
   onReminder: (task: { id: string; title: string }) => void;
@@ -22,7 +22,7 @@ export function useReminders({
     if (!enabled) return;
 
     try {
-      const dueTasks = await api.fetchDueReminders();
+      const dueTasks = await fetchDueReminders();
       for (const task of dueTasks) {
         if (firedRef.current.has(task.id)) continue;
         firedRef.current.add(task.id);
@@ -30,7 +30,7 @@ export function useReminders({
         onReminder({ id: task.id, title: task.title });
 
         // Clear the reminder so it doesn't re-fire
-        api.updateTask(task.id, { remindAt: null }).catch(() => {
+        updateTask(task.id, { remindAt: null }).catch(() => {
           // Non-critical — reminder will fire again on next poll
         });
       }

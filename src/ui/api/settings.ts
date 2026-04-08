@@ -60,8 +60,8 @@ export async function getAppSetting(key: string): Promise<string | null> {
 
 export async function getStorageInfo(): Promise<{ mode: string; path: string }> {
   if (useDirectServices()) {
-    // Tauri always uses SQLite
-    return { mode: "sqlite", path: "(embedded database)" };
+    // Desktop builds persist the SQLite database under the app's Tauri AppData directory.
+    return { mode: "sqlite", path: "AppData/ASF Junban/junban.db" };
   }
   const res = await fetch(`${BASE}/settings/storage`);
   return handleResponse<{ mode: string; path: string }>(res);

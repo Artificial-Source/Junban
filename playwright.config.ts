@@ -13,10 +13,10 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "pnpm dev",
+    command: "E2E_MODE=true pnpm dev:full",
     url: "http://localhost:5173",
-    reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
+    reuseExistingServer: false,
+    timeout: 60_000,
   },
   projects: [
     {

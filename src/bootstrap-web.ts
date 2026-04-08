@@ -7,8 +7,7 @@ import { TemplateService } from "./core/templates.js";
 import { SectionService } from "./core/sections.js";
 import { StatsService } from "./core/stats.js";
 import { EventBus } from "./core/event-bus.js";
-import { ChatManager } from "./ai/chat.js";
-import { createDefaultRegistry, createDefaultToolRegistry } from "./ai/provider.js";
+import type { ChatManager } from "./ai/chat.js";
 import type { LLMProviderRegistry } from "./ai/provider/registry.js";
 import type { ToolRegistry } from "./ai/tools/registry.js";
 import { PluginSettingsManager } from "./plugins/settings.js";
@@ -35,11 +34,15 @@ export interface WebAppServices {
   settingsManager: PluginSettingsManager;
   commandRegistry: CommandRegistry;
   uiRegistry: UIRegistry;
-  chatManager: ChatManager;
   storage: IStorage;
+  getAIRuntime: () => Promise<WebAIRuntime>;
+  save: () => void;
+}
+
+export interface WebAIRuntime {
+  chatManager: ChatManager;
   aiProviderRegistry: LLMProviderRegistry;
   toolRegistry: ToolRegistry;
-  save: () => void;
 }
 
 function debounce<T extends (...args: unknown[]) => void>(fn: T, ms: number): T {
@@ -68,9 +71,28 @@ export async function bootstrapWeb(): Promise<WebAppServices> {
   const settingsManager = new PluginSettingsManager(storage);
   const commandRegistry = new CommandRegistry();
   const uiRegistry = new UIRegistry();
-  const chatManager = new ChatManager();
-  const aiProviderRegistry = createDefaultRegistry();
-  const toolRegistry = createDefaultToolRegistry();
+  let aiRuntime: WebAIRuntime | null = null;
+  let aiRuntimePending: Promise<WebAIRuntime> | null = null;
+
+  const getAIRuntime = async (): Promise<WebAIRuntime> => {
+    if (aiRuntime) return aiRuntime;
+    if (aiRuntimePending) return aiRuntimePending;
+
+    aiRuntimePending = (async () => {
+      const { ChatManager } = await import("./ai/chat.js");
+      const { createDefaultRegistry } = await import("./ai/provider.js");
+      const { createDefaultToolRegistry } = await import("./ai/tool-registry.js");
+      aiRuntime = {
+        chatManager: new ChatManager(),
+        aiProviderRegistry: createDefaultRegistry(),
+        toolRegistry: createDefaultToolRegistry(),
+      };
+      aiRuntimePending = null;
+      return aiRuntime;
+    })();
+
+    return aiRuntimePending;
+  };
 
   // Auto-save DB to Tauri FS after mutations (debounced)
   const save = debounce(() => {
@@ -107,10 +129,8 @@ export async function bootstrapWeb(): Promise<WebAppServices> {
     settingsManager,
     commandRegistry,
     uiRegistry,
-    chatManager,
     storage,
-    aiProviderRegistry,
-    toolRegistry,
+    getAIRuntime,
     save,
   };
 }

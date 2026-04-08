@@ -29,22 +29,22 @@ This is the second ASF project, alongside [ASF Sentinel](https://github.com/ASF-
 
 ## Tech Stack
 
-| Component | Choice | Why |
-|-----------|--------|-----|
-| Runtime | Node.js 22+ / TypeScript | Type safety, ecosystem |
-| Desktop | Tauri | Cross-platform, small binary (~5MB vs Electron ~150MB) |
-| Frontend | React + Tailwind CSS | Fast, huge ecosystem |
-| Local DB | SQLite (better-sqlite3) | Local-first, portable, zero config |
-| ORM | Drizzle | Type-safe, lightweight, SQL-close |
-| AI | Pluggable providers | OpenAI, Anthropic, OpenRouter, Ollama, LM Studio — or build your own |
-| Plugin Runtime | Custom loader with sandboxing | Obsidian-style, controlled execution |
-| MCP | @modelcontextprotocol/sdk | External AI agent bridge (Claude Desktop, custom agents) |
-| CLI | Commander.js | Companion CLI tool |
-| NLP | chrono-node | Natural language date/time parsing |
-| Testing | Vitest | Fast, ESM native |
-| Build | Vite | Fast bundling |
-| Package Manager | pnpm | Fast, disk-efficient |
-| Validation | Zod | Runtime type checking |
+| Component       | Choice                        | Why                                                                  |
+| --------------- | ----------------------------- | -------------------------------------------------------------------- |
+| Runtime         | Node.js 22+ / TypeScript      | Type safety, ecosystem                                               |
+| Desktop         | Tauri                         | Cross-platform, small binary (~5MB vs Electron ~150MB)               |
+| Frontend        | React + Tailwind CSS          | Fast, huge ecosystem                                                 |
+| Local DB        | SQLite (better-sqlite3)       | Local-first, portable, zero config                                   |
+| ORM             | Drizzle                       | Type-safe, lightweight, SQL-close                                    |
+| AI              | Pluggable providers           | OpenAI, Anthropic, OpenRouter, Ollama, LM Studio — or build your own |
+| Plugin Runtime  | Custom loader with sandboxing | Obsidian-style, controlled execution                                 |
+| MCP             | @modelcontextprotocol/sdk     | External AI agent bridge (Claude Desktop, custom agents)             |
+| CLI             | Commander.js                  | Companion CLI tool                                                   |
+| NLP             | chrono-node                   | Natural language date/time parsing                                   |
+| Testing         | Vitest                        | Fast, ESM native                                                     |
+| Build           | Vite                          | Fast bundling                                                        |
+| Package Manager | pnpm                          | Fast, disk-efficient                                                 |
+| Validation      | Zod                           | Runtime type checking                                                |
 
 ## Project Structure
 
@@ -226,6 +226,7 @@ src/
 ## Development Conventions
 
 ### Branching
+
 - `main` — stable, deployable
 - `feat/<name>` — new features
 - `fix/<name>` — bug fixes
@@ -233,7 +234,9 @@ src/
 - `plugin/<name>` — plugin system changes
 
 ### Commits
+
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
 ```
 feat(core): add recurring task support
 fix(parser): handle "next Monday" edge case in NLP
@@ -243,6 +246,7 @@ plugin(loader): implement sandbox isolation
 ```
 
 ### Code Style
+
 - TypeScript strict mode enabled
 - ESLint + Prettier enforced
 - No `any` types (warn level — avoid)
@@ -253,6 +257,7 @@ plugin(loader): implement sandbox isolation
 - Tailwind for styling — no inline styles, no CSS modules
 
 ### Testing
+
 - Tests in `tests/` mirror `src/` structure
 - Unit tests for pure logic (task CRUD, parsing, filtering, plugin lifecycle)
 - Component tests for critical UI flows
@@ -260,6 +265,7 @@ plugin(loader): implement sandbox isolation
 - Coverage: `pnpm test:coverage`
 
 ### Running
+
 ```bash
 pnpm dev           # Dev mode (Vite dev server with HMR, in-browser SQLite)
 pnpm dev:full      # Full dev mode (Vite + Hono API server, shared ./data/junban.db)
@@ -274,14 +280,18 @@ pnpm mcp           # Start MCP server (for external AI agents)
 ## Architecture Decisions
 
 ### Local-First Storage
+
 Two storage backends, selected by `STORAGE_MODE` env var:
+
 - **SQLite** (default): better-sqlite3 + Drizzle ORM. Faster queries, structured data, supports complex filters.
 - **Markdown**: Flat `.md` files with YAML frontmatter. Human-readable, git-friendly, portable.
 
 Both backends implement the same interface. The user chooses; the app doesn't care.
 
 ### AI Assistant
+
 The AI assistant is a conversational interface that lives in the sidebar:
+
 - **Provider abstraction**: All AI providers implement a common interface. Swapping providers is one config change.
 - **BYOM (Bring Your Own Model)**: OpenAI, Anthropic, OpenRouter, Ollama, LM Studio — or build a custom provider plugin.
 - **Tool use**: The AI can read/write tasks, manage projects, suggest priorities, auto-schedule. Tools are defined in `src/ai/tools.ts`.
@@ -290,9 +300,11 @@ The AI assistant is a conversational interface that lives in the sidebar:
 - **Fully optional**: Zero AI code runs unless the user configures a provider. No API keys required for core functionality.
 
 ### Plugin System (API v2.0.0)
+
 ```
 Plugin Discovery → Manifest Validation → Sandbox Creation → Lifecycle Hooks
 ```
+
 - Plugins are directories in `plugins/` with a `manifest.json` and entry file
 - Manifests declare: id, name, version, author, description, minJunbanVersion, permissions
 - Plugins run in a sandboxed context with access only to the Plugin API
@@ -305,17 +317,20 @@ Plugin Discovery → Manifest Validation → Sandbox Creation → Lifecycle Hook
 - **Vibe-code friendly**: The API is designed so AI (Claude/ChatGPT) can generate working plugins. If the API is too complex for AI to produce correct code, it's too complex.
 
 ### State Management
+
 - React state for UI (useState/useReducer for local, context for shared)
 - SQLite as the source of truth — UI reads from DB, writes go through core module
 - No external state library (Redux, Zustand) unless complexity demands it later
 - Plugin state isolated per-plugin
 
 ### Natural Language Parsing
+
 - `chrono-node` for date/time extraction
 - Custom grammar layer on top for task-specific syntax: priorities (`p1`-`p4`), tags (`#tag`), projects (`+project`)
 - Parser returns structured `ParsedTask` with all extracted fields
 
 ### Error Philosophy
+
 - Parse errors: show inline feedback, don't block input
 - Storage errors: surface to user (these are critical)
 - Plugin errors: isolate and disable the plugin, don't crash the app
@@ -324,29 +339,30 @@ Plugin Discovery → Manifest Validation → Sandbox Creation → Lifecycle Hook
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `src/config/env.ts` | All env var definitions with Zod validation |
-| `src/db/schema.ts` | Database schema (source of truth for tables) |
-| `src/storage/interface.ts` | IStorage interface — storage abstraction for both backends |
-| `src/core/tasks.ts` | Task CRUD — the heart of the app |
-| `src/core/types.ts` | Core type definitions (Task, Project, Tag, etc.) |
-| `src/parser/task-parser.ts` | Natural language task input parser |
-| `src/ai/provider.ts` | AI provider setup + default registries |
-| `src/ai/tools/registry.ts` | AI tool registry (42 tools) |
-| `src/ai/voice/interface.ts` | STT/TTS provider interfaces |
-| `src/plugins/loader.ts` | Plugin discovery and loading |
-| `src/plugins/api.ts` | Plugin API surface — what plugins can do |
-| `src/plugins/sandbox.ts` | Plugin execution sandbox |
-| `src/ui/App.tsx` | Root React component |
-| `src/ui/components/TaskInput.tsx` | The main task input field |
-| `src/mcp/server.ts` | MCP server entry point (external agent bridge) |
-| `src/cli/index.ts` | CLI entry point |
-| `sources.json` | Community plugin registry seed |
+| File                              | Purpose                                                    |
+| --------------------------------- | ---------------------------------------------------------- |
+| `src/config/env.ts`               | All env var definitions with Zod validation                |
+| `src/db/schema.ts`                | Database schema (source of truth for tables)               |
+| `src/storage/interface.ts`        | IStorage interface — storage abstraction for both backends |
+| `src/core/tasks.ts`               | Task CRUD — the heart of the app                           |
+| `src/core/types.ts`               | Core type definitions (Task, Project, Tag, etc.)           |
+| `src/parser/task-parser.ts`       | Natural language task input parser                         |
+| `src/ai/provider.ts`              | AI provider setup + default registries                     |
+| `src/ai/tools/registry.ts`        | AI tool registry (42 tools)                                |
+| `src/ai/voice/interface.ts`       | STT/TTS provider interfaces                                |
+| `src/plugins/loader.ts`           | Plugin discovery and loading                               |
+| `src/plugins/api.ts`              | Plugin API surface — what plugins can do                   |
+| `src/plugins/sandbox.ts`          | Plugin execution sandbox                                   |
+| `src/ui/App.tsx`                  | Root React component                                       |
+| `src/ui/components/TaskInput.tsx` | The main task input field                                  |
+| `src/mcp/server.ts`               | MCP server entry point (external agent bridge)             |
+| `src/cli/index.ts`                | CLI entry point                                            |
+| `sources.json`                    | Community plugin registry seed                             |
 
 ## Common Tasks
 
 ### Add a task field
+
 1. Add the field to `src/core/types.ts` (Zod schema + TS type)
 2. Add the column to `src/db/schema.ts`
 3. Generate migration: `pnpm db:generate`
@@ -356,6 +372,7 @@ Plugin Discovery → Manifest Validation → Sandbox Creation → Lifecycle Hook
 7. Update CLI `list` and `add` commands if applicable
 
 ### Create a plugin
+
 1. Create a directory in `plugins/<plugin-name>/`
 2. Add `manifest.json` with required fields (id, name, version, author, description, main)
 3. Create entry file (e.g., `index.ts`) that exports a class extending `Plugin`
@@ -363,64 +380,31 @@ Plugin Discovery → Manifest Validation → Sandbox Creation → Lifecycle Hook
 5. See [docs/plugins/API.md](docs/plugins/API.md) for the full API reference
 
 ### Add a UI view
+
 1. Create component in `src/ui/views/<ViewName>.tsx`
 2. Add route/navigation entry in `src/ui/App.tsx`
 3. Add sidebar link in `src/ui/components/Sidebar.tsx`
 
 ### Add a CLI command
+
 1. Create handler in `src/cli/commands/<name>.ts`
 2. Register with Commander in `src/cli/index.ts`
 3. Use shared core logic from `src/core/` — CLI and UI share the same backend
 
 ### Modify the database schema
+
 1. Edit `src/db/schema.ts`
 2. Run `pnpm db:generate` to create a migration
 3. Run `pnpm db:migrate` to apply it
 4. Update queries in `src/db/queries.ts`
 
 ### Add a keyboard shortcut
+
 1. Define the command in the command registry
 2. Add default keybinding in `src/ui/components/CommandPalette.tsx`
 3. Commands are also available to plugins via the Plugin API
 
 ## Documentation
 
-See [AGENTS.md](AGENTS.md) for a quick-start guide on navigating the codebase with AI assistance.
-
-```
-docs/
-├── README.md                        # Vision, design principles, why Junban exists
-├── guides/                          # Getting started & how-to
-│   ├── ARCHITECTURE.md              # High-level system design & data flow
-│   ├── CONTRIBUTING.md              # How to contribute + sprint methodology
-│   ├── SECURITY.md                  # Threat model, plugin sandboxing
-│   └── SETUP.md                     # Step-by-step local development
-├── frontend/                        # UI code reference
-│   ├── API_LAYER.md                 # 11 API modules, REST endpoints
-│   ├── COMPONENTS.md                # ~56 components: props, deps, usage
-│   ├── CONTEXT.md                   # 7 React contexts with state/functions
-│   ├── HOOKS.md                     # 14 custom hooks with params/returns
-│   ├── SHORTCUTS.md                 # ShortcutManager, all keybindings
-│   ├── THEMES.md                    # Theme system, CSS tokens, adding themes
-│   └── VIEWS.md                     # 17 views + 10 settings tabs
-├── backend/                         # Non-UI code reference
-│   ├── AI.md                        # 45 files: providers, pipeline, 42 tools
-│   ├── CLI.md                       # 5 CLI commands with usage examples
-│   ├── CORE.md                      # Task/project/tag services, events, undo
-│   ├── DATABASE.md                  # 14 tables, Drizzle schema, migrations
-│   ├── MCP.md                       # 7 files: MCP server, tools, resources, prompts
-│   ├── PARSER.md                    # NLP pipeline, grammar rules, examples
-│   ├── PLUGINS.md                   # 11 files: loader, sandbox, API, registry
-│   ├── STORAGE.md                   # IStorage interface + SQLite/Markdown backends
-│   ├── UTILS.md                     # Utilities + config modules
-│   └── VOICE.md                     # 14 files: STT/TTS adapters, audio utils
-├── plugins/                         # Plugin author documentation
-│   ├── API.md                       # Plugin API reference (for authors)
-│   └── EXAMPLES.md                  # Example plugin walkthroughs
-├── planning/                        # Public project planning (committed)
-│   └── ROADMAP.md                   # Milestones, status, sprint history
-└── development/                     # Sprint tracking (local, gitignored)
-    ├── backlog.md                   # All work items, prioritized by area
-    ├── epics.md                     # High-level work streams
-    └── sprints/                     # Per-sprint overviews, prompts, results
-```
+- Start with [docs/README.md](docs/README.md) for the canonical documentation index and maintenance policy.
+- Use [AGENTS.md](AGENTS.md) for AI-agent task routing.

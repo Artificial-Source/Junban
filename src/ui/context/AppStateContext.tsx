@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 import type { Task, Project as ProjectType, Section } from "../../core/types.js";
-import type { ViewInfo } from "../api/index.js";
+import type { ViewInfo } from "../api/plugins.js";
 import type { View, CalendarMode } from "../hooks/useRouting.js";
 import type { GeneralSettings } from "./SettingsContext.js";
 

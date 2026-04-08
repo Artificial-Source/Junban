@@ -22,14 +22,14 @@ We will acknowledge your report within **48 hours** and aim to provide a fix wit
 
 ## Scope
 
-Saydo is a local-first desktop application. The primary security concerns are:
+Junban is a local-first desktop application. The primary security concerns are:
 
 - **Plugin sandboxing** — community plugins must not escape their sandbox
 - **Data integrity** — task data must not be corrupted or exfiltrated
 - **Supply chain** — dependencies are audited and pinned
 - **API key storage** — encrypted at rest with AES-256-GCM
 
-For the full threat model, see [docs/guides/SECURITY.md](docs/guides/SECURITY.md).
+For the full threat model, plugin sandboxing design, and dependency posture, see [docs/guides/SECURITY.md](../docs/guides/SECURITY.md).
 
 ## Disclosure Policy
 

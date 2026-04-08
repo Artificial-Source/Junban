@@ -1,7 +1,7 @@
 import { type MouseEvent as ReactMouseEvent } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { Project } from "../../../core/types.js";
-import type { ViewInfo } from "../../api/index.js";
+import type { ViewInfo } from "../../api/plugins.js";
 import { CollapsedTooltip, SECTION_IDS, renderNavButton } from "./SidebarPrimitives.js";
 import { ProjectButton } from "./ProjectTree.js";
 

@@ -26,18 +26,18 @@ export function PriorityDreadSection({ task, onUpdate }: PriorityDreadSectionPro
   );
 
   return (
-    <>
+    <div className="space-y-4">
       {/* Priority */}
       <div>
-        <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider">
+        <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-on-surface-muted">
           Priority
         </label>
-        <div className="flex gap-1.5 mt-1.5">
+        <div className="flex gap-2">
           {PRIORITIES.map((p) => (
             <button
               key={p.value}
               onClick={() => handlePriorityClick(p.value)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                 task.priority === p.value
                   ? p.activeClass
                   : "bg-surface-tertiary text-on-surface-muted hover:text-on-surface-secondary"
@@ -52,14 +52,14 @@ export function PriorityDreadSection({ task, onUpdate }: PriorityDreadSectionPro
       {/* Dread Level */}
       {showDreadLevel && (
         <div>
-          <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider">
+          <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-on-surface-muted">
             Dread Level
           </label>
-          <div className="mt-1.5">
+          <div>
             <DreadLevelSelector value={task.dreadLevel} onChange={handleDreadLevelChange} />
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

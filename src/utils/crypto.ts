@@ -11,7 +11,8 @@
  * - Key length: 256 bits
  */
 
-const ENC_PREFIX = "enc:v1:";
+import { ENCRYPTED_VALUE_PREFIX } from "./crypto-constants.js";
+
 const SALT = "junban-aes256-v1";
 const PBKDF2_ITERATIONS = 100_000;
 const IV_LENGTH = 12;
@@ -20,7 +21,7 @@ const KEY_LENGTH = 32; // 256 bits
 
 /** Check if a value was encrypted by this module. */
 export function isEncryptedValue(value: string): boolean {
-  return value.startsWith(ENC_PREFIX);
+  return value.startsWith(ENCRYPTED_VALUE_PREFIX);
 }
 
 // ── Key derivation seed ──
@@ -95,13 +96,13 @@ async function encryptNode(plaintext: string): Promise<string> {
   combined.set(encrypted, iv.length);
   combined.set(authTag, iv.length + encrypted.length);
 
-  return ENC_PREFIX + base64Encode(combined);
+  return ENCRYPTED_VALUE_PREFIX + base64Encode(combined);
 }
 
 async function decryptNode(encrypted: string): Promise<string> {
   const crypto = await import("node:crypto");
   const key = await deriveKeyNode();
-  const raw = encrypted.slice(ENC_PREFIX.length);
+  const raw = encrypted.slice(ENCRYPTED_VALUE_PREFIX.length);
   const combined = base64Decode(raw);
 
   const iv = combined.slice(0, IV_LENGTH);
@@ -158,12 +159,12 @@ async function encryptBrowser(plaintext: string): Promise<string> {
   combined.set(iv, 0);
   combined.set(encryptedBytes, iv.length);
 
-  return ENC_PREFIX + base64Encode(combined);
+  return ENCRYPTED_VALUE_PREFIX + base64Encode(combined);
 }
 
 async function decryptBrowser(encrypted: string): Promise<string> {
   const key = await deriveKeyBrowser();
-  const raw = encrypted.slice(ENC_PREFIX.length);
+  const raw = encrypted.slice(ENCRYPTED_VALUE_PREFIX.length);
   const combined = base64Decode(raw);
 
   const iv = combined.slice(0, IV_LENGTH);

@@ -1,8 +1,13 @@
-import { useRef, useEffect } from "react";
-import { AIChatPanel } from "../components/AIChatPanel.js";
+import { lazy, Suspense, useRef, useEffect } from "react";
 import { ErrorBoundary } from "../components/ErrorBoundary.js";
 import { useAIContext } from "../context/AIContext.js";
+import { AIVoiceFeatureProviders } from "../context/AIVoiceFeatureProviders.js";
+import { useAppState } from "../context/AppStateContext.js";
 import { api } from "../api/index.js";
+
+const AIChatPanel = lazy(() =>
+  import("../components/AIChatPanel.js").then((module) => ({ default: module.AIChatPanel })),
+);
 
 interface AIChatViewProps {
   onOpenSettings: () => void;
@@ -10,9 +15,18 @@ interface AIChatViewProps {
 }
 
 export function AIChat({ onOpenSettings, onSelectTask }: AIChatViewProps) {
+  return (
+    <AIVoiceFeatureProviders>
+      <AIChatContent onOpenSettings={onOpenSettings} onSelectTask={onSelectTask} />
+    </AIVoiceFeatureProviders>
+  );
+}
+
+function AIChatContent({ onOpenSettings, onSelectTask }: AIChatViewProps) {
   // Auto-manage LM Studio models when AI Chat view is active
   const autoLoadedModelRef = useRef<string | null>(null);
   const { config: aiConfig } = useAIContext();
+  const { selectedTaskId } = useAppState();
 
   useEffect(() => {
     const autoManage = window.localStorage.getItem("junban.ai.auto-manage-lmstudio") === "1";
@@ -47,12 +61,21 @@ export function AIChat({ onOpenSettings, onSelectTask }: AIChatViewProps) {
           </div>
         }
       >
-        <AIChatPanel
-          onClose={() => {}}
-          onOpenSettings={onOpenSettings}
-          onSelectTask={onSelectTask}
-          mode="view"
-        />
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center text-on-surface-secondary">
+              Loading AI chat...
+            </div>
+          }
+        >
+          <AIChatPanel
+            onClose={() => {}}
+            onOpenSettings={onOpenSettings}
+            onSelectTask={onSelectTask}
+            focusedTaskId={selectedTaskId}
+            mode="view"
+          />
+        </Suspense>
       </ErrorBoundary>
     </div>
   );

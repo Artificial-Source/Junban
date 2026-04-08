@@ -7,7 +7,7 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
-import { api } from "../api/index.js";
+import { getAllSettings, setAppSetting } from "../api/settings.js";
 import { createLogger } from "../../utils/logger.js";
 
 const log = createLogger("settings");
@@ -206,8 +206,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // Load all settings on mount via single batch fetch
   useEffect(() => {
     let mounted = true;
-    api
-      .getAllSettings()
+    getAllSettings()
       .then((allSettings) => {
         if (!mounted) return;
         const next = { ...DEFAULT_SETTINGS };
@@ -247,7 +246,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (key === "font_family") applyFontFamily(value as GeneralSettings["font_family"]);
         return next;
       });
-      api.setAppSetting(key, String(value)).catch((err: unknown) =>
+      setAppSetting(key, String(value)).catch((err: unknown) =>
         log.error("Failed to persist setting", {
           key,
           error: err instanceof Error ? err.message : String(err),

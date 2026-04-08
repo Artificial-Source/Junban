@@ -60,6 +60,67 @@ export default defineConfig(({ command }) => ({
   build: {
     rollupOptions: {
       external: ["better-sqlite3"],
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (
+              id.includes("/react/") ||
+              id.includes("/react-dom/") ||
+              id.includes("/scheduler/")
+            ) {
+              return "vendor-react";
+            }
+            if (id.includes("framer-motion")) {
+              return "animations";
+            }
+            if (id.includes("@dnd-kit")) {
+              return "dnd-kit";
+            }
+            if (id.includes("@tanstack/react-virtual")) {
+              return "virtualizer";
+            }
+            if (id.includes("react-markdown") || id.includes("remark-gfm")) {
+              return "markdown";
+            }
+            if (id.includes("@anthropic-ai/sdk") || id.includes("/openai/")) {
+              return "ai-vendors";
+            }
+            if (id.includes("chrono-node")) {
+              return "date-parser";
+            }
+            if (id.includes("/yaml/")) {
+              return "yaml-parser";
+            }
+            if (
+              id.includes("sql.js") ||
+              id.includes("drizzle-orm/sql-js") ||
+              id.includes("drizzle-orm/sqlite-core")
+            ) {
+              return "web-db";
+            }
+            if (id.includes("@tauri-apps/")) {
+              return "tauri-runtime";
+            }
+            if (id.includes("lucide-react")) {
+              return "icons";
+            }
+          }
+
+          if (id.includes("/src/ai/tools/")) {
+            return "ai-tools";
+          }
+
+          if (id.includes("/src/utils/logger.")) {
+            return "app-utils";
+          }
+
+          if (id.includes("/src/ai/provider/adapters/")) {
+            return "ai-adapters";
+          }
+
+          return undefined;
+        },
+      },
     },
   },
   optimizeDeps: {

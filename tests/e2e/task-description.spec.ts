@@ -17,11 +17,9 @@ test.describe("Task descriptions", () => {
 
     await openTaskDetail(page, "Write docs");
 
-    // Empty description shows a "Description" button — click to enter edit mode
-    await dialog(page).getByRole("button", { name: "Description" }).click();
+    await dialog(page).getByLabel("Description").click();
 
-    // Now the textarea should be visible
-    const textarea = dialog(page).getByPlaceholder(/Description/);
+    const textarea = dialog(page).getByLabel("Description");
     await expect(textarea).toBeVisible();
 
     await textarea.fill(
@@ -48,8 +46,7 @@ test.describe("Task descriptions", () => {
 
     await openTaskDetail(page, "Empty description task");
 
-    // Empty description shows a clickable "Description" button
-    await expect(dialog(page).getByRole("button", { name: "Description" })).toBeVisible();
+    await expect(dialog(page).getByLabel("Description")).toBeVisible();
   });
 
   test("description persists across page reloads", async ({ page }) => {
@@ -60,10 +57,9 @@ test.describe("Task descriptions", () => {
 
     await openTaskDetail(page, "Persistent description");
 
-    // Click the Description button to enter edit mode
-    await dialog(page).getByRole("button", { name: "Description" }).click();
+    await dialog(page).getByLabel("Description").click();
 
-    const textarea = dialog(page).getByPlaceholder(/Description/);
+    const textarea = dialog(page).getByLabel("Description");
     await textarea.fill("This should persist after reload.");
 
     // Blur to save
@@ -91,10 +87,9 @@ test.describe("Task descriptions", () => {
 
     await openTaskDetail(page, "Clear me");
 
-    // Click to enter edit mode
-    await dialog(page).getByRole("button", { name: "Description" }).click();
+    await dialog(page).getByLabel("Description").click();
 
-    const textarea = dialog(page).getByPlaceholder(/Description/);
+    const textarea = dialog(page).getByLabel("Description");
     await textarea.fill("Some initial text");
 
     // Blur to save
@@ -104,7 +99,7 @@ test.describe("Task descriptions", () => {
     await dialog(page).getByText("Some initial text").click();
 
     // Clear the description
-    const editTextarea = dialog(page).getByPlaceholder(/Description/);
+    const editTextarea = dialog(page).getByLabel("Description");
     await editTextarea.fill("");
 
     // Blur to save
@@ -114,8 +109,7 @@ test.describe("Task descriptions", () => {
     await closeTaskDetail(page);
     await openTaskDetail(page, "Clear me");
 
-    // Should show the "Description" button again (empty state)
-    await expect(dialog(page).getByRole("button", { name: "Description" })).toBeVisible();
+    await expect(dialog(page).getByLabel("Description")).toBeVisible();
   });
 
   test("description supports multi-line text with newlines", async ({ page }) => {
@@ -126,10 +120,9 @@ test.describe("Task descriptions", () => {
 
     await openTaskDetail(page, "Multi-line task");
 
-    // Click to enter edit mode
-    await dialog(page).getByRole("button", { name: "Description" }).click();
+    await dialog(page).getByLabel("Description").click();
 
-    const textarea = dialog(page).getByPlaceholder(/Description/);
+    const textarea = dialog(page).getByLabel("Description");
     const multiLineText = "Line 1\nLine 2\nLine 3\n\nParagraph 2";
     await textarea.fill(multiLineText);
 

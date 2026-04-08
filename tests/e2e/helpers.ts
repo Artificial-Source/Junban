@@ -35,7 +35,10 @@ export async function createTask(page: Page, text: string) {
   await input.fill(text);
   await input.press("Enter");
   // Wait for the task to appear in the list
-  await expect(page.getByText(text.replace(/\s*[#~!@+p]\S*/g, "").trim()).first()).toBeVisible({
+  const title = text.replace(/\s*[#~!@+p]\S*/g, "").trim();
+  await expect(
+    page.getByRole("button", { name: new RegExp(`^Task: ${title}$`) }).first(),
+  ).toBeVisible({
     timeout: 5000,
   });
 }
@@ -55,7 +58,10 @@ export async function closeSettings(page: Page) {
 
 /** Open a task's detail panel by clicking on its title. */
 export async function openTaskDetail(page: Page, title: string) {
-  await page.getByText(title, { exact: true }).first().click();
+  await page
+    .getByRole("button", { name: new RegExp(`^Task: ${title}$`) })
+    .first()
+    .click();
   // Wait for the detail panel to appear
   await expect(page.getByRole("dialog", { name: "Task details" })).toBeVisible({ timeout: 5000 });
 }
@@ -81,6 +87,9 @@ export async function resetFeatureFlags(page: Page) {
     "feature_calendar",
     "feature_filters_labels",
     "feature_completed",
+    "feature_dopamine_menu",
+    "eat_the_frog_enabled",
+    "nudge_enabled",
   ];
   await Promise.all(
     flags.map((flag) => page.request.put(`/api/settings/${flag}`, { data: { value: "true" } })),
@@ -92,9 +101,9 @@ export async function setupPage(page: Page) {
   await page.goto("/");
   // Reset the database so each test starts with a clean slate
   await page.request.post("/api/test-reset");
+  await resetFeatureFlags(page);
   await page.reload();
   await dismissOnboarding(page);
-  await resetFeatureFlags(page);
   // Wait for the main content to render
   await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 }
@@ -129,14 +138,25 @@ export async function createTaskViaApi(
     tags?: string[];
   },
 ) {
+  const normalizedDueDate =
+    opts?.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(opts.dueDate)
+      ? new Date(`${opts.dueDate}T00:00:00`).toISOString()
+      : opts?.dueDate;
+
   const response = await page.request.post("/api/tasks", {
     data: {
       title,
       dueTime: false,
       tags: opts?.tags ?? [],
       ...opts,
+      dueDate: normalizedDueDate,
     },
   });
+
+  if (!response.ok()) {
+    throw new Error(`createTaskViaApi failed (${response.status()}): ${await response.text()}`);
+  }
+
   return response.json();
 }
 

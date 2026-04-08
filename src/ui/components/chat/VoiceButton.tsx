@@ -1,8 +1,15 @@
 import { useState, useRef, useCallback } from "react";
 import { Mic, Loader2, Volume2 } from "lucide-react";
 import type { useVoiceContext } from "../../context/VoiceContext.js";
-import { BrowserSTTProvider } from "../../../ai/voice/adapters/browser-stt.js";
-import { createAudioRecorder } from "../../../ai/voice/audio-utils.js";
+
+type AudioRecorder = {
+  start: () => Promise<void>;
+  stop: () => Promise<Blob>;
+};
+
+type BrowserLikeSTTProvider = {
+  startLiveRecognition: () => Promise<string>;
+};
 
 interface VoiceButtonProps {
   onResult: (text: string) => void;
@@ -12,14 +19,14 @@ interface VoiceButtonProps {
 
 export function VoiceButton({ onResult, disabled, voice }: VoiceButtonProps) {
   const [listening, setListening] = useState(false);
-  const recorderRef = useRef<ReturnType<typeof createAudioRecorder> | null>(null);
+  const recorderRef = useRef<AudioRecorder | null>(null);
 
   const { settings, sttProvider, isTranscribing, isSpeaking } = voice;
 
   const handlePushToTalk = useCallback(async () => {
     if (listening) {
       setListening(false);
-      if (sttProvider instanceof BrowserSTTProvider) {
+      if (sttProvider?.id === "browser-stt") {
         return;
       }
       if (recorderRef.current) {
@@ -36,15 +43,16 @@ export function VoiceButton({ onResult, disabled, voice }: VoiceButtonProps) {
     }
 
     setListening(true);
-    if (sttProvider instanceof BrowserSTTProvider) {
+    if (sttProvider?.id === "browser-stt" && "startLiveRecognition" in sttProvider) {
       try {
-        const transcript = await sttProvider.startLiveRecognition();
+        const transcript = await (sttProvider as BrowserLikeSTTProvider).startLiveRecognition();
         if (transcript) onResult(transcript);
       } catch {
         // Recognition failed
       }
       setListening(false);
     } else {
+      const { createAudioRecorder } = await import("../../../ai/voice/audio-utils.js");
       const recorder = createAudioRecorder(voice.settings.microphoneId || undefined);
       recorderRef.current = recorder;
       try {

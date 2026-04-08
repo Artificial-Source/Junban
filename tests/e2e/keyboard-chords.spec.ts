@@ -4,6 +4,7 @@ import { setupPage } from "./helpers.js";
 test.describe("Keyboard chord navigation", () => {
   test.beforeEach(async ({ page }) => {
     await setupPage(page);
+    await page.waitForTimeout(250);
   });
 
   test("g then t navigates to Today view", async ({ page }) => {
@@ -14,8 +15,7 @@ test.describe("Keyboard chord navigation", () => {
     await page.keyboard.press("g");
     await page.keyboard.press("t");
 
-    // Verify the page title changed to indicate Today view
-    await expect(page).toHaveTitle(/Today/);
+    await expect(page.getByRole("heading", { name: "Today", level: 1 })).toBeVisible();
   });
 
   test("g then u navigates to Upcoming view", async ({ page }) => {
@@ -23,44 +23,44 @@ test.describe("Keyboard chord navigation", () => {
     await page.keyboard.press("g");
     await page.keyboard.press("u");
 
-    await expect(page).toHaveTitle(/Upcoming/);
+    await expect(page.getByRole("heading", { name: "Upcoming", level: 1 })).toBeVisible();
   });
 
   test("g then i navigates back to Inbox", async ({ page }) => {
     // First navigate away from Inbox
     await page.keyboard.press("g");
     await page.keyboard.press("t");
-    await expect(page).toHaveTitle(/Today/);
+    await expect(page.getByRole("heading", { name: "Today", level: 1 })).toBeVisible();
 
     // Now press "g" then "i" to go back to Inbox
     await page.keyboard.press("g");
     await page.keyboard.press("i");
 
-    await expect(page).toHaveTitle(/Inbox/);
+    await expect(page.getByRole("heading", { name: "Inbox", level: 1 })).toBeVisible();
   });
 
   test("g then s navigates to Stats view", async ({ page }) => {
     await page.keyboard.press("g");
     await page.keyboard.press("s");
 
-    await expect(page).toHaveTitle(/Stats/);
+    await expect(page.getByRole("heading", { name: "Productivity", level: 1 })).toBeVisible();
   });
 
   test("full chord sequence: Inbox -> Today -> Upcoming -> Inbox", async ({ page }) => {
     // Inbox -> Today
     await page.keyboard.press("g");
     await page.keyboard.press("t");
-    await expect(page).toHaveTitle(/Today/);
+    await expect(page.getByRole("heading", { name: "Today", level: 1 })).toBeVisible();
 
     // Today -> Upcoming
     await page.keyboard.press("g");
     await page.keyboard.press("u");
-    await expect(page).toHaveTitle(/Upcoming/);
+    await expect(page.getByRole("heading", { name: "Upcoming", level: 1 })).toBeVisible();
 
     // Upcoming -> Inbox
     await page.keyboard.press("g");
     await page.keyboard.press("i");
-    await expect(page).toHaveTitle(/Inbox/);
+    await expect(page.getByRole("heading", { name: "Inbox", level: 1 })).toBeVisible();
   });
 
   test("chord indicator shows when g is pressed alone", async ({ page }) => {
@@ -87,7 +87,7 @@ test.describe("Keyboard chord navigation", () => {
     await input.press("t");
 
     // Should still be on Inbox (not Today)
-    await expect(page).toHaveTitle(/Inbox/);
+    await expect(page.getByRole("heading", { name: "Inbox", level: 1 })).toBeVisible();
   });
 
   test("disabling feature_chords prevents chord navigation", async ({ page }) => {
@@ -102,7 +102,9 @@ test.describe("Keyboard chord navigation", () => {
 
     // Navigate to Today via sidebar click (not via chord)
     await page.getByRole("button", { name: "Today", exact: true }).click();
-    await expect(page).toHaveTitle(/Today/, { timeout: 5000 });
+    await expect(page.getByRole("heading", { name: "Today", level: 1 })).toBeVisible({
+      timeout: 5000,
+    });
 
     // Now try the chord g+i to go back to Inbox (should NOT work since chords are disabled)
     await page.keyboard.press("g");
@@ -111,7 +113,7 @@ test.describe("Keyboard chord navigation", () => {
     await page.waitForTimeout(1000);
 
     // Should still be on Today since chords are disabled
-    await expect(page).toHaveTitle(/Today/);
+    await expect(page.getByRole("heading", { name: "Today", level: 1 })).toBeVisible();
 
     // Re-enable chords for cleanup
     await page.request.put("/api/settings/feature_chords", {

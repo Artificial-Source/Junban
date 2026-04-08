@@ -45,7 +45,7 @@ test.describe("Markdown description rendering", () => {
     await detail.locator("strong").filter({ hasText: "markdown" }).click();
 
     // A textarea should appear with the raw markdown
-    const textarea = detail.getByPlaceholder("Description (supports **markdown**)");
+    const textarea = detail.getByLabel("Description");
     await expect(textarea).toBeVisible();
     await expect(textarea).toHaveValue("Some **markdown** content");
   });
@@ -67,7 +67,7 @@ test.describe("Markdown description rendering", () => {
     await detail.getByText("Original text").click();
 
     // Change the text
-    const textarea = detail.getByPlaceholder("Description (supports **markdown**)");
+    const textarea = detail.getByLabel("Description");
     await textarea.fill("Updated **description**");
 
     // Blur by clicking the title input

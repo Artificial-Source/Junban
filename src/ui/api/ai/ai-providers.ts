@@ -1,6 +1,7 @@
 import {
   useDirectServices,
   BASE,
+  buildApiUrl,
   handleResponse,
   handleVoidResponse,
   getServices,
@@ -11,7 +12,8 @@ import { DEFAULT_LMSTUDIO_BASE_URL } from "../../../config/defaults.js";
 export async function listAIProviders(): Promise<AIProviderInfo[]> {
   if (useDirectServices()) {
     const svc = await getServices();
-    return svc.aiProviderRegistry.getAll().map((r) => ({
+    const ai = await svc.getAIRuntime();
+    return ai.aiProviderRegistry.getAll().map((r) => ({
       name: r.plugin.name,
       displayName: r.plugin.displayName,
       needsApiKey: r.plugin.needsApiKey,
@@ -41,12 +43,11 @@ export async function fetchModels(
       baseUrl: baseUrl || baseUrlSetting?.value,
     });
   }
-  const url = new URL(
-    `${BASE}/ai/providers/${encodeURIComponent(providerName)}/models`,
-    window.location.origin,
+  const res = await fetch(
+    buildApiUrl(`/ai/providers/${encodeURIComponent(providerName)}/models`, {
+      baseUrl,
+    }),
   );
-  if (baseUrl) url.searchParams.set("baseUrl", baseUrl);
-  const res = await fetch(url.toString());
   const data = await handleResponse<{ models: ModelDiscoveryInfo[] }>(res);
   return data.models;
 }

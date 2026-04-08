@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback } from "react";
 import {
   X,
   SlidersHorizontal,
@@ -14,18 +14,40 @@ import {
   ChevronRight,
   ToggleRight,
 } from "lucide-react";
-import { GeneralTab } from "./settings/GeneralTab.js";
-import { AppearanceTab } from "./settings/AppearanceTab.js";
-import { FeaturesTab } from "./settings/FeaturesTab.js";
-import { AITab } from "./settings/AITab.js";
-import { VoiceTab } from "./settings/VoiceTab.js";
-import { PluginsTab } from "./settings/PluginsTab.js";
-import { TemplatesTab } from "./settings/TemplatesTab.js";
-import { KeyboardTab } from "./settings/KeyboardTab.js";
-import { DataTab } from "./settings/DataTab.js";
-import { AboutTab } from "./settings/AboutTab.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import { ErrorBoundary } from "../components/ErrorBoundary.js";
 import type { SettingsTab } from "./settings/types.js";
+
+const GeneralTab = lazy(() =>
+  import("./settings/GeneralTab.js").then((module) => ({ default: module.GeneralTab })),
+);
+const AppearanceTab = lazy(() =>
+  import("./settings/AppearanceTab.js").then((module) => ({ default: module.AppearanceTab })),
+);
+const FeaturesTab = lazy(() =>
+  import("./settings/FeaturesTab.js").then((module) => ({ default: module.FeaturesTab })),
+);
+const AITab = lazy(() =>
+  import("./settings/AITab.js").then((module) => ({ default: module.AITab })),
+);
+const VoiceTab = lazy(() =>
+  import("./settings/VoiceTab.js").then((module) => ({ default: module.VoiceTab })),
+);
+const PluginsTab = lazy(() =>
+  import("./settings/PluginsTab.js").then((module) => ({ default: module.PluginsTab })),
+);
+const TemplatesTab = lazy(() =>
+  import("./settings/TemplatesTab.js").then((module) => ({ default: module.TemplatesTab })),
+);
+const KeyboardTab = lazy(() =>
+  import("./settings/KeyboardTab.js").then((module) => ({ default: module.KeyboardTab })),
+);
+const DataTab = lazy(() =>
+  import("./settings/DataTab.js").then((module) => ({ default: module.DataTab })),
+);
+const AboutTab = lazy(() =>
+  import("./settings/AboutTab.js").then((module) => ({ default: module.AboutTab })),
+);
 
 export type { SettingsTab };
 
@@ -120,27 +142,43 @@ const MOBILE_SECTIONS: { label: string; tabs: SettingsTab[] }[] = [
 ];
 
 function renderTabContent(tab: SettingsTab) {
+  const fallback = (
+    <div className="flex min-h-[240px] items-center justify-center text-sm text-on-surface-muted">
+      Loading settings...
+    </div>
+  );
+  const errorFallback = (
+    <div className="flex min-h-[240px] items-center justify-center text-sm text-error">
+      Failed to load this settings tab. Refresh and try again.
+    </div>
+  );
+  const wrap = (content: React.ReactNode) => (
+    <ErrorBoundary fallback={errorFallback}>
+      <Suspense fallback={fallback}>{content}</Suspense>
+    </ErrorBoundary>
+  );
+
   switch (tab) {
     case "general":
-      return <GeneralTab />;
+      return wrap(<GeneralTab />);
     case "appearance":
-      return <AppearanceTab />;
+      return wrap(<AppearanceTab />);
     case "features":
-      return <FeaturesTab />;
+      return wrap(<FeaturesTab />);
     case "ai":
-      return <AITab />;
+      return wrap(<AITab />);
     case "voice":
-      return <VoiceTab />;
+      return wrap(<VoiceTab />);
     case "plugins":
-      return <PluginsTab />;
+      return wrap(<PluginsTab />);
     case "templates":
-      return <TemplatesTab />;
+      return wrap(<TemplatesTab />);
     case "keyboard":
-      return <KeyboardTab />;
+      return wrap(<KeyboardTab />);
     case "data":
-      return <DataTab />;
+      return wrap(<DataTab />);
     case "about":
-      return <AboutTab />;
+      return wrap(<AboutTab />);
   }
 }
 

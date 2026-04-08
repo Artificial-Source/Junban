@@ -2,7 +2,7 @@
 
 The MCP (Model Context Protocol) server (`src/mcp/`) exposes Junban's task management capabilities to external AI agents and apps. Any MCP-compatible client — Claude Desktop, personal assistants, other ASF apps, or custom agents — can manage tasks, projects, tags, and get productivity insights over a local stdio connection.
 
-**Total files:** 7 | **Total lines:** ~300
+This document describes the MCP surface area and integration model. Exact tool counts should follow the AI tool registry rather than being hardcoded in multiple places.
 
 ---
 
@@ -15,7 +15,7 @@ External MCP Client (Claude Desktop, custom agent, etc.)
     v
 src/mcp/server.ts  (entry point)
     |
-    ├── registerMcpTools()      → ToolRegistry (all 34 built-in tools)
+    ├── registerMcpTools()      → ToolRegistry (all registered AI tools)
     ├── registerMcpResources()  → TaskService, ProjectService, TagService, StatsService
     └── registerMcpPrompts()    → pre-built conversation starters
     |
@@ -75,65 +75,78 @@ const today = await client.readResource({ uri: "junban://tasks/today" });
 ## Files
 
 ### `server.ts`
+
 **Path:** `src/mcp/server.ts`
 **Purpose:** Entry point. Redirects `console.log`/`console.warn`/`console.info` to stderr (stdio MCP requirement — only JSON-RPC on stdout). Calls `bootstrap()` to initialize services, creates `McpServer`, registers tools/resources/prompts, connects via `StdioServerTransport`.
 **Key Dependencies:** `bootstrap`, `McpServer`, `StdioServerTransport`
 
 ### `tools.ts`
+
 **Path:** `src/mcp/tools.ts`
 **Purpose:** Registers all `ToolRegistry` tools as MCP tools. Iterates `toolRegistry.getDefinitions()`, converts each tool's JSON Schema parameters to a Zod shape via `jsonSchemaToZod()`, and delegates execution to `toolRegistry.execute()`.
 **Key Exports:**
+
 - `registerMcpTools(server, toolRegistry, toolContext)` — registers all tools on the MCP server
-**Key Dependencies:** `ToolRegistry`, `jsonSchemaToZod`, `toMcpError`
+  **Key Dependencies:** `ToolRegistry`, `jsonSchemaToZod`, `toMcpError`
 
 ### `resources.ts`
+
 **Path:** `src/mcp/resources.ts`
 **Purpose:** Registers 6 static resources and 2 dynamic resource templates for read-only data access.
 **Key Exports:**
+
 - `registerMcpResources(server, services)` — registers all resources
-**Key Dependencies:** `AppServices`, `McpServer`, `ResourceTemplate`
+  **Key Dependencies:** `AppServices`, `McpServer`, `ResourceTemplate`
 
 ### `prompts.ts`
+
 **Path:** `src/mcp/prompts.ts`
 **Purpose:** Registers 3 pre-built prompts for common productivity workflows.
 **Key Exports:**
+
 - `registerMcpPrompts(server)` — registers all prompts
-**Key Dependencies:** `McpServer`, `zod`
+  **Key Dependencies:** `McpServer`, `zod`
 
 ### `schema-converter.ts`
+
 **Path:** `src/mcp/schema-converter.ts`
 **Purpose:** Converts JSON Schema objects (as used by `ToolDefinition.parameters`) to Zod raw shapes for `McpServer.registerTool()`. Handles the subset used by our tools: string, number, integer, boolean, array (of strings), enum, required, description.
 **Key Exports:**
+
 - `jsonSchemaToZod(schema)` — returns `Record<string, z.ZodTypeAny>`
 
 ### `context.ts`
+
 **Path:** `src/mcp/context.ts`
 **Purpose:** Factory that extracts a `ToolContext` from `AppServices`.
 **Key Exports:**
+
 - `createToolContext(services)` — returns `{ taskService, projectService, tagService, statsService }`
 
 ### `errors.ts`
+
 **Path:** `src/mcp/errors.ts`
 **Purpose:** Maps Junban error classes to MCP error responses with `isError: true`.
 **Key Exports:**
+
 - `toMcpError(err)` — returns `{ content: [{ type: "text", text }], isError: true }`
 
 ---
 
-## Tools (28 total)
+## Tools
 
-All 34 tools from `ToolRegistry` are exposed as MCP tools with identical names, descriptions, and parameters. See [AI.md](AI.md) for full tool documentation.
+All tools from `ToolRegistry` are exposed as MCP tools with identical names, descriptions, and parameters. See [AI.md](AI.md) for full tool documentation.
 
-| Category | Tools |
-|----------|-------|
-| Task CRUD | `create_task`, `update_task`, `complete_task`, `delete_task` |
-| Task Query | `query_tasks` |
-| Project CRUD | `create_project`, `list_projects`, `get_project`, `update_project`, `delete_project` |
-| Reminders | `list_reminders`, `set_reminder`, `snooze_reminder`, `dismiss_reminder` |
-| Tags | `list_tags`, `add_tags_to_task`, `remove_tags_from_task` |
-| Organization | `break_down_task`, `check_duplicates`, `suggest_tags`, `find_similar_tasks` |
-| Analytics | `analyze_workload`, `check_overcommitment`, `analyze_completion_patterns`, `get_energy_recommendations`, `get_productivity_stats` |
-| Planning | `plan_my_day`, `daily_review` |
+| Category     | Tools                                                                                                                             |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Task CRUD    | `create_task`, `update_task`, `complete_task`, `delete_task`                                                                      |
+| Task Query   | `query_tasks`                                                                                                                     |
+| Project CRUD | `create_project`, `list_projects`, `get_project`, `update_project`, `delete_project`                                              |
+| Reminders    | `list_reminders`, `set_reminder`, `snooze_reminder`, `dismiss_reminder`                                                           |
+| Tags         | `list_tags`, `add_tags_to_task`, `remove_tags_from_task`                                                                          |
+| Organization | `break_down_task`, `check_duplicates`, `suggest_tags`, `find_similar_tasks`                                                       |
+| Analytics    | `analyze_workload`, `check_overcommitment`, `analyze_completion_patterns`, `get_energy_recommendations`, `get_productivity_stats` |
+| Planning     | `plan_my_day`, `daily_review`                                                                                                     |
 
 ---
 
@@ -141,31 +154,31 @@ All 34 tools from `ToolRegistry` are exposed as MCP tools with identical names, 
 
 ### Static Resources
 
-| URI | Description | Returns |
-|-----|-------------|---------|
-| `junban://tasks/pending` | All pending tasks | Array of task summaries (id, title, status, priority, dueDate, projectId, tags, estimatedMinutes) |
-| `junban://tasks/today` | Tasks due today (includes overdue) | Array of task summaries |
-| `junban://tasks/overdue` | Overdue tasks (due before today) | Array of task summaries |
-| `junban://projects` | All non-archived projects | Array of project objects |
-| `junban://tags` | All tags | Array of tag objects (id, name, color) |
-| `junban://stats/today` | Today's productivity stats | Stats object + currentStreak |
+| URI                      | Description                        | Returns                                                                                           |
+| ------------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `junban://tasks/pending` | All pending tasks                  | Array of task summaries (id, title, status, priority, dueDate, projectId, tags, estimatedMinutes) |
+| `junban://tasks/today`   | Tasks due today (includes overdue) | Array of task summaries                                                                           |
+| `junban://tasks/overdue` | Overdue tasks (due before today)   | Array of task summaries                                                                           |
+| `junban://projects`      | All non-archived projects          | Array of project objects                                                                          |
+| `junban://tags`          | All tags                           | Array of tag objects (id, name, color)                                                            |
+| `junban://stats/today`   | Today's productivity stats         | Stats object + currentStreak                                                                      |
 
 ### Dynamic Resource Templates
 
-| URI Template | Description | Returns |
-|--------------|-------------|---------|
-| `junban://tasks/{taskId}` | Single task detail | Full task object (all fields) |
-| `junban://projects/{projectId}` | Project with its tasks | Project object + tasks array |
+| URI Template                    | Description            | Returns                       |
+| ------------------------------- | ---------------------- | ----------------------------- |
+| `junban://tasks/{taskId}`       | Single task detail     | Full task object (all fields) |
+| `junban://projects/{projectId}` | Project with its tasks | Project object + tasks array  |
 
 ---
 
 ## Prompts (3 total)
 
-| Name | Description | Arguments |
-|------|-------------|-----------|
-| `plan-my-day` | Morning planning — reviews today's tasks, overdue items, suggests prioritized order | `energy_level` (optional): "low", "medium", "high" |
-| `daily-review` | End-of-day review — summarizes accomplishments and pending work | `date` (optional): YYYY-MM-DD, defaults to today |
-| `quick-capture` | Fast task creation from natural language | `task` (required): natural language description |
+| Name            | Description                                                                         | Arguments                                          |
+| --------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `plan-my-day`   | Morning planning — reviews today's tasks, overdue items, suggests prioritized order | `energy_level` (optional): "low", "medium", "high" |
+| `daily-review`  | End-of-day review — summarizes accomplishments and pending work                     | `date` (optional): YYYY-MM-DD, defaults to today   |
+| `quick-capture` | Fast task creation from natural language                                            | `task` (required): natural language description    |
 
 ---
 
@@ -173,12 +186,12 @@ All 34 tools from `ToolRegistry` are exposed as MCP tools with identical names, 
 
 Tool execution errors are caught and returned as MCP error content:
 
-| Error Class | MCP Response |
-|-------------|-------------|
-| `NotFoundError` | `{ isError: true, content: [{ type: "text", text: "Task not found: <id>" }] }` |
+| Error Class       | MCP Response                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------- |
+| `NotFoundError`   | `{ isError: true, content: [{ type: "text", text: "Task not found: <id>" }] }`        |
 | `ValidationError` | `{ isError: true, content: [{ type: "text", text: "Validation error: <message>" }] }` |
-| `StorageError` | `{ isError: true, content: [{ type: "text", text: "Storage error: <message>" }] }` |
-| Other | `{ isError: true, content: [{ type: "text", text: "Error: <message>" }] }` |
+| `StorageError`    | `{ isError: true, content: [{ type: "text", text: "Storage error: <message>" }] }`    |
+| Other             | `{ isError: true, content: [{ type: "text", text: "Error: <message>" }] }`            |
 
 ---
 
@@ -186,12 +199,12 @@ Tool execution errors are caught and returned as MCP error content:
 
 Tests use `InMemoryTransport` from the MCP SDK to create a linked server/client pair without stdio.
 
-| Test File | Tests | What's Covered |
-|-----------|-------|----------------|
-| `tests/mcp/schema-converter.test.ts` | 12 | JSON Schema → Zod: string, number, integer, boolean, array, enum, required/optional, description |
-| `tests/mcp/tools.test.ts` | 7 | Tool listing, create/complete/query tasks via MCP, project CRUD, error handling |
-| `tests/mcp/resources.test.ts` | 14 | All 6 static resources + 2 templates, empty/populated data, not-found errors |
-| `tests/mcp/prompts.test.ts` | 7 | All 3 prompts, argument handling, defaults, well-formed messages |
+| Test File                            | Tests | What's Covered                                                                                   |
+| ------------------------------------ | ----- | ------------------------------------------------------------------------------------------------ |
+| `tests/mcp/schema-converter.test.ts` | 12    | JSON Schema → Zod: string, number, integer, boolean, array, enum, required/optional, description |
+| `tests/mcp/tools.test.ts`            | 7     | Tool listing, create/complete/query tasks via MCP, project CRUD, error handling                  |
+| `tests/mcp/resources.test.ts`        | 14    | All 6 static resources + 2 templates, empty/populated data, not-found errors                     |
+| `tests/mcp/prompts.test.ts`          | 7     | All 3 prompts, argument handling, defaults, well-formed messages                                 |
 
 **Total:** 40 tests
 

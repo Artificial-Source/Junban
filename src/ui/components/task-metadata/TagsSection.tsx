@@ -25,10 +25,10 @@ export function TagsSection({ task, onUpdate, availableTags }: TagsSectionProps)
 
   return (
     <div>
-      <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider flex items-center gap-1.5">
+      <label className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-on-surface-muted">
         <Tag size={12} /> Labels
       </label>
-      <div className="mt-1.5">
+      <div>
         <TagsInput
           value={task.tags.map((t) => t.name)}
           onChange={handleTagsChange}

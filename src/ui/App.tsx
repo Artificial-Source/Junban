@@ -11,7 +11,7 @@ import { BlockedTaskIdsContext } from "./context/BlockedTaskIdsContext.js";
 import type { AppState } from "./context/AppStateContext.js";
 import type { SettingsTab } from "./views/Settings.js";
 import { shortcutManager } from "./shortcutManagerInstance.js";
-import { api } from "./api/index.js";
+import { setAppSetting } from "./api/settings.js";
 import { AppProviders } from "./app/AppProviders.js";
 import { useTaskContextMenu } from "./app/TaskContextMenu.js";
 import { useAppState } from "./app/useAppState.js";
@@ -89,7 +89,6 @@ function AppContent() {
     pluginViews,
     executeCommand,
     builtinPluginIds,
-    setFocusedTaskId,
     fetchProjects,
     fetchSections,
     fetchCommentsAndActivity,
@@ -132,8 +131,6 @@ function AppContent() {
     setAddTaskTrigger,
     setTaskComments: appState.setTaskComments,
     setTaskActivity: appState.setTaskActivity,
-    setFocusedTaskId,
-    selectedTaskId,
     tasks: state.tasks,
   });
 
@@ -394,7 +391,7 @@ function AppContent() {
           onboardingOpen={onboardingOpen}
           onCompleteOnboarding={() => {
             setOnboardingOpen(false);
-            api.setAppSetting("onboarding_completed", "true");
+            setAppSetting("onboarding_completed", "true");
           }}
           handleOpenSettingsTab={handleOpenSettingsTab}
           toast={toast}

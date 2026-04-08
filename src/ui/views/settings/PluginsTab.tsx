@@ -1,12 +1,20 @@
-import { useState, useMemo } from "react";
+import { lazy, Suspense, useState, useMemo } from "react";
 import { Puzzle, Search, ShieldCheck, ShieldAlert } from "lucide-react";
 import { usePluginContext } from "../../context/PluginContext.js";
 import { useGeneralSettings } from "../../context/SettingsContext.js";
-import { PermissionDialog } from "../../components/PermissionDialog.js";
 import { api, type PluginInfo } from "../../api/index.js";
 import { PluginCard } from "../../components/PluginCard.js";
-import { PluginBrowser } from "../../components/PluginBrowser.js";
+import { ErrorBoundary } from "../../components/ErrorBoundary.js";
 import { Toggle } from "./components.js";
+
+const PluginBrowser = lazy(() =>
+  import("../../components/PluginBrowser.js").then((module) => ({ default: module.PluginBrowser })),
+);
+const PermissionDialog = lazy(() =>
+  import("../../components/PermissionDialog.js").then((module) => ({
+    default: module.PermissionDialog,
+  })),
+);
 
 export function PluginsTab() {
   const {
@@ -222,15 +230,25 @@ export function PluginsTab() {
         </div>
       </section>
 
-      <PluginBrowser open={browserOpen} onClose={() => setBrowserOpen(false)} />
+      {browserOpen && (
+        <ErrorBoundary fallback={null}>
+          <Suspense fallback={null}>
+            <PluginBrowser open={browserOpen} onClose={() => setBrowserOpen(false)} />
+          </Suspense>
+        </ErrorBoundary>
+      )}
 
       {permissionPlugin && (
-        <PermissionDialog
-          pluginName={permissionPlugin.name}
-          permissions={permissionPlugin.permissions}
-          onApprove={handleApprove}
-          onCancel={() => setPermissionPlugin(null)}
-        />
+        <ErrorBoundary fallback={null}>
+          <Suspense fallback={null}>
+            <PermissionDialog
+              pluginName={permissionPlugin.name}
+              permissions={permissionPlugin.permissions}
+              onApprove={handleApprove}
+              onCancel={() => setPermissionPlugin(null)}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )}
 
       {/* Safety Confirmation Dialog */}

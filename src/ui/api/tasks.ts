@@ -4,6 +4,7 @@ import type { ImportedTask, ImportResult } from "../../core/import.js";
 import {
   useDirectServices,
   BASE,
+  buildApiUrl,
   handleResponse,
   handleVoidResponse,
   getServices,
@@ -20,11 +21,13 @@ export async function listTasks(params?: {
       params && Object.keys(params).length > 0 ? (params as TaskFilter) : undefined,
     );
   }
-  const url = new URL(`${BASE}/tasks`, window.location.origin);
-  if (params?.search) url.searchParams.set("search", params.search);
-  if (params?.projectId) url.searchParams.set("projectId", params.projectId);
-  if (params?.status) url.searchParams.set("status", params.status);
-  const res = await fetch(url.toString());
+  const res = await fetch(
+    buildApiUrl("/tasks", {
+      search: params?.search,
+      projectId: params?.projectId,
+      status: params?.status,
+    }),
+  );
   return handleResponse<Task[]>(res);
 }
 

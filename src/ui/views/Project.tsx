@@ -1,11 +1,13 @@
-import { useMemo } from "react";
+import { lazy, Suspense, useMemo } from "react";
 import { TaskInput } from "../components/TaskInput.js";
 import { TaskList } from "../components/TaskList.js";
-import { Board } from "./Board.js";
+import { ErrorBoundary } from "../components/ErrorBoundary.js";
 import type { Task, Project as ProjectType, Section } from "../../core/types.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 import { ProjectHeader } from "./project/ProjectHeader.js";
 import { AddSectionButton, SectionedTaskList } from "./project/ProjectSections.js";
+
+const Board = lazy(() => import("./Board.js").then((module) => ({ default: module.Board })));
 
 interface ProjectProps {
   project: ProjectType;
@@ -74,6 +76,11 @@ export function Project({
   const effectiveViewStyle = !kanbanEnabled && rawViewStyle === "board" ? "list" : rawViewStyle;
   const hasSections = sectionsEnabled && sections && sections.length > 0;
   const sortedSections = sections ? [...sections].sort((a, b) => a.sortOrder - b.sortOrder) : [];
+  const boardFallback = (
+    <div className="mt-4 flex items-center justify-center rounded-xl border border-border bg-surface-secondary/40 p-6 text-sm text-on-surface-muted">
+      Loading board...
+    </div>
+  );
 
   // Board view
   if (effectiveViewStyle === "board" && sections && onMoveTask) {
@@ -91,15 +98,19 @@ export function Project({
           autoFocusTrigger={autoFocusTrigger}
         />
         <div className="mt-4">
-          <Board
-            project={project}
-            tasks={projectTasks}
-            sections={sortedSections}
-            onMoveTask={onMoveTask}
-            onToggleTask={onToggleTask}
-            onSelectTask={onSelectTask}
-            selectedTaskId={selectedTaskId}
-          />
+          <ErrorBoundary fallback={boardFallback}>
+            <Suspense fallback={boardFallback}>
+              <Board
+                project={project}
+                tasks={projectTasks}
+                sections={sortedSections}
+                onMoveTask={onMoveTask}
+                onToggleTask={onToggleTask}
+                onSelectTask={onSelectTask}
+                selectedTaskId={selectedTaskId}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </div>
         {sectionsEnabled && onCreateSection && <AddSectionButton onCreate={onCreateSection} />}
       </div>

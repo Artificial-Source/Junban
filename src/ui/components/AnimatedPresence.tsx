@@ -19,9 +19,7 @@ export function AnimatedPresence({ children, ...rest }: AnimatedPresenceProps) {
   const shouldReduceMotion = useReducedMotion();
 
   if (shouldReduceMotion) {
-    // AnimatePresence still tracks presence for conditional rendering,
-    // but Framer Motion internally skips animations when `useReducedMotion` is true.
-    return <AnimatePresence {...rest}>{children}</AnimatePresence>;
+    return <>{children}</>;
   }
 
   return <AnimatePresence {...rest}>{children}</AnimatePresence>;

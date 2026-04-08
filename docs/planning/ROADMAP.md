@@ -166,34 +166,34 @@ Full browser-based client (requires Junban Sync).
 
 ## Current Status
 
-| Area | Done | Remaining | Status |
-|------|------|-----------|--------|
-| Foundation & Infrastructure | 16/16 | 0 | Complete |
-| Core — Task CRUD | 19/19 | 0 | Complete |
-| Parser & NLP | 8/8 | 0 | Complete |
-| UI — Views & Components | 40/41 | 1 | Logo design pending |
-| CLI | 7/8 | 1 | Fuzzy picker idea |
-| Plugin System | 21/21 | 0 | Complete |
-| AI Assistant | 55/67 | 12 | 12 providers, 38 MCP tools, OAuth, ideas pending |
-| Storage & Data | 13/13 | 0 | Complete |
-| Testing | 10/10 | 0 | 208 test files, 2613 tests |
-| Hardening & Quality | 22/22 | 0 | Complete (+ DevOps hardening) |
-| Frontend Enhancements | 25/25 | 0 | Complete |
-| QA — Bugs | 17/17 | 0 | Complete |
-| Documentation | 15/15 | 0 | Complete |
-| **Total** | **268/277** | **9** | **97% complete** |
+| Area                        | Done        | Remaining | Status                                              |
+| --------------------------- | ----------- | --------- | --------------------------------------------------- |
+| Foundation & Infrastructure | 16/16       | 0         | Complete                                            |
+| Core — Task CRUD            | 19/19       | 0         | Complete                                            |
+| Parser & NLP                | 8/8         | 0         | Complete                                            |
+| UI — Views & Components     | 41/41       | 0         | Complete                                            |
+| CLI                         | 7/8         | 1         | Fuzzy picker idea                                   |
+| Plugin System               | 21/21       | 0         | Complete                                            |
+| AI Assistant                | 55/67       | 12        | 12 providers, 40 AI/MCP tools, OAuth, ideas pending |
+| Storage & Data              | 13/13       | 0         | Complete                                            |
+| Testing                     | 10/10       | 0         | 240 automated test/spec files, full E2E green       |
+| Hardening & Quality         | 22/22       | 0         | Complete (+ DevOps hardening)                       |
+| Frontend Enhancements       | 25/25       | 0         | Complete                                            |
+| QA — Bugs                   | 17/17       | 0         | Complete                                            |
+| Documentation               | 15/15       | 0         | Complete                                            |
+| **Total**                   | **269/277** | **8**     | **97% complete**                                    |
 
 ### What's Fully Done
 
 - Task CRUD with subtasks, templates, recurrence, filters, priorities
 - SQLite + Markdown dual storage backends
-- ~70+ React components, 19+ views + 10 settings tabs, 17 hooks, 9 contexts
-- AI assistant with 38 tools, 12 providers (OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, DeepSeek, Gemini, Mistral, Kimi, DashScope, Groq, ZAI), OpenAI OAuth, chat persistence
+- 100+ React components, 20+ views + 10 settings tabs, 18 hooks, 9+ contexts
+- AI assistant with 40 tools, 12 providers (OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, DeepSeek, Gemini, Mistral, Kimi, DashScope, Groq, ZAI), OpenAI OAuth, chat persistence
 - Voice I/O: 8 adapters (STT/TTS), VAD, Web Workers, voice call mode
 - Plugin system with sandboxing, permissions, lifecycle, registry
 - Timeblocking plugin: day/week views, DnD, recurrence, AI auto-scheduling
 - Motivation engine: Eat the Frog, Dopamine Menu, Task Jar, Framer Motion animations
-- MCP server: 38 tools + 8 resources + 3 prompts (Claude Desktop integration)
+- MCP server: 40 tools + 8 resources + 3 prompts (Claude Desktop integration)
 - CLI companion with 5 commands
 - Tauri desktop app scaffold + auto-updater + global quick capture
 - CI/CD pipeline (GitHub Actions) + Husky pre-commit hooks + Dependabot
@@ -204,21 +204,20 @@ Full browser-based client (requires Junban Sync).
 - Kanban board, calendar views, matrix view, stats dashboard
 - Task comments, activity tracking, daily/weekly review rituals
 - Responsive mobile UI, sound effects, saved filters
-- 208 test files, 2613 passing tests (including 33+ Playwright E2E spec files)
+- 240 automated test/spec files, including 32 Playwright E2E spec files, with full E2E coverage green
 
 ### Ideas (need scoping)
 
-| ID | Item | Area |
-|----|------|------|
-| A-41 | Energy-aware suggestions (enhanced) | AI Tools |
-| A-42 | Habit / recurring task intelligence | AI Tools |
-| A-43 | Project planning from description | AI Tools |
-| A-44 | Adaptive learning (preference tracking) | AI Tools |
-| A-48 | Plugin-contributed AI tools | AI Tools |
-| A-18 | AI reminders via integrations | Integrations |
-| A-45 | ICS calendar export/import | Integrations |
-| U-35 | Design proper SVG logo | UI |
-| L-08 | Interactive CLI task picker | CLI |
+| ID   | Item                                    | Area         |
+| ---- | --------------------------------------- | ------------ |
+| A-41 | Energy-aware suggestions (enhanced)     | AI Tools     |
+| A-42 | Habit / recurring task intelligence     | AI Tools     |
+| A-43 | Project planning from description       | AI Tools     |
+| A-44 | Adaptive learning (preference tracking) | AI Tools     |
+| A-48 | Plugin-contributed AI tools             | AI Tools     |
+| A-18 | AI reminders via integrations           | Integrations |
+| A-45 | ICS calendar export/import              | Integrations |
+| L-08 | Interactive CLI task picker             | CLI          |
 
 ### Plugin Ideas
 
@@ -240,60 +239,60 @@ Full browser-based client (requires Junban Sync).
 
 52 sprints completed across ~23 months of development.
 
-| Sprint | Theme | Tests |
-|--------|-------|-------|
-| S0 | Scaffold | 171 |
-| S1 | First Blood (DB wiring) | 219 |
-| S2 | Feel Good (polish) | 246 |
-| S3 | Plugins: Foundation | 275 |
-| S4 | Plugins: UI | 297 |
-| S5 | AI: Foundation | 321 |
-| S6 | AI: Intelligence | 333 |
-| S7 | CI/CD & Release | 333 |
-| S8 | Styling & Desktop App | 333 |
-| S9 | Power User | 387 |
-| S10 | Milestone Closure | 424 |
-| S11 | Markdown Storage | 528 |
-| S12 | Hardening | 528 |
-| S13 | v1.0 Release | 549 |
-| S14 | Design System | 549 |
-| S15 | Sub-tasks & Focus Mode | 574 |
-| S16 | Templates & NL Queries | 610 |
-| S17 | AI Error Handling | 620 |
-| S18 | Dynamic Model Discovery | 630 |
-| S19 | Reminders | 663 |
-| S20 | Pluggable LLM Core | 682 |
-| S21 | Voice Integration | 735 |
-| S22 | AI Intelligence Tools | 772 |
-| S23 | Rebrand (Docket → Junban) | 772 |
-| S24 | Local Voice Models | 813 |
-| S25 | Project & Reminder Tools | 857 |
-| S26 | Inworld TTS & Mobile UI | 960 |
-| S27 | Settings & AI Quick Wins | 960 |
-| S28 | Sound Effects | 988 |
-| S29 | Voice Call & Tag Tools | 1018 |
-| S30-31 | GitHub Issues batch | 1018+ |
-| S32 | Frontend Enhancements | 1018+ |
-| S33 | QA & Polish | 1773 |
-| S34 | Plugin Slot System | 1773 |
-| S35 | Big Features | 1774 |
-| S36 | Bug Fixes | 1785 |
-| S37 | Core UI Enhancements | 1796 |
-| S38 | Module Decomposition (DX-01–07) | 1956 |
-| S39 | Plugin React Rendering | 1956+ |
-| S40 | Timeblocking Data Model | 1956+ |
-| S41 | Timeblocking Day View | 1956+ |
-| S42 | Timeblocking Week View | 1956+ |
-| S43 | Timeblocking Polish + E2E | 2146 |
-| S44 | Module Decomposition II (DX-08–14) | 2159 |
-| S45 | Lint Cleanup | 2159 |
-| S46 | Housekeeping + Global Quick Capture | 2386 |
-| S47 | AI Intelligence Tools (time estimation, weekly review, meeting notes) | 2386 |
-| S48 | Motivation Engine (Eat the Frog, Dopamine Menu, Task Jar, animations) | 2386 |
-| S49 | AI Auto-scheduling | 2386 |
-| S50 | Clean Slate + 7 New Providers + OAuth | 2455 |
-| S51 | Module Decomposition III (DX-15–25) | 2455 |
-| S52 | Production Readiness + DevOps Hardening | 2613 |
+| Sprint | Theme                                                                 | Tests |
+| ------ | --------------------------------------------------------------------- | ----- |
+| S0     | Scaffold                                                              | 171   |
+| S1     | First Blood (DB wiring)                                               | 219   |
+| S2     | Feel Good (polish)                                                    | 246   |
+| S3     | Plugins: Foundation                                                   | 275   |
+| S4     | Plugins: UI                                                           | 297   |
+| S5     | AI: Foundation                                                        | 321   |
+| S6     | AI: Intelligence                                                      | 333   |
+| S7     | CI/CD & Release                                                       | 333   |
+| S8     | Styling & Desktop App                                                 | 333   |
+| S9     | Power User                                                            | 387   |
+| S10    | Milestone Closure                                                     | 424   |
+| S11    | Markdown Storage                                                      | 528   |
+| S12    | Hardening                                                             | 528   |
+| S13    | v1.0 Release                                                          | 549   |
+| S14    | Design System                                                         | 549   |
+| S15    | Sub-tasks & Focus Mode                                                | 574   |
+| S16    | Templates & NL Queries                                                | 610   |
+| S17    | AI Error Handling                                                     | 620   |
+| S18    | Dynamic Model Discovery                                               | 630   |
+| S19    | Reminders                                                             | 663   |
+| S20    | Pluggable LLM Core                                                    | 682   |
+| S21    | Voice Integration                                                     | 735   |
+| S22    | AI Intelligence Tools                                                 | 772   |
+| S23    | Rebrand (Docket → Junban)                                             | 772   |
+| S24    | Local Voice Models                                                    | 813   |
+| S25    | Project & Reminder Tools                                              | 857   |
+| S26    | Inworld TTS & Mobile UI                                               | 960   |
+| S27    | Settings & AI Quick Wins                                              | 960   |
+| S28    | Sound Effects                                                         | 988   |
+| S29    | Voice Call & Tag Tools                                                | 1018  |
+| S30-31 | GitHub Issues batch                                                   | 1018+ |
+| S32    | Frontend Enhancements                                                 | 1018+ |
+| S33    | QA & Polish                                                           | 1773  |
+| S34    | Plugin Slot System                                                    | 1773  |
+| S35    | Big Features                                                          | 1774  |
+| S36    | Bug Fixes                                                             | 1785  |
+| S37    | Core UI Enhancements                                                  | 1796  |
+| S38    | Module Decomposition (DX-01–07)                                       | 1956  |
+| S39    | Plugin React Rendering                                                | 1956+ |
+| S40    | Timeblocking Data Model                                               | 1956+ |
+| S41    | Timeblocking Day View                                                 | 1956+ |
+| S42    | Timeblocking Week View                                                | 1956+ |
+| S43    | Timeblocking Polish + E2E                                             | 2146  |
+| S44    | Module Decomposition II (DX-08–14)                                    | 2159  |
+| S45    | Lint Cleanup                                                          | 2159  |
+| S46    | Housekeeping + Global Quick Capture                                   | 2386  |
+| S47    | AI Intelligence Tools (time estimation, weekly review, meeting notes) | 2386  |
+| S48    | Motivation Engine (Eat the Frog, Dopamine Menu, Task Jar, animations) | 2386  |
+| S49    | AI Auto-scheduling                                                    | 2386  |
+| S50    | Clean Slate + 7 New Providers + OAuth                                 | 2455  |
+| S51    | Module Decomposition III (DX-15–25)                                   | 2455  |
+| S52    | Production Readiness + DevOps Hardening                               | 2613  |
 
 ### Known Technical Debt
 

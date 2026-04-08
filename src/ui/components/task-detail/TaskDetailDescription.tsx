@@ -30,35 +30,50 @@ export function TaskDetailDescription({
     setEditing(false);
   };
 
+  const startEditing = () => setEditing(true);
+  const shellClass = "min-h-[88px] rounded-xl border border-transparent px-0 py-2";
+
   return (
     <div className="relative group/desc">
       {editing ? (
-        <textarea
-          value={localDescription}
-          onChange={(e) => setLocalDescription(e.target.value)}
-          onBlur={handleBlur}
-          autoFocus
-          placeholder="Description (supports **markdown**)"
-          className="w-full p-0 text-sm bg-transparent border-none text-on-surface placeholder-on-surface-muted/50 focus:outline-none focus:ring-0 min-h-[80px] resize-none"
-        />
+        <div className={shellClass}>
+          <textarea
+            aria-label="Description"
+            value={localDescription}
+            onChange={(e) => setLocalDescription(e.target.value)}
+            onBlur={handleBlur}
+            autoFocus
+            placeholder="Add a description..."
+            className="block min-h-[56px] w-full resize-none border-none bg-transparent p-0 text-sm leading-6 text-on-surface placeholder-on-surface-muted/50 focus:outline-none focus:ring-0"
+          />
+        </div>
       ) : localDescription ? (
         <div
-          className="text-sm text-on-surface cursor-text min-h-[80px] prose-sm"
-          onClick={() => setEditing(true)}
+          className={`${shellClass} prose-sm min-h-[88px] cursor-text text-sm text-on-surface`}
+          onClick={startEditing}
         >
           <MarkdownMessage content={localDescription} />
         </div>
       ) : (
-        <button
-          onClick={() => setEditing(true)}
-          className="w-full text-left text-sm text-on-surface-muted/50 min-h-[80px]"
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Description"
+          onClick={startEditing}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              startEditing();
+            }
+          }}
+          className={`${shellClass} w-full cursor-text text-left text-sm leading-6 text-on-surface-muted/50 outline-none`}
         >
-          Description
-        </button>
+          <span>Add a description...</span>
+        </div>
       )}
       {!editing && localDescription && (
         <button
-          onClick={() => setEditing(true)}
+          onClick={startEditing}
           className="absolute top-0 right-0 p-1 rounded-md text-on-surface-muted hover:text-on-surface hover:bg-surface-tertiary opacity-0 group-hover/desc:opacity-100 transition-opacity"
           title="Edit description"
         >

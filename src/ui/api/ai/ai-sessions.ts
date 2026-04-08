@@ -55,8 +55,9 @@ export async function deleteChatSession(sessionId: string): Promise<void> {
 export async function switchChatSession(sessionId: string): Promise<AIChatMessage[]> {
   if (useDirectServices()) {
     const svc = await getServices();
+    const ai = await svc.getAIRuntime();
     // Fire-and-forget memory extraction from current session
-    const currentSession = svc.chatManager.getSession();
+    const currentSession = ai.chatManager.getSession();
     if (currentSession) {
       currentSession.extractMemories().catch((err: unknown) =>
         log.warn("Memory extraction failed", {
@@ -71,7 +72,7 @@ export async function switchChatSession(sessionId: string): Promise<AIChatMessag
     const modelSetting = svc.storage.getAppSetting("ai_model");
     const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
 
-    const executor = svc.aiProviderRegistry.createExecutor({
+    const executor = ai.aiProviderRegistry.createExecutor({
       provider: providerSetting.value as string,
       apiKey: apiKeySetting?.value,
       model: modelSetting?.value,
@@ -90,7 +91,7 @@ export async function switchChatSession(sessionId: string): Promise<AIChatMessag
     };
 
     // Build system message and create a session from stored messages
-    const systemMessage = svc.chatManager.buildSystemMessage(
+    const systemMessage = ai.chatManager.buildSystemMessage(
       toolServices,
       "",
       providerSetting.value as string,
@@ -99,14 +100,14 @@ export async function switchChatSession(sessionId: string): Promise<AIChatMessag
     const session = new ChatSession(executor, toolServices, systemMessage, {
       sessionId,
       queries: svc.storage,
-      toolRegistry: svc.toolRegistry,
+      toolRegistry: ai.toolRegistry,
       model: modelSetting?.value ?? undefined,
       providerName: providerSetting.value as string,
     });
 
     session.restoreMessages(deserializeChatMessages(rows));
 
-    svc.chatManager.setSession(session);
+    ai.chatManager.setSession(session);
     return session.getMessages() as AIChatMessage[];
   }
 
@@ -119,8 +120,9 @@ export async function switchChatSession(sessionId: string): Promise<AIChatMessag
 export async function createNewChatSession(): Promise<string> {
   if (useDirectServices()) {
     const svc = await getServices();
+    const ai = await svc.getAIRuntime();
     // Fire-and-forget memory extraction from current session
-    const currentSession = svc.chatManager.getSession();
+    const currentSession = ai.chatManager.getSession();
     if (currentSession) {
       currentSession.extractMemories().catch((err: unknown) =>
         log.warn("Memory extraction failed", {
@@ -129,7 +131,7 @@ export async function createNewChatSession(): Promise<string> {
       );
     }
     // Clear current session without deleting from DB
-    svc.chatManager.setSession(null);
+    ai.chatManager.setSession(null);
     return "";
   }
   const res = await fetch(`${BASE}/ai/sessions/new`, { method: "POST" });

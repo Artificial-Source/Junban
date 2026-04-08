@@ -65,6 +65,13 @@ export const TaskItem = React.memo(function TaskItem({
 
   // Handle animation class and completion burst in a single effect (merged PERF-320)
   useEffect(() => {
+    if (reducedMotion) {
+      prevStatusRef.current = task.status;
+      setAnimClass("");
+      setShowBurst(false);
+      return;
+    }
+
     if (prevStatusRef.current === "pending" && task.status === "completed") {
       setAnimClass("animate-task-complete");
       setShowBurst(true);
@@ -83,7 +90,7 @@ export const TaskItem = React.memo(function TaskItem({
       return () => clearTimeout(timer);
     }
     prevStatusRef.current = task.status;
-  }, [task.status]);
+  }, [reducedMotion, task.status]);
 
   const priority = task.priority ? getPriority(task.priority) : null;
   const isOverdue = task.dueDate && task.status === "pending" && task.dueDate.split("T")[0] < today;

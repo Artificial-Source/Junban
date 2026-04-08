@@ -4,6 +4,15 @@ import { isTauri } from "../../../utils/tauri.js";
 import { APP_VERSION } from "../../../config/defaults.js";
 import { api } from "../../api/index.js";
 
+const RELEASES_URL = "https://github.com/ASF-GROUP/Junban/releases/latest";
+const CHANGELOG_URL = "https://github.com/ASF-GROUP/Junban/blob/main/CHANGELOG.md";
+
+interface PendingUpdate {
+  version: string;
+  body?: string | null;
+  downloadAndInstall(): Promise<void>;
+}
+
 interface Credit {
   name: string;
   url: string;
@@ -181,7 +190,7 @@ export function AboutTab() {
   const [updateStatus, setUpdateStatus] = useState<
     "idle" | "checking" | "available" | "up-to-date" | "error"
   >("idle");
-  const [updateVersion, setUpdateVersion] = useState("");
+  const [pendingUpdate, setPendingUpdate] = useState<PendingUpdate | null>(null);
   const isTauriApp = isTauri();
 
   // System info state
@@ -220,12 +229,13 @@ export function AboutTab() {
 
   const handleCheckUpdate = async () => {
     setUpdateStatus("checking");
+    setPendingUpdate(null);
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
       const update = await check();
       if (update) {
         setUpdateStatus("available");
-        setUpdateVersion(update.version);
+        setPendingUpdate(update as PendingUpdate);
       } else {
         setUpdateStatus("up-to-date");
       }
@@ -235,14 +245,11 @@ export function AboutTab() {
   };
 
   const handleInstallUpdate = async () => {
+    if (!pendingUpdate) return;
     try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const update = await check();
-      if (update) {
-        await update.downloadAndInstall();
-        const { relaunch } = await import("@tauri-apps/plugin-process");
-        await relaunch();
-      }
+      await pendingUpdate.downloadAndInstall();
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
     } catch {
       setUpdateStatus("error");
     }
@@ -253,7 +260,11 @@ export function AboutTab() {
       {/* App info */}
       <div>
         <div className="flex items-center gap-3">
-          <img src="/images/logo-192.png" alt="Junban logo" className="w-12 h-12" />
+          <img
+            src="/images/logo.webp"
+            alt="Junban logo"
+            className="w-12 h-12 rounded-xl ring-1 ring-border/60 bg-surface object-cover dark:invert"
+          />
           <div>
             <p className="text-sm font-semibold text-on-surface">
               ASF Junban{" "}
@@ -273,15 +284,25 @@ export function AboutTab() {
             >
               {updateStatus === "checking" ? "Checking..." : "Check for Updates"}
             </button>
-            {updateStatus === "available" && (
+            {updateStatus === "available" && pendingUpdate && (
               <div className="mt-2">
-                <p className="text-sm text-success">Update available: v{updateVersion}</p>
+                <p className="text-sm text-success">Update available: v{pendingUpdate.version}</p>
                 <button
                   onClick={handleInstallUpdate}
                   className="mt-1 px-3 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover"
                 >
                   Install and Restart
                 </button>
+                {pendingUpdate.body?.trim() && (
+                  <div className="mt-3 rounded-lg border border-border bg-surface-secondary p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-secondary">
+                      Release Notes
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-on-surface-secondary">
+                      {pendingUpdate.body}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
             {updateStatus === "up-to-date" && (
@@ -290,6 +311,24 @@ export function AboutTab() {
             {updateStatus === "error" && (
               <p className="mt-2 text-sm text-error">Update check failed.</p>
             )}
+            <div className="mt-3 flex flex-wrap gap-3 text-xs">
+              <a
+                href={RELEASES_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent hover:underline"
+              >
+                View latest release
+              </a>
+              <a
+                href={CHANGELOG_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent hover:underline"
+              >
+                View changelog
+              </a>
+            </div>
           </div>
         )}
       </div>

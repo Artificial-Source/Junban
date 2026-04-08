@@ -1,61 +1,12 @@
-import {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  Component,
-  type ReactNode,
-  type ErrorInfo,
-} from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../api/index.js";
 import {
   StructuredContentRenderer,
   type StructuredContent,
 } from "../components/StructuredContentRenderer.js";
+import { PluginErrorBoundary } from "../components/sidebar/PluginErrorBoundary.js";
 import type { ViewInfo } from "../api/plugins.js";
 import { resolveBuiltinComponent } from "../context/builtin-views.js";
-
-interface PluginErrorBoundaryProps {
-  pluginId: string;
-  children: ReactNode;
-}
-
-interface PluginErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-class PluginErrorBoundary extends Component<PluginErrorBoundaryProps, PluginErrorBoundaryState> {
-  constructor(props: PluginErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: Error): PluginErrorBoundaryState {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error(`Plugin "${this.props.pluginId}" crashed:`, error, info.componentStack);
-  }
-
-  render(): ReactNode {
-    if (this.state.hasError) {
-      return (
-        <div className="p-6 text-red-500 text-sm">
-          <p className="font-semibold">Plugin Error</p>
-          <p className="mt-1 text-on-surface-muted">
-            The plugin &quot;{this.props.pluginId}&quot; encountered an error and was disabled.
-          </p>
-          <pre className="mt-2 text-xs bg-surface-secondary p-2 rounded overflow-auto">
-            {this.state.error?.message}
-          </pre>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 interface PluginViewProps {
   viewId: string;

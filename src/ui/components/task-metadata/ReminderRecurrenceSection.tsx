@@ -32,16 +32,16 @@ export function ReminderRecurrenceSection({ task, onUpdate }: ReminderRecurrence
   );
 
   return (
-    <>
+    <div className="space-y-4">
       {/* Reminder */}
       <div className="relative">
-        <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider flex items-center gap-1.5">
+        <label className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-on-surface-muted">
           <Bell size={12} /> Reminder
         </label>
         <button
           ref={reminderBtnRef}
           onClick={() => setShowRemindAtPicker((prev) => !prev)}
-          className="mt-1.5 w-full px-2 py-1.5 text-sm text-left rounded-md text-on-surface hover:bg-surface-tertiary transition-colors"
+          className="w-full rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors hover:bg-surface-tertiary"
         >
           {currentRemindAt ? (
             new Date(currentRemindAt).toLocaleString(undefined, {
@@ -75,14 +75,14 @@ export function ReminderRecurrenceSection({ task, onUpdate }: ReminderRecurrence
       </div>
 
       {/* Recurrence */}
-      <div className="border-t border-border" />
+      <div className="border-t border-border/60 pt-4" />
       <div className="relative">
-        <label className="text-xs font-medium text-on-surface-muted uppercase tracking-wider flex items-center gap-1.5">
+        <label className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-on-surface-muted">
           <Repeat size={12} /> Recurrence
         </label>
         <button
           onClick={() => setShowRecurrencePicker((prev) => !prev)}
-          className="mt-1.5 w-full px-2 py-1.5 text-sm text-left rounded-md text-on-surface hover:bg-surface-tertiary transition-colors"
+          className="w-full rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors hover:bg-surface-tertiary"
         >
           {task.recurrence ? (
             formatRecurrenceLabel(task.recurrence)
@@ -107,6 +107,6 @@ export function ReminderRecurrenceSection({ task, onUpdate }: ReminderRecurrence
           />
         )}
       </div>
-    </>
+    </div>
   );
 }

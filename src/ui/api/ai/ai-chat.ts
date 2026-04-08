@@ -13,6 +13,7 @@ export async function sendChatMessage(
 ): Promise<ReadableStream<Uint8Array> | null> {
   if (useDirectServices()) {
     const svc = await getServices();
+    const ai = await svc.getAIRuntime();
     const providerSetting = svc.storage.getAppSetting("ai_provider");
     if (!providerSetting?.value) {
       // Return a stream with an error event, matching SSE format
@@ -35,7 +36,7 @@ export async function sendChatMessage(
       const modelSetting = svc.storage.getAppSetting("ai_model");
       const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
 
-      const executor = svc.aiProviderRegistry.createExecutor({
+      const executor = ai.aiProviderRegistry.createExecutor({
         provider: providerSetting.value as string,
         apiKey: apiKeySetting?.value,
         model: modelSetting?.value,
@@ -57,10 +58,10 @@ export async function sendChatMessage(
         voiceCall: options?.voiceCall,
         focusedTaskId: options?.focusedTaskId,
       });
-      const session = svc.chatManager.getOrCreateSession(executor, toolServices, {
+      const session = ai.chatManager.getOrCreateSession(executor, toolServices, {
         queries: svc.storage,
         contextBlock,
-        toolRegistry: svc.toolRegistry,
+        toolRegistry: ai.toolRegistry,
         model: modelSetting?.value ?? undefined,
         providerName: providerSetting.value as string,
       });
@@ -113,7 +114,8 @@ export async function sendChatMessage(
 export async function getChatMessages(): Promise<AIChatMessage[]> {
   if (useDirectServices()) {
     const svc = await getServices();
-    let session = svc.chatManager.getSession();
+    const ai = await svc.getAIRuntime();
+    let session = ai.chatManager.getSession();
 
     if (!session) {
       try {
@@ -123,14 +125,14 @@ export async function getChatMessages(): Promise<AIChatMessage[]> {
           const modelSetting = svc.storage.getAppSetting("ai_model");
           const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
 
-          const executor = svc.aiProviderRegistry.createExecutor({
+          const executor = ai.aiProviderRegistry.createExecutor({
             provider: providerSetting.value as string,
             apiKey: apiKeySetting?.value,
             model: modelSetting?.value,
             baseUrl: baseUrlSetting?.value,
           });
 
-          session = svc.chatManager.restoreSession(
+          session = ai.chatManager.restoreSession(
             executor,
             {
               taskService: svc.taskService,
@@ -141,7 +143,7 @@ export async function getChatMessages(): Promise<AIChatMessage[]> {
             },
             svc.storage,
             {
-              toolRegistry: svc.toolRegistry,
+              toolRegistry: ai.toolRegistry,
               model: modelSetting?.value ?? undefined,
               providerName: providerSetting.value as string,
             },
@@ -162,7 +164,8 @@ export async function getChatMessages(): Promise<AIChatMessage[]> {
 export async function clearChat(): Promise<void> {
   if (useDirectServices()) {
     const svc = await getServices();
-    svc.chatManager.clearSession(svc.storage);
+    const ai = await svc.getAIRuntime();
+    ai.chatManager.clearSession(svc.storage);
     svc.save();
     return;
   }

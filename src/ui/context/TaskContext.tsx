@@ -7,7 +7,16 @@ import React, {
   useMemo,
 } from "react";
 import type { Task, CreateTaskInput, UpdateTaskInput } from "../../core/types.js";
-import { api } from "../api/index.js";
+import {
+  completeManyTasks as completeManyTasksApi,
+  completeTask as completeTaskApi,
+  createTask as createTaskApi,
+  deleteManyTasks as deleteManyTasksApi,
+  deleteTask as deleteTaskApi,
+  listTasks,
+  updateManyTasks as updateManyTasksApi,
+  updateTask as updateTaskApi,
+} from "../api/tasks.js";
 
 interface TaskState {
   tasks: Task[];
@@ -88,7 +97,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const refreshTasks = useCallback(async () => {
     dispatch({ type: "LOAD_START" });
     try {
-      const tasks = await api.listTasks();
+      const tasks = await listTasks();
       dispatch({ type: "LOAD_SUCCESS", tasks });
     } catch (err) {
       dispatch({ type: "LOAD_ERROR", error: String(err) });
@@ -97,7 +106,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   const createTask = useCallback(async (input: CreateTaskInput) => {
     try {
-      const task = await api.createTask(input);
+      const task = await createTaskApi(input);
       dispatch({ type: "TASK_ADDED", task });
     } catch (err) {
       dispatch({
@@ -109,7 +118,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   const updateTask = useCallback(async (id: string, input: UpdateTaskInput) => {
     try {
-      const task = await api.updateTask(id, input);
+      const task = await updateTaskApi(id, input);
       dispatch({ type: "TASK_UPDATED", task });
     } catch (err) {
       dispatch({
@@ -122,7 +131,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const completeTask = useCallback(
     async (id: string) => {
       try {
-        const task = await api.completeTask(id);
+        const task = await completeTaskApi(id);
         // If the task has recurrence, refresh to pick up the new occurrence
         if (task.recurrence) {
           await refreshTasks();
@@ -141,7 +150,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   const deleteTask = useCallback(async (id: string) => {
     try {
-      await api.deleteTask(id);
+      await deleteTaskApi(id);
       dispatch({ type: "TASK_REMOVED", id });
     } catch (err) {
       dispatch({
@@ -154,7 +163,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const completeManyTasks = useCallback(
     async (ids: string[]) => {
       try {
-        const tasks = await api.completeManyTasks(ids);
+        const tasks = await completeManyTasksApi(ids);
         // If any had recurrence, refresh all
         if (tasks.some((t) => t.recurrence)) {
           await refreshTasks();
@@ -173,7 +182,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   const deleteManyTasks = useCallback(async (ids: string[]) => {
     try {
-      await api.deleteManyTasks(ids);
+      await deleteManyTasksApi(ids);
       dispatch({ type: "TASKS_REMOVED", ids });
     } catch (err) {
       dispatch({
@@ -185,7 +194,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   const updateManyTasks = useCallback(async (ids: string[], changes: UpdateTaskInput) => {
     try {
-      const tasks = await api.updateManyTasks(ids, changes);
+      const tasks = await updateManyTasksApi(ids, changes);
       dispatch({ type: "TASKS_UPDATED", tasks });
     } catch (err) {
       dispatch({

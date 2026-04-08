@@ -76,11 +76,6 @@ test.describe("Daily Review Modal", () => {
     // Click Move to Tomorrow
     await page.getByRole("button", { name: /Move to Tomorrow/i }).click();
 
-    // Finish the flow
-    await page.getByRole("button", { name: "Next" }).click();
-    await page.getByRole("button", { name: "Next" }).click();
-    await page.getByRole("button", { name: "End My Day" }).click();
-
     // Navigate to Upcoming to verify the task was moved
     await page.reload();
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });

@@ -1,27 +1,56 @@
+import { lazy, Suspense } from "react";
 import { motion } from "framer-motion";
 import { AnimatedPresence } from "../components/AnimatedPresence.js";
+import { ErrorBoundary } from "../components/ErrorBoundary.js";
 import { useReducedMotion } from "../components/useReducedMotion.js";
 import { crossfade } from "../utils/animation-variants.js";
-import { Inbox } from "../views/Inbox.js";
-import { Today } from "../views/Today.js";
-import { Upcoming } from "../views/Upcoming.js";
-import { Project } from "../views/Project.js";
-import { PluginView } from "../views/PluginView.js";
-import { Completed } from "../views/Completed.js";
-import { Cancelled } from "../views/Cancelled.js";
-import { Someday } from "../views/Someday.js";
-import { Stats } from "../views/Stats.js";
-import { Matrix } from "../views/Matrix.js";
-import { Calendar } from "../views/Calendar.js";
-import { FiltersLabels } from "../views/FiltersLabels.js";
-import { FilterView } from "../views/FilterView.js";
-import { TaskPage } from "../views/TaskPage.js";
-import { AIChat } from "../views/AIChat.js";
-import { DopamineMenu } from "../views/DopamineMenu.js";
 import { useAppState } from "../context/AppStateContext.js";
 import type { UpdateTaskInput } from "../../core/types.js";
 import type { CalendarMode } from "../hooks/useRouting.js";
 import type { SettingsTab } from "../views/settings/types.js";
+
+const Inbox = lazy(() => import("../views/Inbox.js").then((module) => ({ default: module.Inbox })));
+const PluginView = lazy(() =>
+  import("../views/PluginView.js").then((module) => ({ default: module.PluginView })),
+);
+const Today = lazy(() => import("../views/Today.js").then((module) => ({ default: module.Today })));
+const Upcoming = lazy(() =>
+  import("../views/Upcoming.js").then((module) => ({ default: module.Upcoming })),
+);
+const Project = lazy(() =>
+  import("../views/Project.js").then((module) => ({ default: module.Project })),
+);
+const Completed = lazy(() =>
+  import("../views/Completed.js").then((module) => ({ default: module.Completed })),
+);
+const Cancelled = lazy(() =>
+  import("../views/Cancelled.js").then((module) => ({ default: module.Cancelled })),
+);
+const Someday = lazy(() =>
+  import("../views/Someday.js").then((module) => ({ default: module.Someday })),
+);
+const Stats = lazy(() => import("../views/Stats.js").then((module) => ({ default: module.Stats })));
+const Matrix = lazy(() =>
+  import("../views/Matrix.js").then((module) => ({ default: module.Matrix })),
+);
+const Calendar = lazy(() =>
+  import("../views/Calendar.js").then((module) => ({ default: module.Calendar })),
+);
+const FiltersLabels = lazy(() =>
+  import("../views/FiltersLabels.js").then((module) => ({ default: module.FiltersLabels })),
+);
+const FilterView = lazy(() =>
+  import("../views/FilterView.js").then((module) => ({ default: module.FilterView })),
+);
+const TaskPage = lazy(() =>
+  import("../views/TaskPage.js").then((module) => ({ default: module.TaskPage })),
+);
+const AIChat = lazy(() =>
+  import("../views/AIChat.js").then((module) => ({ default: module.AIChat })),
+);
+const DopamineMenu = lazy(() =>
+  import("../views/DopamineMenu.js").then((module) => ({ default: module.DopamineMenu })),
+);
 
 /** Parsed task input from TaskInput / QuickAdd — mirrors useTaskHandlers.handleCreateTask param. */
 export interface ParsedTaskInput {
@@ -104,11 +133,26 @@ export function ViewRenderer({
   } = useAppState();
   const reducedMotion = useReducedMotion();
   const viewKey = `${currentView}-${selectedProjectId ?? ""}-${selectedPluginViewId ?? ""}-${selectedFilterId ?? ""}`;
+  const lazyFallback = (
+    <div className="flex h-full items-center justify-center text-on-surface-secondary">
+      Loading view...
+    </div>
+  );
+  const lazyErrorFallback = (
+    <div className="flex h-full items-center justify-center text-error">
+      Failed to load this view. Refresh and try again.
+    </div>
+  );
+  const wrapLazyView = (content: React.ReactNode) => (
+    <ErrorBoundary fallback={lazyErrorFallback}>
+      <Suspense fallback={lazyFallback}>{content}</Suspense>
+    </ErrorBoundary>
+  );
 
   const viewContent = (() => {
     switch (currentView) {
       case "inbox":
-        return (
+        return wrapLazyView(
           <Inbox
             tasks={tasks}
             onCreateTask={handleCreateTask}
@@ -122,10 +166,10 @@ export function ViewRenderer({
             onUpdateDueDate={handleUpdateDueDate}
             onContextMenu={handleContextMenu}
             autoFocusTrigger={addTaskTrigger}
-          />
+          />,
         );
       case "today":
-        return (
+        return wrapLazyView(
           <Today
             tasks={tasks}
             projects={projects}
@@ -141,10 +185,10 @@ export function ViewRenderer({
             onUpdateDueDate={handleUpdateDueDate}
             onContextMenu={handleContextMenu}
             autoFocusTrigger={addTaskTrigger}
-          />
+          />,
         );
       case "upcoming":
-        return (
+        return wrapLazyView(
           <Upcoming
             tasks={tasks}
             projects={projects}
@@ -160,14 +204,14 @@ export function ViewRenderer({
             onUpdateDueDate={handleUpdateDueDate}
             onContextMenu={handleContextMenu}
             autoFocusTrigger={addTaskTrigger}
-          />
+          />,
         );
       case "project": {
         const project = projects.find((p) => p.id === selectedProjectId);
         if (!project) {
           return <p className="text-on-surface-muted">Project not found.</p>;
         }
-        return (
+        return wrapLazyView(
           <Project
             project={project}
             tasks={tasks}
@@ -188,7 +232,7 @@ export function ViewRenderer({
             onUpdateSection={handleUpdateSection}
             onDeleteSection={handleDeleteSection}
             onMoveTask={handleMoveTask}
-          />
+          />,
         );
       }
       case "task": {
@@ -198,7 +242,7 @@ export function ViewRenderer({
         if (!routeTask) {
           return <p className="text-on-surface-muted">Task not found.</p>;
         }
-        return (
+        return wrapLazyView(
           <TaskPage
             task={routeTask}
             allTasks={tasks}
@@ -214,11 +258,11 @@ export function ViewRenderer({
             onToggleSubtask={handleToggleTask}
             onReorder={handleReorder}
             availableTags={availableTags}
-          />
+          />,
         );
       }
       case "calendar":
-        return (
+        return wrapLazyView(
           <Calendar
             tasks={tasks}
             projects={projects}
@@ -227,94 +271,108 @@ export function ViewRenderer({
             onUpdateDueDate={handleUpdateDueDate}
             mode={calendarMode}
             onModeChange={setCalendarMode}
-          />
+          />,
         );
       case "filters-labels":
-        return (
+        return wrapLazyView(
           <FiltersLabels
             tasks={tasks}
             onNavigateToFilter={() => {
               handleNavigate("inbox");
             }}
-          />
+          />,
         );
       case "completed":
-        return <Completed tasks={tasks} projects={projects} onSelectTask={handleSelectTask} />;
+        return wrapLazyView(
+          <Completed tasks={tasks} projects={projects} onSelectTask={handleSelectTask} />,
+        );
       case "cancelled":
-        return featureSettings.feature_cancelled !== "false" ? (
-          <Cancelled
-            tasks={tasks}
-            projects={projects}
-            onSelectTask={handleSelectTask}
-            onRestoreTask={handleRestoreTask}
-          />
-        ) : null;
+        return featureSettings.feature_cancelled !== "false"
+          ? wrapLazyView(
+              <Cancelled
+                tasks={tasks}
+                projects={projects}
+                onSelectTask={handleSelectTask}
+                onRestoreTask={handleRestoreTask}
+              />,
+            )
+          : null;
       case "someday":
-        return featureSettings.feature_someday !== "false" ? (
-          <Someday
-            tasks={tasks}
-            onSelectTask={handleSelectTask}
-            onActivateTask={handleActivateTask}
-          />
-        ) : null;
+        return featureSettings.feature_someday !== "false"
+          ? wrapLazyView(
+              <Someday
+                tasks={tasks}
+                onSelectTask={handleSelectTask}
+                onActivateTask={handleActivateTask}
+              />,
+            )
+          : null;
       case "stats":
-        return featureSettings.feature_stats !== "false" ? <Stats tasks={tasks} /> : null;
+        return featureSettings.feature_stats !== "false"
+          ? wrapLazyView(<Stats tasks={tasks} />)
+          : null;
       case "matrix":
-        return featureSettings.feature_matrix !== "false" ? (
-          <Matrix
-            tasks={tasks}
-            onToggleTask={handleToggleTask}
-            onSelectTask={handleSelectTask}
-            onUpdateTask={handleUpdateTask}
-            selectedTaskId={selectedTaskId}
-          />
-        ) : null;
+        return featureSettings.feature_matrix !== "false"
+          ? wrapLazyView(
+              <Matrix
+                tasks={tasks}
+                onToggleTask={handleToggleTask}
+                onSelectTask={handleSelectTask}
+                onUpdateTask={handleUpdateTask}
+                selectedTaskId={selectedTaskId}
+              />,
+            )
+          : null;
       case "filter":
-        return selectedFilterId ? (
-          <FilterView
-            filterId={selectedFilterId}
-            tasks={tasks}
-            onToggleTask={handleToggleTask}
-            onSelectTask={handleSelectTask}
-            selectedTaskId={selectedTaskId}
-            selectedTaskIds={multiSelectedIds}
-            onMultiSelect={handleMultiSelect}
-            onReorder={handleReorder}
-            onAddSubtask={handleAddSubtask}
-            onUpdateDueDate={handleUpdateDueDate}
-            onContextMenu={handleContextMenu}
-          />
-        ) : null;
+        return selectedFilterId
+          ? wrapLazyView(
+              <FilterView
+                filterId={selectedFilterId}
+                tasks={tasks}
+                onToggleTask={handleToggleTask}
+                onSelectTask={handleSelectTask}
+                selectedTaskId={selectedTaskId}
+                selectedTaskIds={multiSelectedIds}
+                onMultiSelect={handleMultiSelect}
+                onReorder={handleReorder}
+                onAddSubtask={handleAddSubtask}
+                onUpdateDueDate={handleUpdateDueDate}
+                onContextMenu={handleContextMenu}
+              />,
+            )
+          : null;
       case "plugin-view": {
         const viewInfo = pluginViews.find((v) => v.id === selectedPluginViewId);
         return selectedPluginViewId ? (
-          <PluginView viewId={selectedPluginViewId} viewInfo={viewInfo} />
+          wrapLazyView(<PluginView viewId={selectedPluginViewId} viewInfo={viewInfo} />)
         ) : (
           <p className="text-on-surface-muted">No plugin view selected.</p>
         );
       }
       case "ai-chat":
-        return (
+        return wrapLazyView(
           <AIChat
             onOpenSettings={() => handleOpenSettingsTab("ai")}
             onSelectTask={handleSelectTask}
-          />
+          />,
         );
       case "dopamine-menu":
-        return featureSettings.feature_dopamine_menu !== "false" ? (
-          <DopamineMenu
-            tasks={tasks}
-            onToggleTask={handleToggleTask}
-            onSelectTask={handleSelectTask}
-            selectedTaskId={selectedTaskId}
-            selectedTaskIds={multiSelectedIds}
-            onMultiSelect={handleMultiSelect}
-            onReorder={handleReorder}
-            onAddSubtask={handleAddSubtask}
-            onUpdateDueDate={handleUpdateDueDate}
-            onContextMenu={handleContextMenu}
-          />
-        ) : null;
+        return featureSettings.feature_dopamine_menu !== "false"
+          ? wrapLazyView(
+              <DopamineMenu
+                tasks={tasks}
+                onToggleTask={handleToggleTask}
+                onSelectTask={handleSelectTask}
+                selectedTaskId={selectedTaskId}
+                selectedTaskIds={multiSelectedIds}
+                onMultiSelect={handleMultiSelect}
+                onReorder={handleReorder}
+                onAddSubtask={handleAddSubtask}
+                onUpdateDueDate={handleUpdateDueDate}
+                onContextMenu={handleContextMenu}
+              />,
+            )
+          : null;
       default:
         return null;
     }

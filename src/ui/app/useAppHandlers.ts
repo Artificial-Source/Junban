@@ -1,12 +1,14 @@
 import { useCallback, useEffect } from "react";
 import { useTaskContext } from "../context/TaskContext.js";
-import { useVoiceContext } from "../context/VoiceContext.js";
-import { api } from "../api/index.js";
+import { createProject } from "../api/projects.js";
+import { createSection, deleteSection, updateSection } from "../api/sections.js";
+import { addTaskComment, deleteTaskComment, updateTaskComment } from "../api/comments.js";
 import type { View } from "../hooks/useRouting.js";
 import type { SoundEvent } from "../../utils/sounds.js";
 import type { Task, UpdateTaskInput } from "../../core/types.js";
 import { isTauri } from "../../utils/tauri.js";
 import type { ParsedTaskInput } from "./ViewRenderer.js";
+import { ensureVoiceModeEnabledForChatLaunch } from "../context/voice-settings.js";
 
 interface UseAppHandlersParams {
   currentView: View;
@@ -29,8 +31,6 @@ interface UseAppHandlersParams {
   setTaskActivity: React.Dispatch<
     React.SetStateAction<import("../../core/types.js").TaskActivity[]>
   >;
-  setFocusedTaskId: (id: string | null) => void;
-  selectedTaskId: string | null;
   tasks: Task[];
 }
 
@@ -55,17 +55,9 @@ export function useAppHandlers({
   setAddTaskTrigger,
   setTaskComments,
   setTaskActivity,
-  setFocusedTaskId,
-  selectedTaskId,
   tasks,
 }: UseAppHandlersParams) {
   const { createTask } = useTaskContext();
-  const voice = useVoiceContext();
-
-  // ── Sync focused task for AI context ──
-  useEffect(() => {
-    setFocusedTaskId(selectedTaskId);
-  }, [selectedTaskId, setFocusedTaskId]);
 
   // ── Project handlers ──
   const handleCreateProject = useCallback(
@@ -78,7 +70,7 @@ export function useAppHandlers({
       viewStyle: "list" | "board" | "calendar",
     ) => {
       try {
-        await api.createProject(
+        await createProject(
           name,
           color || undefined,
           icon || undefined,
@@ -96,9 +88,9 @@ export function useAppHandlers({
 
   // ── Navigation handlers ──
   const handleOpenVoice = useCallback(() => {
+    ensureVoiceModeEnabledForChatLaunch();
     handleNavigate("ai-chat");
-    if (voice.settings.voiceMode === "off") voice.updateSettings({ voiceMode: "push-to-talk" });
-  }, [voice, handleNavigate]);
+  }, [handleNavigate]);
 
   const handleAddTask = useCallback(() => {
     const taskViews: View[] = ["inbox", "today", "upcoming", "project"];
@@ -187,21 +179,21 @@ export function useAppHandlers({
   const handleCreateSection = useCallback(
     async (name: string) => {
       if (!selectedProjectId) return;
-      await api.createSection(selectedProjectId, name);
+      await createSection(selectedProjectId, name);
       fetchSections(selectedProjectId);
     },
     [selectedProjectId, fetchSections],
   );
   const handleUpdateSection = useCallback(
     async (id: string, data: { name?: string; isCollapsed?: boolean }) => {
-      await api.updateSection(id, data);
+      await updateSection(id, data);
       if (selectedProjectId) fetchSections(selectedProjectId);
     },
     [selectedProjectId, fetchSections],
   );
   const handleDeleteSection = useCallback(
     async (id: string) => {
-      await api.deleteSection(id);
+      await deleteSection(id);
       if (selectedProjectId) fetchSections(selectedProjectId);
       refreshTasks();
     },
@@ -225,21 +217,21 @@ export function useAppHandlers({
 
   const handleAddComment = useCallback(
     async (taskId: string, content: string) => {
-      await api.addTaskComment(taskId, content);
+      await addTaskComment(taskId, content);
       fetchCommentsAndActivity(taskId);
     },
     [fetchCommentsAndActivity],
   );
   const handleUpdateComment = useCallback(
     async (commentId: string, content: string) => {
-      await api.updateTaskComment(commentId, content);
+      await updateTaskComment(commentId, content);
       if (selectedTask) fetchCommentsAndActivity(selectedTask.id);
     },
     [selectedTask, fetchCommentsAndActivity],
   );
   const handleDeleteComment = useCallback(
     async (commentId: string) => {
-      await api.deleteTaskComment(commentId);
+      await deleteTaskComment(commentId);
       if (selectedTask) fetchCommentsAndActivity(selectedTask.id);
     },
     [selectedTask, fetchCommentsAndActivity],

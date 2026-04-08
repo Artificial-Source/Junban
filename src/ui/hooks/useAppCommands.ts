@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { themeManager } from "../themes/manager.js";
 import type { SettingsTab } from "../views/settings/types.js";
 import type { Project } from "../../core/types.js";
-import type { PluginCommandInfo } from "../api/index.js";
+import type { PluginCommandInfo } from "../api/plugins.js";
 
 export function useAppCommands(
   handleNavigate: (view: string, id?: string) => void,

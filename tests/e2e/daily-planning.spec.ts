@@ -77,12 +77,6 @@ test.describe("Daily Planning Modal", () => {
     // Click reschedule on the overdue task (in the modal, the button says "Reschedule to today")
     await page.getByRole("button", { name: "Reschedule to today" }).click();
 
-    // Navigate through remaining steps
-    await page.getByRole("button", { name: "Next" }).click();
-    await page.getByRole("button", { name: "Next" }).click();
-    await page.getByRole("button", { name: "Next" }).click();
-    await page.getByRole("button", { name: "Start My Day" }).click();
-
     // Reload and verify the task is now in the Today section
     await page.reload();
     await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });

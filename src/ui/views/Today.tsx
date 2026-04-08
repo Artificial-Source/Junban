@@ -1,12 +1,9 @@
-import { useState, useMemo, useCallback } from "react";
-import { parseTask } from "../../parser/task-parser.js";
+import { lazy, Suspense, useState, useMemo, useCallback } from "react";
+import { ErrorBoundary } from "../components/ErrorBoundary.js";
+import type { ParsedTask } from "../../parser/task-parser.js";
 import { useToday } from "../hooks/useToday.js";
 import { TaskInput } from "../components/TaskInput.js";
 import { OverdueSection } from "../components/OverdueSection.js";
-import { EatTheFrog } from "../components/EatTheFrog.js";
-import { DailyPlanningModal } from "../components/DailyPlanningModal.js";
-import { DailyReviewModal } from "../components/DailyReviewModal.js";
-import { WeeklyReviewModal } from "../components/WeeklyReviewModal.js";
 import type { WeeklyReviewData } from "../components/WeeklyReviewModal.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 import type { Task, Project } from "../../core/types.js";
@@ -15,10 +12,29 @@ import { TodayTaskList } from "./today/TodayTaskList.js";
 import { WorkloadCapacityBar } from "./today/WorkloadCapacityBar.js";
 import { useWeeklyReviewData } from "./today/useWeeklyReviewData.js";
 
+const EatTheFrog = lazy(() =>
+  import("../components/EatTheFrog.js").then((module) => ({ default: module.EatTheFrog })),
+);
+const DailyPlanningModal = lazy(() =>
+  import("../components/DailyPlanningModal.js").then((module) => ({
+    default: module.DailyPlanningModal,
+  })),
+);
+const DailyReviewModal = lazy(() =>
+  import("../components/DailyReviewModal.js").then((module) => ({
+    default: module.DailyReviewModal,
+  })),
+);
+const WeeklyReviewModal = lazy(() =>
+  import("../components/WeeklyReviewModal.js").then((module) => ({
+    default: module.WeeklyReviewModal,
+  })),
+);
+
 interface TodayProps {
   tasks: Task[];
   projects: Project[];
-  onCreateTask: (input: ReturnType<typeof parseTask>) => void;
+  onCreateTask: (input: ParsedTask) => void;
   onToggleTask: (id: string) => void;
   onSelectTask: (id: string) => void;
   onUpdateTask: (id: string, updates: Record<string, unknown>) => void;
@@ -91,6 +107,7 @@ export function Today({
   );
 
   const computeWeeklyReviewData = useWeeklyReviewData(tasks, projects);
+  const lazyFallback = null;
 
   const handleOpenWeeklyReview = useCallback(() => {
     setWeeklyReviewData(computeWeeklyReviewData());
@@ -131,11 +148,15 @@ export function Today({
       {/* Eat the Frog — highest dread task */}
       {settings.eat_the_frog_enabled !== "false" &&
         !(settings.eat_the_frog_morning_only === "true" && new Date().getHours() >= 12) && (
-          <EatTheFrog
-            tasks={[...overdueTasks, ...todayTasks]}
-            onToggleTask={onToggleTask}
-            onSelectTask={onSelectTask}
-          />
+          <ErrorBoundary fallback={lazyFallback}>
+            <Suspense fallback={lazyFallback}>
+              <EatTheFrog
+                tasks={[...overdueTasks, ...todayTasks]}
+                onToggleTask={onToggleTask}
+                onSelectTask={onSelectTask}
+              />
+            </Suspense>
+          </ErrorBoundary>
         )}
 
       <OverdueSection
@@ -161,24 +182,42 @@ export function Today({
         onContextMenu={onContextMenu}
       />
 
-      <DailyPlanningModal
-        open={planningOpen}
-        onComplete={() => setPlanningOpen(false)}
-        tasks={tasks}
-        projects={projects}
-        onUpdateTask={onUpdateTask}
-      />
-      <DailyReviewModal
-        open={reviewOpen}
-        onComplete={() => setReviewOpen(false)}
-        tasks={tasks}
-        onUpdateTask={onUpdateTask}
-      />
-      <WeeklyReviewModal
-        open={weeklyReviewOpen}
-        onClose={() => setWeeklyReviewOpen(false)}
-        data={weeklyReviewData}
-      />
+      {planningOpen && (
+        <ErrorBoundary fallback={lazyFallback}>
+          <Suspense fallback={lazyFallback}>
+            <DailyPlanningModal
+              open={planningOpen}
+              onComplete={() => setPlanningOpen(false)}
+              tasks={tasks}
+              projects={projects}
+              onUpdateTask={onUpdateTask}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {reviewOpen && (
+        <ErrorBoundary fallback={lazyFallback}>
+          <Suspense fallback={lazyFallback}>
+            <DailyReviewModal
+              open={reviewOpen}
+              onComplete={() => setReviewOpen(false)}
+              tasks={tasks}
+              onUpdateTask={onUpdateTask}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {weeklyReviewOpen && (
+        <ErrorBoundary fallback={lazyFallback}>
+          <Suspense fallback={lazyFallback}>
+            <WeeklyReviewModal
+              open={weeklyReviewOpen}
+              onClose={() => setWeeklyReviewOpen(false)}
+              data={weeklyReviewData}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
     </div>
   );
 }

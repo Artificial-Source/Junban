@@ -14,66 +14,40 @@ import {
   type ReactNode,
 } from "react";
 import { VoiceProviderRegistry } from "../../ai/voice/registry.js";
-import { createDefaultVoiceRegistry } from "../../ai/voice/provider.js";
 import type {
   STTProviderPlugin,
   TTSProviderPlugin,
   TTSModel,
   Voice,
 } from "../../ai/voice/interface.js";
-import { BrowserTTSProvider } from "../../ai/voice/adapters/browser-tts.js";
-import { playAudioBuffer } from "../../ai/voice/audio-utils.js";
 import { createLogger } from "../../utils/logger.js";
-import { encryptValue, decryptValue, isEncryptedValue } from "../../utils/crypto.js";
+import { ENCRYPTED_VALUE_PREFIX } from "../../utils/crypto-constants.js";
+import {
+  loadStoredVoiceSettings,
+  VOICE_SETTINGS_STORAGE_KEY,
+  type VoiceSettings,
+} from "./voice-settings.js";
 
 const log = createLogger("voice");
 
-export type VoiceMode = "off" | "push-to-talk" | "vad";
-
-export interface VoiceSettings {
-  sttProviderId: string;
-  ttsProviderId: string;
-  voiceMode: VoiceMode;
-  ttsEnabled: boolean;
-  autoSend: boolean;
-  ttsVoice: string;
-  ttsModel: string;
-  groqApiKey: string;
-  inworldApiKey: string;
-  microphoneId: string;
-  smartEndpoint: boolean;
-  gracePeriodMs: number;
+function cloneRegistry(source: VoiceProviderRegistry): VoiceProviderRegistry {
+  const next = new VoiceProviderRegistry();
+  for (const provider of source.listSTT()) {
+    next.registerSTT(provider);
+  }
+  for (const provider of source.listTTS()) {
+    next.registerTTS(provider);
+  }
+  return next;
 }
 
-const DEFAULT_SETTINGS: VoiceSettings = {
-  sttProviderId: "browser-stt",
-  ttsProviderId: "browser-tts",
-  voiceMode: "push-to-talk",
-  ttsEnabled: false,
-  autoSend: true,
-  ttsVoice: "",
-  ttsModel: "",
-  groqApiKey: "",
-  inworldApiKey: "",
-  microphoneId: "",
-  smartEndpoint: false,
-  gracePeriodMs: 1500,
-};
-
-const STORAGE_KEY = "junban-voice-settings";
+export type { VoiceMode, VoiceSettings } from "./voice-settings.js";
 
 /** Voice setting keys that contain sensitive data (API keys). */
 const VOICE_SENSITIVE_KEYS: (keyof VoiceSettings)[] = ["groqApiKey", "inworldApiKey"];
 
 function loadSettings(): VoiceSettings {
-  if (typeof window === "undefined") return DEFAULT_SETTINGS;
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored) return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
-  } catch {
-    // ignore
-  }
-  return DEFAULT_SETTINGS;
+  return loadStoredVoiceSettings();
 }
 
 /**
@@ -82,10 +56,12 @@ function loadSettings(): VoiceSettings {
  */
 async function decryptSettings(settings: VoiceSettings): Promise<VoiceSettings> {
   const decrypted = { ...settings };
+  const { decryptValue } = await import("../../utils/crypto.js");
   for (const key of VOICE_SENSITIVE_KEYS) {
     const val = decrypted[key];
-    if (typeof val === "string" && val && isEncryptedValue(val)) {
-      (decrypted[key] as string) = await decryptValue(val);
+    if (typeof val === "string" && val && val.startsWith(ENCRYPTED_VALUE_PREFIX)) {
+      const nextValue = await decryptValue(val);
+      (decrypted[key] as string) = nextValue.startsWith(ENCRYPTED_VALUE_PREFIX) ? "" : nextValue;
     }
   }
   return decrypted;
@@ -97,13 +73,14 @@ async function decryptSettings(settings: VoiceSettings): Promise<VoiceSettings> 
 async function saveSettings(settings: VoiceSettings): Promise<void> {
   try {
     const toStore = { ...settings };
+    const { encryptValue } = await import("../../utils/crypto.js");
     for (const key of VOICE_SENSITIVE_KEYS) {
       const val = toStore[key];
-      if (typeof val === "string" && val && !isEncryptedValue(val)) {
+      if (typeof val === "string" && val && !val.startsWith(ENCRYPTED_VALUE_PREFIX)) {
         (toStore[key] as string) = await encryptValue(val);
       }
     }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+    window.localStorage.setItem(VOICE_SETTINGS_STORAGE_KEY, JSON.stringify(toStore));
   } catch {
     // ignore
   }
@@ -120,6 +97,9 @@ interface VoiceContextValue {
   isListening: boolean;
   isTranscribing: boolean;
   isSpeaking: boolean;
+  ensureRegistryLoaded: () => Promise<void>;
+  localProvidersLoaded: boolean;
+  ensureLocalProvidersLoaded: () => Promise<void>;
   startListening: () => void;
   stopListening: () => void;
   speak: (text: string) => Promise<void>;
@@ -136,8 +116,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [ttsVoices, setTTSVoices] = useState<Voice[]>([]);
   const [ttsModels, setTTSModels] = useState<TTSModel[]>([]);
+  const [registry, setRegistry] = useState(() => new VoiceProviderRegistry());
+  const [localProvidersLoaded, setLocalProvidersLoaded] = useState(false);
   const speechCancelledRef = useRef(false);
   const playbackCancelRef = useRef<(() => void) | null>(null);
+  const registryRef = useRef<VoiceProviderRegistry>(registry);
+  const providerModuleRef = useRef<null | typeof import("../../ai/voice/provider.js")>(null);
+  const registryLoadRef = useRef<Promise<void> | null>(null);
+  const registrySignatureRef = useRef<string | null>(null);
+  const localProviderLoadRef = useRef<Promise<void> | null>(null);
 
   // Decrypt sensitive settings on mount (async)
   useEffect(() => {
@@ -154,17 +141,105 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Build registry whenever API keys change — useMemo avoids the double-create
-  // that useState+useEffect caused (init on mount, then useEffect re-creates,
-  // triggering a cascade of re-renders through ttsProvider/voices/models).
-  const registry = useMemo(
-    () =>
-      createDefaultVoiceRegistry({
-        groqApiKey: settings.groqApiKey || undefined,
-        inworldApiKey: settings.inworldApiKey || undefined,
-      }),
-    [settings.groqApiKey, settings.inworldApiKey],
-  );
+  useEffect(() => {
+    registryRef.current = registry;
+  }, [registry]);
+
+  const registrySignature = `${settings.groqApiKey ?? ""}::${settings.inworldApiKey ?? ""}`;
+
+  const ensureRegistryLoaded = useCallback(async () => {
+    let attempts = 0;
+    while (
+      registrySignatureRef.current !== registrySignature ||
+      registryRef.current.listSTT().length === 0
+    ) {
+      attempts += 1;
+      if (attempts > 3) {
+        throw new Error("Failed to initialize voice provider registry");
+      }
+
+      if (!registryLoadRef.current) {
+        registryLoadRef.current = import("../../ai/voice/provider.js")
+          .then((module) => {
+            providerModuleRef.current = module;
+            const nextRegistry = module.createDefaultVoiceRegistry({
+              groqApiKey: settings.groqApiKey || undefined,
+              inworldApiKey: settings.inworldApiKey || undefined,
+            });
+            registrySignatureRef.current = registrySignature;
+            registryRef.current = nextRegistry;
+            setRegistry(nextRegistry);
+            setLocalProvidersLoaded(module.hasLocalVoiceProviders(nextRegistry));
+            localProviderLoadRef.current = null;
+          })
+          .finally(() => {
+            registryLoadRef.current = null;
+          });
+      }
+
+      await registryLoadRef.current;
+    }
+  }, [registrySignature, settings.groqApiKey, settings.inworldApiKey]);
+
+  useEffect(() => {
+    const shouldWarmRegistry =
+      settings.ttsEnabled ||
+      Boolean(settings.groqApiKey) ||
+      Boolean(settings.inworldApiKey) ||
+      settings.sttProviderId !== "browser-stt" ||
+      settings.ttsProviderId !== "browser-tts";
+
+    if (shouldWarmRegistry) {
+      void ensureRegistryLoaded();
+    }
+  }, [
+    ensureRegistryLoaded,
+    settings.groqApiKey,
+    settings.inworldApiKey,
+    settings.sttProviderId,
+    settings.ttsEnabled,
+    settings.ttsProviderId,
+  ]);
+
+  const ensureLocalProvidersLoaded = useCallback(async () => {
+    await ensureRegistryLoaded();
+    const activeRegistry = registryRef.current;
+    const providerModule = providerModuleRef.current;
+    if (!providerModule) return;
+    if (providerModule.hasLocalVoiceProviders(activeRegistry)) {
+      setLocalProvidersLoaded(true);
+      return;
+    }
+    if (!localProviderLoadRef.current) {
+      localProviderLoadRef.current = providerModule
+        .registerLocalVoiceProviders(activeRegistry)
+        .then(() => {
+          setLocalProvidersLoaded(true);
+          setRegistry(cloneRegistry(activeRegistry));
+        })
+        .finally(() => {
+          localProviderLoadRef.current = null;
+        });
+    }
+    await localProviderLoadRef.current;
+  }, [ensureRegistryLoaded]);
+
+  useEffect(() => {
+    const shouldLoadLocalProviders =
+      settings.voiceMode === "vad" ||
+      settings.sttProviderId === "whisper-local-stt" ||
+      settings.ttsProviderId === "piper-local-tts" ||
+      settings.ttsProviderId === "kokoro-local-tts";
+
+    if (shouldLoadLocalProviders) {
+      void ensureLocalProvidersLoaded();
+    }
+  }, [
+    ensureLocalProvidersLoaded,
+    settings.sttProviderId,
+    settings.ttsProviderId,
+    settings.voiceMode,
+  ]);
 
   const sttProvider = registry.getSTT(settings.sttProviderId);
   const ttsProvider = registry.getTTS(settings.ttsProviderId);
@@ -222,31 +297,42 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   const transcribeAudio = useCallback(
     async (audio: Blob): Promise<string> => {
-      if (!sttProvider) throw new Error("No STT provider configured");
+      let activeProvider = sttProvider;
+      if (!activeProvider) {
+        await ensureRegistryLoaded();
+        activeProvider = registryRef.current.getSTT(settings.sttProviderId);
+      }
+      if (!activeProvider) throw new Error("No STT provider configured");
       setIsTranscribing(true);
       try {
         // Browser STT can't transcribe blobs — this path is for Groq/API-based STT
-        return await sttProvider.transcribe(audio);
+        return await activeProvider.transcribe(audio);
       } finally {
         setIsTranscribing(false);
       }
     },
-    [sttProvider],
+    [ensureRegistryLoaded, settings.sttProviderId, sttProvider],
   );
 
   const speak = useCallback(
     async (text: string) => {
+      let activeProvider = ttsProvider;
+      if (!activeProvider && settings.ttsEnabled) {
+        await ensureRegistryLoaded();
+        activeProvider = registryRef.current.getTTS(settings.ttsProviderId);
+      }
+
       log.debug("speak() called", {
-        provider: ttsProvider?.id,
+        provider: activeProvider?.id,
         enabled: settings.ttsEnabled,
         textLen: text.length,
       });
-      if (!ttsProvider || !settings.ttsEnabled) {
+      if (!activeProvider || !settings.ttsEnabled) {
         log.debug("speak() skipped — no provider or TTS disabled");
         return;
       }
 
-      const isBrowserTTS = ttsProvider.id === "browser-tts";
+      const isBrowserTTS = activeProvider.id === "browser-tts";
 
       // Cancel any in-progress playback before starting new speech
       playbackCancelRef.current?.();
@@ -274,14 +360,19 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         const truncated = clean.length > maxLen ? clean.slice(0, maxLen) + "..." : clean;
         log.debug("speaking", { text: truncated.slice(0, 80) });
 
-        if (ttsProvider instanceof BrowserTTSProvider) {
-          await ttsProvider.speakDirect(truncated, { voice: settings.ttsVoice || undefined });
+        if (
+          isBrowserTTS &&
+          "speakDirect" in activeProvider &&
+          typeof activeProvider.speakDirect === "function"
+        ) {
+          await activeProvider.speakDirect(truncated, { voice: settings.ttsVoice || undefined });
         } else {
-          const buffer = await ttsProvider.synthesize(truncated, {
+          const buffer = await activeProvider.synthesize(truncated, {
             voice: settings.ttsVoice || undefined,
             model: settings.ttsModel || undefined,
           });
           if (!speechCancelledRef.current && buffer.byteLength > 0) {
+            const { playAudioBuffer } = await import("../../ai/voice/audio-utils.js");
             const playback = playAudioBuffer(buffer);
             playbackCancelRef.current = playback.cancel;
             await playback.promise;
@@ -296,7 +387,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         setIsSpeaking(false);
       }
     },
-    [ttsProvider, settings.ttsEnabled, settings.ttsVoice, settings.ttsModel],
+    [
+      ensureRegistryLoaded,
+      settings.ttsEnabled,
+      settings.ttsModel,
+      settings.ttsProviderId,
+      settings.ttsVoice,
+      ttsProvider,
+    ],
   );
 
   const cancelSpeech = useCallback(() => {
@@ -321,6 +419,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       isListening,
       isTranscribing,
       isSpeaking,
+      ensureRegistryLoaded,
+      localProvidersLoaded,
+      ensureLocalProvidersLoaded,
       startListening,
       stopListening,
       speak,
@@ -338,6 +439,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       isListening,
       isTranscribing,
       isSpeaking,
+      ensureRegistryLoaded,
+      localProvidersLoaded,
+      ensureLocalProvidersLoaded,
       startListening,
       stopListening,
       speak,

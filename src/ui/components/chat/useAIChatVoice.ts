@@ -7,7 +7,6 @@ import { useRef, useEffect, useCallback } from "react";
 import { useVoiceContext } from "../../context/VoiceContext.js";
 import { useVAD } from "../../hooks/useVAD.js";
 import { useVoiceCall } from "../../hooks/useVoiceCall.js";
-import { BrowserSTTProvider } from "../../../ai/voice/adapters/browser-stt.js";
 import type { ChatMessage } from "../../../ai/types.js";
 
 export interface UseAIChatVoiceOptions {
@@ -25,6 +24,10 @@ export function useAIChatVoice({
 }: UseAIChatVoiceOptions) {
   const voice = useVoiceContext();
   const wasStreamingRef = useRef(false);
+
+  useEffect(() => {
+    void voice.ensureRegistryLoaded();
+  }, [voice.ensureRegistryLoaded]);
 
   const ttsAvailable = !!(voice.ttsProvider && voice.settings.ttsEnabled);
 
@@ -64,8 +67,7 @@ export function useAIChatVoice({
     [voice, handleVoiceResult],
   );
 
-  const isNonBrowserSTT =
-    voiceCall.isCallActive && !(voice.sttProvider instanceof BrowserSTTProvider);
+  const isNonBrowserSTT = voiceCall.isCallActive && voice.sttProvider?.id !== "browser-stt";
   const browserSTTAvailable =
     typeof window !== "undefined" &&
     ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
@@ -87,15 +89,23 @@ export function useAIChatVoice({
 
   const needBrowserSTTFallback =
     voiceCall.isCallActive &&
-    (voice.sttProvider instanceof BrowserSTTProvider || (isNonBrowserSTT && !vad.isSupported));
+    (voice.sttProvider?.id === "browser-stt" || (isNonBrowserSTT && !vad.isSupported));
   const useBrowserSTTLoop = needBrowserSTTFallback && browserSTTAvailable;
 
   // Browser STT recognition loop
-  const browserSTTRef = useRef<BrowserSTTProvider | null>(null);
+  const browserSTTRef = useRef<{ startLiveRecognition: () => Promise<string> } | null>(null);
   useEffect(() => {
+    let cancelled = false;
     if (!browserSTTRef.current && browserSTTAvailable) {
-      browserSTTRef.current = new BrowserSTTProvider();
+      void import("../../../ai/voice/adapters/browser-stt.js").then(({ BrowserSTTProvider }) => {
+        if (!cancelled && !browserSTTRef.current) {
+          browserSTTRef.current = new BrowserSTTProvider();
+        }
+      });
     }
+    return () => {
+      cancelled = true;
+    };
   }, [browserSTTAvailable]);
 
   useEffect(() => {

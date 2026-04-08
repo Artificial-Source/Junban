@@ -60,14 +60,16 @@ test.describe("Task editing", () => {
     // Click the "No date" button to open date picker
     await dialog.getByRole("button", { name: "No date" }).click();
 
-    // Click "Today" quick option in date picker (scope to dialog to avoid sidebar "Today" button)
-    const todayBtn = dialog.getByRole("button", { name: "Today" });
-    if (await todayBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await todayBtn.click();
-    }
+    const todayBtn = page.locator("body > div.fixed.z-50").getByRole("button", { name: "Today" });
+    await expect(todayBtn).toBeVisible({ timeout: 2000 });
+    await todayBtn.click();
 
-    // Close panel
-    await dialog.getByLabel("Close task details").click();
+    await expect(dialog.getByRole("button", { name: /^\w{3} \d{1,2}$/ })).toBeVisible({
+      timeout: 5000,
+    });
+
+    await page.reload();
+    await expect(page.getByText("Inbox").first()).toBeVisible({ timeout: 10000 });
 
     // The task should now show a date indicator
     await expect(page.locator("[aria-label='Task: Date task']").first()).toBeVisible();

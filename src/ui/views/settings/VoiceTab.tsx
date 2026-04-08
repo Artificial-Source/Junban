@@ -1,12 +1,34 @@
+import { useEffect } from "react";
 import { Play } from "lucide-react";
 import { useVoiceContext, type VoiceMode } from "../../context/VoiceContext.js";
+import { VoiceFeatureProvider } from "../../context/VoiceFeatureProvider.js";
 import { MicrophoneSection } from "./voice/MicrophoneSection.js";
 import { ProviderApiKeyInput } from "./voice/ProviderApiKeyInput.js";
 import { LocalModelsSection } from "./voice/LocalModelsSection.js";
 
 export function VoiceTab() {
+  return (
+    <VoiceFeatureProvider>
+      <VoiceTabContent />
+    </VoiceFeatureProvider>
+  );
+}
+
+function VoiceTabContent() {
   const voice = useVoiceContext();
-  const { settings, updateSettings, registry, ttsVoices, ttsModels } = voice;
+  const {
+    settings,
+    updateSettings,
+    registry,
+    ttsVoices,
+    ttsModels,
+    localProvidersLoaded,
+    ensureLocalProvidersLoaded,
+  } = voice;
+
+  useEffect(() => {
+    void ensureLocalProvidersLoaded();
+  }, [ensureLocalProvidersLoaded]);
 
   const sttProviders = registry.listSTT();
   const ttsProviders = registry.listTTS();
@@ -44,6 +66,9 @@ export function VoiceTab() {
                 </option>
               ))}
             </select>
+            {!localProvidersLoaded && (
+              <p className="mt-1 text-xs text-on-surface-muted">Loading local voice providers...</p>
+            )}
           </div>
 
           {selectedSTT?.needsApiKey && (

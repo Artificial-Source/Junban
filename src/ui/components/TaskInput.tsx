@@ -1,16 +1,25 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Plus, Flag, Hash, Calendar, FolderOpen, Repeat, Clock } from "lucide-react";
-import { parseTask } from "../../parser/task-parser.js";
+import type { ParsedTask } from "../../parser/task-parser.js";
 import { formatRecurrenceLabel } from "./RecurrencePicker.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 
 const PRIORITY_MAP: Record<string, number> = { p1: 1, p2: 2, p3: 3, p4: 4 };
 
 interface TaskInputProps {
-  onSubmit: (input: ReturnType<typeof parseTask>) => void;
+  onSubmit: (input: ParsedTask) => void;
   placeholder?: string;
   autoFocusTrigger?: number;
   defaultDueDate?: Date;
+}
+
+let parseTaskLoader: Promise<typeof import("../../parser/task-parser.js")> | null = null;
+
+async function loadTaskParser() {
+  if (!parseTaskLoader) {
+    parseTaskLoader = import("../../parser/task-parser.js");
+  }
+  return parseTaskLoader;
 }
 
 export function TaskInput({
@@ -20,6 +29,7 @@ export function TaskInput({
   defaultDueDate,
 }: TaskInputProps) {
   const [value, setValue] = useState("");
+  const [preview, setPreview] = useState<ParsedTask | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { settings } = useGeneralSettings();
 
@@ -29,15 +39,41 @@ export function TaskInput({
     }
   }, [autoFocusTrigger]);
 
-  const preview = useMemo(() => {
-    if (!value.trim()) return null;
-    return parseTask(value);
+  useEffect(() => {
+    if (!value.trim()) {
+      setPreview(null);
+      return;
+    }
+
+    let cancelled = false;
+    void loadTaskParser().then(({ parseTask }) => {
+      if (!cancelled) {
+        setPreview(parseTask(value));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [value]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    const warmParser = () => {
+      void loadTaskParser();
+    };
+
+    const input = inputRef.current;
+    input?.addEventListener("focus", warmParser, { once: true });
+    return () => {
+      input?.removeEventListener("focus", warmParser);
+    };
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!value.trim()) return;
 
+    const { parseTask } = await loadTaskParser();
     const parsed = parseTask(value);
     // Apply default priority from settings if user didn't specify one
     if (parsed.priority === null && settings.default_priority !== "none") {

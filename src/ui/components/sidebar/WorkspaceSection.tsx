@@ -1,5 +1,5 @@
 import { MessageSquare, Settings } from "lucide-react";
-import type { ViewInfo } from "../../api/index.js";
+import type { ViewInfo } from "../../api/plugins.js";
 import { CollapsedTooltip, renderNavButton } from "./SidebarPrimitives.js";
 
 interface WorkspaceSectionProps {

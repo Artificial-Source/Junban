@@ -2,7 +2,7 @@
 
 The plugin subsystem (`src/plugins/`) implements Junban's Obsidian-style plugin system. It handles plugin discovery, manifest validation, permission-gated loading, lifecycle management, and the API surface that plugins interact with. This document is for **Junban developers** who need to understand or modify the plugin system internals. For plugin authors, see `docs/plugins/API.md`.
 
-**Total files:** 11 | **Total lines:** ~1,123
+This document is intentionally architecture-focused. Permission names and API namespaces are documented here, but exact file/line totals are not treated as canonical metadata.
 
 ---
 
@@ -52,10 +52,12 @@ Cleanup (unregister commands, UI, AI providers, tools)
 ## Type Definitions
 
 ### `types.ts`
+
 **Path:** `src/plugins/types.ts`
 **Lines:** 72
 **Purpose:** Zod schemas and TypeScript types for plugin manifests, settings, and permissions.
 **Key Exports:**
+
 - `SettingDefinition` — Zod discriminated union supporting 4 setting types:
   - `text` — `{ id, name, type: "text", default: string, description?, placeholder? }`
   - `number` — `{ id, name, type: "number", default: number, description?, min?, max? }`
@@ -72,7 +74,7 @@ Cleanup (unregister commands, UI, AI providers, tools)
   - `license` — optional string
   - `keywords` — optional string array (default: `[]`)
   - `dependencies` — optional record of string to string
-- `VALID_PERMISSIONS` — const tuple of all 15 recognized permissions:
+- `VALID_PERMISSIONS` — const tuple of the recognized plugin permissions:
   - `"task:read"`, `"task:write"` — task access (list, get, create, update, complete, uncomplete, delete)
   - `"project:read"`, `"project:write"` — project access (list, get, create, update, delete)
   - `"tag:read"`, `"tag:write"` — tag access (list, create, delete)
@@ -84,18 +86,20 @@ Cleanup (unregister commands, UI, AI providers, tools)
   - `"ai:provider"` — register custom AI providers
   - `"ai:tools"` — register custom AI tools
 - `Permission` — union type from `VALID_PERMISSIONS`
-**Key Dependencies:** `zod`
-**Used By:** `loader.ts`, `api.ts`, `installer.ts`, `registry.ts`, `settings.ts`
+  **Key Dependencies:** `zod`
+  **Used By:** `loader.ts`, `api.ts`, `installer.ts`, `registry.ts`, `settings.ts`
 
 ---
 
 ## Plugin Discovery and Loading
 
 ### `loader.ts`
+
 **Path:** `src/plugins/loader.ts`
 **Lines:** 375
 **Purpose:** Central plugin loader. Discovers plugins from the filesystem, validates manifests, manages permissions, and handles the full load/unload lifecycle.
 **Key Exports:**
+
 - `LoadedPlugin` — `{ manifest, path, enabled, instance?, pendingApproval? }`
 - `PluginServices` — services injected into the loader:
   - `taskService`, `eventBus`, `settingsManager`, `commandRegistry`, `uiRegistry`, `queries` (IStorage)
@@ -122,40 +126,40 @@ Cleanup (unregister commands, UI, AI providers, tools)
   - `getAll()` / `get(pluginId)` — accessors
   - `discoverOne(pluginId)` — discovers a single plugin after install
   - `remove(pluginId)` — removes from internal map after uninstall
-**Key Dependencies:** `node:fs`, `node:path`, `PluginManifest`, `createPluginAPI`, `Plugin`, all service types
-**Used By:** App initialization (`main.ts`), plugin management API routes
+    **Key Dependencies:** `node:fs`, `node:path`, `PluginManifest`, `createPluginAPI`, `Plugin`, all service types
+    **Used By:** App initialization (`main.ts`), plugin management API routes
 
 ---
 
 ## Plugin Lifecycle
 
 ### `lifecycle.ts`
+
 **Path:** `src/plugins/lifecycle.ts`
 **Lines:** 25
 **Purpose:** Abstract base class that all plugins must extend.
 **Key Exports:**
+
 - `Plugin` — abstract class:
   - `app: PluginAPI` — the Junban Plugin API (set by loader before `onLoad()`)
   - `settings: PluginSettingsAccessor` — settings accessor (set by loader before `onLoad()`)
   - `abstract onLoad()` — called when the plugin is activated
   - `abstract onUnload()` — called when the plugin is deactivated
-  - Optional lifecycle hooks (plugins can override):
-    - `onTaskCreate?(task)` — called when a task is created
-    - `onTaskComplete?(task)` — called when a task is completed
-    - `onTaskUpdate?(task, changes)` — called when a task is updated
-    - `onTaskDelete?(task)` — called when a task is deleted
-**Key Dependencies:** `Task` type, `PluginAPI`, `PluginSettingsAccessor`
-**Used By:** All plugin implementations, `loader.ts`
+  - Optional lifecycle hooks (plugins can override): - `onTaskCreate?(task)` — called when a task is created - `onTaskComplete?(task)` — called when a task is completed - `onTaskUpdate?(task, changes)` — called when a task is updated - `onTaskDelete?(task)` — called when a task is deleted
+    **Key Dependencies:** `Task` type, `PluginAPI`, `PluginSettingsAccessor`
+    **Used By:** All plugin implementations, `loader.ts`
 
 ---
 
 ## Plugin API Surface
 
 ### `api.ts`
+
 **Path:** `src/plugins/api.ts`
 **Lines:** 166
 **Purpose:** Creates the permission-gated API object that plugins interact with. Each plugin gets its own API instance with access controlled by its declared permissions.
 **Key Exports:**
+
 - `PLUGIN_API_VERSION` — `"2.0.0"` (semver)
 - `PLUGIN_API_STABILITY` — `"stable"` (breaking changes require major version bump)
 - `PluginAPIOptions` — all services and configuration needed to construct the API
@@ -163,39 +167,39 @@ Cleanup (unregister commands, UI, AI providers, tools)
 - `PluginAPI` — return type of `createPluginAPI()`
 - `createPluginAPI(options)` — factory function returning:
 
-| Namespace | Permission | Methods |
-|-----------|-----------|---------|
-| `meta` | none | `version`, `stability` |
-| `tasks.list` | `task:read` | `async (filter?) => Task[]` |
-| `tasks.get` | `task:read` | `async (id) => Task \| null` |
-| `tasks.create` | `task:write` | `async (input) => Task` |
-| `tasks.update` | `task:write` | `async (id, changes) => Task` |
-| `tasks.complete` | `task:write` | `async (id) => Task` |
-| `tasks.uncomplete` | `task:write` | `async (id) => Task` |
-| `tasks.delete` | `task:write` | `async (id) => boolean` |
-| `projects.list` | `project:read` | `async () => Project[]` |
-| `projects.get` | `project:read` | `async (id) => Project \| null` |
-| `projects.create` | `project:write` | `async (name, opts?) => Project` |
-| `projects.update` | `project:write` | `async (id, changes) => Project \| null` |
-| `projects.delete` | `project:write` | `async (id) => boolean` |
-| `tags.list` | `tag:read` | `async () => Tag[]` |
-| `tags.create` | `tag:write` | `async (name, color?) => Tag` |
-| `tags.delete` | `tag:write` | `async (id) => boolean` |
-| `commands.register` | `commands` | `(command) => void` — prefixes command ID with `pluginId:` |
-| `ui.addSidebarPanel` | `ui:panel` | `(panel) => void` |
-| `ui.addView` | `ui:view` | `(view) => void` — accepts `slot?` (default "tools"), `contentType?` (default "text") |
-| `ui.addStatusBarItem` | `ui:status` | `(item) => StatusBarHandle` |
-| `storage.get` | `storage` | `async <T>(key) => T \| null` |
-| `storage.set` | `storage` | `async (key, value) => void` |
-| `storage.delete` | `storage` | `async (key) => void` |
-| `storage.keys` | `storage` | `async () => string[]` |
-| `network.fetch` | `network` | `async (url, options?) => Response` |
-| `events.on` | `task:read` | `(event, callback) => void` |
-| `events.off` | none | `(event, callback) => void` |
-| `ai.registerProvider` | `ai:provider` | `(plugin) => void` — prefixes provider name with `pluginId:` |
-| `ai.registerTool` | `ai:tools` | `(definition, executor) => void` — registers with source = pluginId |
-| `settings.get` | none | `<T>(key) => T` |
-| `settings.set` | none | `async (key, value) => void` |
+| Namespace             | Permission      | Methods                                                                               |
+| --------------------- | --------------- | ------------------------------------------------------------------------------------- |
+| `meta`                | none            | `version`, `stability`                                                                |
+| `tasks.list`          | `task:read`     | `async (filter?) => Task[]`                                                           |
+| `tasks.get`           | `task:read`     | `async (id) => Task \| null`                                                          |
+| `tasks.create`        | `task:write`    | `async (input) => Task`                                                               |
+| `tasks.update`        | `task:write`    | `async (id, changes) => Task`                                                         |
+| `tasks.complete`      | `task:write`    | `async (id) => Task`                                                                  |
+| `tasks.uncomplete`    | `task:write`    | `async (id) => Task`                                                                  |
+| `tasks.delete`        | `task:write`    | `async (id) => boolean`                                                               |
+| `projects.list`       | `project:read`  | `async () => Project[]`                                                               |
+| `projects.get`        | `project:read`  | `async (id) => Project \| null`                                                       |
+| `projects.create`     | `project:write` | `async (name, opts?) => Project`                                                      |
+| `projects.update`     | `project:write` | `async (id, changes) => Project \| null`                                              |
+| `projects.delete`     | `project:write` | `async (id) => boolean`                                                               |
+| `tags.list`           | `tag:read`      | `async () => Tag[]`                                                                   |
+| `tags.create`         | `tag:write`     | `async (name, color?) => Tag`                                                         |
+| `tags.delete`         | `tag:write`     | `async (id) => boolean`                                                               |
+| `commands.register`   | `commands`      | `(command) => void` — prefixes command ID with `pluginId:`                            |
+| `ui.addSidebarPanel`  | `ui:panel`      | `(panel) => void`                                                                     |
+| `ui.addView`          | `ui:view`       | `(view) => void` — accepts `slot?` (default "tools"), `contentType?` (default "text") |
+| `ui.addStatusBarItem` | `ui:status`     | `(item) => StatusBarHandle`                                                           |
+| `storage.get`         | `storage`       | `async <T>(key) => T \| null`                                                         |
+| `storage.set`         | `storage`       | `async (key, value) => void`                                                          |
+| `storage.delete`      | `storage`       | `async (key) => void`                                                                 |
+| `storage.keys`        | `storage`       | `async () => string[]`                                                                |
+| `network.fetch`       | `network`       | `async (url, options?) => Response`                                                   |
+| `events.on`           | `task:read`     | `(event, callback) => void`                                                           |
+| `events.off`          | none            | `(event, callback) => void`                                                           |
+| `ai.registerProvider` | `ai:provider`   | `(plugin) => void` — prefixes provider name with `pluginId:`                          |
+| `ai.registerTool`     | `ai:tools`      | `(definition, executor) => void` — registers with source = pluginId                   |
+| `settings.get`        | none            | `<T>(key) => T`                                                                       |
+| `settings.set`        | none            | `async (key, value) => void`                                                          |
 
 Every API method is always present. Calling without the required permission throws an error with a clear message telling the plugin author exactly which permission to add to `manifest.json`. No optional chaining needed.
 
@@ -207,26 +211,30 @@ Every API method is always present. Calling without the required permission thro
 ## Sandbox
 
 ### `sandbox.ts`
+
 **Path:** `src/plugins/sandbox.ts`
 **Lines:** 22
 **Purpose:** Plugin sandbox placeholder. Currently a no-op — actual isolation is deferred to Sprint 4.
 **Key Exports:**
+
 - `SandboxOptions` — `{ pluginId, pluginDir, permissions }`
 - `createSandbox(options)` — returns `{ execute, destroy }` (both no-ops)
-**Current state:** Permission checks happen in `createPluginAPI()` (gating access), not via runtime isolation. Plugins run in the same process via `dynamic import()`.
-**Future plans:** Full isolation via `vm` module, Web Worker, or iframe.
-**Key Dependencies:** None
-**Used By:** Not actively used in the current load flow (permission gating is in `api.ts`)
+  **Current state:** Permission checks happen in `createPluginAPI()` (gating access), not via runtime isolation. Plugins run in the same process via `dynamic import()`.
+  **Future plans:** Full isolation via `vm` module, Web Worker, or iframe.
+  **Key Dependencies:** None
+  **Used By:** Not actively used in the current load flow (permission gating is in `api.ts`)
 
 ---
 
 ## Plugin Registry (Community)
 
 ### `registry.ts`
+
 **Path:** `src/plugins/registry.ts`
 **Lines:** 72
 **Purpose:** Client for the community plugin directory. Fetches and parses the plugin registry (local file or remote URL).
 **Key Exports:**
+
 - `RegistryEntry` — Zod-validated shape:
   - `id`, `name`, `description`, `author`, `version`, `repository` — strings
   - `downloadUrl?` — optional URL for tar.gz download
@@ -237,18 +245,20 @@ Every API method is always present. Calling without the required permission thro
   - `loadLocal()` — reads and parses a local JSON file
   - `fetchRemote(url)` — fetches and parses from a URL
   - `search(plugins, query)` — case-insensitive search by name, description, or tags
-**Key Dependencies:** `node:fs`, `zod`
-**Used By:** Plugin store UI, plugin management API routes
+    **Key Dependencies:** `node:fs`, `zod`
+    **Used By:** Plugin store UI, plugin management API routes
 
 ---
 
 ## Plugin Installer
 
 ### `installer.ts`
+
 **Path:** `src/plugins/installer.ts`
 **Lines:** 133
 **Purpose:** Downloads and extracts plugin archives from tar.gz URLs. Handles installation and uninstallation.
 **Key Exports:**
+
 - `InstallResult` — `{ success, error? }`
 - `PluginInstaller` — class (constructor takes `pluginDir`):
   - `install(pluginId, downloadUrl)` — full install sequence:
@@ -260,18 +270,20 @@ Every API method is always present. Calling without the required permission thro
     6. Moves to `plugins/<pluginId>/`
     7. Cleans up temp files
   - `uninstall(pluginId)` — removes plugin directory with `fs.rmSync(recursive)`
-**Key Dependencies:** `node:fs`, `node:os`, `node:path`, `node:stream/promises`, `tar`, `PluginManifest`
-**Used By:** Plugin store UI, plugin management API routes
+    **Key Dependencies:** `node:fs`, `node:os`, `node:path`, `node:stream/promises`, `tar`, `PluginManifest`
+    **Used By:** Plugin store UI, plugin management API routes
 
 ---
 
 ## Plugin Settings
 
 ### `settings.ts`
+
 **Path:** `src/plugins/settings.ts`
 **Lines:** 74
 **Purpose:** Per-plugin settings manager. In-memory cache backed by database persistence. Defaults come from the plugin manifest.
 **Key Exports:**
+
 - `PluginSettingsManager` — class (constructor takes `IStorage`):
   - `get<T>(pluginId, settingId, definitions)` — returns cached value, or manifest default, or throws if unknown setting
   - `getAll(pluginId)` — returns all cached settings for a plugin
@@ -279,21 +291,23 @@ Every API method is always present. Calling without the required permission thro
   - `delete(pluginId, settingId)` — removes from cache and persists
   - `keys(pluginId)` — returns all setting keys
   - `load(pluginId)` — loads from DB into cache (`IStorage.loadPluginSettings()`)
-**Key internals:**
+    **Key internals:**
 - `cache` — `Map<string, Record<string, unknown>>` (plugin ID -> settings object)
 - `persist(pluginId)` — serializes cache to JSON and saves via `IStorage.savePluginSettings()`
-**Key Dependencies:** `IStorage`, `SettingDefinition`
-**Used By:** `loader.ts` (loads settings before plugin activation), `api.ts` (settings accessor)
+  **Key Dependencies:** `IStorage`, `SettingDefinition`
+  **Used By:** `loader.ts` (loads settings before plugin activation), `api.ts` (settings accessor)
 
 ---
 
 ## Command Registry
 
 ### `command-registry.ts`
+
 **Path:** `src/plugins/command-registry.ts`
 **Lines:** 50
 **Purpose:** Stores plugin-registered commands. Commands are callable programmatically and will be wired to the React command palette in Sprint 4.
 **Key Exports:**
+
 - `PluginCommand` — `{ id, name, pluginId, callback, hotkey? }`
 - `CommandRegistry` — class:
   - `register(cmd)` — registers a command (throws on duplicate ID)
@@ -302,18 +316,20 @@ Every API method is always present. Calling without the required permission thro
   - `get(id)` — lookup
   - `getAll()` — list all commands
   - `execute(id)` — calls the command's callback (throws if not found)
-**Key Dependencies:** None
-**Used By:** `loader.ts` (cleanup on unload), `api.ts` (register via plugin API)
+    **Key Dependencies:** None
+    **Used By:** `loader.ts` (cleanup on unload), `api.ts` (register via plugin API)
 
 ---
 
 ## UI Registry
 
 ### `ui-registry.ts`
+
 **Path:** `src/plugins/ui-registry.ts`
 **Lines:** 100
 **Purpose:** Stores plugin-registered UI components: sidebar panels, views (with slot and content type), and status bar items.
 **Key Exports:**
+
 - `ViewSlot` — `"navigation" | "tools" | "workspace"` — determines where a view appears in the sidebar
 - `ViewContentType` — `"text" | "structured"` — determines how view content is rendered
 - `PanelRegistration` — `{ id, pluginId, title, icon, component?, getContent? }`
@@ -326,8 +342,8 @@ Every API method is always present. Calling without the required permission thro
   - `getPanels()` / `getViews()` / `getStatusBarItems()` — list all registered components
   - `getPanelContent(id)` / `getViewContent(id)` — calls `getContent()` if available
   - `addStatusBarItem()` returns a `StatusBarHandle` for live updates
-**Key Dependencies:** None
-**Used By:** `loader.ts` (cleanup on unload), `api.ts` (register via plugin API)
+    **Key Dependencies:** None
+    **Used By:** `loader.ts` (cleanup on unload), `api.ts` (register via plugin API)
 
 ---
 
@@ -344,23 +360,23 @@ Permissions control what parts of the Plugin API a plugin can access. The flow i
 
 ### Permission Reference (15 permissions)
 
-| Permission | Grants Access To |
-|------------|------------------|
-| `task:read` | `tasks.list()`, `tasks.get()`, `events.on()` |
-| `task:write` | `tasks.create()`, `tasks.update()`, `tasks.complete()`, `tasks.uncomplete()`, `tasks.delete()` |
-| `project:read` | `projects.list()`, `projects.get()` |
-| `project:write` | `projects.create()`, `projects.update()`, `projects.delete()` |
-| `tag:read` | `tags.list()` |
-| `tag:write` | `tags.create()`, `tags.delete()` |
-| `ui:panel` | `ui.addSidebarPanel()` |
-| `ui:view` | `ui.addView()` |
-| `ui:status` | `ui.addStatusBarItem()` |
-| `commands` | `commands.register()` |
-| `settings` | Settings tab in the Settings view |
-| `storage` | `storage.get/set/delete/keys()` |
-| `network` | `network.fetch()` |
-| `ai:provider` | `ai.registerProvider()` |
-| `ai:tools` | `ai.registerTool()` |
+| Permission      | Grants Access To                                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `task:read`     | `tasks.list()`, `tasks.get()`, `events.on()`                                                   |
+| `task:write`    | `tasks.create()`, `tasks.update()`, `tasks.complete()`, `tasks.uncomplete()`, `tasks.delete()` |
+| `project:read`  | `projects.list()`, `projects.get()`                                                            |
+| `project:write` | `projects.create()`, `projects.update()`, `projects.delete()`                                  |
+| `tag:read`      | `tags.list()`                                                                                  |
+| `tag:write`     | `tags.create()`, `tags.delete()`                                                               |
+| `ui:panel`      | `ui.addSidebarPanel()`                                                                         |
+| `ui:view`       | `ui.addView()`                                                                                 |
+| `ui:status`     | `ui.addStatusBarItem()`                                                                        |
+| `commands`      | `commands.register()`                                                                          |
+| `settings`      | Settings tab in the Settings view                                                              |
+| `storage`       | `storage.get/set/delete/keys()`                                                                |
+| `network`       | `network.fetch()`                                                                              |
+| `ai:provider`   | `ai.registerProvider()`                                                                        |
+| `ai:tools`      | `ai.registerTool()`                                                                            |
 
 ---
 

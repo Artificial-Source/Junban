@@ -4,7 +4,7 @@ import type { SensorDescriptor, SensorOptions } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { LucideIcon } from "lucide-react";
 import type { Project } from "../../../core/types.js";
-import type { PanelInfo, ViewInfo } from "../../api/index.js";
+import type { PanelInfo, ViewInfo } from "../../api/plugins.js";
 import { SECTION_IDS, SortableNavItem, renderNavButton } from "./SidebarPrimitives.js";
 import { renderSection } from "./NavSection.js";
 import { CollapsedNav } from "./CollapsedNav.js";

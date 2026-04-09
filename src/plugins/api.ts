@@ -13,6 +13,7 @@ import type { LLMProviderRegistry } from "../ai/provider/registry.js";
 import type { ToolRegistry } from "../ai/tools/registry.js";
 import type { LLMProviderPlugin } from "../ai/provider/interface.js";
 import type { ToolDefinition, ToolExecutor } from "../ai/tools/types.js";
+import { validateOutboundNetworkUrl } from "./network-policy.js";
 
 /** Current Plugin API version (semver). */
 export const PLUGIN_API_VERSION = "2.0.0";
@@ -33,6 +34,10 @@ export interface PluginAPIOptions {
   settingDefinitions: SettingDefinition[];
   aiProviderRegistry?: LLMProviderRegistry;
   toolRegistry?: ToolRegistry;
+  onEventListenerRegistered?: <E extends EventName>(
+    event: E,
+    callback: EventCallback<E>,
+  ) => void;
 }
 
 /** Accessor bound to a specific plugin for reading/writing settings. */
@@ -77,6 +82,7 @@ export function createPluginAPI(options: PluginAPIOptions) {
     settingDefinitions,
     aiProviderRegistry,
     toolRegistry,
+    onEventListenerRegistered,
   } = options;
 
   const has = (p: Permission) => permissions.includes(p);
@@ -244,7 +250,7 @@ export function createPluginAPI(options: PluginAPIOptions) {
 
       set: has("storage")
         ? async (key: string, value: unknown): Promise<void> => {
-            await settingsManager.set(pluginId, key, value);
+            await settingsManager.setStorageValue(pluginId, key, value);
           }
         : (denied(pluginId, "storage", "storage.set()") as unknown as (key: string, value: unknown) => Promise<void>),
 
@@ -265,13 +271,22 @@ export function createPluginAPI(options: PluginAPIOptions) {
     network: {
       fetch: has("network")
         ? async (url: string, init?: RequestInit): Promise<Response> => {
+            validateOutboundNetworkUrl(url, { context: `network.fetch() for plugin "${pluginId}"` });
             const networkLogger = createLogger("plugin-network");
             networkLogger.info("Plugin fetch request", {
               pluginId,
               url,
               method: init?.method ?? "GET",
             });
-            return fetch(url, init);
+
+            const response = await fetch(url, { ...init, redirect: "manual" });
+            if (response.status >= 300 && response.status < 400) {
+              throw new Error(
+                `Blocked network.fetch() for plugin "${pluginId}": redirects are not allowed`,
+              );
+            }
+
+            return response;
           }
         : (denied(pluginId, "network", "network.fetch()") as unknown as (url: string, init?: RequestInit) => Promise<Response>),
     },
@@ -281,6 +296,7 @@ export function createPluginAPI(options: PluginAPIOptions) {
       on: <E extends EventName>(event: E, callback: EventCallback<E>) => {
         checkPermission("task:read", `events.on("${event}")`);
         eventBus.on(event, callback);
+        onEventListenerRegistered?.(event, callback);
       },
       off: <E extends EventName>(event: E, callback: EventCallback<E>) => {
         eventBus.off(event, callback);
@@ -308,12 +324,16 @@ export function createPluginAPI(options: PluginAPIOptions) {
 
     // ── Settings API ─────────────────────────────────────────────────
     settings: {
-      get: <T>(key: string): T => {
-        return settingsManager.get<T>(pluginId, key, settingDefinitions);
-      },
-      set: async (key: string, value: unknown): Promise<void> => {
-        await settingsManager.set(pluginId, key, value);
-      },
+      get: has("settings")
+        ? (<T>(key: string): T => {
+            return settingsManager.get<T>(pluginId, key, settingDefinitions);
+          })
+        : (denied(pluginId, "settings", "settings.get()") as unknown as <T>(key: string) => T),
+      set: has("settings")
+        ? async (key: string, value: unknown): Promise<void> => {
+            await settingsManager.setSetting(pluginId, key, value, settingDefinitions);
+          }
+        : (denied(pluginId, "settings", "settings.set()") as unknown as (key: string, value: unknown) => Promise<void>),
     } satisfies PluginSettingsAccessor,
   };
 }

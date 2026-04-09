@@ -203,12 +203,14 @@ function createTestLoader(
     author: "test",
     description: "test",
     main: "index.js",
+    permissions: ["task:read"],
   };
   // Access the private map — acceptable in tests
   (loader as any).plugins.set(pluginId, {
     manifest: fakeManifest,
     path: "/tmp/test-plugins/test-plugin",
     enabled: false,
+    builtin: true,
   });
 
   return { loader, eventBus, services, pluginId };
@@ -297,6 +299,27 @@ describe("PluginLoader — task hook wiring", () => {
     expect(eventBus.listenerCount("task:complete")).toBe(0);
     expect(eventBus.listenerCount("task:update")).toBe(0);
     expect(eventBus.listenerCount("task:delete")).toBe(0);
+  });
+
+  it("does not wire lifecycle task hooks without task:read permission", async () => {
+    const createSpy = vi.fn();
+
+    class HookPlugin extends Plugin {
+      async onLoad(): Promise<void> {}
+      async onUnload(): Promise<void> {}
+      onTaskCreate(task: Task): void {
+        createSpy(task);
+      }
+    }
+
+    const { loader, eventBus, pluginId } = createTestLoader(HookPlugin);
+    (loader as any).plugins.get(pluginId).manifest.permissions = ["task:write"];
+
+    await loader.load(pluginId);
+
+    expect(eventBus.listenerCount("task:create")).toBe(0);
+    eventBus.emit("task:create", mockTask);
+    expect(createSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -416,6 +439,112 @@ describe("PluginLoader — hook cleanup on unload", () => {
     eventBus.emit("task:create", mockTask);
     expect(spy).not.toHaveBeenCalled();
   });
+
+  it("removes app.events.on listeners registered by plugin API on unload", async () => {
+    class EventApiPlugin extends Plugin {
+      private onCreate = () => {};
+
+      async onLoad(): Promise<void> {
+        this.app.events.on("task:create", this.onCreate);
+      }
+
+      async onUnload(): Promise<void> {}
+    }
+
+    const { loader, eventBus, pluginId, services } = createTestLoader(EventApiPlugin);
+    (loader as any).plugins.get(pluginId).manifest.permissions = ["task:read"];
+    (services.queries.getPluginPermissions as any).mockReturnValue(["task:read"]);
+
+    await loader.load(pluginId);
+    expect(eventBus.listenerCount("task:create")).toBe(1);
+
+    await loader.unload(pluginId);
+    expect(eventBus.listenerCount("task:create")).toBe(0);
+  });
+
+  it("removes app.events.on listeners when onLoad fails", async () => {
+    class FailingEventApiPlugin extends Plugin {
+      async onLoad(): Promise<void> {
+        this.app.events.on("task:create", () => {});
+        throw new Error("boom");
+      }
+
+      async onUnload(): Promise<void> {}
+    }
+
+    const { loader, eventBus, pluginId, services } = createTestLoader(
+      FailingEventApiPlugin,
+    );
+    (loader as any).plugins.get(pluginId).manifest.permissions = ["task:read"];
+    (services.queries.getPluginPermissions as any).mockReturnValue(["task:read"]);
+
+    await expect(loader.load(pluginId)).rejects.toThrow("boom");
+    expect(eventBus.listenerCount("task:create")).toBe(0);
+  });
+
+  it("unregisters plugin tools on normal unload", async () => {
+    class BasicPlugin extends Plugin {
+      async onLoad(): Promise<void> {}
+      async onUnload(): Promise<void> {}
+    }
+
+    const unregisterBySource = vi.fn();
+    const { loader, pluginId } = createTestLoader(BasicPlugin, {
+      toolRegistry: {
+        unregisterBySource,
+      } as any,
+    });
+
+    await loader.load(pluginId);
+    await loader.unload(pluginId);
+
+    expect(unregisterBySource).toHaveBeenCalledWith(pluginId);
+  });
+});
+
+describe("PluginLoader — lifecycle timeout cleanup", () => {
+  it("cancels load timeout when onLoad resolves", async () => {
+    class FastPlugin extends Plugin {
+      async onLoad(): Promise<void> {}
+      async onUnload(): Promise<void> {}
+    }
+
+    const cancel = vi.fn();
+    const origTimeout = (PluginLoader as any).lifecycleTimeout;
+    (PluginLoader as any).lifecycleTimeout = (_id: string, _ms: number) => ({
+      promise: new Promise(() => {}),
+      cancel,
+    });
+
+    const { loader, pluginId } = createTestLoader(FastPlugin);
+    try {
+      await loader.load(pluginId);
+      expect(cancel).toHaveBeenCalled();
+    } finally {
+      (PluginLoader as any).lifecycleTimeout = origTimeout;
+    }
+  });
+});
+
+describe("PluginLoader — constructor instantiation", () => {
+  it("instantiates plugin class only once during load", async () => {
+    let constructorCalls = 0;
+
+    class SingleConstructPlugin extends Plugin {
+      constructor() {
+        super();
+        constructorCalls++;
+      }
+
+      async onLoad(): Promise<void> {}
+      async onUnload(): Promise<void> {}
+    }
+
+    const { loader, pluginId } = createTestLoader(SingleConstructPlugin);
+    await loader.load(pluginId);
+
+    expect(constructorCalls).toBe(1);
+  });
 });
 
 describe("PluginLoader — module export validation", () => {
@@ -449,6 +578,7 @@ describe("PluginLoader — module export validation", () => {
       },
       path: "/tmp/test-plugins/bad-plugin",
       enabled: false,
+      builtin: true,
     });
 
     await expect(loader.load("bad-plugin")).rejects.toThrow(
@@ -490,6 +620,7 @@ describe("PluginLoader — module export validation", () => {
       },
       path: "/tmp/test-plugins/bad-plugin",
       enabled: false,
+      builtin: true,
     });
 
     await expect(loader.load("bad-plugin")).rejects.toThrow(
@@ -530,6 +661,7 @@ describe("PluginLoader — module export validation", () => {
       },
       path: "/tmp/test-plugins/bad-plugin",
       enabled: false,
+      builtin: true,
     });
 
     await expect(loader.load("bad-plugin")).rejects.toThrow(

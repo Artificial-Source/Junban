@@ -3,9 +3,32 @@ import path from "node:path";
 import type { ViteDevServer } from "vite";
 import type { GetServices } from "./types.js";
 import { parseBody } from "./types.js";
+import { ValidationError } from "../src/core/errors.js";
+import { validateOutboundNetworkUrl } from "../src/plugins/network-policy.js";
+import {
+  areCommunityPluginsEnabled,
+  COMMUNITY_PLUGINS_DISABLED_ERROR,
+  hasSettingsPermission,
+  settingsPermissionError,
+  validateApprovalPermissions,
+} from "../src/plugins/route-policy.js";
+import {
+  expectRpcObject,
+  expectRpcOptionalString,
+  expectRpcString,
+  expectRpcStringArray,
+  validateTimeblockingRpcPayload,
+} from "../src/plugins/timeblocking-rpc-validation.js";
 
 // Plugin initialization lock — shared across all plugin routes
 let pluginInitPromise: Promise<void> | null = null;
+
+function statusFromError(message: string, err: unknown): number {
+  if (message.includes("Invalid JSON") || err instanceof ValidationError) {
+    return 400;
+  }
+  return 500;
+}
 
 export function createEnsurePlugins(server: ViteDevServer, getServices: GetServices) {
   return async function ensurePlugins() {
@@ -13,9 +36,7 @@ export function createEnsurePlugins(server: ViteDevServer, getServices: GetServi
       pluginInitPromise = (async () => {
         const svc = await getServices();
         // Use Vite's SSR module loader so .ts plugin files resolve correctly
-        svc.pluginLoader.setModuleLoader((modulePath: string) =>
-          server.ssrLoadModule(modulePath),
-        );
+        svc.pluginLoader.setModuleLoader((modulePath: string) => server.ssrLoadModule(modulePath));
         await svc.pluginLoader.loadAll();
       })();
     }
@@ -23,10 +44,7 @@ export function createEnsurePlugins(server: ViteDevServer, getServices: GetServi
   };
 }
 
-export function registerPluginRoutes(
-  server: ViteDevServer,
-  getServices: GetServices,
-) {
+export function registerPluginRoutes(server: ViteDevServer, getServices: GetServices) {
   const ensurePlugins = createEnsurePlugins(server, getServices);
 
   // GET /api/plugins — list all discovered plugins
@@ -67,9 +85,27 @@ export function registerPluginRoutes(
         const pluginId = approveMatch[1];
         const svc = await getServices();
         await ensurePlugins();
+
+        // Block approving community plugins when restricted mode is on
+        const plugin = svc.pluginLoader.get(pluginId);
+        if (plugin && !plugin.builtin && !areCommunityPluginsEnabled(svc.storage)) {
+          res.statusCode = 403;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: COMMUNITY_PLUGINS_DISABLED_ERROR }));
+          return;
+        }
+
         const body = await parseBody(req);
         const { permissions } = body as { permissions: string[] };
-        await svc.pluginLoader.approveAndLoad(pluginId, permissions);
+        const validation = validateApprovalPermissions(permissions);
+        if (!validation.ok) {
+          res.statusCode = 400;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: validation.error }));
+          return;
+        }
+
+        await svc.pluginLoader.approveAndLoad(pluginId, validation.permissions);
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: true }));
         return;
@@ -123,6 +159,12 @@ export function registerPluginRoutes(
           res.end(JSON.stringify({ error: "Plugin not found" }));
           return;
         }
+        if (!hasSettingsPermission(plugin.manifest.permissions)) {
+          res.statusCode = 403;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: settingsPermissionError(pluginId) }));
+          return;
+        }
         const stored = svc.settingsManager.getAll(pluginId);
         const definitions = plugin.manifest.settings ?? [];
         const values: Record<string, unknown> = {};
@@ -135,9 +177,24 @@ export function registerPluginRoutes(
       }
 
       if (req.method === "PUT") {
+        const plugin = svc.pluginLoader.get(pluginId);
+        if (!plugin) {
+          res.statusCode = 404;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: "Plugin not found" }));
+          return;
+        }
+        if (!hasSettingsPermission(plugin.manifest.permissions)) {
+          res.statusCode = 403;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: settingsPermissionError(pluginId) }));
+          return;
+        }
+
         const body = await parseBody(req);
         const { key, value } = body as { key: string; value: unknown };
-        await svc.settingsManager.set(pluginId, key, value);
+        const definitions = plugin.manifest.settings ?? [];
+        await svc.settingsManager.setSetting(pluginId, key, value, definitions);
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: true }));
         return;
@@ -146,7 +203,7 @@ export function registerPluginRoutes(
       next();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Internal server error";
-      res.statusCode = message.includes("Invalid JSON") ? 400 : 500;
+      res.statusCode = statusFromError(message, err);
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: message }));
     }
@@ -217,6 +274,38 @@ export function registerPluginRoutes(
     }
   });
 
+  // POST /api/plugins/ui/status-bar/:id/click
+  server.middlewares.use(async (req, res, next) => {
+    const match = req.url?.match(/^\/api\/plugins\/ui\/status-bar\/([^/]+)\/click$/);
+    if (!match || req.method !== "POST") return next();
+
+    try {
+      const svc = await getServices();
+      await ensurePlugins();
+
+      const id = decodeURIComponent(match[1]);
+      const item = svc.uiRegistry.getStatusBarItems().find((entry) => entry.id === id);
+      if (!item) {
+        res.statusCode = 404;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Status bar item not found" }));
+        return;
+      }
+
+      if (item.onClick) {
+        item.onClick();
+      }
+
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ ok: true }));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Internal server error";
+      res.statusCode = statusFromError(message, err);
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: message }));
+    }
+  });
+
   // GET /api/plugins/ui/panels
   server.middlewares.use(async (req, res, next) => {
     if (req.url !== "/api/plugins/ui/panels" || req.method !== "GET") return next();
@@ -227,6 +316,7 @@ export function registerPluginRoutes(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const panels = svc.uiRegistry.getPanels().map((panel: any) => ({
         id: panel.id,
+        pluginId: panel.pluginId,
         title: panel.title,
         icon: panel.icon,
         content: svc.uiRegistry.getPanelContent(panel.id) ?? "",
@@ -251,8 +341,7 @@ export function registerPluginRoutes(
       if (contentMatch && req.method === "GET") {
         const svc = await getServices();
         await ensurePlugins();
-        const content =
-          svc.uiRegistry.getViewContent(decodeURIComponent(contentMatch[1])) ?? "";
+        const content = svc.uiRegistry.getViewContent(decodeURIComponent(contentMatch[1])) ?? "";
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ content }));
         return;
@@ -286,8 +375,14 @@ export function registerPluginRoutes(
     try {
       const svc = await getServices();
       await ensurePlugins();
-      const body = await parseBody(req);
-      const { method, args } = body as { method: string; args: unknown[] };
+      const payloadValidation = validateTimeblockingRpcPayload(await parseBody(req));
+      if (!payloadValidation.ok) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: payloadValidation.error }));
+        return;
+      }
+      const { method, args } = payloadValidation.value;
 
       // Get the timeblocking plugin instance
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -313,47 +408,212 @@ export function registerPluginRoutes(
       // Route method calls
       let result: unknown;
       switch (method) {
-        case "listBlocks":
-          result = store.listBlocks(args[0] as string | undefined);
+        case "listBlocks": {
+          const date = expectRpcOptionalString(args, 0, "date");
+          if (!date.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: date.error }));
+            return;
+          }
+
+          result = store.listBlocks(date.value);
           break;
-        case "listBlocksInRange":
-          result = store.listBlocksInRange(args[0] as string, args[1] as string);
+        }
+        case "listBlocksInRange": {
+          const start = expectRpcString(args, 0, "startDate");
+          if (!start.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: start.error }));
+            return;
+          }
+
+          const end = expectRpcString(args, 1, "endDate");
+          if (!end.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: end.error }));
+            return;
+          }
+
+          result = store.listBlocksInRange(start.value, end.value);
           break;
-        case "listSlots":
-          result = store.listSlots(args[0] as string | undefined);
+        }
+        case "listSlots": {
+          const date = expectRpcOptionalString(args, 0, "date");
+          if (!date.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: date.error }));
+            return;
+          }
+
+          result = store.listSlots(date.value);
           break;
-        case "listSlotsInRange":
-          result = store.listSlotsInRange(args[0] as string, args[1] as string);
+        }
+        case "listSlotsInRange": {
+          const start = expectRpcString(args, 0, "startDate");
+          if (!start.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: start.error }));
+            return;
+          }
+
+          const end = expectRpcString(args, 1, "endDate");
+          if (!end.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: end.error }));
+            return;
+          }
+
+          result = store.listSlotsInRange(start.value, end.value);
           break;
-        case "createBlock":
-          result = await store.createBlock(args[0]);
+        }
+        case "createBlock": {
+          const input = expectRpcObject(args, 0, "block input");
+          if (!input.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: input.error }));
+            return;
+          }
+
+          result = await store.createBlock(input.value);
           break;
-        case "updateBlock":
-          result = await store.updateBlock(args[0] as string, args[1]);
+        }
+        case "updateBlock": {
+          const id = expectRpcString(args, 0, "blockId");
+          if (!id.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: id.error }));
+            return;
+          }
+
+          const updates = expectRpcObject(args, 1, "block updates");
+          if (!updates.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: updates.error }));
+            return;
+          }
+
+          result = await store.updateBlock(id.value, updates.value);
           break;
-        case "deleteBlock":
-          result = await store.deleteBlock(args[0] as string);
+        }
+        case "deleteBlock": {
+          const id = expectRpcString(args, 0, "blockId");
+          if (!id.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: id.error }));
+            return;
+          }
+
+          result = await store.deleteBlock(id.value);
           break;
-        case "createSlot":
-          result = await store.createSlot(args[0]);
+        }
+        case "createSlot": {
+          const input = expectRpcObject(args, 0, "slot input");
+          if (!input.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: input.error }));
+            return;
+          }
+
+          result = await store.createSlot(input.value);
           break;
-        case "addTaskToSlot":
-          result = await store.addTaskToSlot(args[0] as string, args[1] as string);
+        }
+        case "addTaskToSlot": {
+          const slotId = expectRpcString(args, 0, "slotId");
+          if (!slotId.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: slotId.error }));
+            return;
+          }
+
+          const taskId = expectRpcString(args, 1, "taskId");
+          if (!taskId.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: taskId.error }));
+            return;
+          }
+
+          result = await store.addTaskToSlot(slotId.value, taskId.value);
           break;
-        case "reorderSlotTasks":
-          result = await store.reorderSlotTasks(args[0] as string, args[1] as string[]);
+        }
+        case "reorderSlotTasks": {
+          const slotId = expectRpcString(args, 0, "slotId");
+          if (!slotId.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: slotId.error }));
+            return;
+          }
+
+          const taskIds = expectRpcStringArray(args, 1, "taskIds");
+          if (!taskIds.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: taskIds.error }));
+            return;
+          }
+
+          result = await store.reorderSlotTasks(slotId.value, taskIds.value);
           break;
+        }
         case "getSettings": {
-          const key = args[0] as string;
+          if (!hasSettingsPermission(plugin.manifest.permissions)) {
+            res.statusCode = 403;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: settingsPermissionError(plugin.manifest.id) }));
+            return;
+          }
+
+          const key = expectRpcString(args, 0, "settingKey");
+          if (!key.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: key.error }));
+            return;
+          }
+
           const definitions = plugin.manifest.settings ?? [];
-          const val = svc.settingsManager.get("timeblocking", key, definitions);
+          const val = svc.settingsManager.get(plugin.manifest.id, key.value, definitions);
           result = val;
           break;
         }
         case "setSettings": {
-          const sKey = args[0] as string;
-          const sVal = args[1] as string;
-          await svc.settingsManager.set("timeblocking", sKey, sVal);
+          if (!hasSettingsPermission(plugin.manifest.permissions)) {
+            res.statusCode = 403;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: settingsPermissionError(plugin.manifest.id) }));
+            return;
+          }
+
+          const sKey = expectRpcString(args, 0, "settingKey");
+          if (!sKey.ok) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: sKey.error }));
+            return;
+          }
+          if (args[1] === undefined) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "settingValue (args[1]) is required" }));
+            return;
+          }
+
+          const sVal = args[1] as unknown;
+          const definitions = plugin.manifest.settings ?? [];
+          await svc.settingsManager.setSetting(plugin.manifest.id, sKey.value, sVal, definitions);
           result = { ok: true };
           break;
         }
@@ -373,7 +633,7 @@ export function registerPluginRoutes(
       res.end(JSON.stringify({ result: result ?? null }));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Internal server error";
-      res.statusCode = 500;
+      res.statusCode = statusFromError(message, err);
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: message }));
     }
@@ -404,18 +664,42 @@ export function registerPluginRoutes(
       const body = await parseBody(req);
       const { pluginId, downloadUrl } = body as { pluginId: string; downloadUrl: string };
 
+      try {
+        validateOutboundNetworkUrl(downloadUrl, {
+          context: "plugin install download",
+          requireHttps: true,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Invalid download URL";
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ success: false, error: message }));
+        return;
+      }
+
       const { PluginInstaller } = await import("../src/plugins/installer.js");
       const installer = new PluginInstaller(path.resolve(process.cwd(), "plugins"));
 
       const result = await installer.install(pluginId, downloadUrl);
       if (result.success) {
         const discovered = await svc.pluginLoader.discoverOne(pluginId);
-        if (discovered) {
-          try {
-            await svc.pluginLoader.load(pluginId);
-          } catch {
-            // Plugin may need permission approval — that's fine
-          }
+        if (!discovered) {
+          await installer.uninstall(pluginId);
+          res.statusCode = 409;
+          res.setHeader("Content-Type", "application/json");
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: `Plugin "${pluginId}" was installed but rejected during discovery (duplicate or invalid plugin ID)`,
+            }),
+          );
+          return;
+        }
+
+        try {
+          await svc.pluginLoader.load(pluginId);
+        } catch {
+          // Plugin may need permission approval — that's fine
         }
       }
 
@@ -444,9 +728,7 @@ export function registerPluginRoutes(
       if (plugin?.builtin) {
         res.statusCode = 400;
         res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({ success: false, error: "Cannot uninstall built-in extensions" }),
-        );
+        res.end(JSON.stringify({ success: false, error: "Cannot uninstall built-in extensions" }));
         return;
       }
 
@@ -491,6 +773,14 @@ export function registerPluginRoutes(
         res.statusCode = 404;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ error: "Plugin not found" }));
+        return;
+      }
+
+      // Block enabling community plugins when restricted mode is on
+      if (!plugin.enabled && !plugin.builtin && !areCommunityPluginsEnabled(svc.storage)) {
+        res.statusCode = 403;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: COMMUNITY_PLUGINS_DISABLED_ERROR }));
         return;
       }
 

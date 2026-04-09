@@ -4,7 +4,7 @@
  * Usage: pnpm plugin:create <plugin-name>
  *
  * Creates a new plugin directory under plugins/ with a manifest.json
- * and a starter index.ts that extends the Plugin base class.
+ * and a starter index.mjs runtime entry.
  */
 
 import * as fs from "node:fs";
@@ -47,7 +47,7 @@ function manifestTemplate(id: string, displayName: string): string {
     version: "1.0.0",
     author: "Your Name",
     description: "A Junban plugin",
-    main: "index.ts",
+    main: "index.mjs",
     minJunbanVersion: "1.0.0",
     permissions: ["task:read", "commands"],
     settings: [
@@ -71,9 +71,7 @@ function indexTemplate(id: string, displayName: string): string {
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join("") + "Plugin";
 
-  return `import { Plugin } from "../../src/plugins/lifecycle.js";
-
-/**
+  return `/**
  * ${displayName} — a Junban plugin.
  *
  * This is the entry point for the plugin. The loader will instantiate
@@ -91,7 +89,7 @@ function indexTemplate(id: string, displayName: string): string {
  *   this.settings.get() — read plugin settings
  *   this.settings.set() — write plugin settings
  */
-export default class ${className} extends Plugin {
+export default class ${className} {
   async onLoad(): Promise<void> {
     // Register a sample command accessible from the Command Palette
     this.app.commands.register({
@@ -144,9 +142,7 @@ function main(): void {
 
   // Check if plugin already exists
   if (fs.existsSync(pluginDir)) {
-    console.error(
-      `\x1b[31mError:\x1b[0m Plugin directory already exists: plugins/${name}/`
-    );
+    console.error(`\x1b[31mError:\x1b[0m Plugin directory already exists: plugins/${name}/`);
     process.exit(1);
   }
 
@@ -154,36 +150,22 @@ function main(): void {
 
   // Create plugin directory and files
   fs.mkdirSync(pluginDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(pluginDir, "manifest.json"),
-    manifestTemplate(name, displayName)
-  );
-  fs.writeFileSync(
-    path.join(pluginDir, "index.ts"),
-    indexTemplate(name, displayName)
-  );
+  fs.writeFileSync(path.join(pluginDir, "manifest.json"), manifestTemplate(name, displayName));
+  fs.writeFileSync(path.join(pluginDir, "index.mjs"), indexTemplate(name, displayName));
 
   // Print success
   console.log(`\n\x1b[32m✔\x1b[0m Plugin scaffolded: plugins/${name}/\n`);
   console.log(`  plugins/${name}/`);
   console.log(`  ├── manifest.json`);
-  console.log(`  └── index.ts\n`);
+  console.log(`  └── index.mjs\n`);
   console.log(`\x1b[1mNext steps:\x1b[0m`);
   console.log(`  1. Edit \x1b[36mplugins/${name}/manifest.json\x1b[0m`);
-  console.log(
-    `     - Set your author name and description`
-  );
-  console.log(
-    `     - Add any permissions you need (see src/plugins/types.ts for the full list)`
-  );
-  console.log(`  2. Edit \x1b[36mplugins/${name}/index.ts\x1b[0m`);
-  console.log(
-    `     - Implement your plugin logic in onLoad()`
-  );
+  console.log(`     - Set your author name and description`);
+  console.log(`     - Add any permissions you need (see src/plugins/types.ts for the full list)`);
+  console.log(`  2. Edit \x1b[36mplugins/${name}/index.mjs\x1b[0m`);
+  console.log(`     - Implement your plugin logic in onLoad()`);
   console.log(`  3. Restart Junban — the plugin loader will pick it up automatically.`);
-  console.log(
-    `\n  Docs: docs/plugins/API.md\n`
-  );
+  console.log(`\n  Docs: docs/plugins/API.md\n`);
 }
 
 main();

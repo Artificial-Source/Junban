@@ -9,7 +9,7 @@ A Junban plugin is a directory with two files:
 ```
 plugins/my-plugin/
   manifest.json   # Metadata, permissions, settings
-  index.ts        # Entry file — exports a Plugin subclass
+  index.mjs       # Entry file — exports a plugin class/object
 ```
 
 ### manifest.json
@@ -21,7 +21,7 @@ plugins/my-plugin/
   "version": "1.0.0",
   "author": "Your Name",
   "description": "What this plugin does.",
-  "main": "index.ts",
+  "main": "index.mjs",
   "minJunbanVersion": "1.0.0",
   "permissions": ["task:read", "commands"]
 }
@@ -43,21 +43,38 @@ plugins/my-plugin/
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `targetApiVersion` | `string` | Plugin API version this plugin targets. If the plugin targets a newer major version than the running Junban, a warning is logged. |
+| `targetApiVersion` | `string` | Plugin API version this plugin targets. If provided, it must be semver and its **major** version must match the running Plugin API major, or the plugin is rejected. |
 | `icon` | `string` | Emoji or icon name for the plugin. |
 | `permissions` | `string[]` | Required permissions (see [Permissions](#2-permissions)). Defaults to `[]`. |
 | `settings` | `SettingDefinition[]` | Plugin settings schema (see [Settings](#9-settings)). |
 | `repository` | `string` | URL to source code repository. |
 | `license` | `string` | SPDX license identifier. |
 | `keywords` | `string[]` | Tags for plugin discovery. |
-| `dependencies` | `Record<string, string>` | Other plugins this plugin depends on. |
+| `dependencies` | `Record<string, string>` | Other plugins this plugin depends on. At load time, Junban enforces that each dependency is installed/discovered, version-compatible, and loadable before this plugin can load. |
+
+`targetApiVersion` is optional. Use it when you want your plugin to declare which Plugin API major it was built and tested against. Leaving it out means Junban will not enforce an API-major compatibility check for that field.
+
+`dependencies` supports exact versions and common semver operators such as `^`, `~`, `<`, `<=`, `>`, `>=`, and `=`.
+
+### Runtime Isolation (Community Plugins)
+
+Community plugins run in a sandboxed VM context.
+
+What this means for plugin authors:
+
+- Do not import Node built-ins (`node:fs`, `node:path`, etc.).
+- Do not rely on `process`, `global`, or other host globals.
+- ESM `import` / dynamic `import()` are blocked in the community sandbox.
+- `import.meta` is blocked in the community sandbox.
+- If you split files, use relative `require("./local-file.js")` within your plugin directory.
+- Use JavaScript module files at runtime (`.js`, `.mjs`, `.cjs`).
+
+All supported capabilities should go through `this.app` (permission-gated Plugin API).
 
 ### Entry File
 
 ```typescript
-import { Plugin } from "../../src/plugins/lifecycle.js";
-
-export default class MyPlugin extends Plugin {
+export default class MyPlugin {
   async onLoad() {
     // Called when the plugin is activated.
     // Register commands, views, panels, event listeners here.
@@ -78,9 +95,11 @@ export default class MyPlugin extends Plugin {
 | `this.app` | `PluginAPI` | The full Junban API. Every method is always present. Methods you lack permission for throw a clear error. |
 | `this.settings` | `PluginSettingsAccessor` | Read/write this plugin's settings. |
 
+You do not need to import Junban internals to receive these properties. The loader injects them before `onLoad()` runs.
+
 ### Lifecycle
 
-1. Junban discovers the plugin directory and validates `manifest.json`.
+1. Junban discovers the plugin directory, validates `manifest.json`, and enforces compatibility (`minJunbanVersion`, optional `targetApiVersion`).
 2. The user approves the requested permissions.
 3. Junban calls `onLoad()`. Register everything here.
 4. The plugin is active until the user disables it or Junban shuts down.
@@ -89,6 +108,11 @@ export default class MyPlugin extends Plugin {
 ## 2. Permissions
 
 Plugins declare required permissions in `manifest.json`. Users see these permissions before activating the plugin.
+
+For community plugins, effective permissions are the intersection of:
+
+- permissions requested in `manifest.json`
+- permissions approved by the user
 
 | Permission | Grants Access To |
 |------------|-----------------|
@@ -102,7 +126,7 @@ Plugins declare required permissions in `manifest.json`. Users see these permiss
 | `ui:view` | `ui.addView()` |
 | `ui:status` | `ui.addStatusBarItem()` |
 | `commands` | `commands.register()` |
-| `settings` | Settings tab in the Settings view |
+| `settings` | `settings.get()`, `settings.set()`, and plugin settings routes/UI |
 | `storage` | `storage.get()`, `storage.set()`, `storage.delete()`, `storage.keys()` |
 | `network` | `network.fetch()` |
 | `ai:provider` | `ai.registerProvider()` |
@@ -375,8 +399,8 @@ async onLoad() {
 }
 
 async onUnload() {
-  // IMPORTANT: Always remove your listeners in onUnload.
-  // Events are NOT auto-removed.
+  // Optional: manual cleanup is supported.
+  // Loader will also forcibly remove plugin listeners on unload/failure.
   this.app.events.off("task:create", this.handleCreate);
   this.app.events.off("task:complete", this.handleComplete);
 }
@@ -407,6 +431,8 @@ private handleComplete = (task: Task) => { /* ... */ };
 
 Instead of manually subscribing to events, you can override lifecycle hook methods on the `Plugin` class. These are simpler and require no cleanup -- the loader calls them automatically and handles errors for you.
 
+> Lifecycle task hooks require `task:read`. If a plugin is loaded without `task:read`, these hooks are not wired and will not receive task payloads.
+
 **Available hooks:**
 
 | Method | Equivalent Event |
@@ -418,13 +444,13 @@ Instead of manually subscribing to events, you can override lifecycle hook metho
 
 **Example:**
 
-```typescript
-class MyPlugin extends Plugin {
-  async onTaskCreate(task: Task) {
+```javascript
+class MyPlugin {
+  async onTaskCreate(task) {
     console.log(`New task: ${task.title}`);
   }
 
-  async onTaskComplete(task: Task) {
+  async onTaskComplete(task) {
     // Award points, play a sound, etc.
   }
 }
@@ -461,7 +487,7 @@ Commands appear in the command palette (Ctrl+K). They are auto-removed when the 
 
 ```typescript
 this.app.ui.addSidebarPanel({
-  id: "my-panel",
+  id: "my-panel",            // Namespaced automatically: "my-plugin:my-panel"
   title: "My Panel",
   icon: "list",
   contentType: "react",       // "text" (default) or "react"
@@ -474,7 +500,7 @@ this.app.ui.addSidebarPanel({
 
 ```typescript
 this.app.ui.addView({
-  id: "my-view",
+  id: "my-view",             // Namespaced automatically: "my-plugin:my-view"
   name: "My View",
   icon: "columns",
   slot: "tools",              // "navigation" | "tools" (default) | "workspace"
@@ -506,11 +532,37 @@ this.app.ui.addView({
 - Use `structured` when you need interactive elements (buttons, progress bars) but want your plugin to work without bundling React. The JSON format supports: `text`, `button`, `progress`, `badge`, `row`, `spacer`, and more.
 - Use `react` when you need full control over rendering. Note that React components only work for built-in plugins that are compiled alongside Junban. Community plugins distributed as standalone files should use `structured` instead.
 
+### Structured Content Shape
+
+When `contentType` is `structured`, `render()` should return a JSON string.
+
+```json
+{
+  "layout": "stack",
+  "elements": [
+    { "type": "text", "value": "Pomodoro", "variant": "title" },
+    { "type": "spacer", "size": "sm" },
+    { "type": "progress", "value": 10, "max": 25, "color": "accent" },
+    {
+      "type": "row",
+      "gap": "md",
+      "justify": "center",
+      "elements": [
+        { "type": "button", "label": "Start", "commandId": "pomodoro:start", "variant": "primary" },
+        { "type": "badge", "value": "Work", "color": "default" }
+      ]
+    }
+  ]
+}
+```
+
+Common elements include `text`, `button`, `progress`, `badge`, `row`, and `spacer`. See the Pomodoro example for a realistic structured view payload.
+
 ### Status Bar (`ui:status`)
 
 ```typescript
 const handle = this.app.ui.addStatusBarItem({
-  id: "my-status",
+  id: "my-status",           // Namespaced automatically: "my-plugin:my-status"
   text: "Ready",
   icon: "timer",
   onClick: () => { /* ... */ },
@@ -524,6 +576,8 @@ The `addStatusBarItem()` call returns a handle object with an `update()` method.
 
 Status bar items are auto-removed when the plugin is unloaded.
 
+UI IDs are plugin-scoped at registration time (`<pluginId>:<localId>`), so panels/views/status items from different plugins cannot overwrite each other even when they reuse the same local ID.
+
 ## 9. Settings
 
 Settings are defined in `manifest.json` and shown in the Settings view (Settings > Plugins > Your Plugin). Plugins read their values at runtime:
@@ -532,6 +586,17 @@ Settings are defined in `manifest.json` and shown in the Settings view (Settings
 const value = this.settings.get<number>("workMinutes"); // Returns the user's value or the manifest default
 await this.settings.set("workMinutes", 30);             // Override the value
 ```
+
+**Permission:** `settings`
+
+Settings writes are strictly validated against manifest definitions:
+
+- Unknown setting keys are rejected.
+- Values must match the setting type (`text`, `number`, `boolean`, `select`).
+- `number` settings enforce optional `min`/`max`.
+- `select` settings must match one of the declared `options`.
+
+Use `settings` for user-configurable options only. For arbitrary plugin state, use `storage` instead.
 
 ### Setting Types
 
@@ -591,7 +656,7 @@ const keys = await this.app.storage.keys(); // ["history"]
 | UI | Auto-generated settings tab | None |
 | Use for | User-configurable options | Plugin internal state |
 | Defaults | Manifest `default` value | `null` |
-| Permission | Always available | Requires `storage` |
+| Permission | Requires `settings` | Requires `storage` |
 
 ## 11. Network
 
@@ -607,6 +672,20 @@ const data = await response.json();
 ```
 
 Wraps the standard `fetch()` API. All requests are logged.
+
+Security policy for `network.fetch()`:
+
+- Allowed schemes: `http:` and `https:` only.
+- Blocked targets: localhost/internal/private destinations, including:
+  - `localhost`, `*.localhost`, `127.0.0.0/8`, `::1`
+  - `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
+  - IPv4-mapped IPv6 forms that resolve to blocked IPv4 ranges (e.g. `::ffff:127.0.0.1`, `::ffff:7f00:1`)
+  - link-local ranges (`169.254.0.0/16`, `fe80::/10`), ULA (`fc00::/7`)
+  - hostnames ending in `.local` or `.internal`
+- Redirect responses are not followed; redirect attempts throw to prevent redirect-based SSRF bypass.
+
+`network.fetch()` is intended for calling external services. It is not a supported path for reaching the local machine, metadata endpoints, or private networks.
+- Blocked requests throw a clear error and are not sent.
 
 ## 12. AI
 
@@ -647,7 +726,7 @@ this.app.ai.registerTool(
 1. **Never use optional chaining on `this.app`**. Every method is always a function. If permission is missing, it throws.
 2. **Declare all needed permissions in manifest.json**. The error message tells you exactly what to add.
 3. **Use arrow functions for event handlers** so `this` is correctly bound.
-4. **Clean up event listeners in `onUnload()`**. Events are NOT auto-removed. Commands, UI panels, and status bar items ARE auto-removed.
+4. **Prefer cleaning up event listeners in `onUnload()` for clarity**. The loader also forcibly removes plugin listeners on unload/load failure.
 5. **Use `storage` for persistent state, `settings` for user-configurable options**.
 6. **Keep `onLoad()` fast**. Don't do heavy computation during startup.
 

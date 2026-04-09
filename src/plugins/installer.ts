@@ -5,6 +5,8 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import * as tar from "tar";
 import { PluginManifest } from "./types.js";
+import { validateManifestVersionCompatibility } from "./compatibility.js";
+import { validateOutboundNetworkUrl } from "./network-policy.js";
 import { createLogger } from "../utils/logger.js";
 
 const logger = createLogger("plugin-installer");
@@ -49,9 +51,17 @@ export class PluginInstaller {
     const tempExtractDir = path.join(tempDir, "extracted");
 
     try {
+      validateOutboundNetworkUrl(downloadUrl, { context: "plugin install download", requireHttps: true });
+
       // Download the archive
       logger.info(`Downloading plugin "${pluginId}" from ${downloadUrl}`);
-      const res = await fetch(downloadUrl);
+      const res = await fetch(downloadUrl, { redirect: "manual" });
+      if (res.status >= 300 && res.status < 400) {
+        return {
+          success: false,
+          error: "Download failed: redirects are not allowed",
+        };
+      }
       if (!res.ok) {
         return { success: false, error: `Download failed: HTTP ${res.status}` };
       }
@@ -130,6 +140,21 @@ export class PluginInstaller {
         return {
           success: false,
           error: `Invalid manifest: ${result.error.issues[0]?.message ?? "unknown error"}`,
+        };
+      }
+
+      if (result.data.id !== pluginId) {
+        return {
+          success: false,
+          error: `Manifest ID mismatch: requested "${pluginId}" but manifest declares "${result.data.id}"`,
+        };
+      }
+
+      const compatibilityIssues = validateManifestVersionCompatibility(result.data);
+      if (compatibilityIssues.length > 0) {
+        return {
+          success: false,
+          error: compatibilityIssues.map((issue) => issue.message).join("; "),
         };
       }
 

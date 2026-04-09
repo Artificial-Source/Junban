@@ -45,7 +45,7 @@ export interface AppServices {
   toolRegistry: ToolRegistry;
 }
 
-export function bootstrap(dbPath?: string): AppServices {
+export function bootstrap(): AppServices {
   const env = loadEnv();
   let storage: IStorage;
 
@@ -59,7 +59,7 @@ export function bootstrap(dbPath?: string): AppServices {
     storage = backend;
     logger.info("Markdown backend initialized", { path: mdPath });
   } else {
-    const resolvedPath = dbPath ?? env.DB_PATH;
+    const resolvedPath = env.DB_PATH;
 
     // Ensure data directory exists
     const dir = path.dirname(resolvedPath);

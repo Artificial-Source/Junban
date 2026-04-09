@@ -136,6 +136,12 @@ describe("Example plugin (integration)", () => {
       await env.api.settings.set("count", 42);
       expect(env.api.settings.get<number>("count")).toBe(42);
     });
+
+    it("rejects unknown setting keys", async () => {
+      await expect(env.api.settings.set("notDefined", 1)).rejects.toThrow(
+        'Invalid setting key "notDefined" for plugin "test-plugin"',
+      );
+    });
   });
 
   // ── 4. Task CRUD ─────────────────────────────────────────────────────────
@@ -309,6 +315,17 @@ describe("Permission denial", () => {
     expect(() =>
       env.api.ui.addView({ id: "v", name: "V", icon: "x" }),
     ).toThrow('requires the "ui:view" permission');
+  });
+
+  it("throws when reading settings without settings permission", () => {
+    const env = createPluginTestEnv({
+      permissions: ["task:read"],
+      settings: [{ id: "count", name: "Count", type: "number", default: 0 }],
+    });
+
+    expect(() => env.api.settings.get<number>("count")).toThrow(
+      'requires the "settings" permission',
+    );
   });
 
   it("error message tells which permission to add", () => {

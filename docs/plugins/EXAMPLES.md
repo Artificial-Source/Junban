@@ -1,6 +1,12 @@
 # Plugin Examples
 
-Five progressively complex examples showing how to build Junban plugins. Each example is complete and working -- you can copy the files directly into your `plugins/` directory.
+Five progressively complex examples showing how to build Junban plugins.
+
+> **Sandbox runtime note (community plugins):**
+> - Use JavaScript runtime entry files (`.js`, `.mjs`, `.cjs`) in `manifest.json` (for example: `"main": "index.mjs"`).
+> - Community plugins run in a restricted VM context and cannot use Node built-ins, `process`, or host globals directly.
+> - ESM `import` / dynamic `import()` and `import.meta` are blocked for community plugins; use relative `require("./local-file.js")` for local module splitting.
+> - The examples below use plain exported classes. Junban injects `this.app` and `this.settings` before `onLoad()`.
 
 ---
 
@@ -17,18 +23,16 @@ A command that logs to the console. The simplest possible plugin.
   "version": "1.0.0",
   "author": "Your Name",
   "description": "A minimal plugin that registers a command.",
-  "main": "index.ts",
+  "main": "index.mjs",
   "minJunbanVersion": "1.0.0",
   "permissions": ["commands"]
 }
 ```
 
-### `plugins/hello-world/index.ts`
+### `plugins/hello-world/index.mjs`
 
-```typescript
-import { Plugin } from "../../src/plugins/lifecycle.js";
-
-export default class HelloWorldPlugin extends Plugin {
+```javascript
+export default class HelloWorldPlugin {
   async onLoad() {
     this.app.commands.register({
       id: "greet",
@@ -47,7 +51,7 @@ export default class HelloWorldPlugin extends Plugin {
 
 **What this teaches:**
 - Plugin structure: manifest.json + entry file
-- Extending the `Plugin` base class
+- Exporting a plain plugin class
 - Registering commands in `onLoad()`
 - Commands appear in the command palette (Ctrl+K)
 
@@ -68,19 +72,16 @@ A status bar item that shows how many pending tasks you have, updated in real ti
   "version": "1.0.0",
   "author": "Your Name",
   "description": "Shows the number of pending tasks in the status bar.",
-  "main": "index.ts",
+  "main": "index.mjs",
   "minJunbanVersion": "1.0.0",
   "permissions": ["task:read", "ui:status"]
 }
 ```
 
-### `plugins/task-counter/index.ts`
+### `plugins/task-counter/index.mjs`
 
-```typescript
-import { Plugin } from "../../src/plugins/lifecycle.js";
-import type { Task } from "../../src/core/types.js";
-
-export default class TaskCounterPlugin extends Plugin {
+```javascript
+export default class TaskCounterPlugin {
   private count = 0;
   private statusItem: { update: (data: { text?: string }) => void } | null = null;
 
@@ -104,7 +105,8 @@ export default class TaskCounterPlugin extends Plugin {
   }
 
   async onUnload() {
-    // IMPORTANT: Remove event listeners. They are NOT auto-removed.
+    // Optional: manual cleanup is supported, but loader cleanup also removes
+    // listeners registered through this.app.events.on().
     this.app.events.off("task:create", this.onTaskCreate);
     this.app.events.off("task:complete", this.onTaskComplete);
     this.app.events.off("task:uncomplete", this.onTaskUncomplete);
@@ -113,22 +115,22 @@ export default class TaskCounterPlugin extends Plugin {
   }
 
   // Arrow functions so `this` is correctly bound
-  private onTaskCreate = (_task: Task) => {
+  private onTaskCreate = (_task) => {
     this.count++;
     this.statusItem?.update({ text: `${this.count} pending` });
   };
 
-  private onTaskComplete = (_task: Task) => {
+  private onTaskComplete = (_task) => {
     this.count = Math.max(0, this.count - 1);
     this.statusItem?.update({ text: `${this.count} pending` });
   };
 
-  private onTaskUncomplete = (_task: Task) => {
+  private onTaskUncomplete = (_task) => {
     this.count++;
     this.statusItem?.update({ text: `${this.count} pending` });
   };
 
-  private onTaskDelete = (task: Task) => {
+  private onTaskDelete = (task) => {
     if (task.status === "pending") {
       this.count = Math.max(0, this.count - 1);
       this.statusItem?.update({ text: `${this.count} pending` });
@@ -163,18 +165,16 @@ A sidebar panel that lists today's tasks, grouped by priority.
   "version": "1.0.0",
   "author": "Your Name",
   "description": "Sidebar panel showing today's tasks grouped by priority.",
-  "main": "index.ts",
+  "main": "index.mjs",
   "minJunbanVersion": "1.0.0",
   "permissions": ["task:read", "project:read", "ui:panel", "commands"]
 }
 ```
 
-### `plugins/daily-digest/index.ts`
+### `plugins/daily-digest/index.mjs`
 
-```typescript
-import { Plugin } from "../../src/plugins/lifecycle.js";
-
-export default class DailyDigestPlugin extends Plugin {
+```javascript
+export default class DailyDigestPlugin {
   async onLoad() {
     // Sidebar panel with structured text content
     this.app.ui.addSidebarPanel({
@@ -233,9 +233,9 @@ A command that finds all overdue tasks and adds a configurable tag to them. Demo
   "version": "1.0.0",
   "author": "Your Name",
   "description": "Bulk-tags overdue tasks with a configurable tag.",
-  "main": "index.ts",
+  "main": "index.mjs",
   "minJunbanVersion": "1.0.0",
-  "permissions": ["task:read", "task:write", "tag:write", "commands"],
+  "permissions": ["task:read", "task:write", "tag:write", "commands", "settings"],
   "settings": [
     {
       "id": "overdueTag",
@@ -255,12 +255,10 @@ A command that finds all overdue tasks and adds a configurable tag to them. Demo
 }
 ```
 
-### `plugins/task-tagger/index.ts`
+### `plugins/task-tagger/index.mjs`
 
-```typescript
-import { Plugin } from "../../src/plugins/lifecycle.js";
-
-export default class TaskTaggerPlugin extends Plugin {
+```javascript
+export default class TaskTaggerPlugin {
   async onLoad() {
     // Register the bulk-tag command
     this.app.commands.register({
@@ -324,6 +322,7 @@ export default class TaskTaggerPlugin extends Plugin {
 - `task:write` -- to update task tags
 - `tag:write` -- to create the tag if it doesn't exist
 - `commands` -- to register the bulk-tag command
+- `settings` -- to read the plugin's user-configurable options
 
 ---
 
@@ -340,9 +339,9 @@ A full plugin with a structured view, status bar, settings, storage, and command
   "version": "1.0.0",
   "author": "ASF",
   "description": "Focus timer with configurable work/break intervals.",
-  "main": "index.ts",
+  "main": "index.mjs",
   "minJunbanVersion": "1.0.0",
-  "permissions": ["task:read", "commands", "ui:status", "ui:view", "storage"],
+  "permissions": ["task:read", "commands", "ui:status", "ui:view", "storage", "settings"],
   "settings": [
     {
       "id": "workMinutes",
@@ -380,15 +379,14 @@ A full plugin with a structured view, status bar, settings, storage, and command
 }
 ```
 
-### `plugins/pomodoro/index.ts`
+### `plugins/pomodoro/index.mjs`
 
-```typescript
-import { Plugin } from "../../src/plugins/lifecycle.js";
+```javascript
 
 type TimerState = "idle" | "running" | "paused";
 type Phase = "work" | "break" | "longBreak";
 
-export default class PomodoroPlugin extends Plugin {
+export default class PomodoroPlugin {
   private state: TimerState = "idle";
   private phase: Phase = "work";
   private timeLeft = 0;
@@ -590,6 +588,7 @@ export default class PomodoroPlugin extends Plugin {
 - `ui:status` -- for the status bar timer display
 - `ui:view` -- for the structured Pomodoro view
 - `storage` -- to persist session counts
+- `settings` -- to read configured work/break durations
 
 ---
 
@@ -606,9 +605,9 @@ A plugin that uses manifest-defined settings to control its behavior. The settin
   "version": "1.0.0",
   "author": "Your Name",
   "description": "Hides low-priority tasks to help you focus.",
-  "main": "index.ts",
+  "main": "index.mjs",
   "minJunbanVersion": "1.0.0",
-  "permissions": ["task:read", "commands", "ui:status"],
+  "permissions": ["task:read", "commands", "ui:status", "settings"],
   "settings": [
     {
       "id": "minPriority",
@@ -638,12 +637,10 @@ A plugin that uses manifest-defined settings to control its behavior. The settin
 }
 ```
 
-### `plugins/focus-mode/index.ts`
+### `plugins/focus-mode/index.mjs`
 
-```typescript
-import { Plugin } from "../../src/plugins/lifecycle.js";
-
-export default class FocusModePlugin extends Plugin {
+```javascript
+export default class FocusModePlugin {
   private statusHandle: { update: (data: { text?: string }) => void } | null = null;
 
   async onLoad() {
@@ -703,6 +700,7 @@ export default class FocusModePlugin extends Plugin {
 - `task:read` -- to list and filter tasks
 - `commands` -- to register the focus command
 - `ui:status` -- for the status bar counter
+- `settings` -- to read the plugin's focus-mode configuration
 
 ---
 
@@ -719,18 +717,16 @@ A plugin that registers a custom view using `structured` content -- a JSON layou
   "version": "1.0.0",
   "author": "Your Name",
   "description": "A dashboard view showing project stats.",
-  "main": "index.ts",
+  "main": "index.mjs",
   "minJunbanVersion": "1.0.0",
   "permissions": ["task:read", "project:read", "ui:view"]
 }
 ```
 
-### `plugins/project-overview/index.ts`
+### `plugins/project-overview/index.mjs`
 
-```typescript
-import { Plugin } from "../../src/plugins/lifecycle.js";
-
-export default class ProjectOverviewPlugin extends Plugin {
+```javascript
+export default class ProjectOverviewPlugin {
   async onLoad() {
     this.app.ui.addView({
       id: "project-overview",

@@ -1,8 +1,118 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { UIRegistry } from "../../src/plugins/ui-registry.js";
 import type { PluginComponent } from "../../src/plugins/ui-registry.js";
 
 describe("UIRegistry — React component support", () => {
+  it("namespaces UI registration IDs by plugin ID", () => {
+    const registry = new UIRegistry();
+
+    registry.addPanel({
+      id: "panel",
+      pluginId: "plugin-a",
+      title: "Panel",
+      icon: "🔧",
+      contentType: "text",
+      getContent: () => "panel content",
+    });
+    registry.addView({
+      id: "view",
+      pluginId: "plugin-a",
+      name: "View",
+      icon: "👀",
+      slot: "tools",
+      contentType: "text",
+      getContent: () => "view content",
+    });
+    registry.addStatusBarItem({
+      id: "status",
+      pluginId: "plugin-a",
+      text: "Ready",
+      icon: "✅",
+    });
+
+    expect(registry.getPanels()[0].id).toBe("plugin-a:panel");
+    expect(registry.getViews()[0].id).toBe("plugin-a:view");
+    expect(registry.getStatusBarItems()[0].id).toBe("plugin-a:status");
+    expect(registry.getPanelContent("plugin-a:panel")).toBe("panel content");
+    expect(registry.getViewContent("plugin-a:view")).toBe("view content");
+  });
+
+  it("does not double-prefix IDs already in the plugin namespace", () => {
+    const registry = new UIRegistry();
+
+    registry.addPanel({
+      id: "plugin-a:panel",
+      pluginId: "plugin-a",
+      title: "Panel",
+      icon: "🔧",
+      contentType: "text",
+      getContent: () => "content",
+    });
+
+    expect(registry.getPanels()[0].id).toBe("plugin-a:panel");
+  });
+
+  it("does not clobber same local IDs across different plugins", () => {
+    const registry = new UIRegistry();
+
+    registry.addView({
+      id: "shared-view",
+      pluginId: "plugin-a",
+      name: "A View",
+      icon: "A",
+      slot: "tools",
+      contentType: "text",
+      getContent: () => "A content",
+    });
+    registry.addView({
+      id: "shared-view",
+      pluginId: "plugin-b",
+      name: "B View",
+      icon: "B",
+      slot: "tools",
+      contentType: "text",
+      getContent: () => "B content",
+    });
+
+    const views = registry.getViews();
+    expect(views).toHaveLength(2);
+    expect(views.map((v) => v.id).sort()).toEqual([
+      "plugin-a:shared-view",
+      "plugin-b:shared-view",
+    ]);
+    expect(registry.getViewContent("plugin-a:shared-view")).toBe("A content");
+    expect(registry.getViewContent("plugin-b:shared-view")).toBe("B content");
+  });
+
+  it("warns on ambiguous bare-ID lookup instead of silently failing", () => {
+    const registry = new UIRegistry();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    registry.addView({
+      id: "shared",
+      pluginId: "plugin-a",
+      name: "A Shared",
+      icon: "A",
+      slot: "tools",
+      contentType: "text",
+      getContent: () => "A",
+    });
+    registry.addView({
+      id: "shared",
+      pluginId: "plugin-b",
+      name: "B Shared",
+      icon: "B",
+      slot: "tools",
+      contentType: "text",
+      getContent: () => "B",
+    });
+
+    expect(registry.getViewContent("shared")).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledOnce();
+
+    warnSpy.mockRestore();
+  });
+
   it("should store view with contentType react and component", () => {
     const registry = new UIRegistry();
     const TestComponent: PluginComponent = () => "hello";
@@ -59,7 +169,7 @@ describe("UIRegistry — React component support", () => {
     expect(views).toHaveLength(1);
     expect(views[0].contentType).toBe("text");
     expect(views[0].component).toBeUndefined();
-    expect(registry.getViewContent("text-view")).toBe("hello text");
+    expect(registry.getViewContent("test-plugin:text-view")).toBe("hello text");
   });
 
   it("should still support structured views", () => {
@@ -95,7 +205,7 @@ describe("UIRegistry — React component support", () => {
     });
 
     // React views don't have getContent
-    expect(registry.getViewContent("react-view")).toBeUndefined();
+    expect(registry.getViewContent("test-plugin:react-view")).toBeUndefined();
   });
 
   it("should remove react views by plugin", () => {

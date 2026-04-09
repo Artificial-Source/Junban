@@ -39,6 +39,7 @@ describe("Plugin API — React component registration", () => {
 
     const views = uiRegistry.getViews();
     expect(views).toHaveLength(1);
+    expect(views[0].id).toBe("test-react:react-view");
     expect(views[0].contentType).toBe("react");
     expect(views[0].component).toBe(TestComponent);
     expect(views[0].pluginId).toBe("test-react");
@@ -58,6 +59,7 @@ describe("Plugin API — React component registration", () => {
 
     const panels = uiRegistry.getPanels();
     expect(panels).toHaveLength(1);
+    expect(panels[0].id).toBe("test-react:react-panel");
     expect(panels[0].contentType).toBe("react");
     expect(panels[0].component).toBe(TestComponent);
   });

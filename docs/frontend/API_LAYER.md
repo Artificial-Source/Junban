@@ -302,7 +302,7 @@ interface StorePluginInfo {
 }
 ```
 
-- **Notes:** In Tauri mode, plugin listing returns empty (plugins deferred). Install/uninstall throw errors in Tauri mode. Permission approval/revocation and toggle not yet supported in Tauri mode. `PluginInfo` includes an optional `icon` field. `StorePluginInfo` includes optional `icon`, `downloads` count, and `longDescription` for the store detail view.
+- **Notes:** In Tauri/direct-services mode, plugin listing returns empty (plugins deferred). Install/uninstall throw errors in this mode, and permission approval/revocation plus toggle now also fail explicitly (instead of silently no-op) because they are not supported yet. `PluginInfo` includes an optional `icon` field. `StorePluginInfo` includes optional `icon`, `downloads` count, and `longDescription` for the store detail view.
 
 ---
 

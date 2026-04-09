@@ -384,6 +384,59 @@ export default class CrashHookPlugin {
     expect(plugin!.enabled).toBe(true);
   });
 
+  it("community plugins run in isolated sandbox context", async () => {
+    const pluginDir = makeTmpPluginDir();
+    const pluginId = "sandbox-isolation";
+
+    writePlugin(
+      pluginDir,
+      pluginId,
+      makeManifest(pluginId, {
+        settings: [{ id: "probe", name: "Probe", type: "text", default: "" }],
+      }),
+      `
+export default class IsolationPlugin {
+  async onLoad() {
+    let nodeBuiltinBlocked = false;
+    try {
+      require("node:fs");
+    } catch {
+      nodeBuiltinBlocked = true;
+    }
+
+    await this.settings.set("probe", JSON.stringify({
+      processType: typeof process,
+      globalType: typeof global,
+      hostProcessType: typeof globalThis.process,
+      nodeBuiltinBlocked,
+    }));
+  }
+  async onUnload() {}
+}
+`,
+    );
+
+    const { loader } = createLoaderWithServices(pluginDir);
+    await loader.discover();
+    await loader.approveAndLoad(pluginId, [
+      "task:read",
+      "task:write",
+      "commands",
+      "settings",
+    ]);
+
+    const plugin = loader.get(pluginId);
+    const probeRaw = plugin?.instance?.settings.get<string>("probe");
+    const probe = JSON.parse(probeRaw ?? "{}");
+
+    expect(probe).toEqual({
+      processType: "undefined",
+      globalType: "undefined",
+      hostProcessType: "undefined",
+      nodeBuiltinBlocked: true,
+    });
+  });
+
   // ── 6. Unload cleanup ──────────────────────────────────────────────────
 
   it("unload removes EventBus listeners and hooks no longer fire", async () => {

@@ -15,6 +15,7 @@ describe("loadEnv", () => {
 
   it("returns defaults when no env vars set", () => {
     const env = loadEnv();
+    expect(env.JUNBAN_PROFILE).toBe("daily");
     expect(env.DB_PATH).toBe("./data/junban.db");
     expect(env.STORAGE_MODE).toBe("sqlite");
     expect(env.MARKDOWN_PATH).toBe("./tasks/");
@@ -26,6 +27,32 @@ describe("loadEnv", () => {
     expect(env.PLUGIN_SANDBOX).toBe(true);
     expect(env.PLUGIN_MAX_SIZE_MB).toBe(10);
     expect(env.CLI_OUTPUT_FORMAT).toBe("text");
+  });
+
+  it("uses dev profile defaults when JUNBAN_PROFILE=dev", () => {
+    process.env.JUNBAN_PROFILE = "dev";
+
+    const env = loadEnv();
+
+    expect(env.JUNBAN_PROFILE).toBe("dev");
+    expect(env.DB_PATH).toBe("./data/dev/junban.db");
+    expect(env.MARKDOWN_PATH).toBe("./tasks/dev/");
+  });
+
+  it("rejects invalid JUNBAN_PROFILE", () => {
+    process.env.JUNBAN_PROFILE = "staging";
+    expect(() => loadEnv()).toThrow();
+  });
+
+  it("lets explicit paths override profile defaults", () => {
+    process.env.JUNBAN_PROFILE = "dev";
+    process.env.DB_PATH = "/tmp/custom.db";
+    process.env.MARKDOWN_PATH = "/tmp/tasks";
+
+    const env = loadEnv();
+
+    expect(env.DB_PATH).toBe("/tmp/custom.db");
+    expect(env.MARKDOWN_PATH).toBe("/tmp/tasks");
   });
 
   it("reads custom DB_PATH", () => {

@@ -27,7 +27,7 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/run-with-profile.mjs dev vite",
     "dev:full": "node scripts/run-with-profile.mjs dev concurrently --kill-others \"node --import tsx src/server.ts\" \"VITE_USE_BACKEND=true vite\"",
     "server": "node scripts/run-with-profile.mjs dev node --import tsx src/server.ts",
     "build": "tsc && vite build",

@@ -1,7 +1,7 @@
 import type { SettingDefinition } from "./types.js";
 import type { IStorage } from "../storage/interface.js";
 import { createLogger } from "../utils/logger.js";
-import { NotFoundError } from "../core/errors.js";
+import { NotFoundError, ValidationError } from "../core/errors.js";
 
 const logger = createLogger("plugin-settings");
 
@@ -35,13 +35,50 @@ export class PluginSettingsManager {
     return this.cache.get(pluginId) ?? {};
   }
 
-  /** Update a setting value for a plugin. */
-  async set(pluginId: string, settingId: string, value: unknown): Promise<void> {
+  /**
+   * Raw plugin-scoped storage write.
+   * Use this only for `app.storage.*`, not manifest-defined settings.
+   */
+  async setStorageValue(
+    pluginId: string,
+    settingId: string,
+    value: unknown,
+  ): Promise<void> {
+    await this.writeValue(pluginId, settingId, value);
+  }
+
+  private async writeValue(
+    pluginId: string,
+    settingId: string,
+    value: unknown,
+  ): Promise<void> {
     logger.debug("Saving plugin setting", { pluginId, settingId });
     const stored = this.cache.get(pluginId) ?? {};
     stored[settingId] = value;
     this.cache.set(pluginId, stored);
     this.persist(pluginId);
+  }
+
+  /**
+   * Update a manifest-defined setting value for a plugin.
+   * Rejects unknown keys and invalid values.
+   */
+  async setSetting(
+    pluginId: string,
+    settingId: string,
+    value: unknown,
+    definitions: SettingDefinition[],
+  ): Promise<void> {
+    const definition = definitions.find((d) => d.id === settingId);
+    if (!definition) {
+      throw new ValidationError(
+        `Invalid setting key "${settingId}" for plugin "${pluginId}". ` +
+          "Only manifest-defined settings can be updated.",
+      );
+    }
+
+    this.assertSettingValue(pluginId, definition, value);
+    await this.writeValue(pluginId, settingId, value);
   }
 
   /** Delete a setting value for a plugin. */
@@ -71,5 +108,62 @@ export class PluginSettingsManager {
   private persist(pluginId: string): void {
     const stored = this.cache.get(pluginId) ?? {};
     this.queries.savePluginSettings(pluginId, JSON.stringify(stored));
+  }
+
+  private assertSettingValue(
+    pluginId: string,
+    definition: SettingDefinition,
+    value: unknown,
+  ): void {
+    const settingRef = `${pluginId}/${definition.id}`;
+    switch (definition.type) {
+      case "text": {
+        if (typeof value !== "string") {
+          throw new ValidationError(
+            `Invalid value for setting "${settingRef}": expected string, got ${typeof value}.`,
+          );
+        }
+        return;
+      }
+      case "number": {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          throw new ValidationError(
+            `Invalid value for setting "${settingRef}": expected finite number.`,
+          );
+        }
+        if (definition.min !== undefined && value < definition.min) {
+          throw new ValidationError(
+            `Invalid value for setting "${settingRef}": must be >= ${definition.min}.`,
+          );
+        }
+        if (definition.max !== undefined && value > definition.max) {
+          throw new ValidationError(
+            `Invalid value for setting "${settingRef}": must be <= ${definition.max}.`,
+          );
+        }
+        return;
+      }
+      case "boolean": {
+        if (typeof value !== "boolean") {
+          throw new ValidationError(
+            `Invalid value for setting "${settingRef}": expected boolean, got ${typeof value}.`,
+          );
+        }
+        return;
+      }
+      case "select": {
+        if (typeof value !== "string") {
+          throw new ValidationError(
+            `Invalid value for setting "${settingRef}": expected string option, got ${typeof value}.`,
+          );
+        }
+        if (!definition.options.includes(value)) {
+          throw new ValidationError(
+            `Invalid value for setting "${settingRef}": must be one of ${definition.options.join(", ")}.`,
+          );
+        }
+        return;
+      }
+    }
   }
 }

@@ -42,18 +42,25 @@ cp .env.example .env
 
 The defaults work out of the box. Edit `.env` if you want to change:
 
+- `JUNBAN_PROFILE` — storage profile (`daily` by default; repo dev commands use `dev` automatically)
 - `DB_PATH` — where the SQLite database is stored (default: `./data/junban.db`)
 - `STORAGE_MODE` — `sqlite` (default) or `markdown`
 - `LOG_LEVEL` — `debug`, `info`, `warn`, `error`
 
+Repo-run development commands automatically use the `dev` profile, which keeps local testing data separate from your packaged desktop install. By default that means:
+
+- `pnpm dev:full`, `pnpm server`, `pnpm db:migrate`, `pnpm cli`, `pnpm mcp`, and `pnpm tauri:dev` use `./data/dev/junban.db`
+- `STORAGE_MODE=markdown` in those same commands uses `./tasks/dev/`
+- Packaged desktop builds still store data in Tauri AppData
+
 ### 4. Set Up the Database
 
 ```bash
-mkdir -p data
+mkdir -p data/dev
 pnpm db:migrate
 ```
 
-This creates the SQLite database and runs all migrations.
+This creates the SQLite database and runs all migrations for the active profile. With the default repo dev profile, that is `./data/dev/junban.db`.
 
 ### 5. Run the Dev Server
 
@@ -105,7 +112,7 @@ pnpm cli delete <task-id>
 ## Development Commands
 
 ```bash
-pnpm dev             # Start dev server with HMR
+pnpm dev             # Start browser dev server under the isolated dev profile
 pnpm build           # Build for production
 pnpm start           # Preview production build
 pnpm test            # Run tests
@@ -116,10 +123,10 @@ pnpm lint:fix        # Fix lint issues
 pnpm typecheck       # TypeScript type checking
 pnpm check           # Run lint + typecheck + test (all at once)
 pnpm db:generate     # Generate a new migration after schema change
-pnpm db:migrate      # Apply pending migrations
-pnpm cli             # Run CLI companion
-pnpm mcp             # Start MCP server (for external AI agents)
-pnpm tauri:dev       # Run desktop app in dev mode (requires Rust)
+pnpm db:migrate      # Apply migrations to the dev-profile database by default
+pnpm cli             # Run CLI companion against the dev-profile database
+pnpm mcp             # Start MCP server against the dev-profile database
+pnpm tauri:dev       # Run desktop app in dev mode with isolated dev-profile data
 pnpm tauri:build     # Build desktop app binary (requires Rust)
 ```
 
@@ -185,6 +192,10 @@ pnpm tauri:build
 
 Produces platform-specific installers in `src-tauri/target/release/bundle/`.
 
+Packaged installers use Tauri AppData rather than the repo's dev-profile paths, so you can keep a stable daily-use install alongside active development.
+
+If you want to override the defaults in `.env`, leave `DB_PATH` and `MARKDOWN_PATH` commented out unless you intentionally want a custom shared location.
+
 ## Working with Plugins
 
 ### Installing a Plugin
@@ -248,9 +259,9 @@ export default class MyPlugin extends Plugin {
 ### Database errors on startup
 
 ```bash
-# Delete the database and re-migrate
-rm -rf data/
-mkdir -p data
+# Delete only the dev-profile database and re-migrate
+rm -f data/dev/junban.db
+mkdir -p data/dev
 pnpm db:migrate
 ```
 

@@ -32,6 +32,7 @@ export function PluginsTab() {
   const [browserOpen, setBrowserOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSafetyDialog, setShowSafetyDialog] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const isRestricted = settings.community_plugins_enabled !== "true";
 
@@ -55,15 +56,27 @@ export function PluginsTab() {
 
   const handleApprove = async (permissions: string[]) => {
     if (permissionPlugin) {
-      await api.approvePluginPermissions(permissionPlugin.id, permissions);
-      setPermissionPlugin(null);
-      refreshPlugins();
+      try {
+        setActionError(null);
+        await api.approvePluginPermissions(permissionPlugin.id, permissions);
+        setPermissionPlugin(null);
+        await refreshPlugins();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to approve plugin permissions";
+        setActionError(message);
+      }
     }
   };
 
   const handleRevoke = async (pluginId: string) => {
-    await api.revokePluginPermissions(pluginId);
-    refreshPlugins();
+    try {
+      setActionError(null);
+      await api.revokePluginPermissions(pluginId);
+      await refreshPlugins();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to revoke plugin permissions";
+      setActionError(message);
+    }
   };
 
   const handleToggleBuiltin = async (pluginId: string) => {
@@ -75,6 +88,7 @@ export function PluginsTab() {
     }
     setToggling((prev) => new Set(prev).add(pluginId));
     try {
+      setActionError(null);
       await api.togglePlugin(pluginId);
       await Promise.all([
         refreshPlugins(),
@@ -83,6 +97,9 @@ export function PluginsTab() {
         refreshStatusBar(),
         refreshCommands(),
       ]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to toggle plugin";
+      setActionError(message);
     } finally {
       setToggling((prev) => {
         const next = new Set(prev);
@@ -115,6 +132,12 @@ export function PluginsTab() {
             </div>
           </div>
         </div>
+      )}
+
+      {actionError && (
+        <p className="mb-4 text-sm text-error" role="alert">
+          {actionError}
+        </p>
       )}
 
       {/* Search */}

@@ -413,8 +413,8 @@ describe("Plugin System Integration", () => {
       const { storage } = createTestServices();
       const manager = new PluginSettingsManager(storage);
 
-      await manager.set("my-plugin", "color", "blue");
-      await manager.set("my-plugin", "count", 42);
+      await manager.setStorageValue("my-plugin", "color", "blue");
+      await manager.setStorageValue("my-plugin", "count", 42);
 
       // Create a new manager to simulate fresh load from DB
       const manager2 = new PluginSettingsManager(storage);
@@ -444,8 +444,8 @@ describe("Plugin System Integration", () => {
       const { storage } = createTestServices();
       const manager = new PluginSettingsManager(storage);
 
-      await manager.set("my-plugin", "key1", "value1");
-      await manager.set("my-plugin", "key2", "value2");
+      await manager.setStorageValue("my-plugin", "key1", "value1");
+      await manager.setStorageValue("my-plugin", "key2", "value2");
 
       await manager.delete("my-plugin", "key1");
 

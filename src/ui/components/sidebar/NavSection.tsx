@@ -290,7 +290,7 @@ export function renderSection(itemId: string, props: NavSectionRenderProps): Rea
                         <span>{panel.title}</span>
                       </div>
                       {panel.contentType === "react" && panel.component ? (
-                        <PluginErrorBoundary pluginId={panel.id}>
+                        <PluginErrorBoundary pluginId={panel.pluginId}>
                           <panel.component />
                         </PluginErrorBoundary>
                       ) : panel.content ? (

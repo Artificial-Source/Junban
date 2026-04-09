@@ -1,9 +1,17 @@
 import { spawn } from "node:child_process";
 
 const [, , profile, command, ...args] = process.argv;
+const VALID_PROFILES = new Set(["daily", "dev"]);
 
 if (!profile || !command) {
   console.error("Usage: node scripts/run-with-profile.mjs <profile> <command> [...args]");
+  process.exit(1);
+}
+
+if (!VALID_PROFILES.has(profile)) {
+  console.error(
+    `Invalid profile \"${profile}\". Expected one of: ${Array.from(VALID_PROFILES).join(", ")}`,
+  );
   process.exit(1);
 }
 

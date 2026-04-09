@@ -19,13 +19,16 @@ This guide describes how ASF Junban desktop releases, in-app updates, changelog 
 
 ### Development / Server Mode
 
-- Default database path: `./data/junban.db`
+- Repo-run dev commands use `JUNBAN_PROFILE=dev` automatically.
+- Default dev database path: `./data/dev/junban.db`
 - Override with `DB_PATH` in `.env`
+- If no profile is set, the fallback daily path remains `./data/junban.db`
 
 ### Markdown Storage Mode
 
 - Optional alternative backend controlled by `STORAGE_MODE=markdown`
-- Default markdown path: `./tasks/`
+- Daily default markdown path: `./tasks/`
+- Dev-profile default markdown path: `./tasks/dev/`
 - Switching backends does not migrate data automatically; use export/import when changing modes.
 
 ## Changelog Source of Truth

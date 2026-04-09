@@ -7,7 +7,7 @@
   "description": "Focus timer with configurable work/break intervals.",
   "main": "index.ts",
   "minJunbanVersion": "0.1.0",
-  "permissions": ["task:read", "commands", "ui:status", "ui:view", "storage"],
+  "permissions": ["task:read", "commands", "ui:status", "ui:view", "storage", "settings"],
   "settings": [
     {
       "id": "workMinutes",

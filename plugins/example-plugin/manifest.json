@@ -5,7 +5,7 @@
   "version": "2.0.0",
   "author": "ASF",
   "description": "A complete example plugin demonstrating the Junban Plugin API: tasks, projects, tags, events, commands, status bar, and settings.",
-  "main": "index.ts",
+  "main": "index.mjs",
   "minJunbanVersion": "0.1.0",
   "targetApiVersion": "2.0.0",
   "license": "MIT",
@@ -16,7 +16,8 @@
     "tag:read",
     "commands",
     "ui:status",
-    "storage"
+    "storage",
+    "settings"
   ],
   "settings": [
     {

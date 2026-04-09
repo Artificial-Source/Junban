@@ -14,6 +14,8 @@ const mockRefreshPanels = vi.fn().mockResolvedValue(undefined);
 const mockRefreshStatusBar = vi.fn().mockResolvedValue(undefined);
 const mockRefreshCommands = vi.fn().mockResolvedValue(undefined);
 const mockTogglePlugin = vi.fn().mockResolvedValue(undefined);
+const mockApprovePluginPermissions = vi.fn().mockResolvedValue(undefined);
+const mockRevokePluginPermissions = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../../../src/ui/context/PluginContext.js", () => ({
   usePluginContext: () => ({
@@ -52,18 +54,28 @@ vi.mock("../../../src/ui/context/PluginContext.js", () => ({
 vi.mock("../../../src/ui/api/index.js", () => ({
   api: {
     togglePlugin: (...args: any[]) => mockTogglePlugin(...args),
-    approvePluginPermissions: vi.fn().mockResolvedValue(undefined),
-    revokePluginPermissions: vi.fn().mockResolvedValue(undefined),
+    approvePluginPermissions: (...args: any[]) => mockApprovePluginPermissions(...args),
+    revokePluginPermissions: (...args: any[]) => mockRevokePluginPermissions(...args),
   },
 }));
 
 vi.mock("../../../src/ui/components/PluginCard.js", () => ({
-  PluginCard: ({ plugin, onToggle }: any) => (
+  PluginCard: ({ plugin, onToggle, onRevoke, onRequestApproval }: any) => (
     <div data-testid={`plugin-card-${plugin.id}`}>
       <span>{plugin.name}</span>
       {onToggle && (
         <button data-testid={`toggle-${plugin.id}`} onClick={onToggle}>
           Toggle
+        </button>
+      )}
+      {onRequestApproval && (
+        <button data-testid={`approve-${plugin.id}`} onClick={onRequestApproval}>
+          Approve
+        </button>
+      )}
+      {onRevoke && (
+        <button data-testid={`revoke-${plugin.id}`} onClick={onRevoke}>
+          Revoke
         </button>
       )}
     </div>
@@ -75,7 +87,14 @@ vi.mock("../../../src/ui/components/PluginBrowser.js", () => ({
 }));
 
 vi.mock("../../../src/ui/components/PermissionDialog.js", () => ({
-  PermissionDialog: () => <div data-testid="permission-dialog">Permission Dialog</div>,
+  PermissionDialog: ({ onApprove }: any) => (
+    <div data-testid="permission-dialog">
+      Permission Dialog
+      <button data-testid="permission-approve" onClick={() => onApprove(["tasks:read"])}>
+        Confirm Approve
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
@@ -151,6 +170,45 @@ describe("PluginsTab", () => {
     fireEvent.click(screen.getByTestId("toggle-pomodoro"));
     await waitFor(() => {
       expect(mockTogglePlugin).toHaveBeenCalledWith("pomodoro");
+    });
+  });
+
+  it("shows an error message when toggle fails", async () => {
+    mockTogglePlugin.mockRejectedValueOnce(new Error("toggle failed"));
+
+    render(<PluginsTab />);
+    fireEvent.click(screen.getByTestId("toggle-pomodoro"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("toggle failed");
+    });
+  });
+
+  it("shows an error message when revoke fails", async () => {
+    mockRevokePluginPermissions.mockRejectedValueOnce(new Error("revoke failed"));
+
+    render(<PluginsTab />);
+    fireEvent.click(screen.getByTestId("revoke-community-plugin"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("revoke failed");
+    });
+  });
+
+  it("shows an error message when approval fails", async () => {
+    mockApprovePluginPermissions.mockRejectedValueOnce(new Error("approve failed"));
+
+    render(<PluginsTab />);
+    fireEvent.click(screen.getByTestId("approve-community-plugin"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("permission-dialog")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId("permission-approve"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("approve failed");
     });
   });
 });

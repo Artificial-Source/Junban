@@ -1,5 +1,101 @@
 import { useDirectServices, BASE, handleResponse, handleVoidResponse } from "./helpers.js";
 import { getServices } from "./direct-services.js";
+import type { SettingDefinition } from "../../plugins/types.js";
+
+export const DIRECT_PLUGIN_POLICIES: Record<
+  string,
+  { permissions: string[]; settings: SettingDefinition[] }
+> = {
+  pomodoro: {
+    permissions: ["task:read", "commands", "ui:status", "ui:view", "storage", "settings"],
+    settings: [
+      { id: "workMinutes", name: "Work Duration", type: "number", default: 25, min: 1, max: 120 },
+      { id: "breakMinutes", name: "Break Duration", type: "number", default: 5, min: 1, max: 60 },
+      {
+        id: "longBreakMinutes",
+        name: "Long Break Duration",
+        type: "number",
+        default: 15,
+        min: 1,
+        max: 60,
+      },
+      {
+        id: "sessionsBeforeLongBreak",
+        name: "Sessions Before Long Break",
+        type: "number",
+        default: 4,
+        min: 1,
+        max: 10,
+      },
+    ],
+  },
+  timeblocking: {
+    permissions: [
+      "task:read",
+      "task:write",
+      "commands",
+      "ui:view",
+      "ui:status",
+      "storage",
+      "settings",
+      "ai:tools",
+    ],
+    settings: [
+      {
+        id: "defaultDurationMinutes",
+        name: "Default Block Duration",
+        type: "select",
+        default: "30",
+        options: ["15", "30", "45", "60", "90", "120"],
+      },
+      {
+        id: "workDayStart",
+        name: "Work Day Start",
+        type: "select",
+        default: "09:00",
+        options: ["06:00", "07:00", "08:00", "09:00", "10:00"],
+      },
+      {
+        id: "workDayEnd",
+        name: "Work Day End",
+        type: "select",
+        default: "17:00",
+        options: ["16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00"],
+      },
+      {
+        id: "gridIntervalMinutes",
+        name: "Grid Interval",
+        type: "select",
+        default: "30",
+        options: ["15", "30", "60"],
+      },
+      {
+        id: "weekStartDay",
+        name: "Week Start Day",
+        type: "select",
+        default: "monday",
+        options: ["sunday", "monday"],
+      },
+    ],
+  },
+};
+
+function getDirectPluginPolicy(pluginId: string): {
+  permissions: string[];
+  settings: SettingDefinition[];
+} {
+  const policy = DIRECT_PLUGIN_POLICIES[pluginId];
+  if (!policy) {
+    throw new Error("Plugin not found");
+  }
+  return policy;
+}
+
+function assertSettingsPermission(pluginId: string, permissions: string[]): void {
+  if (!permissions.includes("settings")) {
+    throw new Error(`Plugin "${pluginId}" does not have the "settings" permission.`);
+  }
+}
 
 export interface PluginInfo {
   id: string;
@@ -41,6 +137,7 @@ export interface StatusBarItemInfo {
 
 export interface PanelInfo {
   id: string;
+  pluginId: string;
   title: string;
   icon: string;
   content: string;
@@ -88,7 +185,15 @@ export async function listPlugins(): Promise<PluginInfo[]> {
 export async function getPluginSettings(pluginId: string): Promise<Record<string, unknown>> {
   if (useDirectServices()) {
     const svc = await getServices();
-    return svc.settingsManager.getAll(pluginId);
+    const policy = getDirectPluginPolicy(pluginId);
+    assertSettingsPermission(pluginId, policy.permissions);
+
+    const stored = svc.settingsManager.getAll(pluginId);
+    const values: Record<string, unknown> = {};
+    for (const def of policy.settings) {
+      values[def.id] = def.id in stored ? stored[def.id] : def.default;
+    }
+    return values;
   }
   const res = await fetch(`${BASE}/plugins/${pluginId}/settings`);
   return handleResponse<Record<string, unknown>>(res);
@@ -101,7 +206,9 @@ export async function updatePluginSetting(
 ): Promise<void> {
   if (useDirectServices()) {
     const svc = await getServices();
-    await svc.settingsManager.set(pluginId, key, value);
+    const policy = getDirectPluginPolicy(pluginId);
+    assertSettingsPermission(pluginId, policy.permissions);
+    await svc.settingsManager.setSetting(pluginId, key, value, policy.settings);
     svc.save();
     return;
   }
@@ -159,6 +266,7 @@ export async function getPluginPanels(): Promise<PanelInfo[]> {
     const svc = await getServices();
     return svc.uiRegistry.getPanels().map((panel) => ({
       id: panel.id,
+      pluginId: panel.pluginId,
       title: panel.title,
       icon: panel.icon,
       content: svc.uiRegistry.getPanelContent(panel.id) ?? "",
@@ -212,8 +320,9 @@ export async function approvePluginPermissions(
   permissions: string[],
 ): Promise<void> {
   if (useDirectServices()) {
-    // Not yet supported in Tauri mode
-    return;
+    throw new Error(
+      `Plugin permission approval is not available in direct-services mode (${pluginId})`,
+    );
   }
   await handleVoidResponse(
     await fetch(`${BASE}/plugins/${pluginId}/permissions/approve`, {
@@ -226,8 +335,9 @@ export async function approvePluginPermissions(
 
 export async function revokePluginPermissions(pluginId: string): Promise<void> {
   if (useDirectServices()) {
-    // Not yet supported in Tauri mode
-    return;
+    throw new Error(
+      `Plugin permission revocation is not available in direct-services mode (${pluginId})`,
+    );
   }
   await handleVoidResponse(
     await fetch(`${BASE}/plugins/${pluginId}/permissions/revoke`, {
@@ -275,8 +385,7 @@ export async function uninstallPlugin(pluginId: string): Promise<void> {
 
 export async function togglePlugin(pluginId: string): Promise<void> {
   if (useDirectServices()) {
-    // Not yet supported in Tauri mode
-    return;
+    throw new Error(`Plugin toggle is not available in direct-services mode (${pluginId})`);
   }
   await handleVoidResponse(
     await fetch(`${BASE}/plugins/${pluginId}/toggle`, {

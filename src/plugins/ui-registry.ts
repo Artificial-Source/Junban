@@ -1,3 +1,7 @@
+import { createLogger } from "../utils/logger.js";
+
+const logger = createLogger("plugin-ui-registry");
+
 /** A React component type — generic to avoid React import in shared module. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type PluginComponent = (props: any) => any;
@@ -47,19 +51,53 @@ export class UIRegistry {
   private views = new Map<string, ViewRegistration>();
   private statusBarItems = new Map<string, StatusBarRegistration>();
 
+  private namespaceId(pluginId: string, id: string): string {
+    const prefix = `${pluginId}:`;
+    return id.startsWith(prefix) ? id : `${prefix}${id}`;
+  }
+
+  private resolveLookupId<T extends { id: string; pluginId: string }>(
+    entries: Map<string, T>,
+    id: string,
+  ): string | undefined {
+    if (entries.has(id)) return id;
+    if (id.includes(":")) return undefined;
+
+    const matching = Array.from(entries.values()).filter((entry) => {
+      const prefix = `${entry.pluginId}:`;
+      const localId = entry.id.startsWith(prefix) ? entry.id.slice(prefix.length) : entry.id;
+      return localId === id;
+    });
+
+    if (matching.length === 1) {
+      return matching[0].id;
+    }
+
+    if (matching.length > 1) {
+      logger.warn(`Ambiguous bare UI registration id lookup: "${id}"`, {
+        matches: matching.map((entry) => entry.id).join(","),
+      });
+    }
+
+    return undefined;
+  }
+
   addPanel(panel: PanelRegistration): void {
-    this.panels.set(panel.id, panel);
+    const namespacedId = this.namespaceId(panel.pluginId, panel.id);
+    this.panels.set(namespacedId, { ...panel, id: namespacedId });
   }
 
   addView(view: ViewRegistration): void {
-    this.views.set(view.id, view);
+    const namespacedId = this.namespaceId(view.pluginId, view.id);
+    this.views.set(namespacedId, { ...view, id: namespacedId });
   }
 
   addStatusBarItem(item: StatusBarRegistration): StatusBarHandle {
-    this.statusBarItems.set(item.id, item);
+    const namespacedId = this.namespaceId(item.pluginId, item.id);
+    this.statusBarItems.set(namespacedId, { ...item, id: namespacedId });
     return {
       update: (data) => {
-        const existing = this.statusBarItems.get(item.id);
+        const existing = this.statusBarItems.get(namespacedId);
         if (existing) {
           if (data.text !== undefined) existing.text = data.text;
           if (data.icon !== undefined) existing.icon = data.icon;
@@ -93,12 +131,16 @@ export class UIRegistry {
   }
 
   getPanelContent(id: string): string | undefined {
-    const panel = this.panels.get(id);
+    const resolvedId = this.resolveLookupId(this.panels, id);
+    if (!resolvedId) return undefined;
+    const panel = this.panels.get(resolvedId);
     return panel?.getContent?.();
   }
 
   getViewContent(id: string): string | undefined {
-    const view = this.views.get(id);
+    const resolvedId = this.resolveLookupId(this.views, id);
+    if (!resolvedId) return undefined;
+    const view = this.views.get(resolvedId);
     return view?.getContent?.();
   }
 }

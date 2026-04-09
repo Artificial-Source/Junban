@@ -24,13 +24,13 @@ describe("PluginSettingsManager", () => {
 
   it("returns stored value when set", async () => {
     const manager = createManager();
-    await manager.set("test-plugin", "workMinutes", 30);
+    await manager.setSetting("test-plugin", "workMinutes", 30, DEFINITIONS);
     expect(manager.get<number>("test-plugin", "workMinutes", DEFINITIONS)).toBe(30);
   });
 
   it("stored value takes precedence over default", async () => {
     const manager = createManager();
-    await manager.set("test-plugin", "greeting", "Hi there");
+    await manager.setSetting("test-plugin", "greeting", "Hi there", DEFINITIONS);
     expect(manager.get<string>("test-plugin", "greeting", DEFINITIONS)).toBe("Hi there");
   });
 
@@ -43,8 +43,8 @@ describe("PluginSettingsManager", () => {
 
   it("isolates settings between plugins", async () => {
     const manager = createManager();
-    await manager.set("plugin-a", "workMinutes", 30);
-    await manager.set("plugin-b", "workMinutes", 50);
+    await manager.setSetting("plugin-a", "workMinutes", 30, DEFINITIONS);
+    await manager.setSetting("plugin-b", "workMinutes", 50, DEFINITIONS);
     expect(manager.get<number>("plugin-a", "workMinutes", DEFINITIONS)).toBe(30);
     expect(manager.get<number>("plugin-b", "workMinutes", DEFINITIONS)).toBe(50);
   });
@@ -58,7 +58,52 @@ describe("PluginSettingsManager", () => {
   it("set after load persists in cache", async () => {
     const manager = createManager();
     await manager.load("test-plugin");
-    await manager.set("test-plugin", "workMinutes", 45);
+    await manager.setSetting("test-plugin", "workMinutes", 45, DEFINITIONS);
     expect(manager.get<number>("test-plugin", "workMinutes", DEFINITIONS)).toBe(45);
+  });
+
+  it("rejects unknown setting keys", async () => {
+    const manager = createManager();
+    await expect(
+      manager.setSetting("test-plugin", "not-in-manifest", "value", DEFINITIONS),
+    ).rejects.toThrow('Invalid setting key "not-in-manifest" for plugin "test-plugin"');
+  });
+
+  it("rejects invalid setting types", async () => {
+    const manager = createManager();
+    await expect(
+      manager.setSetting("test-plugin", "enabled", "true", DEFINITIONS),
+    ).rejects.toThrow('Invalid value for setting "test-plugin/enabled"');
+  });
+
+  it("rejects numbers outside min/max constraints", async () => {
+    const manager = createManager();
+    const defs: SettingDefinition[] = [
+      { id: "workMinutes", name: "Work", type: "number", default: 25, min: 1, max: 60 },
+    ];
+
+    await expect(manager.setSetting("test-plugin", "workMinutes", 0, defs)).rejects.toThrow(
+      'Invalid value for setting "test-plugin/workMinutes": must be >= 1.',
+    );
+    await expect(manager.setSetting("test-plugin", "workMinutes", 61, defs)).rejects.toThrow(
+      'Invalid value for setting "test-plugin/workMinutes": must be <= 60.',
+    );
+  });
+
+  it("rejects select values not in options", async () => {
+    const manager = createManager();
+    const defs: SettingDefinition[] = [
+      {
+        id: "mode",
+        name: "Mode",
+        type: "select",
+        default: "auto",
+        options: ["auto", "manual"],
+      },
+    ];
+
+    await expect(manager.setSetting("test-plugin", "mode", "invalid", defs)).rejects.toThrow(
+      'Invalid value for setting "test-plugin/mode": must be one of auto, manual.',
+    );
   });
 });

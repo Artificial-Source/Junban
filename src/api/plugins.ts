@@ -3,7 +3,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import type { AppServices } from "../bootstrap.js";
-import { VALID_PERMISSIONS } from "../plugins/types.js";
+import { validateOutboundNetworkUrl } from "../plugins/network-policy.js";
+import {
+  areCommunityPluginsEnabled,
+  COMMUNITY_PLUGINS_DISABLED_ERROR,
+  hasSettingsPermission,
+  settingsPermissionError,
+  validateApprovalPermissions,
+} from "../plugins/route-policy.js";
+import {
+  expectRpcObject,
+  expectRpcOptionalString,
+  expectRpcString,
+  expectRpcStringArray,
+  validateTimeblockingRpcPayload,
+} from "../plugins/timeblocking-rpc-validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -71,6 +85,7 @@ export function pluginRoutes(services: AppServices): Hono {
     await ensurePlugins();
     const panels = services.uiRegistry.getPanels().map((panel) => ({
       id: panel.id,
+      pluginId: panel.pluginId,
       title: panel.title,
       icon: panel.icon,
       content: services.uiRegistry.getPanelContent(panel.id) ?? "",
@@ -117,30 +132,14 @@ export function pluginRoutes(services: AppServices): Hono {
     const body = await c.req.json();
     const { pluginId, downloadUrl } = body as { pluginId: string; downloadUrl: string };
 
-    // Validate download URL — must be HTTPS and not targeting internal/private networks
     try {
-      const url = new URL(downloadUrl);
-      if (url.protocol !== "https:") {
-        return c.json({ success: false, error: "Download URL must use HTTPS" }, 400);
-      }
-      const hostname = url.hostname.toLowerCase();
-      if (
-        hostname === "localhost" ||
-        hostname === "127.0.0.1" ||
-        hostname === "[::1]" ||
-        hostname.startsWith("10.") ||
-        hostname.startsWith("192.168.") ||
-        hostname.startsWith("172.") ||
-        hostname === "169.254.169.254" ||
-        hostname.endsWith(".local")
-      ) {
-        return c.json(
-          { success: false, error: "Download URL must not target internal networks" },
-          400,
-        );
-      }
-    } catch {
-      return c.json({ success: false, error: "Invalid download URL" }, 400);
+      validateOutboundNetworkUrl(downloadUrl, {
+        context: "plugin install download",
+        requireHttps: true,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Invalid download URL";
+      return c.json({ success: false, error: message }, 400);
     }
 
     const { PluginInstaller } = await import("../plugins/installer.js");
@@ -149,12 +148,21 @@ export function pluginRoutes(services: AppServices): Hono {
     const result = await installer.install(pluginId, downloadUrl);
     if (result.success) {
       const discovered = await services.pluginLoader.discoverOne(pluginId);
-      if (discovered) {
-        try {
-          await services.pluginLoader.load(pluginId);
-        } catch {
-          // Plugin may need permission approval
-        }
+      if (!discovered) {
+        await installer.uninstall(pluginId);
+        return c.json(
+          {
+            success: false,
+            error: `Plugin "${pluginId}" was installed but rejected during discovery (duplicate or invalid plugin ID)`,
+          },
+          409,
+        );
+      }
+
+      try {
+        await services.pluginLoader.load(pluginId);
+      } catch {
+        // Plugin may need permission approval
       }
     }
     return c.json(result);
@@ -163,16 +171,11 @@ export function pluginRoutes(services: AppServices): Hono {
   // POST /plugins/timeblocking/rpc — RPC bridge for timeblocking plugin store
   app.post("/timeblocking/rpc", async (c) => {
     await ensurePlugins();
-    const body = await c.req.json();
-    const { method, args } = body as { method: string; args: unknown[] };
-
-    // Validate top-level shape
-    if (typeof method !== "string" || !method) {
-      return c.json({ error: "method must be a non-empty string" }, 400);
+    const payloadValidation = validateTimeblockingRpcPayload(await c.req.json());
+    if (!payloadValidation.ok) {
+      return c.json({ error: payloadValidation.error }, 400);
     }
-    if (!Array.isArray(args)) {
-      return c.json({ error: "args must be an array" }, 400);
-    }
+    const { method, args } = payloadValidation.value;
 
     const plugin = services.pluginLoader.getAll().find((p) => p.manifest.id === "timeblocking");
     if (!plugin || !plugin.enabled) {
@@ -186,121 +189,115 @@ export function pluginRoutes(services: AppServices): Hono {
       return c.json({ error: "Timeblocking store not available" }, 500);
     }
 
-    // Arg validation helpers
-    const expectString = (i: number, name: string): string | Response => {
-      if (typeof args[i] !== "string" || !(args[i] as string)) {
-        return c.json({ error: `${name} (args[${i}]) must be a non-empty string` }, 400);
-      }
-      return args[i] as string;
-    };
-    const expectOptionalString = (i: number): string | undefined => {
-      if (args[i] === undefined || args[i] === null) return undefined;
-      return typeof args[i] === "string" ? (args[i] as string) : undefined;
-    };
-    const expectObject = (i: number, name: string): Record<string, unknown> | Response => {
-      if (typeof args[i] !== "object" || args[i] === null || Array.isArray(args[i])) {
-        return c.json({ error: `${name} (args[${i}]) must be an object` }, 400);
-      }
-      return args[i] as Record<string, unknown>;
-    };
-    const expectStringArray = (i: number, name: string): string[] | Response => {
-      if (!Array.isArray(args[i]) || !(args[i] as unknown[]).every((v) => typeof v === "string")) {
-        return c.json({ error: `${name} (args[${i}]) must be an array of strings` }, 400);
-      }
-      return args[i] as string[];
-    };
-    // Returns the response if validation failed (i.e. result is a Response)
-    const isEarlyReturn = (v: unknown): v is Response =>
-      v !== null &&
-      typeof v === "object" &&
-      typeof (v as Response).status === "number" &&
-      typeof (v as Response).json === "function";
-
     let result: unknown;
     switch (method) {
       case "listBlocks": {
-        const date = expectOptionalString(0);
-        result = store.listBlocks(date);
+        const date = expectRpcOptionalString(args, 0, "date");
+        if (!date.ok) return c.json({ error: date.error }, 400);
+        result = store.listBlocks(date.value);
         break;
       }
       case "listBlocksInRange": {
-        const start = expectString(0, "startDate");
-        if (isEarlyReturn(start)) return start;
-        const end = expectString(1, "endDate");
-        if (isEarlyReturn(end)) return end;
-        result = store.listBlocksInRange(start, end);
+        const start = expectRpcString(args, 0, "startDate");
+        if (!start.ok) return c.json({ error: start.error }, 400);
+        const end = expectRpcString(args, 1, "endDate");
+        if (!end.ok) return c.json({ error: end.error }, 400);
+        result = store.listBlocksInRange(start.value, end.value);
         break;
       }
       case "listSlots": {
-        const date = expectOptionalString(0);
-        result = store.listSlots(date);
+        const date = expectRpcOptionalString(args, 0, "date");
+        if (!date.ok) return c.json({ error: date.error }, 400);
+        result = store.listSlots(date.value);
         break;
       }
       case "listSlotsInRange": {
-        const start = expectString(0, "startDate");
-        if (isEarlyReturn(start)) return start;
-        const end = expectString(1, "endDate");
-        if (isEarlyReturn(end)) return end;
-        result = store.listSlotsInRange(start, end);
+        const start = expectRpcString(args, 0, "startDate");
+        if (!start.ok) return c.json({ error: start.error }, 400);
+        const end = expectRpcString(args, 1, "endDate");
+        if (!end.ok) return c.json({ error: end.error }, 400);
+        result = store.listSlotsInRange(start.value, end.value);
         break;
       }
       case "createBlock": {
-        const input = expectObject(0, "block input");
-        if (isEarlyReturn(input)) return input;
-        result = await store.createBlock(input);
+        const input = expectRpcObject(args, 0, "block input");
+        if (!input.ok) return c.json({ error: input.error }, 400);
+        result = await store.createBlock(input.value);
         break;
       }
       case "updateBlock": {
-        const id = expectString(0, "blockId");
-        if (isEarlyReturn(id)) return id;
-        const updates = expectObject(1, "block updates");
-        if (isEarlyReturn(updates)) return updates;
-        result = await store.updateBlock(id, updates);
+        const id = expectRpcString(args, 0, "blockId");
+        if (!id.ok) return c.json({ error: id.error }, 400);
+        const updates = expectRpcObject(args, 1, "block updates");
+        if (!updates.ok) return c.json({ error: updates.error }, 400);
+        result = await store.updateBlock(id.value, updates.value);
         break;
       }
       case "deleteBlock": {
-        const id = expectString(0, "blockId");
-        if (isEarlyReturn(id)) return id;
-        result = await store.deleteBlock(id);
+        const id = expectRpcString(args, 0, "blockId");
+        if (!id.ok) return c.json({ error: id.error }, 400);
+        result = await store.deleteBlock(id.value);
         break;
       }
       case "createSlot": {
-        const input = expectObject(0, "slot input");
-        if (isEarlyReturn(input)) return input;
-        result = await store.createSlot(input);
+        const input = expectRpcObject(args, 0, "slot input");
+        if (!input.ok) return c.json({ error: input.error }, 400);
+        result = await store.createSlot(input.value);
         break;
       }
       case "addTaskToSlot": {
-        const slotId = expectString(0, "slotId");
-        if (isEarlyReturn(slotId)) return slotId;
-        const taskId = expectString(1, "taskId");
-        if (isEarlyReturn(taskId)) return taskId;
-        result = await store.addTaskToSlot(slotId, taskId);
+        const slotId = expectRpcString(args, 0, "slotId");
+        if (!slotId.ok) return c.json({ error: slotId.error }, 400);
+        const taskId = expectRpcString(args, 1, "taskId");
+        if (!taskId.ok) return c.json({ error: taskId.error }, 400);
+        result = await store.addTaskToSlot(slotId.value, taskId.value);
         break;
       }
       case "reorderSlotTasks": {
-        const slotId = expectString(0, "slotId");
-        if (isEarlyReturn(slotId)) return slotId;
-        const taskIds = expectStringArray(1, "taskIds");
-        if (isEarlyReturn(taskIds)) return taskIds;
-        result = await store.reorderSlotTasks(slotId, taskIds);
+        const slotId = expectRpcString(args, 0, "slotId");
+        if (!slotId.ok) return c.json({ error: slotId.error }, 400);
+        const taskIds = expectRpcStringArray(args, 1, "taskIds");
+        if (!taskIds.ok) return c.json({ error: taskIds.error }, 400);
+        result = await store.reorderSlotTasks(slotId.value, taskIds.value);
         break;
       }
       case "getSettings": {
-        const key = expectString(0, "settingKey");
-        if (isEarlyReturn(key)) return key;
+        if (!hasSettingsPermission(plugin.manifest.permissions)) {
+          return c.json(
+            {
+              error: settingsPermissionError(plugin.manifest.id),
+            },
+            403,
+          );
+        }
+        const key = expectRpcString(args, 0, "settingKey");
+        if (!key.ok) return c.json({ error: key.error }, 400);
         const definitions = plugin.manifest.settings ?? [];
-        const val = services.settingsManager.get("timeblocking", key, definitions);
+        const val = services.settingsManager.get(plugin.manifest.id, key.value, definitions);
         result = val;
         break;
       }
       case "setSettings": {
-        const sKey = expectString(0, "settingKey");
-        if (isEarlyReturn(sKey)) return sKey;
+        if (!hasSettingsPermission(plugin.manifest.permissions)) {
+          return c.json(
+            {
+              error: settingsPermissionError(plugin.manifest.id),
+            },
+            403,
+          );
+        }
+        const sKey = expectRpcString(args, 0, "settingKey");
+        if (!sKey.ok) return c.json({ error: sKey.error }, 400);
         if (args[1] === undefined) {
           return c.json({ error: "settingValue (args[1]) is required" }, 400);
         }
-        await services.settingsManager.set("timeblocking", sKey, args[1]);
+        const definitions = plugin.manifest.settings ?? [];
+        await services.settingsManager.setSetting(
+          plugin.manifest.id,
+          sKey.value,
+          args[1],
+          definitions,
+        );
         result = { ok: true };
         break;
       }
@@ -341,28 +338,17 @@ export function pluginRoutes(services: AppServices): Hono {
 
     // Block approving community plugins when restricted mode is on
     const plugin = services.pluginLoader.get(pluginId);
-    if (plugin && !plugin.builtin) {
-      const setting = services.storage.getAppSetting("community_plugins_enabled");
-      if (setting?.value !== "true") {
-        return c.json(
-          { error: "Community plugins are disabled. Enable them in Settings > Plugins." },
-          403,
-        );
-      }
+    if (plugin && !plugin.builtin && !areCommunityPluginsEnabled(services.storage)) {
+      return c.json({ error: COMMUNITY_PLUGINS_DISABLED_ERROR }, 403);
     }
 
     const body = await c.req.json();
     const { permissions } = body as { permissions: string[] };
-    // Validate permissions against known set
-    if (!Array.isArray(permissions)) {
-      return c.json({ error: "permissions must be an array" }, 400);
+    const validation = validateApprovalPermissions(permissions);
+    if (!validation.ok) {
+      return c.json({ error: validation.error }, 400);
     }
-    const validSet = new Set<string>(VALID_PERMISSIONS);
-    const invalid = permissions.filter((p) => !validSet.has(p));
-    if (invalid.length > 0) {
-      return c.json({ error: `Invalid permissions: ${invalid.join(", ")}` }, 400);
-    }
-    await services.pluginLoader.approveAndLoad(pluginId, permissions);
+    await services.pluginLoader.approveAndLoad(pluginId, validation.permissions);
     return c.json({ ok: true });
   });
 
@@ -389,6 +375,9 @@ export function pluginRoutes(services: AppServices): Hono {
     if (!plugin) {
       return c.json({ error: "Plugin not found" }, 404);
     }
+    if (!hasSettingsPermission(plugin.manifest.permissions)) {
+      return c.json({ error: settingsPermissionError(pluginId) }, 403);
+    }
     const stored = services.settingsManager.getAll(pluginId);
     const definitions = plugin.manifest.settings ?? [];
     const values: Record<string, unknown> = {};
@@ -402,9 +391,17 @@ export function pluginRoutes(services: AppServices): Hono {
   app.put("/:id/settings", async (c) => {
     await ensurePlugins();
     const pluginId = c.req.param("id");
+    const plugin = services.pluginLoader.get(pluginId);
+    if (!plugin) {
+      return c.json({ error: "Plugin not found" }, 404);
+    }
+    if (!hasSettingsPermission(plugin.manifest.permissions)) {
+      return c.json({ error: settingsPermissionError(pluginId) }, 403);
+    }
     const body = await c.req.json();
     const { key, value } = body as { key: string; value: unknown };
-    await services.settingsManager.set(pluginId, key, value);
+    const definitions = plugin.manifest.settings ?? [];
+    await services.settingsManager.setSetting(pluginId, key, value, definitions);
     return c.json({ ok: true });
   });
 
@@ -445,14 +442,8 @@ export function pluginRoutes(services: AppServices): Hono {
     }
 
     // Block enabling community plugins when restricted mode is on
-    if (!plugin.enabled && !plugin.builtin) {
-      const setting = services.storage.getAppSetting("community_plugins_enabled");
-      if (setting?.value !== "true") {
-        return c.json(
-          { error: "Community plugins are disabled. Enable them in Settings > Plugins." },
-          403,
-        );
-      }
+    if (!plugin.enabled && !plugin.builtin && !areCommunityPluginsEnabled(services.storage)) {
+      return c.json({ error: COMMUNITY_PLUGINS_DISABLED_ERROR }, 403);
     }
 
     if (plugin.enabled) {

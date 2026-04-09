@@ -23,31 +23,31 @@ docs/
 ├── guides/          Setup, contributing, architecture, performance, security, releases
 ├── frontend/        UI reference docs for views, components, context, hooks, themes
 ├── backend/         Core, database, parser, AI, voice, MCP, CLI, storage, plugins
-├── plugins/         Plugin-author documentation and examples
+├── plugins/         Plugin-author onboarding, API docs, and examples
 └── planning/        Public roadmap and project status
 ```
 
 ## Ownership Map
 
-| If you change...                                | You must update...                                              |
-| ----------------------------------------------- | --------------------------------------------------------------- |
-| `src/ui/components/**`                          | `docs/frontend/COMPONENTS.md`                                   |
-| `src/ui/views/**`                               | `docs/frontend/VIEWS.md`                                        |
-| `src/ui/context/**`                             | `docs/frontend/CONTEXT.md`                                      |
-| `src/ui/hooks/**`                               | `docs/frontend/HOOKS.md`                                        |
-| `src/ui/themes/**` or design tokens             | `docs/frontend/THEMES.md`                                       |
-| `src/ui/api/**`                                 | `docs/frontend/API_LAYER.md`                                    |
-| `src/core/**`                                   | `docs/backend/CORE.md`                                          |
-| `src/db/**`                                     | `docs/backend/DATABASE.md`                                      |
-| `src/storage/**`                                | `docs/backend/STORAGE.md`                                       |
-| `src/parser/**`                                 | `docs/backend/PARSER.md`                                        |
-| `src/ai/**`                                     | `docs/backend/AI.md`                                            |
-| `src/ai/voice/**`                               | `docs/backend/VOICE.md`                                         |
-| `src/mcp/**`                                    | `docs/backend/MCP.md`                                           |
-| `src/plugins/**` internals                      | `docs/backend/PLUGINS.md`                                       |
-| Plugin author API surface                       | `docs/plugins/API.md` and `docs/plugins/EXAMPLES.md`            |
-| `src/cli/**`                                    | `docs/backend/CLI.md`                                           |
-| High-level structure, startup, deployment shape | `guides/ARCHITECTURE.md`, `planning/ROADMAP.md`, `../CLAUDE.md` |
+| If you change...                                | You must update...                                                              |
+| ----------------------------------------------- | ------------------------------------------------------------------------------- |
+| `src/ui/components/**`                          | `docs/frontend/COMPONENTS.md`                                                   |
+| `src/ui/views/**`                               | `docs/frontend/VIEWS.md`                                                        |
+| `src/ui/context/**`                             | `docs/frontend/CONTEXT.md`                                                      |
+| `src/ui/hooks/**`                               | `docs/frontend/HOOKS.md`                                                        |
+| `src/ui/themes/**` or design tokens             | `docs/frontend/THEMES.md`                                                       |
+| `src/ui/api/**`                                 | `docs/frontend/API_LAYER.md`                                                    |
+| `src/core/**`                                   | `docs/backend/CORE.md`                                                          |
+| `src/db/**`                                     | `docs/backend/DATABASE.md`                                                      |
+| `src/storage/**`                                | `docs/backend/STORAGE.md`                                                       |
+| `src/parser/**`                                 | `docs/backend/PARSER.md`                                                        |
+| `src/ai/**`                                     | `docs/backend/AI.md`                                                            |
+| `src/ai/voice/**`                               | `docs/backend/VOICE.md`                                                         |
+| `src/mcp/**`                                    | `docs/backend/MCP.md`                                                           |
+| `src/plugins/**` internals                      | `docs/backend/PLUGINS.md`                                                       |
+| Plugin author API surface                       | `docs/plugins/README.md`, `docs/plugins/API.md`, and `docs/plugins/EXAMPLES.md` |
+| `src/cli/**`                                    | `docs/backend/CLI.md`                                                           |
+| High-level structure, startup, deployment shape | `guides/ARCHITECTURE.md`, `planning/ROADMAP.md`, `../CLAUDE.md`                 |
 
 ## Documentation Maintenance Policy
 

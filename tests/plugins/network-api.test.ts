@@ -60,6 +60,7 @@ describe("Plugin Network API", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: "value" }),
+      redirect: "manual",
     });
   });
 
@@ -82,6 +83,50 @@ describe("Plugin Network API", () => {
 
     const api = createAPI(["network"]);
     await expect(api.network.fetch("https://unreachable.test")).rejects.toThrow("Network error");
+  });
+
+  it("blocks localhost targets even with network permission", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const api = createAPI(["network"]);
+    await expect(api.network.fetch("http://localhost:8080/health")).rejects.toThrow(
+      /Blocked network\.fetch\(\) for plugin "test-network"/,
+    );
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("blocks IPv4-mapped IPv6 loopback targets", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const api = createAPI(["network"]);
+    await expect(api.network.fetch("http://[::ffff:7f00:1]/health")).rejects.toThrow(
+      /local\/private IPv6 ranges are not allowed/,
+    );
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("blocks non-http schemes", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const api = createAPI(["network"]);
+    await expect(api.network.fetch("file:///etc/passwd")).rejects.toThrow(
+      /scheme "file:" is not allowed/,
+    );
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("blocks redirect responses to prevent SSRF bypass", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://localhost:8080/internal" },
+      }),
+    );
+
+    const api = createAPI(["network"]);
+    await expect(api.network.fetch("https://example.com/redirect")).rejects.toThrow(
+      /redirects are not allowed/,
+    );
   });
 
   it("should default to GET method in logs", async () => {

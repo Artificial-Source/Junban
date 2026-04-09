@@ -1,5 +1,6 @@
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "../utils/logger.js";
@@ -20,6 +21,12 @@ if (isMain) {
   const { loadEnv } = await import("../config/env.js");
   const { getDb } = await import("./client.js");
   const env = loadEnv();
+  const dbDir = path.dirname(env.DB_PATH);
+
+  if (dbDir !== "." && dbDir !== ":memory:") {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+
   const db = getDb(env.DB_PATH);
   runMigrations(db);
 }

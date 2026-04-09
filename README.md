@@ -6,7 +6,7 @@
 
 **The task manager that doesn't exist yet.**<br />
 Beautiful and simple out of the box, with a real AI assistant<br />
-and a plugin system so simple that anyone can build features — no coding required.
+and a plugin system so simple that anyone can build features.
 
 Local-first. No accounts. No tracking. Your data stays on your machine.
 
@@ -30,7 +30,7 @@ Built by the [AI Strategic Forum (ASF)](https://github.com/Artificial-Source-Fou
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/today-dark.png" />
   <source media="(prefers-color-scheme: light)" srcset="screenshots/today-light.png" />
-  <img src="screenshots/today-light.png" alt="Junban — Today view" width="720" />
+  <img src="screenshots/today-light.png" alt="Junban - Today view" width="720" />
 </picture>
 
 </div>
@@ -46,7 +46,7 @@ Built by the [AI Strategic Forum (ASF)](https://github.com/Artificial-Source-Fou
 
 |                               Inbox (light)                               |                              Inbox (dark)                               |
 | :-----------------------------------------------------------------------: | :---------------------------------------------------------------------: |
-| <img src="screenshots/inbox-light.png" alt="Inbox — light" width="400" /> | <img src="screenshots/inbox-dark.png" alt="Inbox — dark" width="400" /> |
+| <img src="screenshots/inbox-light.png" alt="Inbox - light" width="400" /> | <img src="screenshots/inbox-dark.png" alt="Inbox - dark" width="400" /> |
 
 |                                Upcoming                                |                                Calendar                                |
 | :--------------------------------------------------------------------: | :--------------------------------------------------------------------: |
@@ -72,173 +72,144 @@ Built by the [AI Strategic Forum (ASF)](https://github.com/Artificial-Source-Fou
 
 Desktop app for Windows, macOS, and Linux.
 
-👉 **Download from the latest release page:** [github.com/Artificial-Source-Foundation/Junban/releases/latest](https://github.com/Artificial-Source-Foundation/Junban/releases/latest)
+Latest release:
 
-> We use the release page (instead of hardcoded asset URLs) because installer filenames include the app version.
+<https://github.com/Artificial-Source-Foundation/Junban/releases/latest>
 
-| Platform                  | Pick this asset on the latest release page |
-| ------------------------- | ------------------------------------------ |
-| **Windows**               | `.exe` installer (recommended) or `.msi`   |
-| **macOS (Apple Silicon)** | `.dmg` with `aarch64` in the filename      |
-| **macOS (Intel)**         | `.dmg` with `x64` in the filename          |
-| **Linux (Debian/Ubuntu)** | `.deb` with `amd64` in the filename        |
-| **Linux (AppImage)**      | `.AppImage` with `amd64` in the filename   |
-
-### Download trust & verification (current)
-
-- Download only from the official [Artificial-Source-Foundation/Junban Releases](https://github.com/Artificial-Source-Foundation/Junban/releases) page.
-- Confirm the asset is attached to a published release with notes/tag in this repository.
-- We do not currently publish standalone checksum instructions for manual installs in this README.
-- For desktop installs, in-app updates use Tauri updater metadata from this same Releases source.
-- The in-app updater can be checked from `Settings -> About`, and release history is tracked in [CHANGELOG.md](CHANGELOG.md).
-
-- **Windows:** use `.exe` for the normal installer; `.msi` is mainly for managed or enterprise-friendly installs.
-- **macOS:** if Gatekeeper warns on first launch, open the app from Finder or approve it in System Settings.
-- **Linux:** use `.deb` on Debian/Ubuntu; use `AppImage` for a portable build on other distros.
+| Platform              | Pick this asset on the latest release page |
+| --------------------- | ------------------------------------------ |
+| Windows               | `.exe` installer or `.msi`                 |
+| macOS (Apple Silicon) | `.dmg` with `aarch64` in the filename      |
+| macOS (Intel)         | `.dmg` with `x64` in the filename          |
+| Linux (Debian/Ubuntu) | `.deb` with `amd64` in the filename        |
+| Linux (portable)      | `.AppImage` with `amd64` in the filename   |
 
 ## Why Junban
 
-Most task managers are either too simple (no AI, no extensibility) or too complex (enterprise bloat). Junban sits in the middle:
+Most task managers are either too simple or too heavy. Junban is trying to keep the core fast and local, while still giving you AI, voice, and extensibility when you want them.
 
-- **Type naturally** — `buy milk tomorrow 3pm p1 #groceries +shopping` just works
-- **Talk to AI** — a sidebar chat that actually sees your tasks, projects, and schedule
-- **Speak instead of type** — voice input via browser, Groq, Inworld AI, or local models
-- **Extend with plugins** — describe what you want to Claude or ChatGPT, drop the file in a folder, done
-- **Own your data** — SQLite or Markdown files. Export anytime. No vendor lock-in
-
-## Development
-
-Want to run from source or contribute? See the [local setup guide](docs/guides/SETUP.md), or:
-
-```bash
-git clone https://github.com/Artificial-Source-Foundation/Junban.git && cd Junban
-pnpm install
-cp .env.example .env
-mkdir -p data && pnpm db:migrate
-pnpm dev          # Web app at http://localhost:5173
-pnpm tauri:dev    # Desktop app (requires Rust + Tauri CLI)
-```
+- Type tasks naturally: `buy milk tomorrow 3pm p1 #groceries +shopping`
+- Use AI that can see your tasks, projects, and schedule
+- Talk instead of type with STT/TTS and voice activity detection
+- Extend the app with plugins
+- Keep your data portable with SQLite or Markdown storage
+- Use the same core from the UI, API server, CLI, and MCP server
 
 ## Features
 
-### Natural Language Input
+### Natural language input
 
-Type tasks the way you think. Dates, priorities, tags, and projects are parsed from plain text.
+Dates, priorities, tags, recurrence, and projects can be parsed from plain text.
 
-```
+```text
 buy milk tomorrow 3pm p1 #groceries +shopping
 finish report next friday p2 #work
 call dentist 9am #health
 ```
 
-### AI Assistant
+### AI assistant
 
-A conversational sidebar that sees your tasks, projects, and schedule. **40 built-in tools** for task CRUD, project management, scheduling, pattern analysis, workload detection, and energy-based recommendations.
+Junban includes an optional AI assistant with:
 
-Supported providers: **OpenAI** / **Anthropic** / **OpenRouter** / **Ollama** / **LM Studio** — or write a custom provider plugin.
+- Chat-driven task and project management
+- Built-in tool calling for planning, querying, organization, and updates
+- Pluggable providers, including cloud and local options
+- Task-aware responses grounded in your actual Junban data
 
-> Nothing AI-related runs unless you configure it. No keys stored or proxied.
+Nothing AI-related runs unless you configure it.
 
 ### Voice
 
-Full speech-to-text and text-to-speech pipeline with voice activity detection (VAD).
+Voice support includes speech-to-text, text-to-speech, and voice activity detection.
 
-| Provider           | Type      | Notes                         |
-| ------------------ | --------- | ----------------------------- |
-| Browser Speech API | STT + TTS | Zero config, works everywhere |
-| Groq               | STT + TTS | Whisper STT + PlayAI TTS      |
-| Inworld AI         | TTS       | High-quality, 15 languages    |
-| Whisper (local)    | STT       | Runs on your machine          |
-| Kokoro (local)     | TTS       | Neural TTS via Web Worker     |
-| Piper (local)      | TTS       | Lightweight local TTS         |
+Current built-in providers include browser, hosted, and local model paths. See `docs/backend/VOICE.md` for the up-to-date provider matrix.
 
 ### Plugins
 
-Obsidian-style plugins — drop a TypeScript file in `plugins/`, no build step.
+Junban has an Obsidian-style plugin system with:
 
-```typescript
-import { Plugin } from "@asf-junban/plugin-api";
+- Manifest-based discovery
+- Sandboxed execution
+- Permission-gated APIs
+- Commands, views, panels, settings, and AI extension points
 
-export default class MyPlugin extends Plugin {
-  async onLoad() {
-    this.app.commands.register({
-      id: "hello",
-      name: "Say Hello",
-      callback: () => console.log("Hello from my plugin!"),
-    });
-  }
-  async onUnload() {}
-}
+Plugin author docs:
+
+- `docs/plugins/API.md`
+- `docs/plugins/EXAMPLES.md`
+
+### Interfaces
+
+- React desktop/web UI
+- Standalone Hono API server
+- Commander-based CLI
+- MCP server for external AI agents
+
+## Development
+
+See `docs/guides/SETUP.md` for the full setup guide.
+
+Quick start:
+
+```bash
+git clone https://github.com/Artificial-Source-Foundation/Junban.git
+cd Junban
+pnpm install
+cp .env.example .env
+pnpm db:migrate
+pnpm dev
 ```
 
-Plugins can register commands, add sidebar panels, add views, hook into task events, and store data. The API is stable (v1.0.0, semver).
+Useful commands:
 
-> Docs: [Plugin API](docs/plugins/API.md) / [Examples](docs/plugins/EXAMPLES.md)
+```bash
+pnpm dev
+pnpm dev:full
+pnpm server
+pnpm build
+pnpm test
+pnpm test:e2e
+pnpm check
+pnpm tauri:dev
+pnpm mcp
+pnpm cli
+```
 
-### And more...
+Source-run dev commands use an isolated dev profile by default. Packaged desktop installs use Tauri app data instead of the repo-local dev database.
 
-|                             |                                                              |
-| --------------------------- | ------------------------------------------------------------ |
-| **Dual storage**            | SQLite (default) or Markdown files with YAML frontmatter     |
-| **Sub-tasks & templates**   | Break down work, reuse common patterns                       |
-| **Recurring tasks**         | Daily, weekly, monthly — with natural language scheduling    |
-| **Reminders**               | Set reminders on any task, get notified when they're due     |
-| **Eisenhower Matrix**       | Prioritize with the urgent/important quadrant view           |
-| **Focus mode**              | Distraction-free, keyboard-driven                            |
-| **CLI companion**           | `junban add`, `junban list`, `junban done` from the terminal |
-| **Themes**                  | Light / Dark / Nord + accent colors + custom CSS             |
-| **Sound effects**           | Satisfying audio feedback for task actions                   |
-| **Automated test coverage** | Solid coverage across the entire codebase                    |
+## Tech Stack
 
-## Tech stack
-
-|              |                                                   |
-| ------------ | ------------------------------------------------- |
-| **Runtime**  | Node.js 22, TypeScript                            |
-| **Desktop**  | Tauri v2                                          |
-| **Frontend** | React 19, Tailwind CSS 4                          |
-| **Database** | SQLite (better-sqlite3 / sql.js) + Drizzle ORM    |
-| **AI**       | OpenAI, Anthropic, OpenRouter, Ollama, LM Studio  |
-| **Voice**    | Browser, Groq, Inworld AI, Whisper, Kokoro, Piper |
-| **CLI**      | Commander.js                                      |
-| **Tests**    | Vitest + Playwright                               |
-| **Build**    | Vite 6                                            |
-
-## Status
-
-v1.0 shipped. Desktop app works on Mac, Windows, Linux.
-
-Latest: voice call mode, global search, tag management AI tools, sound effects, comprehensive settings, mobile-responsive UI.
-
-Next milestone in the roadmap: **Calendar Integrations**. After that: **Junban Sync** for optional cross-device sync.
+| Area     | Choice                                                 |
+| -------- | ------------------------------------------------------ |
+| Runtime  | Node.js 22, TypeScript                                 |
+| Frontend | React 19, Tailwind CSS 4, Vite 6                       |
+| Desktop  | Tauri v2                                               |
+| API      | Hono                                                   |
+| Database | SQLite via better-sqlite3 and sql.js                   |
+| ORM      | Drizzle                                                |
+| AI       | Provider abstraction with cloud and local integrations |
+| Voice    | Browser, hosted, and local adapters                    |
+| CLI      | Commander.js                                           |
+| Tests    | Vitest, Testing Library, Playwright                    |
 
 ## Docs
 
-|                                             |                                 |
-| ------------------------------------------- | ------------------------------- |
-| [Architecture](docs/guides/ARCHITECTURE.md) | How the codebase is organized   |
-| [Local setup](docs/guides/SETUP.md)         | Getting it running              |
-| [Releases](docs/guides/RELEASES.md)         | Packaging, updates, changelog   |
-| [Contributing](docs/guides/CONTRIBUTING.md) | How to help                     |
-| [Security](docs/guides/SECURITY.md)         | Threat model, plugin sandboxing |
-| [Plugin API](docs/plugins/API.md)           | Building plugins                |
-| [Plugin examples](docs/plugins/EXAMPLES.md) | Walkthroughs                    |
-| [Roadmap](docs/planning/ROADMAP.md)         | What's planned                  |
+| Doc                           | Purpose                                 |
+| ----------------------------- | --------------------------------------- |
+| `docs/guides/SETUP.md`        | Local development setup                 |
+| `docs/guides/ARCHITECTURE.md` | System architecture and data flow       |
+| `docs/guides/RELEASES.md`     | Packaging and release workflow          |
+| `docs/guides/CONTRIBUTING.md` | Contribution workflow                   |
+| `docs/guides/SECURITY.md`     | Security model                          |
+| `docs/plugins/API.md`         | Plugin author reference                 |
+| `docs/plugins/EXAMPLES.md`    | Plugin examples                         |
+| `docs/planning/ROADMAP.md`    | Product roadmap                         |
+| `AGENTS.md`                   | Quick-start for coding agents           |
+| `CLAUDE.md`                   | Contributor and agent development guide |
 
 ## Contributing
 
-See [CONTRIBUTING.md](docs/guides/CONTRIBUTING.md). Run `pnpm check` before submitting PRs.
-
-## Star History
-
-<div align="center">
-  <a href="https://github.com/Artificial-Source-Foundation/Junban/stargazers">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Artificial-Source-Foundation/Junban&theme=dark&type=Date" />
-      <img src="https://api.star-history.com/svg?repos=Artificial-Source-Foundation/Junban&type=Date" alt="Star History" width="600" />
-    </picture>
-  </a>
-</div>
+See `docs/guides/CONTRIBUTING.md`. Run `pnpm check` before opening a PR.
 
 ## License
 

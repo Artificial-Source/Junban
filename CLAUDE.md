@@ -1,410 +1,310 @@
-# ASF Junban — Development Guide
+# ASF Junban - Development Guide
 
-## What Is This
+## What This Repo Is
 
-**Build the task manager you've always wanted.**
+ASF Junban is a local-first task manager with a React/Tauri UI, a shared TypeScript core, optional AI features, voice support, an MCP server, a CLI, and an Obsidian-style plugin system.
 
-ASF Junban is an open-source, AI-native task manager with an Obsidian-style plugin system. Built by the **AI Strategic Forum (ASF)** community. **Simple. Smart. Yours.**
+The product goal is consistent across the codebase:
 
-It's the task manager that doesn't exist yet — beautiful and simple out of the box, with a real AI assistant (not a gimmick), and a plugin system so simple that anyone can build features through AI-generated code. No coding experience required.
+- Local-first and private by default
+- Useful without accounts or cloud services
+- AI-enhanced, but not AI-dependent
+- Extensible through a plugin API that stays approachable for both humans and codegen tools
+- Portable data, with SQLite as the main path and Markdown as an alternate backend
 
-This is the second ASF project, alongside [ASF Sentinel](https://github.com/Artificial-Source-Foundation/Sentinel) (a Discord bot for AI news curation).
+## Read This With
 
-## ASF Values (MUST Follow)
+- `AGENTS.md` for fast navigation
+- `docs/README.md` for the canonical docs map
+- `docs/guides/ARCHITECTURE.md` for the full architecture pass
 
-- **Accuracy > Speed** — get it right, not just first
-- **Sources > Vibes** — always cite, always link
-- **Disclosure > Persuasion** — be transparent
-- **Label speculation** — if it's a guess, say so
-- **No hidden promotion** — disclose affiliations
+## Current Tech Stack
 
-## Core Principles
+| Area            | Choice                                                                                              |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| Runtime         | Node.js 22+, TypeScript, ES modules                                                                 |
+| Frontend        | React 19, Tailwind CSS 4, Vite 6                                                                    |
+| Desktop         | Tauri v2                                                                                            |
+| API server      | Hono                                                                                                |
+| Database        | SQLite via better-sqlite3 on Node, sql.js in web/Tauri browser context                              |
+| ORM             | Drizzle ORM                                                                                         |
+| Validation      | Zod                                                                                                 |
+| AI              | Provider abstraction for OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, and compatible providers |
+| Voice           | Browser + remote + local STT/TTS adapters                                                           |
+| CLI             | Commander.js                                                                                        |
+| MCP             | `@modelcontextprotocol/sdk`                                                                         |
+| Tests           | Vitest, Testing Library, Playwright                                                                 |
+| Package manager | pnpm                                                                                                |
 
-1. **Local-first, private by default** — data lives on the user's machine. Zero network calls by default. No accounts, no telemetry, no analytics.
-2. **AI-native, not AI-bolted-on** — the AI assistant is a core part of the experience: conversational sidebar, voice input, BYOM (Bring Your Own Model). But completely optional — Junban works perfectly without AI.
-3. **Vibe-code extensible** — the plugin API is designed so anyone can ask Claude or ChatGPT to build a plugin. If the API is too complicated for AI to generate correct code, it's too complicated.
-4. **Minimal by default, powerful when needed** — clean UI out of the box. The app is a canvas — plugins paint the picture.
-5. **Open source (MIT), honest business model** — free forever. Revenue from optional paid sync hosting (Junban Sync), not dark patterns.
-6. **No vendor lock-in** — SQLite or Markdown files. Export anytime. Switching away should be trivial.
+## Project Shape
 
-## Tech Stack
-
-| Component       | Choice                        | Why                                                                  |
-| --------------- | ----------------------------- | -------------------------------------------------------------------- |
-| Runtime         | Node.js 22+ / TypeScript      | Type safety, ecosystem                                               |
-| Desktop         | Tauri                         | Cross-platform, small binary (~5MB vs Electron ~150MB)               |
-| Frontend        | React + Tailwind CSS          | Fast, huge ecosystem                                                 |
-| Local DB        | SQLite (better-sqlite3)       | Local-first, portable, zero config                                   |
-| ORM             | Drizzle                       | Type-safe, lightweight, SQL-close                                    |
-| AI              | Pluggable providers           | OpenAI, Anthropic, OpenRouter, Ollama, LM Studio — or build your own |
-| Plugin Runtime  | Custom loader with sandboxing | Obsidian-style, controlled execution                                 |
-| MCP             | @modelcontextprotocol/sdk     | External AI agent bridge (Claude Desktop, custom agents)             |
-| CLI             | Commander.js                  | Companion CLI tool                                                   |
-| NLP             | chrono-node                   | Natural language date/time parsing                                   |
-| Testing         | Vitest                        | Fast, ESM native                                                     |
-| Build           | Vite                          | Fast bundling                                                        |
-| Package Manager | pnpm                          | Fast, disk-efficient                                                 |
-| Validation      | Zod                           | Runtime type checking                                                |
-
-## Project Structure
-
-```
+```text
 src/
-├── main.ts                  # Entry point — wires everything together
-├── bootstrap.ts             # Node.js service wiring
-├── bootstrap-web.ts         # Browser/WebView service wiring
-├── config/                  # Configuration & environment (3 files)
-│   ├── env.ts               # Zod-validated env vars
-│   ├── defaults.ts          # Default settings and constants
-│   └── themes.ts            # Built-in theme definitions
-├── db/                      # Database layer (7 files + 9 migrations)
-│   ├── schema.ts            # Drizzle schema definitions (14 tables)
-│   ├── client.ts            # SQLite connection (Node.js / better-sqlite3)
-│   ├── client-web.ts        # SQLite connection (browser / sql.js WASM)
-│   ├── migrate.ts           # Migration runner (Node.js)
-│   ├── migrate-web.ts       # Migration runner (browser)
-│   ├── persistence.ts       # OPFS persistence for browser SQLite
-│   ├── queries.ts           # Query helpers (CRUD for tasks, projects, tags)
-│   └── migrations/          # 9 SQL migration files
-├── storage/                 # Storage abstraction layer (4 files)
-│   ├── interface.ts         # IStorage interface + row types
-│   ├── sqlite-backend.ts    # SQLite implementation via Drizzle
-│   ├── markdown-backend.ts  # Markdown files with YAML frontmatter
-│   └── markdown-utils.ts    # YAML parsing/formatting helpers
-├── core/                    # Core task management logic (19 files)
-│   ├── tasks.ts             # Task CRUD operations
-│   ├── projects.ts          # Project management
-│   ├── tags.ts              # Tag system
-│   ├── sections.ts          # Project sections
-│   ├── stats.ts             # Productivity statistics
-│   ├── templates.ts         # Task templates
-│   ├── priorities.ts        # Priority levels and sorting
-│   ├── recurrence.ts        # Recurring task logic
-│   ├── filters.ts           # Task filtering and search
-│   ├── query-parser.ts      # Natural language query → TaskFilter
-│   ├── nudges.ts            # Contextual nudge suggestions
-│   ├── timer.ts             # In-memory timer (start/stop, format, parse estimates)
-│   ├── export.ts            # Data export (JSON, CSV, Markdown)
-│   ├── import.ts            # Data import (Todoist, plain text)
-│   ├── event-bus.ts         # Internal event system
-│   ├── undo.ts              # Undo/redo stack
-│   ├── actions.ts           # Action definitions for undo
-│   ├── errors.ts            # NotFoundError, ValidationError, StorageError
-│   └── types.ts             # Core type definitions (Zod + TS)
-├── parser/                  # Natural language parsing (3 files)
-│   ├── nlp.ts               # Date/time extraction (chrono-node)
-│   ├── task-parser.ts       # Full task string parser
-│   └── grammar.ts           # Grammar rules for task input
-├── mcp/                     # MCP server — external AI agent bridge (7 files)
-│   ├── server.ts            # Entry point — bootstrap + stdio transport
-│   ├── tools.ts             # Bridges ToolRegistry → MCP tools
-│   ├── resources.ts         # Read-only resources (tasks, projects, tags, stats)
-│   ├── prompts.ts           # Pre-built prompts (plan-my-day, daily-review, quick-capture)
-│   ├── schema-converter.ts  # JSON Schema → Zod converter
-│   ├── context.ts           # ToolContext factory
-│   └── errors.ts            # Error mapping to MCP responses
-├── plugins/                 # Plugin system (11 files + builtin/)
-│   ├── loader.ts            # Plugin discovery and loading
-│   ├── lifecycle.ts         # Plugin lifecycle management
-│   ├── api.ts               # Plugin API surface (what plugins can access)
-│   ├── sandbox.ts           # Sandboxed execution environment
-│   ├── registry.ts          # Community plugin registry client
-│   ├── installer.ts         # Plugin install/uninstall
-│   ├── settings.ts          # Per-plugin settings storage
-│   ├── command-registry.ts  # Plugin command registration
-│   ├── ui-registry.ts       # Plugin UI panel/view registration
-│   ├── types.ts             # Plugin manifest and API types
-│   └── builtin/             # Built-in plugins
-│       ├── pomodoro/        # Pomodoro timer plugin
-│       └── timeblocking/    # Timeblocking plugin (day/week views, auto-scheduler, DnD)
-├── ai/                      # AI assistant layer (45 files)
-│   ├── chat.ts              # Chat session management
-│   ├── provider.ts          # Provider setup + default registries
-│   ├── model-discovery.ts   # Dynamic model list fetching
-│   ├── errors.ts            # AI error classification
-│   ├── types.ts             # AI type definitions
-│   ├── core/                # Pipeline architecture (4 files)
-│   │   ├── pipeline.ts      # LLMPipeline — orchestrates execution
-│   │   ├── middleware.ts     # Middleware chain (retry, timeout)
-│   │   ├── context.ts       # Execution context
-│   │   └── capabilities.ts  # Provider capability detection
-│   ├── provider/            # Provider abstraction (8 files)
-│   │   ├── interface.ts     # LLMProviderPlugin interface
-│   │   ├── registry.ts      # Provider registry
-│   │   └── adapters/        # 6 adapters: openai, anthropic, openrouter, ollama, lmstudio, openai-compat
-│   ├── tools/               # Tool system (20 files)
-│   │   ├── registry.ts      # ToolRegistry
-│   │   ├── types.ts         # Tool type definitions
-│   │   └── builtin/         # 18 tool files: task-crud, project-crud, tag-crud, reminder-tools,
-│   │                        #   query-tasks, daily-planning, task-breakdown, analyze-patterns,
-│   │                        #   analyze-workload, smart-organize, energy-recommendations,
-│   │                        #   productivity-stats, bulk-operations, memory-tools,
-│   │                        #   time-estimation, weekly-review, extract-tasks-from-text, auto-schedule
-│   └── voice/               # Voice I/O (14 files)
-│       ├── interface.ts     # STT/TTS provider interfaces
-│       ├── registry.ts      # Voice provider registry
-│       ├── provider.ts      # Default voice registry setup
-│       ├── audio-utils.ts   # Audio format conversion
-│       ├── adapters/        # 8 adapters: browser-stt, browser-tts, groq-stt, groq-tts,
-│       │                    #   inworld-tts, kokoro-local-tts, piper-local-tts, whisper-local-stt
-│       └── workers/         # 2 Web Workers: kokoro.worker.ts, kokoro-worker-types.ts
-├── server.ts                # Hono API server entry point (standalone backend)
-├── api/                     # API route modules for Hono server (11 files)
-│   ├── tasks.ts, projects.ts, tags.ts, sections.ts, comments.ts
-│   ├── templates.ts, settings.ts, stats.ts, plugins.ts
-│   ├── ai.ts                # AI chat streaming + config
-│   └── voice.ts             # STT/TTS proxy endpoints
-├── ui/                      # React frontend (~140 files)
-│   ├── App.tsx              # Root React component
-│   ├── main.tsx             # React entry point
-│   ├── index.css            # Global styles
-│   ├── shortcuts.ts         # Shortcut definitions
-│   ├── shortcutManagerInstance.ts  # Singleton ShortcutManager
-│   ├── api/                 # Frontend API layer (11 files)
-│   │   ├── index.ts         # API entry point
-│   │   ├── helpers.ts       # handleResponse, handleVoidResponse
-│   │   ├── tasks.ts         # Task API calls
-│   │   ├── projects.ts      # Project API calls
-│   │   ├── sections.ts      # Section API calls
-│   │   ├── comments.ts      # Comment API calls
-│   │   ├── templates.ts     # Template API calls
-│   │   ├── plugins.ts       # Plugin API calls
-│   │   ├── settings.ts      # Settings API calls
-│   │   ├── stats.ts         # Stats API calls
-│   │   └── ai.ts            # AI chat API calls
-│   ├── components/          # Reusable UI components (~52 files + 11 chat/)
-│   │   ├── TaskItem.tsx, TaskInput.tsx, TaskList.tsx, TaskDetailPanel.tsx
-│   │   ├── Sidebar.tsx, CommandPalette.tsx, SearchModal.tsx
-│   │   ├── AIChatPanel.tsx, VoiceCallOverlay.tsx, DailyPlanningModal.tsx
-│   │   ├── DreadLevelSelector.tsx, EatTheFrog.tsx, TaskJar.tsx
-│   │   ├── WeeklyReviewModal.tsx, ExtractTasksModal.tsx
-│   │   ├── AnimatedPresence.tsx, CompletionBurst.tsx
-│   │   ├── chat/            # Chat sub-components (11 files)
-│   │   └── ... (BottomNavBar, FAB, MobileDrawer, DatePicker, etc.)
-│   ├── context/             # React contexts (9 files + ai/ subdirectory)
-│   │   ├── AIContext.tsx     # AI context facade (composes 3 granular contexts)
-│   │   ├── ai/              # Split AI contexts: AIConfigContext, AIChatContext, AISessionContext
-│   │   ├── AppStateContext.tsx  # Read-only app state (reduces prop drilling)
-│   │   ├── TaskContext.tsx, PluginContext.tsx
-│   │   ├── VoiceContext.tsx, SettingsContext.tsx, UndoContext.tsx
-│   │   └── BlockedTaskIdsContext.tsx
-│   ├── hooks/               # Custom hooks (17 files)
-│   │   ├── useRouting.ts, useTaskHandlers.ts, useBulkActions.ts
-│   │   ├── useKeyboardNavigation.ts, useAppCommands.ts, useAppShortcuts.ts
-│   │   ├── useReminders.ts, useNudges.ts, useSoundEffect.ts, useVoiceCall.ts
-│   │   ├── useVAD.ts, useIsMobile.ts, useMultiSelect.ts
-│   │   ├── useGlobalShortcut.ts, useQuickCaptureWindow.ts, useClickOutside.ts
-│   │   └── useFocusTrap.ts
-│   ├── views/               # Application views (19 + calendar/ + settings/)
-│   │   ├── Inbox.tsx, Today.tsx, Upcoming.tsx, Project.tsx
-│   │   ├── Board.tsx, Calendar.tsx, Matrix.tsx, Stats.tsx
-│   │   ├── Completed.tsx, Cancelled.tsx, Someday.tsx
-│   │   ├── Settings.tsx, TaskPage.tsx, AIChat.tsx
-│   │   ├── FiltersLabels.tsx, FilterView.tsx, PluginView.tsx
-│   │   ├── DopamineMenu.tsx, QuickCapture.tsx
-│   │   ├── calendar/        # Calendar sub-views (3 files)
-│   │   └── settings/        # Settings tabs (10 tabs + components.tsx)
-│   └── themes/              # Theme system (4 files)
-│       ├── manager.ts       # Theme loading and switching
-│       ├── light.css        # Default light theme (design tokens)
-│       ├── dark.css         # Default dark theme
-│       └── nord.css         # Nord theme
-├── cli/                     # CLI companion tool (7 files)
-│   ├── index.ts             # CLI entry point (Commander.js)
-│   ├── formatter.ts         # Terminal output formatting
-│   └── commands/            # 5 commands: add, list, done, edit, delete
-└── utils/                   # Shared utilities (7 files)
-    ├── logger.ts            # Structured logger
-    ├── ids.ts               # ID generation (nanoid)
-    ├── dates.ts             # Date utilities
-    ├── format-date.ts       # User-facing date/time formatting
-    ├── sounds.ts            # Web Audio API sound effects
-    ├── color.ts             # Color manipulation
-    └── tauri.ts             # Tauri detection helper
+  main.ts                     Node bootstrap entry
+  server.ts                   Hono API server entry
+  bootstrap.ts                Node service graph
+  bootstrap-web.ts            Browser/Tauri service graph
+  bootstrap-web-ai-runtime.ts Lazy AI runtime for browser/Tauri
+  ui/                         React app, contexts, hooks, views, components
+  api/                        Hono route modules
+  core/                       Business logic services
+  db/                         Schema, clients, migrations, persistence helpers
+  storage/                    SQLite and Markdown backends
+  parser/                     Natural-language parsing
+  ai/                         Chat, providers, tools, voice
+  plugins/                    Plugin runtime and sandbox
+  mcp/                        MCP server adapters
+  cli/                        CLI commands
+  config/                     Env/defaults/themes
+  utils/                      Shared helpers
+  types/                      Ambient/browser type shims
+
+tests/                        Unit, UI, integration, e2e coverage
+docs/                         Canonical project documentation
+plugins/                      Example and user plugins
+src-tauri/                    Tauri shell and Rust config
+scripts/                      Dev/release/docs helper scripts
 ```
 
-## Development Conventions
+## Architecture Overview
 
-### Branching
+### Core application path
 
-- `main` — stable, deployable
-- `feat/<name>` — new features
-- `fix/<name>` — bug fixes
-- `docs/<name>` — documentation only
-- `plugin/<name>` — plugin system changes
-
-### Commits
-
-Follow [Conventional Commits](https://www.conventionalcommits.org/):
-
-```
-feat(core): add recurring task support
-fix(parser): handle "next Monday" edge case in NLP
-docs(plugin): add settings API documentation
-test(core): add edge cases for priority sorting
-plugin(loader): implement sandbox isolation
+```text
+UI or API input -> core services -> storage interface -> SQLite or Markdown
 ```
 
-### Code Style
+Core services in `src/core/` are the center of business logic. UI, API, CLI, MCP, and plugin features should reuse those services rather than duplicate rules.
 
-- TypeScript strict mode enabled
-- ESLint + Prettier enforced
-- No `any` types (warn level — avoid)
-- Named exports preferred
-- Errors are handled, not swallowed
-- All public functions have JSDoc for complex logic
-- React components use function syntax (not class)
-- Tailwind for styling — no inline styles, no CSS modules
+### Storage model
 
-### Testing
+There are two persistence modes:
 
-- Tests in `tests/` mirror `src/` structure
-- Unit tests for pure logic (task CRUD, parsing, filtering, plugin lifecycle)
-- Component tests for critical UI flows
-- Run: `pnpm test` (vitest)
-- Coverage: `pnpm test:coverage`
+- SQLite: the default and most capable path
+- Markdown: file-backed storage for users who want portable plain-text data
 
-### Running
+Both sit behind `src/storage/interface.ts`.
 
-```bash
-pnpm dev           # Dev mode (Vite dev server with HMR, in-browser SQLite)
-pnpm dev:full      # Full dev mode (Vite + Hono API server, shared ./data/junban.db)
-pnpm server        # Standalone API server on port 4822
-pnpm build         # Build for production
-pnpm start         # Preview production build
-pnpm check         # Lint + format check + typecheck + test
-pnpm cli           # Run CLI companion
-pnpm mcp           # Start MCP server (for external AI agents)
-```
+Important constraint:
 
-## Architecture Decisions
+- `src/bootstrap.ts` can use SQLite or Markdown depending on env
+- `src/bootstrap-web.ts` always uses SQLite/sql.js because browser environments do not have the Node file APIs required for Markdown storage
 
-### Local-First Storage
+### Frontend model
 
-Two storage backends, selected by `STORAGE_MODE` env var:
+The frontend lives in `src/ui/` and is split into:
 
-- **SQLite** (default): better-sqlite3 + Drizzle ORM. Faster queries, structured data, supports complex filters.
-- **Markdown**: Flat `.md` files with YAML frontmatter. Human-readable, git-friendly, portable.
+- `components/` for reusable UI pieces
+- `views/` for screen-level composition
+- `context/` for shared state and feature facades
+- `hooks/` for reusable behavior
+- `api/` for frontend access to backend or direct-service calls
+- `themes/` for design tokens and theme loading
 
-Both backends implement the same interface. The user chooses; the app doesn't care.
+The frontend can run in multiple modes, so always confirm whether a feature is using:
 
-### AI Assistant
+- Direct service access in browser/Tauri mode
+- The Hono backend via `src/server.ts`
+- A code path that must support both
 
-The AI assistant is a conversational interface that lives in the sidebar:
+### AI model
 
-- **Provider abstraction**: All AI providers implement a common interface. Swapping providers is one config change.
-- **BYOM (Bring Your Own Model)**: OpenAI, Anthropic, OpenRouter, Ollama, LM Studio — or build a custom provider plugin.
-- **Tool use**: The AI can read/write tasks, manage projects, suggest priorities, auto-schedule. Tools are defined in `src/ai/tools.ts`.
-- **Voice input**: Speech-to-text feeds into the same chat interface. The AI parses natural language into structured tasks.
-- **Context-aware**: The AI sees the user's task list, projects, priorities, and schedule to give relevant suggestions.
-- **Fully optional**: Zero AI code runs unless the user configures a provider. No API keys required for core functionality.
+The AI system in `src/ai/` is layered:
 
-### Plugin System (API v2.0.0)
+- Chat/session management
+- Provider registry and adapters
+- Tool registry and built-in tools
+- Voice providers for STT/TTS
 
-```
-Plugin Discovery → Manifest Validation → Sandbox Creation → Lifecycle Hooks
-```
+Design intent:
 
-- Plugins are directories in `plugins/` with a `manifest.json` and entry file
-- Manifests declare: id, name, version, author, description, minJunbanVersion, permissions
-- Plugins run in a sandboxed context with access only to the Plugin API
-- Lifecycle: `onLoad()` → active → `onUnload()`. Plugins can also hook into task events.
-- **Full CRUD APIs**: tasks (list/get/create/update/complete/uncomplete/delete), projects (list/get/create/update/delete), tags (list/create/delete)
-- **15 permissions**: task:read, task:write, project:read, project:write, tag:read, tag:write, ui:panel, ui:view, ui:status, commands, settings, storage, network, ai:provider, ai:tools
-- **Clear error model**: all API methods always exist. Calling without permission throws with a message telling exactly which permission to add to manifest.json. No optional chaining needed.
-- Plugins can: register commands, add sidebar panels, add views, add settings tabs, listen to task events, register AI tools/providers
-- Plugin settings stored in SQLite (or JSON file in Markdown mode), keyed by plugin ID
-- **Vibe-code friendly**: The API is designed so AI (Claude/ChatGPT) can generate working plugins. If the API is too complex for AI to produce correct code, it's too complex.
+- AI is optional
+- Provider integrations are swappable
+- Tools operate on shared core services and app data
+- Failures should degrade gracefully rather than break task management
 
-### State Management
+### Plugin model
 
-- React state for UI (useState/useReducer for local, context for shared)
-- SQLite as the source of truth — UI reads from DB, writes go through core module
-- No external state library (Redux, Zustand) unless complexity demands it later
-- Plugin state isolated per-plugin
+Plugins are a core product surface, not an afterthought.
 
-### Natural Language Parsing
+- Runtime code is in `src/plugins/`
+- Installed/example plugins live in `plugins/`
+- Plugins load through manifest validation, sandboxing, and a permission-gated API
+- Plugins can extend commands, UI, settings, and AI capabilities
 
-- `chrono-node` for date/time extraction
-- Custom grammar layer on top for task-specific syntax: priorities (`p1`-`p4`), tags (`#tag`), projects (`+project`)
-- Parser returns structured `ParsedTask` with all extracted fields
+When changing plugin infrastructure, preserve sandbox boundaries and explicit permission checks.
 
-### Error Philosophy
+### MCP model
 
-- Parse errors: show inline feedback, don't block input
-- Storage errors: surface to user (these are critical)
-- Plugin errors: isolate and disable the plugin, don't crash the app
-- AI errors: degrade gracefully — if the provider fails, the app works fine without AI
-- Network errors (registry, sync): retry with backoff, degrade gracefully
+`src/mcp/server.ts` exposes Junban capabilities to external agents over stdio.
+
+Important constraint:
+
+- MCP transports JSON-RPC over stdio, so avoid writing incidental output to stdout in MCP server paths.
 
 ## Key Files
 
-| File                              | Purpose                                                    |
-| --------------------------------- | ---------------------------------------------------------- |
-| `src/config/env.ts`               | All env var definitions with Zod validation                |
-| `src/db/schema.ts`                | Database schema (source of truth for tables)               |
-| `src/storage/interface.ts`        | IStorage interface — storage abstraction for both backends |
-| `src/core/tasks.ts`               | Task CRUD — the heart of the app                           |
-| `src/core/types.ts`               | Core type definitions (Task, Project, Tag, etc.)           |
-| `src/parser/task-parser.ts`       | Natural language task input parser                         |
-| `src/ai/provider.ts`              | AI provider setup + default registries                     |
-| `src/ai/tools/registry.ts`        | AI tool registry for built-in assistant capabilities       |
-| `src/ai/voice/interface.ts`       | STT/TTS provider interfaces                                |
-| `src/plugins/loader.ts`           | Plugin discovery and loading                               |
-| `src/plugins/api.ts`              | Plugin API surface — what plugins can do                   |
-| `src/plugins/sandbox.ts`          | Plugin execution sandbox                                   |
-| `src/ui/App.tsx`                  | Root React component                                       |
-| `src/ui/components/TaskInput.tsx` | The main task input field                                  |
-| `src/mcp/server.ts`               | MCP server entry point (external agent bridge)             |
-| `src/cli/index.ts`                | CLI entry point                                            |
-| `sources.json`                    | Community plugin registry seed                             |
+| File                                               | Why it matters                                     |
+| -------------------------------------------------- | -------------------------------------------------- |
+| `src/bootstrap.ts`                                 | Builds the Node service graph                      |
+| `src/bootstrap-web.ts`                             | Builds the browser/Tauri service graph             |
+| `src/server.ts`                                    | Hono API composition and process lifecycle         |
+| `src/db/schema.ts`                                 | Database schema source of truth                    |
+| `src/storage/interface.ts`                         | Shared storage contract                            |
+| `src/core/tasks.ts`                                | Central task logic                                 |
+| `src/core/types.ts`                                | Core schemas and shared domain types               |
+| `src/parser/task-parser.ts`                        | Natural-language task parsing                      |
+| `src/ai/tool-registry.ts`                          | Built-in AI tool registration                      |
+| `src/ai/provider.ts` and `src/ai/provider-node.ts` | Browser/node provider setup                        |
+| `src/plugins/api.ts`                               | Plugin-facing API surface                          |
+| `src/plugins/loader.ts`                            | Plugin discovery/loading                           |
+| `src/plugins/sandbox.ts`                           | Plugin isolation                                   |
+| `src/ui/App.tsx`                                   | App shell and view composition                     |
+| `src/ui/api/direct-services.ts`                    | Frontend direct-service bridge for non-server mode |
+| `src/mcp/server.ts`                                | MCP entry point                                    |
+| `src/cli/index.ts`                                 | CLI entry point                                    |
 
-## Common Tasks
+## Development Commands
 
-### Add a task field
+```bash
+pnpm dev
+pnpm dev:full
+pnpm server
+pnpm build
+pnpm start
+pnpm lint
+pnpm lint:fix
+pnpm format
+pnpm format:check
+pnpm typecheck
+pnpm test
+pnpm test:watch
+pnpm test:coverage
+pnpm test:e2e
+pnpm db:generate
+pnpm db:migrate
+pnpm cli
+pnpm mcp
+pnpm docs:check
+pnpm tauri:dev
+pnpm tauri:build
+pnpm plugin:create
+pnpm check
+```
 
-1. Add the field to `src/core/types.ts` (Zod schema + TS type)
-2. Add the column to `src/db/schema.ts`
-3. Generate migration: `pnpm db:generate`
-4. Update CRUD in `src/core/tasks.ts`
-5. Update the parser in `src/parser/task-parser.ts` if the field is parseable from natural language
-6. Update `TaskItem.tsx` to display the field
-7. Update CLI `list` and `add` commands if applicable
+## Environment And Profiles
 
-### Create a plugin
+Common environment knobs:
 
-1. Create a directory in `plugins/<plugin-name>/`
-2. Add `manifest.json` with required fields (id, name, version, author, description, main)
-3. Create entry file (e.g., `index.ts`) that exports a class extending `Plugin`
-4. Implement `onLoad()` and `onUnload()` lifecycle hooks
-5. See [docs/plugins/API.md](docs/plugins/API.md) for the full API reference
+- `STORAGE_MODE=sqlite|markdown`
+- `DB_PATH`
+- `MARKDOWN_PATH`
+- `PLUGIN_DIR`
+- `API_PORT`
+- `LOG_LEVEL`
+- `VITE_USE_BACKEND=true` when the frontend should call the standalone Hono server in development
 
-### Add a UI view
+Source-run dev commands use `scripts/run-with-profile.mjs` to isolate dev data via a profile-specific path. Do not assume source runs and packaged desktop installs use the same storage location.
 
-1. Create component in `src/ui/views/<ViewName>.tsx`
-2. Add route/navigation entry in `src/ui/App.tsx`
-3. Add sidebar link in `src/ui/components/Sidebar.tsx`
+## Code Conventions
 
-### Add a CLI command
+- TypeScript strict mode is enabled.
+- `noUnusedLocals` and `noUnusedParameters` are enabled.
+- `@/` resolves to `src/`.
+- Named exports are preferred.
+- React function components only.
+- Tailwind is the standard styling path.
+- Zod schemas are used heavily for domain validation and type derivation.
+- Avoid `any`; ESLint warns on explicit `any` in app code.
+- Keep shared behavior in core/services instead of duplicating it across UI, API, CLI, MCP, or plugins.
 
-1. Create handler in `src/cli/commands/<name>.ts`
-2. Register with Commander in `src/cli/index.ts`
-3. Use shared core logic from `src/core/` — CLI and UI share the same backend
+## Testing Layout
 
-### Modify the database schema
+Tests live under `tests/` and cover:
 
-1. Edit `src/db/schema.ts`
-2. Run `pnpm db:generate` to create a migration
-3. Run `pnpm db:migrate` to apply it
-4. Update queries in `src/db/queries.ts`
+- `tests/core/`, `tests/parser/`, `tests/storage/`, `tests/ai/`, `tests/mcp/`, `tests/cli/`, `tests/plugins/`, `tests/utils/`
+- `tests/ui/` for jsdom-based UI coverage
+- `tests/integration/` for cross-layer behavior
+- `tests/e2e/` for Playwright end-to-end flows
 
-### Add a keyboard shortcut
+Vitest is configured as multiple projects:
 
-1. Define the command in the command registry
-2. Add default keybinding in `src/ui/components/CommandPalette.tsx`
-3. Commands are also available to plugins via the Plugin API
+- `unit`
+- `ui`
+- `plugin-ui`
 
-## Documentation
+Run `pnpm check` before considering a change complete unless the task explicitly says otherwise.
 
-- Start with [docs/README.md](docs/README.md) for the canonical documentation index and maintenance policy.
-- Use [AGENTS.md](AGENTS.md) for AI-agent task routing.
+## Common Change Paths
+
+### Add or change a task field
+
+1. Update the domain schema/types in `src/core/types.ts`.
+2. Update `src/db/schema.ts`.
+3. Generate a migration with `pnpm db:generate`.
+4. Update storage/core logic as needed.
+5. Update parser support if the field is user-enterable.
+6. Update UI rendering and editing paths.
+7. Update tests.
+8. Update docs mapped in `docs/README.md`.
+
+### Add UI functionality
+
+1. Identify the owning view and shared components.
+2. Confirm whether state belongs in local component state, a hook, or a context.
+3. Check whether data comes through `src/ui/api/` or direct services.
+4. Update keyboard/mobile behavior if relevant.
+5. Update frontend docs when behavior or structure changes.
+
+### Change storage or schema behavior
+
+1. Confirm whether the change affects SQLite, Markdown, or both.
+2. Preserve the `IStorage` contract unless there is a deliberate interface change.
+3. Regenerate migrations for schema changes.
+4. Review tests across storage and integration layers.
+5. Update database/storage docs.
+
+### Change AI or voice behavior
+
+1. Identify whether the change is provider-specific, pipeline-level, tool-level, or UI-level.
+2. Preserve optionality; the app must remain useful without AI configuration.
+3. Avoid coupling provider specifics into unrelated layers.
+4. Update backend/frontend docs when user-visible behavior changes.
+
+### Change plugin infrastructure
+
+1. Preserve sandbox boundaries and permission checks.
+2. Consider plugin author ergonomics, not just internal correctness.
+3. Update both internal plugin docs and plugin-author docs when the surface changes.
+
+## Documentation Policy
+
+Documentation changes are required when behavior, APIs, workflows, or file organization change.
+
+Start with `docs/README.md`, which contains the ownership map. In practice:
+
+- Frontend source changes usually require updates in `docs/frontend/`
+- Backend/platform changes usually require updates in `docs/backend/`
+- Plugin API changes require updates in `docs/plugins/`
+- Cross-cutting workflow or architecture changes should update `AGENTS.md`, `CLAUDE.md`, and possibly `docs/guides/ARCHITECTURE.md`
+
+Avoid brittle documentation that depends on exact file counts or tool counts unless that number is intentionally maintained.
+
+## Pitfalls
+
+- Do not assume browser code can import Node-only modules.
+- Do not assume Markdown storage works in web bootstrap paths.
+- Do not assume repo-run dev commands share data with packaged installs; dev defaults to `./data/dev/junban.db` and `./tasks/dev/`, while packaged Tauri builds use AppData.
+- Do not bypass core services with duplicated business rules.
+- Do not weaken plugin isolation for convenience.
+- Do not print stray stdout in MCP paths.
+- Do not forget docs when changing public behavior.
+
+## Practical Workflow For Agents
+
+1. Read `AGENTS.md` and `docs/README.md`.
+2. Explore the relevant slice of the repo before editing.
+3. Trace the full path of the feature: UI, API/direct service, core, storage, docs, tests.
+4. Make the smallest correct change.
+5. Run the narrowest useful verification first, then broader checks if needed.
+6. Update docs in the same change when behavior or structure moved.

@@ -1,433 +1,225 @@
-# Plugin Subsystem — Internal Documentation
+# Plugin Subsystem
 
-The plugin subsystem (`src/plugins/`) implements Junban's Obsidian-style plugin system. It handles plugin discovery, manifest validation, permission-gated loading, lifecycle management, and the API surface that plugins interact with. This document is for **Junban developers** who need to understand or modify the plugin system internals. For plugin authors, see `docs/plugins/API.md`.
+This document covers the internal plugin architecture in `src/plugins/`. It is for Junban contributors working on plugin discovery, loading, permissions, runtime cleanup, and the plugin-facing API surface.
 
-This document is intentionally architecture-focused. Permission names and API namespaces are documented here, but exact file/line totals are not treated as canonical metadata.
+For author-facing documentation, see:
 
----
+- `docs/plugins/API.md`
+- `docs/plugins/EXAMPLES.md`
 
-## Architecture Overview
+## Goals
 
-```
-Plugin Directory Scan (discover)
-    |
-    v
-manifest.json Validation (Zod schema)
-    |
-    v
-Permission Check (approved? pending? never seen?)
-    |
-    v
-Settings Load (from DB)
-    |
-    v
-Create Permission-Gated API (createPluginAPI)
-    |
-    v
-Dynamic Import (plugin entry file)
-    |
-    v
-Instantiate Plugin Class
-    |
-    v
-Wire API + Settings
-    |
-    v
-onLoad() lifecycle hook
-    |
-    v
-Plugin Active (commands, UI, events, AI tools registered)
-    |
-    ... (runtime) ...
-    |
-    v
-onUnload() lifecycle hook
-    |
-    v
-Cleanup (unregister commands, UI, AI providers, tools)
+The plugin system is designed to support a few product goals at once:
+
+- Keep the app extensible without turning every feature into core code
+- Preserve explicit permission boundaries
+- Keep the API usable for both human authors and code generation tools
+- Let plugins extend commands, UI, settings, and AI safely
+
+## High-Level Flow
+
+```text
+Plugin discovery -> manifest validation -> approval/permission check -> API creation -> module load -> plugin instance -> onLoad -> active runtime
 ```
 
----
+On unload, the system should reverse plugin-owned registrations and detach listeners cleanly.
 
-## Type Definitions
+## Layout
 
-### `types.ts`
+```text
+src/plugins/
+  api.ts                Permission-gated plugin API factory
+  command-registry.ts   Plugin command registry
+  installer.ts          Download/install/uninstall helpers
+  lifecycle.ts          Base Plugin class
+  loader.ts             Discovery and activation flow
+  registry.ts           Community plugin registry client
+  sandbox.ts            Sandbox hook point
+  settings.ts           Per-plugin settings manager
+  types.ts              Manifest, settings, and permission schemas
+  ui-registry.ts        Plugin panels, views, status items
+  builtin/              Built-in extensions bundled with the app
+```
 
-**Path:** `src/plugins/types.ts`
-**Lines:** 72
-**Purpose:** Zod schemas and TypeScript types for plugin manifests, settings, and permissions.
-**Key Exports:**
+## Manifest And Permissions
 
-- `SettingDefinition` — Zod discriminated union supporting 4 setting types:
-  - `text` — `{ id, name, type: "text", default: string, description?, placeholder? }`
-  - `number` — `{ id, name, type: "number", default: number, description?, min?, max? }`
-  - `boolean` — `{ id, name, type: "boolean", default: boolean, description? }`
-  - `select` — `{ id, name, type: "select", default: string, description?, options: string[] }`
-- `PluginManifest` — Zod schema with fields:
-  - `id` — lowercase alphanumeric + hyphens (regex: `/^[a-z0-9-]+$/`)
-  - `name`, `version`, `author`, `description`, `main` — required strings
-  - `minJunbanVersion` — required string
-  - `targetApiVersion` — optional semver string for API compatibility checking
-  - `permissions` — optional string array (default: `[]`)
-  - `settings` — optional array of `SettingDefinition` (default: `[]`)
-  - `repository` — optional URL
-  - `license` — optional string
-  - `keywords` — optional string array (default: `[]`)
-  - `dependencies` — optional record of string to string
-- `VALID_PERMISSIONS` — const tuple of the recognized plugin permissions:
-  - `"task:read"`, `"task:write"` — task access (list, get, create, update, complete, uncomplete, delete)
-  - `"project:read"`, `"project:write"` — project access (list, get, create, update, delete)
-  - `"tag:read"`, `"tag:write"` — tag access (list, create, delete)
-  - `"ui:panel"`, `"ui:view"`, `"ui:status"` — UI registration
-  - `"commands"` — command palette registration
-  - `"settings"` — settings access
-  - `"storage"` — plugin key-value storage
-  - `"network"` — network access
-  - `"ai:provider"` — register custom AI providers
-  - `"ai:tools"` — register custom AI tools
-- `Permission` — union type from `VALID_PERMISSIONS`
-  **Key Dependencies:** `zod`
-  **Used By:** `loader.ts`, `api.ts`, `installer.ts`, `registry.ts`, `settings.ts`
+`src/plugins/types.ts` defines the plugin manifest schema, plugin setting definitions, and the recognized permission list.
 
----
+Current permission groups cover:
 
-## Plugin Discovery and Loading
+- task access
+- project access
+- tag access
+- UI registration
+- commands
+- plugin storage/settings
+- network access
+- AI provider and tool registration
 
-### `loader.ts`
+The exact permission list is defined in `VALID_PERMISSIONS` and should be treated as the source of truth.
 
-**Path:** `src/plugins/loader.ts`
-**Lines:** 375
-**Purpose:** Central plugin loader. Discovers plugins from the filesystem, validates manifests, manages permissions, and handles the full load/unload lifecycle.
-**Key Exports:**
+## Loader
 
-- `LoadedPlugin` — `{ manifest, path, enabled, instance?, pendingApproval? }`
-- `PluginServices` — services injected into the loader:
-  - `taskService`, `eventBus`, `settingsManager`, `commandRegistry`, `uiRegistry`, `queries` (IStorage)
-  - `aiProviderRegistry?`, `toolRegistry?` — optional AI integration
-- `PluginLoader` — class (constructor takes `pluginDir` and `services`):
-  - `discover()` — scans the plugin directory, reads and validates `manifest.json` for each subdirectory, returns `LoadedPlugin[]`
-  - `load(pluginId)` — full load sequence:
-    1. Checks if already loaded
-    2. Permission check: if never approved, marks `pendingApproval: true` and skips
-    3. Computes effective permissions (intersection of requested and approved)
-    4. Warns if plugin targets a newer API major version
-    5. Loads settings from DB
-    6. Creates permission-gated API via `createPluginAPI()`
-    7. Dynamic imports the entry file
-    8. Instantiates the default-exported class
-    9. Wires `instance.app` and `instance.settings`
-    10. Calls `instance.onLoad()`
-    11. On failure: cleans up commands, UI, AI providers, tools
-  - `approveAndLoad(pluginId, permissions)` — persists permissions to DB, then loads
-  - `revokePermissions(pluginId)` — unloads plugin, deletes permissions from DB, marks as pending
-  - `unload(pluginId)` — calls `onUnload()`, cleans up commands/UI/AI providers
-  - `loadAll()` — discovers and loads all valid plugins
-  - `unloadAll()` — unloads all enabled plugins
-  - `getAll()` / `get(pluginId)` — accessors
-  - `discoverOne(pluginId)` — discovers a single plugin after install
-  - `remove(pluginId)` — removes from internal map after uninstall
-    **Key Dependencies:** `node:fs`, `node:path`, `PluginManifest`, `createPluginAPI`, `Plugin`, all service types
-    **Used By:** App initialization (`main.ts`), plugin management API routes
+`src/plugins/loader.ts` is the main orchestration layer.
 
----
+It is responsible for:
 
-## Plugin Lifecycle
+- discovering plugin directories
+- validating `manifest.json`
+- distinguishing built-in vs community plugins
+- enforcing activation and approval rules
+- creating the plugin API instance
+- loading the plugin module
+- calling lifecycle hooks with timeouts
+- cleaning up commands, UI, providers, tools, and event listeners on failure or unload
 
-### `lifecycle.ts`
+### Built-in vs community plugins
 
-**Path:** `src/plugins/lifecycle.ts`
-**Lines:** 25
-**Purpose:** Abstract base class that all plugins must extend.
-**Key Exports:**
+The loader treats built-in and community plugins differently:
 
-- `Plugin` — abstract class:
-  - `app: PluginAPI` — the Junban Plugin API (set by loader before `onLoad()`)
-  - `settings: PluginSettingsAccessor` — settings accessor (set by loader before `onLoad()`)
-  - `abstract onLoad()` — called when the plugin is activated
-  - `abstract onUnload()` — called when the plugin is deactivated
-  - Optional lifecycle hooks (plugins can override): - `onTaskCreate?(task)` — called when a task is created - `onTaskComplete?(task)` — called when a task is completed - `onTaskUpdate?(task, changes)` — called when a task is updated - `onTaskDelete?(task)` — called when a task is deleted
-    **Key Dependencies:** `Task` type, `PluginAPI`, `PluginSettingsAccessor`
-    **Used By:** All plugin implementations, `loader.ts`
+- Community plugins are affected by the community-plugin enablement setting and permission approval flow.
+- Built-in extensions are trusted from a manifest perspective but still remain explicitly activated by the user.
 
----
+This distinction matters when modifying loader behavior.
+
+### Approval model
+
+Permissions are not simply whatever the manifest requests.
+
+For community plugins, the effective permissions are the intersection of:
+
+- requested permissions from the manifest
+- approved permissions stored by the app
+
+If a plugin has never been approved and requests permissions, it stays pending instead of loading.
+
+## Lifecycle Base Class
+
+`src/plugins/lifecycle.ts` provides the base `Plugin` class that plugin implementations extend.
+
+The loader injects:
+
+- `app` for the plugin-facing API
+- `settings` for plugin settings access
+
+The two main lifecycle hooks are:
+
+- `onLoad()`
+- `onUnload()`
+
+Contributors working on lifecycle behavior should preserve the rule that plugins must be able to clean up after themselves without leaving orphaned listeners or registrations.
 
 ## Plugin API Surface
 
-### `api.ts`
+`src/plugins/api.ts` builds a permission-gated API object per plugin.
 
-**Path:** `src/plugins/api.ts`
-**Lines:** 166
-**Purpose:** Creates the permission-gated API object that plugins interact with. Each plugin gets its own API instance with access controlled by its declared permissions.
-**Key Exports:**
+Design properties:
 
-- `PLUGIN_API_VERSION` — `"2.0.0"` (semver)
-- `PLUGIN_API_STABILITY` — `"stable"` (breaking changes require major version bump)
-- `PluginAPIOptions` — all services and configuration needed to construct the API
-- `PluginSettingsAccessor` — `{ get<T>(key), set(key, value) }`
-- `PluginAPI` — return type of `createPluginAPI()`
-- `createPluginAPI(options)` — factory function returning:
+- API methods are always present
+- Missing permissions produce clear runtime errors
+- plugin authors do not have to optional-chain every namespace
+- AI, UI, data, and command extensions all flow through one explicit surface
 
-| Namespace             | Permission      | Methods                                                                               |
-| --------------------- | --------------- | ------------------------------------------------------------------------------------- |
-| `meta`                | none            | `version`, `stability`                                                                |
-| `tasks.list`          | `task:read`     | `async (filter?) => Task[]`                                                           |
-| `tasks.get`           | `task:read`     | `async (id) => Task \| null`                                                          |
-| `tasks.create`        | `task:write`    | `async (input) => Task`                                                               |
-| `tasks.update`        | `task:write`    | `async (id, changes) => Task`                                                         |
-| `tasks.complete`      | `task:write`    | `async (id) => Task`                                                                  |
-| `tasks.uncomplete`    | `task:write`    | `async (id) => Task`                                                                  |
-| `tasks.delete`        | `task:write`    | `async (id) => boolean`                                                               |
-| `projects.list`       | `project:read`  | `async () => Project[]`                                                               |
-| `projects.get`        | `project:read`  | `async (id) => Project \| null`                                                       |
-| `projects.create`     | `project:write` | `async (name, opts?) => Project`                                                      |
-| `projects.update`     | `project:write` | `async (id, changes) => Project \| null`                                              |
-| `projects.delete`     | `project:write` | `async (id) => boolean`                                                               |
-| `tags.list`           | `tag:read`      | `async () => Tag[]`                                                                   |
-| `tags.create`         | `tag:write`     | `async (name, color?) => Tag`                                                         |
-| `tags.delete`         | `tag:write`     | `async (id) => boolean`                                                               |
-| `commands.register`   | `commands`      | `(command) => void` — prefixes command ID with `pluginId:`                            |
-| `ui.addSidebarPanel`  | `ui:panel`      | `(panel) => void`                                                                     |
-| `ui.addView`          | `ui:view`       | `(view) => void` — accepts `slot?` (default "tools"), `contentType?` (default "text") |
-| `ui.addStatusBarItem` | `ui:status`     | `(item) => StatusBarHandle`                                                           |
-| `storage.get`         | `storage`       | `async <T>(key) => T \| null`                                                         |
-| `storage.set`         | `storage`       | `async (key, value) => void`                                                          |
-| `storage.delete`      | `storage`       | `async (key) => void`                                                                 |
-| `storage.keys`        | `storage`       | `async () => string[]`                                                                |
-| `network.fetch`       | `network`       | `async (url, options?) => Response`                                                   |
-| `events.on`           | `task:read`     | `(event, callback) => void`                                                           |
-| `events.off`          | none            | `(event, callback) => void`                                                           |
-| `ai.registerProvider` | `ai:provider`   | `(plugin) => void` — prefixes provider name with `pluginId:`                          |
-| `ai.registerTool`     | `ai:tools`      | `(definition, executor) => void` — registers with source = pluginId                   |
-| `settings.get`        | none            | `<T>(key) => T`                                                                       |
-| `settings.set`        | none            | `async (key, value) => void`                                                          |
+Major namespaces include:
 
-Every API method is always present. Calling without the required permission throws an error with a clear message telling the plugin author exactly which permission to add to `manifest.json`. No optional chaining needed.
+- `tasks`
+- `projects`
+- `tags`
+- `commands`
+- `ui`
+- `storage`
+- `network`
+- `events`
+- `ai`
+- `settings`
 
-**Key Dependencies:** All service types, `LLMProviderPlugin`, `ToolDefinition`, `ToolExecutor`
-**Used By:** `loader.ts` (creates API for each plugin)
+The plugin API version and stability metadata are also defined here.
 
----
+## Settings
 
-## Sandbox
+`src/plugins/settings.ts` manages per-plugin settings and storage-backed values.
 
-### `sandbox.ts`
+Responsibilities:
 
-**Path:** `src/plugins/sandbox.ts`
-**Lines:** 22
-**Purpose:** Plugin sandbox placeholder. Currently a no-op — actual isolation is deferred to Sprint 4.
-**Key Exports:**
+- load persisted values
+- expose plugin-scoped reads and writes
+- fall back to manifest-defined defaults where appropriate
+- persist updates through the shared storage layer
 
-- `SandboxOptions` — `{ pluginId, pluginDir, permissions }`
-- `createSandbox(options)` — returns `{ execute, destroy }` (both no-ops)
-  **Current state:** Permission checks happen in `createPluginAPI()` (gating access), not via runtime isolation. Plugins run in the same process via `dynamic import()`.
-  **Future plans:** Full isolation via `vm` module, Web Worker, or iframe.
-  **Key Dependencies:** None
-  **Used By:** Not actively used in the current load flow (permission gating is in `api.ts`)
-
----
-
-## Plugin Registry (Community)
-
-### `registry.ts`
-
-**Path:** `src/plugins/registry.ts`
-**Lines:** 72
-**Purpose:** Client for the community plugin directory. Fetches and parses the plugin registry (local file or remote URL).
-**Key Exports:**
-
-- `RegistryEntry` — Zod-validated shape:
-  - `id`, `name`, `description`, `author`, `version`, `repository` — strings
-  - `downloadUrl?` — optional URL for tar.gz download
-  - `tags` — string array
-  - `minJunbanVersion` — string
-- `Registry` — `{ version: number, description?, lastUpdated?, plugins: RegistryEntry[] }`
-- `PluginRegistry` — class (constructor takes `registryPath`):
-  - `loadLocal()` — reads and parses a local JSON file
-  - `fetchRemote(url)` — fetches and parses from a URL
-  - `search(plugins, query)` — case-insensitive search by name, description, or tags
-    **Key Dependencies:** `node:fs`, `zod`
-    **Used By:** Plugin store UI, plugin management API routes
-
----
-
-## Plugin Installer
-
-### `installer.ts`
-
-**Path:** `src/plugins/installer.ts`
-**Lines:** 133
-**Purpose:** Downloads and extracts plugin archives from tar.gz URLs. Handles installation and uninstallation.
-**Key Exports:**
-
-- `InstallResult` — `{ success, error? }`
-- `PluginInstaller` — class (constructor takes `pluginDir`):
-  - `install(pluginId, downloadUrl)` — full install sequence:
-    1. Checks if already installed
-    2. Downloads tar.gz to temp directory
-    3. Extracts with `tar`
-    4. Locates `manifest.json` (root or single subdirectory)
-    5. Validates manifest with Zod
-    6. Moves to `plugins/<pluginId>/`
-    7. Cleans up temp files
-  - `uninstall(pluginId)` — removes plugin directory with `fs.rmSync(recursive)`
-    **Key Dependencies:** `node:fs`, `node:os`, `node:path`, `node:stream/promises`, `tar`, `PluginManifest`
-    **Used By:** Plugin store UI, plugin management API routes
-
----
-
-## Plugin Settings
-
-### `settings.ts`
-
-**Path:** `src/plugins/settings.ts`
-**Lines:** 74
-**Purpose:** Per-plugin settings manager. In-memory cache backed by database persistence. Defaults come from the plugin manifest.
-**Key Exports:**
-
-- `PluginSettingsManager` — class (constructor takes `IStorage`):
-  - `get<T>(pluginId, settingId, definitions)` — returns cached value, or manifest default, or throws if unknown setting
-  - `getAll(pluginId)` — returns all cached settings for a plugin
-  - `set(pluginId, settingId, value)` — updates cache and persists to DB
-  - `delete(pluginId, settingId)` — removes from cache and persists
-  - `keys(pluginId)` — returns all setting keys
-  - `load(pluginId)` — loads from DB into cache (`IStorage.loadPluginSettings()`)
-    **Key internals:**
-- `cache` — `Map<string, Record<string, unknown>>` (plugin ID -> settings object)
-- `persist(pluginId)` — serializes cache to JSON and saves via `IStorage.savePluginSettings()`
-  **Key Dependencies:** `IStorage`, `SettingDefinition`
-  **Used By:** `loader.ts` (loads settings before plugin activation), `api.ts` (settings accessor)
-
----
+This manager supports both plugin settings UX and plugin key-value storage behavior.
 
 ## Command Registry
 
-### `command-registry.ts`
+`src/plugins/command-registry.ts` stores plugin-provided commands.
 
-**Path:** `src/plugins/command-registry.ts`
-**Lines:** 50
-**Purpose:** Stores plugin-registered commands. Commands are callable programmatically and will be wired to the React command palette in Sprint 4.
-**Key Exports:**
+It exists so commands can be:
 
-- `PluginCommand` — `{ id, name, pluginId, callback, hotkey? }`
-- `CommandRegistry` — class:
-  - `register(cmd)` — registers a command (throws on duplicate ID)
-  - `unregister(id)` — removes by ID
-  - `unregisterByPlugin(pluginId)` — removes all commands from a specific plugin
-  - `get(id)` — lookup
-  - `getAll()` — list all commands
-  - `execute(id)` — calls the command's callback (throws if not found)
-    **Key Dependencies:** None
-    **Used By:** `loader.ts` (cleanup on unload), `api.ts` (register via plugin API)
-
----
+- registered without directly coupling to the UI layer
+- executed programmatically
+- cleaned up per plugin on unload
 
 ## UI Registry
 
-### `ui-registry.ts`
+`src/plugins/ui-registry.ts` stores plugin-provided UI extensions.
 
-**Path:** `src/plugins/ui-registry.ts`
-**Lines:** 100
-**Purpose:** Stores plugin-registered UI components: sidebar panels, views (with slot and content type), and status bar items.
-**Key Exports:**
+Current extension categories include:
 
-- `ViewSlot` — `"navigation" | "tools" | "workspace"` — determines where a view appears in the sidebar
-- `ViewContentType` — `"text" | "structured"` — determines how view content is rendered
-- `PanelRegistration` — `{ id, pluginId, title, icon, component?, getContent? }`
-- `ViewRegistration` — `{ id, pluginId, name, icon, slot: ViewSlot, contentType: ViewContentType, component?, getContent? }`
-- `StatusBarRegistration` — `{ id, pluginId, text, icon, onClick? }`
-- `StatusBarHandle` — `{ update(data) }` — allows updating text/icon after registration
-- `UIRegistry` — class:
-  - `addPanel(panel)` / `addView(view)` / `addStatusBarItem(item)` — register UI components
-  - `removeByPlugin(pluginId)` — removes all panels, views, and status bar items from a plugin
-  - `getPanels()` / `getViews()` / `getStatusBarItems()` — list all registered components
-  - `getPanelContent(id)` / `getViewContent(id)` — calls `getContent()` if available
-  - `addStatusBarItem()` returns a `StatusBarHandle` for live updates
-    **Key Dependencies:** None
-    **Used By:** `loader.ts` (cleanup on unload), `api.ts` (register via plugin API)
+- sidebar panels
+- custom views
+- status bar items
 
----
+The UI registry gives the frontend a stable way to discover plugin-owned UI without the loader or plugin instances leaking directly into React code.
 
-## Permission System
+## Registry And Installation
 
-Permissions control what parts of the Plugin API a plugin can access. The flow is:
+Two files support community plugin distribution:
 
-1. **Declaration:** Plugin declares required permissions in `manifest.json` under `permissions[]`
-2. **Approval:** On first load, if permissions are non-empty and never approved, the plugin is marked `pendingApproval: true` and skipped
-3. **User approves:** `approveAndLoad()` persists approved permissions to the database
-4. **Effective permissions:** Intersection of requested (manifest) and approved (DB)
-5. **API gating:** `createPluginAPI()` checks `hasPermission()` for each API namespace. Methods return `undefined` (not Error) when permission is missing.
-6. **Revocation:** `revokePermissions()` unloads the plugin and deletes DB permissions
+- `registry.ts` for reading/searching the plugin registry metadata
+- `installer.ts` for downloading and installing plugin archives
 
-### Permission Reference (15 permissions)
+This keeps discovery metadata separate from installation and runtime activation concerns.
 
-| Permission      | Grants Access To                                                                               |
-| --------------- | ---------------------------------------------------------------------------------------------- |
-| `task:read`     | `tasks.list()`, `tasks.get()`, `events.on()`                                                   |
-| `task:write`    | `tasks.create()`, `tasks.update()`, `tasks.complete()`, `tasks.uncomplete()`, `tasks.delete()` |
-| `project:read`  | `projects.list()`, `projects.get()`                                                            |
-| `project:write` | `projects.create()`, `projects.update()`, `projects.delete()`                                  |
-| `tag:read`      | `tags.list()`                                                                                  |
-| `tag:write`     | `tags.create()`, `tags.delete()`                                                               |
-| `ui:panel`      | `ui.addSidebarPanel()`                                                                         |
-| `ui:view`       | `ui.addView()`                                                                                 |
-| `ui:status`     | `ui.addStatusBarItem()`                                                                        |
-| `commands`      | `commands.register()`                                                                          |
-| `settings`      | Settings tab in the Settings view                                                              |
-| `storage`       | `storage.get/set/delete/keys()`                                                                |
-| `network`       | `network.fetch()`                                                                              |
-| `ai:provider`   | `ai.registerProvider()`                                                                        |
-| `ai:tools`      | `ai.registerTool()`                                                                            |
+## Sandbox
 
----
+`src/plugins/sandbox.ts` is the sandbox hook point.
 
-## Data Flow
+The current system relies primarily on permission-gated API access and controlled registrations rather than full process isolation. If you change this area, be explicit about whether you are changing:
 
-### Plugin Load Sequence (detailed)
+- API-level capability gating
+- runtime isolation
+- both
 
-```
-1. PluginLoader.discover()
-   - fs.readdirSync(pluginDir)
-   - For each subdirectory: read manifest.json, validate with Zod
-   - Store in internal Map<pluginId, LoadedPlugin>
+Do not describe stronger isolation guarantees in docs than the code actually provides.
 
-2. PluginLoader.load(pluginId)
-   - Check DB for approved permissions
-   - If never approved and permissions required: set pendingApproval, return
-   - Check targetApiVersion compatibility
-   - PluginSettingsManager.load(pluginId)  [from DB]
-   - createPluginAPI({ pluginId, effectivePermissions, ...services })
-   - import(path.join(pluginPath, manifest.main))
-   - new PluginClass()
-   - instance.app = api
-   - instance.settings = api.settings
-   - instance.onLoad()
+## Runtime Cleanup
 
-3. Runtime
-   - Plugin interacts via api.tasks, api.commands, api.ui, api.events, api.ai, api.storage
-   - All access checked against permissions
+Plugin cleanup is a first-class requirement, not a nice-to-have.
 
-4. PluginLoader.unload(pluginId)
-   - instance.onUnload()
-   - commandRegistry.unregisterByPlugin(pluginId)
-   - uiRegistry.removeByPlugin(pluginId)
-   - aiProviderRegistry?.unregisterByPlugin(pluginId)
-   - toolRegistry?.unregisterBySource(pluginId)
-```
+When a plugin unloads or fails during load, the system should clean up:
 
-### Plugin Install Sequence
+- command registrations
+- UI registrations
+- AI provider registrations
+- AI tool registrations
+- event listeners tracked by the loader
 
-```
-1. PluginInstaller.install(pluginId, downloadUrl)
-   - Download tar.gz to temp directory
-   - Extract with tar
-   - Find manifest.json (root or subdirectory)
-   - Validate manifest
-   - Move to plugins/<pluginId>/
+This is one of the most important invariants in the subsystem.
 
-2. PluginLoader.discoverOne(pluginId)
-   - Read and validate manifest
-   - Add to internal Map
+## Design Constraints
 
-3. PluginLoader.load(pluginId)
-   - Normal load sequence (permission check, etc.)
-```
+When working on the plugin system:
+
+1. Preserve explicit permission checks.
+2. Keep the plugin API understandable and stable.
+3. Distinguish clearly between built-in and community plugin behavior.
+4. Treat cleanup on unload and load failure as mandatory.
+5. Keep author-facing docs in sync with internal API changes.
+6. Avoid over-claiming sandbox guarantees.
+
+## Related Docs
+
+- `docs/plugins/API.md`
+- `docs/plugins/EXAMPLES.md`
+- `docs/backend/AI.md`
+- `docs/frontend/VIEWS.md`
+- `docs/guides/ARCHITECTURE.md`

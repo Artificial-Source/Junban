@@ -70,6 +70,16 @@ describe("LLMProviderRegistry", () => {
     expect(registry.get("built-in")).toBeDefined();
   });
 
+  it("clears all providers", () => {
+    const registry = new LLMProviderRegistry();
+    registry.register(createTestPlugin("a"));
+    registry.register(createTestPlugin("b"), "plugin-b");
+
+    registry.clear();
+
+    expect(registry.getAll()).toHaveLength(0);
+  });
+
   it("creates an executor via createExecutor", () => {
     const registry = new LLMProviderRegistry();
     registry.register(createTestPlugin("test"));

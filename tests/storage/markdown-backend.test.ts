@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -129,6 +129,26 @@ describe("MarkdownBackend", () => {
       const inboxAfter = fs.readdirSync(path.join(tmpDir, "inbox"));
       expect(inboxAfter.some((f) => f.includes("buy-vegetables"))).toBe(true);
       expect(inboxAfter.some((f) => f.includes("buy-groceries"))).toBe(false);
+    });
+
+    it("does not delete old file when rename write fails", () => {
+      backend.insertTask(makeTask());
+
+      const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementationOnce(() => {
+        throw new Error("disk full");
+      });
+
+      expect(() => backend.updateTask("task-abc123", { title: "Buy vegetables" })).toThrow(
+        StorageError,
+      );
+      writeSpy.mockRestore();
+
+      const [task] = backend.getTask("task-abc123");
+      expect(task.title).toBe("Buy groceries");
+
+      const inboxFiles = fs.readdirSync(path.join(tmpDir, "inbox"));
+      expect(inboxFiles.some((f) => f.includes("buy-groceries"))).toBe(true);
+      expect(inboxFiles.some((f) => f.includes("buy-vegetables"))).toBe(false);
     });
 
     it("updates task project → file moves to new directory", () => {

@@ -61,6 +61,11 @@ function denied(pluginId: string, permission: Permission, method: string): (...a
   };
 }
 
+function buildScopedToolName(pluginId: string, toolName: string): string {
+  const scopedPrefix = `${pluginId}__`;
+  return toolName.startsWith(scopedPrefix) ? toolName : `${scopedPrefix}${toolName}`;
+}
+
 /**
  * Plugin API surface — the controlled interface that plugins interact with.
  *
@@ -317,7 +322,19 @@ export function createPluginAPI(options: PluginAPIOptions) {
 
       registerTool: has("ai:tools") && toolRegistry
         ? (definition: ToolDefinition, executor: ToolExecutor) => {
-            toolRegistry.register(definition, executor, pluginId);
+            const scopedName = buildScopedToolName(pluginId, definition.name);
+            toolRegistry.register(
+              {
+                ...definition,
+                name: scopedName,
+                description:
+                  scopedName === definition.name
+                    ? definition.description
+                    : `[${pluginId}] ${definition.description}`,
+              },
+              executor,
+              pluginId,
+            );
           }
         : (denied(pluginId, "ai:tools", "ai.registerTool()") as unknown as (definition: ToolDefinition, executor: ToolExecutor) => void),
     },

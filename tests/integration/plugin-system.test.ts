@@ -203,10 +203,23 @@ describe("Plugin System Integration", () => {
   describe("PluginLoader - load/unload lifecycle", () => {
     it("should load a plugin and call onLoad", async () => {
       const { taskService, projectService, tagService, eventBus, storage } = createTestServices();
+      const commandRegistry = new CommandRegistry();
+      const uiRegistry = new UIRegistry();
       const loadCode = `
         export default class TestPlugin {
-          async onLoad() { globalThis.__testPluginLoaded = true; }
-          async onUnload() { globalThis.__testPluginLoaded = false; }
+          async onLoad() {
+            this.app.commands.register({
+              id: "lifecycle:cmd",
+              name: "Lifecycle Command",
+              callback: () => {},
+            });
+            this.app.ui.addStatusBarItem({
+              id: "lifecycle-status",
+              text: "loaded",
+              icon: "circle",
+            });
+          }
+          async onUnload() {}
         }
       `;
       writePlugin(pluginDir, "test-plugin", validManifest, loadCode);
@@ -217,8 +230,8 @@ describe("Plugin System Integration", () => {
         tagService,
         eventBus,
         settingsManager: new PluginSettingsManager(storage),
-        commandRegistry: new CommandRegistry(),
-        uiRegistry: new UIRegistry(),
+        commandRegistry,
+        uiRegistry,
         queries: storage,
       });
 
@@ -230,12 +243,14 @@ describe("Plugin System Integration", () => {
 
       const plugin = loader.get("test-plugin");
       expect(plugin?.enabled).toBe(true);
-      expect((globalThis as Record<string, unknown>).__testPluginLoaded).toBe(true);
+      expect(commandRegistry.getAll()).toHaveLength(1);
+      expect(uiRegistry.getStatusBarItems()).toHaveLength(1);
 
       // Cleanup
       await loader.unload("test-plugin");
       expect(plugin?.enabled).toBe(false);
-      expect((globalThis as Record<string, unknown>).__testPluginLoaded).toBe(false);
+      expect(commandRegistry.getAll()).toHaveLength(0);
+      expect(uiRegistry.getStatusBarItems()).toHaveLength(0);
     });
 
     it("should clean up commands and UI on unload", async () => {
@@ -617,19 +632,23 @@ describe("Plugin System Integration", () => {
   describe("Full lifecycle", () => {
     it("should discover -> load -> receive events -> unload", async () => {
       const { taskService, projectService, tagService, eventBus, storage } = createTestServices();
+      const uiRegistry = new UIRegistry();
 
       const code = `
         let count = 0;
         export default class CountPlugin {
           async onLoad() {
+            const handle = this.app.ui.addStatusBarItem({
+              id: "event-counter",
+              text: "0",
+              icon: "circle",
+            });
             this.app.events.on("task:create", () => {
               count++;
-              globalThis.__pluginEventCount = count;
+              handle.update({ text: String(count) });
             });
           }
-          async onUnload() {
-            globalThis.__pluginEventCount = -1;
-          }
+          async onUnload() {}
         }
       `;
       writePlugin(pluginDir, "test-plugin", validManifest, code);
@@ -641,7 +660,7 @@ describe("Plugin System Integration", () => {
         eventBus,
         settingsManager: new PluginSettingsManager(storage),
         commandRegistry: new CommandRegistry(),
-        uiRegistry: new UIRegistry(),
+        uiRegistry,
         queries: storage,
       });
 
@@ -654,11 +673,11 @@ describe("Plugin System Integration", () => {
       // Create tasks — plugin should receive events
       await taskService.create({ title: "Task 1" });
       await taskService.create({ title: "Task 2" });
-      expect((globalThis as Record<string, unknown>).__pluginEventCount).toBe(2);
+      expect(uiRegistry.getStatusBarItems()[0]?.text).toBe("2");
 
       // Unload
       await loader.unloadAll();
-      expect((globalThis as Record<string, unknown>).__pluginEventCount).toBe(-1);
+      expect(uiRegistry.getStatusBarItems()).toHaveLength(0);
       expect(loader.getAll().filter((p) => p.enabled)).toHaveLength(0);
     });
   });

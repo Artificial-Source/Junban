@@ -1,5 +1,6 @@
 import { useDirectServices, BASE, handleResponse, handleVoidResponse } from "../helpers.js";
 import { getServices } from "../direct-services.js";
+import { getSecureSetting, setSecureSetting } from "../../../storage/encrypted-settings.js";
 import type { AIConfigInfo } from "./ai-types.js";
 
 export async function getAIConfig(): Promise<AIConfigInfo> {
@@ -8,16 +9,16 @@ export async function getAIConfig(): Promise<AIConfigInfo> {
     const providerSetting = svc.storage.getAppSetting("ai_provider");
     const modelSetting = svc.storage.getAppSetting("ai_model");
     const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
-    const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+    const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
     const authTypeSetting = svc.storage.getAppSetting("ai_auth_type");
-    const oauthTokenSetting = svc.storage.getAppSetting("ai_oauth_token");
+    const oauthToken = await getSecureSetting(svc.storage, "ai_oauth_token");
     return {
       provider: providerSetting?.value ?? null,
       model: modelSetting?.value ?? null,
       baseUrl: baseUrlSetting?.value ?? null,
-      hasApiKey: !!apiKeySetting?.value,
+      hasApiKey: !!apiKey,
       authType: (authTypeSetting?.value as "api-key" | "oauth") ?? undefined,
-      hasOAuthToken: !!oauthTokenSetting?.value,
+      hasOAuthToken: !!oauthToken,
     };
   }
   const res = await fetch(`${BASE}/ai/config`);
@@ -35,7 +36,7 @@ export async function updateAIConfig(config: {
   if (useDirectServices()) {
     const svc = await getServices();
     if (config.provider) svc.storage.setAppSetting("ai_provider", config.provider);
-    if (config.apiKey) svc.storage.setAppSetting("ai_api_key", config.apiKey);
+    if (config.apiKey) await setSecureSetting(svc.storage, "ai_api_key", config.apiKey);
     if (config.model !== undefined) {
       if (config.model) {
         svc.storage.setAppSetting("ai_model", config.model);
@@ -57,7 +58,11 @@ export async function updateAIConfig(config: {
         svc.storage.deleteAppSetting("ai_auth_type");
       }
     }
-    if (config.oauthToken) svc.storage.setAppSetting("ai_oauth_token", config.oauthToken);
+    if (config.oauthToken) await setSecureSetting(svc.storage, "ai_oauth_token", config.oauthToken);
+
+    // Persist config first so writes are durable even if later session work fails.
+    svc.save();
+
     const ai = await svc.getAIRuntime();
     ai.chatManager.clearSession(svc.storage);
     svc.save();

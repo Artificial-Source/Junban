@@ -28,9 +28,10 @@ export function pluginRoutes(services: AppServices): Hono {
   let pluginInitPromise: Promise<void> | null = null;
   async function ensurePlugins() {
     if (!pluginInitPromise) {
-      pluginInitPromise = (async () => {
-        await services.pluginLoader.loadAll();
-      })();
+      pluginInitPromise = services.pluginLoader.loadAll().catch((err) => {
+        pluginInitPromise = null;
+        throw err;
+      });
     }
     await pluginInitPromise;
   }

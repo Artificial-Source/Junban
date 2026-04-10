@@ -19,6 +19,7 @@ export async function updateAiMemory(
   if (useDirectServices()) {
     const svc = await getServices();
     svc.storage.updateAiMemory(id, content, category);
+    svc.save();
     return;
   }
   await handleVoidResponse(
@@ -34,6 +35,7 @@ export async function deleteAiMemory(id: string): Promise<void> {
   if (useDirectServices()) {
     const svc = await getServices();
     svc.storage.deleteAiMemory(id);
+    svc.save();
     return;
   }
   await handleVoidResponse(
@@ -50,6 +52,7 @@ export async function deleteAllAiMemories(): Promise<void> {
     for (const m of memories) {
       svc.storage.deleteAiMemory(m.id);
     }
+    svc.save();
     return;
   }
   // Delete one by one since we don't have a bulk endpoint

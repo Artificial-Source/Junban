@@ -13,16 +13,22 @@ const PROFILE_DEFAULTS = {
 
 const profileSchema = z.enum(["daily", "dev"]);
 
+const pathSchema = z
+  .string()
+  .trim()
+  .min(1, "Path must not be empty")
+  .refine((value) => !value.includes("\0"), "Path must not contain null bytes");
+
 const envSchema = z.object({
   JUNBAN_PROFILE: profileSchema.default("daily"),
-  DB_PATH: z.string(),
+  DB_PATH: pathSchema,
   STORAGE_MODE: z.enum(["sqlite", "markdown"]).default("sqlite"),
-  MARKDOWN_PATH: z.string(),
+  MARKDOWN_PATH: pathSchema,
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   PORT: z.coerce.number().default(5173),
   DEFAULT_THEME: z.enum(["light", "dark"]).default("light"),
   NLP_LOCALE: z.string().default("en"),
-  PLUGIN_DIR: z.string().default("./plugins/"),
+  PLUGIN_DIR: pathSchema.default("./plugins/"),
   PLUGIN_SANDBOX: z
     .string()
     .default("true")

@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
 const mockPlaySound = vi.fn();
+const mockListTaskRelations = vi.fn().mockResolvedValue([]);
+const mockAddTaskRelation = vi.fn().mockResolvedValue(undefined);
 
 // Undo manager mock — tracks perform calls and executes the action
 const mockPerform = vi.fn().mockImplementation(async (action: any) => {
@@ -43,6 +45,7 @@ const mockTaskContext = {
   completeTask: vi.fn().mockResolvedValue(undefined),
   deleteTask: vi.fn().mockResolvedValue(undefined),
   createTask: vi.fn().mockResolvedValue(undefined),
+  restoreTask: vi.fn().mockResolvedValue(undefined),
   completeManyTasks: vi.fn().mockResolvedValue([]),
   deleteManyTasks: vi.fn().mockResolvedValue(undefined),
   updateManyTasks: vi.fn().mockResolvedValue([]),
@@ -62,6 +65,11 @@ vi.mock("../../../src/ui/context/UndoContext.js", () => ({
 
 vi.mock("../../../src/ui/hooks/useSoundEffect.js", () => ({
   useSoundEffect: () => mockPlaySound,
+}));
+
+vi.mock("../../../src/ui/api/tasks.js", () => ({
+  listTaskRelations: (...args: any[]) => mockListTaskRelations(...args),
+  addTaskRelation: (...args: any[]) => mockAddTaskRelation(...args),
 }));
 
 import { useBulkActions } from "../../../src/ui/hooks/useBulkActions.js";

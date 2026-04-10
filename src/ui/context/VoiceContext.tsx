@@ -61,7 +61,8 @@ async function decryptSettings(settings: VoiceSettings): Promise<VoiceSettings> 
     const val = decrypted[key];
     if (typeof val === "string" && val && val.startsWith(ENCRYPTED_VALUE_PREFIX)) {
       const nextValue = await decryptValue(val);
-      (decrypted[key] as string) = nextValue.startsWith(ENCRYPTED_VALUE_PREFIX) ? "" : nextValue;
+      (decrypted[key] as string) =
+        !nextValue || nextValue.startsWith(ENCRYPTED_VALUE_PREFIX) ? "" : nextValue;
     }
   }
   return decrypted;

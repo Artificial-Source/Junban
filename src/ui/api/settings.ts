@@ -1,4 +1,9 @@
 import type { Task, Project } from "../../core/types.js";
+import {
+  isWritableSettingKey,
+  listSettingsForClient,
+  readSettingForClient,
+} from "../../core/settings-policy.js";
 import { useDirectServices, BASE, handleResponse, handleVoidResponse } from "./helpers.js";
 import { getServices } from "./direct-services.js";
 import { listTasks } from "./tasks.js";
@@ -30,12 +35,7 @@ export async function exportAllData(): Promise<{
 export async function getAllSettings(): Promise<Record<string, string>> {
   if (useDirectServices()) {
     const svc = await getServices();
-    const rows = svc.storage.listAllAppSettings();
-    const result: Record<string, string> = {};
-    for (const row of rows) {
-      result[row.key] = row.value;
-    }
-    return result;
+    return listSettingsForClient(svc.storage.listAllAppSettings());
   }
   const res = await fetch(`${BASE}/settings`);
   return handleResponse<Record<string, string>>(res);
@@ -45,7 +45,7 @@ export async function getAppSetting(key: string): Promise<string | null> {
   if (useDirectServices()) {
     const svc = await getServices();
     const row = svc.storage.getAppSetting(key);
-    return row?.value ?? null;
+    return readSettingForClient(key, row?.value);
   }
   const res = await fetch(`${BASE}/settings/${key}`);
   if (!res.ok) return null;
@@ -64,6 +64,9 @@ export async function getStorageInfo(): Promise<{ mode: string; path: string }> 
 
 export async function setAppSetting(key: string, value: string): Promise<void> {
   if (useDirectServices()) {
+    if (!isWritableSettingKey(key)) {
+      throw new Error(`Setting key "${key}" is not allowed`);
+    }
     const svc = await getServices();
     svc.storage.setAppSetting(key, value);
     svc.save();

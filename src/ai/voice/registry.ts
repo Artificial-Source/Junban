@@ -59,4 +59,10 @@ export class VoiceProviderRegistry {
   listTTS(): TTSProviderPlugin[] {
     return Array.from(this.ttsProviders.values());
   }
+
+  /** Remove all registered STT/TTS providers. */
+  clear(): void {
+    this.sttProviders.clear();
+    this.ttsProviders.clear();
+  }
 }

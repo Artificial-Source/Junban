@@ -7,6 +7,7 @@ const mockListAIProviders = vi.fn().mockResolvedValue([]);
 const mockFetchModels = vi.fn().mockResolvedValue([]);
 
 vi.mock("../../../src/ui/context/AIContext.js", () => ({
+  AIProvider: ({ children }: any) => children,
   useAIContext: () => ({
     config: { provider: "", model: "", baseUrl: "", hasApiKey: false },
     isConfigured: false,
@@ -15,19 +16,14 @@ vi.mock("../../../src/ui/context/AIContext.js", () => ({
   }),
 }));
 
-vi.mock("../../../src/ui/api/index.js", () => ({
-  api: {
-    listAIProviders: (...args: any[]) => mockListAIProviders(...args),
-    fetchModels: (...args: any[]) => mockFetchModels(...args),
-    loadModel: vi.fn().mockResolvedValue(undefined),
-    getAllSettings: vi.fn().mockResolvedValue({}),
-    getAppSetting: vi.fn().mockResolvedValue(null),
-    setAppSetting: vi.fn().mockResolvedValue(undefined),
-    getAiMemories: vi.fn().mockResolvedValue([]),
-    deleteAiMemory: vi.fn().mockResolvedValue(undefined),
-    deleteAllAiMemories: vi.fn().mockResolvedValue(undefined),
-    updateAiMemory: vi.fn().mockResolvedValue(undefined),
-  },
+vi.mock("../../../src/ui/api/ai.js", () => ({
+  listAIProviders: (...args: any[]) => mockListAIProviders(...args),
+  fetchModels: (...args: any[]) => mockFetchModels(...args),
+  loadModel: vi.fn().mockResolvedValue(undefined),
+  getAiMemories: vi.fn().mockResolvedValue([]),
+  deleteAiMemory: vi.fn().mockResolvedValue(undefined),
+  deleteAllAiMemories: vi.fn().mockResolvedValue(undefined),
+  updateAiMemory: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { AITab } from "../../../src/ui/views/settings/AITab.js";

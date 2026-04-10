@@ -13,6 +13,7 @@ vi.mock("lucide-react", () => ({
 }));
 
 vi.mock("../../../src/ui/context/VoiceContext.js", () => ({
+  VoiceProvider: ({ children }: any) => children,
   useVoiceContext: () => ({
     settings: {
       sttProviderId: "browser-stt",
@@ -43,6 +44,8 @@ vi.mock("../../../src/ui/context/VoiceContext.js", () => ({
     speak: vi.fn(),
     cancelSpeech: vi.fn(),
     transcribeAudio: vi.fn(),
+    localProvidersLoaded: true,
+    ensureLocalProvidersLoaded: vi.fn().mockResolvedValue(undefined),
   }),
 }));
 

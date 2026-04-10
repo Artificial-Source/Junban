@@ -25,6 +25,7 @@ vi.mock("../../../src/ui/context/AIContext.js", () => ({
     regenerateLastResponse: vi.fn(),
     sessions: [],
     activeSessionId: null,
+    setFocusedTaskId: vi.fn(),
     createNewSession: vi.fn(),
     switchSession: vi.fn(),
     deleteSession: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("../../../src/ui/context/VoiceContext.js", () => ({
     registry: { listSTT: vi.fn().mockReturnValue([]), listTTS: vi.fn().mockReturnValue([]) },
     ttsVoices: [],
     ttsModels: [],
+    ensureRegistryLoaded: vi.fn().mockResolvedValue(undefined),
   }),
 }));
 

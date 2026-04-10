@@ -4,7 +4,10 @@ import { bootstrap } from "../bootstrap.js";
 const program = new Command();
 const services = bootstrap();
 
-program.name("junban").description("ASF Junban — Task management from the terminal").version("0.1.0");
+program
+  .name("junban")
+  .description("ASF Junban — Task management from the terminal")
+  .version("0.1.0");
 
 program
   .command("add <description>")

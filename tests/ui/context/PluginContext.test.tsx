@@ -1,19 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act, waitFor } from "@testing-library/react";
 
-// Mock the api module BEFORE importing the context
-vi.mock("../../../src/ui/api/index.js", () => ({
-  api: {
-    listPlugins: vi.fn().mockResolvedValue([]),
-    listPluginCommands: vi.fn().mockResolvedValue([]),
-    getStatusBarItems: vi.fn().mockResolvedValue([]),
-    getPluginPanels: vi.fn().mockResolvedValue([]),
-    getPluginViews: vi.fn().mockResolvedValue([]),
-    executePluginCommand: vi.fn().mockResolvedValue(undefined),
-  },
+const pluginApiMocks = vi.hoisted(() => ({
+  listPlugins: vi.fn().mockResolvedValue([]),
+  listPluginCommands: vi.fn().mockResolvedValue([]),
+  getStatusBarItems: vi.fn().mockResolvedValue([]),
+  getPluginPanels: vi.fn().mockResolvedValue([]),
+  getPluginViews: vi.fn().mockResolvedValue([]),
+  executePluginCommand: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { api } from "../../../src/ui/api/index.js";
+vi.mock("../../../src/ui/api/plugins.js", () => pluginApiMocks);
 import { PluginProvider, usePluginContext } from "../../../src/ui/context/PluginContext.js";
 
 function TestConsumer() {
@@ -43,12 +40,12 @@ describe("PluginContext", () => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
     // Reset mock implementations to defaults after each test
-    (api.listPlugins as any).mockResolvedValue([]);
-    (api.listPluginCommands as any).mockResolvedValue([]);
-    (api.getStatusBarItems as any).mockResolvedValue([]);
-    (api.getPluginPanels as any).mockResolvedValue([]);
-    (api.getPluginViews as any).mockResolvedValue([]);
-    (api.executePluginCommand as any).mockResolvedValue(undefined);
+    pluginApiMocks.listPlugins.mockResolvedValue([]);
+    pluginApiMocks.listPluginCommands.mockResolvedValue([]);
+    pluginApiMocks.getStatusBarItems.mockResolvedValue([]);
+    pluginApiMocks.getPluginPanels.mockResolvedValue([]);
+    pluginApiMocks.getPluginViews.mockResolvedValue([]);
+    pluginApiMocks.executePluginCommand.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -91,11 +88,11 @@ describe("PluginContext", () => {
       },
     ];
 
-    (api.listPlugins as any).mockResolvedValue(mockPlugins);
-    (api.listPluginCommands as any).mockResolvedValue(mockCommands);
-    (api.getStatusBarItems as any).mockResolvedValue(mockStatusBar);
-    (api.getPluginPanels as any).mockResolvedValue(mockPanels);
-    (api.getPluginViews as any).mockResolvedValue(mockViews);
+    pluginApiMocks.listPlugins.mockResolvedValue(mockPlugins);
+    pluginApiMocks.listPluginCommands.mockResolvedValue(mockCommands);
+    pluginApiMocks.getStatusBarItems.mockResolvedValue(mockStatusBar);
+    pluginApiMocks.getPluginPanels.mockResolvedValue(mockPanels);
+    pluginApiMocks.getPluginViews.mockResolvedValue(mockViews);
 
     render(
       <PluginProvider>
@@ -103,15 +100,19 @@ describe("PluginContext", () => {
       </PluginProvider>,
     );
 
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
     await waitFor(() => {
       expect(screen.getByTestId("plugin-count").textContent).toBe("1");
     });
 
-    expect(api.listPlugins).toHaveBeenCalled();
-    expect(api.listPluginCommands).toHaveBeenCalled();
-    expect(api.getStatusBarItems).toHaveBeenCalled();
-    expect(api.getPluginPanels).toHaveBeenCalled();
-    expect(api.getPluginViews).toHaveBeenCalled();
+    expect(pluginApiMocks.listPlugins).toHaveBeenCalled();
+    expect(pluginApiMocks.listPluginCommands).toHaveBeenCalled();
+    expect(pluginApiMocks.getStatusBarItems).toHaveBeenCalled();
+    expect(pluginApiMocks.getPluginPanels).toHaveBeenCalled();
+    expect(pluginApiMocks.getPluginViews).toHaveBeenCalled();
 
     const plugins = JSON.parse(screen.getByTestId("plugins").textContent!);
     expect(plugins[0].name).toBe("Test Plugin");
@@ -137,7 +138,7 @@ describe("PluginContext", () => {
     );
 
     await waitFor(() => {
-      expect(api.listPlugins).toHaveBeenCalled();
+      expect(pluginApiMocks.listPlugins).toHaveBeenCalled();
     });
 
     expect(screen.getByTestId("plugin-count").textContent).toBe("0");
@@ -152,7 +153,7 @@ describe("PluginContext", () => {
     );
 
     await waitFor(() => {
-      expect(api.listPlugins).toHaveBeenCalled();
+      expect(pluginApiMocks.listPlugins).toHaveBeenCalled();
     });
 
     // Clear mocks to track execute-specific calls
@@ -162,9 +163,9 @@ describe("PluginContext", () => {
       screen.getByTestId("execute").click();
     });
 
-    expect(api.executePluginCommand).toHaveBeenCalledWith("cmd-1");
-    expect(api.getStatusBarItems).toHaveBeenCalled();
-    expect(api.getPluginPanels).toHaveBeenCalled();
+    expect(pluginApiMocks.executePluginCommand).toHaveBeenCalledWith("cmd-1");
+    expect(pluginApiMocks.getStatusBarItems).toHaveBeenCalled();
+    expect(pluginApiMocks.getPluginPanels).toHaveBeenCalled();
   });
 
   it("polls status bar and panels every 30 seconds", async () => {
@@ -175,11 +176,11 @@ describe("PluginContext", () => {
     );
 
     await waitFor(() => {
-      expect(api.listPlugins).toHaveBeenCalled();
+      expect(pluginApiMocks.listPlugins).toHaveBeenCalled();
     });
 
-    const initialStatusBarCalls = (api.getStatusBarItems as any).mock.calls.length;
-    const initialPanelCalls = (api.getPluginPanels as any).mock.calls.length;
+    const initialStatusBarCalls = pluginApiMocks.getStatusBarItems.mock.calls.length;
+    const initialPanelCalls = pluginApiMocks.getPluginPanels.mock.calls.length;
 
     // Advance time by 30 seconds
     act(() => {
@@ -187,10 +188,10 @@ describe("PluginContext", () => {
     });
 
     await waitFor(() => {
-      expect((api.getStatusBarItems as any).mock.calls.length).toBeGreaterThan(
+      expect(pluginApiMocks.getStatusBarItems.mock.calls.length).toBeGreaterThan(
         initialStatusBarCalls,
       );
-      expect((api.getPluginPanels as any).mock.calls.length).toBeGreaterThan(initialPanelCalls);
+      expect(pluginApiMocks.getPluginPanels.mock.calls.length).toBeGreaterThan(initialPanelCalls);
     });
 
     // Advance another 30 seconds
@@ -199,7 +200,7 @@ describe("PluginContext", () => {
     });
 
     await waitFor(() => {
-      expect((api.getStatusBarItems as any).mock.calls.length).toBeGreaterThan(
+      expect(pluginApiMocks.getStatusBarItems.mock.calls.length).toBeGreaterThan(
         initialStatusBarCalls + 1,
       );
     });
@@ -213,10 +214,10 @@ describe("PluginContext", () => {
     );
 
     await waitFor(() => {
-      expect(api.listPlugins).toHaveBeenCalled();
+      expect(pluginApiMocks.listPlugins).toHaveBeenCalled();
     });
 
-    const callsBefore = (api.getStatusBarItems as any).mock.calls.length;
+    const callsBefore = pluginApiMocks.getStatusBarItems.mock.calls.length;
 
     unmount();
 
@@ -225,12 +226,12 @@ describe("PluginContext", () => {
       vi.advanceTimersByTime(60000);
     });
 
-    expect((api.getStatusBarItems as any).mock.calls.length).toBe(callsBefore);
+    expect(pluginApiMocks.getStatusBarItems.mock.calls.length).toBe(callsBefore);
   });
 
   it("mountedRef prevents stale updates after unmount", async () => {
     let resolvePlugins!: (value: any) => void;
-    (api.listPlugins as any).mockImplementation(
+    pluginApiMocks.listPlugins.mockImplementation(
       () =>
         new Promise((resolve) => {
           resolvePlugins = resolve;
@@ -262,11 +263,11 @@ describe("PluginContext", () => {
     );
 
     await waitFor(() => {
-      expect(api.listPlugins).toHaveBeenCalled();
+      expect(pluginApiMocks.listPlugins).toHaveBeenCalled();
     });
 
     // Set up new data for refresh
-    (api.listPlugins as any).mockResolvedValue([
+    pluginApiMocks.listPlugins.mockResolvedValue([
       {
         id: "p2",
         name: "Refreshed Plugin",
@@ -291,11 +292,11 @@ describe("PluginContext", () => {
   });
 
   it("handles api errors gracefully on mount", async () => {
-    (api.listPlugins as any).mockRejectedValue(new Error("Server error"));
-    (api.listPluginCommands as any).mockRejectedValue(new Error("Server error"));
-    (api.getStatusBarItems as any).mockRejectedValue(new Error("Server error"));
-    (api.getPluginPanels as any).mockRejectedValue(new Error("Server error"));
-    (api.getPluginViews as any).mockRejectedValue(new Error("Server error"));
+    pluginApiMocks.listPlugins.mockRejectedValue(new Error("Server error"));
+    pluginApiMocks.listPluginCommands.mockRejectedValue(new Error("Server error"));
+    pluginApiMocks.getStatusBarItems.mockRejectedValue(new Error("Server error"));
+    pluginApiMocks.getPluginPanels.mockRejectedValue(new Error("Server error"));
+    pluginApiMocks.getPluginViews.mockRejectedValue(new Error("Server error"));
 
     // Should not throw — errors are caught internally
     render(
@@ -305,7 +306,7 @@ describe("PluginContext", () => {
     );
 
     await waitFor(() => {
-      expect(api.listPlugins).toHaveBeenCalled();
+      expect(pluginApiMocks.listPlugins).toHaveBeenCalled();
     });
 
     // State should remain empty (defaults)

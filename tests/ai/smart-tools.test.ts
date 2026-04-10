@@ -10,7 +10,7 @@ import {
   registerCheckDuplicatesTool,
 } from "../../src/ai/tools/builtin/smart-organize.js";
 import { registerEnergyRecommendationsTool } from "../../src/ai/tools/builtin/energy-recommendations.js";
-import { createDefaultToolRegistry } from "../../src/ai/provider.js";
+import { createDefaultToolRegistry } from "../../src/ai/tool-registry.js";
 import { createTestServices } from "../integration/helpers.js";
 import type { ToolContext } from "../../src/ai/tools/types.js";
 import type { TaskService } from "../../src/core/tasks.js";

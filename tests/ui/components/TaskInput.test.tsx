@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
 
 // Mock lucide-react
 vi.mock("lucide-react", () => ({
@@ -74,15 +74,17 @@ describe("TaskInput", () => {
     cleanup();
   });
 
-  it("calls onSubmit with parsed task on form submit", () => {
+  it("calls onSubmit with parsed task on form submit", async () => {
     const onSubmit = vi.fn();
     render(<TaskInput onSubmit={onSubmit} />);
 
     const input = screen.getByPlaceholderText(/add a task/i);
     fireEvent.change(input, { target: { value: "buy milk" } });
-    fireEvent.submit(input.closest("form")!);
+    await act(async () => {
+      fireEvent.submit(input.closest("form")!);
+    });
 
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({ title: "buy milk", dueDate: null }),
     );
@@ -98,21 +100,23 @@ describe("TaskInput", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("applies defaultDueDate when parser returns no date", () => {
+  it("applies defaultDueDate when parser returns no date", async () => {
     const onSubmit = vi.fn();
     const defaultDate = new Date("2026-02-17T00:00:00");
     render(<TaskInput onSubmit={onSubmit} defaultDueDate={defaultDate} />);
 
     const input = screen.getByPlaceholderText(/add a task/i);
     fireEvent.change(input, { target: { value: "buy milk" } });
-    fireEvent.submit(input.closest("form")!);
+    await act(async () => {
+      fireEvent.submit(input.closest("form")!);
+    });
 
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const parsed = onSubmit.mock.calls[0][0];
     expect(parsed.dueDate).toEqual(defaultDate);
   });
 
-  it("does not override parser date with defaultDueDate", () => {
+  it("does not override parser date with defaultDueDate", async () => {
     const parserDate = new Date("2026-03-01T00:00:00");
     // Use mockImplementation (not Once) because parseTask is called for both preview and submit
     mockParseTask.mockImplementation((input: string) => ({
@@ -131,35 +135,41 @@ describe("TaskInput", () => {
 
     const input = screen.getByPlaceholderText(/add a task/i);
     fireEvent.change(input, { target: { value: "buy milk tomorrow" } });
-    fireEvent.submit(input.closest("form")!);
+    await act(async () => {
+      fireEvent.submit(input.closest("form")!);
+    });
 
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const parsed = onSubmit.mock.calls[0][0];
     expect(parsed.dueDate).toEqual(parserDate);
   });
 
-  it("does not apply defaultDueDate when none provided", () => {
+  it("does not apply defaultDueDate when none provided", async () => {
     const onSubmit = vi.fn();
     render(<TaskInput onSubmit={onSubmit} />);
 
     const input = screen.getByPlaceholderText(/add a task/i);
     fireEvent.change(input, { target: { value: "buy milk" } });
-    fireEvent.submit(input.closest("form")!);
+    await act(async () => {
+      fireEvent.submit(input.closest("form")!);
+    });
 
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const parsed = onSubmit.mock.calls[0][0];
     expect(parsed.dueDate).toBeNull();
   });
 
-  it("clears input after successful submit", () => {
+  it("clears input after successful submit", async () => {
     const onSubmit = vi.fn();
     render(<TaskInput onSubmit={onSubmit} />);
 
     const input = screen.getByPlaceholderText(/add a task/i) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "buy milk" } });
-    fireEvent.submit(input.closest("form")!);
+    await act(async () => {
+      fireEvent.submit(input.closest("form")!);
+    });
 
-    expect(input.value).toBe("");
+    await waitFor(() => expect(input.value).toBe(""));
   });
 
   it("renders custom placeholder", () => {

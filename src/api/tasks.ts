@@ -1,6 +1,12 @@
 import { Hono } from "hono";
 import type { AppServices } from "../bootstrap.js";
-import { CreateTaskInput, UpdateTaskInput, CommentContentInput } from "../core/types.js";
+import {
+  CreateTaskInput,
+  UpdateTaskInput,
+  CommentContentInput,
+  RestoreTaskInput,
+} from "../core/types.js";
+import { importTasksWithRollback } from "../core/import-execution.js";
 
 export function taskRoutes(services: AppServices): Hono {
   const app = new Hono();
@@ -93,42 +99,32 @@ export function taskRoutes(services: AppServices): Hono {
 
   // POST /tasks/import — import tasks from external formats
   app.post("/import", async (c) => {
-    const { tasks: importedTasks } = await c.req.json();
-    const errors: string[] = [];
-    let imported = 0;
-
-    for (const t of importedTasks) {
-      try {
-        let projectId: string | undefined;
-        if (t.projectName) {
-          const project = await services.projectService.getOrCreate(t.projectName);
-          projectId = project.id;
-        }
-
-        const task = await services.taskService.create({
-          title: t.title,
-          description: t.description ?? undefined,
-          priority: t.priority,
-          dueDate: t.dueDate ?? undefined,
-          dueTime: t.dueTime,
-          projectId,
-          recurrence: t.recurrence ?? undefined,
-          tags: t.tagNames,
-        });
-
-        if (t.status === "completed") {
-          await services.taskService.complete(task.id);
-        }
-
-        imported++;
-      } catch (err: unknown) {
-        errors.push(
-          `Failed to import "${t.title}": ${err instanceof Error ? err.message : "unknown error"}`,
-        );
-      }
+    const body = await c.req.json();
+    if (!body || !Array.isArray(body.tasks)) {
+      return c.json({ error: "tasks must be an array" }, 400);
     }
 
-    return c.json({ imported, errors });
+    const importedTasks = body.tasks;
+    const result = await importTasksWithRollback(
+      {
+        taskService: services.taskService,
+        projectService: services.projectService,
+      },
+      importedTasks,
+    );
+
+    return c.json(result);
+  });
+
+  // POST /tasks/restore — restore a previously deleted task snapshot
+  app.post("/restore", async (c) => {
+    const body = await c.req.json();
+    const parsed = RestoreTaskInput.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: "Validation failed", details: parsed.error.flatten() }, 400);
+    }
+    const task = await services.taskService.restoreTask(parsed.data);
+    return c.json(task, 201);
   });
 
   // GET /tasks/:id — get a single task

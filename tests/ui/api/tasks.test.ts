@@ -455,4 +455,11 @@ describe("importTasks", () => {
 
     await expect(importTasks([])).rejects.toThrow("Import failed");
   });
+
+  it("throws when tasks is not an array", async () => {
+    await expect(importTasks({} as unknown as Parameters<typeof importTasks>[0])).rejects.toThrow(
+      "tasks must be an array",
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 });

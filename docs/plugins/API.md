@@ -714,6 +714,13 @@ this.app.ai.registerTool(
 );
 ```
 
+Tool names are automatically namespaced by plugin ID at registration time:
+
+- local tool name: `my-tool`
+- registered name exposed to the AI runtime: `<pluginId>__my-tool`
+
+This prevents collisions with built-in tools and tools from other plugins while keeping your local definition readable.
+
 ## 13. Error Handling
 
 - **Permission errors**: Thrown synchronously with a message telling you which permission to add.

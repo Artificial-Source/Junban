@@ -60,9 +60,29 @@ describe("loadEnv", () => {
     expect(loadEnv().DB_PATH).toBe("/tmp/test.db");
   });
 
+  it("rejects empty DB_PATH", () => {
+    process.env.DB_PATH = "   ";
+    expect(() => loadEnv()).toThrow();
+  });
+
+  it("rejects DB_PATH with null byte", () => {
+    process.env.DB_PATH = "bad\u0000path.db";
+    expect(() => loadEnv()).toThrow();
+  });
+
   it("reads STORAGE_MODE=markdown", () => {
     process.env.STORAGE_MODE = "markdown";
     expect(loadEnv().STORAGE_MODE).toBe("markdown");
+  });
+
+  it("rejects empty MARKDOWN_PATH", () => {
+    process.env.MARKDOWN_PATH = "";
+    expect(() => loadEnv()).toThrow();
+  });
+
+  it("rejects MARKDOWN_PATH with null byte", () => {
+    process.env.MARKDOWN_PATH = "tasks\u0000dev";
+    expect(() => loadEnv()).toThrow();
   });
 
   it("rejects invalid STORAGE_MODE", () => {
@@ -103,6 +123,16 @@ describe("loadEnv", () => {
   it("reads optional PLUGIN_REGISTRY_URL", () => {
     process.env.PLUGIN_REGISTRY_URL = "https://example.com/registry.json";
     expect(loadEnv().PLUGIN_REGISTRY_URL).toBe("https://example.com/registry.json");
+  });
+
+  it("rejects empty PLUGIN_DIR", () => {
+    process.env.PLUGIN_DIR = "   ";
+    expect(() => loadEnv()).toThrow();
+  });
+
+  it("rejects PLUGIN_DIR with null byte", () => {
+    process.env.PLUGIN_DIR = "plugins\u0000bad";
+    expect(() => loadEnv()).toThrow();
   });
 
   it("CLI_OUTPUT_FORMAT accepts json", () => {

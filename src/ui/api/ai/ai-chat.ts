@@ -1,6 +1,11 @@
 import { useDirectServices, BASE, handleResponse, handleVoidResponse } from "../helpers.js";
 import { getServices } from "../direct-services.js";
 import type { AIChatMessage } from "./ai-types.js";
+import { getSecureSetting } from "../../../storage/encrypted-settings.js";
+
+function normalizeAuthType(value: string | undefined): "api-key" | "oauth" | undefined {
+  return value === "api-key" || value === "oauth" ? value : undefined;
+}
 
 export async function sendChatMessage(
   message: string,
@@ -27,15 +32,19 @@ export async function sendChatMessage(
 
     try {
       const { gatherContext } = await import("../../../ai/chat.js");
-      const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+      const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
       const modelSetting = svc.storage.getAppSetting("ai_model");
       const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+      const authTypeSetting = svc.storage.getAppSetting("ai_auth_type");
+      const oauthToken = await getSecureSetting(svc.storage, "ai_oauth_token");
 
       const executor = ai.aiProviderRegistry.createExecutor({
         provider: providerSetting.value as string,
-        apiKey: apiKeySetting?.value,
+        apiKey: apiKey ?? undefined,
         model: modelSetting?.value,
         baseUrl: baseUrlSetting?.value,
+        authType: normalizeAuthType(authTypeSetting?.value),
+        oauthToken: oauthToken ?? undefined,
       });
 
       const toolServices = {
@@ -116,15 +125,19 @@ export async function getChatMessages(): Promise<AIChatMessage[]> {
       try {
         const providerSetting = svc.storage.getAppSetting("ai_provider");
         if (providerSetting?.value) {
-          const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+          const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
           const modelSetting = svc.storage.getAppSetting("ai_model");
           const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+          const authTypeSetting = svc.storage.getAppSetting("ai_auth_type");
+          const oauthToken = await getSecureSetting(svc.storage, "ai_oauth_token");
 
           const executor = ai.aiProviderRegistry.createExecutor({
             provider: providerSetting.value as string,
-            apiKey: apiKeySetting?.value,
+            apiKey: apiKey ?? undefined,
             model: modelSetting?.value,
             baseUrl: baseUrlSetting?.value,
+            authType: normalizeAuthType(authTypeSetting?.value),
+            oauthToken: oauthToken ?? undefined,
           });
 
           session = ai.chatManager.restoreSession(

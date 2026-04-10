@@ -227,6 +227,23 @@ describe("EventBus", () => {
       expect(badListener).toHaveBeenCalledOnce();
       expect(goodListener).toHaveBeenCalledOnce();
     });
+
+    it("keeps current emit stable when listeners are removed during dispatch", () => {
+      const bus = new EventBus();
+      const secondListener = vi.fn();
+      const firstListener = vi.fn(() => {
+        bus.off("task:create", secondListener);
+      });
+
+      bus.on("task:create", firstListener);
+      bus.on("task:create", secondListener);
+
+      bus.emit("task:create", makeTask());
+      bus.emit("task:create", makeTask({ id: "task-2" }));
+
+      expect(firstListener).toHaveBeenCalledTimes(2);
+      expect(secondListener).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ── typed events ──

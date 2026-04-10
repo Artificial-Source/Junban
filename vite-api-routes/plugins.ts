@@ -38,7 +38,10 @@ export function createEnsurePlugins(server: ViteDevServer, getServices: GetServi
         // Use Vite's SSR module loader so .ts plugin files resolve correctly
         svc.pluginLoader.setModuleLoader((modulePath: string) => server.ssrLoadModule(modulePath));
         await svc.pluginLoader.loadAll();
-      })();
+      })().catch((err) => {
+        pluginInitPromise = null;
+        throw err;
+      });
     }
     await pluginInitPromise;
   };

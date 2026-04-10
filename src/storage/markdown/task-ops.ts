@@ -96,12 +96,9 @@ export function updateTask(
   const titleChanged = data.title && data.title !== oldRow.title;
   // If projectId changed -> move file
   const projectChanged = "projectId" in data && data.projectId !== oldRow.projectId;
+  const requiresPathChange = titleChanged || projectChanged;
 
-  if (titleChanged || projectChanged) {
-    // Remove old file
-    if (fs.existsSync(entry.filePath)) {
-      fs.unlinkSync(entry.filePath);
-    }
+  if (requiresPathChange) {
     const dir = getTaskDir(idx, newRow.projectId);
     const filename = taskFilename(newRow.title, id);
     newFilePath = path.join(dir, filename);
@@ -115,6 +112,21 @@ export function updateTask(
     fs.writeFileSync(newFilePath, content, "utf-8");
   } catch (err) {
     throw new StorageError(`write ${newFilePath}`, err instanceof Error ? err : undefined);
+  }
+
+  // Only remove old file after the replacement has been safely written.
+  if (requiresPathChange && newFilePath !== entry.filePath && fs.existsSync(entry.filePath)) {
+    try {
+      fs.unlinkSync(entry.filePath);
+    } catch (err) {
+      // Best-effort cleanup to avoid leaving a duplicate path when delete fails.
+      try {
+        if (fs.existsSync(newFilePath)) fs.unlinkSync(newFilePath);
+      } catch {
+        // Intentionally ignored: we still throw the original deletion failure.
+      }
+      throw new StorageError(`delete ${entry.filePath}`, err instanceof Error ? err : undefined);
+    }
   }
 
   idx.taskIndex.set(id, { row: newRow, filePath: newFilePath, description: newDescription });

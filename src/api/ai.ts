@@ -6,26 +6,9 @@ import { deserializeChatMessages } from "../ai/message-utils.js";
 import { DEFAULT_LMSTUDIO_BASE_URL } from "../config/defaults.js";
 import { createLogger } from "../utils/logger.js";
 import { getSecureSetting, setSecureSetting } from "../storage/encrypted-settings.js";
+import { isAllowedAIBaseUrl } from "../ai/base-url-policy.js";
 
 const logger = createLogger("api:ai");
-
-/** Validate baseUrl — only allow localhost or known provider domains. */
-function isAllowedBaseUrl(baseUrl: string): boolean {
-  try {
-    const parsed = new URL(baseUrl);
-    if (!["http:", "https:"].includes(parsed.protocol)) return false;
-    const host = parsed.hostname.toLowerCase();
-    const isLocalhost = host === "localhost" || host === "127.0.0.1" || host === "[::1]";
-    const isKnownProvider =
-      host.endsWith(".openai.com") ||
-      host.endsWith(".anthropic.com") ||
-      host.endsWith(".openrouter.ai") ||
-      host.endsWith(".groq.com");
-    return isLocalhost || isKnownProvider;
-  } catch {
-    return false;
-  }
-}
 
 export function aiRoutes(services: AppServices): Hono {
   const app = new Hono();
@@ -110,7 +93,7 @@ export function aiRoutes(services: AppServices): Hono {
       const baseUrlOverride = c.req.query("baseUrl");
 
       // Validate baseUrl override — only allow HTTP(S) on localhost or known provider domains
-      if (baseUrlOverride && !isAllowedBaseUrl(baseUrlOverride)) {
+      if (baseUrlOverride && !isAllowedAIBaseUrl(baseUrlOverride)) {
         return c.json({ models: [] });
       }
 
@@ -137,7 +120,7 @@ export function aiRoutes(services: AppServices): Hono {
       baseUrl?: string;
     };
     // Validate baseUrl override to prevent SSRF
-    if (baseUrlOverride && !isAllowedBaseUrl(baseUrlOverride)) {
+    if (baseUrlOverride && !isAllowedAIBaseUrl(baseUrlOverride)) {
       return c.json({ error: "Invalid baseUrl" }, 400);
     }
 
@@ -165,7 +148,7 @@ export function aiRoutes(services: AppServices): Hono {
     };
 
     // Validate baseUrl override to prevent SSRF
-    if (baseUrlOverride && !isAllowedBaseUrl(baseUrlOverride)) {
+    if (baseUrlOverride && !isAllowedAIBaseUrl(baseUrlOverride)) {
       return c.json({ error: "Invalid baseUrl" }, 400);
     }
 
@@ -282,12 +265,16 @@ export function aiRoutes(services: AppServices): Hono {
           const apiKey = await getSecureSetting(services.storage, "ai_api_key");
           const modelSetting = services.storage.getAppSetting("ai_model");
           const baseUrlSetting = services.storage.getAppSetting("ai_base_url");
+          const authTypeSetting = services.storage.getAppSetting("ai_auth_type");
+          const oauthToken = await getSecureSetting(services.storage, "ai_oauth_token");
 
           const executor = services.aiProviderRegistry.createExecutor({
             provider: providerSetting.value as string,
             apiKey: apiKey ?? undefined,
             model: modelSetting?.value,
             baseUrl: baseUrlSetting?.value,
+            authType: authTypeSetting?.value as "api-key" | "oauth" | undefined,
+            oauthToken: oauthToken ?? undefined,
           });
 
           session = services.chatManager.restoreSession(

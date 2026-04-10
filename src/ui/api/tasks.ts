@@ -1,6 +1,7 @@
 import type { Task, CreateTaskInput, UpdateTaskInput } from "../../core/types.js";
 import type { TaskFilter } from "../../core/filters.js";
 import type { ImportedTask, ImportResult } from "../../core/import.js";
+import { importTasksWithRollback } from "../../core/import-execution.js";
 import {
   useDirectServices,
   BASE,
@@ -82,6 +83,21 @@ export async function deleteTask(id: string): Promise<void> {
     return;
   }
   await handleVoidResponse(await fetch(`${BASE}/tasks/${id}`, { method: "DELETE" }));
+}
+
+export async function restoreTask(task: Task): Promise<Task> {
+  if (useDirectServices()) {
+    const svc = await getServices();
+    const restored = await svc.taskService.restoreTask(task);
+    svc.save();
+    return restored;
+  }
+  const res = await fetch(`${BASE}/tasks/restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(task),
+  });
+  return handleResponse<Task>(res);
 }
 
 export async function completeManyTasks(ids: string[]): Promise<Task[]> {
@@ -196,44 +212,25 @@ export async function reorderTasks(orderedIds: string[]): Promise<void> {
 }
 
 export async function importTasks(tasks: ImportedTask[]): Promise<ImportResult> {
+  if (!Array.isArray(tasks)) {
+    throw new Error("tasks must be an array");
+  }
+
   if (useDirectServices()) {
     const svc = await getServices();
-    const errors: string[] = [];
-    let imported = 0;
+    const result = await importTasksWithRollback(
+      {
+        taskService: svc.taskService,
+        projectService: svc.projectService,
+      },
+      tasks,
+    );
 
-    for (const t of tasks) {
-      try {
-        let projectId: string | undefined;
-        if (t.projectName) {
-          const project = await svc.projectService.getOrCreate(t.projectName);
-          projectId = project.id;
-        }
-
-        const task = await svc.taskService.create({
-          title: t.title,
-          description: t.description ?? undefined,
-          priority: t.priority,
-          dueDate: t.dueDate ?? undefined,
-          dueTime: t.dueTime,
-          projectId,
-          recurrence: t.recurrence ?? undefined,
-          tags: t.tagNames,
-        });
-
-        if (t.status === "completed") {
-          await svc.taskService.complete(task.id);
-        }
-
-        imported++;
-      } catch (err) {
-        errors.push(
-          `Failed to import "${t.title}": ${err instanceof Error ? err.message : "unknown error"}`,
-        );
-      }
+    if (result.imported > 0) {
+      svc.save();
     }
 
-    svc.save();
-    return { imported, errors };
+    return result;
   }
 
   const res = await fetch(`${BASE}/tasks/import`, {

@@ -1,5 +1,6 @@
 import type { RouteRegistrar } from "./types.js";
 import { parseBody } from "./types.js";
+import { CreateTaskInput, UpdateTaskInput, RestoreTaskInput } from "../src/core/types.js";
 
 export const registerTaskRoutes: RouteRegistrar = (server, getServices) => {
   // POST /api/tasks — create task, GET /api/tasks — list tasks
@@ -29,8 +30,14 @@ export const registerTaskRoutes: RouteRegistrar = (server, getServices) => {
 
       if (req.method === "POST") {
         const body = await parseBody(req);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const task = await svc.taskService.create(body as any);
+        const parsed = CreateTaskInput.safeParse(body);
+        if (!parsed.success) {
+          res.statusCode = 400;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: "Validation failed", details: parsed.error.flatten() }));
+          return;
+        }
+        const task = await svc.taskService.create(parsed.data);
         res.setHeader("Content-Type", "application/json");
         res.statusCode = 201;
         res.end(JSON.stringify(task));
@@ -69,6 +76,12 @@ export const registerTaskRoutes: RouteRegistrar = (server, getServices) => {
       const svc = await getServices();
       const body = await parseBody(req);
       const { ids } = body as { ids: string[] };
+      if (!Array.isArray(ids) || ids.length > 500) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "ids must be an array with at most 500 items" }));
+        return;
+      }
       const tasks = await svc.taskService.completeMany(ids);
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(tasks));
@@ -87,6 +100,12 @@ export const registerTaskRoutes: RouteRegistrar = (server, getServices) => {
       const svc = await getServices();
       const body = await parseBody(req);
       const { ids } = body as { ids: string[] };
+      if (!Array.isArray(ids) || ids.length > 500) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "ids must be an array with at most 500 items" }));
+        return;
+      }
       await svc.taskService.deleteMany(ids);
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: true }));
@@ -106,7 +125,22 @@ export const registerTaskRoutes: RouteRegistrar = (server, getServices) => {
       const body = await parseBody(req);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { ids, changes } = body as { ids: string[]; changes: any };
-      const tasks = await svc.taskService.updateMany(ids, changes);
+      if (!Array.isArray(ids) || ids.length > 500) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "ids must be an array with at most 500 items" }));
+        return;
+      }
+      const parsed = UpdateTaskInput.safeParse(changes);
+      if (!parsed.success) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(
+          JSON.stringify({ error: "Invalid update payload", details: parsed.error.flatten() }),
+        );
+        return;
+      }
+      const tasks = await svc.taskService.updateMany(ids, parsed.data);
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(tasks));
     } catch (err: unknown) {
@@ -127,6 +161,31 @@ export const registerTaskRoutes: RouteRegistrar = (server, getServices) => {
       await svc.taskService.reorder(orderedIds);
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: true }));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Internal server error";
+      res.statusCode = message.includes("Invalid JSON") ? 400 : 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: message }));
+    }
+  });
+
+  // POST /api/tasks/restore
+  server.middlewares.use(async (req, res, next) => {
+    if (req.url !== "/api/tasks/restore" || req.method !== "POST") return next();
+    try {
+      const svc = await getServices();
+      const body = await parseBody(req);
+      const parsed = RestoreTaskInput.safeParse(body);
+      if (!parsed.success) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Validation failed", details: parsed.error.flatten() }));
+        return;
+      }
+      const task = await svc.taskService.restoreTask(parsed.data);
+      res.setHeader("Content-Type", "application/json");
+      res.statusCode = 201;
+      res.end(JSON.stringify(task));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Internal server error";
       res.statusCode = message.includes("Invalid JSON") ? 400 : 500;
@@ -301,8 +360,23 @@ export const registerTaskRoutes: RouteRegistrar = (server, getServices) => {
     next();
   });
 
-  // /api/tasks/:id/complete and /api/tasks/:id
+  // /api/tasks/:id/uncomplete, /api/tasks/:id/complete, and /api/tasks/:id
   server.middlewares.use(async (req, res, next) => {
+    const uncompleteMatch = req.url?.match(/^\/api\/tasks\/([^/]+)\/uncomplete$/);
+    if (uncompleteMatch && req.method === "POST") {
+      const svc = await getServices();
+      try {
+        const task = await svc.taskService.uncomplete(uncompleteMatch[1]);
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(task));
+      } catch (err: any) {
+        res.statusCode = err.name === "NotFoundError" ? 404 : 500;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
     const match = req.url?.match(/^\/api\/tasks\/([^/]+)\/complete$/);
     if (match && req.method === "POST") {
       const svc = await getServices();
@@ -324,6 +398,25 @@ export const registerTaskRoutes: RouteRegistrar = (server, getServices) => {
 
     const id = taskMatch[1];
     const svc = await getServices();
+
+    if (req.method === "GET") {
+      try {
+        const task = await svc.taskService.get(id);
+        if (!task) {
+          res.statusCode = 404;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: "Task not found" }));
+          return;
+        }
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(task));
+      } catch (err: any) {
+        res.statusCode = err.name === "NotFoundError" ? 404 : 500;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
 
     if (req.method === "PATCH") {
       try {

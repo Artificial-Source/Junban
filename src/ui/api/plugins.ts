@@ -1,6 +1,7 @@
 import { useDirectServices, BASE, handleResponse, handleVoidResponse } from "./helpers.js";
 import { getServices } from "./direct-services.js";
 import type { SettingDefinition } from "../../plugins/types.js";
+import { hasSettingsPermission, settingsPermissionError } from "../../plugins/route-policy.js";
 
 export const DIRECT_PLUGIN_POLICIES: Record<
   string,
@@ -91,10 +92,15 @@ function getDirectPluginPolicy(pluginId: string): {
   return policy;
 }
 
-function assertSettingsPermission(pluginId: string, permissions: string[]): void {
-  if (!permissions.includes("settings")) {
-    throw new Error(`Plugin "${pluginId}" does not have the "settings" permission.`);
+function requireDirectPluginSettingsPolicy(pluginId: string): {
+  permissions: string[];
+  settings: SettingDefinition[];
+} {
+  const policy = getDirectPluginPolicy(pluginId);
+  if (!hasSettingsPermission(policy.permissions)) {
+    throw new Error(settingsPermissionError(pluginId));
   }
+  return policy;
 }
 
 export interface PluginInfo {
@@ -175,8 +181,19 @@ export interface StorePluginInfo {
 
 export async function listPlugins(): Promise<PluginInfo[]> {
   if (useDirectServices()) {
-    // No plugin loader in Tauri mode (deferred)
-    return [];
+    const svc = await getServices();
+    return svc.builtinPlugins.map((plugin) => ({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      author: plugin.author,
+      description: plugin.description,
+      enabled: plugin.enabled,
+      permissions: [...plugin.permissions],
+      settings: [...plugin.settings],
+      builtin: true,
+      icon: plugin.icon,
+    }));
   }
   const res = await fetch(`${BASE}/plugins`);
   return handleResponse<PluginInfo[]>(res);
@@ -185,8 +202,7 @@ export async function listPlugins(): Promise<PluginInfo[]> {
 export async function getPluginSettings(pluginId: string): Promise<Record<string, unknown>> {
   if (useDirectServices()) {
     const svc = await getServices();
-    const policy = getDirectPluginPolicy(pluginId);
-    assertSettingsPermission(pluginId, policy.permissions);
+    const policy = requireDirectPluginSettingsPolicy(pluginId);
 
     const stored = svc.settingsManager.getAll(pluginId);
     const values: Record<string, unknown> = {};
@@ -206,8 +222,7 @@ export async function updatePluginSetting(
 ): Promise<void> {
   if (useDirectServices()) {
     const svc = await getServices();
-    const policy = getDirectPluginPolicy(pluginId);
-    assertSettingsPermission(pluginId, policy.permissions);
+    const policy = requireDirectPluginSettingsPolicy(pluginId);
     await svc.settingsManager.setSetting(pluginId, key, value, policy.settings);
     svc.save();
     return;

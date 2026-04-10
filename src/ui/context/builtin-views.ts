@@ -12,6 +12,9 @@ import type { ComponentType } from "react";
 // Cache resolved components to avoid re-creating on every call
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const cachedComponents = new Map<string, (props: any) => any>();
+// Cache in-flight component resolutions to avoid duplicate factory execution
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const pendingComponents = new Map<string, Promise<(props: any) => any>>();
 
 /**
  * Registry of factory functions that lazily create React components
@@ -24,7 +27,7 @@ const builtinComponentFactories = new Map<string, () => Promise<ComponentType<an
  * Register a built-in plugin's React component factory.
  * The factory is called lazily on first resolve and the result is cached.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function registerBuiltinComponent(
   pluginId: string,
   factory: () => Promise<ComponentType<any>>,
@@ -36,7 +39,7 @@ export function registerBuiltinComponent(
  * Resolve a built-in React component for a plugin view.
  * Returns null if the pluginId has no registered factory.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export async function resolveBuiltinComponent(
   pluginId: string,
 ): Promise<((props: any) => any) | null> {
@@ -44,16 +47,29 @@ export async function resolveBuiltinComponent(
     return cachedComponents.get(pluginId)!;
   }
 
+  if (pendingComponents.has(pluginId)) {
+    return pendingComponents.get(pluginId)!;
+  }
+
   const factory = builtinComponentFactories.get(pluginId);
   if (!factory) {
     return null;
   }
 
-  const Component = await factory();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const wrapper = (props: any) => React.createElement(Component, props);
-  cachedComponents.set(pluginId, wrapper);
-  return wrapper;
+  const pendingComponent = (async () => {
+    try {
+      const Component = await factory();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const wrapper = (props: any) => React.createElement(Component, props);
+      cachedComponents.set(pluginId, wrapper);
+      return wrapper;
+    } finally {
+      pendingComponents.delete(pluginId);
+    }
+  })();
+
+  pendingComponents.set(pluginId, pendingComponent);
+  return pendingComponent;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +79,8 @@ export async function resolveBuiltinComponent(
 // Cache the proxy so it's created only once
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let cachedTimeblockingProxy: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let cachedTimeblockingProxyPending: Promise<any> | null = null;
 
 registerBuiltinComponent("timeblocking", async () => {
   const [{ createTimeblockingProxy }, { TimeblockingContext }, { TimeblockingView }] =
@@ -73,7 +91,12 @@ registerBuiltinComponent("timeblocking", async () => {
     ]);
 
   if (!cachedTimeblockingProxy) {
-    cachedTimeblockingProxy = await createTimeblockingProxy();
+    if (!cachedTimeblockingProxyPending) {
+      cachedTimeblockingProxyPending = createTimeblockingProxy().finally(() => {
+        cachedTimeblockingProxyPending = null;
+      });
+    }
+    cachedTimeblockingProxy = await cachedTimeblockingProxyPending;
   }
 
   return () =>

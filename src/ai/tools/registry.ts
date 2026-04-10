@@ -5,11 +5,21 @@
 
 import type { ToolDefinition, ToolExecutor, ToolContext, RegisteredTool } from "./types.js";
 import { createLogger } from "../../utils/logger.js";
+import { TOOL_EXECUTION_TIMEOUT_MS } from "../../config/defaults.js";
 
 const logger = createLogger("tool-registry");
 
+export interface ToolRegistryOptions {
+  executionTimeoutMs?: number;
+}
+
 export class ToolRegistry {
   private tools = new Map<string, RegisteredTool>();
+  private executionTimeoutMs: number;
+
+  constructor(options: ToolRegistryOptions = {}) {
+    this.executionTimeoutMs = options.executionTimeoutMs ?? TOOL_EXECUTION_TIMEOUT_MS;
+  }
 
   /** Register a tool. Throws if a tool with the same name already exists. */
   register(definition: ToolDefinition, executor: ToolExecutor, source = "builtin"): void {
@@ -32,6 +42,11 @@ export class ToolRegistry {
         this.tools.delete(name);
       }
     }
+  }
+
+  /** Remove all registered tools. */
+  clear(): void {
+    this.tools.clear();
   }
 
   /** Get all tool definitions (for passing to LLM providers). */
@@ -62,6 +77,25 @@ export class ToolRegistry {
       throw new Error(`Unknown tool: ${name}`);
     }
     logger.debug("Executing tool", { name });
-    return tool.executor(args, ctx);
+    const timeoutMs = this.executionTimeoutMs;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return tool.executor(args, ctx);
+    }
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        tool.executor(args, ctx),
+        new Promise<string>((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            reject(new Error(`Tool "${name}" timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
   }
 }

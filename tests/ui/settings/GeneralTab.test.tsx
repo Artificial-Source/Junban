@@ -3,16 +3,19 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { GeneralTab } from "../../../src/ui/views/settings/GeneralTab.js";
 import { SettingsProvider } from "../../../src/ui/context/SettingsContext.js";
 
-// Mock api
+const settingsApiMocks = vi.hoisted(() => ({
+  getAllSettings: vi.fn().mockResolvedValue({}),
+  setAppSetting: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../../../src/ui/api/settings.js", () => settingsApiMocks);
+
 vi.mock("../../../src/ui/api/index.js", () => ({
   api: {
-    getAllSettings: vi.fn().mockResolvedValue({}),
     getAppSetting: vi.fn().mockResolvedValue(null),
     setAppSetting: vi.fn().mockResolvedValue(undefined),
   },
 }));
-
-import { api } from "../../../src/ui/api/index.js";
 
 // Mock themeManager (still needed by SettingsProvider indirectly)
 vi.mock("../../../src/ui/themes/manager.js", () => ({
@@ -49,7 +52,7 @@ function renderGeneralTab() {
 describe("GeneralTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (api.getAppSetting as any).mockResolvedValue(null);
+    settingsApiMocks.getAllSettings.mockResolvedValue({});
     document.documentElement.style.removeProperty("--color-accent");
     document.documentElement.style.removeProperty("--color-accent-hover");
     document.documentElement.classList.remove(
@@ -104,7 +107,7 @@ describe("GeneralTab", () => {
       expect(screen.getByText("24-hour")).toBeDefined();
     });
     fireEvent.click(screen.getByText("24-hour"));
-    expect(api.setAppSetting).toHaveBeenCalledWith("time_format", "24h");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("time_format", "24h");
   });
 
   it("renders default priority dropdown", async () => {
@@ -125,7 +128,7 @@ describe("GeneralTab", () => {
     );
     expect(prioritySelect).toBeDefined();
     fireEvent.change(prioritySelect!, { target: { value: "p2" } });
-    expect(api.setAppSetting).toHaveBeenCalledWith("default_priority", "p2");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("default_priority", "p2");
   });
 
   it("renders confirm delete toggle", async () => {
@@ -144,7 +147,7 @@ describe("GeneralTab", () => {
     const row = label.closest(".flex")!;
     const toggle = row.querySelector("button")!;
     fireEvent.click(toggle);
-    expect(api.setAppSetting).toHaveBeenCalledWith("confirm_delete", "false");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("confirm_delete", "false");
   });
 
   it("renders start screen dropdown", async () => {
@@ -165,6 +168,6 @@ describe("GeneralTab", () => {
     );
     expect(startSelect).toBeDefined();
     fireEvent.change(startSelect!, { target: { value: "today" } });
-    expect(api.setAppSetting).toHaveBeenCalledWith("start_view", "today");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("start_view", "today");
   });
 });

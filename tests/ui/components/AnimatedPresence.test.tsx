@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { motion } from "framer-motion";
 
@@ -24,6 +24,11 @@ function ReducedMotionIndicator() {
 describe("AnimatedPresence", () => {
   beforeEach(() => {
     mockReduceAnimations = "false";
+    document.documentElement.classList.remove("reduce-motion");
+  });
+
+  afterEach(() => {
+    document.documentElement.classList.remove("reduce-motion");
   });
 
   it("renders children", () => {
@@ -37,6 +42,7 @@ describe("AnimatedPresence", () => {
 
   it("renders when reduce_animations is true", () => {
     mockReduceAnimations = "true";
+    document.documentElement.classList.add("reduce-motion");
     render(
       <AnimatedPresence>
         <div>Still here</div>
@@ -67,6 +73,7 @@ describe("useReducedMotion", () => {
 
   it("returns true when reduce_animations setting is true", () => {
     mockReduceAnimations = "true";
+    document.documentElement.classList.add("reduce-motion");
     render(<ReducedMotionIndicator />);
     expect(screen.getByTestId("reduced").textContent).toBe("yes");
   });

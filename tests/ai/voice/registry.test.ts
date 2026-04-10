@@ -101,4 +101,15 @@ describe("VoiceProviderRegistry", () => {
     expect(registry.getSTT("shared-id")).toBeUndefined();
     expect(registry.getTTS("shared-id")).toBeDefined();
   });
+
+  it("clears all registered providers", () => {
+    const registry = new VoiceProviderRegistry();
+    registry.registerSTT(createTestSTT("stt-a"));
+    registry.registerTTS(createTestTTS("tts-a"));
+
+    registry.clear();
+
+    expect(registry.listSTT()).toHaveLength(0);
+    expect(registry.listTTS()).toHaveLength(0);
+  });
 });

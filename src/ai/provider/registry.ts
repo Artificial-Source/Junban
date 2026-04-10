@@ -42,6 +42,11 @@ export class LLMProviderRegistry {
     }
   }
 
+  /** Remove all registered providers. */
+  clear(): void {
+    this.providers.clear();
+  }
+
   /** Get a provider registration by name. */
   get(name: string): ProviderRegistration | undefined {
     return this.providers.get(name);

@@ -8,6 +8,7 @@ import {
 import { getServices } from "../direct-services.js";
 import type { AIProviderInfo, ModelDiscoveryInfo } from "./ai-types.js";
 import { DEFAULT_LMSTUDIO_BASE_URL } from "../../../config/defaults.js";
+import { getSecureSetting } from "../../../storage/encrypted-settings.js";
 
 export async function listAIProviders(): Promise<AIProviderInfo[]> {
   if (useDirectServices()) {
@@ -35,11 +36,11 @@ export async function fetchModels(
 ): Promise<ModelDiscoveryInfo[]> {
   if (useDirectServices()) {
     const svc = await getServices();
-    const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+    const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
     const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
     const { fetchAvailableModels } = await import("../../../ai/model-discovery.js");
     return fetchAvailableModels(providerName, {
-      apiKey: apiKeySetting?.value,
+      apiKey: apiKey ?? undefined,
       baseUrl: baseUrl || baseUrlSetting?.value,
     });
   }
@@ -60,13 +61,13 @@ export async function loadModel(
   if (useDirectServices()) {
     const svc = await getServices();
     const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
-    const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+    const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
     if (providerName === "lmstudio") {
       const { loadLMStudioModel } = await import("../../../ai/model-discovery.js");
       await loadLMStudioModel(
         modelKey,
         baseUrl || baseUrlSetting?.value || DEFAULT_LMSTUDIO_BASE_URL,
-        apiKeySetting?.value,
+        apiKey ?? undefined,
       );
     }
     return;
@@ -88,13 +89,13 @@ export async function unloadModel(
   if (useDirectServices()) {
     const svc = await getServices();
     const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
-    const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+    const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
     if (providerName === "lmstudio") {
       const { unloadLMStudioModel } = await import("../../../ai/model-discovery.js");
       await unloadLMStudioModel(
         modelKey,
         baseUrl || baseUrlSetting?.value || DEFAULT_LMSTUDIO_BASE_URL,
-        apiKeySetting?.value,
+        apiKey ?? undefined,
       );
     }
     return;

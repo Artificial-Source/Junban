@@ -185,6 +185,11 @@ Major namespaces include:
 - `ai`
 - `settings`
 
+AI registration behavior:
+
+- `ai.registerProvider()` prefixes provider names with `<pluginId>:` to avoid provider-name collisions.
+- `ai.registerTool()` scopes tool names to `<pluginId>__<toolName>` to avoid collisions with built-ins and other plugins while preserving readable local tool names in plugin code.
+
 The plugin API version and stability metadata are also defined here.
 
 Route-layer policy and validation that must stay consistent across Hono and Vite surfaces is intentionally shared in:

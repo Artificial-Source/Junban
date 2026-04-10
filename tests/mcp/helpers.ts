@@ -7,7 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createTestServices } from "../integration/helpers.js";
-import { createDefaultToolRegistry } from "../../src/ai/provider.js";
+import { createDefaultToolRegistry } from "../../src/ai/tool-registry.js";
 import { StatsService } from "../../src/core/stats.js";
 import { registerMcpTools } from "../../src/mcp/tools.js";
 import { registerMcpResources } from "../../src/mcp/resources.js";

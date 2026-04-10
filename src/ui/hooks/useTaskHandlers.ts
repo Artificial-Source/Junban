@@ -2,7 +2,13 @@ import { useState, useCallback, useMemo } from "react";
 import { useTaskContext } from "../context/TaskContext.js";
 import { useUndoContext } from "../context/UndoContext.js";
 import { useSoundEffect } from "./useSoundEffect.js";
-import { indentTask, outdentTask, reorderTasks } from "../api/tasks.js";
+import {
+  addTaskRelation,
+  indentTask,
+  listTaskRelations,
+  outdentTask,
+  reorderTasks,
+} from "../api/tasks.js";
 import {
   createCompleteAction,
   createDeleteAction,
@@ -14,7 +20,7 @@ export function useTaskHandlers(
   selectedProjectId: string | null,
   projects?: { id: string; name: string }[],
 ) {
-  const { state, createTask, updateTask, completeTask, deleteTask, refreshTasks } =
+  const { state, createTask, updateTask, completeTask, deleteTask, restoreTask, refreshTasks } =
     useTaskContext();
   const { undoManager } = useUndoContext();
   const playSound = useSoundEffect();
@@ -41,12 +47,18 @@ export function useTaskHandlers(
         await createTask(input);
         return {} as Task;
       },
+      restoreTask: async (task: Task) => {
+        await restoreTask(task);
+        return {} as Task;
+      },
+      listTaskRelations,
+      addTaskRelation,
       completeManyTasks: async () => {},
       deleteManyTasks: async () => {},
       updateManyTasks: async () => [] as Task[],
       refreshTasks,
     }),
-    [completeTask, deleteTask, updateTask, createTask, refreshTasks],
+    [completeTask, deleteTask, updateTask, createTask, restoreTask, refreshTasks],
   );
 
   const handleCreateTask = async (parsed: {

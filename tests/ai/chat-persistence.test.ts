@@ -7,7 +7,7 @@ import { DEFAULT_CAPABILITIES } from "../../src/ai/core/capabilities.js";
 import { ToolRegistry } from "../../src/ai/tools/registry.js";
 import { registerTaskCrudTools } from "../../src/ai/tools/builtin/task-crud.js";
 import { registerQueryTasksTool } from "../../src/ai/tools/builtin/query-tasks.js";
-import { createDefaultToolRegistry } from "../../src/ai/provider.js";
+import { createDefaultToolRegistry } from "../../src/ai/tool-registry.js";
 import { createTestServices } from "../integration/helpers.js";
 
 function createToolRegistry(): ToolRegistry {

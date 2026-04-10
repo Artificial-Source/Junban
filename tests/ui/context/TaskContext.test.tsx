@@ -1,42 +1,47 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act, waitFor } from "@testing-library/react";
 
-// Mock the api module BEFORE importing the context
-vi.mock("../../../src/ui/api/index.js", () => ({
-  api: {
-    listTasks: vi.fn().mockResolvedValue([]),
-    createTask: vi.fn().mockResolvedValue({
-      id: "task-1",
-      title: "New task",
-      status: "pending",
-      priority: "none",
-      createdAt: "2026-01-01",
-      updatedAt: "2026-01-01",
-    }),
-    updateTask: vi.fn().mockResolvedValue({
-      id: "task-1",
-      title: "Updated task",
-      status: "pending",
-      priority: "high",
-      createdAt: "2026-01-01",
-      updatedAt: "2026-01-01",
-    }),
-    completeTask: vi.fn().mockResolvedValue({
-      id: "task-1",
-      title: "Done task",
-      status: "completed",
-      priority: "none",
-      createdAt: "2026-01-01",
-      updatedAt: "2026-01-01",
-    }),
-    deleteTask: vi.fn().mockResolvedValue(undefined),
-    completeManyTasks: vi.fn().mockResolvedValue([]),
-    deleteManyTasks: vi.fn().mockResolvedValue(undefined),
-    updateManyTasks: vi.fn().mockResolvedValue([]),
-  },
+const taskApiMocks = vi.hoisted(() => ({
+  listTasks: vi.fn().mockResolvedValue([]),
+  createTask: vi.fn().mockResolvedValue({
+    id: "task-1",
+    title: "New task",
+    status: "pending",
+    priority: "none",
+    createdAt: "2026-01-01",
+    updatedAt: "2026-01-01",
+  }),
+  updateTask: vi.fn().mockResolvedValue({
+    id: "task-1",
+    title: "Updated task",
+    status: "pending",
+    priority: "high",
+    createdAt: "2026-01-01",
+    updatedAt: "2026-01-01",
+  }),
+  completeTask: vi.fn().mockResolvedValue({
+    id: "task-1",
+    title: "Done task",
+    status: "completed",
+    priority: "none",
+    createdAt: "2026-01-01",
+    updatedAt: "2026-01-01",
+  }),
+  deleteTask: vi.fn().mockResolvedValue(undefined),
+  completeManyTasks: vi.fn().mockResolvedValue([]),
+  deleteManyTasks: vi.fn().mockResolvedValue(undefined),
+  updateManyTasks: vi.fn().mockResolvedValue([]),
+  restoreTask: vi.fn().mockResolvedValue({
+    id: "task-1",
+    title: "Restored task",
+    status: "pending",
+    priority: "none",
+    createdAt: "2026-01-01",
+    updatedAt: "2026-01-01",
+  }),
 }));
 
-import { api } from "../../../src/ui/api/index.js";
+vi.mock("../../../src/ui/api/tasks.js", () => taskApiMocks);
 import { TaskProvider, useTaskContext } from "../../../src/ui/context/TaskContext.js";
 
 function TestConsumer() {
@@ -70,7 +75,7 @@ function TestConsumer() {
 describe("TaskContext", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (api.listTasks as any).mockResolvedValue([]);
+    taskApiMocks.listTasks.mockResolvedValue([]);
   });
 
   it("throws when used outside provider", () => {
@@ -87,7 +92,7 @@ describe("TaskContext", () => {
       { id: "t1", title: "Task 1", status: "pending", priority: "none" },
       { id: "t2", title: "Task 2", status: "pending", priority: "high" },
     ];
-    (api.listTasks as any).mockResolvedValue(mockTasks);
+    taskApiMocks.listTasks.mockResolvedValue(mockTasks);
 
     render(
       <TaskProvider>
@@ -99,13 +104,13 @@ describe("TaskContext", () => {
       expect(screen.getByTestId("loading").textContent).toBe("false");
     });
 
-    expect(api.listTasks).toHaveBeenCalled();
+    expect(taskApiMocks.listTasks).toHaveBeenCalled();
     expect(screen.getByTestId("task-count").textContent).toBe("2");
   });
 
   it("sets loading state during fetch", async () => {
     let resolveFetch!: (value: any) => void;
-    (api.listTasks as any).mockImplementation(
+    taskApiMocks.listTasks.mockImplementation(
       () =>
         new Promise((resolve) => {
           resolveFetch = resolve;
@@ -117,6 +122,10 @@ describe("TaskContext", () => {
         <TestConsumer />
       </TaskProvider>,
     );
+
+    await waitFor(() => {
+      expect(taskApiMocks.listTasks).toHaveBeenCalled();
+    });
 
     // Initially loading
     expect(screen.getByTestId("loading").textContent).toBe("true");
@@ -130,7 +139,7 @@ describe("TaskContext", () => {
   });
 
   it("sets error state on fetch failure", async () => {
-    (api.listTasks as any).mockRejectedValue(new Error("Network error"));
+    taskApiMocks.listTasks.mockRejectedValue(new Error("Network error"));
 
     render(
       <TaskProvider>
@@ -160,12 +169,12 @@ describe("TaskContext", () => {
       screen.getByTestId("create").click();
     });
 
-    expect(api.createTask).toHaveBeenCalledWith({ title: "New task" });
+    expect(taskApiMocks.createTask).toHaveBeenCalledWith({ title: "New task" });
     expect(screen.getByTestId("task-count").textContent).toBe("1");
   });
 
   it("createTask sets error on api failure", async () => {
-    (api.createTask as any).mockRejectedValue(new Error("Create failed"));
+    taskApiMocks.createTask.mockRejectedValue(new Error("Create failed"));
 
     render(
       <TaskProvider>
@@ -191,7 +200,7 @@ describe("TaskContext", () => {
       status: "pending",
       priority: "none",
     };
-    (api.listTasks as any).mockResolvedValue([existingTask]);
+    taskApiMocks.listTasks.mockResolvedValue([existingTask]);
 
     render(
       <TaskProvider>
@@ -207,13 +216,13 @@ describe("TaskContext", () => {
       screen.getByTestId("update").click();
     });
 
-    expect(api.updateTask).toHaveBeenCalledWith("task-1", { priority: "high" });
+    expect(taskApiMocks.updateTask).toHaveBeenCalledWith("task-1", { priority: "high" });
     const tasks = JSON.parse(screen.getByTestId("tasks").textContent!);
     expect(tasks[0].title).toBe("Updated task");
   });
 
   it("updateTask sets error on api failure", async () => {
-    (api.updateTask as any).mockRejectedValue(new Error("Update failed"));
+    taskApiMocks.updateTask.mockRejectedValue(new Error("Update failed"));
 
     render(
       <TaskProvider>
@@ -234,7 +243,7 @@ describe("TaskContext", () => {
 
   it("completeTask calls api and updates task in state (non-recurring)", async () => {
     const existingTask = { id: "task-1", title: "Task", status: "pending", priority: "none" };
-    (api.listTasks as any).mockResolvedValue([existingTask]);
+    taskApiMocks.listTasks.mockResolvedValue([existingTask]);
 
     render(
       <TaskProvider>
@@ -250,7 +259,7 @@ describe("TaskContext", () => {
       screen.getByTestId("complete").click();
     });
 
-    expect(api.completeTask).toHaveBeenCalledWith("task-1");
+    expect(taskApiMocks.completeTask).toHaveBeenCalledWith("task-1");
     const tasks = JSON.parse(screen.getByTestId("tasks").textContent!);
     expect(tasks[0].status).toBe("completed");
   });
@@ -263,8 +272,8 @@ describe("TaskContext", () => {
       priority: "none",
       recurrence: "daily",
     };
-    (api.completeTask as any).mockResolvedValue(recurringTask);
-    (api.listTasks as any).mockResolvedValue([
+    taskApiMocks.completeTask.mockResolvedValue(recurringTask);
+    taskApiMocks.listTasks.mockResolvedValue([
       { id: "task-1", title: "Recurring", status: "pending" },
     ]);
 
@@ -279,8 +288,8 @@ describe("TaskContext", () => {
     });
 
     // Reset call count after initial mount fetch
-    (api.listTasks as any).mockClear();
-    (api.listTasks as any).mockResolvedValue([
+    taskApiMocks.listTasks.mockClear();
+    taskApiMocks.listTasks.mockResolvedValue([
       { id: "task-1", title: "Recurring (next)", status: "pending" },
     ]);
 
@@ -289,12 +298,12 @@ describe("TaskContext", () => {
     });
 
     // Should have called listTasks again (refreshTasks) because of recurrence
-    expect(api.listTasks).toHaveBeenCalled();
+    expect(taskApiMocks.listTasks).toHaveBeenCalled();
   });
 
   it("deleteTask calls api and removes task from state", async () => {
     const existingTask = { id: "task-1", title: "Task", status: "pending", priority: "none" };
-    (api.listTasks as any).mockResolvedValue([existingTask]);
+    taskApiMocks.listTasks.mockResolvedValue([existingTask]);
 
     render(
       <TaskProvider>
@@ -310,12 +319,12 @@ describe("TaskContext", () => {
       screen.getByTestId("delete").click();
     });
 
-    expect(api.deleteTask).toHaveBeenCalledWith("task-1");
+    expect(taskApiMocks.deleteTask).toHaveBeenCalledWith("task-1");
     expect(screen.getByTestId("task-count").textContent).toBe("0");
   });
 
   it("deleteTask sets error on api failure", async () => {
-    (api.deleteTask as any).mockRejectedValue(new Error("Delete failed"));
+    taskApiMocks.deleteTask.mockRejectedValue(new Error("Delete failed"));
 
     render(
       <TaskProvider>
@@ -335,7 +344,7 @@ describe("TaskContext", () => {
   });
 
   it("refreshTasks reloads tasks from api", async () => {
-    (api.listTasks as any).mockResolvedValue([]);
+    taskApiMocks.listTasks.mockResolvedValue([]);
 
     render(
       <TaskProvider>
@@ -347,7 +356,7 @@ describe("TaskContext", () => {
       expect(screen.getByTestId("loading").textContent).toBe("false");
     });
 
-    (api.listTasks as any).mockResolvedValue([
+    taskApiMocks.listTasks.mockResolvedValue([
       { id: "t1", title: "Refreshed task", status: "pending" },
     ]);
 

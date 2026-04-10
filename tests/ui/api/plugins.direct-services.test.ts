@@ -14,8 +14,10 @@ vi.mock("../../../src/ui/api/direct-services.js", () => ({
 }));
 
 import {
+  DIRECT_PLUGIN_POLICIES,
   approvePluginPermissions,
   getPluginSettings,
+  listPlugins,
   revokePluginPermissions,
   togglePlugin,
   updatePluginSetting,
@@ -31,8 +33,33 @@ describe("ui/api/plugins direct-services settings path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetServices.mockResolvedValue({
+      builtinPlugins: [
+        {
+          id: "pomodoro",
+          name: "Pomodoro Timer",
+          version: "1.0.0",
+          author: "ASF",
+          description: "Focus timer with configurable work/break intervals.",
+          enabled: true,
+          permissions: DIRECT_PLUGIN_POLICIES.pomodoro.permissions,
+          settings: DIRECT_PLUGIN_POLICIES.pomodoro.settings,
+          builtin: true,
+          icon: "🍅",
+        },
+      ],
       settingsManager: mockSettingsManager,
       save: mockSave,
+    });
+  });
+
+  it("listPlugins returns initialized built-ins in direct-services mode", async () => {
+    const plugins = await listPlugins();
+    expect(plugins).toHaveLength(1);
+    expect(plugins[0]).toMatchObject({
+      id: "pomodoro",
+      builtin: true,
+      enabled: true,
+      icon: "🍅",
     });
   });
 
@@ -63,6 +90,21 @@ describe("ui/api/plugins direct-services settings path", () => {
 
   it("throws for unknown plugin IDs in direct-services mode", async () => {
     await expect(getPluginSettings("unknown-plugin")).rejects.toThrow("Plugin not found");
+  });
+
+  it("enforces settings permission in direct-services mode", async () => {
+    DIRECT_PLUGIN_POLICIES["no-settings-permission"] = {
+      permissions: ["commands"],
+      settings: [],
+    };
+
+    try {
+      await expect(getPluginSettings("no-settings-permission")).rejects.toThrow(
+        'Plugin "no-settings-permission" does not have the "settings" permission.',
+      );
+    } finally {
+      delete DIRECT_PLUGIN_POLICIES["no-settings-permission"];
+    }
   });
 
   it("approve/revoke/toggle fail explicitly in direct-services mode", async () => {

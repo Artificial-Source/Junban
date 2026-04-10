@@ -3,16 +3,12 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AppearanceTab } from "../../../src/ui/views/settings/AppearanceTab.js";
 import { SettingsProvider } from "../../../src/ui/context/SettingsContext.js";
 
-// Mock api
-vi.mock("../../../src/ui/api/index.js", () => ({
-  api: {
-    getAllSettings: vi.fn().mockResolvedValue({}),
-    getAppSetting: vi.fn().mockResolvedValue(null),
-    setAppSetting: vi.fn().mockResolvedValue(undefined),
-  },
+const settingsApiMocks = vi.hoisted(() => ({
+  getAllSettings: vi.fn().mockResolvedValue({}),
+  setAppSetting: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { api } from "../../../src/ui/api/index.js";
+vi.mock("../../../src/ui/api/settings.js", () => settingsApiMocks);
 
 // Mock themeManager
 vi.mock("../../../src/ui/themes/manager.js", () => ({
@@ -39,7 +35,7 @@ function renderAppearanceTab() {
 describe("AppearanceTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (api.getAppSetting as any).mockResolvedValue(null);
+    settingsApiMocks.getAllSettings.mockResolvedValue({});
     document.documentElement.style.removeProperty("--color-accent");
     document.documentElement.style.removeProperty("--color-accent-hover");
     document.documentElement.classList.remove(
@@ -95,7 +91,7 @@ describe("AppearanceTab", () => {
     });
     const redSwatch = screen.getByLabelText("Accent color #db4035");
     fireEvent.click(redSwatch);
-    expect(api.setAppSetting).toHaveBeenCalledWith("accent_color", "#db4035");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("accent_color", "#db4035");
   });
 
   it("renders density segmented control", async () => {
@@ -113,7 +109,7 @@ describe("AppearanceTab", () => {
       expect(screen.getByText("Compact")).toBeDefined();
     });
     fireEvent.click(screen.getByText("Compact"));
-    expect(api.setAppSetting).toHaveBeenCalledWith("density", "compact");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("density", "compact");
   });
 
   it("renders font size segmented control", async () => {
@@ -131,7 +127,7 @@ describe("AppearanceTab", () => {
       expect(screen.getByText("Small")).toBeDefined();
     });
     fireEvent.click(screen.getByText("Small"));
-    expect(api.setAppSetting).toHaveBeenCalledWith("font_size", "small");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("font_size", "small");
   });
 
   it("renders reduce animations toggle", async () => {
@@ -150,6 +146,6 @@ describe("AppearanceTab", () => {
     const row = label.closest(".flex")!;
     const toggle = row.querySelector("button")!;
     fireEvent.click(toggle);
-    expect(api.setAppSetting).toHaveBeenCalledWith("reduce_animations", "true");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("reduce_animations", "true");
   });
 });

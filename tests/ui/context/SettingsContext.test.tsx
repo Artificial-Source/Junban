@@ -1,17 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act, waitFor } from "@testing-library/react";
-import { SettingsProvider, useGeneralSettings } from "../../../src/ui/context/SettingsContext.js";
 
-// Mock the api module
-vi.mock("../../../src/ui/api/index.js", () => ({
-  api: {
-    getAllSettings: vi.fn().mockResolvedValue({}),
-    getAppSetting: vi.fn().mockResolvedValue(null),
-    setAppSetting: vi.fn().mockResolvedValue(undefined),
-  },
+const settingsApiMocks = vi.hoisted(() => ({
+  getAllSettings: vi.fn().mockResolvedValue({}),
+  setAppSetting: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { api } from "../../../src/ui/api/index.js";
+vi.mock("../../../src/ui/api/settings.js", () => settingsApiMocks);
+
+import { SettingsProvider, useGeneralSettings } from "../../../src/ui/context/SettingsContext.js";
 
 function TestConsumer() {
   const { settings, loaded, updateSetting } = useGeneralSettings();
@@ -50,6 +47,8 @@ function TestConsumer() {
 describe("SettingsContext", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    settingsApiMocks.getAllSettings.mockResolvedValue({});
+    settingsApiMocks.setAppSetting.mockResolvedValue(undefined);
     // Reset document element state
     document.documentElement.style.removeProperty("--color-accent");
     document.documentElement.style.removeProperty("--color-accent-hover");
@@ -86,7 +85,7 @@ describe("SettingsContext", () => {
   });
 
   it("loads settings from api on mount", async () => {
-    (api.getAllSettings as any).mockResolvedValue({
+    settingsApiMocks.getAllSettings.mockResolvedValue({
       accent_color: "#ef4444",
       density: "compact",
       start_view: "today",
@@ -123,7 +122,7 @@ describe("SettingsContext", () => {
     });
 
     expect(screen.getByTestId("accent").textContent).toBe("#ef4444");
-    expect(api.setAppSetting).toHaveBeenCalledWith("accent_color", "#ef4444");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("accent_color", "#ef4444");
   });
 
   it("accent color change applies CSS variable to documentElement", async () => {
@@ -182,7 +181,7 @@ describe("SettingsContext", () => {
     expect(screen.getByTestId("font-size").textContent).toBe("large");
     expect(document.documentElement.classList.contains("font-large")).toBe(true);
     expect(document.documentElement.classList.contains("font-small")).toBe(false);
-    expect(api.setAppSetting).toHaveBeenCalledWith("font_size", "large");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("font_size", "large");
   });
 
   it("reduce animations change applies CSS class to documentElement", async () => {
@@ -202,6 +201,6 @@ describe("SettingsContext", () => {
 
     expect(screen.getByTestId("reduce-animations").textContent).toBe("true");
     expect(document.documentElement.classList.contains("reduce-motion")).toBe(true);
-    expect(api.setAppSetting).toHaveBeenCalledWith("reduce_animations", "true");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("reduce_animations", "true");
   });
 });

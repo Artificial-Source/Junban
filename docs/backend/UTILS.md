@@ -7,11 +7,13 @@ This document covers two directories: `src/utils/` (shared utility modules) and 
 ## Utilities (`src/utils/`)
 
 ### `logger.ts`
+
 **Path:** `src/utils/logger.ts`
 **Lines:** 49
 **Purpose:** Simple structured JSON logger with module-scoped instances. Each logger is created with a module name and outputs JSON entries with level, timestamp, module, message, and optional data fields. Log levels can be set globally at startup.
 
 **Key Exports:**
+
 - `LogLevel` -- type: `"debug" | "info" | "warn" | "error"`
 - `setDefaultLogLevel(level: LogLevel): void` -- sets the global threshold (called once at startup)
 - `createLogger(module: string, level?: LogLevel)` -- creates a scoped logger with `.debug()`, `.info()`, `.warn()`, `.error()` methods
@@ -22,18 +24,28 @@ This document covers two directories: `src/utils/` (shared utility modules) and 
 **Used By:** Nearly every module in the project. Created at module scope with `const logger = createLogger("module-name")`.
 
 **Example Output:**
+
 ```json
-{"level":"info","time":"2026-02-20T12:00:00.000Z","module":"tasks","msg":"Task created","id":"abc123","title":"Buy milk"}
+{
+  "level": "info",
+  "time": "2026-02-20T12:00:00.000Z",
+  "module": "tasks",
+  "msg": "Task created",
+  "id": "abc123",
+  "title": "Buy milk"
+}
 ```
 
 ---
 
 ### `ids.ts`
+
 **Path:** `src/utils/ids.ts`
 **Lines:** 12
 **Purpose:** Generates unique 21-character URL-safe IDs using the Web Crypto API. Similar to nanoid but with no external dependency.
 
 **Key Exports:**
+
 - `generateId(): string` -- returns a 21-char ID from the alphabet `0-9A-Za-z_-`
 
 **Key Dependencies:** `crypto.getRandomValues` (Web Crypto API, available in both Node.js and browsers)
@@ -43,11 +55,13 @@ This document covers two directories: `src/utils/` (shared utility modules) and 
 ---
 
 ### `dates.ts`
+
 **Path:** `src/utils/dates.ts`
 **Lines:** 33
 **Purpose:** Basic date utility functions for checking if a date is today, overdue, formatting dates, and getting today's start/end boundaries.
 
 **Key Exports:**
+
 - `isToday(dateStr: string): boolean`
 - `isOverdue(dateStr: string): boolean`
 - `formatDate(dateStr: string, includeTime?: boolean): string`
@@ -61,11 +75,13 @@ This document covers two directories: `src/utils/` (shared utility modules) and 
 ---
 
 ### `format-date.ts`
+
 **Path:** `src/utils/format-date.ts`
 **Lines:** 65
 **Purpose:** Advanced date formatting with four modes: relative (Today, Tomorrow, Yesterday, weekday name, or short date), short (Feb 20, 2026), long (February 20, 2026), and ISO (2026-02-20). Also provides time formatting in 12h or 24h modes.
 
 **Key Exports:**
+
 - `formatTaskDate(isoDate: string, format: "relative" | "short" | "long" | "iso"): string`
 - `formatTaskTime(isoDate: string, timeFormat: "12h" | "24h"): string`
 
@@ -76,11 +92,13 @@ This document covers two directories: `src/utils/` (shared utility modules) and 
 ---
 
 ### `tauri.ts`
+
 **Path:** `src/utils/tauri.ts`
 **Lines:** 6
 **Purpose:** Detects whether the app is running inside a Tauri WebView by checking for the `__TAURI__` global.
 
 **Key Exports:**
+
 - `isTauri(): boolean`
 
 **Key Dependencies:** None
@@ -90,11 +108,13 @@ This document covers two directories: `src/utils/` (shared utility modules) and 
 ---
 
 ### `color.ts`
+
 **Path:** `src/utils/color.ts`
 **Lines:** 27
 **Purpose:** Converts hex color strings to `rgba()` CSS values. Handles shorthand (#abc), full (#aabbcc), and bare (aabbcc) formats. Returns a fallback gray on invalid input.
 
 **Key Exports:**
+
 - `hexToRgba(hex: string, alpha: number): string`
 
 **Key Dependencies:** None
@@ -104,11 +124,13 @@ This document covers two directories: `src/utils/` (shared utility modules) and 
 ---
 
 ### `sounds.ts`
+
 **Path:** `src/utils/sounds.ts`
 **Lines:** 86
 **Purpose:** Procedural UI sound effects using the Web Audio API. Each sound event has a unique musical signature synthesized at runtime -- no audio files needed. Supports volume control and lazy AudioContext initialization.
 
 **Key Exports:**
+
 - `SoundEvent` -- type: `"complete" | "create" | "delete" | "reminder"`
 - `playSound(event: SoundEvent, volume: number): Promise<void>`
 - `previewSound(event: SoundEvent, volume: number): Promise<void>`
@@ -131,25 +153,27 @@ This document covers two directories: `src/utils/` (shared utility modules) and 
 ## Configuration (`src/config/`)
 
 ### `env.ts`
+
 **Path:** `src/config/env.ts`
 **Lines:** 25
 **Purpose:** Zod-validated environment variable loading. Defines all configurable environment variables with defaults and type coercion.
 
 **Key Exports:**
+
 - `Env` -- inferred type from Zod schema
 - `loadEnv(): Env` -- parses `process.env` through the schema
 
 **Environment Variables:**
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DB_PATH` | string | `./data/junban.db` | SQLite database file path |
+| `DB_PATH` | string | `./data/junban.db` | SQLite database file path (must be non-empty; null bytes rejected) |
 | `STORAGE_MODE` | `"sqlite" \| "markdown"` | `"sqlite"` | Storage backend |
-| `MARKDOWN_PATH` | string | `./tasks/` | Base directory for Markdown storage |
+| `MARKDOWN_PATH` | string | `./tasks/` | Base directory for Markdown storage (must be non-empty; null bytes rejected) |
 | `LOG_LEVEL` | `"debug" \| "info" \| "warn" \| "error"` | `"info"` | Logging threshold |
 | `PORT` | number | `5173` | Dev server port |
 | `DEFAULT_THEME` | `"light" \| "dark"` | `"light"` | Default UI theme |
 | `NLP_LOCALE` | string | `"en"` | NLP locale |
-| `PLUGIN_DIR` | string | `./plugins/` | Plugin directory path |
+| `PLUGIN_DIR` | string | `./plugins/` | Plugin directory path (must be non-empty; null bytes rejected) |
 | `PLUGIN_SANDBOX` | boolean | `true` | Enable plugin sandboxing |
 | `PLUGIN_REGISTRY_URL` | string | optional | Remote plugin registry URL |
 | `PLUGIN_MAX_SIZE_MB` | number | `10` | Max plugin archive size |
@@ -162,11 +186,13 @@ This document covers two directories: `src/utils/` (shared utility modules) and 
 ---
 
 ### `defaults.ts`
+
 **Path:** `src/config/defaults.ts`
 **Lines:** 25
 **Purpose:** Application-wide constants and default values: priority definitions (label, value, color), task statuses, project color palette, and UI constants.
 
 **Key Exports:**
+
 - `PRIORITIES` -- `{ P1: { value: 1, label: "P1", color: "#ef4444" }, P2: {...}, P3: {...}, P4: {...} }`
 - `TASK_STATUSES` -- `["pending", "completed", "cancelled"]`
 - `DEFAULT_PROJECT_COLORS` -- array of 8 hex colors
@@ -181,11 +207,13 @@ This document covers two directories: `src/utils/` (shared utility modules) and 
 ---
 
 ### `themes.ts`
+
 **Path:** `src/config/themes.ts`
 **Lines:** 13
 **Purpose:** Built-in theme definitions with id, display name, and type (light/dark).
 
 **Key Exports:**
+
 - `Theme` -- interface: `{ id: string; name: string; type: "light" | "dark" }`
 - `BUILT_IN_THEMES` -- array of three themes: Light, Dark, and Nord
 

@@ -1,31 +1,39 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act, waitFor } from "@testing-library/react";
 
-// Mock the api module BEFORE importing contexts
-vi.mock("../../../src/ui/api/index.js", () => ({
-  api: {
-    // Task API (needed by TaskProvider)
-    listTasks: vi.fn().mockResolvedValue([]),
-    // AI API
-    getAIConfig: vi.fn().mockResolvedValue({
-      provider: "openai",
-      model: "gpt-4",
-      baseUrl: null,
-      hasApiKey: true,
-    }),
-    sendChatMessage: vi.fn().mockResolvedValue(null),
-    clearChat: vi.fn().mockResolvedValue(undefined),
-    getChatMessages: vi.fn().mockResolvedValue([]),
-    updateAIConfig: vi.fn().mockResolvedValue(undefined),
-    listChatSessions: vi.fn().mockResolvedValue([]),
-    createNewChatSession: vi.fn().mockResolvedValue("session-1"),
-    switchChatSession: vi.fn().mockResolvedValue([]),
-    deleteChatSession: vi.fn().mockResolvedValue(undefined),
-    renameChatSession: vi.fn().mockResolvedValue(undefined),
-  },
+const taskApiMocks = vi.hoisted(() => ({
+  listTasks: vi.fn().mockResolvedValue([]),
+  createTask: vi.fn(),
+  updateTask: vi.fn(),
+  completeTask: vi.fn(),
+  deleteTask: vi.fn(),
+  completeManyTasks: vi.fn(),
+  deleteManyTasks: vi.fn(),
+  updateManyTasks: vi.fn(),
+  restoreTask: vi.fn(),
 }));
 
-import { api } from "../../../src/ui/api/index.js";
+const aiApiMocks = vi.hoisted(() => ({
+  getAIConfig: vi.fn().mockResolvedValue({
+    provider: "openai",
+    model: "gpt-4",
+    baseUrl: null,
+    hasApiKey: true,
+  }),
+  sendChatMessage: vi.fn().mockResolvedValue(null),
+  clearChat: vi.fn().mockResolvedValue(undefined),
+  getChatMessages: vi.fn().mockResolvedValue([]),
+  updateAIConfig: vi.fn().mockResolvedValue(undefined),
+  listChatSessions: vi.fn().mockResolvedValue([]),
+  createNewChatSession: vi.fn().mockResolvedValue("session-1"),
+  switchChatSession: vi.fn().mockResolvedValue([]),
+  deleteChatSession: vi.fn().mockResolvedValue(undefined),
+  renameChatSession: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../../../src/ui/api/tasks.js", () => taskApiMocks);
+
+vi.mock("../../../src/ui/api/ai.js", () => aiApiMocks);
 import { TaskProvider } from "../../../src/ui/context/TaskContext.js";
 import { AIProvider, useAIContext } from "../../../src/ui/context/AIContext.js";
 
@@ -135,15 +143,15 @@ describe("AIContext", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    (api.getAIConfig as any).mockResolvedValue({
+    aiApiMocks.getAIConfig.mockResolvedValue({
       provider: "openai",
       model: "gpt-4",
       baseUrl: null,
       hasApiKey: true,
     });
-    (api.listChatSessions as any).mockResolvedValue([]);
-    (api.listTasks as any).mockResolvedValue([]);
-    (api.sendChatMessage as any).mockResolvedValue(null);
+    aiApiMocks.listChatSessions.mockResolvedValue([]);
+    taskApiMocks.listTasks.mockResolvedValue([]);
+    aiApiMocks.sendChatMessage.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -171,7 +179,7 @@ describe("AIContext", () => {
   });
 
   it("isConfigured is false when no provider", async () => {
-    (api.getAIConfig as any).mockResolvedValue({
+    aiApiMocks.getAIConfig.mockResolvedValue({
       provider: null,
       model: null,
       baseUrl: null,
@@ -186,7 +194,7 @@ describe("AIContext", () => {
   });
 
   it("isConfigured is true for local providers without API key", async () => {
-    (api.getAIConfig as any).mockResolvedValue({
+    aiApiMocks.getAIConfig.mockResolvedValue({
       provider: "ollama",
       model: "llama3",
       baseUrl: null,
@@ -206,7 +214,7 @@ describe("AIContext", () => {
       { type: "token", data: "there!" },
       { type: "done", data: "" },
     ]);
-    (api.sendChatMessage as any).mockResolvedValue(stream);
+    aiApiMocks.sendChatMessage.mockResolvedValue(stream);
 
     renderWithProviders();
 
@@ -243,7 +251,7 @@ describe("AIContext", () => {
         }),
       },
     ]);
-    (api.sendChatMessage as any).mockResolvedValue(stream);
+    aiApiMocks.sendChatMessage.mockResolvedValue(stream);
 
     renderWithProviders();
 
@@ -269,7 +277,7 @@ describe("AIContext", () => {
 
   it("sendMessage handles SSE error events with plain string data", async () => {
     const stream = createSSEStream([{ type: "error", data: "Something went wrong" }]);
-    (api.sendChatMessage as any).mockResolvedValue(stream);
+    aiApiMocks.sendChatMessage.mockResolvedValue(stream);
 
     renderWithProviders();
 
@@ -292,7 +300,7 @@ describe("AIContext", () => {
   });
 
   it("sendMessage handles null stream response", async () => {
-    (api.sendChatMessage as any).mockResolvedValue(null);
+    aiApiMocks.sendChatMessage.mockResolvedValue(null);
 
     renderWithProviders();
 
@@ -315,7 +323,7 @@ describe("AIContext", () => {
   });
 
   it("sendMessage handles network errors", async () => {
-    (api.sendChatMessage as any).mockRejectedValue(new Error("Network error"));
+    aiApiMocks.sendChatMessage.mockRejectedValue(new Error("Network error"));
 
     renderWithProviders();
 
@@ -349,7 +357,7 @@ describe("AIContext", () => {
       { type: "token", data: "Done!" },
       { type: "done", data: "" },
     ]);
-    (api.sendChatMessage as any).mockResolvedValue(stream);
+    aiApiMocks.sendChatMessage.mockResolvedValue(stream);
 
     renderWithProviders();
 
@@ -381,7 +389,7 @@ describe("AIContext", () => {
       },
       { type: "done", data: "" },
     ]);
-    (api.sendChatMessage as any).mockResolvedValue(stream);
+    aiApiMocks.sendChatMessage.mockResolvedValue(stream);
 
     renderWithProviders();
 
@@ -399,7 +407,7 @@ describe("AIContext", () => {
 
     // Task mutations trigger refreshTasks (listTasks is called)
     // listTasks was called on mount + at least once more after mutation
-    expect((api.listTasks as any).mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(taskApiMocks.listTasks.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it("sendMessage tracks data mutations and increments dataMutationCount", async () => {
@@ -410,7 +418,7 @@ describe("AIContext", () => {
       },
       { type: "done", data: "" },
     ]);
-    (api.sendChatMessage as any).mockResolvedValue(stream);
+    aiApiMocks.sendChatMessage.mockResolvedValue(stream);
 
     renderWithProviders();
 
@@ -439,7 +447,7 @@ describe("AIContext", () => {
       { type: "token", data: "Hello" },
       { type: "done", data: "" },
     ]);
-    (api.sendChatMessage as any).mockResolvedValue(stream);
+    aiApiMocks.sendChatMessage.mockResolvedValue(stream);
 
     renderWithProviders();
 
@@ -461,7 +469,7 @@ describe("AIContext", () => {
       screen.getByTestId("clear").click();
     });
 
-    expect(api.clearChat).toHaveBeenCalled();
+    expect(aiApiMocks.clearChat).toHaveBeenCalled();
     const messages = JSON.parse(screen.getByTestId("messages").textContent!);
     expect(messages.length).toBe(0);
   });
@@ -477,11 +485,11 @@ describe("AIContext", () => {
       screen.getByTestId("update-config").click();
     });
 
-    expect(api.updateAIConfig).toHaveBeenCalledWith({
+    expect(aiApiMocks.updateAIConfig).toHaveBeenCalledWith({
       provider: "anthropic",
       apiKey: "key-123",
     });
-    expect(api.getAIConfig).toHaveBeenCalled();
+    expect(aiApiMocks.getAIConfig).toHaveBeenCalled();
   });
 
   it("restoreMessages loads chat history from api", async () => {
@@ -489,7 +497,7 @@ describe("AIContext", () => {
       { role: "user", content: "Previous question" },
       { role: "assistant", content: "Previous answer" },
     ];
-    (api.getChatMessages as any).mockResolvedValue(storedMessages);
+    aiApiMocks.getChatMessages.mockResolvedValue(storedMessages);
 
     renderWithProviders();
 
@@ -513,7 +521,7 @@ describe("AIContext", () => {
       { role: "tool", content: "tool result" },
       { role: "assistant", content: "Answer" },
     ];
-    (api.getChatMessages as any).mockResolvedValue(storedMessages);
+    aiApiMocks.getChatMessages.mockResolvedValue(storedMessages);
 
     renderWithProviders();
 
@@ -563,10 +571,10 @@ describe("AIContext", () => {
       screen.getByTestId("new-session").click();
     });
 
-    expect(api.createNewChatSession).toHaveBeenCalled();
+    expect(aiApiMocks.createNewChatSession).toHaveBeenCalled();
     const messages = JSON.parse(screen.getByTestId("messages").textContent!);
     expect(messages.length).toBe(0);
-    expect(api.listChatSessions).toHaveBeenCalled();
+    expect(aiApiMocks.listChatSessions).toHaveBeenCalled();
   });
 
   it("switchSession loads session messages and sets activeSessionId", async () => {
@@ -574,7 +582,7 @@ describe("AIContext", () => {
       { role: "user", content: "Hello" },
       { role: "assistant", content: "Hi" },
     ];
-    (api.switchChatSession as any).mockResolvedValue(sessionMessages);
+    aiApiMocks.switchChatSession.mockResolvedValue(sessionMessages);
 
     renderWithProviders();
 
@@ -586,7 +594,7 @@ describe("AIContext", () => {
       screen.getByTestId("switch-session").click();
     });
 
-    expect(api.switchChatSession).toHaveBeenCalledWith("session-2");
+    expect(aiApiMocks.switchChatSession).toHaveBeenCalledWith("session-2");
     expect(screen.getByTestId("active-session").textContent).toBe("session-2");
     const messages = JSON.parse(screen.getByTestId("messages").textContent!);
     expect(messages.length).toBe(2);
@@ -598,7 +606,7 @@ describe("AIContext", () => {
       { role: "user", content: "Hello" },
       { role: "assistant", content: "Hi" },
     ];
-    (api.switchChatSession as any).mockResolvedValue(sessionMessages);
+    aiApiMocks.switchChatSession.mockResolvedValue(sessionMessages);
 
     renderWithProviders();
 
@@ -612,8 +620,8 @@ describe("AIContext", () => {
       screen.getByTestId("delete-session").click();
     });
 
-    expect(api.deleteChatSession).toHaveBeenCalledWith("session-1");
-    expect(api.listChatSessions).toHaveBeenCalled();
+    expect(aiApiMocks.deleteChatSession).toHaveBeenCalledWith("session-1");
+    expect(aiApiMocks.listChatSessions).toHaveBeenCalled();
   });
 
   it("renameSession calls api and refreshes sessions", async () => {
@@ -627,7 +635,7 @@ describe("AIContext", () => {
       screen.getByTestId("rename-session").click();
     });
 
-    expect(api.renameChatSession).toHaveBeenCalledWith("session-1", "My Chat");
-    expect(api.listChatSessions).toHaveBeenCalled();
+    expect(aiApiMocks.renameChatSession).toHaveBeenCalledWith("session-1", "My Chat");
+    expect(aiApiMocks.listChatSessions).toHaveBeenCalled();
   });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ToolRegistry } from "../../src/ai/tools/registry.js";
 import { registerTaskCrudTools } from "../../src/ai/tools/builtin/task-crud.js";
 import { registerQueryTasksTool } from "../../src/ai/tools/builtin/query-tasks.js";
-import { createDefaultToolRegistry } from "../../src/ai/provider.js";
+import { createDefaultToolRegistry } from "../../src/ai/tool-registry.js";
 import { createTestServices } from "../integration/helpers.js";
 
 describe("ToolRegistry", () => {
@@ -92,6 +92,38 @@ describe("ToolRegistry", () => {
     await expect(
       registry.execute("unknown_tool", {}, { taskService, projectService }),
     ).rejects.toThrow("Unknown tool: unknown_tool");
+  });
+
+  it("times out tool execution when tool hangs", async () => {
+    const registry = new ToolRegistry({ executionTimeoutMs: 10 });
+    const { taskService, projectService } = createTestServices();
+    registry.register(
+      { name: "hang", description: "Never resolves", parameters: { type: "object" } },
+      async () => new Promise<string>(() => {}),
+    );
+
+    await expect(registry.execute("hang", {}, { taskService, projectService })).rejects.toThrow(
+      'Tool "hang" timed out after 10ms',
+    );
+  });
+
+  it("clears all registered tools", () => {
+    const registry = new ToolRegistry();
+    registry.register(
+      { name: "a", description: "A", parameters: { type: "object" } },
+      async () => "ok",
+    );
+    registry.register(
+      { name: "b", description: "B", parameters: { type: "object" } },
+      async () => "ok",
+      "plugin-a",
+    );
+
+    registry.clear();
+
+    expect(registry.size).toBe(0);
+    expect(registry.has("a")).toBe(false);
+    expect(registry.has("b")).toBe(false);
   });
 });
 

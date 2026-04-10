@@ -58,6 +58,38 @@ export interface Task {
   updatedAt: string;
 }
 
+export const RestoreTaskInput = z.object({
+  id: z.string(),
+  title: z.string().min(1).max(500),
+  description: z.string().nullable(),
+  status: TaskStatus,
+  priority: Priority,
+  dueDate: z.string().datetime().nullable(),
+  dueTime: z.boolean(),
+  completedAt: z.string().datetime().nullable(),
+  projectId: z.string().nullable(),
+  recurrence: z.string().nullable(),
+  parentId: z.string().nullable(),
+  remindAt: z.string().datetime().nullable(),
+  estimatedMinutes: z.number().int().min(1).nullable(),
+  actualMinutes: z.number().int().min(0).nullable(),
+  deadline: z.string().datetime().nullable(),
+  isSomeday: z.boolean(),
+  sectionId: z.string().nullable(),
+  dreadLevel: z.number().int().min(1).max(5).nullable(),
+  tags: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      color: z.string(),
+    }),
+  ),
+  sortOrder: z.number().int(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type RestoreTaskInput = z.infer<typeof RestoreTaskInput>;
+
 export interface Project {
   id: string;
   name: string;

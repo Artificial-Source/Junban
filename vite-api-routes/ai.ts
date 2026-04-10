@@ -1,5 +1,12 @@
 import type { RouteRegistrar } from "./types.js";
 import { parseBody } from "./types.js";
+import { DEFAULT_LMSTUDIO_BASE_URL } from "../src/config/defaults.js";
+import { getSecureSetting, setSecureSetting } from "../src/storage/encrypted-settings.js";
+import { isAllowedAIBaseUrl } from "../src/ai/base-url-policy.js";
+
+function normalizeAuthType(value: string | undefined): "api-key" | "oauth" | undefined {
+  return value === "api-key" || value === "oauth" ? value : undefined;
+}
 
 export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
   // GET /api/ai/providers — list all registered AI providers
@@ -14,6 +21,7 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
       displayName: r.plugin.displayName,
       needsApiKey: r.plugin.needsApiKey,
       optionalApiKey: r.plugin.optionalApiKey ?? false,
+      supportsOAuth: r.plugin.supportsOAuth ?? false,
       defaultModel: r.plugin.defaultModel,
       defaultBaseUrl: r.plugin.defaultBaseUrl,
       showBaseUrl: r.plugin.showBaseUrl ?? false,
@@ -33,14 +41,18 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
       const providerSetting = svc.storage.getAppSetting("ai_provider");
       const modelSetting = svc.storage.getAppSetting("ai_model");
       const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
-      const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+      const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
+      const authTypeSetting = svc.storage.getAppSetting("ai_auth_type");
+      const oauthToken = await getSecureSetting(svc.storage, "ai_oauth_token");
       res.setHeader("Content-Type", "application/json");
       res.end(
         JSON.stringify({
           provider: providerSetting?.value ?? null,
           model: modelSetting?.value ?? null,
           baseUrl: baseUrlSetting?.value ?? null,
-          hasApiKey: !!apiKeySetting?.value,
+          hasApiKey: !!apiKey,
+          authType: authTypeSetting?.value ?? undefined,
+          hasOAuthToken: !!oauthToken,
         }),
       );
       return;
@@ -48,14 +60,16 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
 
     if (req.method === "PUT") {
       const body = await parseBody(req);
-      const { provider, apiKey, model, baseUrl } = body as {
+      const { provider, apiKey, model, baseUrl, authType, oauthToken } = body as {
         provider?: string;
         apiKey?: string;
         model?: string;
         baseUrl?: string;
+        authType?: string;
+        oauthToken?: string;
       };
       if (provider) svc.storage.setAppSetting("ai_provider", provider);
-      if (apiKey) svc.storage.setAppSetting("ai_api_key", apiKey);
+      if (apiKey) await setSecureSetting(svc.storage, "ai_api_key", apiKey);
       if (model !== undefined) {
         if (model) {
           svc.storage.setAppSetting("ai_model", model);
@@ -69,6 +83,16 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
         } else {
           svc.storage.deleteAppSetting("ai_base_url");
         }
+      }
+      if (authType !== undefined) {
+        if (authType) {
+          svc.storage.setAppSetting("ai_auth_type", authType);
+        } else {
+          svc.storage.deleteAppSetting("ai_auth_type");
+        }
+      }
+      if (oauthToken) {
+        await setSecureSetting(svc.storage, "ai_oauth_token", oauthToken);
       }
       // Reset chat session when provider config changes
       svc.chatManager.clearSession(svc.storage);
@@ -88,15 +112,21 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
     try {
       const providerName = modelsMatch[1];
       const svc = await getServices();
-      const url = new URL(req.url!, `http://${req.headers.host}`);
+      const url = new URL(req.url!, `http://${req.headers.host ?? "localhost"}`);
       const baseUrlOverride = url.searchParams.get("baseUrl");
 
-      const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+      if (baseUrlOverride && !isAllowedAIBaseUrl(baseUrlOverride)) {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ models: [] }));
+        return;
+      }
+
+      const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
       const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
 
       const { fetchAvailableModels } = await import("../src/ai/model-discovery.js");
       const models = await fetchAvailableModels(providerName, {
-        apiKey: apiKeySetting?.value,
+        apiKey: apiKey ?? undefined,
         baseUrl: baseUrlOverride || baseUrlSetting?.value,
       });
 
@@ -121,15 +151,23 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
         model: string;
         baseUrl?: string;
       };
+
+      if (baseUrlOverride && !isAllowedAIBaseUrl(baseUrlOverride)) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Invalid baseUrl" }));
+        return;
+      }
+
       const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
-      const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+      const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
 
       if (providerName === "lmstudio") {
         const { loadLMStudioModel } = await import("../src/ai/model-discovery.js");
         await loadLMStudioModel(
           modelKey,
-          (baseUrlOverride as string) || baseUrlSetting?.value || "http://localhost:1234/v1",
-          apiKeySetting?.value,
+          (baseUrlOverride as string) || baseUrlSetting?.value || DEFAULT_LMSTUDIO_BASE_URL,
+          apiKey ?? undefined,
         );
       }
 
@@ -176,15 +214,19 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
 
     try {
       const { gatherContext } = await import("../src/ai/chat.js");
-      const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+      const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
       const modelSetting = svc.storage.getAppSetting("ai_model");
       const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+      const authTypeSetting = svc.storage.getAppSetting("ai_auth_type");
+      const oauthToken = await getSecureSetting(svc.storage, "ai_oauth_token");
 
       const providerConfig = {
         provider: providerSetting.value as string,
-        apiKey: apiKeySetting?.value,
+        apiKey: apiKey ?? undefined,
         model: modelSetting?.value,
         baseUrl: baseUrlSetting?.value,
+        authType: authTypeSetting?.value as "api-key" | "oauth" | undefined,
+        oauthToken: oauthToken ?? undefined,
       };
 
       const executor = svc.aiProviderRegistry.createExecutor(providerConfig);
@@ -250,15 +292,19 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
       try {
         const providerSetting = svc.storage.getAppSetting("ai_provider");
         if (providerSetting?.value) {
-          const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+          const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
           const modelSetting = svc.storage.getAppSetting("ai_model");
           const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+          const authTypeSetting = svc.storage.getAppSetting("ai_auth_type");
+          const oauthToken = await getSecureSetting(svc.storage, "ai_oauth_token");
 
           const executor = svc.aiProviderRegistry.createExecutor({
             provider: providerSetting.value as string,
-            apiKey: apiKeySetting?.value,
+            apiKey: apiKey ?? undefined,
             model: modelSetting?.value,
             baseUrl: baseUrlSetting?.value,
+            authType: authTypeSetting?.value as "api-key" | "oauth" | undefined,
+            oauthToken: oauthToken ?? undefined,
           });
 
           session = svc.chatManager.restoreSession(
@@ -320,8 +366,7 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
     if (currentSession) {
       currentSession.extractMemories().catch(() => {});
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (svc.chatManager as any).session = null;
+    svc.chatManager.setSession(null);
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ sessionId: "" }));
   });
@@ -366,15 +411,19 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
           return;
         }
 
-        const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+        const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
         const modelSetting = svc.storage.getAppSetting("ai_model");
         const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+        const authTypeSetting = svc.storage.getAppSetting("ai_auth_type");
+        const oauthToken = await getSecureSetting(svc.storage, "ai_oauth_token");
 
         const executor = svc.aiProviderRegistry.createExecutor({
           provider: providerSetting.value as string,
-          apiKey: apiKeySetting?.value,
+          apiKey: apiKey ?? undefined,
           model: modelSetting?.value,
           baseUrl: baseUrlSetting?.value,
+          authType: normalizeAuthType(authTypeSetting?.value),
+          oauthToken: oauthToken ?? undefined,
         });
 
         const rows = svc.storage.listChatMessages(sessionId);
@@ -406,30 +455,10 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
           providerName: providerSetting.value as string,
         });
 
-        for (const row of rows) {
-          if (row.role === "system") continue;
-          const msg = {
-            role: row.role as "user" | "assistant" | "tool",
-            content: row.content,
-            ...(row.toolCallId ? { toolCallId: row.toolCallId } : {}),
-            ...(row.toolCalls
-              ? {
-                  toolCalls: (() => {
-                    try {
-                      return JSON.parse(row.toolCalls);
-                    } catch {
-                      return undefined;
-                    }
-                  })(),
-                }
-              : {}),
-          };
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (session as any).messages.push(msg);
-        }
+        const { deserializeChatMessages } = await import("../src/ai/message-utils.js");
+        session.restoreMessages(deserializeChatMessages(rows));
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (svc.chatManager as any).session = session;
+        svc.chatManager.setSession(session);
         const messages = session.getMessages();
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify(messages));
@@ -472,15 +501,23 @@ export const registerAIRoutes: RouteRegistrar = (server, getServices) => {
           model: string;
           baseUrl?: string;
         };
+
+        if (baseUrlOverride && !isAllowedAIBaseUrl(baseUrlOverride)) {
+          res.statusCode = 400;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: "Invalid baseUrl" }));
+          return;
+        }
+
         const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
-        const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+        const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
 
         if (providerName === "lmstudio") {
           const { unloadLMStudioModel } = await import("../src/ai/model-discovery.js");
           await unloadLMStudioModel(
             modelKey,
-            (baseUrlOverride as string) || baseUrlSetting?.value || "http://localhost:1234/v1",
-            apiKeySetting?.value,
+            (baseUrlOverride as string) || baseUrlSetting?.value || DEFAULT_LMSTUDIO_BASE_URL,
+            apiKey ?? undefined,
           );
         }
 

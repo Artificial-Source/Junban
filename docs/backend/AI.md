@@ -155,6 +155,12 @@ It is responsible for:
 
 The registry entry point for built-ins is `src/ai/tool-registry.ts`.
 
+Operational guardrails in `src/ai/tools/registry.ts`:
+
+- tool execution is time-bounded (default 15 seconds) so a stuck tool cannot block a chat run forever
+- plugin-contributed tools are registered under plugin-scoped names (`<pluginId>__<toolName>`) to avoid collisions with built-ins or other plugins
+- registries support explicit `clear()` for teardown/reset paths
+
 Design rule:
 
 - AI tools should call shared domain services and use the same rules as the UI, API, CLI, and plugins

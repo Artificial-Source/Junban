@@ -205,9 +205,9 @@ export async function encryptValue(plaintext: string): Promise<string> {
 /**
  * Decrypt an encrypted value.
  * If the value doesn't have the encryption prefix or decryption fails,
- * returns the input unchanged (graceful fallback for migration).
+ * returns the input unchanged only for plaintext migration values.
  */
-export async function decryptValue(encrypted: string): Promise<string> {
+export async function decryptValue(encrypted: string): Promise<string | null> {
   if (!isEncryptedValue(encrypted)) {
     return encrypted;
   }
@@ -217,8 +217,8 @@ export async function decryptValue(encrypted: string): Promise<string> {
     }
     return await decryptNode(encrypted);
   } catch {
-    // Graceful fallback: if decryption fails (wrong key, corrupted data),
-    // return the input unchanged so the app doesn't crash during migration.
-    return encrypted;
+    // Plaintext migration is handled by the prefix check above. If we reach
+    // this path, the value was encrypted but could not be decrypted safely.
+    return null;
   }
 }

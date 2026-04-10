@@ -39,8 +39,10 @@ export function createDefaultVoiceRegistry(config?: VoiceProviderConfig): VoiceP
     registry.registerTTS(new GroqTTSProvider(config.groqApiKey));
   }
 
-  // Always register Inworld TTS (shows in dropdown; requires API key to function)
-  registry.registerTTS(new InworldTTSProvider(config?.inworldApiKey ?? ""));
+  // Register Inworld TTS only when API key is available
+  if (config?.inworldApiKey?.trim()) {
+    registry.registerTTS(new InworldTTSProvider(config.inworldApiKey));
+  }
 
   return registry;
 }

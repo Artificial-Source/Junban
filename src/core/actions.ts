@@ -6,6 +6,11 @@ interface ActionAPI {
   deleteTask: (id: string) => Promise<void>;
   updateTask: (id: string, input: UpdateTaskInput) => Promise<Task>;
   createTask: (input: CreateTaskInput) => Promise<Task>;
+  restoreTask: (task: Task) => Promise<Task>;
+  listTaskRelations: () => Promise<
+    Array<{ taskId: string; relatedTaskId: string; type: "blocks" }>
+  >;
+  addTaskRelation: (taskId: string, relatedTaskId: string, type?: "blocks") => Promise<void>;
   completeManyTasks: (ids: string[]) => Promise<void>;
   deleteManyTasks: (ids: string[]) => Promise<void>;
   updateManyTasks: (ids: string[], changes: UpdateTaskInput) => Promise<Task[]>;
@@ -26,29 +31,21 @@ export function createCompleteAction(api: ActionAPI, task: Task): UndoableAction
 }
 
 export function createDeleteAction(api: ActionAPI, task: Task): UndoableAction {
+  let relationSnapshot: Array<{ taskId: string; relatedTaskId: string; type: "blocks" }> = [];
+
   return {
     description: `Delete "${task.title}"`,
     async execute() {
+      relationSnapshot = (await api.listTaskRelations()).filter(
+        (relation) => relation.taskId === task.id || relation.relatedTaskId === task.id,
+      );
       await api.deleteTask(task.id);
     },
     async undo() {
-      await api.createTask({
-        title: task.title,
-        description: task.description,
-        priority: task.priority,
-        dueDate: task.dueDate,
-        dueTime: task.dueTime,
-        projectId: task.projectId,
-        recurrence: task.recurrence,
-        parentId: task.parentId,
-        remindAt: task.remindAt,
-        estimatedMinutes: task.estimatedMinutes,
-        actualMinutes: task.actualMinutes,
-        deadline: task.deadline,
-        isSomeday: task.isSomeday,
-        sectionId: task.sectionId,
-        tags: task.tags.map((t) => t.name),
-      });
+      await api.restoreTask(task);
+      for (const relation of relationSnapshot) {
+        await api.addTaskRelation(relation.taskId, relation.relatedTaskId, relation.type);
+      }
       await api.refreshTasks();
     },
   };
@@ -88,30 +85,23 @@ export function createBulkCompleteAction(api: ActionAPI, tasks: Task[]): Undoabl
 }
 
 export function createBulkDeleteAction(api: ActionAPI, tasks: Task[]): UndoableAction {
+  const deletedIds = new Set(tasks.map((task) => task.id));
+  let relationSnapshot: Array<{ taskId: string; relatedTaskId: string; type: "blocks" }> = [];
+
   return {
     description: `Delete ${tasks.length} tasks`,
     async execute() {
+      relationSnapshot = (await api.listTaskRelations()).filter(
+        (relation) => deletedIds.has(relation.taskId) || deletedIds.has(relation.relatedTaskId),
+      );
       await api.deleteManyTasks(tasks.map((t) => t.id));
     },
     async undo() {
       for (const task of tasks) {
-        await api.createTask({
-          title: task.title,
-          description: task.description,
-          priority: task.priority,
-          dueDate: task.dueDate,
-          dueTime: task.dueTime,
-          projectId: task.projectId,
-          recurrence: task.recurrence,
-          parentId: task.parentId,
-          remindAt: task.remindAt,
-          estimatedMinutes: task.estimatedMinutes,
-          actualMinutes: task.actualMinutes,
-          deadline: task.deadline,
-          isSomeday: task.isSomeday,
-          sectionId: task.sectionId,
-          tags: task.tags.map((t) => t.name),
-        });
+        await api.restoreTask(task);
+      }
+      for (const relation of relationSnapshot) {
+        await api.addTaskRelation(relation.taskId, relation.relatedTaskId, relation.type);
       }
       await api.refreshTasks();
     },

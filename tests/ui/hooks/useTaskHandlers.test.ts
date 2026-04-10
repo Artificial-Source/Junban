@@ -5,11 +5,14 @@ const mockCreateTask = vi.fn();
 const mockUpdateTask = vi.fn();
 const mockCompleteTask = vi.fn();
 const mockDeleteTask = vi.fn();
+const mockRestoreTask = vi.fn();
 const mockRefreshTasks = vi.fn();
 const mockPlaySound = vi.fn();
 const mockIndentTask = vi.fn();
 const mockOutdentTask = vi.fn();
 const mockReorderTasks = vi.fn();
+const mockListTaskRelations = vi.fn().mockResolvedValue([]);
+const mockAddTaskRelation = vi.fn();
 
 // Undo manager mock — tracks perform calls
 const mockPerform = vi.fn().mockImplementation(async (action: any) => {
@@ -53,6 +56,7 @@ vi.mock("../../../src/ui/context/TaskContext.js", () => ({
     updateTask: (...args: any[]) => mockUpdateTask(...args),
     completeTask: (...args: any[]) => mockCompleteTask(...args),
     deleteTask: (...args: any[]) => mockDeleteTask(...args),
+    restoreTask: (...args: any[]) => mockRestoreTask(...args),
     refreshTasks: (...args: any[]) => mockRefreshTasks(...args),
   }),
 }));
@@ -71,6 +75,8 @@ vi.mock("../../../src/ui/hooks/useSoundEffect.js", () => ({
 }));
 
 vi.mock("../../../src/ui/api/tasks.js", () => ({
+  listTaskRelations: (...args: any[]) => mockListTaskRelations(...args),
+  addTaskRelation: (...args: any[]) => mockAddTaskRelation(...args),
   indentTask: (...args: any[]) => mockIndentTask(...args),
   outdentTask: (...args: any[]) => mockOutdentTask(...args),
   reorderTasks: (...args: any[]) => mockReorderTasks(...args),

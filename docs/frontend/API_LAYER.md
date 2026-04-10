@@ -105,7 +105,7 @@ src/ui/api/
   - `POST /api/tasks/:id/outdent`
   - `POST /api/tasks/reorder`
   - `POST /api/tasks/import`
-- **Notes:** In Tauri mode, `importTasks` handles project resolution via `svc.projectService.getOrCreate()` and completes tasks marked as completed after creation. Calls `svc.save()` after all mutations.
+- **Notes:** Imports now run with rollback safety in both direct-service and server mode. If any item fails, tasks/projects created during that import run are rolled back and the result reports `imported: 0` with error details. In Tauri mode, `svc.save()` is only called after a successful import.
 
 ---
 
@@ -302,7 +302,7 @@ interface StorePluginInfo {
 }
 ```
 
-- **Notes:** In Tauri/direct-services mode, plugin listing returns empty (plugins deferred). Install/uninstall throw errors in this mode, and permission approval/revocation plus toggle now also fail explicitly (instead of silently no-op) because they are not supported yet. `PluginInfo` includes an optional `icon` field. `StorePluginInfo` includes optional `icon`, `downloads` count, and `longDescription` for the store detail view.
+- **Notes:** In Tauri/direct-services mode, built-in plugins are initialized during web bootstrap and surfaced through `listPlugins()`, so plugin views/commands/status items can hydrate without the server route path. Community plugin install/uninstall are still unsupported in this mode, and permission approval/revocation plus toggle fail explicitly because they require the server plugin-management surface. `PluginInfo` includes an optional `icon` field. `StorePluginInfo` includes optional `icon`, `downloads` count, and `longDescription` for the store detail view.
 
 ---
 
@@ -393,13 +393,13 @@ interface ModelDiscoveryInfo {
   - `POST /api/ai/sessions/new`
 
 - **SSE Stream Format:** `sendChatMessage` returns a `ReadableStream<Uint8Array>`. In Tauri mode, this is constructed in-process by iterating over the chat session's async generator. Each SSE event is `data: {JSON}\n\n` with types: `token`, `tool_call`, `tool_result`, `done`, `error`.
-- **Notes:** In Tauri mode, `sendChatMessage` builds the entire AI pipeline in-process: loads provider, gathers context (compact mode for local providers), creates/restores session, and streams events. The `voiceCall` option passes a flag to the context gatherer for voice-optimized prompts. `updateAIConfig` clears the chat session when the provider changes. `getChatMessages` attempts to restore the session from storage if no active session exists. `switchChatSession` in Tauri mode manually reconstructs a `ChatSession` from stored messages. `deleteChatSession` also removes the title override setting. `createNewChatSession` in Tauri mode clears the in-memory session without deleting from the database.
+- **Notes:** In Tauri mode, `sendChatMessage` builds the entire AI pipeline in-process: loads provider, gathers context (compact mode for local providers), creates/restores session, and streams events. The `voiceCall` option passes a flag to the context gatherer for voice-optimized prompts. `updateAIConfig` clears the chat session when the provider changes. `getChatMessages` attempts to restore the session from storage if no active session exists. `switchChatSession` in Tauri mode manually reconstructs a `ChatSession` from stored messages. `deleteChatSession` also removes the title override setting. `createNewChatSession` in Tauri mode clears the in-memory session without deleting from the database. In direct-services mode, API key and OAuth token reads/writes use the same encrypted setting helpers as the Hono API path.
 
 ---
 
 ## settings.ts
 
-- **Path:** `src/ui/api/settings.ts` (65 lines)
+- **Path:** `src/ui/api/settings.ts`
 - **Purpose:** App settings persistence, storage info, and data export.
 - **Key Exports:**
 
@@ -414,4 +414,4 @@ interface ModelDiscoveryInfo {
   - `GET /api/settings/:key`
   - `PUT /api/settings/:key`
   - `GET /api/settings/storage`
-- **Notes:** In Tauri mode, `getStorageInfo` always returns `{ mode: "sqlite", path: "(embedded database)" }`. In server mode, `exportAllData` extracts unique tags from task data since there is no dedicated tags export endpoint. Settings are key-value pairs stored in the app_settings table. Used for keyboard shortcuts, notification preferences, AI config, and general settings.
+- **Notes:** In Tauri mode, `getStorageInfo` always returns `{ mode: "sqlite", path: "(embedded database)" }`. In server mode, `exportAllData` extracts unique tags from task data since there is no dedicated tags export endpoint. Settings are key-value pairs stored in the app_settings table. Used for keyboard shortcuts, notification preferences, AI config, and general settings. In direct-services mode, settings access now mirrors the Hono settings policy: `getAllSettings` filters sensitive keys, `getAppSetting` redacts sensitive values, and `setAppSetting` enforces the writable-key allowlist.

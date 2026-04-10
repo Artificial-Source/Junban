@@ -3,16 +3,19 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { GeneralTab } from "../../../src/ui/views/settings/GeneralTab.js";
 import { SettingsProvider } from "../../../src/ui/context/SettingsContext.js";
 
-// Mock api
+const settingsApiMocks = vi.hoisted(() => ({
+  getAllSettings: vi.fn().mockResolvedValue({}),
+  setAppSetting: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../../../src/ui/api/settings.js", () => settingsApiMocks);
+
 vi.mock("../../../src/ui/api/index.js", () => ({
   api: {
-    getAllSettings: vi.fn().mockResolvedValue({}),
     getAppSetting: vi.fn().mockResolvedValue(null),
     setAppSetting: vi.fn().mockResolvedValue(undefined),
   },
 }));
-
-import { api } from "../../../src/ui/api/index.js";
 
 // Mock themeManager
 vi.mock("../../../src/ui/themes/manager.js", () => ({
@@ -32,7 +35,9 @@ vi.mock("../../../src/utils/sounds.js", () => ({
 }));
 
 // Mock isTauri — controlled via mockIsTauri
-const mockIsTauri = vi.fn(() => true);
+const { mockIsTauri } = vi.hoisted(() => ({
+  mockIsTauri: vi.fn(() => true),
+}));
 vi.mock("../../../src/utils/tauri.js", () => ({
   isTauri: () => mockIsTauri(),
 }));
@@ -56,7 +61,7 @@ describe("Quick Capture Settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsTauri.mockReturnValue(true);
-    (api.getAppSetting as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    settingsApiMocks.getAllSettings.mockResolvedValue({});
     document.documentElement.style.removeProperty("--color-accent");
     document.documentElement.style.removeProperty("--color-accent-hover");
     document.documentElement.classList.remove(
@@ -120,7 +125,7 @@ describe("Quick Capture Settings", () => {
     fireEvent.click(screen.getByText("Reset"));
 
     await waitFor(() => {
-      expect(api.setAppSetting).toHaveBeenCalledWith(
+      expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith(
         "quick_capture_hotkey",
         "CmdOrCtrl+Shift+Space",
       );

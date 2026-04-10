@@ -3,8 +3,13 @@ import { getServices } from "../direct-services.js";
 import type { AIChatMessage, ChatSessionInfo } from "./ai-types.js";
 import { deserializeChatMessages } from "../../../ai/message-utils.js";
 import { createLogger } from "../../../utils/logger.js";
+import { getSecureSetting } from "../../../storage/encrypted-settings.js";
 
 const log = createLogger("ai-sessions");
+
+function normalizeAuthType(value: string | undefined): "api-key" | "oauth" | undefined {
+  return value === "api-key" || value === "oauth" ? value : undefined;
+}
 
 export async function listChatSessions(): Promise<ChatSessionInfo[]> {
   if (useDirectServices()) {
@@ -63,15 +68,19 @@ export async function switchChatSession(sessionId: string): Promise<AIChatMessag
     const providerSetting = svc.storage.getAppSetting("ai_provider");
     if (!providerSetting?.value) return [];
 
-    const apiKeySetting = svc.storage.getAppSetting("ai_api_key");
+    const apiKey = await getSecureSetting(svc.storage, "ai_api_key");
     const modelSetting = svc.storage.getAppSetting("ai_model");
     const baseUrlSetting = svc.storage.getAppSetting("ai_base_url");
+    const authTypeSetting = svc.storage.getAppSetting("ai_auth_type");
+    const oauthToken = await getSecureSetting(svc.storage, "ai_oauth_token");
 
     const executor = ai.aiProviderRegistry.createExecutor({
       provider: providerSetting.value as string,
-      apiKey: apiKeySetting?.value,
+      apiKey: apiKey ?? undefined,
       model: modelSetting?.value,
       baseUrl: baseUrlSetting?.value,
+      authType: normalizeAuthType(authTypeSetting?.value),
+      oauthToken: oauthToken ?? undefined,
     });
 
     const rows = svc.storage.listChatMessages(sessionId);

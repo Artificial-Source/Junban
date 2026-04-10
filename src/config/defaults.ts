@@ -61,6 +61,9 @@ export const PLUGIN_LOAD_TIMEOUT_MS = 30_000;
 /** Timeout for plugin onUnload() in milliseconds. */
 export const PLUGIN_UNLOAD_TIMEOUT_MS = 10_000;
 
+/** Timeout for AI tool execution in milliseconds. */
+export const TOOL_EXECUTION_TIMEOUT_MS = 15_000;
+
 /** Default base URL for LM Studio's OpenAI-compatible API. */
 export const DEFAULT_LMSTUDIO_BASE_URL = "http://localhost:1234/v1";
 

@@ -7,6 +7,7 @@ import {
   createBulkDeleteAction,
   createBulkUpdateAction,
 } from "../../core/actions.js";
+import { addTaskRelation, listTaskRelations } from "../api/tasks.js";
 import type { Task, CreateTaskInput, UpdateTaskInput } from "../../core/types.js";
 
 export function useBulkActions(multiSelectedIds: Set<string>, clearSelection: () => void) {
@@ -17,6 +18,7 @@ export function useBulkActions(multiSelectedIds: Set<string>, clearSelection: ()
     updateManyTasks,
     updateTask,
     createTask,
+    restoreTask,
     completeTask,
     deleteTask,
     refreshTasks,
@@ -40,6 +42,12 @@ export function useBulkActions(multiSelectedIds: Set<string>, clearSelection: ()
         await createTask(input);
         return {} as Task;
       },
+      restoreTask: async (task: Task) => {
+        await restoreTask(task);
+        return {} as Task;
+      },
+      listTaskRelations,
+      addTaskRelation,
       completeManyTasks,
       deleteManyTasks,
       updateManyTasks: async (ids: string[], changes: UpdateTaskInput) => {
@@ -53,6 +61,7 @@ export function useBulkActions(multiSelectedIds: Set<string>, clearSelection: ()
       deleteTask,
       updateTask,
       createTask,
+      restoreTask,
       completeManyTasks,
       deleteManyTasks,
       updateManyTasks,

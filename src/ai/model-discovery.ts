@@ -5,6 +5,9 @@
  */
 
 import type { AIProviderConfig } from "./types.js";
+import { createLogger } from "../utils/logger.js";
+
+const logger = createLogger("model-discovery");
 
 async function createRegistry() {
   const { createDefaultRegistryAsync } = await import("./provider.js");
@@ -38,7 +41,11 @@ export async function fetchAvailableModels(
       label: d.label,
       loaded: d.loaded,
     }));
-  } catch {
+  } catch (err) {
+    logger.warn("Failed to fetch available models", {
+      provider: providerName,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return [];
   }
 }

@@ -69,7 +69,7 @@ describe("crypto", () => {
     });
   });
 
-  describe("decryptValue graceful fallback", () => {
+  describe("decryptValue fallback behavior", () => {
     it("returns plaintext unchanged when value is not encrypted", async () => {
       const plaintext = "sk-not-encrypted-key";
       const result = await decryptValue(plaintext);
@@ -81,18 +81,18 @@ describe("crypto", () => {
       expect(result).toBe("");
     });
 
-    it("returns corrupted encrypted value unchanged", async () => {
+    it("returns null for corrupted encrypted values", async () => {
       const corrupted = "enc:v1:not-valid-base64!!!";
       const result = await decryptValue(corrupted);
-      expect(result).toBe(corrupted);
+      expect(result).toBeNull();
     });
 
-    it("returns truncated encrypted value unchanged", async () => {
+    it("returns null for truncated encrypted values", async () => {
       // Encrypt something, then truncate the base64 data
       const encrypted = await encryptValue("test-value");
       const truncated = encrypted.slice(0, encrypted.length - 10);
       const result = await decryptValue(truncated);
-      expect(result).toBe(truncated);
+      expect(result).toBeNull();
     });
   });
 });

@@ -14,6 +14,7 @@ import {
   deleteManyTasks as deleteManyTasksApi,
   deleteTask as deleteTaskApi,
   listTasks,
+  restoreTask as restoreTaskApi,
   updateManyTasks as updateManyTasksApi,
   updateTask as updateTaskApi,
 } from "../api/tasks.js";
@@ -79,6 +80,7 @@ interface TaskContextValue {
   updateTask: (id: string, input: UpdateTaskInput) => Promise<void>;
   completeTask: (id: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
+  restoreTask: (task: Task) => Promise<void>;
   completeManyTasks: (ids: string[]) => Promise<void>;
   deleteManyTasks: (ids: string[]) => Promise<void>;
   updateManyTasks: (ids: string[], changes: UpdateTaskInput) => Promise<void>;
@@ -160,6 +162,18 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const restoreTask = useCallback(async (task: Task) => {
+    try {
+      const restored = await restoreTaskApi(task);
+      dispatch({ type: "TASK_ADDED", task: restored });
+    } catch (err) {
+      dispatch({
+        type: "LOAD_ERROR",
+        error: `Failed to restore task: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }, []);
+
   const completeManyTasks = useCallback(
     async (ids: string[]) => {
       try {
@@ -235,6 +249,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       updateTask,
       completeTask,
       deleteTask,
+      restoreTask,
       completeManyTasks,
       deleteManyTasks,
       updateManyTasks,
@@ -246,6 +261,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       updateTask,
       completeTask,
       deleteTask,
+      restoreTask,
       completeManyTasks,
       deleteManyTasks,
       updateManyTasks,

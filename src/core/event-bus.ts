@@ -50,7 +50,7 @@ export class EventBus {
     const set = this.listeners.get(event);
     if (!set) return;
 
-    for (const callback of set) {
+    for (const callback of [...set]) {
       try {
         callback(data);
       } catch (err) {

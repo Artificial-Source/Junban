@@ -580,7 +580,7 @@ UI IDs are plugin-scoped at registration time (`<pluginId>:<localId>`), so panel
 
 ## 9. Settings
 
-Settings are defined in `manifest.json` and shown in the Settings view (Settings > Plugins > Your Plugin). Plugins read their values at runtime:
+Settings are defined in `manifest.json` and shown in the Settings view (Settings > Extensions > Your Plugin). Plugins read their values at runtime:
 
 ```typescript
 const value = this.settings.get<number>("workMinutes"); // Returns the user's value or the manifest default
@@ -615,7 +615,7 @@ Each setting has: `id`, `name`, `type`, `default`, and optional `description`.
 
 ### Settings UI (Automatic Rendering)
 
-When a plugin declares `settings` in its manifest, Junban automatically renders a settings form in the plugin settings panel (Settings > Plugins > Your Plugin). No UI code is needed from the plugin author.
+When a plugin declares `settings` in its manifest, Junban automatically renders a settings form in the plugin settings panel (Settings > Extensions > Your Plugin). No UI code is needed from the plugin author.
 
 | Type | Rendered As |
 |------|-------------|

@@ -6,9 +6,9 @@
 
 ## useRouting.ts
 
-- **Path:** `src/ui/hooks/useRouting.ts` (281 lines)
-- **Purpose:** Hash-based client-side routing. Parses the URL hash into a structured `RouteState` object and provides navigation functions. Supports focus mode and calendar mode as query parameters.
-- **Key Exports:** `useRouting`, `View` (type), `CalendarMode` (type)
+- **Path:** `src/ui/hooks/useRouting.ts`
+- **Purpose:** Hash-based client-side routing. Parses the URL hash into a structured `RouteState` object and provides navigation functions. Supports focus mode and compatibility aliases for advanced built-in views that now live behind plugin routes.
+- **Key Exports:** `useRouting`, `View` (type)
 - **Return Value:**
   - `currentView: View` -- current view state
   - `selectedProjectId: string | null`
@@ -17,15 +17,12 @@
   - `settingsTab: SettingsTab` -- current settings tab (managed via ref)
   - `focusModeOpen: boolean`
   - `setFocusModeOpen: Dispatch<SetStateAction<boolean>>`
-  - `calendarMode: CalendarMode | null`
-  - `setCalendarMode: Dispatch<SetStateAction<CalendarMode | null>>`
   - `handleNavigate: (view: string, id?: string) => void` -- change view
   - `openSettingsTab: (tab: SettingsTab) => void` -- open a specific settings tab
-- **View Type:** Union of view states: `inbox`, `today`, `upcoming`, `calendar`, `project` (with `projectId`), `task` (with `taskId`), `plugin-view` (with `viewId`), `filters-labels`, `completed`, `ai-chat`
-- **CalendarMode Type:** `"day" | "week" | "month"`
+- **View Type:** Union of view states including `inbox`, `today`, `upcoming`, `project` (with `projectId`), `task` (with `taskId`), `plugin-view` (with `viewId`), `filters-labels`, and `ai-chat`
 - **Key Dependencies:** `window.location.hash`, `hashchange` and `popstate` event listeners, `useGeneralSettings` (for `start_view` setting)
 - **Used By:** `App.tsx`
-- **Notes:** Parses hash routes like `#/inbox`, `#/project/abc123`, `#/task/xyz`, `#/calendar?mode=week`, `#/inbox?focus=1`. Uses `pushState`/`replaceState` with hash for navigation. `startView` setting from SettingsContext determines the default route. Old `#/settings` and `#/plugin-store` routes redirect to `inbox` (settings is now a modal, plugin store is inside Settings > Plugins). Focus mode is tracked as a `?focus=1` query parameter. Calendar mode is tracked as a `?mode=day|week|month` query parameter. Uses a `navigationKey` ref to decide between push and replace when the hash changes.
+- **Notes:** Parses hash routes like `#/inbox`, `#/project/abc123`, `#/task/xyz`, `#/plugin-view/calendar%3Acalendar`, and `#/inbox?focus=1`. Legacy hashes such as `#/calendar`, `#/stats`, `#/completed`, `#/cancelled`, `#/someday`, `#/matrix`, and `#/dopamine-menu` are rewritten to their matching built-in plugin views so existing links keep working after those features moved out of the core sidebar. Uses `pushState`/`replaceState` with hash for navigation. `startView` from SettingsContext determines the default route. Old `#/settings` and `#/plugin-store` routes redirect to `inbox` (settings is now a modal, plugin store is inside Settings > Extensions). Focus mode is tracked as a `?focus=1` query parameter. Uses a `navigationKey` ref to decide between push and replace when the hash changes.
 
 ---
 
@@ -158,7 +155,7 @@
 - **Return Value:** `Array<{ id, name, callback }>` -- array of command objects (memoized)
 - **Key Dependencies:** `themeManager`
 - **Used By:** `App.tsx` (passed to `CommandPalette`)
-- **Notes:** Commands include: Go to Inbox/Today/Upcoming/Filters & Labels/Completed, Go to Settings (general and individual tabs: general, appearance, ai, plugins, templates, keyboard, data, about), Go to Plugins, Toggle Dark Mode, Switch to Light/Dark Theme, Toggle AI Chat, Enter Focus Mode, Quick Add Task, Create Task from Template, Go to Project (one per project), and all registered plugin commands. Plugin commands are dynamically added from the `pluginCommands` array.
+- **Notes:** Commands include: Go to Inbox/Today/Upcoming/Filters & Labels, Go to Settings (individual tabs like essentials, appearance, advanced, AI, extensions, templates, keyboard, data, about), Go to Extensions, Toggle Dark Mode, Switch to Light/Dark Theme, Toggle AI Chat, Enter Focus Mode, Quick Add Task, Create Task from Template, Go to Project (one per project), and all registered plugin commands. Plugin commands are dynamically added from the `pluginCommands` array.
 
 ---
 

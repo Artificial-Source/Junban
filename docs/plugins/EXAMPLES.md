@@ -693,7 +693,7 @@ export default class FocusModePlugin {
 
 - Defining settings in `manifest.json` (select, boolean, number types)
 - Reading settings with `this.settings.get<T>(id)` at runtime
-- Settings are automatically rendered as a form in Settings > Plugins > Focus Mode
+- Settings are automatically rendered as a form in Settings > Extensions > Focus Mode
 
 **Permissions needed:**
 

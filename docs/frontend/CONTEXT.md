@@ -242,13 +242,12 @@ This nesting order still matters because inner providers can depend on outer one
   - `multiSelectedIds: Set<string>` -- bulk-selected task IDs
   - `featureSettings: GeneralSettings` -- current feature flag values
   - `pluginViews: ViewInfo[]` -- registered plugin views
-  - `calendarMode: CalendarMode | null` -- current calendar mode
   - `sections: Section[]` -- project sections
   - `availableTags: string[]` -- all tag names
   - `tasks: Task[]` -- all tasks
 - **Key Dependencies:** Types from `core/types.js`, `hooks/useRouting.js`, `api/index.js`, `SettingsContext.js`
 - **Used By:** Any deeply nested component that needs read-only access to app state without prop drilling
-- **Notes:** This is a pure pass-through context -- it does not manage any state itself. The `AppStateProvider` receives its `value` prop from `App.tsx`, which computes it from the various other contexts and local state. Throws if used outside the provider.
+- **Notes:** This is a pure pass-through context -- it does not manage any state itself. The `AppStateProvider` receives its `value` prop from `App.tsx`, which computes it from the various other contexts and local state. Advanced views like calendar, stats, and matrix now enter through `plugin-view` routing plus `pluginViews`, rather than dedicated core route state. Throws if used outside the provider.
 
 ---
 

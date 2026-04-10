@@ -209,7 +209,7 @@ plugins/
     └── index.ts
 ```
 
-Restart the dev server. The plugin appears in Settings > Plugins.
+Restart the dev server. The plugin appears in Settings > Extensions.
 
 ### Creating a Plugin
 

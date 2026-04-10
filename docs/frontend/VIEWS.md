@@ -239,14 +239,14 @@ Settings tab implementations live in `src/ui/views/settings/`.
 
 Current tab areas include:
 
-- general
+- essentials
 - appearance
-- features
+- advanced
+- keyboard
+- templates
 - AI
 - voice
-- plugins
-- templates
-- keyboard
+- extensions
 - data
 - about
 

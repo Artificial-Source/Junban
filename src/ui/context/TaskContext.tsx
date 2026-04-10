@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
 } from "react";
 import type { Task, CreateTaskInput, UpdateTaskInput } from "../../core/types.js";
 import {
@@ -18,6 +19,7 @@ import {
   updateManyTasks as updateManyTasksApi,
   updateTask as updateTaskApi,
 } from "../api/tasks.js";
+import { endNamedPerfSpan, markPerf, measureAsync } from "../../utils/perf.js";
 
 interface TaskState {
   tasks: Task[];
@@ -95,27 +97,38 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     loading: true,
     error: null,
   });
+  const initialLoadMeasuredRef = useRef(false);
 
   const refreshTasks = useCallback(async () => {
-    dispatch({ type: "LOAD_START" });
-    try {
-      const tasks = await listTasks();
-      dispatch({ type: "LOAD_SUCCESS", tasks });
-    } catch (err) {
-      dispatch({ type: "LOAD_ERROR", error: String(err) });
-    }
+    await measureAsync("junban:tasks-refresh", async () => {
+      dispatch({ type: "LOAD_START" });
+      try {
+        const tasks = await listTasks();
+        dispatch({ type: "LOAD_SUCCESS", tasks });
+
+        if (!initialLoadMeasuredRef.current) {
+          initialLoadMeasuredRef.current = true;
+          markPerf("junban:startup-ready");
+          endNamedPerfSpan("junban:startup", { taskCount: tasks.length });
+        }
+      } catch (err) {
+        dispatch({ type: "LOAD_ERROR", error: String(err) });
+      }
+    });
   }, []);
 
   const createTask = useCallback(async (input: CreateTaskInput) => {
-    try {
-      const task = await createTaskApi(input);
-      dispatch({ type: "TASK_ADDED", task });
-    } catch (err) {
-      dispatch({
-        type: "LOAD_ERROR",
-        error: `Failed to create task: ${err instanceof Error ? err.message : String(err)}`,
-      });
-    }
+    await measureAsync("junban:task-create", async () => {
+      try {
+        const task = await createTaskApi(input);
+        dispatch({ type: "TASK_ADDED", task });
+      } catch (err) {
+        dispatch({
+          type: "LOAD_ERROR",
+          error: `Failed to create task: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    });
   }, []);
 
   const updateTask = useCallback(async (id: string, input: UpdateTaskInput) => {
@@ -132,20 +145,22 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   const completeTask = useCallback(
     async (id: string) => {
-      try {
-        const task = await completeTaskApi(id);
-        // If the task has recurrence, refresh to pick up the new occurrence
-        if (task.recurrence) {
-          await refreshTasks();
-        } else {
-          dispatch({ type: "TASK_UPDATED", task });
+      await measureAsync("junban:task-complete", async () => {
+        try {
+          const task = await completeTaskApi(id);
+          // If the task has recurrence, refresh to pick up the new occurrence
+          if (task.recurrence) {
+            await refreshTasks();
+          } else {
+            dispatch({ type: "TASK_UPDATED", task });
+          }
+        } catch (err) {
+          dispatch({
+            type: "LOAD_ERROR",
+            error: `Failed to complete task: ${err instanceof Error ? err.message : String(err)}`,
+          });
         }
-      } catch (err) {
-        dispatch({
-          type: "LOAD_ERROR",
-          error: `Failed to complete task: ${err instanceof Error ? err.message : String(err)}`,
-        });
-      }
+      });
     },
     [refreshTasks],
   );
@@ -219,27 +234,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    let idleHandle: number | null = null;
-    let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | null = null;
-
-    const run = () => {
-      void refreshTasks();
-    };
-
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      idleHandle = window.requestIdleCallback(run, { timeout: 100 });
-    } else {
-      timeoutHandle = globalThis.setTimeout(run, 16);
-    }
-
-    return () => {
-      if (idleHandle !== null && typeof window !== "undefined" && "cancelIdleCallback" in window) {
-        window.cancelIdleCallback(idleHandle);
-      }
-      if (timeoutHandle !== null) {
-        globalThis.clearTimeout(timeoutHandle);
-      }
-    };
+    void refreshTasks();
   }, [refreshTasks]);
 
   const contextValue = useMemo(

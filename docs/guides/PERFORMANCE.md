@@ -81,6 +81,34 @@ Check:
 - FCP / LCP
 - whether a change removed work from the startup path, not just moved code around
 
+## Automated Benchmarks
+
+Junban also ships a Playwright-based benchmark pass for the most important user-facing flows:
+
+```bash
+pnpm test:perf
+```
+
+The benchmark suite currently records and budgets:
+
+- empty-start startup (`junban:startup`)
+- initial task refresh (`junban:tasks-refresh`)
+- startup with a seeded task dataset
+- task creation latency (`junban:task-create`)
+- task completion latency (`junban:task-complete`)
+- settings open latency (`junban:settings-open`)
+- route transition latency (`junban:route-change`)
+
+Metrics are collected through a lightweight in-browser performance registry exposed as `window.__JUNBAN_PERF__`, backed by `src/utils/perf.ts`. The Playwright test attaches the raw JSON results to the test output so regressions are easier to inspect.
+
+## Current Low-Risk Optimizations
+
+The current startup path also includes a few small scheduling optimizations aimed at weaker machines:
+
+- initial task refresh uses a much shorter idle timeout so Inbox becomes useful sooner
+- blocked-task relation hydration starts earlier after first paint
+- onboarding and saved-filter hydration use shorter deferred timeouts so UI state stabilizes sooner without moving them onto the critical render path
+
 ## Recent Results
 
 The current production preview baseline is approximately:

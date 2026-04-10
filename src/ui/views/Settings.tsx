@@ -17,6 +17,7 @@ import {
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import { ErrorBoundary } from "../components/ErrorBoundary.js";
 import type { SettingsTab } from "./settings/types.js";
+import { endNamedPerfSpan, markPerf } from "../../utils/perf.js";
 
 const GeneralTab = lazy(() =>
   import("./settings/GeneralTab.js").then((module) => ({ default: module.GeneralTab })),
@@ -220,6 +221,11 @@ export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
   const handleMobileBack = () => {
     setMobileSelectedTab(null);
   };
+
+  useEffect(() => {
+    markPerf("junban:settings-visible");
+    endNamedPerfSpan("junban:settings-open", { tab: activeTab });
+  }, [activeTab]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {

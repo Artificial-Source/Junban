@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { App } from "./App.js";
 import "./index.css";
 import "./themes/manager.js"; // Initialize theme before render
+import { beginNamedPerfSpan, markPerf } from "../utils/perf.js";
 
 const QuickCapture = lazy(() =>
   import("./views/QuickCapture.js").then((module) => ({ default: module.QuickCapture })),
@@ -10,6 +11,9 @@ const QuickCapture = lazy(() =>
 
 /** Render the quick-capture view when the URL path matches /quick-capture */
 const isQuickCapture = window.location.pathname === "/quick-capture";
+
+beginNamedPerfSpan("junban:startup");
+markPerf("junban:main-entry");
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

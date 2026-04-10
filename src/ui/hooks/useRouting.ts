@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { SettingsTab } from "../views/settings/types.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 import { LEGACY_BUILTIN_VIEW_IDS } from "../../plugins/builtin/registry.js";
+import { beginNamedPerfSpan } from "../../utils/perf.js";
 
 export type View =
   | "inbox"
@@ -285,6 +286,7 @@ export function useRouting() {
 
   const handleNavigate = useCallback(
     (view: string, id?: string) => {
+      beginNamedPerfSpan("junban:route-change");
       const legacyRoute = toLegacyPluginRoute(view);
       const nextRoute: RouteState = {
         view: legacyRoute?.view ?? (view as View),

@@ -18,8 +18,13 @@ import { useAppState } from "./app/useAppState.js";
 import { useAppHandlers } from "./app/useAppHandlers.js";
 import { AppLayout } from "./app/AppLayout.js";
 import { AppModals } from "./app/AppModals.js";
+import { beginNamedPerfSpan, endNamedPerfSpan, markPerf } from "../utils/perf.js";
 
 function AppContent() {
+  useEffect(() => {
+    markPerf("junban:app-content-mounted");
+  }, []);
+
   // ── Routing ──
   const routing = useRouting();
   const {
@@ -156,6 +161,12 @@ function AppContent() {
   useEffect(() => {
     setContextMenu(null);
     setCustomDatePicker(null);
+    endNamedPerfSpan("junban:route-change", {
+      view: currentView,
+      projectId: selectedProjectId,
+      pluginViewId: selectedPluginViewId,
+      filterId: selectedFilterId,
+    });
   }, [
     currentView,
     selectedProjectId,
@@ -219,10 +230,12 @@ function AppContent() {
     featureSettings.feature_chords !== "false",
   );
   const handleOpenSettings = useCallback(() => {
+    beginNamedPerfSpan("junban:settings-open");
     setSettingsOpen(true);
   }, [setSettingsOpen]);
   const handleOpenSettingsTab = useCallback(
     (tab: SettingsTab) => {
+      beginNamedPerfSpan("junban:settings-open");
       openSettingsTab(tab);
       setSettingsOpen(true);
     },

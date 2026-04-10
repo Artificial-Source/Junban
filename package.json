@@ -45,6 +45,7 @@
     "cli": "node scripts/run-with-profile.mjs dev tsx src/cli/index.ts",
     "mcp": "node scripts/run-with-profile.mjs dev tsx src/mcp/server.ts",
     "test:e2e": "npx playwright test",
+    "test:perf": "npx playwright test tests/e2e/performance.spec.ts",
     "docs:check": "tsx scripts/docs-check.ts",
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
     "tauri:dev": "node scripts/run-with-profile.mjs dev tauri dev",

@@ -6,6 +6,7 @@ import { api, type PluginInfo } from "../../api/index.js";
 import { PluginCard } from "../../components/PluginCard.js";
 import { ErrorBoundary } from "../../components/ErrorBoundary.js";
 import { Toggle } from "./components.js";
+import { measureAsync } from "../../../utils/perf.js";
 
 const PluginBrowser = lazy(() =>
   import("../../components/PluginBrowser.js").then((module) => ({ default: module.PluginBrowser })),
@@ -58,15 +59,21 @@ export function PluginsTab() {
     if (permissionPlugin) {
       try {
         setActionError(null);
-        await api.approvePluginPermissions(permissionPlugin.id, permissions);
-        setPermissionPlugin(null);
-        await Promise.all([
-          refreshPlugins(),
-          refreshViews(),
-          refreshPanels(),
-          refreshStatusBar(),
-          refreshCommands(),
-        ]);
+        await measureAsync(
+          "junban:plugin-enable",
+          async () => {
+            await api.approvePluginPermissions(permissionPlugin.id, permissions);
+            setPermissionPlugin(null);
+            await Promise.all([
+              refreshPlugins(),
+              refreshViews(),
+              refreshPanels(),
+              refreshStatusBar(),
+              refreshCommands(),
+            ]);
+          },
+          { pluginId: permissionPlugin.id, mode: "approve" },
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to approve plugin permissions";
         setActionError(message);
@@ -77,14 +84,20 @@ export function PluginsTab() {
   const handleRevoke = async (pluginId: string) => {
     try {
       setActionError(null);
-      await api.revokePluginPermissions(pluginId);
-      await Promise.all([
-        refreshPlugins(),
-        refreshViews(),
-        refreshPanels(),
-        refreshStatusBar(),
-        refreshCommands(),
-      ]);
+      await measureAsync(
+        "junban:plugin-disable",
+        async () => {
+          await api.revokePluginPermissions(pluginId);
+          await Promise.all([
+            refreshPlugins(),
+            refreshViews(),
+            refreshPanels(),
+            refreshStatusBar(),
+            refreshCommands(),
+          ]);
+        },
+        { pluginId },
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to revoke plugin permissions";
       setActionError(message);
@@ -93,22 +106,31 @@ export function PluginsTab() {
 
   const handleToggleBuiltin = async (pluginId: string) => {
     const plugin = plugins.find((p) => p.id === pluginId);
+    if (!plugin) {
+      return;
+    }
     // Show permission dialog when enabling a built-in plugin that has permissions and isn't already enabled
-    if (plugin && !plugin.enabled && plugin.permissions.length > 0) {
+    if (!plugin.enabled && plugin.permissions.length > 0) {
       setPermissionPlugin(plugin);
       return;
     }
     setToggling((prev) => new Set(prev).add(pluginId));
     try {
       setActionError(null);
-      await api.togglePlugin(pluginId);
-      await Promise.all([
-        refreshPlugins(),
-        refreshViews(),
-        refreshPanels(),
-        refreshStatusBar(),
-        refreshCommands(),
-      ]);
+      await measureAsync(
+        plugin.enabled ? "junban:plugin-disable" : "junban:plugin-enable",
+        async () => {
+          await api.togglePlugin(pluginId);
+          await Promise.all([
+            refreshPlugins(),
+            refreshViews(),
+            refreshPanels(),
+            refreshStatusBar(),
+            refreshCommands(),
+          ]);
+        },
+        { pluginId },
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to toggle plugin";
       setActionError(message);

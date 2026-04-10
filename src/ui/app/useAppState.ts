@@ -142,9 +142,9 @@ export function useAppState(routing: {
     let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | null = null;
 
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      idleHandle = window.requestIdleCallback(run, { timeout: 1200 });
+      idleHandle = window.requestIdleCallback(run, { timeout: 600 });
     } else {
-      timeoutHandle = globalThis.setTimeout(run, 250);
+      timeoutHandle = globalThis.setTimeout(run, 150);
     }
 
     return () => {
@@ -182,9 +182,9 @@ export function useAppState(routing: {
     let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | null = null;
 
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      idleHandle = window.requestIdleCallback(run, { timeout: 1500 });
+      idleHandle = window.requestIdleCallback(run, { timeout: 500 });
     } else {
-      timeoutHandle = globalThis.setTimeout(run, 300);
+      timeoutHandle = globalThis.setTimeout(run, 150);
     }
 
     return () => {
@@ -214,9 +214,9 @@ export function useAppState(routing: {
     let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | null = null;
 
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      idleHandle = window.requestIdleCallback(run, { timeout: 1500 });
+      idleHandle = window.requestIdleCallback(run, { timeout: 750 });
     } else {
-      timeoutHandle = globalThis.setTimeout(run, 300);
+      timeoutHandle = globalThis.setTimeout(run, 200);
     }
 
     return () => {

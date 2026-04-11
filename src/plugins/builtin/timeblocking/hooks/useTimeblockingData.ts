@@ -23,23 +23,33 @@ export interface UseTimeblockingDataReturn {
   refreshTasks: () => Promise<void>;
 }
 
+function reuseIfSameById<T extends { id: string }>(prev: T[], next: T[]): T[] {
+  if (prev.length !== next.length) return next;
+  for (let i = 0; i < prev.length; i += 1) {
+    if (prev[i]?.id !== next[i]?.id) return next;
+  }
+  return prev;
+}
+
 export function useTimeblockingData(params: UseTimeblockingDataParams): UseTimeblockingDataReturn {
   const { store, plugin, selectedDate, dayCount, rangeStart, rangeEnd, setBlocks, setSlotsState, setTasks } = params;
 
   const refreshData = useCallback(() => {
     if (dayCount === 1) {
       const dateStr = formatDateStr(selectedDate);
-      setBlocks(store.listBlocks(dateStr));
-      setSlotsState(store.listSlots(dateStr));
+      setBlocks((prev) => reuseIfSameById(prev, store.listBlocks(dateStr)));
+      setSlotsState((prev) => reuseIfSameById(prev, store.listSlots(dateStr)));
     } else {
-      setBlocks(store.listBlocksInRange(rangeStart, rangeEnd));
-      setSlotsState(store.listSlotsInRange(rangeStart, rangeEnd));
+      setBlocks((prev) => reuseIfSameById(prev, store.listBlocksInRange(rangeStart, rangeEnd)));
+      setSlotsState((prev) => reuseIfSameById(prev, store.listSlotsInRange(rangeStart, rangeEnd)));
     }
   }, [store, selectedDate, dayCount, rangeStart, rangeEnd, setBlocks, setSlotsState]);
 
   const refreshTasks = useCallback(async () => {
     const list = await plugin.app.tasks.list?.();
-    if (list) setTasks(list);
+    if (list) {
+      setTasks((prev) => reuseIfSameById(prev, list));
+    }
   }, [plugin.app.tasks, setTasks]);
 
   useEffect(() => {

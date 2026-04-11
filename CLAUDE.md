@@ -192,6 +192,14 @@ pnpm plugin:create
 pnpm check
 ```
 
+## Branch And Release Flow
+
+- `developer` is the integration branch for normal development work.
+- `main` is the production branch and should remain stable and releasable.
+- Preferred promotion path is `feature branch -> developer -> main -> v* tag`.
+- GitHub Actions CI runs on both `developer` and `main`; merges are expected to satisfy the required checks before promotion.
+- Release automation only publishes from tags that resolve to commits already present on `main`.
+
 ## Environment And Profiles
 
 Common environment knobs:

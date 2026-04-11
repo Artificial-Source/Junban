@@ -17,7 +17,9 @@ export function useReducedMotion(): boolean {
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const handler = (e: MediaQueryListEvent) => setOsPrefersReduced(e.matches);
+    const handler = (e: MediaQueryListEvent) => {
+      setOsPrefersReduced((prev) => (prev === e.matches ? prev : e.matches));
+    };
     mql.addEventListener("change", handler);
     return () => mql.removeEventListener("change", handler);
   }, []);
@@ -26,8 +28,10 @@ export function useReducedMotion(): boolean {
     if (typeof document === "undefined" || typeof MutationObserver === "undefined") return;
 
     const root = document.documentElement;
-    const sync = () => setAppPrefersReduced(root.classList.contains("reduce-motion"));
-    sync();
+    const sync = () => {
+      const next = root.classList.contains("reduce-motion");
+      setAppPrefersReduced((prev) => (prev === next ? prev : next));
+    };
 
     const observer = new MutationObserver(sync);
     observer.observe(root, { attributes: true, attributeFilter: ["class"] });

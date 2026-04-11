@@ -110,10 +110,12 @@ describe("FiltersLabels", () => {
     });
   });
 
-  it("shows add filter form when Add filter button is clicked", () => {
+  it("shows add filter form when Add filter button is clicked", async () => {
     render(<FiltersLabels tasks={[]} onNavigateToFilter={onNavigateToFilter} />);
     fireEvent.click(screen.getByText("Add filter"));
-    expect(screen.getByPlaceholderText("Filter name")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Filter name")).toBeTruthy();
+    });
   });
 
   it("adds a filter when form is submitted", async () => {
@@ -147,13 +149,15 @@ describe("FiltersLabels", () => {
     expect(onNavigateToFilter).toHaveBeenCalledWith("#work");
   });
 
-  it("collapses and expands My Filters section", () => {
+  it("collapses and expands My Filters section", async () => {
     render(<FiltersLabels tasks={[]} onNavigateToFilter={onNavigateToFilter} />);
     // Both sections start expanded
     expect(screen.getByText("Your list of filters will show up here.")).toBeTruthy();
 
     // Click My Filters to collapse
     fireEvent.click(screen.getByText("My Filters"));
-    expect(screen.queryByText("Your list of filters will show up here.")).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByText("Your list of filters will show up here.")).toBeNull();
+    });
   });
 });

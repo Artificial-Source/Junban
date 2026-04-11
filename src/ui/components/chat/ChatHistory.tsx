@@ -112,8 +112,16 @@ function SessionEntry({
   }
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onSwitch(session.sessionId)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSwitch(session.sessionId);
+        }
+      }}
       className={`w-full text-left px-2 py-1.5 rounded-md text-xs group flex items-start gap-1.5 transition-colors ${
         isActive
           ? "bg-accent/10 text-accent"
@@ -149,7 +157,7 @@ function SessionEntry({
           <Trash2 size={10} />
         </button>
       </div>
-    </button>
+    </div>
   );
 }
 

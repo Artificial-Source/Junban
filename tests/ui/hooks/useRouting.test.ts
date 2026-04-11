@@ -82,15 +82,13 @@ describe("useRouting", () => {
     expect(result.current.focusModeOpen).toBe(true);
   });
 
-  it("setCalendarMode updates calendar mode", () => {
+  it("navigate to calendar resolves to the built-in plugin view", () => {
     const { result } = renderHook(() => useRouting());
     act(() => {
       result.current.handleNavigate("calendar");
     });
-    act(() => {
-      result.current.setCalendarMode("month");
-    });
-    expect(result.current.calendarMode).toBe("month");
+    expect(result.current.currentView).toBe("plugin-view");
+    expect(result.current.selectedPluginViewId).toBeTruthy();
   });
 
   it("openSettingsTab updates settingsTab", () => {
@@ -108,11 +106,11 @@ describe("useRouting", () => {
     expect(result.current.selectedProjectId).toBe("my-project");
   });
 
-  it("parses hash with calendar mode param on mount", () => {
+  it("parses legacy calendar hash into the built-in plugin view", () => {
     window.location.hash = "#/calendar?mode=month";
     const { result } = renderHook(() => useRouting());
-    expect(result.current.currentView).toBe("calendar");
-    expect(result.current.calendarMode).toBe("month");
+    expect(result.current.currentView).toBe("plugin-view");
+    expect(result.current.selectedPluginViewId).toBeTruthy();
   });
 
   it("parses focus=1 query param from hash", () => {

@@ -2,7 +2,14 @@ import { type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 import {
   Inbox,
   CalendarDays,
+  CalendarRange,
   Clock,
+  CheckCircle2,
+  XCircle,
+  BarChart3,
+  Lightbulb,
+  Grid2x2,
+  Zap,
   ChevronDown,
   ChevronRight,
   SlidersHorizontal,
@@ -32,7 +39,14 @@ export const NAV_ITEMS: Array<{
   { id: "inbox", label: "Inbox", icon: Inbox, countKey: "inbox" },
   { id: "today", label: "Today", icon: CalendarDays, countKey: "today" },
   { id: "upcoming", label: "Upcoming", icon: Clock },
+  { id: "calendar", label: "Calendar", icon: CalendarRange },
   { id: "filters-labels", label: "Filters & Labels", icon: SlidersHorizontal },
+  { id: "completed", label: "Completed", icon: CheckCircle2 },
+  { id: "cancelled", label: "Cancelled", icon: XCircle },
+  { id: "matrix", label: "Matrix", icon: Grid2x2 },
+  { id: "stats", label: "Stats", icon: BarChart3 },
+  { id: "someday", label: "Someday / Maybe", icon: Lightbulb },
+  { id: "dopamine-menu", label: "Quick Wins", icon: Zap },
 ];
 
 export const CORE_VIEWS = new Set(["inbox", "today", "upcoming"]);
@@ -41,7 +55,14 @@ export const DEFAULT_SIDEBAR_ORDER = [
   "inbox",
   "today",
   "upcoming",
+  "calendar",
   "filters-labels",
+  "completed",
+  "cancelled",
+  "matrix",
+  "stats",
+  "someday",
+  "dopamine-menu",
   "favorite-views",
   "favorites",
   "projects",
@@ -58,7 +79,14 @@ export const SECTION_IDS = new Set([
 ]);
 
 export const NAV_FEATURE_MAP: Record<string, keyof GeneralSettings> = {
+  calendar: "feature_calendar",
   "filters-labels": "feature_filters_labels",
+  completed: "feature_completed",
+  cancelled: "feature_cancelled",
+  matrix: "feature_matrix",
+  stats: "feature_stats",
+  someday: "feature_someday",
+  "dopamine-menu": "feature_dopamine_menu",
 };
 
 export function SortableNavItem({ id, children }: { id: string; children: ReactNode }) {

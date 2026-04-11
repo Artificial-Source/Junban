@@ -133,6 +133,14 @@ pnpm docs:check
 pnpm plugin:create
 ```
 
+## Branch Workflow
+
+- `developer` is the integration branch for normal feature, fix, docs, and test work.
+- `main` is the protected production branch and should stay releasable.
+- Default branch flow is `feature branch -> developer -> main -> v* tag`.
+- Open PRs into `developer` for day-to-day work unless the task is an explicitly approved hotfix or release promotion.
+- Release tags must point to commits that are already on `main`.
+
 ## Conventions That Matter
 
 - TypeScript strict mode is on.

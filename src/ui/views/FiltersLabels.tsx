@@ -12,6 +12,14 @@ interface SavedFilter {
   query: string;
 }
 
+function reuseIfSameByKey<T>(prev: T[], next: T[], getKey: (value: T) => string): T[] {
+  if (prev.length !== next.length) return next;
+  for (let i = 0; i < prev.length; i += 1) {
+    if (getKey(prev[i]) !== getKey(next[i])) return next;
+  }
+  return prev;
+}
+
 interface FiltersLabelsProps {
   tasks: Task[];
   onNavigateToFilter: (query: string) => void;
@@ -39,7 +47,14 @@ export function FiltersLabels({ tasks, onNavigateToFilter }: FiltersLabelsProps)
     api.getAppSetting(SAVED_FILTERS_KEY).then((val) => {
       if (val) {
         try {
-          setSavedFilters(JSON.parse(val));
+          const parsed = JSON.parse(val) as SavedFilter[];
+          setSavedFilters((prev) =>
+            reuseIfSameByKey(
+              prev,
+              parsed,
+              (filter) => `${filter.id}:${filter.name}:${filter.query}`,
+            ),
+          );
         } catch {
           // ignore
         }
@@ -51,7 +66,11 @@ export function FiltersLabels({ tasks, onNavigateToFilter }: FiltersLabelsProps)
   useEffect(() => {
     api
       .listTags()
-      .then(setTags)
+      .then((loadedTags) => {
+        setTags((prev) =>
+          reuseIfSameByKey(prev, loadedTags, (tag) => `${tag.id}:${tag.name}:${tag.color}`),
+        );
+      })
       .catch((err: unknown) =>
         log.error("Failed to load tags", {
           error: err instanceof Error ? err.message : String(err),

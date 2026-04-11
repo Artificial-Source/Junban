@@ -35,6 +35,14 @@ interface TaskDetailPanelProps {
   onDeleteComment?: (commentId: string) => void;
 }
 
+function reuseIfSameTaskIds(prev: Task[], next: Task[]): Task[] {
+  if (prev.length !== next.length) return next;
+  for (let i = 0; i < prev.length; i += 1) {
+    if (prev[i]?.id !== next[i]?.id) return next;
+  }
+  return prev;
+}
+
 export function TaskDetailPanel({
   task,
   allTasks = [],
@@ -97,8 +105,8 @@ export function TaskDetailPanel({
     let cancelled = false;
     taskApi.getTaskRelations(task.id).then((r) => {
       if (!cancelled) {
-        setRelBlocks(r.blocks);
-        setRelBlockedBy(r.blockedBy);
+        setRelBlocks((prev) => reuseIfSameTaskIds(prev, r.blocks));
+        setRelBlockedBy((prev) => reuseIfSameTaskIds(prev, r.blockedBy));
       }
     });
     return () => {

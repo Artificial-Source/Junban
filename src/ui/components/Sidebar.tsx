@@ -97,9 +97,8 @@ export function Sidebar({
       { id: string; label: string; icon: typeof Inbox | string; countKey?: "inbox" | "today" }
     >(NAV_ITEMS.map((item) => [item.id, item]));
     for (const view of pluginViews) {
-      if (view.slot === "navigation" && builtinPluginIds.has(view.pluginId)) {
-        const viewId = `plugin-view-${view.id}`;
-        map.set(viewId, { id: viewId, label: view.name, icon: view.icon ?? "🧩" });
+      if (view.slot === "navigation" && !map.has(view.id)) {
+        map.set(view.id, { id: view.id, label: view.name, icon: view.icon ?? "🧩" });
       }
     }
     return map;
@@ -115,7 +114,9 @@ export function Sidebar({
       workspace: ViewInfo[] = [];
     for (const view of pluginViews) {
       const slot =
-        view.slot === "navigation" && builtinPluginIds.has(view.pluginId)
+        view.slot === "navigation" &&
+        builtinPluginIds.has(view.pluginId) &&
+        !navItemMap.has(view.id)
           ? "navigation"
           : view.slot === "navigation"
             ? "tools"
@@ -125,7 +126,7 @@ export function Sidebar({
       else tools.push(view);
     }
     return { navigation, tools, workspace };
-  }, [pluginViews, builtinPluginIds]);
+  }, [pluginViews, builtinPluginIds, navItemMap]);
 
   const hasToolsContent = viewsBySlot.tools.length > 0 || panels.length > 0;
 

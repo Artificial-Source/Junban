@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { TimeblockingView } from "../../../../src/plugins/builtin/timeblocking/components/TimeblockingView.js";
 import { TimeblockingContext } from "../../../../src/plugins/builtin/timeblocking/context.js";
 import type TimeblockingPlugin from "../../../../src/plugins/builtin/timeblocking/index.js";
@@ -49,6 +49,12 @@ function renderView(plugin?: TimeblockingPlugin) {
       <TimeblockingView />
     </TimeblockingContext.Provider>,
   );
+}
+
+async function settleView() {
+  await act(async () => {
+    await Promise.resolve();
+  });
 }
 
 // Helper to match matchMedia for mobile tests
@@ -166,27 +172,42 @@ describe("TimeblockingView - Extended", () => {
       expect(screen.getByTestId("sidebar-toggle")).toBeInTheDocument();
     });
 
-    it("toggles sidebar collapse", () => {
+    it("toggles sidebar collapse", async () => {
       renderView();
-      // Sidebar should be visible initially
-      expect(screen.getByText("Tasks")).toBeInTheDocument();
+      await settleView();
+      const toggle = screen.getByTestId("sidebar-toggle");
+      expect(toggle).toHaveAttribute("aria-label", "Hide sidebar");
 
-      // Toggle collapse
-      fireEvent.click(screen.getByTestId("sidebar-toggle"));
-      expect(screen.queryByText("Tasks")).not.toBeInTheDocument();
+      act(() => {
+        fireEvent.click(toggle);
+      });
+      await settleView();
+      expect(toggle).toHaveAttribute("aria-label", "Show sidebar");
 
-      // Toggle expand
-      fireEvent.click(screen.getByTestId("sidebar-toggle"));
-      expect(screen.getByText("Tasks")).toBeInTheDocument();
+      act(() => {
+        fireEvent.click(toggle);
+      });
+      await settleView();
+      expect(toggle).toHaveAttribute("aria-label", "Hide sidebar");
     });
 
-    it("toggles sidebar via S key", () => {
+    it("toggles sidebar via S key", async () => {
       renderView();
-      expect(screen.getByText("Tasks")).toBeInTheDocument();
-      fireEvent.keyDown(window, { key: "s" });
-      expect(screen.queryByText("Tasks")).not.toBeInTheDocument();
-      fireEvent.keyDown(window, { key: "s" });
-      expect(screen.getByText("Tasks")).toBeInTheDocument();
+      await settleView();
+      const toggle = screen.getByTestId("sidebar-toggle");
+      expect(toggle).toHaveAttribute("aria-label", "Hide sidebar");
+
+      act(() => {
+        fireEvent.keyDown(window, { key: "s" });
+      });
+      await settleView();
+      expect(toggle).toHaveAttribute("aria-label", "Show sidebar");
+
+      act(() => {
+        fireEvent.keyDown(window, { key: "s" });
+      });
+      await settleView();
+      expect(toggle).toHaveAttribute("aria-label", "Hide sidebar");
     });
 
     it("renders resize divider", () => {

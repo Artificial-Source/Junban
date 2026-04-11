@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act, cleanup } from "@testing-library/react";
 import { motion } from "framer-motion";
 
 // Mock SettingsContext before importing AnimatedPresence
@@ -24,11 +24,16 @@ function ReducedMotionIndicator() {
 describe("AnimatedPresence", () => {
   beforeEach(() => {
     mockReduceAnimations = "false";
-    document.documentElement.classList.remove("reduce-motion");
+    act(() => {
+      document.documentElement.classList.remove("reduce-motion");
+    });
   });
 
   afterEach(() => {
-    document.documentElement.classList.remove("reduce-motion");
+    cleanup();
+    act(() => {
+      document.documentElement.classList.remove("reduce-motion");
+    });
   });
 
   it("renders children", () => {
@@ -40,14 +45,18 @@ describe("AnimatedPresence", () => {
     expect(screen.getByText("Hello")).toBeInTheDocument();
   });
 
-  it("renders when reduce_animations is true", () => {
+  it("renders when reduce_animations is true", async () => {
     mockReduceAnimations = "true";
-    document.documentElement.classList.add("reduce-motion");
-    render(
-      <AnimatedPresence>
-        <div>Still here</div>
-      </AnimatedPresence>,
-    );
+    await act(async () => {
+      document.documentElement.classList.add("reduce-motion");
+    });
+    await act(async () => {
+      render(
+        <AnimatedPresence>
+          <div>Still here</div>
+        </AnimatedPresence>,
+      );
+    });
     expect(screen.getByText("Still here")).toBeInTheDocument();
   });
 
@@ -71,10 +80,14 @@ describe("useReducedMotion", () => {
     expect(screen.getByTestId("reduced").textContent).toBe("no");
   });
 
-  it("returns true when reduce_animations setting is true", () => {
+  it("returns true when reduce_animations setting is true", async () => {
     mockReduceAnimations = "true";
-    document.documentElement.classList.add("reduce-motion");
-    render(<ReducedMotionIndicator />);
+    await act(async () => {
+      document.documentElement.classList.add("reduce-motion");
+    });
+    await act(async () => {
+      render(<ReducedMotionIndicator />);
+    });
     expect(screen.getByTestId("reduced").textContent).toBe("yes");
   });
 });

@@ -1,7 +1,7 @@
 import { CompletionRing } from "../../components/CompletionRing.js";
 import { TaskJar } from "../../components/TaskJar.js";
 import { useGeneralSettings } from "../../context/SettingsContext.js";
-import { usePluginContext } from "../../context/PluginContext.js";
+import { useOptionalPluginContext } from "../../context/PluginContext.js";
 import type { Task } from "../../../core/types.js";
 
 interface TodayHeaderProps {
@@ -26,7 +26,8 @@ export function TodayHeader({
   onWeeklyReview,
 }: TodayHeaderProps) {
   const { settings } = useGeneralSettings();
-  const { plugins } = usePluginContext();
+  const pluginContext = useOptionalPluginContext();
+  const plugins = pluginContext?.plugins ?? [];
   const showTaskJar = settings.eat_the_frog_enabled !== "false";
   const showWeeklyReview = plugins.some((plugin) => plugin.id === "stats" && plugin.enabled);
 

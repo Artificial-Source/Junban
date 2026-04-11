@@ -188,3 +188,7 @@ export function usePluginContext() {
   if (!ctx) throw new Error("usePluginContext must be used within PluginProvider");
   return ctx;
 }
+
+export function useOptionalPluginContext() {
+  return useContext(PluginContext);
+}

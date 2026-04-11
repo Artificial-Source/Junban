@@ -47,12 +47,20 @@ See [Plugin Registry Submission](#plugin-registry-submission) below.
 
 | Branch          | Purpose               |
 | --------------- | --------------------- |
+| `developer`     | Integration branch    |
 | `main`          | Stable, deployable    |
 | `feat/<name>`   | New features          |
 | `fix/<name>`    | Bug fixes             |
 | `docs/<name>`   | Documentation changes |
 | `plugin/<name>` | Plugin system changes |
 | `test/<name>`   | Test additions        |
+
+Recommended flow:
+
+1. Branch from `developer` for normal work.
+2. Open pull requests back into `developer`.
+3. Promote `developer` into `main` only when the branch is green and ready to ship.
+4. Create release tags from commits that are already on `main`.
 
 ### Commits
 
@@ -75,6 +83,14 @@ refactor(ui): extract TaskInput into separate component
 - **Size**: Keep PRs focused. One feature or fix per PR. Large PRs are harder to review.
 - **Tests**: Include tests for new logic. Fix failing tests before submitting.
 - **Docs**: Update the mapped documentation in the same PR when behavior, API surface, workflow, or file organization changes. Use `docs/README.md` as the ownership map.
+- **Target branch**: Use `developer` for normal feature and fix work. Reserve `main` for promotion PRs and urgent, explicitly approved hotfixes.
+
+### CI/CD
+
+- GitHub Actions runs the full quality gate (`lint`, `format:check`, `docs:check`, `typecheck`, `test`) on pushes and PRs for both `developer` and `main`.
+- Pull requests also run dependency review so risky dependency changes are easier to spot.
+- A separate web build verification job runs after the quality gate to catch production build regressions before merge.
+- Desktop release automation only runs from version tags that point to commits already present on `main`.
 
 ### Documentation Requirements
 

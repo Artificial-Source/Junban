@@ -39,11 +39,26 @@ This guide describes how ASF Junban desktop releases, in-app updates, changelog 
 
 ## Release Flow
 
+Branch model:
+
+- `developer` is the integration branch for day-to-day work.
+- `main` is the production branch and should stay releasable.
+- Version tags must be created from commits that are already on `main`.
+
 1. Update versions with `pnpm release:prepare <version>`.
 2. Move the relevant items from `Unreleased` into a new version section in `CHANGELOG.md`.
-3. Commit and tag the release as `v<version>`.
-4. Push the tag so GitHub Actions builds installers and updater metadata.
-5. Review the draft GitHub release before publishing.
+3. Merge or promote the release candidate into `main`.
+4. Commit and tag the release as `v<version>` from `main`.
+5. Push the tag so GitHub Actions re-runs the quality gate, verifies the tag commit is on `main`, then builds installers and updater metadata.
+6. Review the draft GitHub release before publishing.
+
+## CI/CD Flow
+
+- `CI` runs on pushes to `developer` and `main`, on pull requests targeting those branches, and on manual dispatch.
+- The required quality gate is `Lint, Typecheck & Test`.
+- `Build Web App` runs after the quality gate to catch production build breaks before merge.
+- `Dependency Review` runs on pull requests to flag risky dependency updates.
+- `Release` can run from a pushed tag or manual dispatch, but it only proceeds when the tag resolves to a commit already present on `main`.
 
 ## Current Limits
 

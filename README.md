@@ -4,11 +4,11 @@
 
 # ASF Junban
 
-**The task manager that doesn't exist yet.**<br />
-Beautiful and simple out of the box, with a real AI assistant<br />
-and a plugin system so simple that anyone can build features.
+**A local-first task manager with AI, voice, and plugins.**<br />
+Fast for everyday task management, flexible when you need more power,<br />
+and private by default because your data stays on your machine.
 
-Local-first. No accounts. No tracking. Your data stays on your machine.
+No accounts. No tracking. No mandatory cloud.
 
 <p>
   <a href="https://github.com/Artificial-Source-Foundation/Junban">Home</a> &nbsp;&middot;&nbsp;
@@ -23,7 +23,7 @@ Local-first. No accounts. No tracking. Your data stays on your machine.
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/Artificial-Source-Foundation/Junban?style=social)](https://github.com/Artificial-Source-Foundation/Junban/stargazers)
 
-Built by the [AI Strategic Forum (ASF)](https://github.com/Artificial-Source-Foundation) community.
+An open-source project by the [AI Strategic Forum (ASF)](https://github.com/Artificial-Source-Foundation) community.
 
 <br />
 
@@ -70,30 +70,57 @@ Built by the [AI Strategic Forum (ASF)](https://github.com/Artificial-Source-Fou
 
 ## Download
 
-Desktop app for Windows, macOS, and Linux.
-
-Latest release:
+Download the latest desktop release here:
 
 <https://github.com/Artificial-Source-Foundation/Junban/releases/latest>
 
-| Platform              | Pick this asset on the latest release page |
-| --------------------- | ------------------------------------------ |
-| Windows               | `.exe` installer or `.msi`                 |
-| macOS (Apple Silicon) | `.dmg` with `aarch64` in the filename      |
-| macOS (Intel)         | `.dmg` with `x64` in the filename          |
-| Linux (Debian/Ubuntu) | `.deb` with `amd64` in the filename        |
-| Linux (portable)      | `.AppImage` with `amd64` in the filename   |
+Pick the file for your platform:
+
+| Platform              | Download this file         |
+| --------------------- | -------------------------- |
+| Windows               | `.exe` installer or `.msi` |
+| macOS (Apple Silicon) | `.dmg` with `aarch64`      |
+| macOS (Intel)         | `.dmg` with `x64`          |
+| Linux (Debian/Ubuntu) | `.deb` with `amd64`        |
+| Linux (portable)      | `.AppImage` with `amd64`   |
+
+Install notes:
+
+- Windows: download the installer and open it.
+- macOS: download the `.dmg`, open it, and move Junban to `Applications`.
+- Linux: use the commands below, or download the asset in your browser and run the matching install step.
+
+Linux quick install from the latest release:
+
+```bash
+# Debian/Ubuntu (.deb) - download latest, then install
+curl -fsSL https://api.github.com/repos/Artificial-Source-Foundation/Junban/releases/latest \
+  | grep -o 'https://[^"]*amd64\.deb' \
+  | head -n 1 \
+  | xargs curl -fL -o ASF-Junban-latest-amd64.deb
+sudo apt install ./ASF-Junban-latest-amd64.deb
+
+# Portable (.AppImage) - download latest, make executable, then run
+curl -fsSL https://api.github.com/repos/Artificial-Source-Foundation/Junban/releases/latest \
+  | grep -o 'https://[^"]*amd64\.AppImage' \
+  | head -n 1 \
+  | xargs curl -fL -o ASF-Junban-latest-amd64.AppImage
+chmod +x ./ASF-Junban-latest-amd64.AppImage
+./ASF-Junban-latest-amd64.AppImage
+```
+
+If you prefer the browser flow, download the `.deb` or `.AppImage` from the release page above and run the same install step on the downloaded file.
 
 ## Why Junban
 
-Most task managers are either too simple or too heavy. Junban is trying to keep the core fast and local, while still giving you AI, voice, and extensibility when you want them.
+Most task managers force a tradeoff: simple but limited, or powerful but bloated. Junban is built to stay fast for everyday use while still giving you AI, voice, and extensibility when you want them.
 
-- Type tasks naturally: `buy milk tomorrow 3pm p1 #groceries +shopping`
-- Use AI that can see your tasks, projects, and schedule
-- Talk instead of type with STT/TTS and voice activity detection
-- Extend the app with plugins
-- Keep your data portable with SQLite or Markdown storage
-- Use the same core from the UI, API server, CLI, and MCP server
+- Capture tasks in plain English: `buy milk tomorrow 3pm p1 #groceries +shopping`
+- Use an optional AI assistant that can work with your real tasks, projects, and schedule
+- Talk instead of type with built-in voice features
+- Extend the app with plugins instead of waiting for core features
+- Keep your data local and portable with SQLite or Markdown storage
+- Use the same core across the desktop app, API server, CLI, and MCP server
 
 ## Features
 

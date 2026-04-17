@@ -12,6 +12,7 @@ Local-first. No accounts. No tracking. Your data stays on your machine.
 
 <p>
   <a href="https://github.com/Artificial-Source-Foundation/Junban">Home</a> &nbsp;&middot;&nbsp;
+  <a href="docs/site/README.md">Documentation</a> &nbsp;&middot;&nbsp;
   <a href="docs/guides/SETUP.md">Setup</a> &nbsp;&middot;&nbsp;
   <a href="docs/guides/ARCHITECTURE.md">Architecture</a> &nbsp;&middot;&nbsp;
   <a href="docs/guides/RELEASES.md">Releases</a> &nbsp;&middot;&nbsp;
@@ -198,6 +199,7 @@ Source-run dev commands use an isolated dev profile by default. Packaged desktop
 | Domain / Entry             | Purpose                                                                                                                    |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `docs/README.md`           | Canonical docs index and single source of truth for ownership mapping/doc-governance routing                               |
+| `docs/site/README.md`      | Website-facing docs hub that routes readers by audience (`users`, `developers`, `agents`) to canonical docs                        |
 | `docs/product/README.md`   | Product-doc index for mission, roadmap, status, and PRD-style planning                                                     |
 | `docs/guides/`             | Contributor and maintainer workflows (setup, architecture, releases, security)                                             |
 | `docs/reference/README.md` | Technical-reference library index for `docs/reference/frontend/`, `docs/reference/backend/`, and `docs/reference/plugins/` |

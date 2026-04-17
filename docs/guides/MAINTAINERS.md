@@ -30,6 +30,7 @@ Before merging into `developer`:
 - Confirm CI passed.
 - Confirm docs were updated when behavior, APIs, workflows, or structure changed.
 - Confirm documentation routing follows `docs/README.md` and the domain indexes (`docs/reference/README.md`, `docs/product/README.md`, and `docs/internal/README.md`) when relevant.
+- If canonical docs changed under `docs/guides/`, `docs/reference/`, or `docs/product/`, confirm mapped `docs/site/` publication pages were reviewed/updated in the same PR.
 
 Before merging into `main`:
 

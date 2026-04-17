@@ -4,9 +4,10 @@ This policy defines how Junban keeps legacy documentation paths alive for link c
 
 ## Canonical vs legacy surfaces
 
-- Canonical documentation lives under `docs/reference/`, `docs/product/`, and `docs/internal/`.
+- Canonical documentation lives under `docs/guides/`, `docs/reference/`, `docs/product/`, and `docs/internal/`.
 - Legacy compatibility stubs exist under historical paths (`docs/frontend`, `docs/backend`, `docs/plugins`, and `docs/planning`).
 - New normative content must be authored in canonical docs, not in legacy stubs.
+- `docs/site/` is a website publication layer and must not be treated as canonical documentation.
 
 ## Stub requirements
 

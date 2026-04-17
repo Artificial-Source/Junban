@@ -113,6 +113,7 @@ Before opening a PR:
 1. Run `git diff --name-only`.
 2. Match changed source paths to the ownership map in `docs/README.md`.
 3. Update those docs in the same PR or explicitly confirm no behavior/API change.
+4. If you changed canonical docs in `docs/guides/`, `docs/reference/`, or `docs/product/`, review and update mapped `docs/site/` publication pages in the same PR.
 
 ### Code Review
 

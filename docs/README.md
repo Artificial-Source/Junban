@@ -4,6 +4,8 @@ This is the canonical documentation entry point for Junban contributors and AI a
 
 Product-facing mission, roadmap, status, and PRD-style planning live under `docs/product/`; contributor, engineering, reference, and internal-planning docs live under their canonical domains in this tree.
 
+Website-facing documentation lives under `docs/site/` as a publishing surface, while canonical contributor/reference ownership remains in `docs/guides/`, `docs/reference/`, `docs/product/`, and `docs/internal/`.
+
 ## Start Here
 
 | You want to...                    | Read this first                                                                  |
@@ -11,6 +13,8 @@ Product-facing mission, roadmap, status, and PRD-style planning live under `docs
 | Understand the project            | [`../CLAUDE.md`](../CLAUDE.md)                                                   |
 | Find the right doc quickly        | [`../AGENTS.md`](../AGENTS.md)                                                   |
 | Navigate docs by domain           | [Documentation Domains](#documentation-domains)                                  |
+| Navigate website-facing docs      | [`site/README.md`](site/README.md)                                               |
+| Route website docs by audience    | [`site/users/README.md`](site/users/README.md), [`site/developers/README.md`](site/developers/README.md), [`site/agents/README.md`](site/agents/README.md) |
 | Set up local development          | [`guides/SETUP.md`](guides/SETUP.md)                                             |
 | Contribute safely                 | [`guides/CONTRIBUTING.md`](guides/CONTRIBUTING.md)                               |
 | Understand architecture           | [`guides/ARCHITECTURE.md`](guides/ARCHITECTURE.md)                               |
@@ -29,6 +33,7 @@ Use this taxonomy first; each domain points to its canonical library location.
 | Technical reference | Contributors, maintainers, implementers     | [`reference/README.md`](reference/README.md) | `docs/reference/frontend/`, `docs/reference/backend/`, `docs/reference/plugins/` |
 | Product docs        | Maintainers, contributors, external readers | [`product/README.md`](product/README.md)     | `docs/product/`, `docs/product/prds/`                                            |
 | Internal planning   | Maintainers                                 | [`internal/README.md`](internal/README.md)   | `docs/internal/planning/`, `docs/internal/sprints/`                              |
+| Website docs        | External readers                            | [`site/README.md`](site/README.md)           | `docs/site/` (publication surface; each page maps to upstream `docs/guides/`, `docs/reference/`, or `docs/product/`; exception: `site/README.md` points to `docs/README.md`) |
 
 Legacy compatibility note: `docs/frontend/`, `docs/backend/`, `docs/plugins/`, and `docs/planning/` remain as compatibility surfaces for older URLs; route new work through `docs/reference/`, `docs/product/`, and `docs/internal/`. Lifecycle and retirement guidance lives in [`guides/LEGACY_COMPATIBILITY_POLICY.md`](guides/LEGACY_COMPATIBILITY_POLICY.md).
 
@@ -48,6 +53,11 @@ docs/
 │   ├── roadmap.md    Product roadmap
 │   ├── status.md     Product status snapshot
 │   └── prds/         Lightweight PRD-style planning docs
+├── site/             Website-facing documentation surface
+│   ├── README.md     Audience hub and publication contract
+│   ├── users/        User-facing landing pages
+│   ├── developers/   Developer-facing landing pages
+│   └── agents/       AI-agent landing pages
 ├── internal/         Internal planning library
 │   ├── README.md     Internal planning index
 │   ├── planning/     Backlog, epics, and sprint history
@@ -58,6 +68,9 @@ docs/
 The structure tree intentionally omits the legacy stub directories under `docs/frontend/`,
 `docs/backend/`, and `docs/plugins/`. Those paths remain only as compatibility aliases and
 are governed by [`guides/LEGACY_COMPATIBILITY_POLICY.md`](guides/LEGACY_COMPATIBILITY_POLICY.md).
+
+`docs/site/` is a website publication layer. It should route to or derive from the canonical contributor/reference domains above rather than replacing them as the source of truth.
+Treat `docs/site/` as outside this ownership table except for its publication contract: most published pages must backlink to one canonical source in `docs/guides/`, `docs/reference/`, or `docs/product/`, with `docs/site/README.md` as the single exception that points to `docs/README.md` as its canonical anchor.
 
 ## Planning and product docs
 
@@ -109,6 +122,7 @@ Rules:
 3. Keep one canonical source per topic. Link across docs instead of copying the same explanation into multiple files.
 4. Prefer durable docs over brittle inventories. When counts/examples drift easily, update wording to describe the system accurately without depending on fragile exact numbers unless the number is intentionally tracked.
 5. Remove scratch/debug artifacts from the repo root after debugging sessions.
+6. If website-facing docs in `docs/site/` are updated for behavior or workflow changes, confirm the corresponding canonical docs domain is updated in the same PR.
 
 ## Practical Workflow
 

@@ -28,6 +28,7 @@ Product docs live under `docs/product/` so mission, roadmap, status, and PRD-sty
 - `docs/product/` is for product-level intent, roadmap, status, and PRD-style planning.
 - `docs/guides/` and `docs/reference/` remain the contributor and engineering documentation library.
 - `docs/internal/` remains the internal execution-planning library.
+- `docs/site/` may publish website-facing product narratives, but canonical product source docs stay in `docs/product/`.
 - `docs/planning/ROADMAP.md` is now a compatibility alias only; the canonical roadmap surface is this product docs domain.
 - Compatibility-stub lifecycle guidance lives in [`../guides/LEGACY_COMPATIBILITY_POLICY.md`](../guides/LEGACY_COMPATIBILITY_POLICY.md).
 

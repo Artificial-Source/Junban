@@ -5,6 +5,7 @@ import path from "node:path";
 
 const ROOT = process.cwd();
 const DOCS_INDEX = path.join(ROOT, "docs", "README.md");
+const DOCS_SITE_DIR = path.join(ROOT, "docs", "site");
 const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx"]);
 const TEXT_EXTENSIONS = new Set([
   ".md",
@@ -28,6 +29,7 @@ const LEGACY_PATH_ALLOWLIST = new Set([
   normalizePath(path.join(ROOT, "llms.txt")),
   normalizePath(path.join(ROOT, "scripts", "docs-check.ts")),
 ]);
+const SITE_CANONICAL_ALLOWED_PREFIXES = ["docs/guides/", "docs/reference/", "docs/product/"];
 
 function readFile(filePath: string): string {
   return fs.readFileSync(filePath, "utf8");
@@ -190,6 +192,62 @@ function validateLegacyPathUsage(textFiles: string[]): string[] {
   return errors;
 }
 
+function extractCanonicalSourceTarget(markdownContents: string): string | null {
+  const canonicalLineMatch = markdownContents.match(/^Canonical source:\s*(.+)$/m);
+  if (!canonicalLineMatch) return null;
+
+  const canonicalLine = canonicalLineMatch[1].trim();
+  const markdownLinkMatch = canonicalLine.match(/\[[^\]]+\]\(([^)]+)\)/);
+  if (!markdownLinkMatch) return null;
+
+  return markdownLinkMatch[1].trim();
+}
+
+function isAllowedSiteCanonicalPath(targetPath: string): boolean {
+  return SITE_CANONICAL_ALLOWED_PREFIXES.some((prefix) => targetPath.startsWith(prefix));
+}
+
+function validateSiteCanonicalSources(siteMarkdownFiles: string[]): string[] {
+  const errors: string[] = [];
+
+  for (const filePath of siteMarkdownFiles) {
+    const relativeSource = normalizePath(path.relative(ROOT, filePath));
+    const contents = readFile(filePath);
+    const rawTarget = extractCanonicalSourceTarget(contents);
+
+    if (!rawTarget) {
+      errors.push(
+        `Missing or invalid Canonical source line in ${relativeSource} (expected: Canonical source: [label](path))`,
+      );
+      continue;
+    }
+
+    const targetWithoutHash = rawTarget.split("#")[0];
+    const resolvedTarget = path.resolve(path.dirname(filePath), targetWithoutHash);
+    const relativeResolvedTarget = normalizePath(path.relative(ROOT, resolvedTarget));
+
+    if (!fs.existsSync(resolvedTarget) || !fs.statSync(resolvedTarget).isFile()) {
+      errors.push(`Canonical source target does not exist in ${relativeSource}: ${rawTarget}`);
+      continue;
+    }
+
+    const isSiteHomepage = relativeSource === "docs/site/README.md";
+    const isAllowedCanonicalTarget = isSiteHomepage
+      ? relativeResolvedTarget === "docs/README.md"
+      : isAllowedSiteCanonicalPath(relativeResolvedTarget);
+
+    if (!isAllowedCanonicalTarget) {
+      errors.push(
+        isSiteHomepage
+          ? `Canonical source target for docs/site/README.md must be docs/README.md: ${rawTarget}`
+          : `Canonical source target must be under docs/guides/, docs/reference/, or docs/product/ in ${relativeSource}: ${rawTarget}`,
+      );
+    }
+  }
+
+  return errors;
+}
+
 function main() {
   if (!fs.existsSync(DOCS_INDEX)) {
     console.error("docs/README.md not found");
@@ -207,12 +265,14 @@ function main() {
   ].filter((filePath, index, all) => all.indexOf(filePath) === index && fs.existsSync(filePath));
 
   const textFiles = collectTextFiles(ROOT);
+  const siteMarkdownFiles = fs.existsSync(DOCS_SITE_DIR) ? collectMarkdownFiles(DOCS_SITE_DIR) : [];
 
   const errors = [
     ...validateOwnershipDocs(),
     ...validateMarkdownLinks(markdownFiles),
     ...validateLlmsFile(path.join(ROOT, "llms.txt")),
     ...validateLegacyPathUsage(textFiles),
+    ...validateSiteCanonicalSources(siteMarkdownFiles),
   ];
 
   if (errors.length > 0) {

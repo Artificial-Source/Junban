@@ -4,18 +4,18 @@
 
 ASF Junban is a local-first task manager with a React/Tauri UI, a shared TypeScript core, optional AI features, voice support, an MCP server, a CLI, and an Obsidian-style plugin system.
 
-The product goal is consistent across the codebase:
+Product-facing mission, principles, roadmap, status, and PRD docs now live under `docs/product/`.
 
-- Local-first and private by default
-- Useful without accounts or cloud services
-- AI-enhanced, but not AI-dependent
-- Extensible through a plugin API that stays approachable for both humans and codegen tools
-- Portable data, with SQLite as the main path and Markdown as an alternate backend
+Implementation-facing product principles are summarized in [`docs/product/mission-and-principles.md`](docs/product/mission-and-principles.md).
 
 ## Read This With
 
 - `AGENTS.md` for fast navigation
 - `docs/README.md` for the canonical docs map
+- `docs/product/README.md` for product docs
+- `docs/product/mission-and-principles.md` for the product principles that should shape implementation decisions
+- `docs/reference/README.md` for technical-reference routing
+- `docs/internal/README.md` for internal-planning routing
 - `docs/guides/ARCHITECTURE.md` for the full architecture pass
 
 ## Current Tech Stack
@@ -192,6 +192,14 @@ pnpm plugin:create
 pnpm check
 ```
 
+## Branching And Releases
+
+- `developer` is the default integration branch for active work.
+- `main` is the stable production branch.
+- Normal feature, fix, docs, and plugin branches should usually branch from and merge back into `developer`.
+- Release promotion happens from `developer` to `main`.
+- Release tags (`v<version>`) must be created from commits on `main`.
+
 ## Environment And Profiles
 
 Common environment knobs:
@@ -281,12 +289,13 @@ Run `pnpm check` before considering a change complete unless the task explicitly
 
 Documentation changes are required when behavior, APIs, workflows, or file organization change.
 
-Start with `docs/README.md`, which contains the ownership map. In practice:
+Use `docs/README.md` as the single source of truth for the ownership map and documentation-governance routing. Then route through:
 
-- Frontend source changes usually require updates in `docs/frontend/`
-- Backend/platform changes usually require updates in `docs/backend/`
-- Plugin API changes require updates in `docs/plugins/`
-- Cross-cutting workflow or architecture changes should update `AGENTS.md`, `CLAUDE.md`, and possibly `docs/guides/ARCHITECTURE.md`
+- `docs/product/README.md` for product docs
+- `docs/reference/README.md` for technical reference docs
+- `docs/internal/README.md` for internal planning docs
+
+Keep quick guidance in entrypoint docs synchronized by linking to `docs/README.md` rather than copying full ownership-map blocks.
 
 Avoid brittle documentation that depends on exact file counts or tool counts unless that number is intentionally maintained.
 

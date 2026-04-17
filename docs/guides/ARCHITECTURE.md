@@ -313,18 +313,18 @@ The goal is to verify behavior at the layer where a change actually lives while 
 
 Use these docs alongside this architecture overview:
 
-- `docs/frontend/COMPONENTS.md`
-- `docs/frontend/VIEWS.md`
-- `docs/frontend/CONTEXT.md`
-- `docs/frontend/API_LAYER.md`
-- `docs/backend/CORE.md`
-- `docs/backend/DATABASE.md`
-- `docs/backend/STORAGE.md`
-- `docs/backend/AI.md`
-- `docs/backend/VOICE.md`
-- `docs/backend/MCP.md`
-- `docs/backend/PLUGINS.md`
-- `docs/backend/CLI.md`
+- `docs/reference/frontend/COMPONENTS.md`
+- `docs/reference/frontend/VIEWS.md`
+- `docs/reference/frontend/CONTEXT.md`
+- `docs/reference/frontend/API_LAYER.md`
+- `docs/reference/backend/CORE.md`
+- `docs/reference/backend/DATABASE.md`
+- `docs/reference/backend/STORAGE.md`
+- `docs/reference/backend/AI.md`
+- `docs/reference/backend/VOICE.md`
+- `docs/reference/backend/MCP.md`
+- `docs/reference/backend/PLUGINS.md`
+- `docs/reference/backend/CLI.md`
 
 `docs/README.md` is the canonical documentation index and ownership map.
 

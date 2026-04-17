@@ -1,0 +1,50 @@
+name: Production Hotfix
+description: Track a production-only fix that should go directly to main
+labels: ["hotfix", "bug"]
+body:
+  - type: textarea
+    id: impact
+    attributes:
+      label: Production impact
+      description: What user-facing problem is happening in production and how severe is it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-fix
+    attributes:
+      label: Proposed fix
+      description: Describe the smallest safe fix for the issue.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: branch-flow
+    attributes:
+      label: Branch flow
+      options:
+        - label: "Hotfix branch will be created from `main`"
+        - label: "PR will target `main`"
+        - label: "Fix will be merged or cherry-picked back into `developer`"
+
+  - type: checkboxes
+    id: verification
+    attributes:
+      label: Verification
+      options:
+        - label: Reproduction steps are known
+        - label: Relevant automated checks have been identified
+        - label: Manual verification plan is clear
+        - label: Release/update impact has been considered
+
+  - type: textarea
+    id: rollout
+    attributes:
+      label: Rollout notes
+      description: Describe any release, communication, or post-fix follow-up needed.
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional notes
+      description: Links to incidents, PRs, logs, or other supporting context.

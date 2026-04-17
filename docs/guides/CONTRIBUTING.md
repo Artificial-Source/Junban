@@ -25,7 +25,7 @@ Thank you for considering contributing to Junban! This guide covers everything y
 
 Before starting significant work:
 
-1. **Check the [Roadmap](../planning/ROADMAP.md)** — the feature may already be planned
+1. **Check the [Roadmap](../product/roadmap.md)** — the feature may already be planned
 2. **Open an issue** describing what you want to build and why
 3. **Wait for discussion** — maintainers will confirm the direction before you invest time
 4. **Reference the issue** in your PR
@@ -34,7 +34,7 @@ Before starting significant work:
 
 Plugins are the best way to add features without modifying core code:
 
-1. Build your plugin following the [Plugin API](../plugins/API.md) reference
+1. Build your plugin following the [Plugin API](../reference/plugins/API.md) reference
 2. Test it locally in the `plugins/` directory
 3. Publish it to npm or a Git repository
 4. Submit a PR to add it to `sources.json` (the community plugin registry)
@@ -45,14 +45,28 @@ See [Plugin Registry Submission](#plugin-registry-submission) below.
 
 ### Branching
 
-| Branch          | Purpose               |
-| --------------- | --------------------- |
-| `main`          | Stable, deployable    |
-| `feat/<name>`   | New features          |
-| `fix/<name>`    | Bug fixes             |
-| `docs/<name>`   | Documentation changes |
-| `plugin/<name>` | Plugin system changes |
-| `test/<name>`   | Test additions        |
+| Branch          | Purpose                   |
+| --------------- | ------------------------- |
+| `main`          | Production releases only  |
+| `developer`     | Shared integration branch |
+| `feat/<name>`   | New features              |
+| `fix/<name>`    | Bug fixes                 |
+| `docs/<name>`   | Documentation changes     |
+| `plugin/<name>` | Plugin system changes     |
+| `test/<name>`   | Test additions            |
+
+Day-to-day flow:
+
+1. Branch from `developer` for normal work.
+2. Open PRs back into `developer` while the feature set is still being integrated.
+3. When a release is ready, open a promotion PR from `developer` into `main`.
+4. Tag the merged `main` commit as `v<version>` to publish installers and updater metadata.
+
+Hotfix flow:
+
+1. Branch from `main` only when fixing a production-only issue.
+2. Merge the hotfix into `main`.
+3. Merge the same fix back into `developer` so the branches do not drift.
 
 ### Commits
 
@@ -75,6 +89,7 @@ refactor(ui): extract TaskInput into separate component
 - **Size**: Keep PRs focused. One feature or fix per PR. Large PRs are harder to review.
 - **Tests**: Include tests for new logic. Fix failing tests before submitting.
 - **Docs**: Update the mapped documentation in the same PR when behavior, API surface, workflow, or file organization changes. Use `docs/README.md` as the ownership map.
+- **Target branch**: Use `developer` for normal feature/fix PRs. Only open PRs to `main` for release promotions or production hotfixes.
 
 ### Documentation Requirements
 
@@ -85,30 +100,18 @@ Documentation is required when changes affect:
 - architecture or startup flow
 - file organization or extension points
 
-Use this mapping:
+Start with `docs/README.md` for the docs taxonomy, then route through:
 
-- `src/ui/components/**` -> `docs/frontend/COMPONENTS.md`
-- `src/ui/views/**` -> `docs/frontend/VIEWS.md`
-- `src/ui/context/**` -> `docs/frontend/CONTEXT.md`
-- `src/ui/hooks/**` -> `docs/frontend/HOOKS.md`
-- `src/ui/themes/**` -> `docs/frontend/THEMES.md`
-- `src/ui/api/**` -> `docs/frontend/API_LAYER.md`
-- `src/core/**` -> `docs/backend/CORE.md`
-- `src/db/**` -> `docs/backend/DATABASE.md`
-- `src/storage/**` -> `docs/backend/STORAGE.md`
-- `src/parser/**` -> `docs/backend/PARSER.md`
-- `src/ai/**` -> `docs/backend/AI.md`
-- `src/ai/voice/**` -> `docs/backend/VOICE.md`
-- `src/mcp/**` -> `docs/backend/MCP.md`
-- `src/plugins/**` internals -> `docs/backend/PLUGINS.md`
-- plugin author API changes -> `docs/plugins/API.md` and `docs/plugins/EXAMPLES.md`
-- `src/cli/**` -> `docs/backend/CLI.md`
-- architecture, deployment shape, roadmap status -> `docs/guides/ARCHITECTURE.md`, `docs/planning/ROADMAP.md`, and `CLAUDE.md` if contributor workflow changes
+- `docs/product/README.md` for mission, roadmap, status, and PRD-style product docs
+- `docs/reference/README.md` for technical-reference docs
+- `docs/internal/README.md` for internal planning docs
+
+Use `docs/README.md` as the single source of truth for ownership mapping and doc-governance policy.
 
 Before opening a PR:
 
 1. Run `git diff --name-only`.
-2. Match changed source paths to the docs above.
+2. Match changed source paths to the ownership map in `docs/README.md`.
 3. Update those docs in the same PR or explicitly confirm no behavior/API change.
 
 ### Code Review
@@ -226,7 +229,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model.
 
 ## Sprint Methodology
 
-Development follows milestone-based planning tracked in the [Roadmap](../planning/ROADMAP.md). Contributors should align larger work with roadmap priorities or approved issues.
+Development follows milestone-based planning tracked in the [Roadmap](../product/roadmap.md). Contributors should align larger work with roadmap priorities or approved issues.
 
 ### How Sprints Work
 
@@ -245,7 +248,7 @@ Development follows milestone-based planning tracked in the [Roadmap](../plannin
 | L    | 1–2 days  | Plugin loader with validation, keyboard navigation system |
 | XL   | 3–5 days  | Sandbox implementation, storage abstraction layer         |
 
-See [ROADMAP.md](../planning/ROADMAP.md) for sprint history and project status.
+See [`../product/status.md`](../product/status.md) for the product snapshot and [`../internal/README.md`](../internal/README.md) for sprint execution/history.
 
 ## Questions?
 

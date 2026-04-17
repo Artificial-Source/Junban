@@ -176,7 +176,7 @@ await client.connect(transport);
 await client.callTool({ name: "create_task", arguments: { title: "Hello from MCP" } });
 ```
 
-See [MCP documentation](../backend/MCP.md) for the full reference (34 tools, 8 resources, 3 prompts).
+See [MCP documentation](../reference/backend/MCP.md) for the full reference (34 tools, 8 resources, 3 prompts).
 
 ## Building the Desktop App (Optional)
 
@@ -213,7 +213,7 @@ Restart the dev server. The plugin appears in Settings > Extensions.
 
 ### Creating a Plugin
 
-See [Plugin API](../plugins/API.md) for the full API reference and [Plugin Examples](../plugins/EXAMPLES.md) for walkthroughs.
+See [Plugin API](../reference/plugins/API.md) for the full API reference and [Plugin Examples](../reference/plugins/EXAMPLES.md) for walkthroughs.
 
 Quick start:
 

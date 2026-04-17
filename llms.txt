@@ -1,0 +1,38 @@
+# Junban
+
+> Local-first task manager with a React/Tauri UI, Hono API, SQLite and Markdown storage,
+> AI chat and voice support, MCP integration, and a plugin system.
+
+## Docs
+
+- `docs/README.md`: canonical documentation index and routing entrypoint
+- `AGENTS.md`: fast repository navigation for coding agents and maintainers
+- `CLAUDE.md`: development guide, architecture summary, and repo conventions
+- `docs/guides/`: contributor and maintainer guides (setup, architecture, performance, security, releases)
+- `docs/reference/`: technical reference library (frontend, backend, plugins)
+- `docs/product/`: product documentation home, mission, roadmap, status
+- `docs/internal/`: internal planning and execution artifacts
+
+## Reference families
+
+- `docs/reference/README.md`: technical reference library entrypoint
+- `docs/reference/frontend/`: UI, views, context, hooks, themes, shortcuts, and API layer docs
+- `docs/reference/backend/`: core, database, storage, parser, AI, voice, MCP, CLI, utils, and plugin runtime docs
+- `docs/reference/plugins/`: plugin author API and examples
+
+## Product and planning families
+
+- `docs/product/README.md`: product-doc index for mission, roadmap, status, and PRD-style planning
+- `docs/product/mission-and-principles.md`: product mission, principles, and long-term direction
+- `docs/product/roadmap.md`: product roadmap
+- `docs/product/status.md`: current product status snapshot
+- `docs/product/prds/README.md`: PRD catalog and lightweight planning docs
+- `docs/internal/README.md`: internal planning entrypoint for backlog, epics, and sprint execution docs
+- `docs/internal/planning/`: backlog and epics
+- `docs/internal/planning/sprint-history.md`: historical sprint summary and technical-debt notes
+- `docs/internal/sprints/`: sprint overviews, prompts, and historical execution artifacts
+
+## Historical / compatibility references
+
+- `docs/planning/ROADMAP.md`: compatibility path for older roadmap links
+- `docs/guides/DOCS_IA_AUDIT.md`: historical IA-planning baseline and migration notes

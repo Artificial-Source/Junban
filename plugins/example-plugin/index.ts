@@ -16,7 +16,7 @@
  * it will throw a clear error telling you exactly which permission to add.
  *
  * Use this as a starting point for your own plugins.
- * See docs/plugins/API.md for the full API reference.
+ * See docs/reference/plugins/API.md for the full API reference.
  */
 
 import { Plugin } from "../../src/plugins/lifecycle.js";

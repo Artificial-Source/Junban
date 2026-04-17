@@ -39,11 +39,19 @@ This guide describes how ASF Junban desktop releases, in-app updates, changelog 
 
 ## Release Flow
 
-1. Update versions with `pnpm release:prepare <version>`.
-2. Move the relevant items from `Unreleased` into a new version section in `CHANGELOG.md`.
-3. Commit and tag the release as `v<version>`.
-4. Push the tag so GitHub Actions builds installers and updater metadata.
-5. Review the draft GitHub release before publishing.
+1. Merge day-to-day work into `developer` until the release candidate is stable.
+2. Open a promotion PR from `developer` into `main`.
+3. Update versions with `pnpm release:prepare <version>` and move the relevant items from `Unreleased` into a new version section in `CHANGELOG.md` as part of that promotion.
+4. Merge the promotion PR into `main`.
+5. Tag the merged `main` commit as `v<version>`.
+6. Push the tag so GitHub Actions builds installers and updater metadata.
+7. Review the draft GitHub release before publishing.
+
+## Branch Roles
+
+- `developer` is the integration branch for active work.
+- `main` is the production branch and the only branch that should receive release tags.
+- The release workflow fails if a `v*` tag does not point to a commit in `main` history.
 
 ## Current Limits
 

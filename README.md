@@ -15,8 +15,9 @@ Local-first. No accounts. No tracking. Your data stays on your machine.
   <a href="docs/guides/SETUP.md">Setup</a> &nbsp;&middot;&nbsp;
   <a href="docs/guides/ARCHITECTURE.md">Architecture</a> &nbsp;&middot;&nbsp;
   <a href="docs/guides/RELEASES.md">Releases</a> &nbsp;&middot;&nbsp;
-  <a href="docs/plugins/API.md">Plugin API</a> &nbsp;&middot;&nbsp;
-  <a href="docs/planning/ROADMAP.md">Roadmap</a>
+  <a href="docs/reference/plugins/API.md">Plugin API</a> &nbsp;&middot;&nbsp;
+  <a href="docs/product/README.md">Product Docs</a> &nbsp;&middot;&nbsp;
+  <a href="docs/product/roadmap.md">Roadmap</a>
 </p>
 
 [![CI](https://github.com/Artificial-Source-Foundation/Junban/actions/workflows/ci.yml/badge.svg)](https://github.com/Artificial-Source-Foundation/Junban/actions/workflows/ci.yml)
@@ -122,7 +123,7 @@ Nothing AI-related runs unless you configure it.
 
 Voice support includes speech-to-text, text-to-speech, and voice activity detection.
 
-Current built-in providers include browser, hosted, and local model paths. See `docs/backend/VOICE.md` for the up-to-date provider matrix.
+Current built-in providers include browser, hosted, and local model paths. See `docs/reference/backend/VOICE.md` for the up-to-date provider matrix.
 
 ### Plugins
 
@@ -135,8 +136,8 @@ Junban has an Obsidian-style plugin system with:
 
 Plugin author docs:
 
-- `docs/plugins/API.md`
-- `docs/plugins/EXAMPLES.md`
+- `docs/reference/plugins/API.md`
+- `docs/reference/plugins/EXAMPLES.md`
 
 ### Interfaces
 
@@ -194,22 +195,36 @@ Source-run dev commands use an isolated dev profile by default. Packaged desktop
 
 ## Docs
 
-| Doc                           | Purpose                                 |
-| ----------------------------- | --------------------------------------- |
-| `docs/guides/SETUP.md`        | Local development setup                 |
-| `docs/guides/ARCHITECTURE.md` | System architecture and data flow       |
-| `docs/guides/RELEASES.md`     | Packaging and release workflow          |
-| `docs/guides/CONTRIBUTING.md` | Contribution workflow                   |
-| `docs/guides/SECURITY.md`     | Security model                          |
-| `docs/plugins/API.md`         | Plugin author reference                 |
-| `docs/plugins/EXAMPLES.md`    | Plugin examples                         |
-| `docs/planning/ROADMAP.md`    | Product roadmap                         |
-| `AGENTS.md`                   | Quick-start for coding agents           |
-| `CLAUDE.md`                   | Contributor and agent development guide |
+| Domain / Entry             | Purpose                                                                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `docs/README.md`           | Canonical docs index and single source of truth for ownership mapping/doc-governance routing                               |
+| `docs/product/README.md`   | Product-doc index for mission, roadmap, status, and PRD-style planning                                                     |
+| `docs/guides/`             | Contributor and maintainer workflows (setup, architecture, releases, security)                                             |
+| `docs/reference/README.md` | Technical-reference library index for `docs/reference/frontend/`, `docs/reference/backend/`, and `docs/reference/plugins/` |
+| `docs/internal/README.md`  | Internal planning library index for `docs/internal/planning/` and `docs/internal/sprints/`                                 |
+| `AGENTS.md`                | Quick-start for coding agents                                                                                              |
+| `CLAUDE.md`                | Contributor and agent development guide                                                                                    |
+
+Historical compatibility:
+
+- `docs/planning/ROADMAP.md` remains available as a legacy roadmap alias that redirects into `docs/product/`.
+- Lifecycle and retirement policy for legacy stubs: `docs/guides/LEGACY_COMPATIBILITY_POLICY.md`.
+
+Common docs:
+
+- `docs/guides/CONTRIBUTING.md` for contributor workflow and branch targeting
+- `docs/guides/SECURITY.md` for security model and reporting guidance
+- `docs/guides/SETUP.md` for local development setup
 
 ## Contributing
 
 See `docs/guides/CONTRIBUTING.md`. Run `pnpm check` before opening a PR.
+
+Current branch flow:
+
+- `developer` is the integration branch for normal work.
+- `main` is reserved for production-ready release promotions and hotfixes.
+- Desktop releases are tagged from `main` as `v<version>`.
 
 ## License
 

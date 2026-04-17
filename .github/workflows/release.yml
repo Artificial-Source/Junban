@@ -10,7 +10,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify-tag-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure release tag points to current main commit
+        run: |
+          git fetch origin main --no-tags
+          MAIN_SHA=$(git rev-parse origin/main^{commit})
+          if [ "$GITHUB_SHA" != "$MAIN_SHA" ]; then
+            echo "Release tags must point to the current origin/main commit."
+            exit 1
+          fi
+
   create-release:
+    needs: verify-tag-source
     runs-on: ubuntu-latest
     permissions:
       contents: write

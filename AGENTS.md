@@ -28,23 +28,25 @@ Junban is a local-first task manager with:
 
 ## Where To Look
 
-| You need to...                     | Start here                                                                       |
-| ---------------------------------- | -------------------------------------------------------------------------------- |
-| Understand the whole project       | `CLAUDE.md`, then `docs/guides/ARCHITECTURE.md`                                  |
-| Find canonical documentation       | `docs/README.md`                                                                 |
-| Fix UI behavior                    | `src/ui/`, `docs/frontend/COMPONENTS.md`, `docs/frontend/VIEWS.md`               |
-| Fix shared app state or context    | `src/ui/context/`, `docs/frontend/CONTEXT.md`                                    |
-| Fix frontend data access           | `src/ui/api/`, `docs/frontend/API_LAYER.md`                                      |
-| Fix backend/core behavior          | `src/core/`, `docs/backend/CORE.md`                                              |
-| Change database or persistence     | `src/db/`, `src/storage/`, `docs/backend/DATABASE.md`, `docs/backend/STORAGE.md` |
-| Work on natural-language input     | `src/parser/`, `docs/backend/PARSER.md`                                          |
-| Work on AI chat/tools/providers    | `src/ai/`, `docs/backend/AI.md`                                                  |
-| Work on voice features             | `src/ai/voice/`, `docs/backend/VOICE.md`                                         |
-| Work on plugins                    | `src/plugins/`, `plugins/`, `docs/backend/PLUGINS.md`, `docs/plugins/API.md`     |
-| Work on MCP                        | `src/mcp/`, `docs/backend/MCP.md`                                                |
-| Work on CLI                        | `src/cli/`, `docs/backend/CLI.md`                                                |
-| Understand release/setup/security  | `docs/guides/RELEASES.md`, `docs/guides/SETUP.md`, `docs/guides/SECURITY.md`     |
-| Check roadmap or internal planning | `docs/planning/ROADMAP.md`, `docs/development/`                                  |
+| You need to...                                    | Start here                                                                                                                                                                 |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Understand the whole project                      | `CLAUDE.md`, then `docs/guides/ARCHITECTURE.md`                                                                                                                            |
+| Find canonical documentation                      | `docs/README.md`                                                                                                                                                           |
+| Navigate technical reference docs                 | `docs/reference/README.md`                                                                                                                                                 |
+| Check product docs                                | `docs/product/README.md`                                                                                                                                                   |
+| Fix UI behavior                                   | `src/ui/`, `docs/reference/frontend/COMPONENTS.md`, `docs/reference/frontend/VIEWS.md`                                                                                     |
+| Fix shared app state or context                   | `src/ui/context/`, `docs/reference/frontend/CONTEXT.md`                                                                                                                    |
+| Fix frontend data access                          | `src/ui/api/`, `docs/reference/frontend/API_LAYER.md`                                                                                                                      |
+| Fix backend/core behavior                         | `src/core/`, `docs/reference/backend/CORE.md`                                                                                                                              |
+| Change database or persistence                    | `src/db/`, `src/storage/`, `docs/reference/backend/DATABASE.md`, `docs/reference/backend/STORAGE.md`                                                                       |
+| Work on natural-language input                    | `src/parser/`, `docs/reference/backend/PARSER.md`                                                                                                                          |
+| Work on AI chat/tools/providers                   | `src/ai/`, `docs/reference/backend/AI.md`                                                                                                                                  |
+| Work on voice features                            | `src/ai/voice/`, `docs/reference/backend/VOICE.md`                                                                                                                         |
+| Work on plugins                                   | `src/plugins/`, `plugins/`, `docs/reference/backend/PLUGINS.md`, `docs/reference/plugins/README.md`, `docs/reference/plugins/API.md`, `docs/reference/plugins/EXAMPLES.md` |
+| Work on MCP                                       | `src/mcp/`, `docs/reference/backend/MCP.md`                                                                                                                                |
+| Work on CLI                                       | `src/cli/`, `docs/reference/backend/CLI.md`                                                                                                                                |
+| Understand release/setup/security                 | `docs/guides/RELEASES.md`, `docs/guides/SETUP.md`, `docs/guides/SECURITY.md`                                                                                               |
+| Check product roadmap/status or internal planning | `docs/product/README.md`, `docs/internal/README.md`                                                                                                                        |
 
 ## Top-Level Layout
 
@@ -148,25 +150,18 @@ pnpm plugin:create
 
 If code changes affect behavior, APIs, workflows, or file organization, update docs in the same PR.
 
-Minimum ownership map:
+Route through `docs/README.md` first, then use domain indexes (`docs/reference/README.md`,
+`docs/product/README.md`, and `docs/internal/README.md`) before editing lower-level docs.
 
-- `src/ui/components/**` -> `docs/frontend/COMPONENTS.md`
-- `src/ui/views/**` -> `docs/frontend/VIEWS.md`
-- `src/ui/context/**` -> `docs/frontend/CONTEXT.md`
-- `src/ui/hooks/**` -> `docs/frontend/HOOKS.md`
-- `src/ui/themes/**` -> `docs/frontend/THEMES.md`
-- `src/ui/api/**` -> `docs/frontend/API_LAYER.md`
-- `src/core/**` -> `docs/backend/CORE.md`
-- `src/db/**` -> `docs/backend/DATABASE.md`
-- `src/storage/**` -> `docs/backend/STORAGE.md`
-- `src/parser/**` -> `docs/backend/PARSER.md`
-- `src/ai/**` -> `docs/backend/AI.md`
-- `src/ai/voice/**` -> `docs/backend/VOICE.md`
-- `src/mcp/**` -> `docs/backend/MCP.md`
-- `src/plugins/**` internals -> `docs/backend/PLUGINS.md`
-- Plugin author API changes -> `docs/plugins/API.md` and `docs/plugins/EXAMPLES.md`
-- `src/cli/**` -> `docs/backend/CLI.md`
-- Cross-cutting architecture/workflow changes -> `docs/guides/ARCHITECTURE.md`, `docs/planning/ROADMAP.md`, `CLAUDE.md`
+`docs/README.md` is the canonical ownership map and documentation-governance source.
+
+Quick route reminders:
+
+- Frontend source changes typically route through `docs/reference/frontend/`
+- Backend/platform changes typically route through `docs/reference/backend/`
+- Plugin-author surface changes route through `docs/reference/plugins/`
+- Product mission, roadmap, status, or PRD-scope changes route through `docs/product/`
+- Cross-cutting workflow or architecture changes may also require updates in `docs/guides/ARCHITECTURE.md` and `CLAUDE.md`
 
 Always verify against `docs/README.md` before deciding no doc update is needed.
 

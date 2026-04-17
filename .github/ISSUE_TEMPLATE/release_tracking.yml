@@ -1,0 +1,51 @@
+name: Release Tracking
+description: Track a planned release promotion from developer to main
+labels: ["release"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Target version
+      description: What version is this release targeting?
+      placeholder: "e.g. 1.0.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Release scope
+      description: Summarize the features, fixes, and notable changes intended for this release.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: branch-flow
+    attributes:
+      label: Branch flow
+      options:
+        - label: "Release candidate has been stabilized on `developer`"
+        - label: "Promotion PR will target `main`"
+        - label: "Release tag will be created from the merged `main` commit"
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Release checklist
+      options:
+        - label: "`CHANGELOG.md` has been reviewed and prepared"
+        - label: Version updates have been planned
+        - label: "`pnpm check` has passed on the candidate branch"
+        - label: Desktop packaging / updater impact has been considered
+
+  - type: textarea
+    id: blockers
+    attributes:
+      label: Blockers or open questions
+      description: Anything that still needs to land or be verified before promoting to `main`.
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional notes
+      description: Links to milestone PRs, test notes, rollout notes, or anything else maintainers should track.

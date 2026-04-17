@@ -6,6 +6,28 @@ import path from "node:path";
 const ROOT = process.cwd();
 const DOCS_INDEX = path.join(ROOT, "docs", "README.md");
 const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx"]);
+const TEXT_EXTENSIONS = new Set([
+  ".md",
+  ".mdx",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".json",
+  ".yml",
+  ".yaml",
+  ".txt",
+]);
+const LEGACY_DOC_PATHS = ["docs/frontend/", "docs/backend/", "docs/plugins/", "docs/planning/"];
+const LEGACY_PATH_ALLOWLIST = new Set([
+  normalizePath(path.join(ROOT, "docs", "guides", "DOCS_IA_AUDIT.md")),
+  normalizePath(path.join(ROOT, "docs", "planning", "ROADMAP.md")),
+  normalizePath(path.join(ROOT, "docs", "README.md")),
+  normalizePath(path.join(ROOT, "docs", "product", "README.md")),
+  normalizePath(path.join(ROOT, "README.md")),
+  normalizePath(path.join(ROOT, "llms.txt")),
+  normalizePath(path.join(ROOT, "scripts", "docs-check.ts")),
+]);
 
 function readFile(filePath: string): string {
   return fs.readFileSync(filePath, "utf8");
@@ -27,6 +49,32 @@ function collectMarkdownFiles(dir: string): string[] {
       continue;
     }
     if (MARKDOWN_EXTENSIONS.has(path.extname(entry.name))) {
+      results.push(fullPath);
+    }
+  }
+
+  return results;
+}
+
+function collectTextFiles(dir: string): string[] {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const results: string[] = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (
+        [".git", "node_modules", "dist", "coverage", ".wrangler", ".sst", "target"].includes(
+          entry.name,
+        )
+      ) {
+        continue;
+      }
+      results.push(...collectTextFiles(fullPath));
+      continue;
+    }
+
+    if (entry.name === ".gitignore" || TEXT_EXTENSIONS.has(path.extname(entry.name))) {
       results.push(fullPath);
     }
   }
@@ -100,6 +148,48 @@ function validateMarkdownLinks(markdownFiles: string[]): string[] {
   return errors;
 }
 
+function validateLlmsFile(llmsPath: string): string[] {
+  if (!fs.existsSync(llmsPath)) return [];
+
+  const errors: string[] = [];
+  const contents = readFile(llmsPath);
+
+  for (const line of contents.split(/\r?\n/)) {
+    const value = line.includes(":") ? line.split(":").slice(1).join(":") : line;
+    for (const rawToken of value.split(",")) {
+      const token = rawToken.trim().replace(/^-\s*/, "");
+      if (!token || token.startsWith("#") || token.startsWith(">")) continue;
+      if (!(token.endsWith(".md") || token.endsWith("/"))) continue;
+
+      const resolved = path.resolve(ROOT, token);
+      if (!fs.existsSync(resolved)) {
+        errors.push(`Broken llms.txt path reference: ${token}`);
+      }
+    }
+  }
+
+  return errors;
+}
+
+function validateLegacyPathUsage(textFiles: string[]): string[] {
+  const errors: string[] = [];
+
+  for (const filePath of textFiles) {
+    const normalizedPath = normalizePath(filePath);
+    if (LEGACY_PATH_ALLOWLIST.has(normalizedPath)) continue;
+
+    const contents = readFile(filePath);
+    for (const legacyPath of LEGACY_DOC_PATHS) {
+      if (!contents.includes(legacyPath)) continue;
+      errors.push(
+        `Legacy documentation path reference in ${normalizePath(path.relative(ROOT, filePath))}: ${legacyPath}`,
+      );
+    }
+  }
+
+  return errors;
+}
+
 function main() {
   if (!fs.existsSync(DOCS_INDEX)) {
     console.error("docs/README.md not found");
@@ -112,9 +202,18 @@ function main() {
     path.join(ROOT, "AGENTS.md"),
     path.join(ROOT, "CLAUDE.md"),
     path.join(ROOT, ".github", "SECURITY.md"),
+    path.join(ROOT, ".github", "pull_request_template.md"),
+    ...collectMarkdownFiles(path.join(ROOT, ".github", "PULL_REQUEST_TEMPLATE")),
   ].filter((filePath, index, all) => all.indexOf(filePath) === index && fs.existsSync(filePath));
 
-  const errors = [...validateOwnershipDocs(), ...validateMarkdownLinks(markdownFiles)];
+  const textFiles = collectTextFiles(ROOT);
+
+  const errors = [
+    ...validateOwnershipDocs(),
+    ...validateMarkdownLinks(markdownFiles),
+    ...validateLlmsFile(path.join(ROOT, "llms.txt")),
+    ...validateLegacyPathUsage(textFiles),
+  ];
 
   if (errors.length > 0) {
     console.error("Documentation checks failed:\n");

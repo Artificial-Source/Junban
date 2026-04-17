@@ -165,7 +165,7 @@ function main(): void {
   console.log(`  2. Edit \x1b[36mplugins/${name}/index.mjs\x1b[0m`);
   console.log(`     - Implement your plugin logic in onLoad()`);
   console.log(`  3. Restart Junban — the plugin loader will pick it up automatically.`);
-  console.log(`\n  Docs: docs/plugins/API.md\n`);
+  console.log(`\n  Docs: docs/reference/plugins/API.md\n`);
 }
 
 main();

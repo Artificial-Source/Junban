@@ -262,7 +262,7 @@ export function AboutTab() {
       <div>
         <div className="flex items-center gap-3">
           <img
-            src="/images/logo.svg"
+            src="/images/logo.webp"
             alt="Junban logo"
             className="w-12 h-12 rounded-xl ring-1 ring-border/60 bg-surface object-contain p-2 dark:invert"
           />

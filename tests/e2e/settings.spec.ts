@@ -24,17 +24,17 @@ test.describe("Settings modal", () => {
     await expect(page.getByRole("heading", { name: "Settings" })).not.toBeVisible();
   });
 
-  test("shows all 10 setting tabs in the sidebar", async ({ page }) => {
+  test("shows all 10 MVP setting tabs in the sidebar", async ({ page }) => {
     await openSettings(page);
     const tabs = [
       "Essentials",
       "Appearance",
+      "Filters & Labels",
       "Advanced",
       "Keyboard",
       "Templates",
       "AI",
       "Voice",
-      "Extensions",
       "Data",
       "About",
     ];
@@ -48,6 +48,9 @@ test.describe("Settings modal", () => {
 
     await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await expect(page.getByText("Color scheme")).toBeVisible();
+
+    await page.getByRole("button", { name: "Filters & Labels", exact: true }).click();
+    await expect(page.getByText("My Filters")).toBeVisible();
 
     await page.getByRole("button", { name: "Advanced", exact: true }).click();
     await expect(page.getByText("Optional upgrades for desktop use")).toBeVisible();
@@ -385,20 +388,6 @@ test.describe("Voice settings tab", () => {
     const content = settingsContent(page);
     await expect(content.getByText("Speech-to-Text").first()).toBeVisible({ timeout: 5000 });
     await expect(content.getByText("Text-to-Speech").first()).toBeVisible();
-  });
-});
-
-// ── Plugins tab ─────────────────────────────────────────────────────────
-
-test.describe("Plugins settings tab", () => {
-  test.beforeEach(async ({ page }) => {
-    await setupPage(page);
-  });
-
-  test("displays plugins management UI", async ({ page }) => {
-    await openSettings(page, "Plugins");
-    const content = settingsContent(page);
-    await expect(content.getByText("Plugins").first()).toBeVisible({ timeout: 5000 });
   });
 });
 

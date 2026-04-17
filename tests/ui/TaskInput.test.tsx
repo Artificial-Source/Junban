@@ -53,7 +53,7 @@ describe("TaskInput", () => {
     await user.type(input, "buy milk p2 #food");
 
     expect(screen.getByText("buy milk")).toBeInTheDocument();
-    expect(screen.getByText("P2")).toBeInTheDocument();
+    expect(screen.getAllByText("P2").length).toBeGreaterThan(0);
     expect(screen.getByText("food")).toBeInTheDocument();
   });
 

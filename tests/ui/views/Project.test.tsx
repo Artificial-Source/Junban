@@ -1,8 +1,23 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 
 vi.mock("../../../src/ui/components/TaskInput.js", () => ({
-  TaskInput: (props: any) => <div data-testid="task-input" data-placeholder={props.placeholder} />,
+  TaskInput: (props: any) => (
+    <button
+      data-testid="task-input"
+      data-placeholder={props.placeholder}
+      onClick={() =>
+        props.onSubmit({
+          title: "New task",
+          priority: null,
+          tags: [],
+          project: null,
+          dueDate: null,
+          dueTime: false,
+        })
+      }
+    />
+  ),
 }));
 
 vi.mock("../../../src/ui/components/TaskList.js", () => ({
@@ -17,7 +32,7 @@ vi.mock("../../../src/ui/components/TaskList.js", () => ({
 }));
 
 import { Project } from "../../../src/ui/views/Project.js";
-import type { Task, Project as ProjectType } from "../../../src/core/types.js";
+import type { Task, Project as ProjectType, Section } from "../../../src/core/types.js";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -33,10 +48,28 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     recurrence: null,
     parentId: null,
     remindAt: null,
+    estimatedMinutes: null,
+    actualMinutes: null,
+    deadline: null,
+    isSomeday: false,
+    sectionId: null,
+    dreadLevel: null,
     tags: [],
     sortOrder: 0,
     createdAt: "2026-02-20T10:00:00.000Z",
     updatedAt: "2026-02-20T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeSection(overrides: Partial<Section> = {}): Section {
+  return {
+    id: "sec-1",
+    projectId: "proj-1",
+    name: "Doing",
+    sortOrder: 0,
+    isCollapsed: false,
+    createdAt: "2026-02-20T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -114,6 +147,45 @@ describe("Project", () => {
     render(<Project {...defaultProps} />);
     const input = screen.getByTestId("task-input");
     expect(input.getAttribute("data-placeholder")).toBe("Add a task to My Project...");
+  });
+
+  it("creates a task inside a section with the section id", () => {
+    const onCreateTask = vi.fn();
+    render(
+      <Project
+        {...defaultProps}
+        onCreateTask={onCreateTask}
+        sections={[makeSection()]}
+        onCreateSection={vi.fn()}
+        onUpdateSection={vi.fn()}
+        onDeleteSection={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByText("Add task to Doing"));
+    fireEvent.click(screen.getAllByTestId("task-input")[1]);
+    expect(onCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "New task", sectionId: "sec-1" }),
+    );
+  });
+
+  it("renders the section add-task action below existing section tasks", () => {
+    const tasks = [
+      makeTask({ id: "t1", title: "Existing", projectId: "proj-1", sectionId: "sec-1" }),
+    ];
+    render(
+      <Project
+        {...defaultProps}
+        tasks={tasks}
+        sections={[makeSection()]}
+        onCreateSection={vi.fn()}
+        onUpdateSection={vi.fn()}
+        onDeleteSection={vi.fn()}
+      />,
+    );
+    const existingTask = screen.getByText("Existing");
+    const addTaskButton = screen.getByText("Add task to Doing");
+    const position = existingTask.compareDocumentPosition(addTaskButton);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   // ── V2-19: Project progress tracking ──

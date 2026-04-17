@@ -8,6 +8,14 @@ vi.mock("../../../src/ui/themes/manager.js", () => ({
   },
 }));
 
+vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
+  useGeneralSettings: () => ({
+    settings: {
+      feature_completed: "false",
+    },
+  }),
+}));
+
 import { useAppCommands } from "../../../src/ui/hooks/useAppCommands.js";
 
 describe("useAppCommands", () => {
@@ -58,8 +66,8 @@ describe("useAppCommands", () => {
     expect(ids).toContain("nav-inbox");
     expect(ids).toContain("nav-today");
     expect(ids).toContain("nav-upcoming");
-    expect(ids).toContain("nav-filters-labels");
-    expect(ids).toContain("nav-completed");
+    expect(ids).toContain("nav-settings-filters");
+    expect(ids).not.toContain("nav-completed");
   });
 
   it("navigation command calls handleNavigate", () => {

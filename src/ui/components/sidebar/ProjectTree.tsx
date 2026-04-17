@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type MouseEvent as ReactMouseEvent } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { Project } from "../../../core/types.js";
 import { CollapsedTooltip } from "./SidebarPrimitives.js";
@@ -11,6 +11,7 @@ interface ProjectTreeProps {
   projectTaskCounts?: Map<string, number>;
   projectCompletedCounts?: Map<string, number>;
   collapsed: boolean;
+  onContextMenu?: (e: ReactMouseEvent, project: Project) => void;
 }
 
 export function ProjectTree({
@@ -21,6 +22,7 @@ export function ProjectTree({
   projectTaskCounts,
   projectCompletedCounts,
   collapsed,
+  onContextMenu,
 }: ProjectTreeProps) {
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
@@ -69,6 +71,7 @@ export function ProjectTree({
                   projectTaskCounts={projectTaskCounts}
                   projectCompletedCounts={projectCompletedCounts}
                   collapsed={collapsed}
+                  onContextMenu={onContextMenu}
                 />
               </div>
             </div>
@@ -83,6 +86,7 @@ export function ProjectTree({
                       projectTaskCounts={projectTaskCounts}
                       projectCompletedCounts={projectCompletedCounts}
                       collapsed={collapsed}
+                      onContextMenu={onContextMenu}
                     />
                   </li>
                 ))}
@@ -102,6 +106,7 @@ export function ProjectButton({
   projectTaskCounts,
   projectCompletedCounts,
   collapsed = false,
+  onContextMenu,
 }: {
   project: Project;
   isActive: boolean;
@@ -109,6 +114,7 @@ export function ProjectButton({
   projectTaskCounts?: Map<string, number>;
   projectCompletedCounts?: Map<string, number>;
   collapsed?: boolean;
+  onContextMenu?: (e: ReactMouseEvent, project: Project) => void;
 }) {
   const pendingCount = projectTaskCounts?.get(project.id) ?? 0;
   const completedCount = projectCompletedCounts?.get(project.id) ?? 0;
@@ -119,6 +125,7 @@ export function ProjectButton({
     return (
       <button
         onClick={() => onNavigate("project", project.id)}
+        onContextMenu={onContextMenu ? (e) => onContextMenu(e, project) : undefined}
         title={project.name}
         aria-current={isActive ? "page" : undefined}
         className={`group relative w-full flex items-center justify-center p-1.5 rounded-lg transition-colors ${
@@ -140,6 +147,7 @@ export function ProjectButton({
   return (
     <button
       onClick={() => onNavigate("project", project.id)}
+      onContextMenu={onContextMenu ? (e) => onContextMenu(e, project) : undefined}
       aria-current={isActive ? "page" : undefined}
       className={`w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center gap-3 transition-colors ${
         isActive

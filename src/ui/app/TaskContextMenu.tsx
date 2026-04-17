@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import type { ContextMenuItem } from "../components/ContextMenu.js";
 import type { Task, UpdateTaskInput, Project as ProjectType } from "../../core/types.js";
+import { useGeneralSettings } from "../context/SettingsContext.js";
+import type { Section } from "../../core/types.js";
 
 /** Build an ISO reminder string N minutes from now. Called at click time, not render time. */
 function reminderFromNow(minutes: number): string {
@@ -28,6 +30,7 @@ function reminderFromNow(minutes: number): string {
 export function useTaskContextMenu({
   tasks,
   projects,
+  sections,
   availableTags,
   handleSelectTask,
   handleToggleTask,
@@ -39,6 +42,7 @@ export function useTaskContextMenu({
 }: {
   tasks: Task[];
   projects: ProjectType[];
+  sections: Section[];
   availableTags: string[];
   handleSelectTask: (id: string) => void;
   handleToggleTask: (id: string) => void;
@@ -48,6 +52,7 @@ export function useTaskContextMenu({
   handleCopyTaskLink: (id: string) => void;
   handleNavigate: (view: string, id?: string) => void;
 }) {
+  const { settings } = useGeneralSettings();
   const [contextMenu, setContextMenu] = useState<{
     taskId: string;
     position: { x: number; y: number };
@@ -312,6 +317,26 @@ export function useTaskContextMenu({
       });
     }
 
+    if (sections.length > 0 && task.projectId) {
+      items.push({
+        id: "move-section",
+        label: "Move to section...",
+        icon: <FolderInput size={14} />,
+        submenu: [
+          {
+            id: "move-section-none",
+            label: "No section",
+            onClick: () => handleUpdateTask(task.id, { sectionId: null }),
+          },
+          ...sections.map((section) => ({
+            id: `move-section-${section.id}`,
+            label: section.name,
+            onClick: () => handleUpdateTask(task.id, { sectionId: section.id }),
+          })),
+        ],
+      });
+    }
+
     // ── Go to project ──
     if (task.projectId) {
       items.push({
@@ -323,12 +348,14 @@ export function useTaskContextMenu({
     }
 
     // ── Move to Someday / Remove from Someday ──
-    items.push({
-      id: "someday",
-      label: task.isSomeday ? "Remove from Someday" : "Move to Someday",
-      icon: <Lightbulb size={14} />,
-      onClick: () => handleUpdateTask(task.id, { isSomeday: !task.isSomeday }),
-    });
+    if (settings.feature_someday === "true") {
+      items.push({
+        id: "someday",
+        label: task.isSomeday ? "Remove from Someday" : "Move to Someday",
+        icon: <Lightbulb size={14} />,
+        onClick: () => handleUpdateTask(task.id, { isSomeday: !task.isSomeday }),
+      });
+    }
 
     // ── Mark as cancelled / Reopen ──
     items.push({
@@ -369,6 +396,7 @@ export function useTaskContextMenu({
     contextMenu,
     tasks,
     projects,
+    sections,
     availableTags,
     handleSelectTask,
     handleToggleTask,
@@ -377,6 +405,7 @@ export function useTaskContextMenu({
     handleDuplicateTask,
     handleCopyTaskLink,
     handleNavigate,
+    settings.feature_someday,
   ]);
 
   return {

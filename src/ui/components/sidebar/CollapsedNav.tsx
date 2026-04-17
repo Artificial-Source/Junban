@@ -17,6 +17,7 @@ interface CollapsedNavProps {
   selectedPluginViewId?: string | null;
   onNavigate: (view: string, id?: string) => void;
   onNavContextMenu: (e: ReactMouseEvent, itemId: string) => void;
+  onProjectContextMenu?: (e: ReactMouseEvent, project: Project) => void;
   projects: Project[];
   viewsBySlot: { tools: ViewInfo[] };
   collapsed: boolean;
@@ -32,6 +33,7 @@ export function CollapsedNav({
   selectedPluginViewId,
   onNavigate,
   onNavContextMenu,
+  onProjectContextMenu,
   projects,
   viewsBySlot,
   collapsed,
@@ -78,6 +80,7 @@ export function CollapsedNav({
                   isActive={currentView === "project" && selectedProjectId === p.id}
                   onNavigate={onNavigate}
                   collapsed={collapsed}
+                  onContextMenu={onProjectContextMenu}
                 />
               </div>
             ))}

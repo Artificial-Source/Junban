@@ -224,9 +224,9 @@ This view should stay aligned with the plugin UI registry and plugin API surface
 `src/ui/views/Settings.tsx` is the main settings shell.
 
 - The primary split is now `Essentials` vs `Features`.
-- `Essentials` keeps baseline task-app preferences like date/time and task defaults.
+- `Essentials` keeps baseline task-app preferences like date/time, task defaults, and filters/labels management.
 - `Features` collects optional workflow tweaks like quick capture, sound, notifications, nudges, and feature toggles so first-run settings feel lighter.
-- The surrounding tab labels are intentionally product-facing: `AI`, `Voice`, `Extensions`, `Templates`, `Data`, and `About`.
+- The surrounding tab labels are intentionally product-facing: `Filters & Labels`, `AI`, `Voice`, `Templates`, `Data`, and `About`. The plugin-management settings surface remains implemented in the codebase but is intentionally hidden from the MVP UI.
 - First-run copy intentionally nudges users toward the `Minimal` preset, and `Templates` now sits later in the settings flow so it does not crowd the first-run essentials.
 
 It is responsible for:
@@ -244,12 +244,12 @@ Current tab implementations:
 | ----------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `src/ui/views/settings/GeneralTab.tsx`    | Core essentials such as date/time, task defaults, startup, notifications, sounds, and nudges |
 | `src/ui/views/settings/AppearanceTab.tsx` | Theme, density, font, and other visual preferences                                           |
+| `src/ui/views/settings/FiltersLabelsTab.tsx` | Saved filter and label management moved into Settings                                      |
 | `src/ui/views/settings/FeaturesTab.tsx`   | Optional workflow toggles and feature-level settings                                         |
 | `src/ui/views/settings/KeyboardTab.tsx`   | Shortcut customization                                                                       |
 | `src/ui/views/settings/TemplatesTab.tsx`  | Template management                                                                          |
 | `src/ui/views/settings/AITab.tsx`         | AI provider, briefing, memory, and instruction settings                                      |
 | `src/ui/views/settings/VoiceTab.tsx`      | Voice provider, microphone, and local model settings                                         |
-| `src/ui/views/settings/PluginsTab.tsx`    | Plugin management and extensions surface                                                     |
 | `src/ui/views/settings/DataTab.tsx`       | Import, export, and storage/data actions                                                     |
 | `src/ui/views/settings/AboutTab.tsx`      | Version, update, and about information                                                       |
 

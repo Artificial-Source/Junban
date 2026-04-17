@@ -1,10 +1,12 @@
 import { useState, useMemo, useCallback, type MouseEvent as ReactMouseEvent } from "react";
 import type { DragEndEvent } from "@dnd-kit/core";
-import { Inbox } from "lucide-react";
+import { FolderPlus, Inbox, Pencil, Star, Trash2 } from "lucide-react";
 import type { Project } from "../../core/types.js";
 import type { PanelInfo, ViewInfo } from "../api/plugins.js";
 import { useGeneralSettings } from "../context/SettingsContext.js";
 import { ContextMenu } from "./ContextMenu.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
+import { AddProjectModal } from "./AddProjectModal.js";
 import {
   NAV_ITEMS,
   DEFAULT_SIDEBAR_ORDER,
@@ -38,6 +40,24 @@ interface SidebarProps {
   inboxCount?: number;
   todayCount?: number;
   onOpenProjectModal?: () => void;
+  onCreateProject?: (
+    name: string,
+    color: string,
+    icon: string,
+    parentId: string | null,
+    isFavorite: boolean,
+    viewStyle: "list" | "board" | "calendar",
+  ) => void;
+  onUpdateProject?: (
+    id: string,
+    name: string,
+    color: string,
+    icon: string,
+    parentId: string | null,
+    isFavorite: boolean,
+    viewStyle: "list" | "board" | "calendar",
+  ) => void;
+  onDeleteProject?: (id: string) => void;
   builtinPluginIds?: Set<string>;
   savedFilters?: Array<{ id: string; name: string; query: string; color?: string }>;
   selectedFilterId?: string | null;
@@ -61,6 +81,9 @@ export function Sidebar({
   inboxCount,
   todayCount,
   onOpenProjectModal,
+  onCreateProject,
+  onUpdateProject,
+  onDeleteProject,
   builtinPluginIds = new Set(),
   savedFilters = [],
   selectedFilterId,
@@ -73,6 +96,15 @@ export function Sidebar({
   const [favoriteViewsExpanded, setFavoriteViewsExpanded] = useState(true);
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
   const [emptySpaceMenu, setEmptySpaceMenu] = useState<{ x: number; y: number } | null>(null);
+  const [projectContextMenu, setProjectContextMenu] = useState<{
+    project: Project;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [projectModalState, setProjectModalState] = useState<
+    { mode: "create"; defaultParentId: string | null } | { mode: "edit"; project: Project } | null
+  >(null);
+  const [projectDeleteTarget, setProjectDeleteTarget] = useState<Project | null>(null);
 
   const visibleNavItems = useMemo(() => {
     const hidden = new Set<string>();
@@ -107,6 +139,11 @@ export function Sidebar({
     () => projects.filter((p) => p.isFavorite && !p.archived),
     [projects],
   );
+  const projectsForSidebar = useMemo(() => {
+    const activeProjects = projects.filter((p) => !p.archived);
+    if (favoriteProjects.length === 0) return activeProjects;
+    return activeProjects.filter((p) => !p.isFavorite);
+  }, [projects, favoriteProjects]);
 
   const viewsBySlot = useMemo(() => {
     const navigation: ViewInfo[] = [],
@@ -140,7 +177,7 @@ export function Sidebar({
     }
     if (favoriteNavItems.length > 0) visibleIds.add("favorite-views");
     if (favoriteProjects.length > 0) visibleIds.add("favorites");
-    if (projects.length > 0 || onOpenProjectModal) visibleIds.add("projects");
+    if (projectsForSidebar.length > 0 || onOpenProjectModal) visibleIds.add("projects");
     if (savedFilters.length > 0) visibleIds.add("my-views");
     if (hasToolsContent) visibleIds.add("tools");
     const orderStr = settings.sidebar_section_order;
@@ -176,7 +213,7 @@ export function Sidebar({
     favoriteViewIds,
     favoriteNavItems.length,
     favoriteProjects.length,
-    projects.length,
+    projectsForSidebar.length,
     onOpenProjectModal,
     savedFilters.length,
     hasToolsContent,
@@ -203,7 +240,15 @@ export function Sidebar({
   const handleNavContextMenu = useCallback((e: ReactMouseEvent, itemId: string) => {
     e.preventDefault();
     setEmptySpaceMenu(null);
+    setProjectContextMenu(null);
     setCtxMenu({ itemId, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const handleProjectContextMenu = useCallback((e: ReactMouseEvent, project: Project) => {
+    e.preventDefault();
+    setCtxMenu(null);
+    setEmptySpaceMenu(null);
+    setProjectContextMenu({ project, x: e.clientX, y: e.clientY });
   }, []);
 
   const handleEmptySpaceContextMenu = useCallback((e: ReactMouseEvent) => {
@@ -212,8 +257,86 @@ export function Sidebar({
       return;
     e.preventDefault();
     setCtxMenu(null);
+    setProjectContextMenu(null);
     setEmptySpaceMenu({ x: e.clientX, y: e.clientY });
   }, []);
+
+  const projectContextMenuItems = useMemo(() => {
+    if (!projectContextMenu) return [];
+
+    const { project } = projectContextMenu;
+    return [
+      {
+        id: "edit-project",
+        label: "Edit project",
+        icon: <Pencil size={14} />,
+        onClick: () => setProjectModalState({ mode: "edit", project }),
+      },
+      {
+        id: "new-subproject",
+        label: "New subproject",
+        icon: <FolderPlus size={14} />,
+        separator: true,
+        onClick: () => setProjectModalState({ mode: "create", defaultParentId: project.id }),
+      },
+      {
+        id: "toggle-favorite",
+        label: project.isFavorite ? "Remove from Favorites" : "Add to Favorites",
+        icon: <Star size={14} />,
+        onClick: () =>
+          onUpdateProject?.(
+            project.id,
+            project.name,
+            project.color,
+            project.icon ?? "",
+            project.parentId,
+            !project.isFavorite,
+            project.viewStyle,
+          ),
+      },
+      {
+        id: "delete-project",
+        label: "Delete project",
+        icon: <Trash2 size={14} />,
+        separator: true,
+        danger: true,
+        onClick: () => setProjectDeleteTarget(project),
+      },
+    ];
+  }, [projectContextMenu, onUpdateProject]);
+
+  const handleProjectModalSubmit = useCallback(
+    (
+      name: string,
+      color: string,
+      icon: string,
+      parentId: string | null,
+      isFavorite: boolean,
+      viewStyle: "list" | "board" | "calendar",
+    ) => {
+      if (projectModalState?.mode === "edit") {
+        onUpdateProject?.(
+          projectModalState.project.id,
+          name,
+          color,
+          icon,
+          parentId,
+          isFavorite,
+          viewStyle,
+        );
+        return;
+      }
+
+      onCreateProject?.(name, color, icon, parentId, isFavorite, viewStyle);
+    },
+    [projectModalState, onCreateProject, onUpdateProject],
+  );
+
+  const handleConfirmDeleteProject = useCallback(() => {
+    if (!projectDeleteTarget) return;
+    onDeleteProject?.(projectDeleteTarget.id);
+    setProjectDeleteTarget(null);
+  }, [projectDeleteTarget, onDeleteProject]);
 
   const hasHiddenViews = useMemo(
     () => Object.entries(NAV_FEATURE_MAP).some(([, key]) => settings[key] === "false"),
@@ -269,7 +392,7 @@ export function Sidebar({
             navItemMap={navItemMap}
             countMap={countMap}
             viewsBySlot={viewsBySlot}
-            projects={projects}
+            projects={projectsForSidebar}
             projectTaskCounts={projectTaskCounts}
             projectCompletedCounts={projectCompletedCounts}
             favoriteProjects={favoriteProjects}
@@ -290,6 +413,7 @@ export function Sidebar({
             onDragEnd={handleDragEnd}
             onNavContextMenu={handleNavContextMenu}
             onOpenProjectModal={onOpenProjectModal}
+            onProjectContextMenu={handleProjectContextMenu}
           />
         </div>
 
@@ -310,6 +434,13 @@ export function Sidebar({
           onClose={() => setCtxMenu(null)}
         />
       )}
+      {projectContextMenu && projectContextMenuItems.length > 0 && (
+        <ContextMenu
+          items={projectContextMenuItems}
+          position={{ x: projectContextMenu.x, y: projectContextMenu.y }}
+          onClose={() => setProjectContextMenu(null)}
+        />
+      )}
       {emptySpaceMenu && emptyContextMenuItems.length > 0 && (
         <ContextMenu
           items={emptyContextMenuItems}
@@ -317,6 +448,29 @@ export function Sidebar({
           onClose={() => setEmptySpaceMenu(null)}
         />
       )}
+      {projectModalState && (
+        <AddProjectModal
+          open={true}
+          onClose={() => setProjectModalState(null)}
+          mode={projectModalState.mode}
+          onSubmit={handleProjectModalSubmit}
+          projects={projects}
+          initialProject={projectModalState.mode === "edit" ? projectModalState.project : null}
+          defaultParentId={
+            projectModalState.mode === "create" ? projectModalState.defaultParentId : null
+          }
+        />
+      )}
+      <ConfirmDialog
+        open={projectDeleteTarget !== null}
+        title="Delete project?"
+        message={
+          projectDeleteTarget ? `Delete "${projectDeleteTarget.name}"? This cannot be undone.` : ""
+        }
+        confirmLabel="Delete"
+        onConfirm={handleConfirmDeleteProject}
+        onCancel={() => setProjectDeleteTarget(null)}
+      />
     </aside>
   );
 }

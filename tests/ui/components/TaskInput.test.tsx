@@ -9,6 +9,23 @@ vi.mock("lucide-react", () => ({
   Calendar: (props: any) => <svg data-testid="calendar-icon" {...props} />,
   FolderOpen: (props: any) => <svg data-testid="folder-icon" {...props} />,
   Repeat: (props: any) => <svg data-testid="repeat-icon" {...props} />,
+  Clock: (props: any) => <svg data-testid="clock-icon" {...props} />,
+}));
+
+vi.mock("../../../src/ui/components/DatePicker.js", () => ({
+  DatePicker: ({ onChange }: any) => (
+    <button data-testid="date-picker" onClick={() => onChange("2026-02-20T00:00:00")}>
+      pick date
+    </button>
+  ),
+}));
+
+vi.mock("../../../src/ui/components/TagsInput.js", () => ({
+  TagsInput: ({ value, onChange }: any) => (
+    <button data-testid="tags-input" onClick={() => onChange([...(value ?? []), "work"])}>
+      add tag
+    </button>
+  ),
 }));
 
 // Mock task parser — use vi.fn() so we can change behavior per test
@@ -175,5 +192,32 @@ describe("TaskInput", () => {
   it("renders custom placeholder", () => {
     render(<TaskInput onSubmit={() => {}} placeholder="Custom placeholder" />);
     expect(screen.getByPlaceholderText("Custom placeholder")).toBeTruthy();
+  });
+
+  it("shows the metadata toolbar on focus", () => {
+    render(<TaskInput onSubmit={() => {}} />);
+    const input = screen.getByPlaceholderText(/add a task/i);
+    fireEvent.focus(input);
+    expect(screen.getByRole("button", { name: /p1/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /date/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /labels/i })).toBeTruthy();
+  });
+
+  it("submits manual toolbar priority overrides", async () => {
+    const onSubmit = vi.fn();
+    render(<TaskInput onSubmit={onSubmit} />);
+
+    const input = screen.getByPlaceholderText(/add a task/i);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "buy milk" } });
+    fireEvent.click(screen.getByRole("button", { name: /p2/i }));
+    await act(async () => {
+      fireEvent.submit(input.closest("form")!);
+    });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "buy milk", priority: 2 }),
+    );
   });
 });

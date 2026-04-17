@@ -3,6 +3,7 @@ import { themeManager } from "../themes/manager.js";
 import type { SettingsTab } from "../views/settings/types.js";
 import type { Project } from "../../core/types.js";
 import type { PluginCommandInfo } from "../api/plugins.js";
+import { useGeneralSettings } from "../context/SettingsContext.js";
 
 export function useAppCommands(
   handleNavigate: (view: string, id?: string) => void,
@@ -15,21 +16,12 @@ export function useAppCommands(
   setQuickAddOpen?: React.Dispatch<React.SetStateAction<boolean>>,
   setExtractTasksOpen?: React.Dispatch<React.SetStateAction<boolean>>,
 ) {
+  const { settings } = useGeneralSettings();
   return useMemo(() => {
     const cmds = [
       { id: "nav-inbox", name: "Go to Inbox", callback: () => handleNavigate("inbox") },
       { id: "nav-today", name: "Go to Today", callback: () => handleNavigate("today") },
       { id: "nav-upcoming", name: "Go to Upcoming", callback: () => handleNavigate("upcoming") },
-      {
-        id: "nav-filters-labels",
-        name: "Go to Filters & Labels",
-        callback: () => handleNavigate("filters-labels"),
-      },
-      {
-        id: "nav-completed",
-        name: "Go to Completed",
-        callback: () => handleNavigate("completed"),
-      },
       { id: "nav-settings", name: "Go to Settings", callback: () => openSettingsTab("general") },
       {
         id: "nav-settings-general",
@@ -42,14 +34,14 @@ export function useAppCommands(
         callback: () => openSettingsTab("appearance"),
       },
       {
+        id: "nav-settings-filters",
+        name: "Go to Settings: Filters & Labels",
+        callback: () => openSettingsTab("filters"),
+      },
+      {
         id: "nav-settings-ai",
         name: "Go to Settings: AI Assistant",
         callback: () => openSettingsTab("ai"),
-      },
-      {
-        id: "nav-settings-plugins",
-        name: "Go to Settings: Plugins",
-        callback: () => openSettingsTab("plugins"),
       },
       {
         id: "nav-settings-templates",
@@ -71,11 +63,15 @@ export function useAppCommands(
         name: "Go to Settings: About",
         callback: () => openSettingsTab("about"),
       },
-      {
-        id: "nav-plugin-store",
-        name: "Go to Plugins",
-        callback: () => openSettingsTab("plugins"),
-      },
+      ...(settings.feature_completed === "true"
+        ? [
+            {
+              id: "nav-completed",
+              name: "Go to Completed",
+              callback: () => handleNavigate("completed"),
+            },
+          ]
+        : []),
       { id: "theme-toggle", name: "Toggle Dark Mode", callback: () => themeManager.toggle() },
       {
         id: "theme-light",
@@ -141,5 +137,6 @@ export function useAppCommands(
     setTemplateSelectorOpen,
     setQuickAddOpen,
     setExtractTasksOpen,
+    settings.feature_completed,
   ]);
 }

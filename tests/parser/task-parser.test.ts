@@ -37,6 +37,47 @@ describe("parseTask", () => {
     expect(result.dueTime).toBe(false);
   });
 
+  it("does not swallow the next title letter after shorthand dates", () => {
+    const result = parseTask("tod hola");
+    expect(result.title).toBe("hola");
+    expect(result.dueDate).not.toBeNull();
+    expect(result.dueTime).toBe(false);
+  });
+
+  it("keeps trailing shorthand text as title after a shorthand date", () => {
+    const result = parseTask("tom tod");
+    expect(result.title).toBe("tod");
+    expect(result.dueDate).not.toBeNull();
+    expect(result.dueTime).toBe(false);
+  });
+
+  it("keeps trailing normal text as title after a shorthand date", () => {
+    const result = parseTask("tom test");
+    expect(result.title).toBe("test");
+    expect(result.dueDate).not.toBeNull();
+    expect(result.dueTime).toBe(false);
+  });
+
+  it("extends shorthand dates when followed by a connector and time", () => {
+    const result = parseTask("tom at 3pm");
+    expect(result.title).toBe("");
+    expect(result.dueDate).not.toBeNull();
+    expect(result.dueTime).toBe(true);
+  });
+
+  it("extends shorthand dates when followed by a connector phrase", () => {
+    const result = parseTask("tom by 5");
+    expect(result.title).toBe("");
+    expect(result.dueDate).not.toBeNull();
+  });
+
+  it("extends weekday shorthand dates when followed by a bare time", () => {
+    const result = parseTask("mon 2pm");
+    expect(result.title).toBe("");
+    expect(result.dueDate).not.toBeNull();
+    expect(result.dueTime).toBe(true);
+  });
+
   it("removes connector words before dates", () => {
     const result = parseTask("Buy grocery by tomorrow");
     expect(result.title).toBe("Buy grocery");

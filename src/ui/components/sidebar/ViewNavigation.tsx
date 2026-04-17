@@ -56,6 +56,7 @@ interface ViewNavigationProps {
   onNavContextMenu: (e: ReactMouseEvent, itemId: string) => void;
   // Projects
   onOpenProjectModal?: () => void;
+  onProjectContextMenu?: (e: ReactMouseEvent, project: Project) => void;
 }
 
 function ExpandedNavigation(props: ViewNavigationProps) {
@@ -89,6 +90,7 @@ function ExpandedNavigation(props: ViewNavigationProps) {
     panels,
     onNavContextMenu,
     onOpenProjectModal,
+    onProjectContextMenu,
   } = props;
 
   const sectionProps = {
@@ -119,6 +121,7 @@ function ExpandedNavigation(props: ViewNavigationProps) {
     panels,
     onNavContextMenu,
     onOpenProjectModal,
+    onProjectContextMenu,
   };
 
   return (
@@ -226,6 +229,7 @@ export function ViewNavigation(props: ViewNavigationProps) {
         selectedPluginViewId={props.selectedPluginViewId}
         onNavigate={props.onNavigate}
         onNavContextMenu={props.onNavContextMenu}
+        onProjectContextMenu={props.onProjectContextMenu}
         projects={props.projects}
         viewsBySlot={props.viewsBySlot}
         collapsed={props.collapsed}

@@ -38,10 +38,13 @@ vi.mock("lucide-react", () => {
     ChevronLeft: icon("chevron-left"),
     ChevronRight: icon("chevron-right"),
     Plus: icon("plus"),
+    FolderPlus: icon("folder-plus"),
     Search: icon("search"),
     SlidersHorizontal: icon("sliders"),
+    Pencil: icon("pencil"),
     CheckCircle2: icon("check-circle"),
     Star: icon("star"),
+    Trash2: icon("trash-2"),
     XCircle: icon("x-circle"),
     BarChart3: icon("bar-chart"),
     Lightbulb: icon("lightbulb"),
@@ -57,8 +60,21 @@ vi.mock("lucide-react", () => {
     Heart: icon("heart"),
     GripVertical: icon("grip-vertical"),
     Zap: icon("zap"),
+    X: icon("x"),
+    Check: icon("check"),
+    Smile: icon("smile"),
+    Palette: icon("palette"),
+    List: icon("list"),
+    Columns3: icon("columns3"),
+    Calendar: icon("calendar"),
+    AlertTriangle: icon("alert-triangle"),
   };
 });
+
+vi.mock("emoji-picker-react", () => ({
+  Theme: { AUTO: "auto" },
+  default: () => <div data-testid="emoji-picker" />,
+}));
 
 // Mock dnd-kit to avoid DOM measurement issues in tests
 vi.mock("@dnd-kit/core", () => ({
@@ -125,9 +141,9 @@ describe("Sidebar", () => {
     expect(screen.getByText("Inbox")).toBeTruthy();
     expect(screen.getByText("Today")).toBeTruthy();
     expect(screen.getByText("Upcoming")).toBeTruthy();
-    expect(screen.getByText("Calendar")).toBeTruthy();
-    expect(screen.getByText("Filters & Labels")).toBeTruthy();
-    expect(screen.getByText("Completed")).toBeTruthy();
+    expect(screen.queryByText("Calendar")).toBeNull();
+    expect(screen.queryByText("Filters & Labels")).toBeNull();
+    expect(screen.queryByText("Completed")).toBeNull();
   });
 
   it("highlights the active view", () => {
@@ -235,18 +251,55 @@ describe("Sidebar", () => {
 
   it("shows context menu on right-click of nav item", () => {
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
-    const calendarBtn = screen.getByText("Calendar").closest("button")!;
-    fireEvent.contextMenu(calendarBtn);
+    const todayBtn = screen.getByText("Today").closest("button")!;
+    fireEvent.contextMenu(todayBtn);
     expect(screen.getByRole("menu")).toBeTruthy();
-    expect(screen.getByText("Hide from sidebar")).toBeTruthy();
+    expect(screen.getByText("Manage in Settings")).toBeTruthy();
   });
 
-  it("shows 'Hide from sidebar' for optional views", () => {
+  it("shows project actions on right-click of a project", () => {
+    const projects = [makeProject({ id: "p1", name: "Work" })];
+    render(<Sidebar {...defaultProps} projects={projects} onUpdateProject={vi.fn()} />);
+    const projectBtn = screen.getByText("Work").closest("button")!;
+    fireEvent.contextMenu(projectBtn);
+    expect(screen.getByText("Edit project")).toBeTruthy();
+    expect(screen.getByText("New subproject")).toBeTruthy();
+    expect(screen.getByText("Delete project")).toBeTruthy();
+  });
+
+  it("toggles project favorite from the project context menu", () => {
+    const onUpdateProject = vi.fn();
+    const projects = [makeProject({ id: "p1", name: "Work", isFavorite: false })];
+    render(<Sidebar {...defaultProps} projects={projects} onUpdateProject={onUpdateProject} />);
+    const projectBtn = screen.getByText("Work").closest("button")!;
+    fireEvent.contextMenu(projectBtn);
+    fireEvent.click(screen.getByText("Add to Favorites"));
+    expect(onUpdateProject).toHaveBeenCalledWith("p1", "Work", "#3b82f6", "", null, true, "list");
+  });
+
+  it("does not duplicate favorited projects across Favorites and My Projects", () => {
+    const projects = [makeProject({ id: "p1", name: "Work", isFavorite: true })];
+    render(<Sidebar {...defaultProps} projects={projects} />);
+    expect(screen.getByText("Favorites")).toBeTruthy();
+    expect(screen.getAllByText("Work")).toHaveLength(1);
+  });
+
+  it("confirms project deletion from the project context menu", () => {
+    const onDeleteProject = vi.fn();
+    const projects = [makeProject({ id: "p1", name: "Work" })];
+    render(<Sidebar {...defaultProps} projects={projects} onDeleteProject={onDeleteProject} />);
+    const projectBtn = screen.getByText("Work").closest("button")!;
+    fireEvent.contextMenu(projectBtn);
+    fireEvent.click(screen.getByText("Delete project"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onDeleteProject).toHaveBeenCalledWith("p1");
+  });
+
+  it("does not show 'Hide from sidebar' for core MVP views", () => {
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
-    // Test with Stats (optional view)
-    const statsBtn = screen.getByText("Stats").closest("button")!;
-    fireEvent.contextMenu(statsBtn);
-    expect(screen.getByText("Hide from sidebar")).toBeTruthy();
+    const todayBtn = screen.getByText("Today").closest("button")!;
+    fireEvent.contextMenu(todayBtn);
+    expect(screen.queryByText("Hide from sidebar")).toBeNull();
   });
 
   it("does NOT show 'Hide from sidebar' for core views", () => {
@@ -257,12 +310,11 @@ describe("Sidebar", () => {
     expect(screen.getByText("Manage in Settings")).toBeTruthy();
   });
 
-  it("clicking 'Hide from sidebar' calls updateSetting with correct feature key", () => {
+  it("core view context menu does not call feature-hide updates", () => {
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
-    const calendarBtn = screen.getByText("Calendar").closest("button")!;
-    fireEvent.contextMenu(calendarBtn);
-    fireEvent.click(screen.getByText("Hide from sidebar"));
-    expect(mockUpdateSetting).toHaveBeenCalledWith("feature_calendar", "false");
+    const todayBtn = screen.getByText("Today").closest("button")!;
+    fireEvent.contextMenu(todayBtn);
+    expect(mockUpdateSetting).not.toHaveBeenCalledWith("feature_calendar", "false");
   });
 
   it("core view context menu shows 'Manage in Settings'", () => {
@@ -355,13 +407,13 @@ describe("Sidebar", () => {
 
   it("'Move to top' moves item to first position", () => {
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
-    const statsBtn = screen.getByText("Stats").closest("button")!;
-    fireEvent.contextMenu(statsBtn);
+    const upcomingBtn = screen.getByText("Upcoming").closest("button")!;
+    fireEvent.contextMenu(upcomingBtn);
     fireEvent.click(screen.getByText("Move to top"));
     const call = mockUpdateSetting.mock.calls.find((c: any[]) => c[0] === "sidebar_section_order");
     expect(call).toBeTruthy();
     const order = (call![1] as string).split(",");
-    expect(order[0]).toBe("stats");
+    expect(order[0]).toBe("upcoming");
   });
 
   it("'Move to bottom' moves item to last position", () => {
@@ -385,9 +437,8 @@ describe("Sidebar", () => {
 
   it("does not show 'Move to bottom' for last item", () => {
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
-    // Quick Wins is last by default
-    const quickWinsBtn = screen.getByText("Quick Wins").closest("button")!;
-    fireEvent.contextMenu(quickWinsBtn);
+    const upcomingBtn = screen.getByText("Upcoming").closest("button")!;
+    fireEvent.contextMenu(upcomingBtn);
     expect(screen.queryByText("Move to bottom")).toBeNull();
   });
 
@@ -395,10 +446,10 @@ describe("Sidebar", () => {
 
   it("'Set as Home view' updates start_view setting", () => {
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
-    const calendarBtn = screen.getByText("Calendar").closest("button")!;
-    fireEvent.contextMenu(calendarBtn);
+    const todayBtn = screen.getByText("Today").closest("button")!;
+    fireEvent.contextMenu(todayBtn);
     fireEvent.click(screen.getByText("Set as Home view"));
-    expect(mockUpdateSetting).toHaveBeenCalledWith("start_view", "calendar");
+    expect(mockUpdateSetting).toHaveBeenCalledWith("start_view", "today");
   });
 
   it("shows 'Home view' (disabled) when item is already the start_view", () => {
@@ -423,29 +474,21 @@ describe("Sidebar", () => {
 
   // ── Hide others ──
 
-  it("'Hide others' hides all optional views except the target", () => {
+  it("'Hide others' is not shown when there are no hideable MVP views", () => {
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
-    const calendarBtn = screen.getByText("Calendar").closest("button")!;
-    fireEvent.contextMenu(calendarBtn);
-    fireEvent.click(screen.getByText("Hide others"));
-    // Should NOT have been called with feature_calendar = false
-    expect(mockUpdateSetting).not.toHaveBeenCalledWith("feature_calendar", "false");
-    // Should have been called for other optional views
-    expect(mockUpdateSetting).toHaveBeenCalledWith("feature_stats", "false");
-    expect(mockUpdateSetting).toHaveBeenCalledWith("feature_someday", "false");
-    expect(mockUpdateSetting).toHaveBeenCalledWith("feature_cancelled", "false");
+    const todayBtn = screen.getByText("Today").closest("button")!;
+    fireEvent.contextMenu(todayBtn);
+    expect(screen.queryByText("Hide others")).toBeNull();
   });
 
   // ── Show all hidden ──
 
-  it("'Show all hidden' re-enables all hidden views", () => {
+  it("'Show all hidden' is not shown when no hideable feature-mapped views exist", () => {
     mockSettings = { feature_stats: "false", feature_someday: "false" };
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
     const inboxBtn = screen.getByText("Inbox").closest("button")!;
     fireEvent.contextMenu(inboxBtn);
-    fireEvent.click(screen.getByText("Show all hidden"));
-    expect(mockUpdateSetting).toHaveBeenCalledWith("feature_stats", "true");
-    expect(mockUpdateSetting).toHaveBeenCalledWith("feature_someday", "true");
+    expect(screen.queryByText("Show all hidden")).toBeNull();
   });
 
   it("does not show 'Show all hidden' when no views are hidden", () => {
@@ -466,16 +509,16 @@ describe("Sidebar", () => {
   });
 
   it("shows 'Remove from Favorites' when view is favorited", () => {
-    mockSettings = { sidebar_favorite_views: "calendar" };
+    mockSettings = { sidebar_favorite_views: "today" };
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
-    // Calendar is now in Favorite Views section (removed from main nav to avoid duplication)
-    const calendarBtn = screen.getByText("Calendar").closest("button")!;
-    fireEvent.contextMenu(calendarBtn);
+    const todayButtons = screen.getAllByText("Today");
+    const todayBtn = todayButtons[0].closest("button")!;
+    fireEvent.contextMenu(todayBtn);
     expect(screen.getByText("Remove from Favorites")).toBeTruthy();
   });
 
   it("renders Favorite Views section when views are favorited", () => {
-    mockSettings = { sidebar_favorite_views: "today,calendar" };
+    mockSettings = { sidebar_favorite_views: "today" };
     render(<Sidebar {...defaultProps} />);
     expect(screen.getByText("Favorite Views")).toBeTruthy();
   });
@@ -490,8 +533,8 @@ describe("Sidebar", () => {
 
   it("context menu includes separator dividers between groups", () => {
     render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} />);
-    const calendarBtn = screen.getByText("Calendar").closest("button")!;
-    fireEvent.contextMenu(calendarBtn);
+    const todayBtn = screen.getByText("Today").closest("button")!;
+    fireEvent.contextMenu(todayBtn);
     const menu = screen.getByRole("menu");
     const separators = menu.querySelectorAll('[role="separator"]');
     expect(separators.length).toBeGreaterThan(0);
@@ -500,32 +543,28 @@ describe("Sidebar", () => {
   // ── Favorite dedup: hide favorited items from main nav ──
 
   it("hides favorited items from main nav (no duplication)", () => {
-    mockSettings = { sidebar_favorite_views: "calendar" };
+    mockSettings = { sidebar_favorite_views: "today" };
     render(<Sidebar {...defaultProps} />);
-    // Calendar should appear only once (in Favorite Views), not in main nav
-    const calendarElements = screen.getAllByText("Calendar");
-    expect(calendarElements).toHaveLength(1);
-    // Favorite Views section should be visible
+    const todayElements = screen.getAllByText("Today");
+    expect(todayElements).toHaveLength(1);
     expect(screen.getByText("Favorite Views")).toBeTruthy();
   });
 
   it("shows favorited items only in Favorite Views section", () => {
-    mockSettings = { sidebar_favorite_views: "today,stats" };
+    mockSettings = { sidebar_favorite_views: "today,upcoming" };
     render(<Sidebar {...defaultProps} />);
-    // Today and Stats removed from main nav, only in Favorite Views
     expect(screen.getByText("Favorite Views")).toBeTruthy();
-    // Each should appear exactly once
     const todayElements = screen.getAllByText("Today");
-    const statsElements = screen.getAllByText("Stats");
+    const upcomingElements = screen.getAllByText("Upcoming");
     expect(todayElements).toHaveLength(1);
-    expect(statsElements).toHaveLength(1);
+    expect(upcomingElements).toHaveLength(1);
   });
 
   // ── Section ordering ──
 
   it("renders sections in default order when sidebar_section_order is empty", () => {
     mockSettings = {
-      sidebar_favorite_views: "calendar",
+      sidebar_favorite_views: "today",
       sidebar_section_order: "",
     };
     const projects = [makeProject({ id: "p1", name: "Work" })];
@@ -538,17 +577,16 @@ describe("Sidebar", () => {
   });
 
   it("renders sections with drag handles", () => {
-    mockSettings = { sidebar_favorite_views: "calendar" };
+    mockSettings = { sidebar_favorite_views: "today" };
     const projects = [makeProject({ id: "p1", name: "Work" })];
     render(<Sidebar {...defaultProps} projects={projects} />);
-    // Should have drag handle buttons for sections
     const dragHandles = screen.getAllByLabelText(/Drag .+ section/);
-    expect(dragHandles.length).toBeGreaterThanOrEqual(2); // Favorite Views + My Projects at least
+    expect(dragHandles.length).toBeGreaterThanOrEqual(2);
   });
 
   it("renders sections in stored order from sidebar_section_order", () => {
     mockSettings = {
-      sidebar_favorite_views: "calendar",
+      sidebar_favorite_views: "today",
       sidebar_section_order: "projects,favorite-views",
     };
     const projects = [makeProject({ id: "p1", name: "Work" })];
@@ -561,9 +599,8 @@ describe("Sidebar", () => {
 
   it("nav items can be reordered below sections in flat list", () => {
     mockSettings = {
-      sidebar_favorite_views: "calendar",
-      sidebar_section_order:
-        "favorite-views,inbox,today,upcoming,filters-labels,completed,cancelled,matrix,stats,someday",
+      sidebar_favorite_views: "today",
+      sidebar_section_order: "favorite-views,inbox,today,upcoming",
     };
     render(<Sidebar {...defaultProps} />);
     const sortable = screen.getByTestId("sortable-context");

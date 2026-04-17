@@ -5,7 +5,6 @@ import {
   Palette,
   Bot,
   Mic,
-  Puzzle,
   Keyboard,
   Database,
   Info,
@@ -25,6 +24,11 @@ const GeneralTab = lazy(() =>
 const AppearanceTab = lazy(() =>
   import("./settings/AppearanceTab.js").then((module) => ({ default: module.AppearanceTab })),
 );
+const FiltersLabelsTab = lazy(() =>
+  import("./settings/FiltersLabelsTab.js").then((module) => ({
+    default: module.FiltersLabelsTab,
+  })),
+);
 const FeaturesTab = lazy(() =>
   import("./settings/FeaturesTab.js").then((module) => ({ default: module.FeaturesTab })),
 );
@@ -33,9 +37,6 @@ const AITab = lazy(() =>
 );
 const VoiceTab = lazy(() =>
   import("./settings/VoiceTab.js").then((module) => ({ default: module.VoiceTab })),
-);
-const PluginsTab = lazy(() =>
-  import("./settings/PluginsTab.js").then((module) => ({ default: module.PluginsTab })),
 );
 const TemplatesTab = lazy(() =>
   import("./settings/TemplatesTab.js").then((module) => ({ default: module.TemplatesTab })),
@@ -81,6 +82,13 @@ const TABS: TabMeta[] = [
     mobileIcon: <Palette className="w-5 h-5" />,
   },
   {
+    id: "filters",
+    label: "Filters & Labels",
+    subtitle: "Saved filters and tags",
+    icon: <SlidersHorizontal className="w-4 h-4" />,
+    mobileIcon: <SlidersHorizontal className="w-5 h-5" />,
+  },
+  {
     id: "features",
     label: "Advanced",
     subtitle: "Optional upgrades",
@@ -116,13 +124,6 @@ const TABS: TabMeta[] = [
     mobileIcon: <Mic className="w-5 h-5" />,
   },
   {
-    id: "plugins",
-    label: "Extensions",
-    subtitle: "Built-ins & community",
-    icon: <Puzzle className="w-4 h-4" />,
-    mobileIcon: <Puzzle className="w-5 h-5" />,
-  },
-  {
     id: "data",
     label: "Data",
     subtitle: "Backup & transfer",
@@ -140,13 +141,17 @@ const TABS: TabMeta[] = [
 
 // Sections for the mobile index page
 const MOBILE_SECTIONS: { label: string; tabs: SettingsTab[] }[] = [
-  { label: "Essentials", tabs: ["general", "appearance"] },
+  { label: "Essentials", tabs: ["general", "appearance", "filters"] },
   { label: "Advanced", tabs: ["features", "keyboard", "templates"] },
   { label: "AI & Voice", tabs: ["ai", "voice"] },
-  { label: "Extensions", tabs: ["plugins"] },
   { label: "Data", tabs: ["data"] },
   { label: "Info", tabs: ["about"] },
 ];
+
+function sanitizeSettingsTab(tab: SettingsTab | null | undefined): SettingsTab {
+  if (tab === "plugins") return "general";
+  return tab ?? "general";
+}
 
 function renderTabContent(tab: SettingsTab) {
   const fallback = (
@@ -170,14 +175,14 @@ function renderTabContent(tab: SettingsTab) {
       return wrap(<GeneralTab />);
     case "appearance":
       return wrap(<AppearanceTab />);
+    case "filters":
+      return wrap(<FiltersLabelsTab />);
     case "features":
       return wrap(<FeaturesTab />);
     case "ai":
       return wrap(<AITab />);
     case "voice":
       return wrap(<VoiceTab />);
-    case "plugins":
-      return wrap(<PluginsTab />);
     case "templates":
       return wrap(<TemplatesTab />);
     case "keyboard":
@@ -191,12 +196,13 @@ function renderTabContent(tab: SettingsTab) {
 
 export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
   const isMobile = useIsMobile();
+  const safeInitialTab = sanitizeSettingsTab(initialTab);
   // Settings manages its own tab state. The initialTab prop is used only on mount
   // (or when changed from outside, e.g. command palette "Open AI settings").
-  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? "general");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(safeInitialTab);
   // null = show the mobile index page; a tab id = show that tab's content
   const [mobileSelectedTab, setMobileSelectedTab] = useState<SettingsTab | null>(
-    isMobile && initialTab && initialTab !== "general" ? initialTab : null,
+    isMobile && safeInitialTab !== "general" ? safeInitialTab : null,
   );
 
   // Sync if the caller changes initialTab after mount (e.g. re-opening at a different tab)
@@ -204,9 +210,10 @@ export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
   if (initialTab !== prevInitialTab) {
     setPrevInitialTab(initialTab);
     if (initialTab) {
-      setActiveTab(initialTab);
-      if (isMobile && initialTab !== "general") {
-        setMobileSelectedTab(initialTab);
+      const nextTab = sanitizeSettingsTab(initialTab);
+      setActiveTab(nextTab);
+      if (isMobile && nextTab !== "general") {
+        setMobileSelectedTab(nextTab);
       }
     }
   }

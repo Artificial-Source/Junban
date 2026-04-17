@@ -148,6 +148,7 @@ function AppContent() {
   } = useTaskContextMenu({
     tasks: state.tasks,
     projects,
+    sections,
     availableTags,
     handleSelectTask,
     handleToggleTask,
@@ -340,6 +341,9 @@ function AppContent() {
         handleOpenSettings={handleOpenSettings}
         handleAddTask={handlers.handleAddTask}
         handleOpenVoice={handlers.handleOpenVoice}
+        handleCreateProject={handlers.handleCreateProject}
+        handleUpdateProject={handlers.handleUpdateProject}
+        handleDeleteProject={handlers.handleDeleteProject}
         handleCreateTask={handleCreateTask}
         handleToggleTask={handleToggleTask}
         handleSelectTask={handleSelectTask}

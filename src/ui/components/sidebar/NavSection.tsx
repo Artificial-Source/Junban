@@ -56,6 +56,7 @@ interface NavSectionRenderProps {
   onNavContextMenu: (e: ReactMouseEvent, itemId: string) => void;
   // Projects
   onOpenProjectModal?: () => void;
+  onProjectContextMenu?: (e: ReactMouseEvent, project: Project) => void;
   sectionRenderer?: SectionRenderer;
 }
 
@@ -107,6 +108,7 @@ export function renderSection(itemId: string, props: NavSectionRenderProps): Rea
     panels,
     onNavContextMenu,
     onOpenProjectModal,
+    onProjectContextMenu,
     sectionRenderer = defaultSectionRenderer,
   } = props;
 
@@ -168,6 +170,7 @@ export function renderSection(itemId: string, props: NavSectionRenderProps): Rea
                     onNavigate={onNavigate}
                     projectTaskCounts={projectTaskCounts}
                     projectCompletedCounts={projectCompletedCounts}
+                    onContextMenu={onProjectContextMenu}
                   />
                 </li>
               ))}
@@ -208,6 +211,7 @@ export function renderSection(itemId: string, props: NavSectionRenderProps): Rea
               projectTaskCounts={projectTaskCounts}
               projectCompletedCounts={projectCompletedCounts}
               collapsed={collapsed}
+              onContextMenu={onProjectContextMenu}
             />
           )}
         </>

@@ -12,7 +12,6 @@ import {
   Zap,
   ChevronDown,
   ChevronRight,
-  SlidersHorizontal,
   GripVertical,
 } from "lucide-react";
 import type { GeneralSettings } from "../../context/SettingsContext.js";
@@ -40,7 +39,6 @@ export const NAV_ITEMS: Array<{
   { id: "today", label: "Today", icon: CalendarDays, countKey: "today" },
   { id: "upcoming", label: "Upcoming", icon: Clock },
   { id: "calendar", label: "Calendar", icon: CalendarRange },
-  { id: "filters-labels", label: "Filters & Labels", icon: SlidersHorizontal },
   { id: "completed", label: "Completed", icon: CheckCircle2 },
   { id: "cancelled", label: "Cancelled", icon: XCircle },
   { id: "matrix", label: "Matrix", icon: Grid2x2 },
@@ -56,7 +54,6 @@ export const DEFAULT_SIDEBAR_ORDER = [
   "today",
   "upcoming",
   "calendar",
-  "filters-labels",
   "completed",
   "cancelled",
   "matrix",
@@ -80,7 +77,6 @@ export const SECTION_IDS = new Set([
 
 export const NAV_FEATURE_MAP: Record<string, keyof GeneralSettings> = {
   calendar: "feature_calendar",
-  "filters-labels": "feature_filters_labels",
   completed: "feature_completed",
   cancelled: "feature_cancelled",
   matrix: "feature_matrix",

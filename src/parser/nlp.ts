@@ -37,6 +37,98 @@ const DATE_SHORTHANDS: [RegExp, string][] = [
   [/\beom\b/gi, "end of month"],
 ];
 
+const SINGLE_TOKEN_DATE_KEYWORDS = [
+  "tod",
+  "tom",
+  "yd",
+  "nw",
+  "mon",
+  "tue",
+  "wed",
+  "thu",
+  "fri",
+  "sat",
+  "sun",
+  "today",
+  "tomorrow",
+  "yesterday",
+  "now",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+  "eod",
+  "eow",
+  "eom",
+  "end of day",
+  "end of week",
+  "end of month",
+] as const;
+
+const SINGLE_TOKEN_DATE_SHORTHANDS = [
+  "tod",
+  "tom",
+  "yd",
+  "nw",
+  "mon",
+  "tue",
+  "wed",
+  "thu",
+  "fri",
+  "sat",
+  "sun",
+  "eod",
+  "eow",
+  "eom",
+] as const;
+
+function trimOvermatchedTrailingLetter(parsedText: string): string {
+  const trimmed = parsedText.trim();
+  const match = trimmed.match(/^(.+?)\s+([A-Za-z])$/);
+  if (!match) return trimmed;
+
+  const keyword = match[1].toLowerCase();
+  if (SINGLE_TOKEN_DATE_KEYWORDS.includes(keyword as (typeof SINGLE_TOKEN_DATE_KEYWORDS)[number])) {
+    return match[1];
+  }
+
+  return trimmed;
+}
+
+function collapseSingleTokenShorthandMatch(parsedText: string): string {
+  const trimmed = parsedText.trim();
+  const [firstWord, ...restWords] = trimmed.split(/\s+/);
+  if (!firstWord) return trimmed;
+
+  const remainder = restWords.join(" ");
+
+  const lowered = firstWord.toLowerCase();
+  if (
+    SINGLE_TOKEN_DATE_SHORTHANDS.includes(lowered as (typeof SINGLE_TOKEN_DATE_SHORTHANDS)[number])
+  ) {
+    if (looksLikeDateContinuation(remainder)) {
+      return trimmed;
+    }
+    return firstWord;
+  }
+
+  return trimmed;
+}
+
+function looksLikeDateContinuation(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  return (
+    /^(?:at|by|before|on)\b/i.test(trimmed) ||
+    /^\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/i.test(trimmed) ||
+    /^(?:noon|midnight|morning|afternoon|evening|tonight)\b/i.test(trimmed)
+  );
+}
+
 /** Expand shorthand date abbreviations (tod, tom, mon, etc.) to full words for chrono-node. */
 export function expandDateShorthands(input: string): string {
   let result = input;
@@ -71,10 +163,14 @@ export function parseDate(input: string, referenceDate?: Date): ParsedDate | nul
     result.index + findOriginalLength(input, expanded, result.index, result.text.length),
   );
 
+  const matchedText = collapseSingleTokenShorthandMatch(
+    trimOvermatchedTrailingLetter(originalText || result.text),
+  );
+
   return {
     date: result.start.date(),
     hasTime,
-    text: originalText || result.text,
+    text: matchedText,
   };
 }
 

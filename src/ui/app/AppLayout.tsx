@@ -85,6 +85,24 @@ interface AppLayoutProps {
   handleOpenSettings: () => void;
   handleAddTask: () => void;
   handleOpenVoice: () => void;
+  handleCreateProject: (
+    name: string,
+    color: string,
+    icon: string,
+    parentId: string | null,
+    isFavorite: boolean,
+    viewStyle: "list" | "board" | "calendar",
+  ) => void;
+  handleUpdateProject: (
+    id: string,
+    name: string,
+    color: string,
+    icon: string,
+    parentId: string | null,
+    isFavorite: boolean,
+    viewStyle: "list" | "board" | "calendar",
+  ) => void;
+  handleDeleteProject: (id: string) => void;
   handleCreateTask: (data: ParsedTaskInput) => void;
   handleToggleTask: (id: string) => void;
   handleSelectTask: (id: string) => void;
@@ -160,6 +178,9 @@ export function AppLayout({
   handleOpenSettings,
   handleAddTask,
   handleOpenVoice,
+  handleCreateProject,
+  handleUpdateProject,
+  handleDeleteProject,
   handleCreateTask,
   handleToggleTask,
   handleSelectTask,
@@ -220,6 +241,9 @@ export function AppLayout({
               inboxCount={inboxTaskCount}
               todayCount={todayTaskCount}
               onOpenProjectModal={() => setProjectModalOpen(true)}
+              onCreateProject={handleCreateProject}
+              onUpdateProject={handleUpdateProject}
+              onDeleteProject={handleDeleteProject}
               builtinPluginIds={builtinPluginIds}
               savedFilters={savedFilters}
               selectedFilterId={selectedFilterId}
@@ -350,6 +374,9 @@ export function AppLayout({
                   setDrawerOpen(false);
                   setProjectModalOpen(true);
                 }}
+                onCreateProject={handleCreateProject}
+                onUpdateProject={handleUpdateProject}
+                onDeleteProject={handleDeleteProject}
                 builtinPluginIds={builtinPluginIds}
                 savedFilters={savedFilters}
                 selectedFilterId={selectedFilterId}

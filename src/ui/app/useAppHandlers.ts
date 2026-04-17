@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { useTaskContext } from "../context/TaskContext.js";
-import { createProject } from "../api/projects.js";
+import { createProject, deleteProject, updateProject } from "../api/projects.js";
 import { createSection, deleteSection, updateSection } from "../api/sections.js";
 import { addTaskComment, deleteTaskComment, updateTaskComment } from "../api/comments.js";
 import type { View } from "../hooks/useRouting.js";
@@ -84,6 +84,49 @@ export function useAppHandlers({
       }
     },
     [fetchProjects],
+  );
+
+  const handleUpdateProject = useCallback(
+    async (
+      id: string,
+      name: string,
+      color: string,
+      icon: string,
+      parentId: string | null,
+      isFavorite: boolean,
+      viewStyle: "list" | "board" | "calendar",
+    ) => {
+      try {
+        await updateProject(id, {
+          name,
+          color: color || undefined,
+          icon: icon || null,
+          parentId,
+          isFavorite,
+          viewStyle,
+        });
+        fetchProjects();
+      } catch {
+        /* Non-critical */
+      }
+    },
+    [fetchProjects],
+  );
+
+  const handleDeleteProject = useCallback(
+    async (id: string) => {
+      try {
+        await deleteProject(id);
+        if (currentView === "project" && selectedProjectId === id) {
+          handleNavigate("inbox");
+        }
+        fetchProjects();
+        refreshTasks();
+      } catch {
+        /* Non-critical */
+      }
+    },
+    [currentView, selectedProjectId, handleNavigate, fetchProjects, refreshTasks],
   );
 
   // ── Navigation handlers ──
@@ -295,6 +338,8 @@ export function useAppHandlers({
 
   return {
     handleCreateProject,
+    handleUpdateProject,
+    handleDeleteProject,
     handleOpenVoice,
     handleAddTask,
     handleRestoreTask,

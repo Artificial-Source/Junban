@@ -72,6 +72,7 @@ export function useTaskHandlers(
     estimatedMinutes?: number | null;
     deadline?: Date | null;
     isSomeday?: boolean;
+    sectionId?: string | null;
     dreadLevel?: number | null;
   }) => {
     if (!parsed.title.trim()) return;
@@ -91,6 +92,7 @@ export function useTaskHandlers(
       estimatedMinutes: parsed.estimatedMinutes ?? undefined,
       deadline: parsed.deadline?.toISOString() ?? undefined,
       isSomeday: parsed.isSomeday ?? undefined,
+      sectionId: parsed.sectionId ?? undefined,
       dreadLevel: parsed.dreadLevel ?? undefined,
     });
     playSound("create");

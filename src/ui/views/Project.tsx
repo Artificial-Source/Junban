@@ -6,20 +6,14 @@ import type { Task, Project as ProjectType, Section } from "../../core/types.js"
 import { useGeneralSettings } from "../context/SettingsContext.js";
 import { ProjectHeader } from "./project/ProjectHeader.js";
 import { AddSectionButton, SectionedTaskList } from "./project/ProjectSections.js";
+import type { ParsedTaskInput } from "../app/ViewRenderer.js";
 
 const Board = lazy(() => import("./Board.js").then((module) => ({ default: module.Board })));
 
 interface ProjectProps {
   project: ProjectType;
   tasks: Task[];
-  onCreateTask: (parsed: {
-    title: string;
-    priority: number | null;
-    tags: string[];
-    project: string | null;
-    dueDate: Date | null;
-    dueTime: boolean;
-  }) => void;
+  onCreateTask: (parsed: ParsedTaskInput) => void;
   onToggleTask: (id: string) => void;
   onSelectTask: (id: string) => void;
   selectedTaskId: string | null;
@@ -81,6 +75,9 @@ export function Project({
       Loading board...
     </div>
   );
+  const handleCreateProjectTask = (parsed: ParsedTaskInput) => {
+    onCreateTask({ ...parsed, sectionId: parsed.sectionId ?? null });
+  };
 
   // Board view
   if (effectiveViewStyle === "board" && sections && onMoveTask) {
@@ -93,7 +90,7 @@ export function Project({
           totalForProgress={totalForProgress}
         />
         <TaskInput
-          onSubmit={onCreateTask}
+          onSubmit={handleCreateProjectTask}
           placeholder={`Add a task to ${project.name}...`}
           autoFocusTrigger={autoFocusTrigger}
         />
@@ -127,7 +124,7 @@ export function Project({
         totalForProgress={totalForProgress}
       />
       <TaskInput
-        onSubmit={onCreateTask}
+        onSubmit={handleCreateProjectTask}
         placeholder={`Add a task to ${project.name}...`}
         autoFocusTrigger={autoFocusTrigger}
       />
@@ -154,6 +151,7 @@ export function Project({
         <SectionedTaskList
           projectTasks={projectTasks}
           sortedSections={sortedSections}
+          onCreateTask={handleCreateProjectTask}
           onToggleTask={onToggleTask}
           onSelectTask={onSelectTask}
           selectedTaskId={selectedTaskId}
@@ -162,6 +160,7 @@ export function Project({
           onReorder={onReorder}
           onAddSubtask={onAddSubtask}
           onUpdateDueDate={onUpdateDueDate}
+          onContextMenu={onContextMenu}
           onUpdateSection={onUpdateSection}
           onDeleteSection={onDeleteSection}
         />

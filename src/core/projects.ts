@@ -77,6 +77,35 @@ export class ProjectService {
   }
 
   async delete(id: string): Promise<boolean> {
+    const existing = await this.get(id);
+    if (!existing) return false;
+
+    // Keep tasks, but move them out of the deleted project and clear any section linkage.
+    const tasks = this.queries.listTasks();
+    for (const task of tasks) {
+      if (task.projectId === id) {
+        this.queries.updateTask(task.id, {
+          projectId: null,
+          sectionId: null,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    // Promote child projects to the top level instead of deleting them.
+    const projects = this.queries.listProjects();
+    for (const project of projects) {
+      if (project.parentId === id) {
+        this.queries.updateProject(project.id, { parentId: null });
+      }
+    }
+
+    // Delete project sections after clearing task section links.
+    const sections = this.queries.listSections(id);
+    for (const section of sections) {
+      this.queries.deleteSection(section.id);
+    }
+
     const result = this.queries.deleteProject(id);
     if (result.changes > 0) logger.debug("Project deleted", { id });
     return result.changes > 0;

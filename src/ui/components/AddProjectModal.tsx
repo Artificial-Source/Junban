@@ -16,6 +16,7 @@ const VIEW_OPTIONS = [
 interface AddProjectModalProps {
   open: boolean;
   onClose: () => void;
+  mode?: "create" | "edit";
   onSubmit: (
     name: string,
     color: string,
@@ -25,9 +26,19 @@ interface AddProjectModalProps {
     viewStyle: "list" | "board" | "calendar",
   ) => void;
   projects: Project[];
+  initialProject?: Project | null;
+  defaultParentId?: string | null;
 }
 
-export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjectModalProps) {
+export function AddProjectModal({
+  open,
+  onClose,
+  mode = "create",
+  onSubmit,
+  projects,
+  initialProject = null,
+  defaultParentId = null,
+}: AddProjectModalProps) {
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState("");
   const [color, setColor] = useState<string>(DEFAULT_PROJECT_COLORS[10]); // Blue default
@@ -42,24 +53,54 @@ export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjec
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
 
+  const excludedParentIds = new Set<string>();
+  if (initialProject) {
+    excludedParentIds.add(initialProject.id);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const project of projects) {
+        if (
+          project.parentId &&
+          excludedParentIds.has(project.parentId) &&
+          !excludedParentIds.has(project.id)
+        ) {
+          excludedParentIds.add(project.id);
+          changed = true;
+        }
+      }
+    }
+  }
+
   // Root-level, non-archived projects for parent dropdown
-  const rootProjects = projects.filter((p) => !p.archived && p.parentId === null);
+  const rootProjects = projects.filter(
+    (p) => !p.archived && p.parentId === null && !excludedParentIds.has(p.id),
+  );
 
   // Reset form + autofocus on open
   useEffect(() => {
     if (!open) return;
-    setName("");
-    setEmoji("");
-    setColor(DEFAULT_PROJECT_COLORS[10]);
-    setCustomHex("");
-    setShowCustomHex(false);
-    setParentId(null);
-    setIsFavorite(false);
-    setViewStyle("list");
+
+    const nextName = initialProject?.name ?? "";
+    const nextEmoji = initialProject?.icon ?? "";
+    const nextColor = initialProject?.color ?? DEFAULT_PROJECT_COLORS[10];
+    const nextParentId = initialProject?.parentId ?? defaultParentId;
+    const nextIsFavorite = initialProject?.isFavorite ?? false;
+    const nextViewStyle = initialProject?.viewStyle ?? "list";
+    const isCustomColor = !(DEFAULT_PROJECT_COLORS as readonly string[]).includes(nextColor);
+
+    setName(nextName);
+    setEmoji(nextEmoji);
+    setColor(nextColor);
+    setCustomHex(isCustomColor ? nextColor : "");
+    setShowCustomHex(isCustomColor);
+    setParentId(nextParentId);
+    setIsFavorite(nextIsFavorite);
+    setViewStyle(nextViewStyle);
     setEmojiPickerOpen(false);
     const timer = setTimeout(() => nameRef.current?.focus(), 50);
     return () => clearTimeout(timer);
-  }, [open]);
+  }, [open, initialProject, defaultParentId]);
 
   // Keyboard: Escape closes
   useEffect(() => {
@@ -98,6 +139,8 @@ export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjec
   if (!open) return null;
 
   const canSubmit = name.trim().length > 0;
+  const title = mode === "edit" ? "Edit project" : "Add project";
+  const submitLabel = mode === "edit" ? "Save" : "Add";
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,7 +165,7 @@ export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjec
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <h2 id="add-project-title" className="text-base font-semibold text-on-surface">
-            Add project
+            {title}
           </h2>
           <button
             onClick={onClose}
@@ -377,7 +420,7 @@ export function AddProjectModal({ open, onClose, onSubmit, projects }: AddProjec
             disabled={!canSubmit}
             className="px-4 py-2 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Add
+            {submitLabel}
           </button>
         </div>
       </div>

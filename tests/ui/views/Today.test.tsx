@@ -24,6 +24,12 @@ vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
   }),
 }));
 
+vi.mock("../../../src/ui/context/PluginContext.js", () => ({
+  usePluginContext: () => ({
+    plugins: [],
+  }),
+}));
+
 // Mock child components to isolate Today view tests
 vi.mock("../../../src/ui/components/TaskInput.js", () => ({
   TaskInput: ({ placeholder }: { placeholder?: string }) => (

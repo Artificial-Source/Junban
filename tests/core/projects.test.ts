@@ -2,15 +2,18 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createTestServices } from "../integration/helpers.js";
 import type { TaskService } from "../../src/core/tasks.js";
 import type { ProjectService } from "../../src/core/projects.js";
+import type { IStorage } from "../../src/storage/interface.js";
 
 describe("ProjectService", () => {
   let projectService: ProjectService;
   let taskService: TaskService;
+  let storage: IStorage;
 
   beforeEach(() => {
     const services = createTestServices();
     projectService = services.projectService;
     taskService = services.taskService;
+    storage = services.storage;
   });
 
   // ── create ──
@@ -206,6 +209,30 @@ describe("ProjectService", () => {
     it("returns false for non-existent project", async () => {
       const result = await projectService.delete("missing");
       expect(result).toBe(false);
+    });
+
+    it("moves project tasks back to inbox and clears their section", async () => {
+      const project = await projectService.create("Delete Me");
+      storage.insertSection({
+        id: "section-1",
+        projectId: project.id,
+        name: "Doing",
+        sortOrder: 0,
+        isCollapsed: false,
+        createdAt: new Date().toISOString(),
+      });
+      const task = await taskService.create({
+        title: "Keep me",
+        projectId: project.id,
+        sectionId: "section-1",
+      });
+
+      await projectService.delete(project.id);
+
+      const found = await taskService.get(task.id);
+      expect(found).not.toBeNull();
+      expect(found!.projectId).toBeNull();
+      expect(found!.sectionId).toBeNull();
     });
   });
 

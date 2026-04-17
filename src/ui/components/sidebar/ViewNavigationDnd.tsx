@@ -42,6 +42,7 @@ export function ViewNavigationDnd({
   onDragEnd,
   onNavContextMenu,
   onOpenProjectModal,
+  onProjectContextMenu,
 }: ViewNavigationProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -76,6 +77,7 @@ export function ViewNavigationDnd({
     panels,
     onNavContextMenu,
     onOpenProjectModal,
+    onProjectContextMenu,
     sectionRenderer: ({
       id,
       children,

@@ -115,7 +115,7 @@ function parseRouteStateFromHash(hash: string, defaultView: View = "inbox"): Rou
       break;
     case "filters":
     case "filters-labels":
-      route.view = "filters-labels";
+      route.view = "inbox";
       break;
     case "completed":
     case "cancelled":

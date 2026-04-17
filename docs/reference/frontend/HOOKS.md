@@ -147,7 +147,7 @@
 - **Return Value:** `Array<{ id, name, callback }>` -- array of command objects (memoized)
 - **Key Dependencies:** `themeManager`
 - **Used By:** `App.tsx` (passed to `CommandPalette`)
-- **Notes:** Commands include: Go to Inbox/Today/Upcoming/Filters & Labels, Go to Settings (individual tabs like essentials, appearance, advanced, AI, extensions, templates, keyboard, data, about), Go to Extensions, Toggle Dark Mode, Switch to Light/Dark Theme, Toggle AI Chat, Enter Focus Mode, Quick Add Task, Create Task from Template, Go to Project (one per project), and all registered plugin commands. Plugin commands are dynamically added from the `pluginCommands` array.
+- **Notes:** Commands include: Go to Inbox/Today/Upcoming, Go to Settings (individual tabs like essentials, appearance, filters & labels, advanced, AI, templates, keyboard, data, about), Toggle Dark Mode, Switch to Light/Dark Theme, Toggle AI Chat, Enter Focus Mode, Quick Add Task, Create Task from Template, Go to Project (one per project), and all registered plugin commands. Disabled built-in views like Completed are omitted until their feature flags are enabled. Plugin commands are dynamically added from the `pluginCommands` array. The Extensions settings surface is hidden from the MVP UI, so command-palette entries no longer route there.
 
 ---
 

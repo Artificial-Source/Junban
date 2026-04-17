@@ -23,7 +23,7 @@ export function SidebarHeader({
         {!collapsed ? (
           <div className="flex items-center gap-2">
             <img
-              src="/images/logo.svg"
+              src="/images/logo.webp"
               alt="Junban logo"
               className="h-7 w-7 shrink-0 rounded-md ring-1 ring-border/60 bg-surface object-contain p-1 dark:invert"
             />
@@ -31,7 +31,7 @@ export function SidebarHeader({
           </div>
         ) : (
           <img
-            src="/images/logo.svg"
+            src="/images/logo.webp"
             alt="Junban logo"
             className="h-7 w-7 shrink-0 rounded-md ring-1 ring-border/60 bg-surface object-contain p-1 dark:invert"
           />

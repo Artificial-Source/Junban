@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { ChevronDown, ChevronRight, Plus, Trash2, Check, X } from "lucide-react";
 import { TaskList } from "../../components/TaskList.js";
 import type { Task, Section } from "../../../core/types.js";
+import type { ParsedTaskInput } from "../../app/ViewRenderer.js";
+import { TaskInput } from "../../components/TaskInput.js";
 
 /** Inline section name editor (used for renaming). */
 function SectionNameEditor({
@@ -182,6 +184,7 @@ export function AddSectionButton({ onCreate }: { onCreate: (name: string) => voi
 interface SectionedTaskListProps {
   projectTasks: Task[];
   sortedSections: Section[];
+  onCreateTask: (parsed: ParsedTaskInput) => void;
   onToggleTask: (id: string) => void;
   onSelectTask: (id: string) => void;
   selectedTaskId: string | null;
@@ -193,14 +196,50 @@ interface SectionedTaskListProps {
   onReorder?: (orderedIds: string[]) => void;
   onAddSubtask?: (parentId: string, title: string) => void;
   onUpdateDueDate?: (taskId: string, dueDate: string | null) => void;
+  onContextMenu?: (taskId: string, position: { x: number; y: number }) => void;
   onUpdateSection?: (id: string, data: { name?: string; isCollapsed?: boolean }) => void;
   onDeleteSection?: (id: string) => void;
+}
+
+function SectionTaskComposer({
+  sectionName,
+  onSubmit,
+}: {
+  sectionName: string;
+  onSubmit: (parsed: ParsedTaskInput) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 mt-2 px-1 py-1 text-sm text-on-surface-muted hover:text-accent transition-colors"
+      >
+        <Plus size={14} />
+        Add task to {sectionName}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2">
+      <TaskInput
+        onSubmit={(parsed) => {
+          onSubmit(parsed);
+          setOpen(false);
+        }}
+        placeholder={`Add a task to ${sectionName}...`}
+      />
+    </div>
+  );
 }
 
 /** Renders task lists grouped by project sections. */
 export function SectionedTaskList({
   projectTasks,
   sortedSections,
+  onCreateTask,
   onToggleTask,
   onSelectTask,
   selectedTaskId,
@@ -209,6 +248,7 @@ export function SectionedTaskList({
   onReorder,
   onAddSubtask,
   onUpdateDueDate,
+  onContextMenu,
   onUpdateSection,
   onDeleteSection,
 }: SectionedTaskListProps) {
@@ -241,6 +281,7 @@ export function SectionedTaskList({
             onReorder={onReorder}
             onAddSubtask={onAddSubtask}
             onUpdateDueDate={onUpdateDueDate}
+            onContextMenu={onContextMenu}
           />
         </div>
       )}
@@ -259,18 +300,33 @@ export function SectionedTaskList({
               />
             )}
             {!section.isCollapsed && (
-              <TaskList
-                tasks={sectionTasks}
-                onToggle={onToggleTask}
-                onSelect={onSelectTask}
-                selectedTaskId={selectedTaskId}
-                emptyMessage="No tasks in this section."
-                selectedTaskIds={selectedTaskIds}
-                onMultiSelect={onMultiSelect}
-                onReorder={onReorder}
-                onAddSubtask={onAddSubtask}
-                onUpdateDueDate={onUpdateDueDate}
-              />
+              <>
+                {sectionTasks.length === 0 && (
+                  <SectionTaskComposer
+                    sectionName={section.name}
+                    onSubmit={(parsed) => onCreateTask({ ...parsed, sectionId: section.id })}
+                  />
+                )}
+                <TaskList
+                  tasks={sectionTasks}
+                  onToggle={onToggleTask}
+                  onSelect={onSelectTask}
+                  selectedTaskId={selectedTaskId}
+                  emptyMessage="No tasks in this section."
+                  selectedTaskIds={selectedTaskIds}
+                  onMultiSelect={onMultiSelect}
+                  onReorder={onReorder}
+                  onAddSubtask={onAddSubtask}
+                  onUpdateDueDate={onUpdateDueDate}
+                  onContextMenu={onContextMenu}
+                />
+                {sectionTasks.length > 0 && (
+                  <SectionTaskComposer
+                    sectionName={section.name}
+                    onSubmit={(parsed) => onCreateTask({ ...parsed, sectionId: section.id })}
+                  />
+                )}
+              </>
             )}
           </div>
         );

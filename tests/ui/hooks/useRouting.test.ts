@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
-// Mock SettingsContext before importing the hook
 vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
   useGeneralSettings: () => ({
     settings: { start_view: "inbox" },
@@ -10,9 +9,6 @@ vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
   }),
 }));
 
-// We need to test the pure functions exported from the module.
-// Since parseRouteStateFromHash and buildHashFromRoute are not exported,
-// we test them indirectly through the hook's behavior.
 import { useRouting } from "../../../src/ui/hooks/useRouting.js";
 
 describe("useRouting", () => {
@@ -89,6 +85,7 @@ describe("useRouting", () => {
     });
     expect(result.current.currentView).toBe("plugin-view");
     expect(result.current.selectedPluginViewId).toBeTruthy();
+    expect(window.location.hash).toContain("#/plugin-view/");
   });
 
   it("openSettingsTab updates settingsTab", () => {

@@ -1,6 +1,7 @@
 export type SettingsTab =
   | "general"
   | "appearance"
+  | "filters"
   | "features"
   | "ai"
   | "voice"

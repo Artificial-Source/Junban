@@ -209,7 +209,7 @@ plugins/
     └── index.ts
 ```
 
-Restart the dev server. The plugin appears in Settings > Extensions.
+Restart the dev server. For the current MVP, the public Extensions settings surface is hidden even though the plugin runtime still exists in the codebase.
 
 ### Creating a Plugin
 

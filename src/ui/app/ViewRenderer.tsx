@@ -46,6 +46,7 @@ export interface ParsedTaskInput {
   estimatedMinutes?: number | null;
   deadline?: Date | null;
   isSomeday?: boolean;
+  sectionId?: string | null;
   dreadLevel?: number | null;
 }
 

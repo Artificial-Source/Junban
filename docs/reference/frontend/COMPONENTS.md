@@ -18,7 +18,7 @@
   - `defaultProjectId?: string` -- pre-selects a project for the created task
 - **Key Dependencies:** `parseTask` from `../../parser/task-parser.js`, `CreateTaskInput` from `../../core/types.js`
 - **Used By:** `Inbox.tsx`, `Today.tsx`, `Upcoming.tsx`, `Project.tsx`
-- **Notes:** Shows a live preview line below the input displaying parsed due date, priority, and tags. Submits on Enter, clears input on success. Preview tokens are styled as colored pill badges with icons (Flag for priority, Hash for tags, Calendar for date, FolderOpen for project, Repeat for recurrence).
+- **Notes:** Shows a live preview line below the input displaying parsed due date, priority, and tags. When the field is focused, it also reveals a lightweight metadata toolbar for click-based priority, date, and label selection without leaving the natural-language input flow. Submits on Enter, clears input on success. Preview tokens are styled as colored pill badges with icons (Flag for priority, Hash for tags, Calendar for date, FolderOpen for project, Repeat for recurrence).
 
 ---
 
@@ -200,7 +200,7 @@
   - `builtinPluginIds?: Set<string>` -- restricts navigation-slot views to built-in plugins
 - **Key Dependencies:** `lucide-react`, `core/types.js`, `api/index.js` (PanelInfo, ViewInfo)
 - **Used By:** `App.tsx`
-- **Notes:** The core sidebar stays intentionally lean by default: built-in nav items cover Inbox, Today, Upcoming, and Filters & Labels. Advanced built-in experiences like Calendar, Stats, Someday, Completed, Cancelled, Matrix, and Quick Wins now appear only when their built-in plugin is enabled. Plugin views are grouped by slot via `useMemo`: `navigation` views render inline after built-in nav items (restricted to built-in plugins), `tools` views render in a collapsible "Tools" section between My Projects and Workspace, and `workspace` views render in the bottom Workspace section. Emoji plugin icons are handled alongside Lucide component icons. Collapsed mode shows only icons with hover tooltips (`CollapsedTooltip` internal component). Badge counts on Inbox and Today items. Project items show a mini progress bar (w-12 h-1) showing completed/total task ratio alongside the pending count. Old "Plugin Panels" and "Custom Views" sections were removed in favor of slot-based rendering.
+- **Notes:** The core sidebar stays intentionally lean by default: built-in nav items cover Inbox, Today, and Upcoming. Filters and labels management now lives in Settings instead of the main sidebar. Advanced built-in experiences like Calendar, Stats, Someday, Completed, Cancelled, Matrix, and Quick Wins now appear only when their built-in plugin is enabled. Plugin views are grouped by slot via `useMemo`: `navigation` views render inline after built-in nav items (restricted to built-in plugins), `tools` views render in a collapsible "Tools" section between My Projects and Workspace, and `workspace` views render in the bottom Workspace section. Emoji plugin icons are handled alongside Lucide component icons. Collapsed mode shows only icons with hover tooltips (`CollapsedTooltip` internal component). Badge counts on Inbox and Today items. Project items show a mini progress bar (w-12 h-1) showing completed/total task ratio alongside the pending count, and project buttons now expose a right-click context menu for edit, favorite, subproject creation, and deletion actions. Old "Plugin Panels" and "Custom Views" sections were removed in favor of slot-based rendering.
 
 ---
 

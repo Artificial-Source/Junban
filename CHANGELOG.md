@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `.swarm/` audit artifacts and `.mcp.json` from git tracking
 - Updated all README screenshots to reflect current UI state
 
+## [1.0.2] — 2026-04-17
+
+Patch release to restore updater artifact generation and allow the release workflow to validate draft assets before publish.
+
+### Fixed
+
+- Desktop builds now generate updater artifacts and signatures by enabling `bundle.createUpdaterArtifacts` in the Tauri config.
+- Release validation can now inspect draft releases using the workflow token before publish.
+
 ## [1.0.1] — 2026-04-17
 
 Patch release to correct desktop packaging and release metadata after the stale pre-Junban public release.
@@ -76,3 +85,4 @@ First stable public release. 37 sprints, 1930+ tests, 251 features shipped.
 
 [1.0.0]: https://github.com/Artificial-Source-Foundation/Junban/releases/tag/v1.0.0
 [1.0.1]: https://github.com/Artificial-Source-Foundation/Junban/releases/tag/v1.0.1
+[1.0.2]: https://github.com/Artificial-Source-Foundation/Junban/releases/tag/v1.0.2

@@ -13,7 +13,7 @@
       "repository": "https://github.com/Artificial-Source-Foundation/junban-plugin-kanban",
       "downloadUrl": "https://github.com/Artificial-Source-Foundation/junban-plugin-kanban/releases/latest/download/plugin.tar.gz",
       "tags": ["view", "kanban", "productivity"],
-      "minJunbanVersion": "1.0.1",
+      "minJunbanVersion": "1.0.2",
       "icon": "📋",
       "downloads": 0,
       "longDescription": "Adds a fully interactive Kanban board view to Junban. Organize tasks into customizable columns (e.g. To Do, In Progress, Done) with drag-and-drop support. Perfect for visual thinkers who prefer board-style workflows over traditional lists."
@@ -27,7 +27,7 @@
       "repository": "https://github.com/Artificial-Source-Foundation/junban-plugin-calendar",
       "downloadUrl": "https://github.com/Artificial-Source-Foundation/junban-plugin-calendar/releases/latest/download/plugin.tar.gz",
       "tags": ["view", "calendar"],
-      "minJunbanVersion": "1.0.1",
+      "minJunbanVersion": "1.0.2",
       "icon": "📅",
       "downloads": 0,
       "longDescription": "Visualize your tasks on a monthly or weekly calendar. See deadlines at a glance, drag tasks to reschedule them, and plan your week ahead. Supports color-coded projects and priority indicators."
@@ -41,7 +41,7 @@
       "repository": "https://github.com/Artificial-Source-Foundation/junban-plugin-time-tracking",
       "downloadUrl": "https://github.com/Artificial-Source-Foundation/junban-plugin-time-tracking/releases/latest/download/plugin.tar.gz",
       "tags": ["productivity", "tracking"],
-      "minJunbanVersion": "1.0.1",
+      "minJunbanVersion": "1.0.2",
       "icon": "⏱️",
       "downloads": 0,
       "longDescription": "Built-in time tracking for any task. Start and stop timers with one click, view daily and weekly time reports, and understand where your time goes. All data stays local — no external services required."
@@ -55,7 +55,7 @@
       "repository": "https://github.com/Artificial-Source-Foundation/junban-plugin-git-sync",
       "downloadUrl": "https://github.com/Artificial-Source-Foundation/junban-plugin-git-sync/releases/latest/download/plugin.tar.gz",
       "tags": ["sync", "git"],
-      "minJunbanVersion": "1.0.1",
+      "minJunbanVersion": "1.0.2",
       "icon": "🔄",
       "downloads": 0,
       "longDescription": "Keep your tasks in sync across multiple devices using Git. Automatically commits and pushes changes to a Git repository of your choice. Supports conflict resolution and works with any Git hosting provider (GitHub, GitLab, etc.)."

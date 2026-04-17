@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `.swarm/` audit artifacts and `.mcp.json` from git tracking
 - Updated all README screenshots to reflect current UI state
 
+## [1.0.1] — 2026-04-17
+
+Patch release to correct desktop packaging and release metadata after the stale pre-Junban public release.
+
+### Fixed
+
+- Desktop release metadata now ships as `ASF Junban` / `asf-junban` instead of stale `Saydo` identifiers.
+- Release workflow now blocks publishing if tagged package metadata or uploaded assets still contain pre-Junban branding.
+- Draft releases now require `latest.json` updater metadata before publish.
+- README and release documentation now show the current packaged desktop download and install flow.
+
 ## [1.0.0] — 2026-02-28
 
 First stable public release. 37 sprints, 1930+ tests, 251 features shipped.
@@ -64,3 +75,4 @@ First stable public release. 37 sprints, 1930+ tests, 251 features shipped.
 - Markdown backend sorts YAML frontmatter keys alphabetically for git-friendly diffs
 
 [1.0.0]: https://github.com/Artificial-Source-Foundation/Junban/releases/tag/v1.0.0
+[1.0.1]: https://github.com/Artificial-Source-Foundation/Junban/releases/tag/v1.0.1

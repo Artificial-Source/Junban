@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "ASF Junban",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "com.asf.junban",
   "build": {
     "beforeDevCommand": "pnpm dev:full",

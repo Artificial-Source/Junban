@@ -1,6 +1,6 @@
 [package]
 name = "asf-junban"
-version = "1.0.0"
+version = "1.0.1"
 description = "ASF Junban — Open-source task management with an Obsidian-style plugin system"
 authors = ["ASF Community"]
 edition = "2021"

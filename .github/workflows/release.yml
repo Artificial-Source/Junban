@@ -10,6 +10,73 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify-release:
+    name: Verify Release Candidate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag_name: ${{ steps.tag.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_NAME='${{ inputs.tag }}'
+            git fetch --tags origin "$TAG_NAME"
+          else
+            TAG_NAME='${{ github.ref_name }}'
+          fi
+
+          if ! git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag $TAG_NAME was not found" >&2
+            exit 1
+          fi
+
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Check out release tag
+        run: git checkout '${{ steps.tag.outputs.tag_name }}'
+
+      - name: Ensure tag commit is on main
+        run: |
+          TAG_SHA=$(git rev-list -n 1 '${{ steps.tag.outputs.tag_name }}')
+          if ! git branch -r --contains "$TAG_SHA" | grep -q 'origin/main$'; then
+            echo "Release tags must point to a commit that is already on origin/main" >&2
+            exit 1
+          fi
+
+      - name: Verify release branding metadata
+        run: |
+          grep -q '"name": "asf-junban"' package.json
+          grep -q '^name = "asf-junban"' src-tauri/Cargo.toml
+          grep -q '^name = "asf_junban_lib"' src-tauri/Cargo.toml
+          grep -q '"productName": "ASF Junban"' src-tauri/tauri.conf.json
+          grep -q '"identifier": "com.asf.junban"' src-tauri/tauri.conf.json
+          grep -q 'Artificial-Source-Foundation/Junban/releases/latest/download/latest.json' src-tauri/tauri.conf.json
+
+          if grep -nE 'asf-saydo|asf_saydo_lib|ASF Saydo|com\.asf\.saydo|ASF-GROUP/Saydo' package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json; then
+            echo "Stale pre-Junban branding is still present in release metadata" >&2
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm docs:check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
   create-release:
     runs-on: ubuntu-latest
     permissions:
@@ -115,8 +182,46 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
 
+  verify-release-assets:
+    name: Verify Draft Release Assets
+    needs: [verify-release, create-release, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Validate uploaded assets and updater metadata
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data } = await github.rest.repos.getRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ needs.create-release.outputs.release_id }},
+            });
+
+            const assetNames = data.assets.map((asset) => asset.name);
+
+            core.info(`Draft release assets: ${assetNames.join(", ")}`);
+
+            const staleAsset = assetNames.find((name) => /saydo|docket/i.test(name));
+            if (staleAsset) {
+              core.setFailed(`Draft release still contains stale branding: ${staleAsset}`);
+              return;
+            }
+
+            if (!assetNames.some((name) => name === "latest.json")) {
+              core.setFailed("Draft release is missing latest.json updater metadata");
+              return;
+            }
+
+            const platformAssetPatterns = [/\.deb$/i, /\.AppImage$/i, /\.dmg$/i, /\.msi$/i, /-setup\.exe$/i];
+            const hasPlatformInstaller = assetNames.some((name) => platformAssetPatterns.some((pattern) => pattern.test(name)));
+            if (!hasPlatformInstaller) {
+              core.setFailed("Draft release is missing platform installer assets");
+            }
+
   publish:
-    needs: [create-release, build]
+    needs: [verify-release, create-release, build, verify-release-assets]
     runs-on: ubuntu-latest
     permissions:
       contents: write

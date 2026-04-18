@@ -73,7 +73,7 @@ jobs:
             exit 1
           fi
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -168,7 +168,7 @@ jobs:
         with:
           node-version: 22
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:

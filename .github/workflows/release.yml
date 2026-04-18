@@ -27,7 +27,7 @@ jobs:
     outputs:
       tag_name: ${{ steps.tag.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -73,11 +73,11 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
       - run: corepack enable
+      - run: corepack prepare pnpm@10.29.1 --activate
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
@@ -94,7 +94,7 @@ jobs:
     outputs:
       release_id: ${{ steps.create.outputs.result }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ needs.verify-release.outputs.tag_name }}
@@ -160,14 +160,15 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.verify-release.outputs.tag_name }}
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
       - run: corepack enable
+      - run: corepack prepare pnpm@10.29.1 --activate
 
       - uses: dtolnay/rust-toolchain@stable
         with:

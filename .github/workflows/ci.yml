@@ -18,12 +18,12 @@ jobs:
     name: Lint, Typecheck & Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
       - run: corepack enable
+      - run: corepack prepare pnpm@10.29.1 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm format:check

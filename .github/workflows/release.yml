@@ -13,6 +13,11 @@ on:
         description: Existing release tag to publish (for example v1.0.1)
         required: true
         type: string
+      dry_run:
+        description: Verify and build without creating or publishing a GitHub release
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: release-${{ github.ref }}
@@ -87,6 +92,7 @@ jobs:
       - run: pnpm test
       - run: pnpm build
   create-release:
+    if: ${{ github.event_name != 'workflow_dispatch' || !github.event.inputs.dry_run }}
     needs: verify-release
     runs-on: ubuntu-latest
     permissions:
@@ -142,6 +148,7 @@ jobs:
             return data.id;
 
   build:
+    if: ${{ github.event_name != 'workflow_dispatch' || !github.event.inputs.dry_run }}
     needs: [verify-release, create-release]
     permissions:
       contents: write
@@ -198,7 +205,54 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
 
+  dry-run-build:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run }}
+    needs: verify-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.verify-release.outputs.tag_name }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: corepack prepare pnpm@10.29.1 --activate
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install system dependencies (Ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build desktop app in dry-run mode
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build ${{ matrix.args }}
+
   verify-release-assets:
+    if: ${{ github.event_name != 'workflow_dispatch' || !github.event.inputs.dry_run }}
     name: Verify Draft Release Assets
     needs: [verify-release, create-release, build]
     runs-on: ubuntu-latest
@@ -237,6 +291,7 @@ jobs:
             }
 
   publish:
+    if: ${{ github.event_name != 'workflow_dispatch' || !github.event.inputs.dry_run }}
     needs: [verify-release, create-release, build, verify-release-assets]
     runs-on: ubuntu-latest
     permissions:

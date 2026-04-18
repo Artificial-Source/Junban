@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "asf-junban"
-version = "1.0.0"
+version = "1.0.4"
 dependencies = [
  "serde",
  "serde_json",

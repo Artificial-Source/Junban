@@ -148,32 +148,16 @@ This document covers two directories: `src/utils/` (shared utility modules) and 
 ### `env.ts`
 
 **Path:** `src/config/env.ts`
-**Purpose:** Zod-validated environment variable loading. Defines all configurable environment variables with defaults and type coercion.
+**Purpose:** Schema-validated environment loading shared by backend startup paths.
 
 **Key Exports:**
 
 - `Env` -- inferred type from Zod schema
 - `loadEnv(): Env` -- parses `process.env` through the schema
 
-**Environment Variables:**
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `DB_PATH` | string | `./data/junban.db` | SQLite database file path (must be non-empty; null bytes rejected) |
-| `STORAGE_MODE` | `"sqlite" \| "markdown"` | `"sqlite"` | Storage backend |
-| `MARKDOWN_PATH` | string | `./tasks/` | Base directory for Markdown storage (must be non-empty; null bytes rejected) |
-| `LOG_LEVEL` | `"debug" \| "info" \| "warn" \| "error"` | `"info"` | Logging threshold |
-| `PORT` | number | `5173` | Dev server port |
-| `DEFAULT_THEME` | `"light" \| "dark"` | `"light"` | Default UI theme |
-| `NLP_LOCALE` | string | `"en"` | NLP locale |
-| `PLUGIN_DIR` | string | `./plugins/` | Plugin directory path (must be non-empty; null bytes rejected) |
-| `PLUGIN_SANDBOX` | boolean | `true` | Enable plugin sandboxing |
-| `PLUGIN_REGISTRY_URL` | string | optional | Remote plugin registry URL |
-| `PLUGIN_MAX_SIZE_MB` | number | `10` | Max plugin archive size |
-| `CLI_OUTPUT_FORMAT` | `"text" \| "json"` | `"text"` | Default CLI output format |
+**Configuration details:** Environment variables and runtime/env-scope boundaries are documented in [`CONFIG.md`](CONFIG.md).
 
-**Key Dependencies:** `zod`
-
-**Used By:** `src/main.ts`, `src/bootstrap.ts`, `src/db/migrate.ts`
+**Used By:** `src/bootstrap.ts`, `src/api/settings.ts`, `src/db/migrate.ts`, `src/main.ts`, `src/server.ts`
 
 ---
 

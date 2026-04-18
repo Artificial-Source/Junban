@@ -121,7 +121,7 @@ pnpm test:coverage   # Run tests with coverage
 pnpm lint            # Run ESLint
 pnpm lint:fix        # Fix lint issues
 pnpm typecheck       # TypeScript type checking
-pnpm check           # Run lint + typecheck + test (all at once)
+pnpm check           # Run lint + format:check + typecheck + test (all at once)
 pnpm db:generate     # Generate a new migration after schema change
 pnpm db:migrate      # Apply migrations to the dev-profile database by default
 pnpm cli             # Run CLI companion against the dev-profile database
@@ -133,10 +133,6 @@ pnpm tauri:build     # Build desktop app binary (requires Rust)
 ## Using the MCP Server
 
 The MCP server lets external AI agents (Claude Desktop, personal assistants, other apps) manage your tasks over the Model Context Protocol.
-
-```bash
-pnpm mcp
-```
 
 ### Claude Desktop Integration
 
@@ -153,13 +149,23 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. You can now ask Claude to manage your tasks:
+Restart Claude Desktop. Claude launches the Junban MCP server from that config entry, so you do not need a separate long-running `pnpm mcp` terminal for normal Claude Desktop usage.
+
+You can now ask Claude to manage your tasks:
 
 - "Create a task to review the PR by Friday"
 - "What's on my plate today?"
 - "Mark the groceries task as done"
 
 ### Custom Agent Integration
+
+If you want a manual smoke test, run the server by itself:
+
+```bash
+pnpm mcp
+```
+
+If you are building your own MCP client, the stdio transport should launch `pnpm mcp` for you. In that case, do not start a second manual MCP server first.
 
 ```typescript
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -176,7 +182,7 @@ await client.connect(transport);
 await client.callTool({ name: "create_task", arguments: { title: "Hello from MCP" } });
 ```
 
-See [MCP documentation](../reference/backend/MCP.md) for the full reference (34 tools, 8 resources, 3 prompts).
+See [MCP documentation](../reference/backend/MCP.md) for the full reference. Tool, resource, and prompt inventories should follow the current registries rather than hardcoded counts.
 
 ## Building the Desktop App (Optional)
 
@@ -200,16 +206,16 @@ If you want to override the defaults in `.env`, leave `DB_PATH` and `MARKDOWN_PA
 
 ### Installing a Plugin
 
-Place plugin directories in `plugins/`:
+Junban discovers local community plugins from the `plugins/` directory. The scaffolded community plugin format uses `manifest.json` plus `index.mjs`.
 
 ```bash
 plugins/
 └── my-plugin/
     ├── manifest.json
-    └── index.ts
+    └── index.mjs
 ```
 
-Restart the dev server. For the current MVP, the public Extensions settings surface is hidden even though the plugin runtime still exists in the codebase.
+After adding or editing a community plugin, fully restart the app. Then use **Settings → Plugins** to enable community plugins and approve the plugin's requested permissions before expecting it to load.
 
 ### Creating a Plugin
 
@@ -218,41 +224,17 @@ See [Plugin API](../reference/plugins/API.md) for the full API reference and [Pl
 Quick start:
 
 ```bash
-mkdir -p plugins/my-plugin
+pnpm plugin:create my-plugin
 ```
 
-Create `plugins/my-plugin/manifest.json`:
+This creates:
 
-```json
-{
-  "id": "my-plugin",
-  "name": "My Plugin",
-  "version": "1.0.0",
-  "author": "Your Name",
-  "description": "Does something cool",
-  "main": "index.ts",
-  "minJunbanVersion": "1.0.0",
-  "permissions": ["commands"]
-}
-```
+- `plugins/my-plugin/manifest.json`
+- `plugins/my-plugin/index.mjs`
 
-Create `plugins/my-plugin/index.ts`:
+The scaffold comes from `scripts/create-plugin.ts`. It uses the current community-plugin entry format and default permissions.
 
-```typescript
-import { Plugin } from "@asf-junban/plugin-api";
-
-export default class MyPlugin extends Plugin {
-  async onLoad() {
-    this.app.commands.register({
-      id: "my-plugin:hello",
-      name: "Say Hello",
-      callback: () => alert("Hello!"),
-    });
-  }
-
-  async onUnload() {}
-}
-```
+For a full walkthrough, see [Build your first Junban plugin](../tutorials/your-first-plugin.md). For the full contract and examples, use [Plugin API](../reference/plugins/API.md) and [Plugin Examples](../reference/plugins/EXAMPLES.md).
 
 ## Troubleshooting
 
@@ -267,7 +249,7 @@ pnpm db:migrate
 
 ### Port already in use
 
-Edit `PORT` in `.env` or kill the process using port 5173:
+If port 5173 is already busy, stop the conflicting process first. The current local run instructions in this repository do not wire `.env` `PORT` through the Vite server configuration.
 
 ```bash
 lsof -i :5173 | grep LISTEN

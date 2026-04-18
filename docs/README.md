@@ -10,6 +10,7 @@ Product-facing mission, roadmap, status, and PRD-style planning live under `docs
 | --------------------------------- | -------------------------------------------------------------------------------- |
 | Understand the project            | [`../CLAUDE.md`](../CLAUDE.md)                                                   |
 | Find the right doc quickly        | [`../AGENTS.md`](../AGENTS.md)                                                   |
+| Browse public docs by reading mode | [public docs index](index.md)                                                   |
 | Navigate docs by domain           | [Documentation Domains](#documentation-domains)                                  |
 | Set up local development          | [`guides/SETUP.md`](guides/SETUP.md)                                             |
 | Contribute safely                 | [`guides/CONTRIBUTING.md`](guides/CONTRIBUTING.md)                               |
@@ -25,6 +26,7 @@ Use this taxonomy first; each domain points to its canonical library location.
 
 | Domain              | Audience                                    | Start here                                   | Canonical locations                                                              |
 | ------------------- | ------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
+| Public docs navigation | Users, contributors, external readers    | [public docs index](index.md)               | `docs/index.md`, `docs/tutorials/`, `docs/how-to/`, `docs/explanation/` as a routing surface; canonical ownership stays in this file |
 | Guides              | Contributors, maintainers, agents           | [`guides/`](guides/)                         | `docs/guides/`                                                                   |
 | Technical reference | Contributors, maintainers, implementers     | [`reference/README.md`](reference/README.md) | `docs/reference/frontend/`, `docs/reference/backend/`, `docs/reference/plugins/` |
 | Product docs        | Maintainers, contributors, external readers | [`product/README.md`](product/README.md)     | `docs/product/`, `docs/product/prds/`                                            |
@@ -36,7 +38,12 @@ Legacy compatibility note: `docs/frontend/`, `docs/backend/`, `docs/plugins/`, a
 
 ```text
 docs/
+├── index.md          Public Diataxis-style docs entrypoint
+├── manifest.md       Public docs surface manifest
 ├── README.md         Canonical docs index and maintenance policy
+├── tutorials/        Learning-oriented walkthroughs
+├── how-to/           Task-oriented operational guides
+├── explanation/      Conceptual architecture and design docs
 ├── guides/           Setup, contributing, architecture, performance, security, releases
 ├── reference/        Technical-reference library
 │   ├── README.md     Technical-reference index
@@ -71,6 +78,8 @@ are governed by [`guides/LEGACY_COMPATIBILITY_POLICY.md`](guides/LEGACY_COMPATIB
 
 This section is the single source of truth for documentation ownership and governance routing.
 
+`docs/index.md` is the public discoverability surface. Ownership, maintenance routing, and canonical update rules remain in this file.
+
 Audience-specific entrypoint docs (`AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/guides/CONTRIBUTING.md`, and `.github/pull_request_template.md`) may keep quick guidance, but they should link back here instead of maintaining parallel ownership-map copies.
 
 | If you change...                                                                                                                                                                                                                         | You must update...                                                                                                                                 |
@@ -86,7 +95,7 @@ Audience-specific entrypoint docs (`AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/
 | `src/db/**`                                                                                                                                                                                                                              | `docs/reference/backend/DATABASE.md`                                                                                                               |
 | `src/storage/**`                                                                                                                                                                                                                         | `docs/reference/backend/STORAGE.md` and `docs/reference/backend/DATABASE.md`                                                                       |
 | `src/utils/**`                                                                                                                                                                                                                           | `docs/reference/backend/UTILS.md`                                                                                                                  |
-| `src/config/**`                                                                                                                                                                                                                          | `docs/reference/backend/UTILS.md`                                                                                                                  |
+| `src/config/**`                                                                                                                                                                                                                          | `docs/reference/backend/CONFIG.md` and `docs/reference/backend/UTILS.md`                                                                            |
 | `src/parser/**`                                                                                                                                                                                                                          | `docs/reference/backend/PARSER.md`                                                                                                                 |
 | `src/ai/**`                                                                                                                                                                                                                              | `docs/reference/backend/AI.md`                                                                                                                     |
 | `src/ai/voice/**`                                                                                                                                                                                                                        | `docs/reference/backend/VOICE.md`                                                                                                                  |

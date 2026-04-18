@@ -33,7 +33,9 @@ The MCP server reuses the exact same `bootstrap()` and `ToolRegistry` as the CLI
 pnpm mcp
 ```
 
-This starts the server on stdio (JSON-RPC). For Claude Desktop, add to `claude_desktop_config.json`:
+This starts the server on stdio (JSON-RPC). Use it as a manual smoke test or for clients that expect you to start the server yourself. Claude Desktop and similar stdio clients can launch the process from config instead.
+
+For Claude Desktop, add to `claude_desktop_config.json`:
 
 ```json
 {
@@ -46,7 +48,7 @@ This starts the server on stdio (JSON-RPC). For Claude Desktop, add to `claude_d
 }
 ```
 
-For a custom agent using the MCP SDK:
+For a custom agent using the MCP SDK, `StdioClientTransport` launches `pnpm mcp` for you:
 
 ```typescript
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";

@@ -58,16 +58,13 @@ export interface PluginServices {
  */
 export class PluginLoader {
   private plugins: Map<string, LoadedPlugin> = new Map();
-  private moduleLoader: ((path: string) => Promise<any>) | null = null;
+  private moduleLoader: ((path: string) => Promise<{ default: unknown }>) | null = null;
   /** Monotonic reload token used to bypass host loader cache for built-ins. */
   private builtinLoadRevisions: Map<string, number> = new Map();
   /** Temporary copied built-in plugin directories (native import path only). */
   private builtinNativeStageDirs: Map<string, string> = new Map();
   /** EventBus listeners registered by plugin hooks/API, cleaned up on unload. */
-  private pluginListeners: Map<
-    string,
-    Array<{ event: EventName; callback: EventCallback<any> }>
-  > = new Map();
+  private pluginListeners: Map<string, Array<{ event: EventName; callback: unknown }>> = new Map();
 
   constructor(
     private pluginDir: string,
@@ -100,7 +97,7 @@ export class PluginLoader {
   }
 
   /** Set a custom module loader (e.g. Vite's ssrLoadModule for dev). */
-  setModuleLoader(loader: (path: string) => Promise<any>): void {
+  setModuleLoader(loader: (path: string) => Promise<{ default: unknown }>): void {
     this.moduleLoader = loader;
   }
 
@@ -836,10 +833,10 @@ export class PluginLoader {
     }
   }
 
-  private trackPluginListener(
+  private trackPluginListener<E extends EventName>(
     pluginId: string,
-    event: EventName,
-    callback: EventCallback<any>,
+    event: E,
+    callback: EventCallback<E>,
   ): void {
     const listeners = this.pluginListeners.get(pluginId) ?? [];
     listeners.push({ event, callback });
@@ -853,7 +850,7 @@ export class PluginLoader {
 
     const eb = this.services.eventBus;
     for (const { event, callback } of listeners) {
-      eb.off(event, callback);
+      eb.off(event, callback as EventCallback<typeof event>);
     }
     this.pluginListeners.delete(pluginId);
   }

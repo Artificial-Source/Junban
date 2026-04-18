@@ -8,20 +8,21 @@
  */
 import React from "react";
 import type { ComponentType } from "react";
+import type TimeblockingPlugin from "../../plugins/builtin/timeblocking/index.js";
+
+type BuiltinViewProps = Record<string, unknown>;
+type BuiltinViewComponent = ComponentType<BuiltinViewProps>;
 
 // Cache resolved components to avoid re-creating on every call
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const cachedComponents = new Map<string, (props: any) => any>();
+const cachedComponents = new Map<string, (props: BuiltinViewProps) => React.ReactNode>();
 // Cache in-flight component resolutions to avoid duplicate factory execution
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const pendingComponents = new Map<string, Promise<(props: any) => any>>();
+const pendingComponents = new Map<string, Promise<(props: BuiltinViewProps) => React.ReactNode>>();
 
 /**
  * Registry of factory functions that lazily create React components
  * for built-in plugins. Each factory is called at most once (result cached).
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const builtinComponentFactories = new Map<string, () => Promise<ComponentType<any>>>();
+const builtinComponentFactories = new Map<string, () => Promise<BuiltinViewComponent>>();
 
 /**
  * Register a built-in plugin's React component factory.
@@ -30,7 +31,7 @@ const builtinComponentFactories = new Map<string, () => Promise<ComponentType<an
 
 export function registerBuiltinComponent(
   pluginId: string,
-  factory: () => Promise<ComponentType<any>>,
+  factory: () => Promise<BuiltinViewComponent>,
 ): void {
   builtinComponentFactories.set(pluginId, factory);
 }
@@ -42,7 +43,7 @@ export function registerBuiltinComponent(
 
 export async function resolveBuiltinComponent(
   pluginId: string,
-): Promise<((props: any) => any) | null> {
+): Promise<((props: BuiltinViewProps) => React.ReactNode) | null> {
   if (cachedComponents.has(pluginId)) {
     return cachedComponents.get(pluginId)!;
   }
@@ -59,8 +60,7 @@ export async function resolveBuiltinComponent(
   const pendingComponent = (async () => {
     try {
       const Component = await factory();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const wrapper = (props: any) => React.createElement(Component, props);
+      const wrapper = (props: BuiltinViewProps) => React.createElement(Component, props);
       cachedComponents.set(pluginId, wrapper);
       return wrapper;
     } finally {
@@ -77,10 +77,8 @@ export async function resolveBuiltinComponent(
 // ---------------------------------------------------------------------------
 
 // Cache the proxy so it's created only once
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let cachedTimeblockingProxy: any = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let cachedTimeblockingProxyPending: Promise<any> | null = null;
+let cachedTimeblockingProxy: unknown = null;
+let cachedTimeblockingProxyPending: Promise<unknown> | null = null;
 
 registerBuiltinComponent("timeblocking", async () => {
   const [{ createTimeblockingProxy }, { TimeblockingContext }, { TimeblockingView }] =
@@ -102,7 +100,7 @@ registerBuiltinComponent("timeblocking", async () => {
   return () =>
     React.createElement(
       TimeblockingContext.Provider,
-      { value: cachedTimeblockingProxy },
+      { value: cachedTimeblockingProxy as TimeblockingPlugin },
       React.createElement(TimeblockingView),
     );
 });

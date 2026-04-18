@@ -86,7 +86,7 @@ function AITabContent() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [provider, baseUrl]);
+  }, [provider, baseUrl, model]);
 
   const currentProvider = providers.find((p) => p.name === provider);
   const supportsAutoLoad = provider === "lmstudio";

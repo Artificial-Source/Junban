@@ -138,7 +138,7 @@ interface StorageQueries {
 export class SQLiteBackend implements IStorage {
   private q: StorageQueries;
 
-  constructor(db: BaseSQLiteDatabase<"sync", any, typeof schema>) {
+  constructor(db: BaseSQLiteDatabase<"sync", unknown, typeof schema>) {
     this.q = createQueries(db) as unknown as StorageQueries;
   }
 

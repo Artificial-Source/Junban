@@ -41,7 +41,7 @@ export function Calendar({
       nav.setMode(modeProp);
       nav.setDate(new Date());
     }
-  }, [modeProp]);
+  }, [modeProp, nav]);
 
   const taskCount = useMemo(() => {
     if (nav.mode === "day") {

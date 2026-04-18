@@ -3,6 +3,19 @@ import { Download, Loader2, AlertCircle, CheckCircle2, Trash2 } from "lucide-rea
 import type { VoiceProviderRegistry } from "../../../../ai/voice/registry.js";
 import type { ModelStatus } from "../../../../ai/voice/adapters/whisper-local-stt.js";
 
+interface LocalModelProvider {
+  id: string;
+  name: string;
+  modelId: string;
+  status: ModelStatus;
+  progress: number;
+  preload(): Promise<void>;
+  checkCached?(): Promise<boolean>;
+  deleteModel?(): Promise<void>;
+  getModelSize?(): Promise<number>;
+  onStatusChange?: (status: ModelStatus, progress: number) => void;
+}
+
 export interface LocalModelInfo {
   id: string;
   name: string;
@@ -18,28 +31,41 @@ export interface LocalModelInfo {
 }
 
 /** Extract local model info from a provider via duck typing. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function toLocalModelInfo(provider: any, type: "STT" | "TTS"): LocalModelInfo | null {
-  if (provider && typeof provider.status === "string" && typeof provider.preload === "function") {
+export function toLocalModelInfo(provider: unknown, type: "STT" | "TTS"): LocalModelInfo | null {
+  const localProvider = provider as Partial<LocalModelProvider> | null;
+  if (
+    localProvider &&
+    typeof localProvider.status === "string" &&
+    typeof localProvider.preload === "function" &&
+    typeof localProvider.id === "string" &&
+    typeof localProvider.name === "string" &&
+    typeof localProvider.modelId === "string"
+  ) {
     return {
-      id: provider.id,
-      name: provider.name,
-      modelId: provider.modelId,
+      id: localProvider.id,
+      name: localProvider.name,
+      modelId: localProvider.modelId,
       type,
-      status: provider.status,
-      progress: provider.progress,
-      preload: () => provider.preload(),
+      status: localProvider.status,
+      progress: localProvider.progress ?? 0,
+      preload: () => localProvider.preload!(),
       checkCached:
-        typeof provider.checkCached === "function" ? () => provider.checkCached() : undefined,
+        typeof localProvider.checkCached === "function"
+          ? () => localProvider.checkCached!()
+          : undefined,
       deleteModel:
-        typeof provider.deleteModel === "function" ? () => provider.deleteModel() : undefined,
+        typeof localProvider.deleteModel === "function"
+          ? () => localProvider.deleteModel!()
+          : undefined,
       getModelSize:
-        typeof provider.getModelSize === "function" ? () => provider.getModelSize() : undefined,
+        typeof localProvider.getModelSize === "function"
+          ? () => localProvider.getModelSize!()
+          : undefined,
       get onStatusChange() {
-        return provider.onStatusChange;
+        return localProvider.onStatusChange;
       },
       set onStatusChange(cb) {
-        provider.onStatusChange = cb;
+        localProvider.onStatusChange = cb;
       },
     };
   }
@@ -63,8 +89,9 @@ export function LocalModelsSection({ registry }: { registry: VoiceProviderRegist
 
   // Memoize localModels to avoid recreating on every render.
   // modelVersion is bumped after preload/delete to pick up status changes.
-  const localModels = useMemo<LocalModelInfo[]>(
-    () => [
+  const localModels = useMemo<LocalModelInfo[]>(() => {
+    void modelVersion;
+    return [
       ...registry
         .listSTT()
         .map((p) => toLocalModelInfo(p, "STT"))
@@ -73,9 +100,8 @@ export function LocalModelsSection({ registry }: { registry: VoiceProviderRegist
         .listTTS()
         .map((p) => toLocalModelInfo(p, "TTS"))
         .filter((m): m is LocalModelInfo => m !== null),
-    ],
-    [registry, modelVersion],
-  );
+    ];
+  }, [registry, modelVersion]);
 
   // Keep a ref so async callbacks always see the latest models
   const localModelsRef = useRef(localModels);

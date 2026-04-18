@@ -134,7 +134,7 @@ export function Sidebar({
       }
     }
     return map;
-  }, [pluginViews, builtinPluginIds]);
+  }, [pluginViews]);
   const favoriteProjects = useMemo(
     () => projects.filter((p) => p.isFavorite && !p.archived),
     [projects],

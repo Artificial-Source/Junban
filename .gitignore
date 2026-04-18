@@ -67,3 +67,8 @@ plugins/*/dist/
 .claude/worktrees/
 .swarm/
 .mcp.json
+
+# Local desktop release artifacts
+*.deb
+*.rpm
+*.AppImage

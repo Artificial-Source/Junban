@@ -29,6 +29,7 @@
   "scripts": {
     "setup:dev": "tsx scripts/setup-dev.ts",
     "tauri:prepare-sidecar": "node scripts/prepare-tauri-sidecar.mjs",
+    "tauri:validate-sidecar": "node scripts/validate-tauri-sidecar.mjs",
     "dev": "node scripts/run-with-profile.mjs dev vite",
     "dev:full": "node scripts/run-with-profile.mjs dev concurrently --kill-others \"node --import tsx src/server.ts\" \"VITE_USE_BACKEND=true vite\"",
     "server": "node scripts/run-with-profile.mjs dev node --import tsx src/server.ts",

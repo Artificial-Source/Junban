@@ -223,7 +223,7 @@ Defined in `src/db/schema.ts` using Drizzle ORM. Fourteen tables:
 ### `migrate.ts`
 
 **Path:** `src/db/migrate.ts`
-**Purpose:** Runs Drizzle ORM migrations from the `migrations/` directory against a better-sqlite3 database. Can be executed standalone via `pnpm db:migrate`.
+**Purpose:** Runs Drizzle ORM migrations from the `migrations/` directory against a better-sqlite3 database. Before invoking Drizzle, it now backfills the native `__drizzle_migrations` ledger for recognized legacy schemaful SQLite databases that predate ledger tracking, so Node startup and packaged desktop upgrades can continue without replaying already-applied schema changes. Can be executed standalone via `pnpm db:migrate`.
 **Key Exports:** `runMigrations(db: BetterSQLite3Database)`
 **Key Dependencies:** `drizzle-orm/better-sqlite3/migrator`
 **Used By:** `src/bootstrap.ts`
@@ -233,9 +233,9 @@ Defined in `src/db/schema.ts` using Drizzle ORM. Fourteen tables:
 ### `migrate-web.ts`
 
 **Path:** `src/db/migrate-web.ts`
-**Purpose:** Runs migrations in the browser by importing raw SQL strings (via Vite `?raw` imports) and executing them statement-by-statement against a sql.js database.
-**Key Exports:** `runWebMigrations(sqlite: Database): void`
-**Key Dependencies:** Raw SQL migration files
+**Purpose:** Runs migrations in browser/sql.js runtimes by loading the Drizzle journal plus raw SQL migration strings, creating the native-style `__drizzle_migrations` ledger, and applying only pending migrations in journal order.
+**Key Exports:** `runWebMigrations(sqlite: Database): Promise<void>`
+**Key Dependencies:** Raw SQL migration files, raw journal import (`meta/_journal.json?raw`), Web Crypto for SHA-256 hashes
 **Used By:** `src/bootstrap-web.ts`
 
 ---
@@ -339,10 +339,10 @@ Storage architecture details for `src/storage/**` should be maintained in [`STOR
 
 Migrations are stored as SQL files in `src/db/migrations/`. Two migration approaches exist:
 
-1. **Node.js (desktop/CLI):** `migrate.ts` uses Drizzle's built-in migrator to scan the `migrations/` folder.
-2. **Browser (web/Tauri):** `migrate-web.ts` imports SQL files as raw strings via Vite and executes them directly against sql.js.
+1. **Node.js (desktop/CLI):** `migrate.ts` uses Drizzle's built-in migrator to scan the `migrations/` folder, but first inspects schemaful ledger-less SQLite databases from the legacy desktop path and seeds the matching prefix into `__drizzle_migrations` before Drizzle executes pending migrations.
+2. **Browser (web/Tauri direct-services mode):** `migrate-web.ts` imports the SQL files and journal metadata via Vite raw imports, creates `__drizzle_migrations`, reads the latest applied `created_at`, and executes only journal entries that are still pending.
 
-Both approaches apply the same SQL migrations to maintain schema consistency across environments.
+Both approaches apply the same SQL migrations to maintain schema consistency across environments. The Node path now has an explicit compatibility shim for pre-sidecar desktop databases that already have the legacy schema but no migration ledger, while the web/sql.js path mirrors Drizzle's native SQLite migrator closely enough for rerun safety: rerunning migrations on an already-upgraded database becomes a no-op instead of replaying every statement.
 
 ---
 

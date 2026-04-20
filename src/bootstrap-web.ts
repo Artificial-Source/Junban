@@ -76,7 +76,7 @@ async function createWebServices(): Promise<WebAppServices> {
     logger.info("Web bootstrap starting");
     const existingData = await loadDbFile();
     const { db, sqlite } = await createWebDb(existingData ?? undefined);
-    runWebMigrations(sqlite);
+    await runWebMigrations(sqlite);
     logger.info("Web SQLite initialized", { hasExistingData: !!existingData });
 
     const storage: IStorage = new SQLiteBackend(db);

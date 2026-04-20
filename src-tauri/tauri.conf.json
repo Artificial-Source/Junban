@@ -5,7 +5,7 @@
   "identifier": "com.asf.junban",
   "build": {
     "beforeDevCommand": "pnpm tauri:prepare-sidecar && pnpm dev:full",
-    "beforeBuildCommand": "pnpm build && pnpm tauri:prepare-sidecar",
+    "beforeBuildCommand": "pnpm build && pnpm tauri:prepare-sidecar && pnpm tauri:validate-sidecar",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },

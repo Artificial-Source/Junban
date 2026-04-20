@@ -93,6 +93,8 @@ Important constraint:
 - The packaged desktop sidecar binds an available localhost port at startup, and the frontend learns that dynamic port only through the runtime-descriptor handshake from Tauri
 - Readiness validation requires the backend health payload to identify Junban rather than accepting any HTTP 200 responder on that port; if startup fails, Tauri now leaves the app bootable and exposes an unready desktop runtime descriptor so the frontend can render a controlled error state
 - If the sidecar later exits, subsequent runtime-descriptor reads report the desktop backend as unready instead of leaving stale ready metadata behind
+- Existing packaged-desktop upgrades keep the same AppData-backed SQLite file, so the desktop-backend shift should not require export/import or manual database relocation for normal upgrades
+- Existing desktop compatibility/grandfathering behavior for legacy built-in plugins is unchanged by the backend shift; keep that note with the packaged-desktop/frontend transport docs rather than treating it as a storage migration
 
 Desktop remote-access note:
 
@@ -165,7 +167,7 @@ Supporting files live in `src/db/`:
 - `schema.ts` for the Drizzle schema
 - `client.ts` for Node SQLite access
 - `client-web.ts` for `sql.js`
-- `migrate.ts` and `migrate-web.ts` for migrations
+- `migrate.ts` and `migrate-web.ts` for migrations (both now track applied migrations instead of replaying the whole journal on every run)
 - `persistence.ts` for browser/Tauri persistence helpers
 
 ### Markdown path

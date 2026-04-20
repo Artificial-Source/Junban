@@ -1,14 +1,14 @@
 import { PluginManifest, type SettingDefinition, type Permission } from "../types.js";
 import type { Plugin } from "../lifecycle.js";
-import pomodoroManifestJson from "./pomodoro/manifest.json";
-import timeblockingManifestJson from "./timeblocking/manifest.json";
-import statsManifestJson from "./stats/manifest.json";
-import somedayManifestJson from "./someday/manifest.json";
-import completedManifestJson from "./completed/manifest.json";
-import cancelledManifestJson from "./cancelled/manifest.json";
-import matrixManifestJson from "./matrix/manifest.json";
-import calendarManifestJson from "./calendar/manifest.json";
-import dopamineMenuManifestJson from "./dopamine-menu/manifest.json";
+import pomodoroManifestJson from "./pomodoro/manifest.json" with { type: "json" };
+import timeblockingManifestJson from "./timeblocking/manifest.json" with { type: "json" };
+import statsManifestJson from "./stats/manifest.json" with { type: "json" };
+import somedayManifestJson from "./someday/manifest.json" with { type: "json" };
+import completedManifestJson from "./completed/manifest.json" with { type: "json" };
+import cancelledManifestJson from "./cancelled/manifest.json" with { type: "json" };
+import matrixManifestJson from "./matrix/manifest.json" with { type: "json" };
+import calendarManifestJson from "./calendar/manifest.json" with { type: "json" };
+import dopamineMenuManifestJson from "./dopamine-menu/manifest.json" with { type: "json" };
 
 export const BUILTIN_MANIFESTS = [
   PluginManifest.parse(pomodoroManifestJson),

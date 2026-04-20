@@ -31,10 +31,29 @@ cd Junban
 ### 2. Install Dependencies
 
 ```bash
+corepack enable
 pnpm install
 ```
 
-### 3. Configure Environment
+### 3. Bootstrap the Dev Environment
+
+```bash
+pnpm setup:dev
+```
+
+This helper does the common first-run setup for you:
+
+- creates `.env` from `.env.example` if needed
+- ensures the dev data directories exist
+- runs database migrations for the default dev profile
+
+If you prefer a single command from a fresh machine:
+
+```bash
+git clone https://github.com/Artificial-Source/Junban.git && cd Junban && corepack enable && pnpm install && pnpm setup:dev && pnpm dev
+```
+
+### 4. Configure Environment Manually (Optional)
 
 ```bash
 cp .env.example .env
@@ -53,7 +72,7 @@ Repo-run development commands automatically use the `dev` profile, which keeps l
 - `STORAGE_MODE=markdown` in those same commands uses `./tasks/dev/`
 - Packaged desktop builds still store data in Tauri AppData
 
-### 4. Set Up the Database
+### 5. Set Up the Database Manually (Optional)
 
 ```bash
 mkdir -p data/dev
@@ -62,7 +81,7 @@ pnpm db:migrate
 
 This creates the SQLite database and runs all migrations for the active profile. With the default repo dev profile, that is `./data/dev/junban.db`.
 
-### 5. Run the Dev Server
+### 6. Run the Dev Server
 
 ```bash
 pnpm dev
@@ -70,7 +89,7 @@ pnpm dev
 
 The app is now running at `http://localhost:5173` with hot module replacement (HMR).
 
-### 6. Create Your First Task
+### 7. Create Your First Task
 
 Open the app in your browser. You should see the inbox view. Type a task in the input field:
 
@@ -113,6 +132,7 @@ pnpm cli delete <task-id>
 
 ```bash
 pnpm dev             # Start browser dev server under the isolated dev profile
+pnpm setup:dev       # Create .env, ensure dev dirs, and run migrations
 pnpm build           # Build for production
 pnpm start           # Preview production build
 pnpm test            # Run tests
@@ -200,6 +220,14 @@ Produces platform-specific installers in `src-tauri/target/release/bundle/`.
 
 Packaged installers use Tauri AppData rather than the repo's dev-profile paths, so you can keep a stable daily-use install alongside active development.
 
+`pnpm tauri:dev` automatically stages the bundled desktop backend sidecar first. `pnpm tauri:build` now stages it and runs the packaged-runtime smoke validation before bundling. If you need to smoke-test that packaging input directly, run:
+
+```bash
+pnpm build
+pnpm tauri:prepare-sidecar
+pnpm tauri:validate-sidecar
+```
+
 If you want to override the defaults in `.env`, leave `DB_PATH` and `MARKDOWN_PATH` commented out unless you intentionally want a custom shared location.
 
 ## Working with Plugins
@@ -255,6 +283,17 @@ If port 5173 is already busy, stop the conflicting process first. The current lo
 lsof -i :5173 | grep LISTEN
 kill <PID>
 ```
+
+### Desktop sidecar prep fails during `pnpm tauri:dev` or `pnpm tauri:build`
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+pnpm tauri:prepare-sidecar
+pnpm tauri:validate-sidecar
+```
+
+If that still fails, inspect the first failing command in the sidecar-prep output before retrying the full Tauri build.
 
 ### pnpm install fails
 

@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import type { AppServices } from "../bootstrap.js";
+import { loadEnv } from "../config/env.js";
 import { validateOutboundNetworkUrl } from "../plugins/network-policy.js";
 import {
   areCommunityPluginsEnabled,
@@ -27,6 +28,7 @@ export interface PluginRoutesOptions {
 
 export function pluginRoutes(services: AppServices, options: PluginRoutesOptions = {}): Hono {
   const app = new Hono();
+  const pluginInstallDir = path.resolve(loadEnv().PLUGIN_DIR);
 
   // Promise lock to prevent double plugin init
   let pluginInitPromise: Promise<void> | null = null;
@@ -150,7 +152,7 @@ export function pluginRoutes(services: AppServices, options: PluginRoutesOptions
     }
 
     const { PluginInstaller } = await import("../plugins/installer.js");
-    const installer = new PluginInstaller(path.resolve(process.cwd(), "plugins"));
+    const installer = new PluginInstaller(pluginInstallDir);
 
     const result = await installer.install(pluginId, downloadUrl);
     if (result.success) {
@@ -429,7 +431,7 @@ export function pluginRoutes(services: AppServices, options: PluginRoutesOptions
     }
 
     const { PluginInstaller } = await import("../plugins/installer.js");
-    const installer = new PluginInstaller(path.resolve(process.cwd(), "plugins"));
+    const installer = new PluginInstaller(pluginInstallDir);
 
     const result = await installer.uninstall(pluginId);
     if (result.success) {

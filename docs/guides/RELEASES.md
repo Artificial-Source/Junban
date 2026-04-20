@@ -15,8 +15,16 @@ This guide describes how ASF Junban desktop releases, in-app updates, changelog 
 ### Desktop App
 
 - Primary database path: `AppData/ASF Junban/junban.db`
-- This is the SQLite database used by packaged Tauri installs.
+- This is the SQLite database used by packaged Tauri installs, including the current sidecar-backed desktop runtime.
 - The app creates the directory automatically on first run.
+
+## Desktop Backend Upgrade Notes
+
+- Packaged desktop releases now bundle the Node backend as a localhost sidecar.
+- Existing packaged installs still use the same AppData SQLite file, so normal upgrades should migrate in place without export/import or manual database moves.
+- Repo dev/profile data (`./data/dev/junban.db`, `./tasks/dev/`) stays separate from packaged AppData data; do not treat source-run dev data as the packaged upgrade path.
+- Existing desktop grandfathering/compatibility behavior for legacy built-in plugins is unchanged by this runtime shift.
+- If an upgraded packaged build reports that the desktop backend is unavailable, validate the bundled sidecar assets first and avoid deleting the AppData database unless you have a backup and a separate reason to suspect database corruption.
 
 ### Development / Server Mode
 
@@ -57,9 +65,10 @@ This guide describes how ASF Junban desktop releases, in-app updates, changelog 
 
 ## CI/CD Flow
 
-- `CI` runs on pushes to `developer` and `main`, on pull requests targeting those branches, and on manual dispatch.
-- The required quality gate is `Lint, Typecheck & Test`.
-- `Build Web App` runs after the quality gate to catch production build breaks before merge.
+- `CI` runs on pushes to `developer` and `main`, and on pull requests targeting those branches.
+- The required quality gate is `Lint, Typecheck, Test & Packaging Smoke`.
+- Normal CI now runs `pnpm build`, `pnpm tauri:prepare-sidecar`, and `pnpm tauri:validate-sidecar` so pull requests fail before merge if the packaged desktop sidecar cannot be staged correctly.
+- Local `pnpm tauri:build` runs the same sidecar validation before Tauri bundles desktop artifacts.
 - `Dependency Review` runs on pull requests to flag risky dependency updates.
 - `Release` can run from a pushed tag or manual dispatch, but it only proceeds when the tag resolves to a commit already present on `main`.
 - `Release` now also verifies package metadata still says `Junban` and confirms the draft release includes installer assets plus `latest.json` before publishing.
@@ -74,7 +83,10 @@ This guide describes how ASF Junban desktop releases, in-app updates, changelog 
 ## Alpha Checklist
 
 - Confirm desktop install works on each target OS.
+- Confirm the packaged app reaches a ready desktop-backend state after install/update (not just the splash/error shell).
 - Create, edit, complete, delete, and export real tasks using the packaged app.
 - Verify data still exists after restart.
+- Verify an upgrade from the previous packaged release keeps the existing AppData database without manual migration steps.
+- If packaging/runtime code changed, run `pnpm tauri:prepare-sidecar && pnpm tauri:validate-sidecar` before tagging and confirm CI passed the same smoke validation. The validation smoke now covers both a fresh packaged startup and a legacy schemaful AppData-style database that lacks `__drizzle_migrations`, so the upgrade path stays exercised alongside the clean-install path.
 - Test one release-to-release in-app update on a real install.
 - Review `CHANGELOG.md` before every tagged release.

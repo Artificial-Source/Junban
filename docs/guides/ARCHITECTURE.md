@@ -11,13 +11,21 @@ The architecture is organized around a few stable ideas:
 - Browser/Tauri and Node runtimes have different bootstrap paths.
 - AI, voice, plugins, and MCP are first-class subsystems, but they all integrate through the same app data model.
 
+## Quick Routes
+
+- Contributor/agent navigation: [`../../AGENTS.md`](../../AGENTS.md)
+- Canonical docs map: [`../README.md`](../README.md)
+- CLI usage + command examples: [`../how-to/use-cli.md`](../how-to/use-cli.md)
+- CLI technical reference: [`../reference/backend/CLI.md`](../reference/backend/CLI.md)
+
 ## Top-Level Shape
 
 ```text
 src/
   main.ts                     Node bootstrap entry
   server.ts                   Hono API entry
-  bootstrap.ts                Node service graph
+  bootstrap.ts                Stable Node bootstrap facade
+  backend/                    Backend composition kernel, Node factories, and runtime owner
   bootstrap-web.ts            Browser/Tauri service graph
   bootstrap-web-ai-runtime.ts Lazy browser AI runtime
 
@@ -46,7 +54,19 @@ Used by:
 - `src/cli/index.ts`
 - `src/mcp/server.ts`
 
-Node mode builds services through `src/bootstrap.ts`.
+Node mode still enters through `src/bootstrap.ts`.
+
+`src/bootstrap.ts` is now a thin compatibility facade that delegates to the Node factory in
+`src/backend/node-factory.ts`, which prepares runtime-specific dependencies and then composes the
+shared backend service graph via `src/backend/kernel.ts`.
+
+When a Node entrypoint also needs plugin lifecycle management, it can use
+`src/backend/node-runtime.ts` as a thin owner around those services instead of open-coding plugin
+startup/shutdown logic. Runtime initialization errors are surfaced to callers so each entrypoint can
+choose fail-fast behavior or catch-and-continue behavior while still retrying through the runtime.
+Long-lived Node entrypoints (`src/server.ts` and `src/main.ts`) own signal-driven shutdown and call
+`runtime.dispose()` exactly once per termination sequence; the API server closes its listener before
+awaiting runtime disposal so it stops accepting new work before teardown.
 
 This path can use either:
 
@@ -66,11 +86,26 @@ Important constraint:
 - Browser-side code always uses SQLite via `sql.js`
 - Markdown storage is Node-only because it requires filesystem access
 
+Desktop remote-access note:
+
+- Packaged Tauri builds can also host a lightweight Rust web server that serves the compiled frontend and synchronizes the persisted SQLite file for personal trusted-network access.
+- That remote browser path still uses the browser service graph from `src/bootstrap-web.ts`; it swaps filesystem persistence for HTTP-backed DB-file load/save.
+- Remote access settings are persisted by the Tauri runtime so the desktop app can auto-start the server on launch.
+- The desktop window locks local editing while remote access is active, and the Rust host only authorizes one remote browser session at a time.
+- Optional password protection is enforced by the Rust host before the remote browser can read or write the SQLite file.
+
 The browser/Tauri path also lazy-loads AI runtime code through `src/bootstrap-web-ai-runtime.ts` so the base UI does not pay that startup cost until needed.
 
 ## Service Graph
 
-`src/bootstrap.ts` and `src/bootstrap-web.ts` are the main composition roots.
+`src/bootstrap-web.ts` remains the browser/Tauri composition root.
+
+For Node paths, the composition boundary is now split into:
+
+- `src/backend/kernel.ts` for runtime-agnostic backend service composition
+- `src/backend/node-factory.ts` for Node-specific env, storage, plugin-path, and default AI/tool setup
+- `src/backend/node-runtime.ts` for thin plugin lifecycle ownership in long-lived Node entrypoints
+- `src/bootstrap.ts` as the stable compatibility entry used by current callers
 
 They assemble:
 
@@ -79,8 +114,8 @@ They assemble:
 - Event bus
 - Plugin infrastructure
 - Command and UI registries
-- AI provider and tool registries
-- Chat manager where relevant
+- AI provider and tool registries supplied by the runtime factory
+- Chat manager supplied by the runtime factory
 
 This keeps the rest of the codebase working against explicit services instead of creating hidden global dependencies.
 

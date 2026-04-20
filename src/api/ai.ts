@@ -10,11 +10,40 @@ import { isAllowedAIBaseUrl } from "../ai/base-url-policy.js";
 
 const logger = createLogger("api:ai");
 
-export function aiRoutes(services: AppServices): Hono {
+export interface AiRoutesOptions {
+  ensurePluginsLoaded?: () => Promise<void>;
+}
+
+export function aiRoutes(services: AppServices, options: AiRoutesOptions = {}): Hono {
   const app = new Hono();
+
+  // Promise lock to prevent double plugin init
+  let pluginInitPromise: Promise<void> | null = null;
+  async function ensurePluginsViaLoader() {
+    if (!pluginInitPromise) {
+      pluginInitPromise = services.pluginLoader.loadAll().catch((err) => {
+        pluginInitPromise = null;
+        throw err;
+      });
+    }
+    await pluginInitPromise;
+  }
+
+  const ensurePlugins = options.ensurePluginsLoaded ?? ensurePluginsViaLoader;
+
+  async function ensurePluginsBestEffort(route: string): Promise<void> {
+    try {
+      await ensurePlugins();
+    } catch (err) {
+      logger.warn(
+        `Continuing without plugin AI extensions for ${route}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
 
   // GET /ai/providers
   app.get("/providers", async (c) => {
+    await ensurePluginsBestEffort("GET /ai/providers");
     const providers = services.aiProviderRegistry.getAll().map((r: ProviderRegistration) => ({
       name: r.plugin.name,
       displayName: r.plugin.displayName,
@@ -88,6 +117,7 @@ export function aiRoutes(services: AppServices): Hono {
 
   // GET /ai/providers/:name/models
   app.get("/providers/:name/models", async (c) => {
+    await ensurePluginsBestEffort("GET /ai/providers/:name/models");
     try {
       const providerName = c.req.param("name");
       const baseUrlOverride = c.req.query("baseUrl");
@@ -113,6 +143,7 @@ export function aiRoutes(services: AppServices): Hono {
 
   // POST /ai/providers/:name/models/load
   app.post("/providers/:name/models/load", async (c) => {
+    await ensurePluginsBestEffort("POST /ai/providers/:name/models/load");
     const providerName = c.req.param("name");
     const body = await c.req.json();
     const { model: modelKey, baseUrl: baseUrlOverride } = body as {
@@ -140,6 +171,7 @@ export function aiRoutes(services: AppServices): Hono {
 
   // POST /ai/providers/:name/models/unload
   app.post("/providers/:name/models/unload", async (c) => {
+    await ensurePluginsBestEffort("POST /ai/providers/:name/models/unload");
     const providerName = decodeURIComponent(c.req.param("name"));
     const body = await c.req.json();
     const { model: modelKey, baseUrl: baseUrlOverride } = body as {
@@ -168,6 +200,7 @@ export function aiRoutes(services: AppServices): Hono {
 
   // POST /ai/chat — SSE streaming chat
   app.post("/chat", async (c) => {
+    await ensurePluginsBestEffort("POST /ai/chat");
     const body = await c.req.json();
     const message = body.message as string;
     const voiceCall = body.voiceCall as boolean | undefined;
@@ -256,6 +289,7 @@ export function aiRoutes(services: AppServices): Hono {
 
   // GET /ai/messages
   app.get("/messages", async (c) => {
+    await ensurePluginsBestEffort("GET /ai/messages");
     let session = services.chatManager.getSession();
 
     if (!session) {
@@ -340,6 +374,7 @@ export function aiRoutes(services: AppServices): Hono {
 
   // POST /ai/sessions/:id/switch
   app.post("/sessions/:id/switch", async (c) => {
+    await ensurePluginsBestEffort("POST /ai/sessions/:id/switch");
     const currentSession = services.chatManager.getSession();
     if (currentSession) {
       currentSession

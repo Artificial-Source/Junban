@@ -42,7 +42,8 @@ Implementation-facing product principles are summarized in [`docs/product/missio
 src/
   main.ts                     Node bootstrap entry
   server.ts                   Hono API server entry
-  bootstrap.ts                Node service graph
+  bootstrap.ts                Stable Node bootstrap facade
+  backend/                    Backend composition kernel and runtime factories
   bootstrap-web.ts            Browser/Tauri service graph
   bootstrap-web-ai-runtime.ts Lazy AI runtime for browser/Tauri
   ui/                         React app, contexts, hooks, views, components
@@ -146,7 +147,10 @@ Important constraint:
 
 | File                                               | Why it matters                                     |
 | -------------------------------------------------- | -------------------------------------------------- |
-| `src/bootstrap.ts`                                 | Builds the Node service graph                      |
+| `src/bootstrap.ts`                                 | Stable Node bootstrap entry used by callers        |
+| `src/backend/kernel.ts`                            | Runtime-agnostic backend service composition       |
+| `src/backend/node-factory.ts`                      | Node storage/env + AI wiring for the backend kernel |
+| `src/backend/node-runtime.ts`                      | Thin Node lifecycle owner for plugin init/teardown |
 | `src/bootstrap-web.ts`                             | Builds the browser/Tauri service graph             |
 | `src/server.ts`                                    | Hono API composition and process lifecycle         |
 | `src/db/schema.ts`                                 | Database schema source of truth                    |

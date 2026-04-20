@@ -2,11 +2,17 @@
 
 The `src/cli/` directory implements the Junban CLI companion tool. It uses Commander.js for command registration and shares the same core services as the UI through the `bootstrap()` function.
 
+## Start Here
+
+- Task-focused usage guide: [`../../how-to/use-cli.md`](../../how-to/use-cli.md)
+- Runtime/bootstrap context: [`../../guides/ARCHITECTURE.md`](../../guides/ARCHITECTURE.md)
+- Canonical docs map: [`../../README.md`](../../README.md)
+
 ---
 
 ## Architecture
 
-The CLI bootstraps the full application services (database, storage, task/project/tag services) and then dispatches to command handlers via Commander.js. Each command handler is lazily imported for fast startup.
+The CLI bootstraps the shared application services (database, storage, task/project/tag services) through the Node compatibility facade in `src/bootstrap.ts` and then dispatches to command handlers via Commander.js. Each command handler is lazily imported for fast startup.
 
 ```
 CLI Entry (index.ts)
@@ -16,9 +22,13 @@ CLI Entry (index.ts)
   |-> Handler uses services (taskService, projectService, etc.)
 ```
 
+The long-lived Node runtime owner in `src/backend/node-runtime.ts` is primarily for app/server/MCP plugin lifecycle coordination; the CLI keeps using `bootstrap()` directly because its commands are short-lived and do not currently own shared plugin startup/shutdown.
+
 ---
 
 ## Files
+
+Invocation note: the examples below use the repository script form (`pnpm cli -- ...`) because that is the default contributor workflow in this repo. If you installed the CLI as `junban`, the same commands work without the `pnpm cli --` prefix.
 
 ### `index.ts`
 
@@ -29,7 +39,7 @@ CLI Entry (index.ts)
 
 **Key Dependencies:** `commander`, `bootstrap()` from `src/bootstrap.ts`
 
-**Used By:** Invoked directly via `pnpm cli`
+**Used By:** Invoked in-repo via `pnpm cli -- <command>` or as `junban <command>` when installed as a binary
 
 **Registered Commands:**
 
@@ -53,10 +63,10 @@ CLI Entry (index.ts)
 **Usage:**
 
 ```bash
-junban add "buy milk tomorrow p1 #groceries"
+pnpm cli -- add "buy milk tomorrow p1 #groceries"
 # Output: Created: buy milk P1 #groceries due 2/21/2026 [abc12345]
 
-junban add "deploy to production" --json
+pnpm cli -- add "deploy to production" --json
 # Output: { "id": "...", "title": "deploy to production", ... }
 ```
 
@@ -78,22 +88,22 @@ junban add "deploy to production" --json
 **Usage:**
 
 ```bash
-junban list
+pnpm cli -- list
 # Lists all pending tasks
 
-junban list --today
+pnpm cli -- list --today
 # Lists tasks due today
 
-junban list --project work
+pnpm cli -- list --project work
 # Lists tasks in the "work" project
 
-junban list --tag urgent
+pnpm cli -- list --tag urgent
 # Lists tasks tagged "urgent"
 
-junban list --search "deploy"
+pnpm cli -- list --search "deploy"
 # Searches tasks by title/description
 
-junban list --json
+pnpm cli -- list --json
 # Output as JSON array
 ```
 
@@ -119,10 +129,10 @@ junban list --json
 **Usage:**
 
 ```bash
-junban done abc12345
+pnpm cli -- done abc12345
 # Output: Completed: buy milk [abc12345]
 
-junban done abc12345 --json
+pnpm cli -- done abc12345 --json
 # Output: { "id": "...", "status": "completed", ... }
 ```
 
@@ -144,16 +154,16 @@ junban done abc12345 --json
 **Usage:**
 
 ```bash
-junban edit abc12345 --title "buy organic milk"
+pnpm cli -- edit abc12345 --title "buy organic milk"
 # Output: Updated: buy organic milk [abc12345]
 
-junban edit abc12345 --priority 2
+pnpm cli -- edit abc12345 --priority 2
 # Sets priority to P2
 
-junban edit abc12345 --due "next friday"
+pnpm cli -- edit abc12345 --due "next friday"
 # NLP-parsed due date
 
-junban edit abc12345 --description "From the farmer's market"
+pnpm cli -- edit abc12345 --description "From the farmer's market"
 ```
 
 **Options:**
@@ -178,10 +188,10 @@ junban edit abc12345 --description "From the farmer's market"
 **Usage:**
 
 ```bash
-junban delete abc12345
+pnpm cli -- delete abc12345
 # Output: Deleted: buy milk [abc12345]
 
-junban delete abc12345 --json
+pnpm cli -- delete abc12345 --json
 # Output: { "deleted": true, "id": "...", "title": "buy milk" }
 ```
 

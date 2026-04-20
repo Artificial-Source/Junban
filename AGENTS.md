@@ -11,6 +11,12 @@ When you spawn into this repository:
 3. Read `docs/README.md`.
 4. If the task is not already tightly scoped, use an explore agent or targeted `Glob`/`Grep` to map the relevant files before editing.
 
+## Fast Doc Routes
+
+- Backend bootstrap/runtime split: `src/backend/`, `src/bootstrap.ts`, `docs/guides/ARCHITECTURE.md`, `docs/explanation/architecture.md`
+- CLI usage, invocation examples, and internals: `src/cli/`, `docs/how-to/use-cli.md`, `docs/reference/backend/CLI.md`
+- Canonical doc ownership/routing: `docs/README.md`
+
 ## Repo Snapshot
 
 Junban is a local-first task manager with:
@@ -38,13 +44,14 @@ Junban is a local-first task manager with:
 | Fix shared app state or context                   | `src/ui/context/`, `docs/reference/frontend/CONTEXT.md`                                                                                                                    |
 | Fix frontend data access                          | `src/ui/api/`, `docs/reference/frontend/API_LAYER.md`                                                                                                                      |
 | Fix backend/core behavior                         | `src/core/`, `docs/reference/backend/CORE.md`                                                                                                                              |
+| Change backend startup/runtime wiring             | `src/backend/`, `src/bootstrap.ts`, `docs/guides/ARCHITECTURE.md`                                                                                                          |
 | Change database or persistence                    | `src/db/`, `src/storage/`, `docs/reference/backend/DATABASE.md`, `docs/reference/backend/STORAGE.md`                                                                       |
 | Work on natural-language input                    | `src/parser/`, `docs/reference/backend/PARSER.md`                                                                                                                          |
 | Work on AI chat/tools/providers                   | `src/ai/`, `docs/reference/backend/AI.md`                                                                                                                                  |
 | Work on voice features                            | `src/ai/voice/`, `docs/reference/backend/VOICE.md`                                                                                                                         |
 | Work on plugins                                   | `src/plugins/`, `plugins/`, `docs/reference/backend/PLUGINS.md`, `docs/reference/plugins/README.md`, `docs/reference/plugins/API.md`, `docs/reference/plugins/EXAMPLES.md` |
 | Work on MCP                                       | `src/mcp/`, `docs/reference/backend/MCP.md`                                                                                                                                |
-| Work on CLI                                       | `src/cli/`, `docs/reference/backend/CLI.md`                                                                                                                                |
+| Work on CLI                                       | `src/cli/`, `docs/how-to/use-cli.md`, `docs/reference/backend/CLI.md`                                                                                                      |
 | Understand release/setup/security                 | `docs/guides/RELEASES.md`, `docs/guides/SETUP.md`, `docs/guides/SECURITY.md`                                                                                               |
 | Check product roadmap/status or internal planning | `docs/product/README.md`, `docs/internal/README.md`                                                                                                                        |
 

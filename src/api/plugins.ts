@@ -21,12 +21,16 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function pluginRoutes(services: AppServices): Hono {
+export interface PluginRoutesOptions {
+  ensurePluginsLoaded?: () => Promise<void>;
+}
+
+export function pluginRoutes(services: AppServices, options: PluginRoutesOptions = {}): Hono {
   const app = new Hono();
 
   // Promise lock to prevent double plugin init
   let pluginInitPromise: Promise<void> | null = null;
-  async function ensurePlugins() {
+  async function ensurePluginsViaLoader() {
     if (!pluginInitPromise) {
       pluginInitPromise = services.pluginLoader.loadAll().catch((err) => {
         pluginInitPromise = null;
@@ -35,6 +39,8 @@ export function pluginRoutes(services: AppServices): Hono {
     }
     await pluginInitPromise;
   }
+
+  const ensurePlugins = options.ensurePluginsLoaded ?? ensurePluginsViaLoader;
 
   // GET /plugins/commands — list all registered commands
   app.get("/commands", async (c) => {

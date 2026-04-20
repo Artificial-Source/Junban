@@ -4,7 +4,7 @@ Junban is a local-first application with a few intentionally narrow boundaries:
 
 - **Domain core first** (`src/core/`) owns business rules.
 - **Storage is abstracted** behind `IStorage` (`src/storage/interface.ts`).
-- **Composition happens centrally** (`src/bootstrap.ts` and `src/bootstrap-web.ts`).
+- **Composition is split by runtime** (`src/backend/kernel.ts`, `src/backend/node-factory.ts`, `src/backend/node-runtime.ts`, `src/bootstrap.ts`, and `src/bootstrap-web.ts`).
 - **Interfaces are thin** so UI, API, CLI, MCP, and plugins all act on the same model.
 
 The project is intentionally shaped so different runtimes can share the same domain behavior without rewriting product logic.
@@ -13,7 +13,10 @@ The project is intentionally shaped so different runtimes can share the same dom
 
 The strongest architectural theme is the separation between **domain logic** and **transport/runtime entry points**.
 
-- `src/bootstrap.ts` builds the main Node `AppServices` graph.
+- `src/bootstrap.ts` is the stable Node compatibility facade.
+- `src/backend/kernel.ts` builds the runtime-agnostic backend service graph.
+- `src/backend/node-factory.ts` supplies Node-only storage/env defaults and creates the plugin loader with Node path ownership.
+- `src/backend/node-runtime.ts` owns plugin lifecycle for long-lived Node processes.
 - `src/server.ts` and `src/main.ts` call that graph for API/CLI-style execution.
 - `src/bootstrap-web.ts` builds a similar graph for browser/Tauri using a web database path.
 - `src/mcp/server.ts` reuses the same service graph and exposes it over MCP.
@@ -31,7 +34,7 @@ See also: [`../guides/ARCHITECTURE.md`](../guides/ARCHITECTURE.md), [`../referen
 
 The composition roots exist so runtime-specific wiring stays near startup instead of leaking into the domain layer.
 
-In practice, that means storage selection, plugin loading, AI registry setup, and similar cross-cutting concerns are assembled in `src/bootstrap.ts` or `src/bootstrap-web.ts`, while the rest of the app works against services and interfaces.
+In practice, that means `src/backend/kernel.ts` only assembles shared services, while `src/backend/node-factory.ts` owns Node-only concerns such as storage selection, environment handling, built-in plugin path resolution, and plugin-loader construction. Browser/Tauri composition stays in `src/bootstrap-web.ts`.
 
 The durable rule is simple: runtime differences belong at composition time, not spread through `src/core/`.
 

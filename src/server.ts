@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { bodyLimit } from "hono/body-limit";
 import { serve } from "@hono/node-server";
-import { bootstrap } from "./bootstrap.js";
+import { createNodeBackendRuntime } from "./bootstrap.js";
 import { loadEnv } from "./config/env.js";
 import { NotFoundError, ValidationError } from "./core/errors.js";
 import { createLogger, setDefaultLogLevel } from "./utils/logger.js";
@@ -26,16 +26,18 @@ const logger = createLogger("server");
 const API_PORT = parseInt(process.env.API_PORT ?? "4822", 10);
 
 logger.info("Bootstrapping services...");
-const services = bootstrap();
+const runtime = createNodeBackendRuntime();
+const { services } = runtime;
 
-// Load plugins (failures don't crash the server)
 try {
-  await services.pluginLoader.loadAll();
-  const loaded = services.pluginLoader.getAll().filter((p) => p.enabled);
-  logger.info(`Plugins loaded: ${loaded.length}`);
+  await runtime.initialize();
 } catch (err) {
-  logger.error(`Plugin loading failed: ${err instanceof Error ? err.message : err}`);
+  logger.error(
+    `Plugin startup failed during server bootstrap: ${err instanceof Error ? err.message : err}`,
+  );
 }
+
+const ensurePluginsLoaded = async () => runtime.initialize();
 
 // Build Hono app
 const app = new Hono();
@@ -110,8 +112,18 @@ app.route("/api/comments", commentRoutes(services));
 app.route("/api/templates", templateRoutes(services));
 app.route("/api/settings", settingsRoutes(services));
 app.route("/api/stats", statsRoutes(services));
-app.route("/api/plugins", pluginRoutes(services));
-app.route("/api/ai", aiRoutes(services));
+app.route(
+  "/api/plugins",
+  pluginRoutes(services, {
+    ensurePluginsLoaded,
+  }),
+);
+app.route(
+  "/api/ai",
+  aiRoutes(services, {
+    ensurePluginsLoaded,
+  }),
+);
 app.route("/api/voice", voiceRoutes());
 
 // Health check
@@ -129,32 +141,60 @@ const server = serve(
 );
 
 // Graceful shutdown
-async function shutdown(signal: string) {
-  logger.info(`${signal} received, shutting down...`);
-  try {
-    await services.pluginLoader.unloadAll();
-  } catch (err) {
-    logger.error(`Plugin unload error: ${err instanceof Error ? err.message : err}`);
+let shuttingDown: Promise<void> | null = null;
+let shutdownExitCode = 0;
+async function shutdown(signal: string, requestedExitCode = 0) {
+  shutdownExitCode = Math.max(shutdownExitCode, requestedExitCode);
+
+  if (shuttingDown) {
+    return shuttingDown;
   }
-  server.close(() => {
-    logger.info("Server closed");
-    process.exit(0);
-  });
-  // Force exit after 5s if graceful shutdown stalls
-  setTimeout(() => process.exit(1), 5000).unref();
+
+  shuttingDown = (async () => {
+    logger.info(`${signal} received, shutting down...`);
+
+    // Force exit after 5s if graceful shutdown stalls.
+    const forceExitTimer = setTimeout(() => process.exit(1), 5000);
+    forceExitTimer.unref();
+
+    // Stop accepting new requests first to avoid teardown races.
+    const serverClosed = new Promise<void>((resolve, reject) => {
+      server.close((err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        logger.info("Server closed");
+        resolve();
+      });
+    });
+
+    try {
+      await serverClosed;
+      await runtime.dispose();
+      clearTimeout(forceExitTimer);
+      process.exit(shutdownExitCode);
+    } catch (err) {
+      clearTimeout(forceExitTimer);
+      logger.error(`Shutdown failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  })();
+
+  return shuttingDown;
 }
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
 
 process.on("uncaughtException", (err) => {
   logger.error(`Uncaught exception: ${err.message}`);
-  process.exit(1);
+  void shutdown("uncaughtException", 1);
 });
 
 process.on("unhandledRejection", (reason) => {
   logger.error(`Unhandled rejection: ${reason}`);
-  process.exit(1);
+  void shutdown("unhandledRejection", 1);
 });
 
 export { app, services };

@@ -85,8 +85,8 @@ const BASE_ACCESSOR = {
 
 /**
  * Whether the frontend should use direct in-process service calls (WASM SQLite).
- * Returns true only for browser-side embedded runtimes (for example the current
- * remote-desktop browser path) where the backend API is not locally hosted.
+ * Returns true only for browser-side embedded runtimes that still own
+ * persistence in-browser.
  *
  * When `VITE_USE_BACKEND=true` (set automatically by `pnpm dev:full` and Tauri
  * dev mode), or when `VITE_API_URL` is set, API calls go through fetch to the
@@ -96,7 +96,7 @@ export function useDirectServices(): boolean {
   // If explicitly told to use the backend server, never use direct services
   if (import.meta.env.VITE_USE_BACKEND === "true") return false;
   if (import.meta.env.VITE_API_URL) return false;
-  if (isRemoteDesktopRuntime()) return true;
+  if (isRemoteDesktopRuntime()) return false;
   if (isTauri()) return false;
   // In plain browser dev (pnpm dev), use Vite's inline apiPlugin (fetch to /api)
   return false;

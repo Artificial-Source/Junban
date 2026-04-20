@@ -57,6 +57,8 @@ interface ViewNavigationProps {
   // Projects
   onOpenProjectModal?: () => void;
   onProjectContextMenu?: (e: ReactMouseEvent, project: Project) => void;
+  projectActionsDisabled?: boolean;
+  disablePanelInteractions?: boolean;
 }
 
 function ExpandedNavigation(props: ViewNavigationProps) {
@@ -91,6 +93,8 @@ function ExpandedNavigation(props: ViewNavigationProps) {
     onNavContextMenu,
     onOpenProjectModal,
     onProjectContextMenu,
+    projectActionsDisabled,
+    disablePanelInteractions,
   } = props;
 
   const sectionProps = {
@@ -122,6 +126,8 @@ function ExpandedNavigation(props: ViewNavigationProps) {
     onNavContextMenu,
     onOpenProjectModal,
     onProjectContextMenu,
+    projectActionsDisabled,
+    disablePanelInteractions,
   };
 
   return (

@@ -23,6 +23,7 @@ const env = loadEnv();
 setDefaultLogLevel(env.LOG_LEVEL);
 const logger = createLogger("server");
 
+const API_HOST = process.env.API_HOST?.trim() || "0.0.0.0";
 const API_PORT = parseInt(process.env.API_PORT ?? "4822", 10);
 const HEALTH_RESPONSE = {
   ok: true,
@@ -138,10 +139,11 @@ app.get("/api/health", (c) => c.json(HEALTH_RESPONSE));
 const server = serve(
   {
     fetch: app.fetch,
+    hostname: API_HOST,
     port: API_PORT,
   },
   (info) => {
-    logger.info(`API server listening on port ${info.port}`);
+    logger.info(`API server listening on ${API_HOST}:${info.port}`);
   },
 );
 

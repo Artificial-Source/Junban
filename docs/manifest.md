@@ -16,6 +16,7 @@ The repository already treats [`README.md`](README.md) as the documentation owne
 | [`how-to/install.md`](how-to/install.md) | How-to | Fast install path for contributors and source users |
 | [`how-to/configure.md`](how-to/configure.md) | How-to | Documents real configuration tasks from `.env.example` and `src/config/env.ts` |
 | [`how-to/run-locally.md`](how-to/run-locally.md) | How-to | Covers local dev modes from `package.json` and `src/server.ts` |
+| [`how-to/remote-access.md`](how-to/remote-access.md) | How-to | Documents the packaged-desktop trusted-network remote-access workflow |
 | [`how-to/use-cli.md`](how-to/use-cli.md) | How-to | Covers CLI usage from `src/cli/index.ts` and the backend CLI reference |
 | [`how-to/connect-claude-desktop.md`](how-to/connect-claude-desktop.md) | How-to | Documents the MCP setup path shown in the setup guide |
 | [`how-to/test.md`](how-to/test.md) | How-to | Maps real test commands and test layers present in the repo |

@@ -283,6 +283,7 @@ async function smokeExecutePreparedBackend(sidecarBinaryPath, options = {}) {
     cwd: sidecarDir,
     env: {
       ...process.env,
+      API_HOST: "127.0.0.1",
       API_PORT: String(apiPort),
       STORAGE_MODE: "sqlite",
       DB_PATH: runtimePaths.dbPath,

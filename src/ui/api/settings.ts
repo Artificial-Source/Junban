@@ -8,6 +8,11 @@ import { useDirectServices, BASE, handleResponse, handleVoidResponse } from "./h
 import { getServices } from "./direct-services.js";
 import { listTasks } from "./tasks.js";
 import { listProjects } from "./projects.js";
+import { isTauri } from "../../utils/tauri.js";
+import { getDesktopRemoteServerStatus } from "./desktop-server.js";
+
+const SETTINGS_MUTATION_BLOCKED_ERROR =
+  "Settings are read-only while remote access is running. Stop remote access to make local changes.";
 
 export async function exportAllData(): Promise<{
   tasks: Task[];
@@ -63,6 +68,13 @@ export async function getStorageInfo(): Promise<{ mode: string; path: string }> 
 }
 
 export async function setAppSetting(key: string, value: string): Promise<void> {
+  if (isTauri()) {
+    const remoteStatus = await getDesktopRemoteServerStatus();
+    if (remoteStatus.running) {
+      throw new Error(SETTINGS_MUTATION_BLOCKED_ERROR);
+    }
+  }
+
   if (useDirectServices()) {
     if (!isWritableSettingKey(key)) {
       throw new Error(`Setting key "${key}" is not allowed`);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback, useState, type SetStateAction } from "react";
+import { useEffect, useMemo, useCallback, useState, useRef, type SetStateAction } from "react";
 import { useRouting } from "./hooks/useRouting.js";
 import { useTaskHandlers } from "./hooks/useTaskHandlers.js";
 import { useMultiSelect } from "./hooks/useMultiSelect.js";
@@ -18,6 +18,10 @@ import { useAppState } from "./app/useAppState.js";
 import { useAppHandlers } from "./app/useAppHandlers.js";
 import { AppLayout } from "./app/AppLayout.js";
 import { AppModals } from "./app/AppModals.js";
+import {
+  getRemoteStatusFailureFallback,
+  shouldBlockLocalMutations,
+} from "./app/remoteMutationLock.js";
 import { api } from "./api/index.js";
 import {
   DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT,
@@ -43,6 +47,8 @@ function guardMutationHandler<Args extends unknown[], Result>(
 }
 
 function AppContent() {
+  const tauriRuntime = isTauri();
+
   useEffect(() => {
     markPerf("junban:app-content-mounted");
   }, []);
@@ -167,7 +173,17 @@ function AppContent() {
 
   // ── Reminders ──
   const [remoteServerRunning, setRemoteServerRunning] = useState(false);
-  const mutationsBlocked = isTauri() && remoteServerRunning;
+  const [remoteStatusKnown, setRemoteStatusKnown] = useState(!tauriRuntime);
+  const remoteStatusKnownRef = useRef(remoteStatusKnown);
+  useEffect(() => {
+    remoteStatusKnownRef.current = remoteStatusKnown;
+  }, [remoteStatusKnown]);
+
+  const mutationsBlocked = shouldBlockLocalMutations(
+    tauriRuntime,
+    remoteStatusKnown,
+    remoteServerRunning,
+  );
 
   const handleReminder = useCallback(
     (task: { id: string; title: string }) => {
@@ -214,9 +230,13 @@ function AppContent() {
     });
   }, [blockedMutationToastAt, showToast, handleOpenSettingsTab]);
 
-  const applyRemoteServerStatus = useCallback((serverStatus: DesktopRemoteServerStatus) => {
-    setRemoteServerRunning(serverStatus.running);
-  }, []);
+  const applyRemoteServerStatus = useCallback(
+    (serverStatus: DesktopRemoteServerStatus) => {
+      setRemoteStatusKnown(true);
+      setRemoteServerRunning(serverStatus.running);
+    },
+    [setRemoteStatusKnown, setRemoteServerRunning],
+  );
 
   // ── App handlers (projects, sections, comments, etc.) ──
   const handlers = useAppHandlers({
@@ -369,7 +389,7 @@ function AppContent() {
   }, [selectedTask, projects]);
 
   useEffect(() => {
-    if (!isTauri()) {
+    if (!tauriRuntime) {
       return;
     }
 
@@ -386,6 +406,11 @@ function AppContent() {
           }
         })
         .catch((err: unknown) => {
+          const failureFallback = getRemoteStatusFailureFallback(remoteStatusKnownRef.current);
+          if (active && failureFallback) {
+            setRemoteStatusKnown(failureFallback.remoteStatusKnown);
+            setRemoteServerRunning(failureFallback.remoteServerRunning);
+          }
           console.error("[app] Failed to poll remote server status:", err);
         });
     };
@@ -405,7 +430,7 @@ function AppContent() {
         handleServerStatusChange as EventListener,
       );
     };
-  }, [applyRemoteServerStatus]);
+  }, [applyRemoteServerStatus, tauriRuntime]);
 
   useEffect(() => {
     if (!mutationsBlocked) {

@@ -31,7 +31,7 @@ This page is the public-facing entry point for the documentation set. For the ca
 | Area | Purpose | Current scope |
 | --- | --- | --- |
 | Tutorials | Guided learning by doing | First run and first plugin workflows grounded in `docs/guides/SETUP.md`, `package.json`, and `scripts/create-plugin.ts` |
-| How-to guides | Task-focused instructions | Installation, local run, storage selection, CLI, MCP, and testing workflows supported by the repo today |
+| How-to guides | Task-focused instructions | Installation, local run, remote access, storage selection, CLI, MCP, and testing workflows supported by the repo today |
 | Reference | Factual technical lookup | Existing canonical docs under [`reference/`](reference/) |
 | Explanation | Concepts and rationale | Architecture, storage choices, plugin model, and AI/MCP relationships grounded in `src/` and `docs/guides/ARCHITECTURE.md` |
 

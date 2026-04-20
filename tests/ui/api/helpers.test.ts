@@ -85,12 +85,13 @@ describe("buildApiUrl", () => {
 });
 
 describe("useDirectServices", () => {
-  it("stays on direct-services for remote-desktop browser runtime", async () => {
-    const { useDirectServices } = await loadHelpers({
+  it("uses backend fetches for remote-desktop browser runtime", async () => {
+    const { useDirectServices, buildApiUrl } = await loadHelpers({
       runtimeConfig: { mode: "remote-desktop" },
     });
 
-    expect(useDirectServices()).toBe(true);
+    expect(useDirectServices()).toBe(false);
+    expect(buildApiUrl("/tasks")).toBe("/api/tasks");
   });
 
   it("uses backend fetches for packaged Tauri", async () => {

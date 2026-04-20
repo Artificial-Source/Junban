@@ -6,6 +6,7 @@ import * as comments from "./comments.js";
 import * as stats from "./stats.js";
 import * as plugins from "./plugins.js";
 import * as settings from "./settings.js";
+import * as desktopServer from "./desktop-server.js";
 
 export const api = {
   ...tasks,
@@ -16,6 +17,7 @@ export const api = {
   ...stats,
   ...plugins,
   ...settings,
+  ...desktopServer,
 };
 
 // Re-export all interfaces

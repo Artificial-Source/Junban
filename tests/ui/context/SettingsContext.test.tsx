@@ -6,15 +6,33 @@ const settingsApiMocks = vi.hoisted(() => ({
   setAppSetting: vi.fn().mockResolvedValue(undefined),
 }));
 
+const desktopServerMocks = vi.hoisted(() => ({
+  getDesktopRemoteServerStatus: vi.fn().mockResolvedValue({
+    available: true,
+    running: false,
+    port: 4822,
+    localUrl: "http://127.0.0.1:4822",
+  }),
+}));
+
 vi.mock("../../../src/ui/api/settings.js", () => settingsApiMocks);
+vi.mock("../../../src/ui/api/desktop-server.js", () => ({
+  DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT: "junban:desktop-remote-server-status-changed",
+  getDesktopRemoteServerStatus: desktopServerMocks.getDesktopRemoteServerStatus,
+}));
+vi.mock("../../../src/utils/tauri.js", () => ({
+  isTauri: () => true,
+}));
 
 import { SettingsProvider, useGeneralSettings } from "../../../src/ui/context/SettingsContext.js";
+import { DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT } from "../../../src/ui/api/desktop-server.js";
 
 function TestConsumer() {
-  const { settings, loaded, updateSetting } = useGeneralSettings();
+  const { settings, loaded, readOnly, updateSetting } = useGeneralSettings();
   return (
     <div>
       <span data-testid="loaded">{String(loaded)}</span>
+      <span data-testid="read-only">{String(readOnly)}</span>
       <span data-testid="accent">{settings.accent_color}</span>
       <span data-testid="density">{settings.density}</span>
       <span data-testid="font-size">{settings.font_size}</span>
@@ -49,6 +67,12 @@ describe("SettingsContext", () => {
     vi.clearAllMocks();
     settingsApiMocks.getAllSettings.mockResolvedValue({});
     settingsApiMocks.setAppSetting.mockResolvedValue(undefined);
+    desktopServerMocks.getDesktopRemoteServerStatus.mockResolvedValue({
+      available: true,
+      running: false,
+      port: 4822,
+      localUrl: "http://127.0.0.1:4822",
+    });
     // Reset document element state
     document.documentElement.style.removeProperty("--color-accent");
     document.documentElement.style.removeProperty("--color-accent-hover");
@@ -122,6 +146,66 @@ describe("SettingsContext", () => {
     });
 
     expect(screen.getByTestId("accent").textContent).toBe("#ef4444");
+    expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("accent_color", "#ef4444");
+  });
+
+  it("blocks updateSetting while remote access keeps settings read-only", async () => {
+    render(
+      <SettingsProvider>
+        <TestConsumer />
+      </SettingsProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("loaded").textContent).toBe("true");
+    });
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT, {
+          detail: {
+            available: true,
+            running: true,
+            port: 4822,
+            localUrl: "http://127.0.0.1:4822",
+          },
+        }),
+      );
+    });
+
+    expect(screen.getByTestId("read-only").textContent).toBe("true");
+
+    act(() => {
+      screen.getByTestId("set-accent").click();
+    });
+
+    expect(screen.getByTestId("accent").textContent).toBe("#3b82f6");
+    expect(settingsApiMocks.setAppSetting).not.toHaveBeenCalled();
+  });
+
+  it("rolls back optimistic setting changes when persistence rejects", async () => {
+    settingsApiMocks.setAppSetting.mockRejectedValue(
+      new Error("Settings are read-only while remote access is running"),
+    );
+
+    render(
+      <SettingsProvider>
+        <TestConsumer />
+      </SettingsProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("loaded").textContent).toBe("true");
+    });
+
+    act(() => {
+      screen.getByTestId("set-accent").click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("accent").textContent).toBe("#3b82f6");
+    });
+    expect(document.documentElement.style.getPropertyValue("--color-accent")).toBe("#3b82f6");
     expect(settingsApiMocks.setAppSetting).toHaveBeenCalledWith("accent_color", "#ef4444");
   });
 

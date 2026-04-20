@@ -207,6 +207,18 @@ function applyFontFamily(family: GeneralSettings["font_family"]) {
   document.documentElement.style.setProperty("--font-sans", fonts[family]);
 }
 
+function applySettingSideEffects<K extends keyof GeneralSettings>(
+  key: K,
+  value: GeneralSettings[K],
+) {
+  if (key === "accent_color") applyAccentColor(value as GeneralSettings["accent_color"]);
+  if (key === "density") applyDensity(value as GeneralSettings["density"]);
+  if (key === "font_size") applyFontSize(value as GeneralSettings["font_size"]);
+  if (key === "reduce_animations")
+    applyReduceAnimations(value as GeneralSettings["reduce_animations"]);
+  if (key === "font_family") applyFontFamily(value as GeneralSettings["font_family"]);
+}
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<GeneralSettings>(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
@@ -290,22 +302,35 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      let previousValue: GeneralSettings[K] | null = null;
+
       setSettings((prev) => {
+        previousValue = prev[key];
         const next = { ...prev, [key]: value };
-        if (key === "accent_color") applyAccentColor(value as string);
-        if (key === "density") applyDensity(value as GeneralSettings["density"]);
-        if (key === "font_size") applyFontSize(value as GeneralSettings["font_size"]);
-        if (key === "reduce_animations")
-          applyReduceAnimations(value as GeneralSettings["reduce_animations"]);
-        if (key === "font_family") applyFontFamily(value as GeneralSettings["font_family"]);
+        applySettingSideEffects(key, value);
         return next;
       });
-      setAppSetting(key, String(value)).catch((err: unknown) =>
+
+      setAppSetting(key, String(value)).catch((err: unknown) => {
         log.error("Failed to persist setting", {
           key,
           error: err instanceof Error ? err.message : String(err),
-        }),
-      );
+        });
+
+        if (previousValue === null) {
+          return;
+        }
+
+        setSettings((prev) => {
+          if (prev[key] !== value) {
+            return prev;
+          }
+
+          const reverted = { ...prev, [key]: previousValue };
+          applySettingSideEffects(key, previousValue);
+          return reverted;
+        });
+      });
     },
     [readOnly],
   );

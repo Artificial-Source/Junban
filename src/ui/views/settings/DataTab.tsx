@@ -142,7 +142,9 @@ function RemoteAccessSection() {
     try {
       setStatus(await api.startDesktopRemoteServer(nextConfig.port));
       setMessage(
-        "Remote access is running. Use the local URL or your Tailscale IP with this port.",
+        nextConfig.passwordEnabled
+          ? "Remote access is running. Use the local URL or your LAN/Tailscale IP with this port."
+          : "Remote access is running in host-only mode. Enable password protection for LAN or Tailscale devices.",
       );
     } catch (err) {
       console.error("[settings:data] Failed to start remote server:", err);
@@ -176,7 +178,8 @@ function RemoteAccessSection() {
       <div className="space-y-4 max-w-2xl rounded-xl border border-border bg-surface-secondary/40 p-4">
         <p className="text-sm text-on-surface-secondary">
           Host Junban from the desktop app so you can open it from another device over your network
-          or Tailscale.
+          or Tailscale. LAN and Tailscale exposure requires password protection; passwordless mode
+          stays on this device only.
         </p>
 
         <div className="flex flex-wrap items-end gap-3">
@@ -215,7 +218,7 @@ function RemoteAccessSection() {
                 setConfig((current) => ({ ...current, passwordEnabled: e.target.checked }))
               }
             />
-            Protect remote access with a password
+            Protect remote access with a password (required for LAN/Tailscale access)
           </label>
 
           {config.passwordEnabled && (
@@ -291,7 +294,9 @@ function RemoteAccessSection() {
             <p>
               Host-only URL: <span className="font-mono text-on-surface">{status.localUrl}</span>
               <span className="block text-xs text-on-surface-muted mt-0.5">
-                For remote devices, use your LAN or Tailscale IP with port {status.port}
+                {config.passwordEnabled
+                  ? `Remote devices can use your LAN or Tailscale IP with port ${status.port} after entering the password.`
+                  : "Passwordless mode stays on this device over loopback/localhost only."}
               </span>
             </p>
           )}
@@ -301,11 +306,12 @@ function RemoteAccessSection() {
           </p>
           <p className="text-xs text-on-surface-muted">
             For Tailscale, start the server here and then open your Tailscale device IP with this
-            port from the other machine.
+            port from the other machine after enabling password protection.
           </p>
           <p className="text-xs text-on-surface-muted">
-            Password protection is optional. If enabled, the first remote browser enters it once and
-            then keeps a local session cookie.
+            Passwordless mode is host-only. To use another device over LAN or Tailscale, enable
+            password protection; the first remote browser enters it once and then keeps a local
+            session cookie.
           </p>
         </div>
       </div>

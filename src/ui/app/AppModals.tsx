@@ -60,6 +60,7 @@ interface AppModalsProps {
   settingsOpen: boolean;
   settingsTab: SettingsTab | null | undefined;
   onCloseSettings: () => void;
+  mutationsBlocked: boolean;
 
   // Focus mode
   focusModeOpen: boolean;
@@ -154,6 +155,7 @@ export function AppModals({
   settingsOpen,
   settingsTab,
   onCloseSettings,
+  mutationsBlocked,
   focusModeOpen,
   tasks,
   handleToggleTask,
@@ -197,7 +199,11 @@ export function AppModals({
       {settingsOpen && (
         <ErrorBoundary fallback={modalFallback}>
           <Suspense fallback={modalFallback}>
-            <Settings activeTab={settingsTab ?? undefined} onClose={onCloseSettings} />
+            <Settings
+              activeTab={settingsTab ?? undefined}
+              onClose={onCloseSettings}
+              mutationsBlocked={mutationsBlocked}
+            />
           </Suspense>
         </ErrorBoundary>
       )}
@@ -227,7 +233,7 @@ export function AppModals({
         </ErrorBoundary>
       )}
       <div className="hidden md:block">
-        <StatusBar />
+        <StatusBar mutationsBlocked={mutationsBlocked} />
       </div>
       {commandPaletteOpen && (
         <ErrorBoundary fallback={modalFallback}>
@@ -302,6 +308,7 @@ export function AppModals({
               open={onboardingOpen}
               onComplete={onCompleteOnboarding}
               onRequestOpenSettings={(tab) => handleOpenSettingsTab(tab as SettingsTab)}
+              mutationsBlocked={mutationsBlocked}
             />
           </Suspense>
         </ErrorBoundary>

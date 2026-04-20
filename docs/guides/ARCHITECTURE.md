@@ -81,7 +81,7 @@ Used by the React app when running in the browser or inside the Tauri webview.
 
 This path now has two local-runtime variants:
 
-- Plain browser and the current remote-browser desktop path still build services through `src/bootstrap-web.ts`.
+- Plain browser still builds services through `src/bootstrap-web.ts` when it owns persistence in-browser.
 - Packaged desktop now starts the existing Node backend as a localhost sidecar and routes the UI through the Hono API.
 - The packaged desktop webview now receives an explicit runtime descriptor from Tauri before the app imports API helpers; that descriptor carries the actual sidecar API base, readiness contract, and failure reason instead of relying on a hardcoded localhost port in the frontend.
 
@@ -96,12 +96,14 @@ Important constraint:
 
 Desktop remote-access note:
 
-- Packaged Tauri builds can also host a lightweight Rust web server that serves the compiled frontend and synchronizes the persisted SQLite file for personal trusted-network access.
-- That remote browser path still uses the browser service graph from `src/bootstrap-web.ts`; it swaps filesystem persistence for HTTP-backed DB-file load/save.
+- Packaged Tauri builds can also host a lightweight Rust web server that serves the compiled frontend and brokers authenticated remote access for personal trusted-network use.
+- The remote browser path now keeps the existing Rust-owned password/session gate, then proxies authenticated `/api/*` calls to the same localhost Node sidecar backend used by the packaged desktop window.
+- Remote browsers no longer bootstrap `src/bootstrap-web.ts` or synchronize the raw SQLite file over HTTP for normal app traffic; the backend remains the owner of API, storage, and plugin/runtime behavior, and the legacy raw `/_junban/db` path is removed.
 - The local packaged desktop window is no longer on that browser-owned path; it talks to the bundled Node sidecar over localhost so it uses the same backend API/storage ownership model as source-run server mode.
 - Remote access settings are persisted by the Tauri runtime so the desktop app can auto-start the server on launch.
-- The desktop window locks local editing while remote access is active, and the Rust host only authorizes one remote browser session at a time.
-- Optional password protection is enforced by the Rust host before the remote browser can read or write the SQLite file.
+- The desktop window applies an app-level local mutation guard while remote access is active, and the Rust host only authorizes one remote browser session at a time.
+- Optional password protection is enforced by the Rust host before the remote browser can reach the proxied backend API. `GET /_junban/session` is now read-only, and both passwordless and passworded remote browsers must perform an explicit `POST` claim/login action before they become the active session. Those POST actions now require same-origin browser headers (`Origin` with `Referer` fallback), and passworded login attempts apply temporary lockout (`429` + `Retry-After`) after repeated failures.
+- Remote server startup now fails fast when the packaged desktop sidecar backend is missing or marked unready, so the remote server never advertises a broken API proxy.
 
 The browser/Tauri path also lazy-loads AI runtime code through `src/bootstrap-web-ai-runtime.ts` so the base UI does not pay that startup cost until needed.
 

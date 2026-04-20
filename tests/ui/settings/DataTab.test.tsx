@@ -6,6 +6,15 @@ vi.mock("lucide-react", () => ({
   ChevronUp: (props: any) => <svg data-testid="chevron-up" {...props} />,
 }));
 
+// Mutable mock for readOnly to test lock state combinations
+let mockReadOnly = false;
+
+vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
+  useGeneralSettings: () => ({
+    readOnly: mockReadOnly,
+  }),
+}));
+
 const mockGetStorageInfo = vi.fn();
 const mockExportAllData = vi.fn();
 const mockImportTasks = vi.fn();
@@ -59,6 +68,7 @@ import { DataTab } from "../../../src/ui/views/settings/DataTab.js";
 describe("DataTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReadOnly = false; // Reset for each test
     mockGetStorageInfo.mockResolvedValue({ mode: "sqlite", path: "/data/junban.db" });
     mockExportAllData.mockResolvedValue({ tasks: [], projects: [], tags: [] });
     mockListProjects.mockResolvedValue([]);
@@ -94,6 +104,37 @@ describe("DataTab", () => {
       expect(screen.getByText("Import")).toBeDefined();
     });
     expect(screen.getByText("Choose File")).toBeDefined();
+  });
+
+  it("disables import selection while mutations are blocked", async () => {
+    render(<DataTab mutationsBlocked={true} />);
+
+    const chooseFileButton = await screen.findByRole("button", { name: "Choose File" });
+    expect(chooseFileButton).toBeDisabled();
+    expect(
+      screen.getByText(/Import is unavailable while remote access is running/i),
+    ).toBeInTheDocument();
+  });
+
+  it("disables import selection when readOnly from context is true (regression: combined lock state)", async () => {
+    // Regression test: readOnly from context should disable import even when mutationsBlocked prop is false
+    mockReadOnly = true;
+    render(<DataTab mutationsBlocked={false} />);
+
+    const chooseFileButton = await screen.findByRole("button", { name: "Choose File" });
+    expect(chooseFileButton).toBeDisabled();
+    expect(
+      screen.getByText(/Import is unavailable while remote access is running/i),
+    ).toBeInTheDocument();
+  });
+
+  it("uses combined lock state: disables import when either mutationsBlocked OR readOnly is true", async () => {
+    // Test the combined lock state: mutationsBlocked || readOnly
+    mockReadOnly = true;
+    render(<DataTab mutationsBlocked={true} />);
+
+    const chooseFileButton = await screen.findByRole("button", { name: "Choose File" });
+    expect(chooseFileButton).toBeDisabled();
   });
 
   it("shows markdown storage description", async () => {

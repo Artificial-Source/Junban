@@ -14,6 +14,8 @@ export function useAppShortcuts(
   setQuickAddOpen?: React.Dispatch<React.SetStateAction<boolean>>,
   handleNavigate?: (view: string, id?: string) => void,
   chordsEnabled: boolean = true,
+  mutationsBlocked: boolean = false,
+  onBlockedMutationAttempt?: () => void,
 ) {
   useEffect(() => {
     shortcutManager.register({
@@ -32,13 +34,25 @@ export function useAppShortcuts(
       id: "undo",
       description: "Undo",
       defaultKey: "ctrl+z",
-      callback: () => undo(),
+      callback: () => {
+        if (mutationsBlocked) {
+          onBlockedMutationAttempt?.();
+          return;
+        }
+        undo();
+      },
     });
     shortcutManager.register({
       id: "redo",
       description: "Redo",
       defaultKey: "ctrl+shift+z",
-      callback: () => redo(),
+      callback: () => {
+        if (mutationsBlocked) {
+          onBlockedMutationAttempt?.();
+          return;
+        }
+        redo();
+      },
     });
     if (setSearchOpen) {
       shortcutManager.register({
@@ -53,7 +67,13 @@ export function useAppShortcuts(
         id: "focus-mode",
         description: "Enter Focus Mode",
         defaultKey: "ctrl+shift+f",
-        callback: () => setFocusModeOpen(true),
+        callback: () => {
+          if (mutationsBlocked) {
+            onBlockedMutationAttempt?.();
+            return;
+          }
+          setFocusModeOpen(true);
+        },
       });
     }
     if (setQuickAddOpen) {
@@ -61,13 +81,25 @@ export function useAppShortcuts(
         id: "quick-add",
         description: "Quick Add Task",
         defaultKey: "q",
-        callback: () => setQuickAddOpen(true),
+        callback: () => {
+          if (mutationsBlocked) {
+            onBlockedMutationAttempt?.();
+            return;
+          }
+          setQuickAddOpen(true);
+        },
       });
       shortcutManager.register({
         id: "quick-add-ctrl",
         description: "Quick Add Task (Alt)",
         defaultKey: "ctrl+n",
-        callback: () => setQuickAddOpen(true),
+        callback: () => {
+          if (mutationsBlocked) {
+            onBlockedMutationAttempt?.();
+            return;
+          }
+          setQuickAddOpen(true);
+        },
       });
     }
 
@@ -142,5 +174,7 @@ export function useAppShortcuts(
     setQuickAddOpen,
     handleNavigate,
     chordsEnabled,
+    mutationsBlocked,
+    onBlockedMutationAttempt,
   ]);
 }

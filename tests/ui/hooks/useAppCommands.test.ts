@@ -29,6 +29,7 @@ describe("useAppCommands", () => {
     projects: { id: string; name: string }[] = [],
     pluginCommands: { id: string; name: string }[] = [],
     setQuickAddOpen?: any,
+    mutationsBlocked = false,
   ) {
     return renderHook(() =>
       useAppCommands(
@@ -40,6 +41,8 @@ describe("useAppCommands", () => {
         pluginCommands,
         executeCommand,
         setQuickAddOpen,
+        undefined,
+        mutationsBlocked,
       ),
     );
   }
@@ -144,5 +147,18 @@ describe("useAppCommands", () => {
     const { result } = renderCommands();
     const quickAddCmd = result.current.find((c) => c.id === "quick-add-task");
     expect(quickAddCmd).toBeUndefined();
+  });
+
+  it("omits mutating commands while local mutations are blocked", () => {
+    const setQuickAddOpen = vi.fn();
+    const pluginCommands = [{ id: "timer-start", name: "Start Timer" }];
+    const { result } = renderCommands([], pluginCommands, setQuickAddOpen, true);
+
+    const ids = result.current.map((c) => c.id);
+    expect(ids).not.toContain("focus-mode");
+    expect(ids).not.toContain("quick-add-task");
+    expect(ids).not.toContain("create-from-template");
+    expect(ids).not.toContain("plugin-timer-start");
+    expect(ids).toContain("nav-settings-data");
   });
 });

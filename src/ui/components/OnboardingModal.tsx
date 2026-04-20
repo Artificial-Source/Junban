@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { themeManager } from "../themes/manager.js";
 import { useGeneralSettings, type GeneralSettings } from "../context/SettingsContext.js";
 import { approvePluginPermissions } from "../api/plugins.js";
@@ -11,14 +11,29 @@ import { StepAI } from "./onboarding/StepAI.js";
 import { StepReady } from "./onboarding/StepReady.js";
 import type { OnboardingModalProps, ThemeId, Preset } from "./onboarding/types.js";
 
-export function OnboardingModal({ open, onComplete, onRequestOpenSettings }: OnboardingModalProps) {
+export function OnboardingModal({
+  open,
+  onComplete,
+  onRequestOpenSettings,
+  mutationsBlocked = false,
+  readOnly: readOnlyProp = false,
+}: OnboardingModalProps) {
   const [step, setStep] = useState(0);
   const [selectedTheme, setSelectedTheme] = useState<ThemeId>("light");
   const [selectedAccent, setSelectedAccent] = useState("#3b82f6");
   const [selectedPreset, setSelectedPreset] = useState<Preset>("minimal");
   const [wantsAI, setWantsAI] = useState(false);
 
-  const { updateSetting } = useGeneralSettings();
+  const { updateSetting, readOnly: readOnlyFromContext } = useGeneralSettings();
+  // Use the authoritative combined lock state: mutationsBlocked OR readOnly (from prop or context)
+  const isLocked = mutationsBlocked || readOnlyProp || readOnlyFromContext;
+
+  // Refs for focus management
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const getStartedButtonRef = useRef<HTMLButtonElement>(null);
+  const nextButtonRef = useRef<HTMLButtonElement>(null);
+  const finishButtonRef = useRef<HTMLButtonElement>(null);
 
   const handleNext = useCallback(() => {
     if (step < TOTAL_STEPS - 1) {
@@ -30,21 +45,34 @@ export function OnboardingModal({ open, onComplete, onRequestOpenSettings }: Onb
     if (step > 0) setStep((s) => s - 1);
   }, [step]);
 
-  const handleThemeSelect = useCallback((themeId: ThemeId) => {
-    setSelectedTheme(themeId);
-    themeManager.setTheme(themeId);
-  }, []);
+  const handleThemeSelect = useCallback(
+    (themeId: ThemeId) => {
+      setSelectedTheme(themeId);
+      if (!isLocked) {
+        themeManager.setTheme(themeId);
+      }
+    },
+    [isLocked],
+  );
 
   const handleAccentSelect = useCallback(
     (color: string) => {
       setSelectedAccent(color);
-      updateSetting("accent_color", color);
+      if (!isLocked) {
+        updateSetting("accent_color", color);
+      }
     },
-    [updateSetting],
+    [updateSetting, isLocked],
   );
 
   const handleFinish = useCallback(() => {
     void (async () => {
+      if (isLocked) {
+        // Skip all local writes when mutations are blocked or read-only
+        onComplete();
+        return;
+      }
+
       const preset = PRESETS[selectedPreset];
       for (const [key, value] of Object.entries(preset)) {
         updateSetting(
@@ -77,12 +105,78 @@ export function OnboardingModal({ open, onComplete, onRequestOpenSettings }: Onb
     updateSetting,
     onComplete,
     onRequestOpenSettings,
+    isLocked,
   ]);
+
+  // Store previous focus and restore on close
+  useEffect(() => {
+    if (!open) return;
+
+    // Store the previously focused element when modal opens
+    previousFocusRef.current = document.activeElement as HTMLElement;
+
+    // Focus the primary action button when modal opens
+    const timer = setTimeout(() => {
+      if (step === 0 && getStartedButtonRef.current) {
+        getStartedButtonRef.current.focus();
+      } else if ((step === 1 || step === 2) && nextButtonRef.current) {
+        nextButtonRef.current.focus();
+      } else if (step === 4 && finishButtonRef.current) {
+        finishButtonRef.current.focus();
+      }
+    }, 0);
+
+    return () => {
+      clearTimeout(timer);
+      // Restore focus when modal closes
+      if (previousFocusRef.current && typeof previousFocusRef.current.focus === "function") {
+        setTimeout(() => previousFocusRef.current?.focus(), 0);
+      }
+    };
+  }, [open, step]);
+
+  // Focus trap and Escape handling
+  const handleModalKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape") {
+      // Onboarding is mandatory, so Escape doesn't close it
+      // But we could add a skip action in the future
+      return;
+    }
+
+    if (e.key !== "Tab" || !modalRef.current) return;
+
+    const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (e.shiftKey) {
+      // Shift + Tab
+      if (document.activeElement === firstElement) {
+        e.preventDefault();
+        lastElement?.focus();
+      }
+    } else {
+      // Tab
+      if (document.activeElement === lastElement) {
+        e.preventDefault();
+        firstElement?.focus();
+      }
+    }
+  }, []);
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    <div
+      ref={modalRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Junban onboarding"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onKeyDown={handleModalKeyDown}
+    >
       <div className="w-full max-w-lg mx-4 bg-surface rounded-[20px] shadow-2xl border border-border animate-scale-fade-in px-9 py-8">
         {/* Progress dots */}
         <div className="flex justify-center gap-2 mb-8">
@@ -118,8 +212,9 @@ export function OnboardingModal({ open, onComplete, onRequestOpenSettings }: Onb
             <>
               <div />
               <button
+                ref={getStartedButtonRef}
                 onClick={handleNext}
-                className="px-8 py-2.5 text-sm font-semibold bg-accent text-white rounded-xl hover:bg-accent/90 transition-colors"
+                className="px-8 py-2.5 text-sm font-semibold bg-accent text-white rounded-xl hover:bg-accent/90 transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface"
               >
                 Get Started
               </button>
@@ -130,13 +225,14 @@ export function OnboardingModal({ open, onComplete, onRequestOpenSettings }: Onb
             <>
               <button
                 onClick={handleBack}
-                className="px-4 py-2 text-sm text-on-surface-muted hover:text-on-surface transition-colors"
+                className="px-4 py-2 text-sm text-on-surface-muted hover:text-on-surface transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface rounded-lg"
               >
                 Back
               </button>
               <button
+                ref={nextButtonRef}
                 onClick={handleNext}
-                className="px-6 py-2.5 text-sm font-semibold bg-accent text-white rounded-[10px] hover:bg-accent/90 transition-colors"
+                className="px-6 py-2.5 text-sm font-semibold bg-accent text-white rounded-[10px] hover:bg-accent/90 transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface"
               >
                 Next
               </button>
@@ -147,7 +243,7 @@ export function OnboardingModal({ open, onComplete, onRequestOpenSettings }: Onb
             <>
               <button
                 onClick={handleBack}
-                className="px-4 py-2 text-sm text-on-surface-muted hover:text-on-surface transition-colors"
+                className="px-4 py-2 text-sm text-on-surface-muted hover:text-on-surface transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface rounded-lg"
               >
                 Back
               </button>
@@ -158,8 +254,9 @@ export function OnboardingModal({ open, onComplete, onRequestOpenSettings }: Onb
             <>
               <div />
               <button
+                ref={finishButtonRef}
                 onClick={handleFinish}
-                className="px-8 py-2.5 text-[15px] font-semibold bg-accent text-white rounded-xl hover:bg-accent/90 transition-colors"
+                className="px-8 py-2.5 text-[15px] font-semibold bg-accent text-white rounded-xl hover:bg-accent/90 transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface"
               >
                 Start using Junban
               </button>

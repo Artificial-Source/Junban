@@ -5,6 +5,7 @@ interface SidebarHeaderProps {
   collapsed: boolean;
   onToggleCollapsed?: () => void;
   onAddTask?: () => void;
+  addTaskDisabled?: boolean;
   onSearch?: () => void;
 }
 
@@ -12,6 +13,7 @@ export function SidebarHeader({
   collapsed,
   onToggleCollapsed,
   onAddTask,
+  addTaskDisabled = false,
   onSearch,
 }: SidebarHeaderProps) {
   const isMac =
@@ -59,8 +61,15 @@ export function SidebarHeader({
       {onAddTask && (
         <button
           onClick={onAddTask}
-          className={`mt-3 w-full flex items-center rounded-lg bg-accent text-white font-medium text-sm transition-colors hover:bg-accent-hover motion-safe:transition-transform motion-safe:hover:scale-[1.02] motion-safe:active:scale-[0.98] ${
+          aria-label="Add task"
+          disabled={addTaskDisabled}
+          title={addTaskDisabled ? "Stop remote access to add tasks from this window" : undefined}
+          className={`mt-3 w-full flex items-center rounded-lg bg-accent text-white font-medium text-sm transition-colors motion-safe:transition-transform ${
             collapsed ? "justify-center p-2" : "gap-2 px-3 py-2"
+          } ${
+            addTaskDisabled
+              ? "cursor-not-allowed opacity-60"
+              : "hover:bg-accent-hover motion-safe:hover:scale-[1.02] motion-safe:active:scale-[0.98]"
           }`}
         >
           <Plus size={18} />

@@ -58,6 +58,8 @@ export function ProjectTree({
               {hasChildren && (
                 <button
                   onClick={() => toggleParentExpanded(project.id)}
+                  aria-label={`${isParentExpanded ? "Collapse" : "Expand"} ${project.name} subprojects`}
+                  aria-expanded={isParentExpanded}
                   className="p-0.5 mr-0.5 rounded text-on-surface-muted hover:text-on-surface-secondary transition-colors"
                 >
                   {isParentExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}

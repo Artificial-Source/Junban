@@ -1,4 +1,5 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, type ReactNode } from "react";
+import { Globe, Lock } from "lucide-react";
 import { ErrorBoundary } from "../components/ErrorBoundary.js";
 import { Sidebar } from "../components/Sidebar.js";
 import { Breadcrumb, type BreadcrumbItem } from "../components/Breadcrumb.js";
@@ -133,6 +134,9 @@ interface AppLayoutProps {
 
   // AppState for context provider
   appState: AppState;
+  remoteServerRunning: boolean;
+  mutationsBlocked: boolean;
+  handleStopRemoteServer: () => void;
 
   // Optional children (modals)
   children?: ReactNode;
@@ -206,8 +210,27 @@ export function AppLayout({
   setSearchOpen,
   setProjectModalOpen,
   appState,
+  remoteServerRunning,
+  mutationsBlocked,
+  handleStopRemoteServer,
   children,
 }: AppLayoutProps) {
+  const lockBannerRef = useRef<HTMLDivElement | null>(null);
+  const stopRemoteAccessButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previousRemoteServerRunningRef = useRef(remoteServerRunning);
+
+  useEffect(() => {
+    if (remoteServerRunning && !previousRemoteServerRunningRef.current) {
+      if (stopRemoteAccessButtonRef.current) {
+        stopRemoteAccessButtonRef.current.focus();
+      } else {
+        lockBannerRef.current?.focus();
+      }
+    }
+
+    previousRemoteServerRunningRef.current = remoteServerRunning;
+  }, [remoteServerRunning]);
+
   return (
     <div className="flex flex-col h-screen bg-surface text-on-surface pb-[--height-bottom-nav] md:pb-0">
       <a
@@ -247,6 +270,7 @@ export function AppLayout({
               builtinPluginIds={builtinPluginIds}
               savedFilters={savedFilters}
               selectedFilterId={selectedFilterId}
+              mutationsBlocked={mutationsBlocked}
             />
           </ErrorBoundary>
         </div>
@@ -255,7 +279,60 @@ export function AppLayout({
           tabIndex={-1}
           className="flex-1 overflow-auto p-3 md:p-6 flex flex-col"
         >
-          <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col">
+          {remoteServerRunning && (
+            <div
+              ref={lockBannerRef}
+              tabIndex={-1}
+              role="region"
+              aria-labelledby="remote-lock-banner-title"
+              aria-describedby="remote-lock-banner-description remote-lock-banner-status"
+              className="mb-4 rounded-xl border border-warning/30 bg-warning/5 p-4 outline-none"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-warning/10 p-2 text-warning">
+                    <Lock size={18} />
+                  </div>
+                  <div role="status" aria-live="polite" aria-atomic="true">
+                    <p
+                      id="remote-lock-banner-title"
+                      className="text-sm font-medium text-on-surface"
+                    >
+                      Remote session active
+                    </p>
+                    <p
+                      id="remote-lock-banner-description"
+                      className="text-sm text-on-surface-secondary"
+                    >
+                      Local desktop changes are paused while remote access is running. You can still
+                      manage remote access from Settings → Data or with the control here.
+                    </p>
+                    <p id="remote-lock-banner-status" className="sr-only">
+                      Local desktop changes are unavailable until remote access stops.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  ref={stopRemoteAccessButtonRef}
+                  type="button"
+                  onClick={handleStopRemoteServer}
+                  aria-describedby="remote-lock-banner-description"
+                  className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm text-on-surface hover:bg-surface-tertiary"
+                >
+                  <Globe size={16} />
+                  Stop remote access
+                </button>
+              </div>
+            </div>
+          )}
+          <div
+            data-testid="app-workspace"
+            aria-disabled={mutationsBlocked}
+            {...(mutationsBlocked ? { inert: true } : {})}
+            className={`max-w-7xl w-full mx-auto flex-1 flex flex-col ${
+              mutationsBlocked ? "pointer-events-none select-none opacity-50" : ""
+            }`}
+          >
             {multiSelectedIds.size > 0 && (
               <Suspense fallback={null}>
                 <BulkActionBar
@@ -337,7 +414,7 @@ export function AppLayout({
         </main>
       </div>
 
-      {isMobile && (
+      {!remoteServerRunning && isMobile && (
         <Suspense fallback={null}>
           <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
             <ErrorBoundary
@@ -380,13 +457,14 @@ export function AppLayout({
                 builtinPluginIds={builtinPluginIds}
                 savedFilters={savedFilters}
                 selectedFilterId={selectedFilterId}
+                mutationsBlocked={mutationsBlocked}
               />
             </ErrorBoundary>
           </MobileDrawer>
         </Suspense>
       )}
 
-      {isMobile && (
+      {!remoteServerRunning && isMobile && (
         <ErrorBoundary fallback={null}>
           <Suspense fallback={null}>
             <>
@@ -404,7 +482,7 @@ export function AppLayout({
         </ErrorBoundary>
       )}
 
-      {selectedTask && currentView !== "task" && (
+      {!remoteServerRunning && selectedTask && currentView !== "task" && (
         <ErrorBoundary>
           <Suspense fallback={null}>
             <TaskDetailPanel

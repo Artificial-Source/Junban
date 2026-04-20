@@ -1,4 +1,10 @@
-import { useState, useMemo, useCallback, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import type { DragEndEvent } from "@dnd-kit/core";
 import { FolderPlus, Inbox, Pencil, Star, Trash2 } from "lucide-react";
 import type { Project } from "../../core/types.js";
@@ -61,6 +67,7 @@ interface SidebarProps {
   builtinPluginIds?: Set<string>;
   savedFilters?: Array<{ id: string; name: string; query: string; color?: string }>;
   selectedFilterId?: string | null;
+  mutationsBlocked?: boolean;
 }
 
 export function Sidebar({
@@ -87,6 +94,7 @@ export function Sidebar({
   builtinPluginIds = new Set(),
   savedFilters = [],
   selectedFilterId,
+  mutationsBlocked = false,
 }: SidebarProps) {
   const { settings, updateSetting } = useGeneralSettings();
   const [projectsExpanded, setProjectsExpanded] = useState(true);
@@ -224,6 +232,10 @@ export function Sidebar({
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      // Block drag-reorder persistence while mutations are blocked (remote lock)
+      if (mutationsBlocked) {
+        return;
+      }
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const ids = [...orderedSidebarItems];
@@ -234,7 +246,7 @@ export function Sidebar({
       ids.splice(newIndex, 0, active.id as string);
       updateSetting("sidebar_section_order", ids.join(","));
     },
-    [orderedSidebarItems, updateSetting],
+    [orderedSidebarItems, updateSetting, mutationsBlocked],
   );
 
   const handleNavContextMenu = useCallback((e: ReactMouseEvent, itemId: string) => {
@@ -261,6 +273,17 @@ export function Sidebar({
     setEmptySpaceMenu({ x: e.clientX, y: e.clientY });
   }, []);
 
+  useEffect(() => {
+    if (!mutationsBlocked) {
+      return;
+    }
+
+    setProjectModalState(null);
+    setProjectDeleteTarget(null);
+    setProjectContextMenu(null);
+    setEmptySpaceMenu(null);
+  }, [mutationsBlocked]);
+
   const projectContextMenuItems = useMemo(() => {
     if (!projectContextMenu) return [];
 
@@ -270,29 +293,38 @@ export function Sidebar({
         id: "edit-project",
         label: "Edit project",
         icon: <Pencil size={14} />,
-        onClick: () => setProjectModalState({ mode: "edit", project }),
+        disabled: mutationsBlocked,
+        onClick: mutationsBlocked
+          ? undefined
+          : () => setProjectModalState({ mode: "edit", project }),
       },
       {
         id: "new-subproject",
         label: "New subproject",
         icon: <FolderPlus size={14} />,
         separator: true,
-        onClick: () => setProjectModalState({ mode: "create", defaultParentId: project.id }),
+        disabled: mutationsBlocked,
+        onClick: mutationsBlocked
+          ? undefined
+          : () => setProjectModalState({ mode: "create", defaultParentId: project.id }),
       },
       {
         id: "toggle-favorite",
         label: project.isFavorite ? "Remove from Favorites" : "Add to Favorites",
         icon: <Star size={14} />,
-        onClick: () =>
-          onUpdateProject?.(
-            project.id,
-            project.name,
-            project.color,
-            project.icon ?? "",
-            project.parentId,
-            !project.isFavorite,
-            project.viewStyle,
-          ),
+        disabled: mutationsBlocked,
+        onClick: mutationsBlocked
+          ? undefined
+          : () =>
+              onUpdateProject?.(
+                project.id,
+                project.name,
+                project.color,
+                project.icon ?? "",
+                project.parentId,
+                !project.isFavorite,
+                project.viewStyle,
+              ),
       },
       {
         id: "delete-project",
@@ -300,10 +332,11 @@ export function Sidebar({
         icon: <Trash2 size={14} />,
         separator: true,
         danger: true,
-        onClick: () => setProjectDeleteTarget(project),
+        disabled: mutationsBlocked,
+        onClick: mutationsBlocked ? undefined : () => setProjectDeleteTarget(project),
       },
     ];
-  }, [projectContextMenu, onUpdateProject]);
+  }, [projectContextMenu, onUpdateProject, mutationsBlocked]);
 
   const handleProjectModalSubmit = useCallback(
     (
@@ -351,6 +384,7 @@ export function Sidebar({
     onOpenSettings,
     orderedSidebarItems,
     hasHiddenViews,
+    mutationsBlocked,
   });
 
   const emptyContextMenuItems = useSidebarEmptyContextMenu({
@@ -358,6 +392,7 @@ export function Sidebar({
     onOpenProjectModal,
     onAddTask,
     onOpenSettings,
+    addActionsDisabled: mutationsBlocked,
     settings,
     updateSetting,
   });
@@ -373,6 +408,7 @@ export function Sidebar({
         collapsed={collapsed}
         onToggleCollapsed={onToggleCollapsed}
         onAddTask={onAddTask}
+        addTaskDisabled={mutationsBlocked}
         onSearch={onSearch}
       />
 
@@ -414,6 +450,8 @@ export function Sidebar({
             onNavContextMenu={handleNavContextMenu}
             onOpenProjectModal={onOpenProjectModal}
             onProjectContextMenu={handleProjectContextMenu}
+            projectActionsDisabled={mutationsBlocked}
+            disablePanelInteractions={mutationsBlocked}
           />
         </div>
 

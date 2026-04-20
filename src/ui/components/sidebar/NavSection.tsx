@@ -57,6 +57,8 @@ interface NavSectionRenderProps {
   // Projects
   onOpenProjectModal?: () => void;
   onProjectContextMenu?: (e: ReactMouseEvent, project: Project) => void;
+  projectActionsDisabled?: boolean;
+  disablePanelInteractions?: boolean;
   sectionRenderer?: SectionRenderer;
 }
 
@@ -109,6 +111,8 @@ export function renderSection(itemId: string, props: NavSectionRenderProps): Rea
     onNavContextMenu,
     onOpenProjectModal,
     onProjectContextMenu,
+    projectActionsDisabled = false,
+    disablePanelInteractions = false,
     sectionRenderer = defaultSectionRenderer,
   } = props;
 
@@ -193,8 +197,14 @@ export function renderSection(itemId: string, props: NavSectionRenderProps): Rea
               onOpenProjectModal && projectsExpanded ? (
                 <button
                   onClick={onOpenProjectModal}
+                  aria-label="New project"
                   title="New project"
-                  className="p-0.5 rounded text-on-surface-muted hover:text-on-surface-secondary hover:bg-surface-tertiary transition-colors"
+                  disabled={projectActionsDisabled}
+                  className={`p-0.5 rounded text-on-surface-muted transition-colors ${
+                    projectActionsDisabled
+                      ? "cursor-not-allowed opacity-50"
+                      : "hover:text-on-surface-secondary hover:bg-surface-tertiary"
+                  }`}
                 >
                   <Plus size={14} />
                 </button>
@@ -283,7 +293,11 @@ export function renderSection(itemId: string, props: NavSectionRenderProps): Rea
                 </ul>
               )}
               {panels.length > 0 && (
-                <div className="space-y-1.5 px-3 mt-1">
+                <div
+                  className={`space-y-1.5 px-3 mt-1 ${
+                    disablePanelInteractions ? "pointer-events-none opacity-60" : ""
+                  }`}
+                >
                   {panels.map((panel) => (
                     <div
                       key={panel.id}

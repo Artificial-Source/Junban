@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useCallback } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback, useRef } from "react";
 import {
   X,
   SlidersHorizontal,
@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import { ErrorBoundary } from "../components/ErrorBoundary.js";
+import { useGeneralSettings } from "../context/SettingsContext.js";
 import type { SettingsTab } from "./settings/types.js";
 import { endNamedPerfSpan, markPerf } from "../../utils/perf.js";
 
@@ -56,6 +57,7 @@ export type { SettingsTab };
 interface SettingsProps {
   activeTab?: SettingsTab;
   onClose: () => void;
+  mutationsBlocked?: boolean;
 }
 
 interface TabMeta {
@@ -148,12 +150,14 @@ const MOBILE_SECTIONS: { label: string; tabs: SettingsTab[] }[] = [
   { label: "Info", tabs: ["about"] },
 ];
 
+const REMOTE_ADMIN_TABS = new Set<SettingsTab>(["data", "about"]);
+
 function sanitizeSettingsTab(tab: SettingsTab | null | undefined): SettingsTab {
   if (tab === "plugins") return "general";
   return tab ?? "general";
 }
 
-function renderTabContent(tab: SettingsTab) {
+function renderTabContent(tab: SettingsTab, mutationsBlocked: boolean) {
   const fallback = (
     <div className="flex min-h-[240px] items-center justify-center text-sm text-on-surface-muted">
       Loading settings...
@@ -188,14 +192,20 @@ function renderTabContent(tab: SettingsTab) {
     case "keyboard":
       return wrap(<KeyboardTab />);
     case "data":
-      return wrap(<DataTab />);
+      return wrap(<DataTab mutationsBlocked={mutationsBlocked} />);
     case "about":
       return wrap(<AboutTab />);
   }
 }
 
-export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
+export function Settings({
+  activeTab: initialTab,
+  onClose,
+  mutationsBlocked = false,
+}: SettingsProps) {
   const isMobile = useIsMobile();
+  const { readOnly } = useGeneralSettings();
+  const settingsReadOnly = mutationsBlocked || readOnly;
   const safeInitialTab = sanitizeSettingsTab(initialTab);
   // Settings manages its own tab state. The initialTab prop is used only on mount
   // (or when changed from outside, e.g. command palette "Open AI settings").
@@ -203,6 +213,16 @@ export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
   // null = show the mobile index page; a tab id = show that tab's content
   const [mobileSelectedTab, setMobileSelectedTab] = useState<SettingsTab | null>(
     isMobile && safeInitialTab !== "general" ? safeInitialTab : null,
+  );
+
+  // Refs for focus management
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  const isTabBlocked = useCallback(
+    (tab: SettingsTab) => settingsReadOnly && !REMOTE_ADMIN_TABS.has(tab),
+    [settingsReadOnly],
   );
 
   // Sync if the caller changes initialTab after mount (e.g. re-opening at a different tab)
@@ -234,6 +254,78 @@ export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
     endNamedPerfSpan("junban:settings-open", { tab: activeTab });
   }, [activeTab]);
 
+  useEffect(() => {
+    if (!settingsReadOnly) {
+      return;
+    }
+
+    if (!REMOTE_ADMIN_TABS.has(activeTab)) {
+      setActiveTab("data");
+    }
+
+    if (isMobile && mobileSelectedTab !== null && !REMOTE_ADMIN_TABS.has(mobileSelectedTab)) {
+      setMobileSelectedTab("data");
+    }
+  }, [activeTab, isMobile, mobileSelectedTab, settingsReadOnly]);
+
+  // Focus management: store previous focus and restore on close
+  useEffect(() => {
+    // Store the previously focused element when modal opens
+    previousFocusRef.current = document.activeElement as HTMLElement;
+
+    // Focus the close button when modal opens (desktop only, mobile handles its own focus)
+    if (!isMobile && closeButtonRef.current) {
+      setTimeout(() => closeButtonRef.current?.focus(), 0);
+    }
+
+    return () => {
+      // Restore focus when modal closes
+      if (previousFocusRef.current && typeof previousFocusRef.current.focus === "function") {
+        setTimeout(() => previousFocusRef.current?.focus(), 0);
+      }
+    };
+  }, [isMobile]);
+
+  // Focus trap: keep focus within the modal (only tabbable, visible, enabled elements)
+  const handleModalKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab" || !modalRef.current) return;
+
+    const candidates = modalRef.current.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href]:not([disabled]), input:not([disabled]):not([type="hidden"]):not([type="file"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+
+    // Filter out visually hidden elements (hidden attribute or computed display: none / visibility: hidden)
+    const focusableElements = Array.from(candidates).filter((el) => {
+      // Skip elements with hidden attribute
+      if (el.hasAttribute("hidden")) return false;
+      // Skip file inputs (even if not disabled, they may be visually hidden)
+      if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "file") return false;
+      // Skip elements with hidden ancestor or computed styles
+      const style = window.getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden") return false;
+      return true;
+    });
+
+    if (focusableElements.length === 0) return;
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (e.shiftKey) {
+      // Shift + Tab
+      if (document.activeElement === firstElement) {
+        e.preventDefault();
+        lastElement?.focus();
+      }
+    } else {
+      // Tab
+      if (document.activeElement === lastElement) {
+        e.preventDefault();
+        firstElement?.focus();
+      }
+    }
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -264,36 +356,63 @@ export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
     if (mobileSelectedTab !== null) {
       const tabMeta = TABS.find((t) => t.id === mobileSelectedTab);
       return (
-        <div className="fixed inset-0 z-50 bg-surface flex flex-col pb-[var(--height-bottom-nav)]">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mobile-settings-tab-title"
+          className="fixed inset-0 z-50 bg-surface flex flex-col pb-[var(--height-bottom-nav)]"
+        >
           <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
             <button
               onClick={handleMobileBack}
               aria-label="Back to settings"
-              className="p-2.5 -ml-1.5 rounded-md text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface transition-colors"
+              className="p-2.5 -ml-1.5 rounded-md text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <h2 className="text-lg font-bold text-on-surface">{tabMeta?.label ?? "Settings"}</h2>
+            <h2 id="mobile-settings-tab-title" className="text-lg font-bold text-on-surface">
+              {tabMeta?.label ?? "Settings"}
+            </h2>
           </div>
-          <div className="flex-1 overflow-y-auto p-4">{renderTabContent(mobileSelectedTab)}</div>
+          <div className="flex-1 overflow-y-auto p-4">
+            {renderTabContent(mobileSelectedTab, mutationsBlocked)}
+          </div>
         </div>
       );
     }
 
     // Index page
     return (
-      <div className="fixed inset-0 z-50 bg-surface flex flex-col pb-[var(--height-bottom-nav)]">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mobile-settings-title"
+        className="fixed inset-0 z-50 bg-surface flex flex-col pb-[var(--height-bottom-nav)]"
+      >
         <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
           <button
             onClick={onClose}
             aria-label="Close settings"
-            className="p-2.5 -ml-1.5 rounded-md text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface transition-colors"
+            className="p-2.5 -ml-1.5 rounded-md text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h2 className="text-lg font-bold text-on-surface">Settings</h2>
+          <h2 id="mobile-settings-title" className="text-lg font-bold text-on-surface">
+            Settings
+          </h2>
         </div>
         <div className="flex-1 overflow-y-auto">
+          {settingsReadOnly && (
+            <p
+              id="settings-read-only-note"
+              role="status"
+              aria-live="polite"
+              className="px-5 pt-4 text-xs text-warning"
+            >
+              Settings are read-only while remote access is running. Use Data to administer remote
+              access.
+            </p>
+          )}
           {MOBILE_SECTIONS.map((section) => (
             <div key={section.label}>
               <h3 className="text-xs font-semibold text-accent uppercase tracking-wider px-5 pt-5 pb-2">
@@ -306,7 +425,11 @@ export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
                     <button
                       key={tab.id}
                       onClick={() => handleTabChange(tab.id)}
-                      className="w-full flex items-center gap-4 px-5 py-3.5 text-left hover:bg-surface-secondary active:bg-surface-tertiary transition-colors"
+                      disabled={isTabBlocked(tab.id)}
+                      aria-describedby={
+                        isTabBlocked(tab.id) ? "settings-read-only-note" : undefined
+                      }
+                      className="w-full flex items-center gap-4 px-5 py-3.5 text-left hover:bg-surface-secondary active:bg-surface-tertiary transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <span className="w-10 h-10 rounded-xl bg-surface-tertiary flex items-center justify-center text-on-surface-secondary flex-shrink-0">
                         {tab.mobileIcon}
@@ -333,27 +456,42 @@ export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
     );
   }
 
-  // ── Desktop layout (unchanged) ──
+  // ── Desktop layout with modal dialog semantics ──
   return (
     <div
+      ref={modalRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={handleBackdropClick}
+      onKeyDown={handleModalKeyDown}
     >
       <div className="bg-surface rounded-xl shadow-xl border border-border max-w-[960px] w-[90vw] h-[85vh] max-h-[800px] flex flex-row overflow-hidden">
         {/* Left sidebar nav */}
         <div className="w-60 flex-shrink-0 border-r border-border bg-surface-secondary p-4 flex flex-col">
-          <h2 className="text-lg font-bold text-on-surface mb-4 px-2">Settings</h2>
+          <h2 id="settings-title" className="text-lg font-bold text-on-surface mb-4 px-2">
+            Settings
+          </h2>
+          {settingsReadOnly && (
+            <p id="settings-read-only-note" className="mb-3 px-2 text-xs text-warning">
+              Settings are read-only while remote access is running. Open Data to administer remote
+              access.
+            </p>
+          )}
           <nav aria-label="Settings tabs" className="flex-1">
             <ul className="space-y-0.5">
               {TABS.map((tab) => (
                 <li key={tab.id}>
                   <button
                     onClick={() => handleTabChange(tab.id)}
+                    disabled={isTabBlocked(tab.id)}
+                    aria-describedby={isTabBlocked(tab.id) ? "settings-read-only-note" : undefined}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg transition-colors ${
                       activeTab === tab.id
                         ? "bg-accent/10 text-accent font-medium"
                         : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
-                    }`}
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
                   >
                     {tab.icon}
                     {tab.label}
@@ -371,6 +509,7 @@ export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
               {TABS.find((t) => t.id === activeTab)?.label ?? "Settings"}
             </h3>
             <button
+              ref={closeButtonRef}
               onClick={onClose}
               aria-label="Close settings"
               className="p-1.5 rounded-md text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface transition-colors"
@@ -378,7 +517,9 @@ export function Settings({ activeTab: initialTab, onClose }: SettingsProps) {
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-6">{renderTabContent(activeTab)}</div>
+          <div className="flex-1 overflow-y-auto p-6">
+            {renderTabContent(activeTab, mutationsBlocked)}
+          </div>
         </div>
       </div>
     </div>

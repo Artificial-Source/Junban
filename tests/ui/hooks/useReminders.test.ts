@@ -61,6 +61,25 @@ describe("useReminders", () => {
     });
   });
 
+  it("does not clear reminders when mutation-side effects are disabled", async () => {
+    mockFetchDueReminders.mockResolvedValueOnce([{ id: "t1", title: "R1" }]);
+
+    const onReminder = vi.fn();
+    renderHook(() =>
+      useReminders({
+        onReminder,
+        intervalMs: 600000,
+        clearReminders: false,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(1500);
+
+    await vi.waitFor(() => {
+      expect(onReminder).toHaveBeenCalledWith({ id: "t1", title: "R1" });
+    });
+    expect(mockUpdateTask).not.toHaveBeenCalled();
+  });
+
   it("deduplicates — does not fire same task twice", async () => {
     const task = { id: "t1", title: "R1" };
     // Return the same task on both calls

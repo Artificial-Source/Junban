@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback } from "react";
+import { useEffect, useMemo, useCallback, useState, type SetStateAction } from "react";
 import { useRouting } from "./hooks/useRouting.js";
 import { useTaskHandlers } from "./hooks/useTaskHandlers.js";
 import { useMultiSelect } from "./hooks/useMultiSelect.js";
@@ -18,7 +18,29 @@ import { useAppState } from "./app/useAppState.js";
 import { useAppHandlers } from "./app/useAppHandlers.js";
 import { AppLayout } from "./app/AppLayout.js";
 import { AppModals } from "./app/AppModals.js";
+import { api } from "./api/index.js";
+import {
+  DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT,
+  type DesktopRemoteServerStatus,
+} from "./api/desktop-server.js";
 import { beginNamedPerfSpan, endNamedPerfSpan, markPerf } from "../utils/perf.js";
+import { isTauri } from "../utils/tauri.js";
+
+function guardMutationHandler<Args extends unknown[], Result>(
+  blocked: boolean,
+  onBlocked: () => void,
+  action: (...args: Args) => Result,
+  fallback: Result,
+): (...args: Args) => Result {
+  return (...args: Args) => {
+    if (blocked) {
+      onBlocked();
+      return fallback;
+    }
+
+    return action(...args);
+  };
+}
 
 function AppContent() {
   useEffect(() => {
@@ -116,6 +138,86 @@ function AppContent() {
     handleReorder,
   } = taskHandlers;
 
+  // ── Clear selection on view change ──
+  useEffect(() => {
+    setSelectedTaskId(null);
+  }, [currentView, selectedProjectId, selectedPluginViewId, selectedFilterId, setSelectedTaskId]);
+
+  // ── Multi-select & Bulk ──
+  const {
+    selectedIds: multiSelectedIds,
+    handleMultiSelect,
+    clearSelection,
+  } = useMultiSelect(visibleTasks.map((t) => t.id));
+  useEffect(() => {
+    clearSelection();
+  }, [currentView, selectedProjectId, selectedPluginViewId, selectedFilterId, clearSelection]);
+  const { handleBulkComplete, handleBulkDelete, handleBulkMoveToProject, handleBulkAddTag } =
+    useBulkActions(multiSelectedIds, clearSelection);
+
+  // ── Keyboard navigation ──
+  useKeyboardNavigation({
+    tasks: visibleTasks,
+    selectedTaskId,
+    onSelect: handleSelectTask,
+    onOpen: handleSelectTask,
+    onClose: handleCloseDetail,
+    enabled: !commandPaletteOpen,
+  });
+
+  // ── Reminders ──
+  const [remoteServerRunning, setRemoteServerRunning] = useState(false);
+  const mutationsBlocked = isTauri() && remoteServerRunning;
+
+  const handleReminder = useCallback(
+    (task: { id: string; title: string }) => {
+      if (typeof Notification !== "undefined" && Notification.permission === "granted")
+        new Notification("Junban Reminder", { body: task.title });
+      playSound("reminder");
+      showToast(`Reminder: ${task.title}`, {
+        label: "View",
+        onClick: () => handleSelectTask(task.id),
+      });
+    },
+    [playSound, showToast, handleSelectTask],
+  );
+  useReminders({
+    onReminder: handleReminder,
+    enabled: true,
+    clearReminders: !mutationsBlocked,
+  });
+
+  // ── Shortcuts & Commands ──
+  const handleOpenSettings = useCallback(() => {
+    beginNamedPerfSpan("junban:settings-open");
+    setSettingsOpen(true);
+  }, [setSettingsOpen]);
+  const handleOpenSettingsTab = useCallback(
+    (tab: SettingsTab) => {
+      beginNamedPerfSpan("junban:settings-open");
+      openSettingsTab(tab);
+      setSettingsOpen(true);
+    },
+    [openSettingsTab, setSettingsOpen],
+  );
+  const [blockedMutationToastAt, setBlockedMutationToastAt] = useState(0);
+  const showMutationBlockedToast = useCallback(() => {
+    const now = Date.now();
+    if (now - blockedMutationToastAt < 1500) {
+      return;
+    }
+
+    setBlockedMutationToastAt(now);
+    showToast("Local changes are disabled while remote access is running.", {
+      label: "Remote Access",
+      onClick: () => handleOpenSettingsTab("data"),
+    });
+  }, [blockedMutationToastAt, showToast, handleOpenSettingsTab]);
+
+  const applyRemoteServerStatus = useCallback((serverStatus: DesktopRemoteServerStatus) => {
+    setRemoteServerRunning(serverStatus.running);
+  }, []);
+
   // ── App handlers (projects, sections, comments, etc.) ──
   const handlers = useAppHandlers({
     currentView,
@@ -135,6 +237,8 @@ function AppContent() {
     setTaskComments: appState.setTaskComments,
     setTaskActivity: appState.setTaskActivity,
     tasks: state.tasks,
+    mutationsBlocked,
+    onMutationBlocked: showMutationBlockedToast,
   });
 
   // ── Task context menu ──
@@ -177,49 +281,6 @@ function AppContent() {
     setCustomDatePicker,
   ]);
 
-  // ── Clear selection on view change ──
-  useEffect(() => {
-    setSelectedTaskId(null);
-  }, [currentView, selectedProjectId, selectedPluginViewId, selectedFilterId, setSelectedTaskId]);
-
-  // ── Multi-select & Bulk ──
-  const {
-    selectedIds: multiSelectedIds,
-    handleMultiSelect,
-    clearSelection,
-  } = useMultiSelect(visibleTasks.map((t) => t.id));
-  useEffect(() => {
-    clearSelection();
-  }, [currentView, selectedProjectId, selectedPluginViewId, selectedFilterId, clearSelection]);
-  const { handleBulkComplete, handleBulkDelete, handleBulkMoveToProject, handleBulkAddTag } =
-    useBulkActions(multiSelectedIds, clearSelection);
-
-  // ── Keyboard navigation ──
-  useKeyboardNavigation({
-    tasks: visibleTasks,
-    selectedTaskId,
-    onSelect: handleSelectTask,
-    onOpen: handleSelectTask,
-    onClose: handleCloseDetail,
-    enabled: !commandPaletteOpen,
-  });
-
-  // ── Reminders ──
-  const handleReminder = useCallback(
-    (task: { id: string; title: string }) => {
-      if (typeof Notification !== "undefined" && Notification.permission === "granted")
-        new Notification("Junban Reminder", { body: task.title });
-      playSound("reminder");
-      showToast(`Reminder: ${task.title}`, {
-        label: "View",
-        onClick: () => handleSelectTask(task.id),
-      });
-    },
-    [playSound, showToast, handleSelectTask],
-  );
-  useReminders({ onReminder: handleReminder, enabled: true });
-
-  // ── Shortcuts & Commands ──
   useAppShortcuts(
     setCommandPaletteOpen,
     undo,
@@ -229,29 +290,71 @@ function AppContent() {
     setQuickAddOpen,
     handleNavigate,
     featureSettings.feature_chords !== "false",
+    mutationsBlocked,
+    showMutationBlockedToast,
   );
-  const handleOpenSettings = useCallback(() => {
-    beginNamedPerfSpan("junban:settings-open");
-    setSettingsOpen(true);
-  }, [setSettingsOpen]);
-  const handleOpenSettingsTab = useCallback(
-    (tab: SettingsTab) => {
-      beginNamedPerfSpan("junban:settings-open");
-      openSettingsTab(tab);
-      setSettingsOpen(true);
-    },
-    [openSettingsTab, setSettingsOpen],
+
+  const requestOpenQuickAdd = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        (value: SetStateAction<boolean>) => setQuickAddOpen(value),
+        undefined,
+      ),
+    [mutationsBlocked, showMutationBlockedToast, setQuickAddOpen],
+  );
+  const requestOpenFocusMode = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        (value: SetStateAction<boolean>) => setFocusModeOpen(value),
+        undefined,
+      ),
+    [mutationsBlocked, showMutationBlockedToast, setFocusModeOpen],
+  );
+  const requestOpenTemplateSelector = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        (value: SetStateAction<boolean>) => setTemplateSelectorOpen(value),
+        undefined,
+      ),
+    [mutationsBlocked, showMutationBlockedToast, setTemplateSelectorOpen],
+  );
+  const requestOpenProjectModal = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        (value: SetStateAction<boolean>) => setProjectModalOpen(value),
+        undefined,
+      ),
+    [mutationsBlocked, showMutationBlockedToast, setProjectModalOpen],
+  );
+  const requestOpenExtractTasks = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        (value: SetStateAction<boolean>) => setExtractTasksOpen(value),
+        undefined,
+      ),
+    [mutationsBlocked, showMutationBlockedToast, setExtractTasksOpen],
   );
   const commands = useAppCommands(
     handleNavigate,
     handleOpenSettingsTab,
-    setFocusModeOpen,
-    setTemplateSelectorOpen,
+    requestOpenFocusMode,
+    requestOpenTemplateSelector,
     projects,
     pluginCommands,
     executeCommand,
-    setQuickAddOpen,
-    setExtractTasksOpen,
+    requestOpenQuickAdd,
+    requestOpenExtractTasks,
+    mutationsBlocked,
   );
 
   // ── Task detail nav ──
@@ -264,6 +367,330 @@ function AppContent() {
       return projects.find((p) => p.id === selectedTask.projectId)?.name ?? "Inbox";
     return "Inbox";
   }, [selectedTask, projects]);
+
+  useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+
+    let active = true;
+    const handleServerStatusChange = (event: Event) => {
+      applyRemoteServerStatus((event as CustomEvent<DesktopRemoteServerStatus>).detail);
+    };
+    const loadStatus = () => {
+      void api
+        .getDesktopRemoteServerStatus()
+        .then((serverStatus) => {
+          if (active) {
+            applyRemoteServerStatus(serverStatus);
+          }
+        })
+        .catch((err: unknown) => {
+          console.error("[app] Failed to poll remote server status:", err);
+        });
+    };
+
+    window.addEventListener(
+      DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT,
+      handleServerStatusChange as EventListener,
+    );
+    loadStatus();
+    const timer = window.setInterval(loadStatus, 3000);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener(
+        DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT,
+        handleServerStatusChange as EventListener,
+      );
+    };
+  }, [applyRemoteServerStatus]);
+
+  useEffect(() => {
+    if (!mutationsBlocked) {
+      return;
+    }
+
+    setCommandPaletteOpen(false);
+    setQuickAddOpen(false);
+    setProjectModalOpen(false);
+    setTemplateSelectorOpen(false);
+    setExtractTasksOpen(false);
+    setFocusModeOpen(false);
+    setContextMenu(null);
+    setCustomDatePicker(null);
+    setSelectedTaskId(null);
+    clearSelection();
+
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement && activeElement !== document.body) {
+      activeElement.blur();
+    }
+  }, [
+    mutationsBlocked,
+    clearSelection,
+    setCommandPaletteOpen,
+    setContextMenu,
+    setCustomDatePicker,
+    setExtractTasksOpen,
+    setFocusModeOpen,
+    setProjectModalOpen,
+    setQuickAddOpen,
+    setSelectedTaskId,
+    setTemplateSelectorOpen,
+  ]);
+
+  const guardedHandleCreateTask = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleCreateTask,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleCreateTask],
+  );
+  const guardedHandleToggleTask = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleToggleTask,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleToggleTask],
+  );
+  const guardedHandleUpdateTask = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleUpdateTask,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleUpdateTask],
+  );
+  const guardedHandleDeleteTask = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleDeleteTask,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleDeleteTask],
+  );
+  const guardedHandleUpdateDueDate = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleUpdateDueDate,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleUpdateDueDate],
+  );
+  const guardedHandleAddSubtask = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleAddSubtask,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleAddSubtask],
+  );
+  const guardedHandleIndent = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleIndent,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleIndent],
+  );
+  const guardedHandleOutdent = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleOutdent,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleOutdent],
+  );
+  const guardedHandleReorder = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleReorder,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleReorder],
+  );
+  const guardedHandleBulkComplete = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleBulkComplete,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleBulkComplete],
+  );
+  const guardedHandleBulkDelete = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleBulkDelete,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleBulkDelete],
+  );
+  const guardedHandleBulkMoveToProject = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleBulkMoveToProject,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleBulkMoveToProject],
+  );
+  const guardedHandleBulkAddTag = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handleBulkAddTag,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handleBulkAddTag],
+  );
+  const guardedHandleAddTask = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleAddTask,
+        undefined,
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleAddTask],
+  );
+  const guardedHandleCreateProject = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleCreateProject,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleCreateProject],
+  );
+  const guardedHandleUpdateProject = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleUpdateProject,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleUpdateProject],
+  );
+  const guardedHandleDeleteProject = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleDeleteProject,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleDeleteProject],
+  );
+  const guardedHandleCreateSection = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleCreateSection,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleCreateSection],
+  );
+  const guardedHandleUpdateSection = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleUpdateSection,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleUpdateSection],
+  );
+  const guardedHandleDeleteSection = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleDeleteSection,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleDeleteSection],
+  );
+  const guardedHandleMoveTask = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleMoveTask,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleMoveTask],
+  );
+  const guardedHandleAddComment = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleAddComment,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleAddComment],
+  );
+  const guardedHandleUpdateComment = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleUpdateComment,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleUpdateComment],
+  );
+  const guardedHandleDeleteComment = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleDeleteComment,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleDeleteComment],
+  );
+  const guardedHandleExtractedTasksCreate = useMemo(
+    () =>
+      guardMutationHandler(
+        mutationsBlocked,
+        showMutationBlockedToast,
+        handlers.handleExtractedTasksCreate,
+        Promise.resolve(),
+      ),
+    [mutationsBlocked, showMutationBlockedToast, handlers.handleExtractedTasksCreate],
+  );
 
   // ── AppState context value ──
   const appStateValue: AppState = useMemo(
@@ -326,10 +753,10 @@ function AppContent() {
         drawerOpen={drawerOpen}
         setDrawerOpen={setDrawerOpen}
         multiSelectedIds={multiSelectedIds}
-        handleBulkComplete={handleBulkComplete}
-        handleBulkDelete={handleBulkDelete}
-        handleBulkMoveToProject={handleBulkMoveToProject}
-        handleBulkAddTag={handleBulkAddTag}
+        handleBulkComplete={guardedHandleBulkComplete}
+        handleBulkDelete={guardedHandleBulkDelete}
+        handleBulkMoveToProject={guardedHandleBulkMoveToProject}
+        handleBulkAddTag={guardedHandleBulkAddTag}
         clearSelection={clearSelection}
         selectedTask={selectedTask ?? null}
         selectedTaskIdx={selectedTaskIdx}
@@ -339,44 +766,52 @@ function AppContent() {
         taskActivity={taskActivity}
         handleNavigate={handleNavigate}
         handleOpenSettings={handleOpenSettings}
-        handleAddTask={handlers.handleAddTask}
+        handleAddTask={guardedHandleAddTask}
         handleOpenVoice={handlers.handleOpenVoice}
-        handleCreateProject={handlers.handleCreateProject}
-        handleUpdateProject={handlers.handleUpdateProject}
-        handleDeleteProject={handlers.handleDeleteProject}
-        handleCreateTask={handleCreateTask}
-        handleToggleTask={handleToggleTask}
+        handleCreateProject={guardedHandleCreateProject}
+        handleUpdateProject={guardedHandleUpdateProject}
+        handleDeleteProject={guardedHandleDeleteProject}
+        handleCreateTask={guardedHandleCreateTask}
+        handleToggleTask={guardedHandleToggleTask}
         handleSelectTask={handleSelectTask}
-        handleUpdateTask={handleUpdateTask}
-        handleDeleteTask={handleDeleteTask}
+        handleUpdateTask={guardedHandleUpdateTask}
+        handleDeleteTask={guardedHandleDeleteTask}
         handleMultiSelect={handleMultiSelect}
-        handleReorder={handleReorder}
-        handleAddSubtask={handleAddSubtask}
-        handleUpdateDueDate={handleUpdateDueDate}
+        handleReorder={guardedHandleReorder}
+        handleAddSubtask={guardedHandleAddSubtask}
+        handleUpdateDueDate={guardedHandleUpdateDueDate}
         handleContextMenu={handleContextMenu}
-        handleCreateSection={handlers.handleCreateSection}
-        handleUpdateSection={handlers.handleUpdateSection}
-        handleDeleteSection={handlers.handleDeleteSection}
-        handleMoveTask={handlers.handleMoveTask}
+        handleCreateSection={guardedHandleCreateSection}
+        handleUpdateSection={guardedHandleUpdateSection}
+        handleDeleteSection={guardedHandleDeleteSection}
+        handleMoveTask={guardedHandleMoveTask}
         handleCloseDetail={handleCloseDetail}
-        handleIndent={handleIndent}
-        handleOutdent={handleOutdent}
-        handleAddComment={handlers.handleAddComment}
-        handleUpdateComment={handlers.handleUpdateComment}
-        handleDeleteComment={handlers.handleDeleteComment}
+        handleIndent={guardedHandleIndent}
+        handleOutdent={guardedHandleOutdent}
+        handleAddComment={guardedHandleAddComment}
+        handleUpdateComment={guardedHandleUpdateComment}
+        handleDeleteComment={guardedHandleDeleteComment}
         addTaskTrigger={addTaskTrigger}
         handleOpenSettingsTab={handleOpenSettingsTab}
         setSearchOpen={setSearchOpen}
-        setProjectModalOpen={setProjectModalOpen}
+        setProjectModalOpen={requestOpenProjectModal}
         appState={appStateValue}
+        remoteServerRunning={remoteServerRunning}
+        mutationsBlocked={mutationsBlocked}
+        handleStopRemoteServer={() => {
+          void api.stopDesktopRemoteServer().catch((err: unknown) => {
+            showToast(err instanceof Error ? err.message : "Could not stop remote access.");
+          });
+        }}
       >
         <AppModals
           settingsOpen={settingsOpen}
           settingsTab={settingsTab}
           onCloseSettings={() => setSettingsOpen(false)}
+          mutationsBlocked={mutationsBlocked}
           focusModeOpen={focusModeOpen}
           tasks={state.tasks}
-          handleToggleTask={handleToggleTask}
+          handleToggleTask={guardedHandleToggleTask}
           onCloseFocusMode={() => setFocusModeOpen(false)}
           templateSelectorOpen={templateSelectorOpen}
           onCloseTemplateSelector={() => setTemplateSelectorOpen(false)}
@@ -391,17 +826,21 @@ function AppContent() {
           handleSelectTask={handleSelectTask}
           projectModalOpen={projectModalOpen}
           onCloseProjectModal={() => setProjectModalOpen(false)}
-          handleCreateProject={handlers.handleCreateProject}
+          handleCreateProject={guardedHandleCreateProject}
           quickAddOpen={quickAddOpen}
           onCloseQuickAdd={() => setQuickAddOpen(false)}
-          handleCreateTask={handleCreateTask}
+          handleCreateTask={guardedHandleCreateTask}
           extractTasksOpen={extractTasksOpen}
           onCloseExtractTasks={() => setExtractTasksOpen(false)}
-          handleExtractedTasksCreate={handlers.handleExtractedTasksCreate}
+          handleExtractedTasksCreate={guardedHandleExtractedTasksCreate}
           onboardingOpen={onboardingOpen}
           onCompleteOnboarding={() => {
             setOnboardingOpen(false);
-            setAppSetting("onboarding_completed", "true");
+            // Skip onboarding_completed write when mutations are blocked
+            // (onboarding modal already skips preset/theme writes in that mode)
+            if (!mutationsBlocked) {
+              void setAppSetting("onboarding_completed", "true");
+            }
           }}
           handleOpenSettingsTab={handleOpenSettingsTab}
           toast={toast}
@@ -411,7 +850,7 @@ function AppContent() {
           setContextMenu={setContextMenu}
           customDatePicker={customDatePicker}
           setCustomDatePicker={setCustomDatePicker}
-          handleUpdateTask={handleUpdateTask}
+          handleUpdateTask={guardedHandleUpdateTask}
         />
       </AppLayout>
     </BlockedTaskIdsContext.Provider>

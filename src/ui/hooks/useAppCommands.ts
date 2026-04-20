@@ -15,6 +15,7 @@ export function useAppCommands(
   executeCommand: (id: string) => void,
   setQuickAddOpen?: React.Dispatch<React.SetStateAction<boolean>>,
   setExtractTasksOpen?: React.Dispatch<React.SetStateAction<boolean>>,
+  mutationsBlocked: boolean = false,
 ) {
   const { settings } = useGeneralSettings();
   return useMemo(() => {
@@ -89,16 +90,22 @@ export function useAppCommands(
         name: "Quick Wins / Dopamine Menu",
         callback: () => handleNavigate("dopamine-menu"),
       },
-      { id: "focus-mode", name: "Enter Focus Mode", callback: () => setFocusModeOpen(true) },
-      ...(setQuickAddOpen
+      ...(!mutationsBlocked
+        ? [{ id: "focus-mode", name: "Enter Focus Mode", callback: () => setFocusModeOpen(true) }]
+        : []),
+      ...(!mutationsBlocked && setQuickAddOpen
         ? [{ id: "quick-add-task", name: "Quick Add Task", callback: () => setQuickAddOpen(true) }]
         : []),
-      {
-        id: "create-from-template",
-        name: "Create Task from Template",
-        callback: () => setTemplateSelectorOpen(true),
-      },
-      ...(setExtractTasksOpen
+      ...(!mutationsBlocked
+        ? [
+            {
+              id: "create-from-template",
+              name: "Create Task from Template",
+              callback: () => setTemplateSelectorOpen(true),
+            },
+          ]
+        : []),
+      ...(!mutationsBlocked && setExtractTasksOpen
         ? [
             {
               id: "extract-tasks-from-text",
@@ -118,12 +125,14 @@ export function useAppCommands(
     }
 
     // Add plugin commands
-    for (const cmd of pluginCommands) {
-      cmds.push({
-        id: `plugin-${cmd.id}`,
-        name: cmd.name,
-        callback: () => executeCommand(cmd.id),
-      });
+    if (!mutationsBlocked) {
+      for (const cmd of pluginCommands) {
+        cmds.push({
+          id: `plugin-${cmd.id}`,
+          name: cmd.name,
+          callback: () => executeCommand(cmd.id),
+        });
+      }
     }
 
     return cmds;
@@ -137,6 +146,7 @@ export function useAppCommands(
     setTemplateSelectorOpen,
     setQuickAddOpen,
     setExtractTasksOpen,
+    mutationsBlocked,
     settings.feature_completed,
   ]);
 }

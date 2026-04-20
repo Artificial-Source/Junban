@@ -7,16 +7,18 @@ interface UseRemindersOptions {
   onReminder: (task: { id: string; title: string }) => void;
   enabled?: boolean;
   intervalMs?: number;
+  clearReminders?: boolean;
 }
 
 /**
  * Polls for due reminders and fires callbacks for each.
- * Clears remindAt on fired tasks to prevent re-firing.
+ * Optionally clears remindAt on fired tasks to prevent re-firing.
  */
 export function useReminders({
   onReminder,
   enabled = true,
   intervalMs = 60000,
+  clearReminders = true,
 }: UseRemindersOptions) {
   const firedRef = useRef<Set<string>>(new Set());
 
@@ -31,15 +33,17 @@ export function useReminders({
 
         onReminder({ id: task.id, title: task.title });
 
-        // Clear the reminder so it doesn't re-fire
-        updateTask(task.id, { remindAt: null }).catch(() => {
-          // Non-critical — reminder will fire again on next poll
-        });
+        if (clearReminders) {
+          // Clear the reminder so it doesn't re-fire
+          updateTask(task.id, { remindAt: null }).catch(() => {
+            // Non-critical — reminder will fire again on next poll
+          });
+        }
       }
     } catch {
       // Non-critical
     }
-  }, [enabled, onReminder]);
+  }, [enabled, onReminder, clearReminders]);
 
   useEffect(() => {
     if (!enabled) return;

@@ -2,7 +2,7 @@
  * Styled confirmation dialog to replace native window.confirm().
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { AlertTriangle } from "lucide-react";
 
 interface ConfirmDialogProps {
@@ -26,13 +26,19 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  // Focus confirm button on open, handle Escape key
+  // Store previous focus on open, restore on close
   useEffect(() => {
     if (!open) return;
 
-    // Small delay to ensure DOM is ready
+    // Store previously focused element
+    previousFocusRef.current = document.activeElement as HTMLElement;
+
+    // Focus confirm button when modal opens
     const timer = setTimeout(() => confirmRef.current?.focus(), 50);
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -42,11 +48,41 @@ export function ConfirmDialog({
       }
     };
     document.addEventListener("keydown", handleKeyDown);
+
     return () => {
       clearTimeout(timer);
       document.removeEventListener("keydown", handleKeyDown);
+      // Restore focus when modal closes
+      if (previousFocusRef.current && typeof previousFocusRef.current.focus === "function") {
+        setTimeout(() => previousFocusRef.current?.focus(), 0);
+      }
     };
   }, [open, onCancel]);
+
+  // Focus trap: keep focus within the modal
+  const handleModalKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab" || !modalRef.current) return;
+
+    const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (e.shiftKey) {
+      // Shift + Tab: going backwards
+      if (document.activeElement === firstElement) {
+        e.preventDefault();
+        lastElement?.focus();
+      }
+    } else {
+      // Tab: going forwards
+      if (document.activeElement === lastElement) {
+        e.preventDefault();
+        firstElement?.focus();
+      }
+    }
+  }, []);
 
   if (!open) return null;
 
@@ -54,6 +90,7 @@ export function ConfirmDialog({
 
   return (
     <div
+      ref={modalRef}
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 animate-in fade-in duration-150"
       role="dialog"
       aria-modal="true"
@@ -61,6 +98,7 @@ export function ConfirmDialog({
       onClick={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}
+      onKeyDown={handleModalKeyDown}
     >
       <div className="bg-surface rounded-xl shadow-2xl max-w-sm w-full mx-4 p-6 border border-border animate-in zoom-in-95 duration-150">
         <div className="flex items-start gap-3 mb-4">
@@ -81,15 +119,16 @@ export function ConfirmDialog({
 
         <div className="flex justify-end gap-2">
           <button
+            ref={cancelRef}
             onClick={onCancel}
-            className="px-4 py-2 text-sm font-medium text-on-surface-secondary hover:bg-surface-tertiary rounded-lg transition-colors"
+            className="px-4 py-2 text-sm font-medium text-on-surface-secondary hover:bg-surface-tertiary rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface"
           >
             {cancelLabel}
           </button>
           <button
             ref={confirmRef}
             onClick={onConfirm}
-            className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${
+            className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface ${
               isDanger ? "bg-error hover:bg-error/90" : "bg-accent hover:bg-accent-hover"
             }`}
           >

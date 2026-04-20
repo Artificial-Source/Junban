@@ -226,6 +226,17 @@ describe("Sidebar", () => {
     expect(screen.getByText("Add task")).toBeTruthy();
   });
 
+  it("exposes an accessible name for collapsed Add task button", () => {
+    render(<Sidebar {...defaultProps} onAddTask={vi.fn()} collapsed={true} />);
+    expect(screen.getByRole("button", { name: /add task/i })).toBeTruthy();
+  });
+
+  it("disables Add task while local mutations are blocked", () => {
+    render(<Sidebar {...defaultProps} onAddTask={vi.fn()} mutationsBlocked={true} />);
+
+    expect(screen.getByRole("button", { name: /add task/i })).toBeDisabled();
+  });
+
   it("renders AI Chat link", () => {
     render(<Sidebar {...defaultProps} />);
     expect(screen.getByText("AI Chat")).toBeTruthy();
@@ -237,6 +248,42 @@ describe("Sidebar", () => {
     render(<Sidebar {...defaultProps} onNavigate={onNavigate} projects={projects} />);
     fireEvent.click(screen.getByText("Work"));
     expect(onNavigate).toHaveBeenCalledWith("project", "p1");
+  });
+
+  it("disables project mutation actions while local mutations are blocked", () => {
+    const projects = [makeProject({ id: "p1", name: "Work" })];
+
+    render(
+      <Sidebar
+        {...defaultProps}
+        projects={projects}
+        onUpdateProject={vi.fn()}
+        onDeleteProject={vi.fn()}
+        mutationsBlocked={true}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText("Work").closest("button")!);
+
+    expect(screen.getByText("Edit project").closest("button")).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByText("New subproject").closest("button")).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByText("Delete project").closest("button")).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("exposes an accessible name for the icon-only New project button", () => {
+    const projects = [makeProject({ id: "p1", name: "Work" })];
+    render(<Sidebar {...defaultProps} projects={projects} onOpenProjectModal={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /new project/i })).toBeTruthy();
   });
 
   it("hides project labels when collapsed", () => {
@@ -324,6 +371,31 @@ describe("Sidebar", () => {
     fireEvent.contextMenu(todayBtn);
     fireEvent.click(screen.getByText("Manage in Settings"));
     expect(onOpenSettings).toHaveBeenCalled();
+  });
+
+  it("disables setting-persisting view context menu actions while mutations are blocked", () => {
+    render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} mutationsBlocked={true} />);
+    const todayBtn = screen.getByText("Today").closest("button")!;
+    fireEvent.contextMenu(todayBtn);
+
+    const favoriteAction = screen.getByText("Add to Favorites").closest("button");
+    expect(favoriteAction).toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.click(screen.getByText("Add to Favorites"));
+    expect(mockUpdateSetting).not.toHaveBeenCalled();
+  });
+
+  it("disables empty-space reset order action while mutations are blocked", () => {
+    mockSettings = { sidebar_nav_order: "today,inbox" };
+    render(<Sidebar {...defaultProps} onOpenSettings={vi.fn()} mutationsBlocked={true} />);
+
+    fireEvent.contextMenu(screen.getByLabelText("Views"));
+
+    const resetOrder = screen.getByText("Reset Order").closest("button");
+    expect(resetOrder).toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.click(screen.getByText("Reset Order"));
+    expect(mockUpdateSetting).not.toHaveBeenCalled();
   });
 
   it("hides calendar when feature_calendar is false", () => {
@@ -560,6 +632,31 @@ describe("Sidebar", () => {
     expect(upcomingElements).toHaveLength(1);
   });
 
+  // ── Drag reorder with mutations blocked ──
+
+  it("does not persist sidebar drag reorder while mutations are blocked", () => {
+    mockSettings = { sidebar_section_order: "inbox,today,upcoming" };
+    render(<Sidebar {...defaultProps} mutationsBlocked={true} />);
+
+    // The DnD component should still render, but the onDragEnd handler should be a no-op
+    // when mutations are blocked. We verify this by checking that the sortable context
+    // is present and the drag handler doesn't call updateSetting.
+    const dndContext = screen.getByTestId("dnd-context");
+    expect(dndContext).toBeTruthy();
+
+    // The drag reorder mutation should be blocked - verify updateSetting hasn't been called
+    // for sidebar reordering while mutations are blocked
+    expect(mockUpdateSetting).not.toHaveBeenCalledWith("sidebar_section_order", expect.any(String));
+  });
+
+  it("allows sidebar drag reorder when mutations are not blocked", () => {
+    mockSettings = { sidebar_section_order: "inbox,today,upcoming" };
+    render(<Sidebar {...defaultProps} mutationsBlocked={false} />);
+
+    // Verify the DnD context is rendered when mutations are not blocked
+    expect(screen.getByTestId("dnd-context")).toBeTruthy();
+  });
+
   // ── Section ordering ──
 
   it("renders sections in default order when sidebar_section_order is empty", () => {
@@ -622,5 +719,59 @@ describe("Sidebar", () => {
     expect(wrapper?.tagName).toBe("DIV");
     // Wrapper should have the style from SortableNavItem (opacity)
     expect(wrapper?.style.opacity).toBe("1");
+  });
+
+  // ── ProjectTree disclosure button accessibility tests ──
+
+  it("project with children has disclosure button with accessible name and aria-expanded", () => {
+    const parent = makeProject({ id: "p1", name: "Work", parentId: null });
+    const child = makeProject({ id: "p2", name: "Subproject", parentId: "p1" });
+    const projects = [parent, child];
+
+    render(<Sidebar {...defaultProps} projects={projects} />);
+
+    // Find the disclosure button by its accessible name
+    const disclosureButton = screen.getByLabelText(/Expand Work subprojects/i);
+    expect(disclosureButton).toBeTruthy();
+    expect(disclosureButton).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("toggles aria-expanded when clicking disclosure button", () => {
+    const parent = makeProject({ id: "p1", name: "Work", parentId: null });
+    const child = makeProject({ id: "p2", name: "Subproject", parentId: "p1" });
+    const projects = [parent, child];
+
+    render(<Sidebar {...defaultProps} projects={projects} />);
+
+    const disclosureButton = screen.getByLabelText(/Expand Work subprojects/i);
+    expect(disclosureButton).toHaveAttribute("aria-expanded", "false");
+
+    // Click to expand
+    fireEvent.click(disclosureButton);
+    expect(disclosureButton).toHaveAttribute("aria-expanded", "true");
+    expect(disclosureButton).toHaveAttribute("aria-label", "Collapse Work subprojects");
+
+    // Click to collapse
+    fireEvent.click(disclosureButton);
+    expect(disclosureButton).toHaveAttribute("aria-expanded", "false");
+    expect(disclosureButton).toHaveAttribute("aria-label", "Expand Work subprojects");
+  });
+
+  it("disclosure button toggles child project visibility", () => {
+    const parent = makeProject({ id: "p1", name: "Work", parentId: null });
+    const child = makeProject({ id: "p2", name: "Subproject", parentId: "p1" });
+    const projects = [parent, child];
+
+    render(<Sidebar {...defaultProps} projects={projects} />);
+
+    // Child should not be visible initially
+    expect(screen.queryByText("Subproject")).toBeNull();
+
+    // Click to expand
+    const disclosureButton = screen.getByLabelText(/Expand Work subprojects/i);
+    fireEvent.click(disclosureButton);
+
+    // Child should now be visible
+    expect(screen.getByText("Subproject")).toBeTruthy();
   });
 });

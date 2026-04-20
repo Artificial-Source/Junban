@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { DndContext, closestCenter } from "@dnd-kit/core";
 import { useSensor, useSensors, KeyboardSensor, PointerSensor } from "@dnd-kit/core";
 import {
@@ -7,7 +6,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { SECTION_IDS, renderNavButton } from "./SidebarPrimitives.js";
-import { SortableNavItem, SortableSection } from "./SidebarSortable.js";
+import { SortableNavItem } from "./SidebarSortable.js";
 import { renderSection } from "./NavSection.js";
 import type { ViewNavigationProps } from "./ViewNavigation.js";
 
@@ -43,6 +42,8 @@ export function ViewNavigationDnd({
   onNavContextMenu,
   onOpenProjectModal,
   onProjectContextMenu,
+  projectActionsDisabled,
+  disablePanelInteractions,
 }: ViewNavigationProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -78,17 +79,8 @@ export function ViewNavigationDnd({
     onNavContextMenu,
     onOpenProjectModal,
     onProjectContextMenu,
-    sectionRenderer: ({
-      id,
-      children,
-    }: {
-      id: string;
-      children: (dragHandleListeners: Record<string, unknown>) => ReactNode;
-    }) => (
-      <SortableSection key={id} id={id}>
-        {(dragListeners) => children(dragListeners)}
-      </SortableSection>
-    ),
+    projectActionsDisabled,
+    disablePanelInteractions,
   };
 
   return (

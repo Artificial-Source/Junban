@@ -31,7 +31,19 @@ vi.mock("../../../src/config/defaults.js", () => ({
     "#14aaf5",
     "#4073ff",
   ],
-  PROJECT_COLOR_LABELS: {} as Record<string, string>,
+  PROJECT_COLOR_LABELS: {
+    "#b8255f": "Berry Red",
+    "#db4035": "Red",
+    "#ff9933": "Orange",
+    "#fad000": "Yellow",
+    "#afb83b": "Olive Green",
+    "#7ecc49": "Lime Green",
+    "#299438": "Emerald",
+    "#6accbc": "Mint Green",
+    "#158fad": "Teal",
+    "#14aaf5": "Sky Blue",
+    "#4073ff": "Blue",
+  } as Record<string, string>,
 }));
 
 import { AddProjectModal } from "../../../src/ui/components/AddProjectModal.js";
@@ -122,5 +134,159 @@ describe("AddProjectModal", () => {
   it("shows character count", () => {
     render(<AddProjectModal {...defaultProps} />);
     expect(screen.getByText("0/120")).toBeDefined();
+  });
+
+  it("keeps Tab focus contained when submit is disabled by empty name", () => {
+    render(<AddProjectModal {...defaultProps} />);
+
+    const dialog = screen.getByRole("dialog");
+    const cancelButton = screen.getByText("Cancel");
+    const closeButton = screen.getByLabelText("Close");
+    const addButton = screen.getByText("Add");
+
+    expect(addButton.hasAttribute("disabled")).toBe(true);
+
+    cancelButton.focus();
+    expect(document.activeElement).toBe(cancelButton);
+
+    fireEvent.keyDown(cancelButton, { key: "Tab" });
+
+    expect(document.activeElement).toBe(closeButton);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  // Accessibility tests for Milestone 4 blockers
+  describe("accessibility", () => {
+    it("emoji trigger has accessible name with aria-label", () => {
+      render(<AddProjectModal {...defaultProps} />);
+      const emojiButton = screen.getByLabelText("Pick an emoji");
+      expect(emojiButton).toBeDefined();
+      expect(emojiButton.getAttribute("aria-haspopup")).toBe("dialog");
+      expect(emojiButton.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("emoji trigger shows current emoji in accessible name when set", () => {
+      render(
+        <AddProjectModal
+          {...defaultProps}
+          initialProject={{
+            id: "1",
+            name: "Test",
+            icon: "🚀",
+            color: "#4073ff",
+            isFavorite: false,
+            viewStyle: "list",
+            archived: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }}
+          mode="edit"
+        />,
+      );
+      const emojiButton = screen.getByLabelText("Change emoji: currently 🚀");
+      expect(emojiButton).toBeDefined();
+    });
+
+    it("clear emoji button has accessible name", () => {
+      render(
+        <AddProjectModal
+          {...defaultProps}
+          initialProject={{
+            id: "1",
+            name: "Test",
+            icon: "🚀",
+            color: "#4073ff",
+            isFavorite: false,
+            viewStyle: "list",
+            archived: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }}
+          mode="edit"
+        />,
+      );
+      const clearButton = screen.getByLabelText("Clear emoji");
+      expect(clearButton).toBeDefined();
+    });
+
+    it("color picker has labeled group with aria-labelledby", () => {
+      render(<AddProjectModal {...defaultProps} />);
+      const colorLabel = screen.getByText("Color");
+      expect(colorLabel.id).toBeDefined();
+      // The group is referenced by aria-labelledby
+      expect(colorLabel.tagName.toLowerCase()).toBe("label");
+    });
+
+    it("color buttons have accessible names and aria-pressed state", () => {
+      render(<AddProjectModal {...defaultProps} />);
+      // Default color is Blue (#4073ff)
+      const blueButton = screen.getByLabelText("Blue");
+      expect(blueButton).toBeDefined();
+      expect(blueButton.getAttribute("aria-pressed")).toBe("true");
+
+      // Other colors should have aria-pressed="false"
+      const redButton = screen.getByLabelText("Red");
+      expect(redButton.getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("color selection updates aria-pressed state", () => {
+      render(<AddProjectModal {...defaultProps} />);
+      const berryRedButton = screen.getByLabelText("Berry Red");
+
+      // Initially not selected
+      expect(berryRedButton.getAttribute("aria-pressed")).toBe("false");
+
+      // Click to select
+      fireEvent.click(berryRedButton);
+      expect(berryRedButton.getAttribute("aria-pressed")).toBe("true");
+
+      // Previous selection (Blue) should now be unselected
+      const blueButton = screen.getByLabelText("Blue");
+      expect(blueButton.getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("custom color button has accessible name and aria-pressed state", () => {
+      render(<AddProjectModal {...defaultProps} />);
+      const customButton = screen.getByLabelText("Custom color");
+      expect(customButton).toBeDefined();
+      expect(customButton.getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("view selector has radiogroup role with labeledby", () => {
+      render(<AddProjectModal {...defaultProps} />);
+      const viewLabel = screen.getByText("View");
+      expect(viewLabel.id).toBeDefined();
+
+      // Find the radiogroup container
+      const radiogroup = document.querySelector('[role="radiogroup"]');
+      expect(radiogroup).toBeDefined();
+      expect(radiogroup?.getAttribute("aria-labelledby")).toBe(viewLabel.id);
+    });
+
+    it("view buttons have radio role with aria-checked for selected state", () => {
+      render(<AddProjectModal {...defaultProps} />);
+      const listButton = screen.getByRole("radio", { name: /list/i });
+      const boardButton = screen.getByRole("radio", { name: /board/i });
+      const calendarButton = screen.getByRole("radio", { name: /calendar/i });
+
+      // List is default selected
+      expect(listButton.getAttribute("aria-checked")).toBe("true");
+      expect(boardButton.getAttribute("aria-checked")).toBe("false");
+      expect(calendarButton.getAttribute("aria-checked")).toBe("false");
+    });
+
+    it("view selection updates aria-checked state", () => {
+      render(<AddProjectModal {...defaultProps} />);
+      const listButton = screen.getByRole("radio", { name: /list/i });
+      const boardButton = screen.getByRole("radio", { name: /board/i });
+
+      // Initially List is selected
+      expect(listButton.getAttribute("aria-checked")).toBe("true");
+
+      // Click Board
+      fireEvent.click(boardButton);
+      expect(boardButton.getAttribute("aria-checked")).toBe("true");
+      expect(listButton.getAttribute("aria-checked")).toBe("false");
+    });
   });
 });

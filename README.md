@@ -112,6 +112,15 @@ chmod +x ./ASF-Junban-latest-amd64.AppImage
 
 If you prefer the browser flow, download the `.deb` or `.AppImage` from the release page above and run the same install step on the downloaded file.
 
+Desktop remote access:
+
+- Packaged desktop installs can expose a personal web UI from inside the app.
+- Open `Settings -> Data -> Remote Access`, choose a port, and start the server.
+- Optional password protection is built in, and you can enable auto-start so remote access comes up when the app opens.
+- This is designed for trusted-network access such as Tailscale.
+- When remote access is running, local desktop changes that write data are blocked in the desktop window, including quick capture and import, while remote-access controls remain available there.
+- Only one remote browser session is active at a time. Stop and restart remote access from the desktop app to switch devices.
+
 ## Why Junban
 
 Most task managers force a tradeoff: simple but limited, or powerful but bloated. Junban is built to stay fast for everyday use while still giving you AI, voice, and extensibility when you want them.
@@ -182,10 +191,16 @@ Quick start:
 ```bash
 git clone https://github.com/Artificial-Source/Junban.git
 cd Junban
+corepack enable
 pnpm install
-cp .env.example .env
-pnpm db:migrate
+pnpm setup:dev
 pnpm dev
+```
+
+One-line setup:
+
+```bash
+git clone https://github.com/Artificial-Source/Junban.git && cd Junban && corepack enable && pnpm install && pnpm setup:dev && pnpm dev
 ```
 
 Useful commands:

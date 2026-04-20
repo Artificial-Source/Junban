@@ -179,16 +179,17 @@
 ## useReminders.ts
 
 - **Path:** `src/ui/hooks/useReminders.ts`
-- **Purpose:** Polls for due task reminders and fires callbacks for each. Clears `remindAt` on fired tasks to prevent re-firing.
+- **Purpose:** Polls for due task reminders and fires callbacks for each. Optionally clears `remindAt` on fired tasks to prevent re-firing.
 - **Key Exports:** `useReminders`
 - **Params:** (options object)
   - `onReminder: (task: { id: string; title: string }) => void` -- callback when a reminder fires
   - `enabled?: boolean` -- whether polling is active (default: `true`)
-  - `intervalMs?: number` -- polling interval in milliseconds (default: `30000`)
+  - `intervalMs?: number` -- polling interval in milliseconds (default: `60000`)
+  - `clearReminders?: boolean` -- whether reminder polling should clear `remindAt` after firing (default: `true`)
 - **Return Value:** None (side effect only)
 - **Key Dependencies:** `api` (fetchDueReminders, updateTask)
 - **Used By:** `App.tsx`
-- **Notes:** Uses `setInterval` with configurable polling interval. Tracks already-fired reminders by ID via a ref `Set` to avoid duplicates within the same session. After firing a reminder, calls `api.updateTask` to clear `remindAt` (errors silently caught as non-critical). Runs an initial check shortly after mount to keep startup/network contention lower.
+- **Notes:** Uses `setInterval` with configurable polling interval. Tracks already-fired reminders by ID via a ref `Set` to avoid duplicates within the same session. When `clearReminders` is true, it calls `api.updateTask` to clear `remindAt` after firing (errors silently caught as non-critical). `App.tsx` disables reminder clears while desktop local mutations are blocked by active remote access so polling does not mutate task state in that mode. Runs an initial check shortly after mount to keep startup/network contention lower.
 
 ---
 

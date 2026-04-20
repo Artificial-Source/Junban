@@ -1,5 +1,6 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { TaskInput } from "../components/TaskInput.js";
+import { api } from "../api/index.js";
 import { isTauri } from "../../utils/tauri.js";
 import type { ParsedTask } from "../../parser/task-parser.js";
 
@@ -8,11 +9,13 @@ import type { ParsedTask } from "../../parser/task-parser.js";
  * Contains only a TaskInput — no sidebar, no navigation, no chrome.
  *
  * Lifecycle:
- * - On Enter (task submit): emits `quick-capture-submit` event to main window, then hides
+ * - On Enter (task submit): emits `quick-capture-submit` to the main window when local mutations are available, then hides
  * - On Escape: hides the window
  * - On blur: hides the window
  */
 export function QuickCapture() {
+  const [blockedMessage, setBlockedMessage] = useState<string | null>(null);
+
   const hideWindow = useCallback(async () => {
     if (!isTauri()) return;
     try {
@@ -47,6 +50,14 @@ export function QuickCapture() {
     async (input: ParsedTask) => {
       if (!isTauri()) return;
       try {
+        const remoteServerStatus = await api.getDesktopRemoteServerStatus();
+        if (remoteServerStatus.running) {
+          setBlockedMessage(
+            "Quick capture is unavailable while remote access is running. Stop remote access from the desktop app to add tasks locally.",
+          );
+          return;
+        }
+
         const { emit } = await import("@tauri-apps/api/event");
         await emit("quick-capture-submit", {
           title: input.title,
@@ -60,6 +71,7 @@ export function QuickCapture() {
           deadline: input.deadline ? input.deadline.toISOString() : null,
           isSomeday: input.isSomeday,
         });
+        setBlockedMessage(null);
       } catch {
         // Degrade gracefully
       }
@@ -70,7 +82,15 @@ export function QuickCapture() {
 
   return (
     <div className="h-screen w-screen bg-surface flex items-center px-3 shadow-2xl border border-border rounded-xl">
-      <div className="flex-1">
+      <div className="flex-1 space-y-3">
+        {blockedMessage && (
+          <p
+            role="alert"
+            className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-on-surface-secondary"
+          >
+            {blockedMessage}
+          </p>
+        )}
         <TaskInput
           onSubmit={handleSubmit}
           placeholder='Quick capture... (e.g., "buy milk tomorrow p1 #groceries")'

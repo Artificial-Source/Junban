@@ -243,7 +243,7 @@ Defined in `src/db/schema.ts` using Drizzle ORM. Fourteen tables:
 ### `persistence.ts`
 
 **Path:** `src/db/persistence.ts`
-**Purpose:** Tauri-specific file persistence for the sql.js database. Loads and saves the database binary to the Tauri AppData directory (`ASF Junban/junban.db`).
+**Purpose:** Tauri-specific file persistence for the sql.js database. Loads and saves the database binary to the Tauri AppData directory (`ASF Junban/junban.db`) only for runtimes that still own persistence locally; remote-desktop browsers are hard-blocked from direct database file access and must go through the backend API.
 **Key Exports:**
 
 - `loadDbFile(): Promise<Uint8Array | null>`

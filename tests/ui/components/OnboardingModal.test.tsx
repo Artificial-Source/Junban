@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
+// Mock variables must be declared before the component import
+const mockUpdateSetting = vi.fn();
+const mockSetTheme = vi.fn();
+const mockApprovePluginPermissions = vi.fn();
+
 vi.mock("lucide-react", () => ({
   CheckCircle2: (props: any) => <svg data-testid="icon-check" {...props} />,
   Sparkles: (props: any) => <svg data-testid="icon-sparkles" {...props} />,
@@ -17,20 +22,22 @@ vi.mock("lucide-react", () => ({
   Check: (props: any) => <svg data-testid="icon-check-small" {...props} />,
 }));
 
-const mockUpdateSetting = vi.fn();
-
 vi.mock("../../../src/ui/context/SettingsContext.js", () => ({
   useGeneralSettings: () => ({
     settings: { accent_color: "#3b82f6" },
     loaded: true,
-    updateSetting: mockUpdateSetting,
+    updateSetting: (...args: any[]) => mockUpdateSetting(...args),
   }),
 }));
 
 vi.mock("../../../src/ui/themes/manager.js", () => ({
   themeManager: {
-    setTheme: vi.fn(),
+    setTheme: (...args: any[]) => mockSetTheme(...args),
   },
+}));
+
+vi.mock("../../../src/ui/api/plugins.js", () => ({
+  approvePluginPermissions: (...args: any[]) => mockApprovePluginPermissions(...args),
 }));
 
 import { OnboardingModal } from "../../../src/ui/components/OnboardingModal.js";
@@ -103,6 +110,164 @@ describe("OnboardingModal", () => {
     fireEvent.click(screen.getByText("Start using Junban"));
     await waitFor(() => {
       expect(onComplete).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("mutations blocked", () => {
+    it("skips local writes when mutations are blocked during finish", async () => {
+      const onComplete = vi.fn();
+      render(<OnboardingModal open={true} onComplete={onComplete} mutationsBlocked={true} />);
+
+      // Navigate through to finish
+      fireEvent.click(screen.getByText("Get Started"));
+      fireEvent.click(screen.getByText("Next"));
+      fireEvent.click(screen.getByText("Next"));
+      fireEvent.click(screen.getByText("Set up later"));
+      fireEvent.click(screen.getByText("Start using Junban"));
+
+      await waitFor(() => {
+        expect(onComplete).toHaveBeenCalledTimes(1);
+      });
+
+      // Should not have called any updateSetting
+      expect(mockUpdateSetting).not.toHaveBeenCalled();
+      expect(mockSetTheme).not.toHaveBeenCalled();
+      expect(mockApprovePluginPermissions).not.toHaveBeenCalled();
+    });
+
+    it("does not update theme when selecting theme while mutations blocked", () => {
+      render(<OnboardingModal open={true} onComplete={vi.fn()} mutationsBlocked={true} />);
+
+      fireEvent.click(screen.getByText("Get Started")); // Navigate to theme step
+
+      // Click on a theme
+      fireEvent.click(screen.getByText("Dark"));
+
+      expect(mockSetTheme).not.toHaveBeenCalled();
+    });
+
+    it("does not update accent color when selecting color while mutations blocked", () => {
+      render(<OnboardingModal open={true} onComplete={vi.fn()} mutationsBlocked={true} />);
+
+      fireEvent.click(screen.getByText("Get Started")); // Navigate to theme step
+
+      // The color buttons have aria-labels with the color values
+      const colorButtons = screen.getAllByLabelText(/Accent color/);
+      if (colorButtons.length > 0) {
+        fireEvent.click(colorButtons[1]!);
+      }
+
+      expect(mockUpdateSetting).not.toHaveBeenCalled();
+    });
+
+    it("skips local writes when readOnly prop is true (regression: combined lock state)", async () => {
+      // Regression test: readOnly prop should also block writes
+      const onComplete = vi.fn();
+      render(
+        <OnboardingModal
+          open={true}
+          onComplete={onComplete}
+          mutationsBlocked={false}
+          readOnly={true}
+        />,
+      );
+
+      // Navigate through to finish
+      fireEvent.click(screen.getByText("Get Started"));
+      fireEvent.click(screen.getByText("Next"));
+      fireEvent.click(screen.getByText("Next"));
+      fireEvent.click(screen.getByText("Set up later"));
+      fireEvent.click(screen.getByText("Start using Junban"));
+
+      await waitFor(() => {
+        expect(onComplete).toHaveBeenCalledTimes(1);
+      });
+
+      // Should not have called any updateSetting when readOnly is true
+      expect(mockUpdateSetting).not.toHaveBeenCalled();
+      expect(mockSetTheme).not.toHaveBeenCalled();
+      expect(mockApprovePluginPermissions).not.toHaveBeenCalled();
+    });
+
+    it("skips local writes when either mutationsBlocked OR readOnly is true", async () => {
+      // Combined lock state test: either prop should block writes
+      const onComplete = vi.fn();
+      render(
+        <OnboardingModal
+          open={true}
+          onComplete={onComplete}
+          mutationsBlocked={true}
+          readOnly={true}
+        />,
+      );
+
+      // Navigate through to finish
+      fireEvent.click(screen.getByText("Get Started"));
+      fireEvent.click(screen.getByText("Next"));
+      fireEvent.click(screen.getByText("Next"));
+      fireEvent.click(screen.getByText("Set up later"));
+      fireEvent.click(screen.getByText("Start using Junban"));
+
+      await waitFor(() => {
+        expect(onComplete).toHaveBeenCalledTimes(1);
+      });
+
+      // Should not have called any updateSetting
+      expect(mockUpdateSetting).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("accessibility - radio group semantics", () => {
+    it("theme options have radio roles and aria-checked attributes", () => {
+      render(<OnboardingModal open={true} onComplete={vi.fn()} />);
+      fireEvent.click(screen.getByText("Get Started")); // Navigate to theme step
+
+      // Theme options should be in a radiogroup
+      const themeGroup = screen.getByRole("radiogroup", { name: /theme selection/i });
+      expect(themeGroup).toBeInTheDocument();
+
+      // Each theme option should have role="radio" and aria-checked
+      const themeOptions = screen.getAllByRole("radio");
+      expect(themeOptions.length).toBeGreaterThanOrEqual(3); // At least light, dark, nord
+
+      // One should be checked (the default selected theme)
+      const checkedOption = themeOptions.find(
+        (option) => option.getAttribute("aria-checked") === "true",
+      );
+      expect(checkedOption).toBeDefined();
+    });
+
+    it("accent color options have radio roles and aria-checked attributes", () => {
+      render(<OnboardingModal open={true} onComplete={vi.fn()} />);
+      fireEvent.click(screen.getByText("Get Started")); // Navigate to theme step
+
+      // Accent color group should exist
+      const colorGroup = screen.getByRole("radiogroup", { name: /accent color/i });
+      expect(colorGroup).toBeInTheDocument();
+
+      // Each color should have role="radio"
+      const colorOptions = screen.getAllByRole("radio");
+      expect(colorOptions.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("preset options have radio roles and aria-checked attributes", () => {
+      render(<OnboardingModal open={true} onComplete={vi.fn()} />);
+      fireEvent.click(screen.getByText("Get Started"));
+      fireEvent.click(screen.getByText("Next")); // Navigate to preset step
+
+      // Preset group should exist
+      const presetGroup = screen.getByRole("radiogroup", { name: /feature preset selection/i });
+      expect(presetGroup).toBeInTheDocument();
+
+      // Each preset option should have role="radio"
+      const presetOptions = screen.getAllByRole("radio");
+      expect(presetOptions.length).toBeGreaterThanOrEqual(3); // Minimal, Standard, Everything
+
+      // One should be checked
+      const checkedOption = presetOptions.find(
+        (option) => option.getAttribute("aria-checked") === "true",
+      );
+      expect(checkedOption).toBeDefined();
     });
   });
 });

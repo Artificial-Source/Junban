@@ -192,6 +192,7 @@ Purpose:
 
 - stripped-down capture flow for the quick-capture window
 - minimal chrome, optimized for rapid entry
+- submission flows through the same desktop mutation guard as the main window, so quick capture is blocked while remote access is running
 
 ## AI And Plugin Views
 
@@ -250,7 +251,7 @@ Current tab implementations:
 | `src/ui/views/settings/TemplatesTab.tsx`  | Template management                                                                          |
 | `src/ui/views/settings/AITab.tsx`         | AI provider, briefing, memory, and instruction settings                                      |
 | `src/ui/views/settings/VoiceTab.tsx`      | Voice provider, microphone, and local model settings                                         |
-| `src/ui/views/settings/DataTab.tsx`       | Import, export, and storage/data actions                                                     |
+| `src/ui/views/settings/DataTab.tsx`       | Import, export, storage details, and desktop remote-access controls including port, auto-start, password protection, and the local mutation-guard state; import is blocked while the remote-access lock is active |
 | `src/ui/views/settings/AboutTab.tsx`      | Version, update, and about information                                                       |
 
 Important helper directories:

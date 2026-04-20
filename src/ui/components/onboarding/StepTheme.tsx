@@ -22,14 +22,20 @@ export function StepTheme({
         Choose a theme and accent color
       </p>
 
-      {/* Theme cards */}
-      <div className="flex gap-3 justify-center mb-5">
+      {/* Theme cards - accessible radio group */}
+      <div
+        role="radiogroup"
+        aria-label="Theme selection"
+        className="flex gap-3 justify-center mb-5"
+      >
         {THEME_OPTIONS.map((theme) => {
           const Icon = theme.icon;
           const isSelected = selectedTheme === theme.id;
           return (
             <button
               key={theme.id}
+              role="radio"
+              aria-checked={isSelected}
               onClick={() => onThemeSelect(theme.id)}
               className={`w-[130px] rounded-2xl border-2 p-3 flex flex-col items-center justify-center gap-2 transition-all hover:scale-[1.02] ${theme.cardBg} ${
                 isSelected
@@ -50,25 +56,36 @@ export function StepTheme({
         })}
       </div>
 
-      {/* Accent color picker */}
+      {/* Accent color picker - accessible radio group */}
       <div>
-        <p className="text-[13px] font-medium text-on-surface-muted mb-2.5">Accent color</p>
-        <div className="flex items-center gap-2.5 flex-wrap">
-          {ACCENT_COLORS.map((color) => (
-            <button
-              key={color}
-              onClick={() => onAccentSelect(color)}
-              aria-label={`Accent color ${color}`}
-              className={`rounded-full flex items-center justify-center transition-all ${
-                selectedAccent === color
-                  ? "w-8 h-8 ring-2 ring-offset-2 ring-offset-surface ring-current"
-                  : "w-7 h-7 hover:scale-110"
-              }`}
-              style={{ backgroundColor: color }}
-            >
-              {selectedAccent === color && <Check size={14} className="text-white drop-shadow" />}
-            </button>
-          ))}
+        <p className="text-[13px] font-medium text-on-surface-muted mb-2.5" id="accent-color-label">
+          Accent color
+        </p>
+        <div
+          role="radiogroup"
+          aria-labelledby="accent-color-label"
+          className="flex items-center gap-2.5 flex-wrap"
+        >
+          {ACCENT_COLORS.map((color) => {
+            const isSelected = selectedAccent === color;
+            return (
+              <button
+                key={color}
+                role="radio"
+                aria-checked={isSelected}
+                aria-label={`Accent color ${color}`}
+                onClick={() => onAccentSelect(color)}
+                className={`rounded-full flex items-center justify-center transition-all ${
+                  isSelected
+                    ? "w-8 h-8 ring-2 ring-offset-2 ring-offset-surface ring-current"
+                    : "w-7 h-7 hover:scale-110"
+                }`}
+                style={{ backgroundColor: color }}
+              >
+                {isSelected && <Check size={14} className="text-white drop-shadow" />}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

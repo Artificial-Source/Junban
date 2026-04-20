@@ -89,6 +89,40 @@ describe("useAppShortcuts", () => {
     expect(registeredIds).toContain("quick-add-ctrl");
   });
 
+  it("blocks undo and mutation openers while local mutations are blocked", () => {
+    const setFocusModeOpen = vi.fn();
+    const setQuickAddOpen = vi.fn();
+    const onBlockedMutationAttempt = vi.fn();
+
+    renderHook(() =>
+      useAppShortcuts(
+        setCommandPaletteOpen,
+        undo,
+        redo,
+        undefined,
+        setFocusModeOpen,
+        setQuickAddOpen,
+        undefined,
+        true,
+        true,
+        onBlockedMutationAttempt,
+      ),
+    );
+
+    const shortcutById = new Map(
+      mockRegister.mock.calls.map((call: any[]) => [call[0].id, call[0].callback]),
+    );
+
+    shortcutById.get("undo")?.();
+    shortcutById.get("focus-mode")?.();
+    shortcutById.get("quick-add")?.();
+
+    expect(undo).not.toHaveBeenCalled();
+    expect(setFocusModeOpen).not.toHaveBeenCalled();
+    expect(setQuickAddOpen).not.toHaveBeenCalled();
+    expect(onBlockedMutationAttempt).toHaveBeenCalledTimes(3);
+  });
+
   it("loads custom bindings from settings", async () => {
     vi.useFakeTimers();
     try {

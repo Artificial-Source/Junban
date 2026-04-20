@@ -7,6 +7,7 @@ Junban is a local-first application. By default, no data leaves the user's machi
 1. **Plugin sandboxing** — community plugins must not be able to harm the host system
 2. **Data integrity** — task data must not be corrupted or lost
 3. **Supply chain** — dependencies must be audited and minimal
+4. **Remote access exposure** — packaged desktop remote access must stay limited to trusted networks and a single active browser session
 
 ## Threat Model
 
@@ -27,6 +28,7 @@ Junban is a local-first application. By default, no data leaves the user's machi
 | Compromised dependency | Supply chain attack | Medium |
 | Local attacker (shared machine) | Read sensitive task data | Low |
 | Network attacker | Intercept sync data | Low (no network by default) |
+| Remote-network attacker | Reach a user-enabled remote-access endpoint | Medium when the feature is enabled |
 
 ### Attack Surfaces
 
@@ -37,6 +39,7 @@ Junban is a local-first application. By default, no data leaves the user's machi
 | Natural language parser | Input injection | Parser produces structured data, no eval |
 | SQLite database | SQL injection | Drizzle ORM parameterized queries |
 | CLI arguments | Command injection | Commander.js argument parsing, no shell exec |
+| Desktop remote access | Unauthorized browser access, accidental exposure | Off by default, trusted-network guidance, optional password, single-session lock, local mutation guard |
 | Sync (future) | MITM, data tampering | TLS required, integrity checks |
 
 ## Plugin Sandboxing
@@ -166,6 +169,34 @@ Task data is stored unencrypted in local files. This is a deliberate trade-off:
 For users who need encryption at rest, we recommend:
 - Full-disk encryption (FileVault, BitLocker, LUKS)
 - Encrypted containers (VeraCrypt) for the `data/` directory
+
+## Desktop Remote Access
+
+Packaged desktop builds can optionally expose a personal remote-access web UI. This changes the threat model because the app is no longer purely local while the endpoint is running.
+
+### Security posture
+
+- **Off by default**: remote access is only available after the user enables it from `Settings -> Data -> Remote Access`.
+- **Trusted-network feature**: it is intended for LAN or overlay-network use such as Tailscale, not direct public-internet exposure.
+- **Single active browser session**: only one remote browser can hold the live session at a time. To switch devices, the user must stop and restart remote access from the desktop app.
+- **Optional password gate**: users can require a password before the first browser session is authorized.
+- **Local mutation guard**: while remote access is running, local desktop write actions are blocked so the desktop UI does not race the remote browser for changes.
+
+### What the built-in protections do
+
+| Control | Purpose |
+|---------|---------|
+| Optional password | Prevents opportunistic access on a trusted network when enabled |
+| Session cookie after login | Keeps the authorized browser connected without re-entering the password on every request |
+| Single-session claim/lock | Prevents multiple remote browsers from mutating the same live desktop session |
+| Desktop mutation lock | Keeps local desktop edits, quick capture, and imports from writing while the remote browser is active |
+
+### Operator guidance
+
+- Prefer Tailscale, a private LAN, or another trusted/private network path.
+- Do **not** expose the built-in remote-access port directly to the public internet.
+- Turn on password protection when the feature is enabled anywhere beyond a tightly controlled local network.
+- If you suspect the wrong browser has access, stop remote access from the desktop app and start it again before reconnecting.
 
 ### Future: Sync Security
 

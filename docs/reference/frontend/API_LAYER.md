@@ -10,9 +10,9 @@ The API layer provides a unified interface for the React frontend to interact wi
 
 1. **Server mode** (default) -- makes HTTP `fetch` calls to the Hono API at `/api/*`
 2. **Packaged desktop mode** -- makes HTTP `fetch` calls to the localhost Node sidecar API
-3. **Direct-services mode** -- lazy-loads `bootstrapWeb()` for browser-owned embedded runtimes such as the current remote-desktop browser path
+3. **Direct-services mode** -- lazy-loads `bootstrapWeb()` only for browser-owned embedded runtimes that still keep persistence in-browser
 
-`helpers.ts` decides which transport to use based on the active runtime. This keeps the packaged desktop app on the backend-owned data/API path while preserving the existing browser/direct-services path where a backend is not present.
+`helpers.ts` decides which transport to use based on the active runtime. This keeps packaged desktop and remote-desktop clients on the backend-owned data/API path while preserving the direct-services loader for runtimes that still do not have a backend.
 
 This reference summarizes stable transport contracts. For exact request/response shapes and implementation details, treat each source file in `src/ui/api/` as canonical.
 
@@ -21,6 +21,7 @@ src/ui/api/
   index.ts       -- Barrel export combining non-AI modules into a single `api` object
   helpers.ts     -- Shared utilities (runtime-aware API base, readiness validation, response handlers)
   direct-services.ts -- Lazy Tauri/bootstrap service loader for in-process mode
+  desktop-server.ts -- Packaged-desktop remote-access config/status helpers and remote session actions
   tasks.ts       -- Task CRUD, bulk operations, tree operations, import
   projects.ts    -- Project CRUD, tag listing
   templates.ts   -- Template CRUD and instantiation
@@ -57,7 +58,7 @@ src/ui/api/
   - `waitForDesktopApiReady(): Promise<void>` -- packaged-desktop startup guard that validates the runtime-provided sidecar health contract before API helpers are used
   - `handleResponse<T>(res: Response): Promise<T>` -- parses JSON response, throws on HTTP error (extracts `error` field from JSON body if available)
   - `handleVoidResponse(res: Response): Promise<void>` -- checks for HTTP error without parsing body
-- **Notes:** In packaged desktop mode, Tauri injects `window.__JUNBAN_RUNTIME_READY__` before the UI imports API helpers. That handshake provides the sidecar's dynamic localhost API base plus `ready/error` status. `waitForDesktopApiReady()` first honors that descriptor; only ready descriptors proceed to the health-check probe, and unready descriptors fail fast so the shell can render a controlled startup error state. After startup, the runtime layer also listens for `junban:desktop-runtime-descriptor-changed` events from the Tauri shell and updates `window.__JUNBAN_RUNTIME__` in place so API calls stop using stale ready descriptors if the sidecar later dies.
+- **Notes:** In packaged desktop mode, Tauri injects `window.__JUNBAN_RUNTIME_READY__` before the UI imports API helpers. That handshake provides the sidecar's dynamic localhost API base plus `ready/error` status. `waitForDesktopApiReady()` first honors that descriptor; only ready descriptors proceed to the health-check probe, and unready descriptors fail fast so the shell can render a controlled startup error state. After startup, the runtime layer also listens for `junban:desktop-runtime-descriptor-changed` events from the Tauri shell and updates `window.__JUNBAN_RUNTIME__` in place so API calls stop using stale ready descriptors if the sidecar later dies. Remote-desktop browsers still use the remote runtime gate/UI, but once authorized they stay on ordinary `fetch("/api/*")` calls and let the Rust host proxy those requests to the desktop sidecar backend. The remote session status read is now side-effect free; passwordless browsers must explicitly `POST` a claim action before API access is authorized.
 
 ---
 
@@ -68,7 +69,22 @@ src/ui/api/
 - **Key Exports:**
   - `getServices(): Promise<WebServices>` -- lazy-loads and caches `bootstrapWeb()`
   - `WebServices` type -- the return type of `bootstrapWeb()`
-- **Notes:** Split out of `helpers.ts` so the common API helper path does not automatically drag the heavy in-process bootstrap loader into every startup module. `getServices()` lazily imports `../../bootstrap-web.js` and caches the result. Packaged desktop no longer uses this path for its main window; it remains for runtime shapes that still own persistence in-browser.
+- **Notes:** Split out of `helpers.ts` so the common API helper path does not automatically drag the heavy in-process bootstrap loader into every startup module. `getServices()` lazily imports `../../bootstrap-web.js` and caches the result. Packaged desktop and the remote-desktop browser path no longer use this path for normal app traffic; it remains for runtime shapes that still own persistence in-browser.
+
+---
+
+## desktop-server.ts
+
+- **Path:** `src/ui/api/desktop-server.ts`
+- **Purpose:** Thin transport helpers for packaged-desktop remote access settings plus the remote-browser session gate.
+- **Key Exports:**
+  - `getDesktopRemoteServerStatus()` / `startDesktopRemoteServer()` / `stopDesktopRemoteServer()`
+  - `getDesktopRemoteServerConfig()` / `updateDesktopRemoteServerConfig()`
+  - `DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT` -- packaged-desktop status sync event for banner/settings UI
+  - `getRemoteSessionStatus()` -- read-only session status fetch
+  - `claimRemoteSession()` -- explicit passwordless `POST` claim action
+  - `loginRemoteSession()` -- passworded `POST` claim action
+- **Notes:** Remote browsers should never infer authorization from `GET /_junban/session`. They first read status, then explicitly claim a session with `claimRemoteSession()` when passwordless access is allowed, or `loginRemoteSession()` when password protection is enabled. The packaged desktop UI also dispatches `DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT` after start/stop/status reads so the startup banner, mutation guard, and Settings → Data controls stay synchronized. The Rust host now enforces same-origin browser metadata (`Origin` with `Referer` fallback) for these POST actions and can return lockout responses (`HTTP 429`) after repeated failed password attempts.
 
 ---
 

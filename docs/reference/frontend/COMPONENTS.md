@@ -1086,3 +1086,18 @@ Onboarding helper files:
 - **Key Dependencies:** `useReducedMotion` from `./useReducedMotion.js`
 - **Used By:** `TaskItem.tsx` (on completion toggle)
 - **Notes:** Returns `null` when `active` is false or reduced motion is preferred. Uses CSS custom properties `--burst-angle` and `--burst-color` for each particle. Colors cycle through success (green), accent (indigo), and warning (amber) using CSS variables. Animation defined in `index.css` via `completion-burst-particle` class.
+
+---
+
+## Runtime & Access Components
+
+### RemoteAccessGate.tsx
+
+- **Path:** `src/ui/components/RemoteAccessGate.tsx`
+- **Purpose:** Remote-browser startup gate for the desktop sidecar. Checks session ownership, prompts for password unlock when required, and gates access until the browser is authorized.
+- **Key Exports:** `RemoteAccessGate`
+- **Props:**
+  - `children: ReactNode` -- the app shell/content shown only after authorization
+- **Key Dependencies:** `ui/api/desktop-server.ts` (`getRemoteSessionStatus`, `loginRemoteSession`, `claimRemoteSession`), `isRemoteDesktopRuntime`, `lucide-react`
+- **Used By:** `src/ui/main.tsx`
+- **Notes:** In remote runtime, it loads session status once and renders one of three states: session locked by another browser, password unlock flow, or explicit connect flow for passwordless sessions. Async unlock/connect/refresh failures are surfaced through a stable assertive live region (`role="alert"`) so assistive tech announces failures reliably without depending on remounting transient error nodes.

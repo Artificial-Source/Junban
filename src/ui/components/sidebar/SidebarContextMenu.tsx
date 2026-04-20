@@ -30,6 +30,7 @@ export function useSidebarContextMenu({
   onOpenSettings,
   orderedSidebarItems,
   hasHiddenViews,
+  mutationsBlocked,
 }: {
   ctxMenu: ContextMenuState | null;
   favoriteViewIds: Set<string>;
@@ -38,6 +39,7 @@ export function useSidebarContextMenu({
   onOpenSettings?: () => void;
   orderedSidebarItems: string[];
   hasHiddenViews: boolean;
+  mutationsBlocked: boolean;
 }) {
   return useMemo(() => {
     if (!ctxMenu) return [];
@@ -57,12 +59,15 @@ export function useSidebarContextMenu({
       id: "favorite",
       label: isFavorited ? "Remove from Favorites" : "Add to Favorites",
       icon: <Heart size={14} />,
-      onClick: () => {
-        const current = new Set(favoriteViewIds);
-        if (isFavorited) current.delete(itemId);
-        else current.add(itemId);
-        updateSetting("sidebar_favorite_views", [...current].join(","));
-      },
+      disabled: mutationsBlocked,
+      onClick: mutationsBlocked
+        ? undefined
+        : () => {
+            const current = new Set(favoriteViewIds);
+            if (isFavorited) current.delete(itemId);
+            else current.add(itemId);
+            updateSetting("sidebar_favorite_views", [...current].join(","));
+          },
     });
 
     // ── Group 2: Set as Home ──
@@ -72,8 +77,8 @@ export function useSidebarContextMenu({
       label: isHome ? "Home view" : "Set as Home view",
       icon: <Home size={14} />,
       separator: true,
-      disabled: isHome,
-      onClick: isHome ? undefined : () => updateSetting("start_view", itemId),
+      disabled: mutationsBlocked || isHome,
+      onClick: mutationsBlocked || isHome ? undefined : () => updateSetting("start_view", itemId),
     });
 
     // Copy link
@@ -97,7 +102,8 @@ export function useSidebarContextMenu({
         label: "Hide from sidebar",
         icon: <EyeOff size={14} />,
         separator: true,
-        onClick: () => updateSetting(featureKey, "false"),
+        disabled: mutationsBlocked,
+        onClick: mutationsBlocked ? undefined : () => updateSetting(featureKey, "false"),
       });
 
       // Hide others — hide all optional views except this one
@@ -109,12 +115,15 @@ export function useSidebarContextMenu({
           id: "hide-others",
           label: "Hide others",
           icon: <EyeOff size={14} />,
-          onClick: () => {
-            for (const otherId of otherOptionalVisible) {
-              const key = NAV_FEATURE_MAP[otherId];
-              if (key) updateSetting(key, "false");
-            }
-          },
+          disabled: mutationsBlocked,
+          onClick: mutationsBlocked
+            ? undefined
+            : () => {
+                for (const otherId of otherOptionalVisible) {
+                  const key = NAV_FEATURE_MAP[otherId];
+                  if (key) updateSetting(key, "false");
+                }
+              },
         });
       }
     }
@@ -136,11 +145,14 @@ export function useSidebarContextMenu({
         label: "Show all hidden",
         icon: <Eye size={14} />,
         separator: !featureKey && !CORE_VIEWS.has(itemId),
-        onClick: () => {
-          for (const [, key] of Object.entries(NAV_FEATURE_MAP)) {
-            if (settings[key] === "false") updateSetting(key, "true");
-          }
-        },
+        disabled: mutationsBlocked,
+        onClick: mutationsBlocked
+          ? undefined
+          : () => {
+              for (const [, key] of Object.entries(NAV_FEATURE_MAP)) {
+                if (settings[key] === "false") updateSetting(key, "true");
+              }
+            },
       });
     }
 
@@ -153,11 +165,14 @@ export function useSidebarContextMenu({
         label: "Move to top",
         icon: <ArrowUpToLine size={14} />,
         separator: true,
-        onClick: () => {
-          const reordered = orderedSidebarItems.filter((id) => id !== itemId);
-          reordered.unshift(itemId);
-          updateSetting("sidebar_section_order", reordered.join(","));
-        },
+        disabled: mutationsBlocked,
+        onClick: mutationsBlocked
+          ? undefined
+          : () => {
+              const reordered = orderedSidebarItems.filter((id) => id !== itemId);
+              reordered.unshift(itemId);
+              updateSetting("sidebar_section_order", reordered.join(","));
+            },
       });
     }
 
@@ -166,11 +181,14 @@ export function useSidebarContextMenu({
         id: "move-bottom",
         label: "Move to bottom",
         icon: <ArrowDownToLine size={14} />,
-        onClick: () => {
-          const reordered = orderedSidebarItems.filter((id) => id !== itemId);
-          reordered.push(itemId);
-          updateSetting("sidebar_section_order", reordered.join(","));
-        },
+        disabled: mutationsBlocked,
+        onClick: mutationsBlocked
+          ? undefined
+          : () => {
+              const reordered = orderedSidebarItems.filter((id) => id !== itemId);
+              reordered.push(itemId);
+              updateSetting("sidebar_section_order", reordered.join(","));
+            },
       });
     }
 
@@ -179,10 +197,13 @@ export function useSidebarContextMenu({
         id: "reset-order",
         label: "Reset order",
         icon: <RotateCcw size={14} />,
-        onClick: () => {
-          updateSetting("sidebar_section_order", "");
-          if (settings.sidebar_nav_order) updateSetting("sidebar_nav_order", "");
-        },
+        disabled: mutationsBlocked,
+        onClick: mutationsBlocked
+          ? undefined
+          : () => {
+              updateSetting("sidebar_section_order", "");
+              if (settings.sidebar_nav_order) updateSetting("sidebar_nav_order", "");
+            },
       });
     }
 
@@ -194,6 +215,7 @@ export function useSidebarContextMenu({
     onOpenSettings,
     orderedSidebarItems,
     hasHiddenViews,
+    mutationsBlocked,
     updateSetting,
   ]);
 }
@@ -204,6 +226,7 @@ export function useSidebarEmptyContextMenu({
   onOpenProjectModal,
   onAddTask,
   onOpenSettings,
+  addActionsDisabled,
   settings,
   updateSetting,
 }: {
@@ -211,6 +234,7 @@ export function useSidebarEmptyContextMenu({
   onOpenProjectModal?: () => void;
   onAddTask?: () => void;
   onOpenSettings?: () => void;
+  addActionsDisabled: boolean;
   settings: GeneralSettings;
   updateSetting: (key: keyof GeneralSettings, value: string) => void;
 }) {
@@ -230,7 +254,8 @@ export function useSidebarEmptyContextMenu({
         id: "new-project",
         label: "New Project",
         icon: <FolderPlus size={14} />,
-        onClick: onOpenProjectModal,
+        disabled: addActionsDisabled,
+        onClick: addActionsDisabled ? undefined : onOpenProjectModal,
       });
     }
 
@@ -239,7 +264,8 @@ export function useSidebarEmptyContextMenu({
         id: "add-task",
         label: "Add Task",
         icon: <ListPlus size={14} />,
-        onClick: onAddTask,
+        disabled: addActionsDisabled,
+        onClick: addActionsDisabled ? undefined : onAddTask,
       });
     }
 
@@ -258,13 +284,24 @@ export function useSidebarEmptyContextMenu({
         id: "reset-order",
         label: "Reset Order",
         icon: <RotateCcw size={14} />,
-        onClick: () => {
-          updateSetting("sidebar_section_order", "");
-          if (settings.sidebar_nav_order) updateSetting("sidebar_nav_order", "");
-        },
+        disabled: addActionsDisabled,
+        onClick: addActionsDisabled
+          ? undefined
+          : () => {
+              updateSetting("sidebar_section_order", "");
+              if (settings.sidebar_nav_order) updateSetting("sidebar_nav_order", "");
+            },
       });
     }
 
     return items;
-  }, [position, onOpenProjectModal, onAddTask, onOpenSettings, settings, updateSetting]);
+  }, [
+    position,
+    onOpenProjectModal,
+    onAddTask,
+    onOpenSettings,
+    addActionsDisabled,
+    settings,
+    updateSetting,
+  ]);
 }

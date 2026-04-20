@@ -8,7 +8,13 @@ import {
   type ReactNode,
 } from "react";
 import { getAllSettings, setAppSetting } from "../api/settings.js";
+import {
+  DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT,
+  getDesktopRemoteServerStatus,
+  type DesktopRemoteServerStatus,
+} from "../api/desktop-server.js";
 import { createLogger } from "../../utils/logger.js";
+import { isTauri } from "../../utils/tauri.js";
 
 const log = createLogger("settings");
 
@@ -117,12 +123,14 @@ const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS) as (keyof GeneralSettings)[];
 interface SettingsContextValue {
   settings: GeneralSettings;
   loaded: boolean;
+  readOnly: boolean;
   updateSetting: <K extends keyof GeneralSettings>(key: K, value: GeneralSettings[K]) => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue>({
   settings: DEFAULT_SETTINGS,
   loaded: false,
+  readOnly: false,
   updateSetting: () => {},
 });
 
@@ -202,6 +210,7 @@ function applyFontFamily(family: GeneralSettings["font_family"]) {
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<GeneralSettings>(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
+  const [readOnly, setReadOnly] = useState(false);
 
   // Load all settings on mount via single batch fetch
   useEffect(() => {
@@ -234,8 +243,53 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+
+    let mounted = true;
+
+    const applyRemoteStatus = (status: DesktopRemoteServerStatus) => {
+      if (!mounted) {
+        return;
+      }
+
+      setReadOnly(status.running);
+    };
+
+    const handleStatusChange = (event: Event) => {
+      applyRemoteStatus((event as CustomEvent<DesktopRemoteServerStatus>).detail);
+    };
+
+    window.addEventListener(
+      DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT,
+      handleStatusChange as EventListener,
+    );
+
+    void getDesktopRemoteServerStatus()
+      .then(applyRemoteStatus)
+      .catch((err: unknown) => {
+        log.warn("Failed to read remote server status for settings lock", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+
+    return () => {
+      mounted = false;
+      window.removeEventListener(
+        DESKTOP_REMOTE_SERVER_STATUS_CHANGED_EVENT,
+        handleStatusChange as EventListener,
+      );
+    };
+  }, []);
+
   const updateSetting = useCallback(
     <K extends keyof GeneralSettings>(key: K, value: GeneralSettings[K]) => {
+      if (readOnly) {
+        return;
+      }
+
       setSettings((prev) => {
         const next = { ...prev, [key]: value };
         if (key === "accent_color") applyAccentColor(value as string);
@@ -253,14 +307,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         }),
       );
     },
-    [],
+    [readOnly],
   );
 
   return (
     <SettingsContext.Provider
       value={useMemo(
-        () => ({ settings, loaded, updateSetting }),
-        [settings, loaded, updateSetting],
+        () => ({ settings, loaded, readOnly, updateSetting }),
+        [settings, loaded, readOnly, updateSetting],
       )}
     >
       {children}

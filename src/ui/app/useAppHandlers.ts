@@ -32,6 +32,8 @@ interface UseAppHandlersParams {
     React.SetStateAction<import("../../core/types.js").TaskActivity[]>
   >;
   tasks: Task[];
+  mutationsBlocked: boolean;
+  onMutationBlocked: () => void;
 }
 
 /**
@@ -56,6 +58,8 @@ export function useAppHandlers({
   setTaskComments,
   setTaskActivity,
   tasks,
+  mutationsBlocked,
+  onMutationBlocked,
 }: UseAppHandlersParams) {
   const { createTask } = useTaskContext();
 
@@ -311,6 +315,11 @@ export function useAppHandlers({
           deadline: string | null;
           isSomeday: boolean;
         }>("quick-capture-submit", (event) => {
+          if (mutationsBlocked) {
+            onMutationBlocked();
+            return;
+          }
+
           const data = event.payload;
           handleCreateTask({
             title: data.title,
@@ -334,7 +343,7 @@ export function useAppHandlers({
     return () => {
       unlisten?.();
     };
-  }, [handleCreateTask]);
+  }, [handleCreateTask, mutationsBlocked, onMutationBlocked]);
 
   return {
     handleCreateProject,

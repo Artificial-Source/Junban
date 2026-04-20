@@ -16,20 +16,24 @@ export function StepPreset({
       <p className="text-sm text-on-surface-muted text-center mt-1 mb-6">
         Start simple. You can always add more later in Settings.
       </p>
-      <div className="space-y-3">
+      {/* Accessible radio group for preset selection */}
+      <div role="radiogroup" aria-label="Feature preset selection" className="space-y-3">
         {PRESET_OPTIONS.map((option) => {
           const Icon = option.icon;
           const isSelected = selectedPreset === option.key;
           return (
             <button
               key={option.key}
+              role="radio"
+              aria-checked={isSelected}
               onClick={() => onPresetSelect(option.key)}
               className={`w-full flex items-center gap-3.5 px-4 py-4 rounded-[14px] border-2 text-left transition-all hover:scale-[1.01] ${
                 isSelected ? "border-accent" : "border-border hover:border-on-surface-muted/30"
               }`}
             >
-              {/* Radio dot */}
+              {/* Radio dot with visual selected state */}
               <div
+                aria-hidden="true"
                 className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
                   isSelected
                     ? "border-[6px] border-accent bg-white"

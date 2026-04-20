@@ -4,6 +4,9 @@ export interface OnboardingModalProps {
   open: boolean;
   onComplete: () => void;
   onRequestOpenSettings?: (tab: string) => void;
+  mutationsBlocked?: boolean;
+  /** Explicit readOnly flag from settings context. If true, final writes are skipped. */
+  readOnly?: boolean;
 }
 
 export type ThemeId = "light" | "dark" | "nord";

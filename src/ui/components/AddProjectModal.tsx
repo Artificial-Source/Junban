@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { X, Check, Smile, Palette, List, Columns3, Calendar } from "lucide-react";
 import EmojiPicker, { Theme } from "emoji-picker-react";
 import { DEFAULT_PROJECT_COLORS, PROJECT_COLOR_LABELS } from "../../config/defaults.js";
@@ -49,6 +49,9 @@ export function AddProjectModal({
   const [viewStyle, setViewStyle] = useState<"list" | "board" | "calendar">("list");
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
 
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
@@ -77,30 +80,27 @@ export function AddProjectModal({
     (p) => !p.archived && p.parentId === null && !excludedParentIds.has(p.id),
   );
 
-  // Reset form + autofocus on open
+  // Store previous focus and restore on close
   useEffect(() => {
     if (!open) return;
 
-    const nextName = initialProject?.name ?? "";
-    const nextEmoji = initialProject?.icon ?? "";
-    const nextColor = initialProject?.color ?? DEFAULT_PROJECT_COLORS[10];
-    const nextParentId = initialProject?.parentId ?? defaultParentId;
-    const nextIsFavorite = initialProject?.isFavorite ?? false;
-    const nextViewStyle = initialProject?.viewStyle ?? "list";
-    const isCustomColor = !(DEFAULT_PROJECT_COLORS as readonly string[]).includes(nextColor);
+    // Store previously focused element
+    previousFocusRef.current = document.activeElement as HTMLElement;
 
-    setName(nextName);
-    setEmoji(nextEmoji);
-    setColor(nextColor);
-    setCustomHex(isCustomColor ? nextColor : "");
-    setShowCustomHex(isCustomColor);
-    setParentId(nextParentId);
-    setIsFavorite(nextIsFavorite);
-    setViewStyle(nextViewStyle);
-    setEmojiPickerOpen(false);
-    const timer = setTimeout(() => nameRef.current?.focus(), 50);
-    return () => clearTimeout(timer);
-  }, [open, initialProject, defaultParentId]);
+    // Focus the close button first (or name input after a delay)
+    const timer = setTimeout(() => {
+      closeButtonRef.current?.focus();
+      nameRef.current?.focus();
+    }, 50);
+
+    return () => {
+      clearTimeout(timer);
+      // Restore focus when modal closes
+      if (previousFocusRef.current && typeof previousFocusRef.current.focus === "function") {
+        setTimeout(() => previousFocusRef.current?.focus(), 0);
+      }
+    };
+  }, [open]);
 
   // Keyboard: Escape closes
   useEffect(() => {
@@ -136,6 +136,65 @@ export function AddProjectModal({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [emojiPickerOpen]);
 
+  // Reset form state when opening with new data
+  useEffect(() => {
+    if (!open) return;
+
+    const nextName = initialProject?.name ?? "";
+    const nextEmoji = initialProject?.icon ?? "";
+    const nextColor = initialProject?.color ?? DEFAULT_PROJECT_COLORS[10];
+    const nextParentId = initialProject?.parentId ?? defaultParentId;
+    const nextIsFavorite = initialProject?.isFavorite ?? false;
+    const nextViewStyle = initialProject?.viewStyle ?? "list";
+    const isCustomColor = !(DEFAULT_PROJECT_COLORS as readonly string[]).includes(nextColor);
+
+    setName(nextName);
+    setEmoji(nextEmoji);
+    setColor(nextColor);
+    setCustomHex(isCustomColor ? nextColor : "");
+    setShowCustomHex(isCustomColor);
+    setParentId(nextParentId);
+    setIsFavorite(nextIsFavorite);
+    setViewStyle(nextViewStyle);
+    setEmojiPickerOpen(false);
+  }, [open, initialProject, defaultParentId]);
+
+  // Focus trap: keep focus within modal
+  const handleModalKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab" || !modalRef.current) return;
+
+    const candidates = modalRef.current.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href]:not([disabled]), input:not([disabled]):not([type="hidden"]):not([type="file"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])',
+    );
+
+    const focusableElements = Array.from(candidates).filter((el) => {
+      if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return false;
+      if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "file") return false;
+
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden";
+    });
+
+    if (focusableElements.length === 0) return;
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (e.shiftKey) {
+      // Shift + Tab: going backwards
+      if (document.activeElement === firstElement) {
+        e.preventDefault();
+        lastElement?.focus();
+      }
+    } else {
+      // Tab: going forwards
+      if (document.activeElement === lastElement) {
+        e.preventDefault();
+        firstElement?.focus();
+      }
+    }
+  }, []);
+
   if (!open) return null;
 
   const canSubmit = name.trim().length > 0;
@@ -153,6 +212,7 @@ export function AddProjectModal({
 
   return (
     <div
+      ref={modalRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-in fade-in duration-150"
       role="dialog"
       aria-modal="true"
@@ -160,6 +220,7 @@ export function AddProjectModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
+      onKeyDown={handleModalKeyDown}
     >
       <div className="bg-surface rounded-xl shadow-2xl max-w-md w-full mx-4 border border-border animate-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
         {/* Header */}
@@ -168,9 +229,10 @@ export function AddProjectModal({
             {title}
           </h2>
           <button
+            ref={closeButtonRef}
             onClick={onClose}
             aria-label="Close"
-            className="p-1 rounded-md text-on-surface-muted hover:text-on-surface-secondary hover:bg-surface-tertiary transition-colors"
+            className="p-1 rounded-md text-on-surface-muted hover:text-on-surface-secondary hover:bg-surface-tertiary transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface"
           >
             <X size={18} />
           </button>
@@ -193,8 +255,10 @@ export function AddProjectModal({
                   ref={emojiButtonRef}
                   type="button"
                   onClick={() => setEmojiPickerOpen(!emojiPickerOpen)}
-                  className="flex items-center justify-center w-10 h-10 rounded-lg border border-border bg-surface hover:bg-surface-tertiary transition-colors text-lg"
-                  title="Pick an emoji"
+                  className="flex items-center justify-center w-10 h-10 rounded-lg border border-border bg-surface hover:bg-surface-tertiary transition-colors text-lg focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface"
+                  aria-label={emoji ? `Change emoji: currently ${emoji}` : "Pick an emoji"}
+                  aria-expanded={emojiPickerOpen}
+                  aria-haspopup="dialog"
                 >
                   {emoji ? (
                     <span>{emoji}</span>
@@ -225,7 +289,7 @@ export function AddProjectModal({
                   value={name}
                   onChange={(e) => setName(e.target.value.slice(0, MAX_NAME_LENGTH))}
                   placeholder="My project"
-                  className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-2 focus:ring-accent"
+                  className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-2 focus:ring-accent focus-visible:ring-2 focus-visible:ring-accent"
                 />
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-on-surface-muted">
                   {name.length}/{MAX_NAME_LENGTH}
@@ -235,8 +299,8 @@ export function AddProjectModal({
                 <button
                   type="button"
                   onClick={() => setEmoji("")}
-                  className="p-1 rounded text-on-surface-muted hover:text-on-surface-secondary transition-colors"
-                  title="Clear emoji"
+                  className="p-1 rounded text-on-surface-muted hover:text-on-surface-secondary transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface"
+                  aria-label="Clear emoji"
                 >
                   <X size={14} />
                 </button>
@@ -246,35 +310,48 @@ export function AddProjectModal({
 
           {/* Color */}
           <div>
-            <label className="block text-xs font-medium text-on-surface-secondary mb-1.5">
+            <label
+              id="project-color-label"
+              className="block text-xs font-medium text-on-surface-secondary mb-1.5"
+            >
               Color
             </label>
-            <div className="flex flex-wrap gap-2">
-              {DEFAULT_PROJECT_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => {
-                    setColor(c);
-                    setShowCustomHex(false);
-                  }}
-                  title={PROJECT_COLOR_LABELS[c] ?? c}
-                  className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
-                    color === c
-                      ? "ring-2 ring-offset-2 ring-offset-surface ring-on-surface-secondary scale-110"
-                      : "hover:scale-110"
-                  }`}
-                  style={{ backgroundColor: c }}
-                >
-                  {color === c && <Check size={12} className="text-white drop-shadow-sm" />}
-                </button>
-              ))}
+            <div
+              role="group"
+              aria-labelledby="project-color-label"
+              className="flex flex-wrap gap-2"
+            >
+              {DEFAULT_PROJECT_COLORS.map((c) => {
+                const colorLabel = PROJECT_COLOR_LABELS[c] ?? c;
+                const isSelected = color === c;
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => {
+                      setColor(c);
+                      setShowCustomHex(false);
+                    }}
+                    aria-label={colorLabel}
+                    aria-pressed={isSelected}
+                    className={`w-7 h-7 rounded-full flex items-center justify-center transition-all focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface ${
+                      isSelected
+                        ? "ring-2 ring-offset-2 ring-offset-surface ring-on-surface-secondary scale-110"
+                        : "hover:scale-110"
+                    }`}
+                    style={{ backgroundColor: c }}
+                  >
+                    {isSelected && <Check size={12} className="text-white drop-shadow-sm" />}
+                  </button>
+                );
+              })}
               {/* Custom color button */}
               <button
                 type="button"
                 onClick={() => setShowCustomHex(!showCustomHex)}
-                title="Custom color"
-                className={`w-7 h-7 rounded-full flex items-center justify-center border-2 border-dashed transition-all ${
+                aria-label={isCustomColor ? `Custom color: ${color}` : "Custom color"}
+                aria-pressed={isCustomColor}
+                className={`w-7 h-7 rounded-full flex items-center justify-center border-2 border-dashed transition-all focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface ${
                   isCustomColor
                     ? "ring-2 ring-offset-2 ring-offset-surface ring-on-surface-secondary scale-110 border-on-surface-secondary"
                     : "border-on-surface-muted hover:border-on-surface-secondary hover:scale-110"
@@ -302,6 +379,7 @@ export function AddProjectModal({
                   }}
                   placeholder="#4073ff"
                   maxLength={7}
+                  aria-label="Custom color hex value"
                   className={`w-28 px-2 py-1.5 text-sm font-mono border rounded-lg bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-2 ${
                     customHex && !HEX_REGEX.test(customHex)
                       ? "border-error focus:ring-error"
@@ -333,7 +411,7 @@ export function AddProjectModal({
               id="project-parent"
               value={parentId ?? ""}
               onChange={(e) => setParentId(e.target.value || null)}
-              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface focus:outline-none focus:ring-2 focus:ring-accent appearance-none"
+              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface focus:outline-none focus:ring-2 focus:ring-accent focus-visible:ring-2 focus-visible:ring-accent appearance-none"
             >
               <option value="">None</option>
               {rootProjects.map((p) => (
@@ -347,19 +425,19 @@ export function AddProjectModal({
 
           {/* Favorite toggle */}
           <div className="flex items-center justify-between">
-            <label
-              htmlFor="project-favorite"
+            <span
+              id="project-favorite-label"
               className="text-xs font-medium text-on-surface-secondary"
             >
               Add to favorites
-            </label>
+            </span>
             <button
-              id="project-favorite"
               type="button"
               role="switch"
               aria-checked={isFavorite}
+              aria-labelledby="project-favorite-label"
               onClick={() => setIsFavorite(!isFavorite)}
-              className={`relative w-10 h-5.5 rounded-full transition-colors ${
+              className={`relative w-10 h-5.5 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface ${
                 isFavorite ? "bg-accent" : "bg-surface-tertiary"
               }`}
             >
@@ -373,10 +451,17 @@ export function AddProjectModal({
 
           {/* View style */}
           <div>
-            <label className="block text-xs font-medium text-on-surface-secondary mb-1.5">
+            <label
+              id="project-view-label"
+              className="block text-xs font-medium text-on-surface-secondary mb-1.5"
+            >
               View
             </label>
-            <div className="flex rounded-lg border border-border overflow-hidden">
+            <div
+              role="radiogroup"
+              aria-labelledby="project-view-label"
+              className="flex rounded-lg border border-border overflow-hidden"
+            >
               {VIEW_OPTIONS.map((opt) => {
                 const Icon = opt.icon;
                 const isActive = viewStyle === opt.value;
@@ -384,8 +469,10 @@ export function AddProjectModal({
                   <button
                     key={opt.value}
                     type="button"
+                    role="radio"
+                    aria-checked={isActive}
                     onClick={() => setViewStyle(opt.value)}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors relative ${
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors relative focus:outline-none focus:ring-2 focus:ring-accent/50 focus:z-10 ${
                       isActive
                         ? "bg-accent/10 text-accent"
                         : "text-on-surface-secondary hover:bg-surface-tertiary"
@@ -410,7 +497,7 @@ export function AddProjectModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-on-surface-secondary hover:bg-surface-tertiary rounded-lg transition-colors"
+            className="px-4 py-2 text-sm font-medium text-on-surface-secondary hover:bg-surface-tertiary rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface"
           >
             Cancel
           </button>
@@ -418,7 +505,7 @@ export function AddProjectModal({
             type="submit"
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="px-4 py-2 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-surface"
           >
             {submitLabel}
           </button>

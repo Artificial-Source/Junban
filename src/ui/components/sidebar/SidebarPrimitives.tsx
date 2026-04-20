@@ -127,14 +127,14 @@ export function SectionHeader({
         <button
           {...dragHandleListeners}
           aria-label={`Drag ${label} section`}
-          className="p-0.5 -ml-1 mr-0.5 rounded text-on-surface-muted/0 group-hover/section:text-on-surface-muted hover:!text-on-surface-secondary cursor-grab transition-colors"
+          className="p-0.5 -ml-1 mr-0.5 rounded text-on-surface-muted/0 group-hover/section:text-on-surface-muted hover:!text-on-surface-secondary cursor-grab transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
         >
           <GripVertical size={12} />
         </button>
       )}
       <button
         onClick={onToggle}
-        className="flex items-center gap-1 text-[11px] font-semibold text-on-surface-muted uppercase tracking-wider text-left hover:text-on-surface-secondary transition-colors flex-1"
+        className="flex items-center gap-1 text-[11px] font-semibold text-on-surface-muted uppercase tracking-wider text-left hover:text-on-surface-secondary transition-colors flex-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded px-1 -ml-1"
       >
         {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         {label}
@@ -159,7 +159,7 @@ export function renderNavButton(
       onClick={onClick}
       onContextMenu={onCtxMenu}
       aria-current={isActive ? "page" : undefined}
-      className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
+      className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
         collapsed ? "justify-center" : "gap-3"
       } ${
         isActive

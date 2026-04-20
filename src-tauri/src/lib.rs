@@ -8,6 +8,8 @@ use std::{
     },
 };
 
+mod tauri_paths;
+
 use axum::{
     body::{to_bytes, Body},
     extract::{OriginalUri, Path, State},
@@ -21,6 +23,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use socket2::{Domain, Protocol, Socket, Type};
 use tauri::{AppHandle, Emitter, Manager, State as TauriState};
+use tauri_paths::{
+    config_path, db_path, desktop_markdown_path, desktop_plugin_dir, desktop_sidecar_entry_path,
+    resource_dir,
+};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
@@ -50,7 +56,6 @@ const DESKTOP_API_HOST: &str = "127.0.0.1";
 const DESKTOP_BACKEND_START_ATTEMPTS: usize = 3;
 const JUNBAN_BACKEND_SERVICE: &str = "junban-backend";
 const DESKTOP_SIDECAR_NAME: &str = "junban-node";
-const DESKTOP_SIDECAR_ENTRY: &str = "gen/sidecar/backend/server.js";
 const DESKTOP_RUNTIME_DESCRIPTOR_CHANGED_EVENT: &str = "junban:desktop-runtime-descriptor-changed";
 
 #[derive(Clone)]
@@ -252,14 +257,6 @@ fn emit_runtime_descriptor_change(app: &AppHandle, runtime: &JunbanRuntimeDescri
     }
 }
 
-fn app_data_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| format!("Failed to resolve app data directory: {err}"))?;
-    Ok(app_data.join("ASF Junban"))
-}
-
 fn default_remote_config() -> RemoteServerConfigFile {
     RemoteServerConfigFile {
         port: 4822,
@@ -377,6 +374,18 @@ fn should_redirect_remote_path_to_root(relative_path: &PathBuf) -> bool {
     relative_path == &PathBuf::from("quick-capture")
 }
 
+fn sanitize_relative_path(requested: &str) -> Option<PathBuf> {
+    let mut clean = PathBuf::new();
+    for component in PathBuf::from(requested).components() {
+        match component {
+            Component::Normal(segment) => clean.push(segment),
+            Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    Some(clean)
+}
+
 fn config_response(config: &RemoteServerConfigFile) -> RemoteServerConfigResponse {
     RemoteServerConfigResponse {
         port: config.port,
@@ -384,32 +393,6 @@ fn config_response(config: &RemoteServerConfigFile) -> RemoteServerConfigRespons
         password_enabled: config.password_enabled,
         has_password: config.password_hash.is_some(),
     }
-}
-
-fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_data_root(app)?.join("junban.db"))
-}
-
-fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_data_root(app)?.join("remote-access.json"))
-}
-
-fn resource_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .resource_dir()
-        .map_err(|err| format!("Failed to resolve resource directory: {err}"))
-}
-
-fn desktop_plugin_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_data_root(app)?.join("plugins"))
-}
-
-fn desktop_markdown_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_data_root(app)?.join("tasks"))
-}
-
-fn desktop_sidecar_entry_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(resource_dir(app)?.join(DESKTOP_SIDECAR_ENTRY))
 }
 
 fn desktop_api_base(port: u16) -> String {
@@ -767,18 +750,6 @@ async fn save_remote_config(
     fs::write(path, bytes)
         .await
         .map_err(|err| format!("Failed to write remote access config: {err}"))
-}
-
-fn sanitize_relative_path(requested: &str) -> Option<PathBuf> {
-    let mut clean = PathBuf::new();
-    for component in PathBuf::from(requested).components() {
-        match component {
-            Component::Normal(segment) => clean.push(segment),
-            Component::CurDir => {}
-            _ => return None,
-        }
-    }
-    Some(clean)
 }
 
 async fn read_static_file(path: PathBuf) -> Option<Vec<u8>> {

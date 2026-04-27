@@ -16,11 +16,11 @@ export function AppearanceTab() {
   if (!loaded) return null;
 
   return (
-    <div className="space-y-8">
+    <div className="density-section-stack flex flex-col">
       {/* ── Theme ── */}
       <section>
         <h2 className="text-lg font-semibold mb-3 text-on-surface">Theme</h2>
-        <div className="space-y-4 max-w-md">
+        <div className="density-control-stack flex max-w-md flex-col">
           <SettingRow label="Color scheme" description="Choose light, dark, or match your system">
             <SegmentedControl
               options={[
@@ -48,7 +48,7 @@ export function AppearanceTab() {
       {/* ── Layout ── */}
       <section>
         <h2 className="text-lg font-semibold mb-3 text-on-surface">Layout</h2>
-        <div className="space-y-4 max-w-md">
+        <div className="density-control-stack flex max-w-md flex-col">
           <SettingRow label="Density" description="Adjust UI spacing">
             <SegmentedControl
               options={[
@@ -90,7 +90,7 @@ export function AppearanceTab() {
       {/* ── Accessibility ── */}
       <section>
         <h2 className="text-lg font-semibold mb-3 text-on-surface">Accessibility</h2>
-        <div className="space-y-4 max-w-md">
+        <div className="density-control-stack flex max-w-md flex-col">
           <SettingRow label="Reduce animations" description="Minimize motion for accessibility">
             <Toggle
               enabled={settings.reduce_animations === "true"}

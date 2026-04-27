@@ -35,9 +35,6 @@ vi.mock("../../../src/ui/views/settings/FeaturesTab.js", () => ({
 vi.mock("../../../src/ui/views/settings/AITab.js", () => ({
   AITab: () => <div>AI tab content</div>,
 }));
-vi.mock("../../../src/ui/views/settings/VoiceTab.js", () => ({
-  VoiceTab: () => <div>Voice tab content</div>,
-}));
 vi.mock("../../../src/ui/views/settings/AgentToolsTab.js", () => ({
   AgentToolsTab: () => <div>Agent tools tab content</div>,
 }));
@@ -125,6 +122,19 @@ describe("Settings modal dialog semantics", () => {
 
     const title = screen.getByText("Settings");
     expect(title).toHaveAttribute("id", "settings-title");
+  });
+
+  it("hides the experimental Voice tab from settings navigation", () => {
+    render(<Settings activeTab="general" onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "Voice" })).not.toBeInTheDocument();
+  });
+
+  it("redirects direct Voice tab requests to AI while Voice is disabled", () => {
+    render(<Settings activeTab="voice" onClose={vi.fn()} />);
+
+    expect(screen.getByText("AI tab content")).toBeInTheDocument();
+    expect(screen.queryByText("Voice tab content")).not.toBeInTheDocument();
   });
 
   it("focuses close button when opened", async () => {

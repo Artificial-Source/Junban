@@ -1,1 +1,46 @@
-{"default":{"identifier":"default","description":"Default capabilities for Junban","local":true,"windows":["main","quick-capture"],"permissions":["core:default","core:window:allow-show","core:window:allow-hide","core:window:allow-set-focus","core:window:allow-center","core:window:allow-close","core:window:allow-minimize","core:window:allow-maximize","core:window:allow-unmaximize","core:window:allow-is-maximized","core:window:allow-start-dragging","core:event:default","global-shortcut:allow-register","global-shortcut:allow-unregister","global-shortcut:allow-is-registered","fs:default","fs:allow-exists","fs:allow-read-file","fs:allow-write-file","fs:allow-mkdir","fs:allow-remove","fs:allow-read-dir","shell:allow-spawn","shell:allow-execute","shell:allow-kill","updater:default",{"identifier":"fs:scope","allow":[{"path":"$APPDATA/Junban/**"},{"path":"$DOCUMENT/**"},{"path":"$DOWNLOAD/**"}]}]}}
+{
+  "default": {
+    "identifier": "default",
+    "description": "Default capabilities for Junban",
+    "local": true,
+    "windows": ["main", "quick-capture"],
+    "permissions": [
+      "core:default",
+      "core:window:allow-show",
+      "core:window:allow-hide",
+      "core:window:allow-set-focus",
+      "core:window:allow-center",
+      "core:window:allow-close",
+      "core:window:allow-minimize",
+      "core:window:allow-maximize",
+      "core:window:allow-unmaximize",
+      "core:window:allow-is-maximized",
+      "core:window:allow-start-dragging",
+      "core:event:default",
+      "global-shortcut:allow-register",
+      "global-shortcut:allow-unregister",
+      "global-shortcut:allow-is-registered",
+      "dialog:allow-save",
+      "fs:default",
+      "fs:allow-exists",
+      "fs:allow-read-file",
+      "fs:allow-write-file",
+      "fs:allow-write-text-file",
+      "fs:allow-mkdir",
+      "fs:allow-remove",
+      "fs:allow-read-dir",
+      "shell:allow-spawn",
+      "shell:allow-execute",
+      "shell:allow-kill",
+      "updater:default",
+      {
+        "identifier": "fs:scope",
+        "allow": [
+          { "path": "$APPDATA/Junban/**" },
+          { "path": "$DOCUMENT/**" },
+          { "path": "$DOWNLOAD/**" }
+        ]
+      }
+    ]
+  }
+}

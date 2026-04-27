@@ -34,7 +34,6 @@ test.describe("Settings modal", () => {
       "Keyboard",
       "Templates",
       "AI",
-      "Voice",
       "Agent Tools",
       "Data",
       "Advanced",
@@ -272,13 +271,24 @@ test.describe("Appearance settings tab", () => {
     await openSettings(page, "Appearance");
     const content = settingsContent(page);
     const densityRow = content.getByText("Density").locator("..").locator("..");
+    const defaultButton = densityRow.getByRole("button", { name: "Default" });
+    const defaultPadding = await defaultButton.evaluate((element) =>
+      parseFloat(window.getComputedStyle(element).paddingTop),
+    );
     await densityRow.getByRole("button", { name: "Compact" }).click();
 
     const html = page.locator("html");
     await expect(html).toHaveClass(/density-compact/);
+    await expect
+      .poll(async () =>
+        densityRow
+          .getByRole("button", { name: "Compact" })
+          .evaluate((element) => parseFloat(window.getComputedStyle(element).paddingTop)),
+      )
+      .toBeLessThan(defaultPadding);
 
     // Reset
-    await densityRow.getByRole("button", { name: "Default" }).click();
+    await defaultButton.click();
   });
 
   test("can change font size", async ({ page }) => {
@@ -415,21 +425,6 @@ test.describe("AI settings tab", () => {
     await openSettings(page, "AI");
     const content = settingsContent(page);
     await expect(content.getByText("Provider").first()).toBeVisible({ timeout: 5000 });
-  });
-});
-
-// ── Voice tab ───────────────────────────────────────────────────────────
-
-test.describe("Voice settings tab", () => {
-  test.beforeEach(async ({ page }) => {
-    await setupPage(page);
-  });
-
-  test("displays voice configuration sections", async ({ page }) => {
-    await openSettings(page, "Voice");
-    const content = settingsContent(page);
-    await expect(content.getByText("Speech-to-Text").first()).toBeVisible({ timeout: 5000 });
-    await expect(content.getByText("Text-to-Speech").first()).toBeVisible();
   });
 });
 

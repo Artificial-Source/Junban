@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, Copy, Download, ExternalLink, Terminal } from "lucide-react";
 import { APP_VERSION } from "../../../config/defaults.js";
+import { isTauri } from "../../../utils/tauri.js";
 
 const RELEASES_URL = "https://github.com/Artificial-Source/Junban/releases/latest";
 const MCP_DOCS_URL =
@@ -63,7 +64,28 @@ ${CLAUDE_CONFIG}
 
 type DownloadTarget = "claude" | "skill" | "source";
 
-function downloadTextFile(filename: string, text: string): void {
+async function downloadTextFile(filename: string, text: string): Promise<boolean> {
+  if (isTauri()) {
+    const [{ save }, { writeTextFile }] = await Promise.all([
+      import("@tauri-apps/plugin-dialog"),
+      import("@tauri-apps/plugin-fs"),
+    ]);
+    const path = await save({
+      title: "Save Junban agent setup file",
+      defaultPath: filename,
+      filters: [
+        {
+          name: filename.endsWith(".json") ? "JSON" : "Markdown",
+          extensions: [filename.endsWith(".json") ? "json" : "md"],
+        },
+      ],
+    });
+
+    if (!path) return false;
+    await writeTextFile(path, text);
+    return true;
+  }
+
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -72,7 +94,8 @@ function downloadTextFile(filename: string, text: string): void {
   document.body.append(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
 }
 
 function getDownload(target: DownloadTarget): { filename: string; text: string } {
@@ -88,12 +111,17 @@ function getDownload(target: DownloadTarget): { filename: string; text: string }
 
 export function AgentToolsTab() {
   const [copied, setCopied] = useState<DownloadTarget | null>(null);
+  const [downloaded, setDownloaded] = useState<DownloadTarget | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!copied) return;
-    const timeout = window.setTimeout(() => setCopied(null), 1600);
+    if (!copied && !downloaded) return;
+    const timeout = window.setTimeout(() => {
+      setCopied(null);
+      setDownloaded(null);
+    }, 1600);
     return () => window.clearTimeout(timeout);
-  }, [copied]);
+  }, [copied, downloaded]);
 
   const handleCopy = async (target: DownloadTarget) => {
     const item = getDownload(target);
@@ -105,9 +133,17 @@ export function AgentToolsTab() {
     }
   };
 
-  const handleDownload = (target: DownloadTarget) => {
+  const handleDownload = async (target: DownloadTarget) => {
     const item = getDownload(target);
-    downloadTextFile(item.filename, item.text);
+    try {
+      const saved = await downloadTextFile(item.filename, item.text);
+      setDownloadError(null);
+      setDownloaded(saved ? target : null);
+    } catch (err) {
+      setDownloaded(null);
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setDownloadError(`Could not save file. ${message}`);
+    }
   };
 
   return (
@@ -150,6 +186,7 @@ export function AgentToolsTab() {
           description="Use this when Junban is installed as a normal command."
           target="claude"
           copied={copied === "claude"}
+          downloaded={downloaded === "claude"}
           onCopy={handleCopy}
           onDownload={handleDownload}
         />
@@ -158,6 +195,7 @@ export function AgentToolsTab() {
           description="Give this to another AI agent so it knows how to use Junban."
           target="skill"
           copied={copied === "skill"}
+          downloaded={downloaded === "skill"}
           onCopy={handleCopy}
           onDownload={handleDownload}
         />
@@ -166,10 +204,13 @@ export function AgentToolsTab() {
           description="Use this while running Junban from a cloned project folder."
           target="source"
           copied={copied === "source"}
+          downloaded={downloaded === "source"}
           onCopy={handleCopy}
           onDownload={handleDownload}
         />
       </div>
+
+      {downloadError && <p className="text-xs text-danger">{downloadError}</p>}
 
       <div className="flex flex-wrap gap-3 text-xs">
         <a
@@ -209,11 +250,20 @@ interface SetupCardProps {
   description: string;
   target: DownloadTarget;
   copied: boolean;
+  downloaded: boolean;
   onCopy(target: DownloadTarget): void;
   onDownload(target: DownloadTarget): void;
 }
 
-function SetupCard({ title, description, target, copied, onCopy, onDownload }: SetupCardProps) {
+function SetupCard({
+  title,
+  description,
+  target,
+  copied,
+  downloaded,
+  onCopy,
+  onDownload,
+}: SetupCardProps) {
   return (
     <div className="rounded-xl border border-border p-4">
       <h4 className="text-sm font-semibold text-on-surface">{title}</h4>
@@ -224,8 +274,8 @@ function SetupCard({ title, description, target, copied, onCopy, onDownload }: S
           onClick={() => onDownload(target)}
           className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-on-surface-secondary transition-colors hover:bg-surface-secondary"
         >
-          <Download className="h-3.5 w-3.5" />
-          Download
+          {downloaded ? <Check className="h-3.5 w-3.5" /> : <Download className="h-3.5 w-3.5" />}
+          {downloaded ? "Saved" : "Download"}
         </button>
         <button
           type="button"

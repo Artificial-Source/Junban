@@ -173,6 +173,11 @@ program
 
 program.parseAsync().catch((err: unknown) => {
   if (err instanceof CommanderError) {
+    if (err.code === "commander.helpDisplayed" || err.code === "commander.version") {
+      process.exitCode = err.exitCode;
+      return;
+    }
+
     if (wantsJsonOutput()) {
       console.error(JSON.stringify({ success: false, error: err.message }));
     }

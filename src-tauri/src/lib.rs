@@ -1435,6 +1435,7 @@ pub fn run() {
     tauri::Builder::default()
         .append_invoke_initialization_script(DESKTOP_RUNTIME_INIT_SCRIPT)
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_shell::init())

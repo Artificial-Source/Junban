@@ -19,7 +19,7 @@ ErrorBoundary
 
 `AppStateProvider` is not part of the root provider stack. It is applied inside `src/ui/app/AppLayout.tsx` around the rendered shell after `App.tsx` and `useAppState()` have computed the read-only aggregate value.
 
-`AIProvider` and `VoiceProvider` are now feature-scoped instead of app-global. They mount only around AI/voice entry points like `AIChat`, `AITab`, and `VoiceTab`, which keeps those chunks off the default startup path while preserving the same feature APIs.
+`AIProvider` and `VoiceProvider` are now feature-scoped instead of app-global. They mount only around AI/voice entry points like `AIChat`, `AITab`, and experimental voice surfaces, which keeps those chunks off the default startup path while preserving the same feature APIs. The Voice settings tab implementation still exists, but it is currently hidden from Settings navigation and direct `voice` tab requests sanitize to `AI`.
 
 This nesting order still matters because inner providers can depend on outer ones (for example, feature-scoped AI still depends on `TaskProvider`, and `AppStateProvider` aggregates read-only state from the global providers before passing it deeper into the layout).
 
@@ -135,9 +135,9 @@ This nesting order still matters because inner providers can depend on outer one
   - `gracePeriodMs: number` -- VAD grace period (default 1500ms)
   - `groqApiKey, inworldApiKey` -- provider API keys
 - **Key Dependencies:** `VoiceProviderRegistry` from `ai/voice/registry.js`, `createDefaultVoiceRegistry` from `ai/voice/provider.js`, `BrowserTTSProvider` from `ai/voice/adapters/browser-tts.js`, `playAudioBuffer` from `ai/voice/audio-utils.js`, `localStorage` for persistence
-- **Used By:** `AIChatPanel.tsx`, `VoiceTab.tsx`, `useVoiceCall.ts`, `useVAD.ts`
+- **Used By:** `AIChatPanel.tsx`, experimental `VoiceTab.tsx`, `useVoiceCall.ts`, `useVAD.ts`
 - **Notes:** Settings are persisted to `localStorage` under `junban-voice-settings`. The provider registry and local-provider registration are lazy/on-demand (via `ensureRegistryLoaded` and `ensureLocalProvidersLoaded`) instead of auto-warming on provider mount. Voice list and model list refresh when the TTS provider changes. The `speak` function strips markdown formatting (code blocks, inline code, markdown punctuation), truncates to 5000 chars for browser TTS or 2000 chars for API TTS, and supports both `BrowserTTSProvider.speakDirect()` and API-based `synthesize()` + `playAudioBuffer()`. Cancellation handles both `window.speechSynthesis.cancel()` and audio buffer cancellation via a ref.
-- **Mounting:** This provider is feature-scoped. `src/ui/context/VoiceFeatureProvider.tsx` mounts it for the Voice settings tab, and `src/ui/context/AIVoiceFeatureProviders.tsx` mounts it for AI chat.
+- **Mounting:** This provider is feature-scoped. `src/ui/context/VoiceFeatureProvider.tsx` mounts it for experimental voice settings work, and `src/ui/context/AIVoiceFeatureProviders.tsx` mounts it for AI chat. Voice settings are currently hidden from the Settings sidebar until the feature is tested enough to expose.
 
 ---
 

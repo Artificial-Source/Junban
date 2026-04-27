@@ -5,7 +5,6 @@ import {
   Palette,
   Bell,
   Bot,
-  Mic,
   Terminal,
   Keyboard,
   Database,
@@ -31,7 +30,6 @@ import { GeneralTab } from "./settings/GeneralTab.js";
 import { KeyboardTab } from "./settings/KeyboardTab.js";
 import { TemplatesTab } from "./settings/TemplatesTab.js";
 import type { SettingsTab } from "./settings/types.js";
-import { VoiceTab } from "./settings/VoiceTab.js";
 import { endNamedPerfSpan, markPerf } from "../../utils/perf.js";
 
 export type { SettingsTab };
@@ -101,13 +99,6 @@ const TABS: TabMeta[] = [
     mobileIcon: <Bot className="w-5 h-5" />,
   },
   {
-    id: "voice",
-    label: "Voice",
-    subtitle: "Speech & dictation",
-    icon: <Mic className="w-4 h-4" />,
-    mobileIcon: <Mic className="w-5 h-5" />,
-  },
-  {
     id: "agent-tools",
     label: "Agent Tools",
     subtitle: "CLI & MCP setup",
@@ -141,7 +132,7 @@ const TABS: TabMeta[] = [
 const MOBILE_SECTIONS: { label: string; tabs: SettingsTab[] }[] = [
   { label: "Everyday", tabs: ["general", "appearance", "alerts", "filters"] },
   { label: "Workflow", tabs: ["keyboard", "templates"] },
-  { label: "AI & Voice", tabs: ["ai", "voice", "agent-tools"] },
+  { label: "AI & Agents", tabs: ["ai", "agent-tools"] },
   { label: "System", tabs: ["data", "features", "about"] },
 ];
 
@@ -149,6 +140,7 @@ const REMOTE_ADMIN_TABS = new Set<SettingsTab>(["data", "about"]);
 
 function sanitizeSettingsTab(tab: SettingsTab | null | undefined): SettingsTab {
   if (tab === "plugins") return "general";
+  if (tab === "voice") return "ai";
   return tab ?? "general";
 }
 
@@ -178,7 +170,7 @@ function renderTabContent(tab: SettingsTab, mutationsBlocked: boolean) {
     case "ai":
       return wrap(<AITab />);
     case "voice":
-      return wrap(<VoiceTab />);
+      return wrap(<AITab />);
     case "agent-tools":
       return wrap(<AgentToolsTab />);
     case "templates":

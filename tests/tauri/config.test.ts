@@ -8,12 +8,32 @@ function readJson<T>(relativePath: string): T {
   return JSON.parse(fs.readFileSync(path.join(rootDir, relativePath), "utf8")) as T;
 }
 
+function expectIconFile(relativePath: string) {
+  const absolutePath = path.join(rootDir, "src-tauri", relativePath);
+  const bytes = fs.readFileSync(absolutePath);
+  expect(bytes.length).toBeGreaterThan(0);
+
+  if (relativePath.endsWith(".png")) {
+    expect(Array.from(bytes.subarray(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    return;
+  }
+
+  if (relativePath.endsWith(".ico")) {
+    expect(Array.from(bytes.subarray(0, 4))).toEqual([0, 0, 1, 0]);
+    return;
+  }
+
+  if (relativePath.endsWith(".icns")) {
+    expect(bytes.subarray(0, 4).toString("ascii")).toBe("icns");
+  }
+}
+
 describe("Tauri desktop configuration", () => {
   it("uses a frameless main window with the expected desktop sidecar hooks", () => {
     const config = readJson<{
       build: Record<string, string>;
       app: { windows: Array<Record<string, unknown>> };
-      bundle: { externalBin: string[]; resources: string[] };
+      bundle: { externalBin: string[]; resources: string[]; icon: string[] };
     }>("src-tauri/tauri.conf.json");
 
     const mainWindow = config.app.windows.find((window) => window.label === "main");
@@ -25,6 +45,9 @@ describe("Tauri desktop configuration", () => {
     expect(config.build.beforeBuildCommand).toContain("pnpm tauri:validate-sidecar");
     expect(config.bundle.externalBin).toContain("binaries/junban-node");
     expect(config.bundle.resources).toContain("./gen/sidecar/");
+    for (const iconPath of config.bundle.icon) {
+      expectIconFile(iconPath);
+    }
   });
 
   it("grants the main window permissions needed by the custom titlebar", () => {

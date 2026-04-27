@@ -68,6 +68,41 @@
   }
 }
 
+@layer utilities {
+  .density-section-stack {
+    gap: calc(2rem * var(--density-scale));
+  }
+  .density-control-stack {
+    gap: calc(1rem * var(--density-scale));
+  }
+  .density-row {
+    gap: calc(1rem * var(--density-scale));
+    min-height: calc(2.25rem * var(--density-scale));
+  }
+  .density-button {
+    padding-block: calc(0.375rem * var(--density-scale));
+    padding-inline: calc(0.75rem * var(--density-scale));
+  }
+  .density-select {
+    padding-block: calc(0.375rem * var(--density-scale));
+    padding-inline: calc(0.75rem * var(--density-scale));
+  }
+  .density-swatch {
+    width: calc(1.75rem * var(--density-scale));
+    height: calc(1.75rem * var(--density-scale));
+  }
+  .density-toggle {
+    --density-toggle-width: calc(2.25rem * var(--density-scale));
+    --density-toggle-knob-size: calc(0.875rem * var(--density-scale));
+    height: calc(1.25rem * var(--density-scale));
+    width: var(--density-toggle-width);
+  }
+  .density-toggle-knob {
+    height: var(--density-toggle-knob-size);
+    width: var(--density-toggle-knob-size);
+  }
+}
+
 @layer base {
   .font-small {
     font-size: 87.5%;

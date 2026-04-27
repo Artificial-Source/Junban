@@ -15,7 +15,7 @@ export function SegmentedControl<T extends string>({
         <button
           key={opt.value}
           onClick={() => onChange(opt.value)}
-          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+          className={`density-button text-sm rounded-md transition-colors ${
             value === opt.value
               ? "bg-accent text-white shadow-sm"
               : "text-on-surface-secondary hover:text-on-surface"
@@ -44,7 +44,7 @@ export function ColorSwatchPicker({
           key={color}
           onClick={() => onChange(color)}
           aria-label={`Accent color ${color}`}
-          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
+          className={`density-swatch rounded-full flex items-center justify-center transition-all ${
             value === color
               ? "ring-2 ring-offset-2 ring-offset-surface ring-on-surface"
               : "hover:scale-110"
@@ -68,7 +68,7 @@ export function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div className="density-row flex items-center justify-between">
       <div className="min-w-0">
         <p className="text-sm text-on-surface">{label}</p>
         {description && <p className="text-xs text-on-surface-muted">{description}</p>}
@@ -91,7 +91,7 @@ export function SettingSelect<T extends string>({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as T)}
-      className="px-3 py-1.5 text-sm border border-border rounded-lg bg-surface text-on-surface"
+      className="density-select text-sm border border-border rounded-lg bg-surface text-on-surface"
     >
       {options.map((opt) => (
         <option key={opt.value} value={opt.value}>
@@ -115,14 +115,17 @@ export function Toggle({
     <button
       onClick={onToggle}
       disabled={disabled}
-      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+      className={`density-toggle relative inline-flex items-center rounded-full transition-colors ${
         enabled ? "bg-accent" : "bg-surface-tertiary"
       } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
     >
       <span
-        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-          enabled ? "translate-x-[18px]" : "translate-x-0.5"
-        }`}
+        className="density-toggle-knob inline-block rounded-full bg-white transition-transform"
+        style={{
+          transform: enabled
+            ? "translateX(calc(var(--density-toggle-width) - var(--density-toggle-knob-size) - 0.125rem))"
+            : "translateX(0.125rem)",
+        }}
       />
     </button>
   );

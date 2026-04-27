@@ -125,10 +125,10 @@ const today = await client.readResource({ uri: "junban://tasks/today" });
 ### `schema-converter.ts`
 
 **Path:** `src/mcp/schema-converter.ts`
-**Purpose:** Converts JSON Schema objects (as used by `ToolDefinition.parameters`) to Zod raw shapes for `McpServer.registerTool()`. Handles the subset used by our tools: string, number, integer, boolean, array (of strings), enum, required, description.
+**Purpose:** Converts JSON Schema objects (as used by `ToolDefinition.parameters`) to Zod objects for `McpServer.registerTool()`. Handles the subset used by our tools: string, number, integer, boolean, arrays with nested item schemas, nested objects, enum, required, `additionalProperties: false`, min/max array items, and description.
 **Key Exports:**
 
-- `jsonSchemaToZod(schema)` — returns `Record<string, z.ZodTypeAny>`
+- `jsonSchemaToZod(schema)` — returns `z.ZodObject<Record<string, z.ZodTypeAny>>`
 
 ### `context.ts`
 

@@ -94,19 +94,13 @@ Install notes:
 Linux quick install from the latest release:
 
 ```bash
-install_script="$(mktemp)"
-trap 'rm -f "$install_script"' EXIT
-curl -fsSL -o "$install_script" https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh
-sh "$install_script"
+curl -fsSL https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh | sh
 ```
 
 The installer uses the `.deb` on Debian/Ubuntu and the portable AppImage on other Linux distributions. It also refreshes the Junban launcher entry so the app menu shows a single `Junban` result. The `.deb` path explains and asks before using `sudo` because `apt-get` installs a system package. To install without `sudo`, force the AppImage path:
 
 ```bash
-install_script="$(mktemp)"
-trap 'rm -f "$install_script"' EXIT
-curl -fsSL -o "$install_script" https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh
-sh "$install_script" --appimage
+curl -fsSL https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh | sh -s -- --appimage
 ```
 
 If you prefer the browser flow, download the `.deb` or `.AppImage` from the release page above and run the matching install step manually.

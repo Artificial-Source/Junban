@@ -119,12 +119,17 @@ run_as_root() {
   info "Reason: apt-get installs Junban as a system package and registers it with dpkg."
   info "No-sudo alternative: rerun this installer with --appimage to install under your home directory."
 
-  if [ ! -t 0 ] || [ ! -t 1 ]; then
+  answer=""
+  if [ -t 0 ] && [ -t 1 ]; then
+    printf 'Continue with sudo apt-get install? [y/N] '
+    IFS= read -r answer || die "could not read sudo confirmation"
+  elif [ -t 1 ] && { : </dev/tty >/dev/tty; } 2>/dev/null; then
+    printf 'Continue with sudo apt-get install? [y/N] ' >/dev/tty
+    IFS= read -r answer </dev/tty || die "could not read sudo confirmation"
+  else
     die "cannot ask for sudo confirmation without an interactive terminal; rerun as root or use --appimage"
   fi
 
-  printf 'Continue with sudo apt-get install? [y/N] '
-  IFS= read -r answer || die "could not read sudo confirmation"
   case "$answer" in
     y | Y | yes | YES | Yes) ;;
     *) die "installation cancelled; rerun with --appimage to install without sudo" ;;

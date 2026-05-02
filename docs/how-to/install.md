@@ -18,6 +18,26 @@ If you just want to run the app and not modify source, use the release page:
 
 Assets include `.exe/.msi` for Windows, `.dmg` for macOS, and `.deb`/`.AppImage` for Linux.
 
+On Linux, run the installer helper to fetch the latest release and choose the right asset for your distro:
+
+```bash
+install_script="$(mktemp)"
+curl -fsSL -o "$install_script" https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh
+sh "$install_script"
+rm -f "$install_script"
+```
+
+The helper installs the `.deb` on Debian/Ubuntu systems and installs the portable AppImage under `~/Applications` elsewhere. The `.deb` path explains and asks before using `sudo` because `apt-get` installs a system package. Use the AppImage path for an install under your home directory without `sudo`.
+
+You can force either path with an explicit argument:
+
+```bash
+install_script="$(mktemp)"
+curl -fsSL -o "$install_script" https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh
+sh "$install_script" --deb # or: --appimage
+rm -f "$install_script"
+```
+
 ### Option B: Run from source (developer and power-user path)
 
 1. Install prerequisites from [Local Development Setup](../guides/SETUP.md).

@@ -5,6 +5,7 @@ This guide describes how Junban desktop releases, in-app updates, changelog entr
 ## What Ships to Users
 
 - Desktop installers are published on the GitHub Releases page.
+- Linux users can download and run `scripts/install-linux.sh` from the raw GitHub URL to install the latest `.deb` on Debian/Ubuntu or the latest AppImage elsewhere. The `.deb` path may ask for `sudo`; the AppImage path installs under the user's home directory without `sudo`.
 - Tauri update metadata is served from `releases/latest/download/latest.json`.
 - The desktop app checks that metadata from `Settings -> About`.
 - When an update is available, the app can download, install, and relaunch itself.
@@ -80,7 +81,7 @@ This guide describes how Junban desktop releases, in-app updates, changelog entr
 - Update checks are desktop-only.
 - Release notes shown in-app depend on the updater metadata / release body.
 - We do not yet publish checksums or detached verification steps in the README.
-- Linux package-manager based installs are not yet supported as an update channel.
+- Linux package-manager based installs are not yet supported as an update channel; the install helper fetches release assets but does not configure an apt/yum/dnf repository.
 
 ## Alpha Checklist
 

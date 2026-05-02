@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Linux installer helper** — `scripts/install-linux.sh` installs the latest `.deb` on Debian/Ubuntu or the latest AppImage on other Linux distributions.
 - **DevOps hardening** — graceful shutdown (SIGTERM/SIGINT) with plugin unload, uncaught exception handlers, Husky + lint-staged pre-commit hooks, `.nvmrc` for Node 22, Dependabot config, `.github/SECURITY.md` vulnerability reporting policy
 - **OpenRouter model filtering** — model dropdown dynamically filters to tool-capable models only (via `supported_parameters.includes("tools")`), sorted alphabetically with clean display names
 - **API key encryption** — AES-256-GCM encryption for API keys at rest

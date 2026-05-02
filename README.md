@@ -94,23 +94,22 @@ Install notes:
 Linux quick install from the latest release:
 
 ```bash
-# Debian/Ubuntu (.deb) - download latest, then install
-curl -fsSL https://api.github.com/repos/Artificial-Source/Junban/releases/latest \
-  | grep -o 'https://[^"]*amd64\.deb' \
-  | head -n 1 \
-  | xargs curl -fL -o ASF-Junban-latest-amd64.deb
-sudo apt install ./ASF-Junban-latest-amd64.deb
-
-# Portable (.AppImage) - download latest, make executable, then run
-curl -fsSL https://api.github.com/repos/Artificial-Source/Junban/releases/latest \
-  | grep -o 'https://[^"]*amd64\.AppImage' \
-  | head -n 1 \
-  | xargs curl -fL -o ASF-Junban-latest-amd64.AppImage
-chmod +x ./ASF-Junban-latest-amd64.AppImage
-./ASF-Junban-latest-amd64.AppImage
+install_script="$(mktemp)"
+curl -fsSL -o "$install_script" https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh
+sh "$install_script"
+rm -f "$install_script"
 ```
 
-If you prefer the browser flow, download the `.deb` or `.AppImage` from the release page above and run the same install step on the downloaded file.
+The installer uses the `.deb` on Debian/Ubuntu and the portable AppImage on other Linux distributions. The `.deb` path explains and asks before using `sudo` because `apt-get` installs a system package. To install without `sudo`, force the AppImage path:
+
+```bash
+install_script="$(mktemp)"
+curl -fsSL -o "$install_script" https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh
+sh "$install_script" --appimage
+rm -f "$install_script"
+```
+
+If you prefer the browser flow, download the `.deb` or `.AppImage` from the release page above and run the matching install step manually.
 
 Desktop remote access:
 

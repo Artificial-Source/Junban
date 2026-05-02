@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [1.0.7] — 2026-05-02
+
+Patch release to fix the packaged Linux backend startup and simplify release publishing.
+
+### Fixed
+
+- Packaged Linux builds now materialize the sidecar `node_modules` package entries so Tauri bundles can resolve dependencies such as `hono` at runtime.
+- Sidecar validation now rejects symlink-only package entries that Linux bundles can omit.
+
+### Changed
+
+- The release workflow now publishes Linux installers independently instead of blocking Ubuntu releases on Windows or macOS packaging failures.
+
 ## [1.0.6] — 2026-05-01
 
 Patch release to publish the current packaged desktop build and installer flow.
@@ -109,3 +122,4 @@ First stable public release.
 [1.0.2]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.2
 [1.0.5]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.5
 [1.0.6]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.6
+[1.0.7]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.7

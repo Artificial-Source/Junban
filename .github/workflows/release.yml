@@ -153,16 +153,9 @@ jobs:
     permissions:
       contents: write
     strategy:
-      fail-fast: false
       matrix:
         include:
           - platform: ubuntu-22.04
-            args: ""
-          - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
-          - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
-          - platform: windows-latest
             args: ""
 
     runs-on: ${{ matrix.platform }}
@@ -209,16 +202,9 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run }}
     needs: verify-release
     strategy:
-      fail-fast: false
       matrix:
         include:
           - platform: ubuntu-22.04
-            args: ""
-          - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
-          - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
-          - platform: windows-latest
             args: ""
 
     runs-on: ${{ matrix.platform }}
@@ -284,10 +270,13 @@ jobs:
               return;
             }
 
-            const platformAssetPatterns = [/\.deb$/i, /\.AppImage$/i, /\.dmg$/i, /\.msi$/i, /-setup\.exe$/i];
-            const hasPlatformInstaller = assetNames.some((name) => platformAssetPatterns.some((pattern) => pattern.test(name)));
-            if (!hasPlatformInstaller) {
-              core.setFailed("Draft release is missing platform installer assets");
+            if (!assetNames.some((name) => /\.deb$/i.test(name))) {
+              core.setFailed("Draft release is missing the Linux .deb installer");
+              return;
+            }
+
+            if (!assetNames.some((name) => /\.AppImage$/i.test(name))) {
+              core.setFailed("Draft release is missing the Linux AppImage installer");
             }
 
   publish:

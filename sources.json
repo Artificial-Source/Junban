@@ -2,7 +2,7 @@
   "$schema": "./plugin-registry.schema.json",
   "version": 1,
   "description": "Junban community plugin registry",
-  "lastUpdated": "2026-05-01",
+  "lastUpdated": "2026-05-02",
   "plugins": [
     {
       "id": "junban-kanban",

@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 const rootDir = process.cwd();
+const rootPackageJsonPath = path.join(rootDir, "package.json");
 const sidecarDir = path.join(rootDir, "src-tauri", "gen", "sidecar");
 const backendDir = path.join(sidecarDir, "backend");
 const nodeModulesDir = path.join(sidecarDir, "node_modules");
@@ -16,6 +17,7 @@ const staleTauriOutputDirs = [
   path.join(rootDir, "src-tauri", "target", "release", "bundle", "appimage_deb"),
 ];
 const removablePnpmPackagePrefixes = ["sharp@", "@img+sharp-", "@img+sharp-libvips-"];
+const removablePackageNames = ["sharp", "@img/sharp-"];
 
 function collectFiles(targetDir, matcher, collected = []) {
   for (const entry of fs.readdirSync(targetDir, { withFileTypes: true })) {
@@ -32,6 +34,10 @@ function collectFiles(targetDir, matcher, collected = []) {
   }
 
   return collected;
+}
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
 function run(command, args) {
@@ -165,6 +171,152 @@ function deployProductionNodeModules(targetDir) {
   pruneNodeModulesArtifacts(nodeModulesDir);
   pruneBundlingIncompatiblePackages();
   pruneDanglingSharpLinks(nodeModulesDir);
+  materializePnpmPackageLinks();
+}
+
+function packageNameToPath(packageName) {
+  return path.join(nodeModulesDir, ...packageName.split("/"));
+}
+
+function collectPackageRoots(packageRootsByName) {
+  const pnpmDir = path.join(nodeModulesDir, ".pnpm");
+
+  for (const entry of fs.readdirSync(pnpmDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const packageNodeModulesDir = path.join(pnpmDir, entry.name, "node_modules");
+    if (!fs.existsSync(packageNodeModulesDir)) {
+      continue;
+    }
+
+    for (const packageEntry of fs.readdirSync(packageNodeModulesDir, { withFileTypes: true })) {
+      const packageEntryPath = path.join(packageNodeModulesDir, packageEntry.name);
+      const packageRoots = packageEntry.name.startsWith("@")
+        ? fs
+            .readdirSync(packageEntryPath, { withFileTypes: true })
+            .filter((scopedEntry) => scopedEntry.isDirectory())
+            .map((scopedEntry) => path.join(packageEntryPath, scopedEntry.name))
+        : [packageEntryPath];
+
+      for (const packageRoot of packageRoots) {
+        const packageJsonPath = path.join(packageRoot, "package.json");
+        if (!fs.existsSync(packageJsonPath)) {
+          continue;
+        }
+
+        const packageJson = readJson(packageJsonPath);
+        if (!packageJson.name) {
+          continue;
+        }
+
+        const roots = packageRootsByName.get(packageJson.name) ?? [];
+        roots.push(packageRoot);
+        packageRootsByName.set(packageJson.name, roots);
+      }
+    }
+  }
+}
+
+function collectTopLevelPackageNames(packageNames) {
+  for (const entry of fs.readdirSync(nodeModulesDir, { withFileTypes: true })) {
+    if (entry.name.startsWith(".") || entry.name === ".bin") {
+      continue;
+    }
+
+    if (entry.name.startsWith("@")) {
+      const scopeDir = path.join(nodeModulesDir, entry.name);
+      for (const scopedEntry of fs.readdirSync(scopeDir, { withFileTypes: true })) {
+        packageNames.add(`${entry.name}/${scopedEntry.name}`);
+      }
+      continue;
+    }
+
+    packageNames.add(entry.name);
+  }
+}
+
+function choosePackageRoot(packageRoots, destinationPath) {
+  if (fs.existsSync(destinationPath) && fs.lstatSync(destinationPath).isSymbolicLink()) {
+    const linkedPackageRoot = fs.realpathSync(destinationPath);
+    if (fs.existsSync(path.join(linkedPackageRoot, "package.json"))) {
+      return linkedPackageRoot;
+    }
+  }
+
+  if (packageRoots.length === 1) {
+    return packageRoots[0];
+  }
+
+  return packageRoots[0];
+}
+
+function collectRuntimeDependencyNames(packageRoot, packageRootsByName) {
+  const packageJson = readJson(path.join(packageRoot, "package.json"));
+  const dependencyNames = Object.keys(packageJson.dependencies ?? {});
+
+  for (const optionalDependencyName of Object.keys(packageJson.optionalDependencies ?? {})) {
+    if (packageRootsByName.has(optionalDependencyName)) {
+      dependencyNames.push(optionalDependencyName);
+    }
+  }
+
+  return dependencyNames;
+}
+
+function materializePackage(packageName, packageRootsByName) {
+  const packageRoots = packageRootsByName.get(packageName);
+  if (!packageRoots || packageRoots.length === 0) {
+    if (removablePackageNames.some((removableName) => packageName.startsWith(removableName))) {
+      return;
+    }
+
+    throw new Error(`Could not find deployed package root for ${packageName}`);
+  }
+
+  const destinationPath = packageNameToPath(packageName);
+  const sourcePath = choosePackageRoot(packageRoots, destinationPath);
+
+  fs.rmSync(destinationPath, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+  fs.cpSync(sourcePath, destinationPath, {
+    recursive: true,
+    dereference: true,
+    verbatimSymlinks: false,
+  });
+
+  return sourcePath;
+}
+
+function materializePnpmPackageLinks() {
+  const packageRootsByName = new Map();
+  const pendingPackageNames = new Set(Object.keys(readJson(rootPackageJsonPath).dependencies ?? {}));
+  const materializedPackageNames = new Set();
+
+  collectPackageRoots(packageRootsByName);
+  collectTopLevelPackageNames(pendingPackageNames);
+
+  while (pendingPackageNames.size > 0) {
+    const packageName = [...pendingPackageNames].sort()[0];
+    pendingPackageNames.delete(packageName);
+
+    if (materializedPackageNames.has(packageName)) {
+      continue;
+    }
+
+    const packageRoot = materializePackage(packageName, packageRootsByName);
+    if (!packageRoot) {
+      continue;
+    }
+
+    materializedPackageNames.add(packageName);
+    for (const dependencyName of collectRuntimeDependencyNames(packageRoot, packageRootsByName)) {
+      if (!materializedPackageNames.has(dependencyName)) {
+        pendingPackageNames.add(dependencyName);
+      }
+    }
+  }
 }
 
 function copyBetterSqlite3NativeBindings() {

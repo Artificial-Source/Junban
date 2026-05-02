@@ -4,12 +4,12 @@ This guide describes how Junban desktop releases, in-app updates, changelog entr
 
 ## What Ships to Users
 
-- Desktop installers are published on the GitHub Releases page.
+- Linux desktop installers are published on the GitHub Releases page.
 - Linux users can download and run `scripts/install-linux.sh` from the raw GitHub URL to install the latest `.deb` on Debian/Ubuntu or the latest AppImage elsewhere. The `.deb` path may ask for `sudo`; the AppImage path installs under the user's home directory without `sudo`.
 - Tauri update metadata is served from `releases/latest/download/latest.json`.
 - The desktop app checks that metadata from `Settings -> About`.
 - When an update is available, the app can download, install, and relaunch itself.
-- The release workflow now fails if package metadata still uses pre-Junban branding, if uploaded installer asset names still expose stale visible `ASF Junban` branding, or if `latest.json` is missing from the draft release.
+- The release workflow now fails if package metadata still uses pre-Junban branding, if uploaded Linux installer asset names still expose stale visible `ASF Junban` branding, or if `latest.json` is missing from the draft release.
 
 ## Branding Boundaries
 
@@ -61,7 +61,7 @@ This guide describes how Junban desktop releases, in-app updates, changelog entr
 3. Update versions with `pnpm release:prepare <version>` and move the relevant items from `Unreleased` into a new version section in `CHANGELOG.md` as part of that promotion.
 4. Merge the promotion PR into `main`.
 5. Tag the merged `main` commit as `v<version>`.
-6. Push the tag so GitHub Actions builds installers and updater metadata.
+6. Push the tag so GitHub Actions builds Linux installers and updater metadata.
 7. Let the release workflow verify the tagged commit branding metadata and the uploaded draft assets.
 8. Review the draft GitHub release before publishing.
 
@@ -79,12 +79,13 @@ This guide describes how Junban desktop releases, in-app updates, changelog entr
 - Local `pnpm tauri:build` runs the same sidecar validation before Tauri bundles desktop artifacts.
 - `Dependency Review` runs on pull requests to flag risky dependency updates.
 - `Release` can run from a pushed tag or manual dispatch, but it only proceeds when the tag resolves to a commit already present on `main`.
-- `Release` now also verifies package metadata still says `Junban`, blocks stale visible `ASF Junban` installer asset names, and confirms the draft release includes installer assets plus `latest.json` before publishing.
+- `Release` now also verifies package metadata still says `Junban`, blocks stale visible `ASF Junban` Linux installer asset names, and confirms the draft release includes `.deb`, AppImage, and `latest.json` assets before publishing.
 
 ## Current Limits
 
 - Update checks are desktop-only.
 - Release notes shown in-app depend on the updater metadata / release body.
+- Automated release publishing is Linux-only for now. Windows and macOS builds should move to separate optional workflows once their packaging path is stable.
 - We do not yet publish checksums or detached verification steps in the README.
 - Linux package-manager based installs are not yet supported as an update channel; the install helper fetches release assets but does not configure an apt/yum/dnf repository.
 

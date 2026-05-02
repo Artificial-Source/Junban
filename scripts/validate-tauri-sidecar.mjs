@@ -49,6 +49,17 @@ function assertNotExists(targetPath, description) {
   assert(!fs.existsSync(targetPath), `${description} should not exist: ${targetPath}`);
 }
 
+function assertMaterializedPackage(packageName) {
+  const packagePath = path.join(nodeModulesDir, ...packageName.split("/"));
+  const packageJsonPath = path.join(packagePath, "package.json");
+
+  assertExists(packageJsonPath, `Deployed ${packageName} package`);
+  assert(
+    !fs.lstatSync(packagePath).isSymbolicLink(),
+    `Deployed ${packageName} package must be a real directory, not a symlink`,
+  );
+}
+
 function collectFiles(targetDir, matcher, collected = []) {
   for (const entry of fs.readdirSync(targetDir, { withFileTypes: true })) {
     const entryPath = path.join(targetDir, entry.name);
@@ -385,10 +396,12 @@ async function main() {
     );
   }
 
-  assertExists(path.join(nodeModulesDir, "better-sqlite3", "package.json"), "Deployed better-sqlite3 package");
+  assertMaterializedPackage("better-sqlite3");
   const betterSqliteBindings = getBetterSqliteBindingPaths();
   assert(betterSqliteBindings.length > 0, "Deployed better-sqlite3 native binding");
-  assertExists(path.join(nodeModulesDir, "hono", "package.json"), "Deployed hono package");
+  assertMaterializedPackage("hono");
+  assertMaterializedPackage("@hono/node-server");
+  assertMaterializedPackage("zod");
   assertNotExists(path.join(nodeModulesDir, "sharp"), "Pruned sharp top-level package");
 
   const pnpmDir = path.join(nodeModulesDir, ".pnpm");

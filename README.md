@@ -97,7 +97,15 @@ Linux quick install from the latest release:
 curl -fsSL https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh | sh
 ```
 
-The installer prints the detected distro, architecture, and selected install path. It uses the `.deb` on Debian/Ubuntu and the portable AppImage on other Linux distributions. It also refreshes the Junban launcher entry so the app menu shows a single `Junban` result. The `.deb` path explains and asks before using `sudo` because `apt-get` installs a system package. To install without `sudo`, force the AppImage path:
+The installer prints the detected distro, architecture, and selected install path. It uses the `.deb` on Debian/Ubuntu and the portable AppImage on other Linux distributions. It also refreshes the Junban launcher entry so the app menu shows a single `Junban` result. The `.deb` path explains and asks before using `sudo` because `apt-get` installs a system package.
+
+If you want to choose the install type yourself:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh | sh -s -- --choose
+```
+
+To install without `sudo`, force the AppImage path:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh | sh -s -- --appimage

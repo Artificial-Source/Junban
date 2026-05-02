@@ -26,6 +26,12 @@ curl -fsSL https://raw.githubusercontent.com/Artificial-Source/Junban/main/scrip
 
 The helper prints the detected distro, architecture, and selected install path. It installs the `.deb` on Debian/Ubuntu systems and installs the portable AppImage under `~/Applications` elsewhere. It also refreshes the Junban launcher entry so the app menu shows one `Junban` result. The `.deb` path explains and asks before using `sudo` because `apt-get` installs a system package. Use the AppImage path for an install under your home directory without `sudo`.
 
+If you want to choose the install type yourself:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh | sh -s -- --choose
+```
+
 You can force either path with an explicit argument:
 
 ```bash

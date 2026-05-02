@@ -14,19 +14,20 @@ DETECTED_DISTRO_ID="unknown"
 DETECTED_DISTRO_ID_LIKE=""
 
 usage() {
-  printf '%s\n' 'Usage: install-linux.sh [--auto|--deb|--appimage]'
+  printf '%s\n' 'Usage: install-linux.sh [--auto|--choose|--deb|--appimage]'
   printf '%s\n' ''
   printf '%s\n' 'Installs the latest Junban Linux desktop release.'
   printf '%s\n' ''
   printf '%s\n' 'Options:'
   printf '%s\n' '  --auto       Use .deb on Debian/Ubuntu, AppImage elsewhere (default)'
+  printf '%s\n' '  --choose     Ask whether to install the .deb or AppImage'
   printf '%s\n' '  --deb        Force the Debian/Ubuntu .deb installer; may require sudo'
   printf '%s\n' '  --appimage   Force the portable AppImage installer; does not use sudo'
   printf '%s\n' '  -h, --help   Show this help'
   printf '%s\n' ''
   printf '%s\n' 'Environment:'
   printf '%s\n' '  JUNBAN_INSTALL_DIR   AppImage install directory (default: ~/Applications)'
-  printf '%s\n' '  JUNBAN_INSTALL_KIND  auto, deb, or appimage'
+  printf '%s\n' '  JUNBAN_INSTALL_KIND  auto, choose, deb, or appimage'
 }
 
 die() {
@@ -47,6 +48,9 @@ while [ "$#" -gt 0 ]; do
     --auto)
       INSTALL_KIND="auto"
       ;;
+    --choose | --interactive)
+      INSTALL_KIND="choose"
+      ;;
     --deb)
       INSTALL_KIND="deb"
       ;;
@@ -65,8 +69,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$INSTALL_KIND" in
-  auto | deb | appimage) ;;
-  *) die "JUNBAN_INSTALL_KIND must be auto, deb, or appimage" ;;
+  auto | choose | deb | appimage) ;;
+  *) die "JUNBAN_INSTALL_KIND must be auto, choose, deb, or appimage" ;;
 esac
 REQUESTED_INSTALL_KIND="$INSTALL_KIND"
 
@@ -130,6 +134,8 @@ describe_install_choice() {
     deb)
       if [ "$REQUESTED_INSTALL_KIND" = "auto" ]; then
         info "Selected .deb install because this looks like Debian/Ubuntu and apt-get is available"
+      elif [ "$REQUESTED_INSTALL_KIND" = "choose" ]; then
+        info "Selected .deb install from your choice"
       else
         info "Selected .deb install because it was requested explicitly"
       fi
@@ -141,10 +147,58 @@ describe_install_choice() {
         else
           info "Selected AppImage install because this distro is not Debian/Ubuntu-like"
         fi
+      elif [ "$REQUESTED_INSTALL_KIND" = "choose" ]; then
+        info "Selected AppImage install from your choice"
       else
         info "Selected AppImage install because it was requested explicitly"
       fi
       ;;
+  esac
+}
+
+read_terminal_answer() {
+  prompt="$1"
+  TERMINAL_ANSWER=""
+
+  if [ -t 0 ] && [ -t 1 ]; then
+    printf '%s' "$prompt"
+    IFS= read -r TERMINAL_ANSWER || return 1
+  elif [ -t 1 ] && { : </dev/tty >/dev/tty; } 2>/dev/null; then
+    printf '%s' "$prompt" >/dev/tty
+    IFS= read -r TERMINAL_ANSWER </dev/tty || return 1
+  else
+    return 2
+  fi
+}
+
+choose_install_kind() {
+  recommended_kind="$1"
+  default_choice="2"
+  if [ "$recommended_kind" = "deb" ]; then
+    default_choice="1"
+  fi
+
+  info "Choose what to install:"
+  info "  1) .deb system package - best for Debian/Ubuntu; may require sudo"
+  info "  2) AppImage portable app - installs under your home directory; no sudo"
+  if [ "$recommended_kind" = "deb" ]; then
+    info "Recommended: .deb because this looks like Debian/Ubuntu and apt-get is available"
+  else
+    info "Recommended: AppImage because this distro is not Debian/Ubuntu-like or apt-get is unavailable"
+  fi
+
+  if ! read_terminal_answer "Select install type [${default_choice}]: "; then
+    die "cannot ask for install choice without an interactive terminal; rerun with --deb or --appimage"
+  fi
+
+  case "$TERMINAL_ANSWER" in
+    "") TERMINAL_ANSWER="$default_choice" ;;
+  esac
+
+  case "$TERMINAL_ANSWER" in
+    1 | deb | DEB | .deb) INSTALL_KIND="deb" ;;
+    2 | appimage | AppImage | APPIMAGE) INSTALL_KIND="appimage" ;;
+    *) die "unknown install choice: ${TERMINAL_ANSWER}; expected 1, 2, deb, or appimage" ;;
   esac
 }
 
@@ -167,18 +221,11 @@ run_as_root() {
   info "Reason: apt-get installs Junban as a system package and registers it with dpkg."
   info "No-sudo alternative: rerun this installer with --appimage to install under your home directory."
 
-  answer=""
-  if [ -t 0 ] && [ -t 1 ]; then
-    printf 'Continue with sudo apt-get install? [y/N] '
-    IFS= read -r answer || die "could not read sudo confirmation"
-  elif [ -t 1 ] && { : </dev/tty >/dev/tty; } 2>/dev/null; then
-    printf 'Continue with sudo apt-get install? [y/N] ' >/dev/tty
-    IFS= read -r answer </dev/tty || die "could not read sudo confirmation"
-  else
+  if ! read_terminal_answer 'Continue with sudo apt-get install? [y/N] '; then
     die "cannot ask for sudo confirmation without an interactive terminal; rerun as root or use --appimage"
   fi
 
-  case "$answer" in
+  case "$TERMINAL_ANSWER" in
     y | Y | yes | YES | Yes) ;;
     *) die "installation cancelled; rerun with --appimage to install without sudo" ;;
   esac
@@ -280,7 +327,14 @@ install_appimage() {
 detect_linux_distro
 describe_detection
 
-if [ "$INSTALL_KIND" = "auto" ]; then
+RECOMMENDED_INSTALL_KIND="appimage"
+if is_debian_like && command_exists apt-get; then
+  RECOMMENDED_INSTALL_KIND="deb"
+fi
+
+if [ "$INSTALL_KIND" = "choose" ]; then
+  choose_install_kind "$RECOMMENDED_INSTALL_KIND"
+elif [ "$INSTALL_KIND" = "auto" ]; then
   if is_debian_like && command_exists apt-get; then
     INSTALL_KIND="deb"
   else

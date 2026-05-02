@@ -261,6 +261,17 @@ describe("Linux installer", () => {
     expect(result.stderr).toContain(".deb installation requires apt-get");
   });
 
+  it("explains that --choose requires an interactive terminal", () => {
+    const { result } = runInstaller({ args: ["--choose"] });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain("Choose what to install");
+    expect(result.stdout).toContain("Recommended: AppImage");
+    expect(result.stderr).toContain(
+      "cannot ask for install choice without an interactive terminal",
+    );
+  });
+
   it("explains sudo and the AppImage alternative before non-root .deb installs", () => {
     const { result } = runInstaller({
       args: ["--deb"],

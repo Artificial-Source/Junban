@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import "./index.css";
 import "./themes/manager.js"; // Initialize theme before render
 import { beginNamedPerfSpan, markPerf } from "../utils/perf.js";
-import { waitForRuntimeConfig } from "../utils/runtime.js";
 
 const QuickCapture = lazy(() =>
   import("./views/QuickCapture.js").then((module) => ({ default: module.QuickCapture })),
@@ -62,7 +61,6 @@ function renderStartupError(message: string) {
 
 void (async () => {
   try {
-    await waitForRuntimeConfig();
     const { waitForDesktopApiReady } = await import("./api/helpers.js");
     await waitForDesktopApiReady();
 

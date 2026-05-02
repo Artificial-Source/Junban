@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [1.0.8] — 2026-05-02
+
+Patch release to make packaged desktop startup resilient when the Tauri runtime descriptor arrives before the backend port is ready.
+
+### Fixed
+
+- Packaged desktop startup now re-reads the Tauri runtime descriptor when the first descriptor is empty, preventing the `Desktop backend unavailable` screen when the backend is already running.
+
 ## [1.0.7] — 2026-05-02
 
 Patch release to fix the packaged Linux backend startup and simplify release publishing.
@@ -123,3 +131,4 @@ First stable public release.
 [1.0.5]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.5
 [1.0.6]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.6
 [1.0.7]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.7
+[1.0.8]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.8

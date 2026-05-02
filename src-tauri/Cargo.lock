@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "asf-junban"
-version = "1.0.7"
+version = "1.0.8"
 dependencies = [
  "axum",
  "mime_guess",

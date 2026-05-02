@@ -29,6 +29,7 @@ import {
 } from "./api/desktop-server.js";
 import { beginNamedPerfSpan, endNamedPerfSpan, markPerf } from "../utils/perf.js";
 import { isTauri } from "../utils/tauri.js";
+import { sendAppNotification } from "../utils/notifications.js";
 
 function guardMutationHandler<Args extends unknown[], Result>(
   blocked: boolean,
@@ -187,8 +188,7 @@ function AppContent() {
 
   const handleReminder = useCallback(
     (task: { id: string; title: string }) => {
-      if (typeof Notification !== "undefined" && Notification.permission === "granted")
-        new Notification("Junban Reminder", { body: task.title });
+      void sendAppNotification("Junban Reminder", task.title);
       playSound("reminder");
       showToast(`Reminder: ${task.title}`, {
         label: "View",

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [1.0.9] — 2026-05-02
+
+Patch release to improve installed desktop notification and sound feedback.
+
+### Added
+
+- Alerts settings now include a test notification button and permission request action.
+
+### Fixed
+
+- Packaged desktop notifications now use native app notifications instead of browser notification permissions.
+- Sound previews now support WebKit-prefixed WebAudio and show an in-app status when playback fails.
+
 ## [1.0.8] — 2026-05-02
 
 Patch release to make packaged desktop startup resilient when the Tauri runtime descriptor arrives before the backend port is ready.
@@ -132,3 +145,4 @@ First stable public release.
 [1.0.6]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.6
 [1.0.7]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.7
 [1.0.8]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.8
+[1.0.9]: https://github.com/Artificial-Source/Junban/releases/tag/v1.0.9

@@ -1,6 +1,6 @@
 /** Default application settings and constants. */
 
-export const APP_VERSION = "1.0.8";
+export const APP_VERSION = "1.0.9";
 
 export const PRIORITIES = {
   P1: { value: 1, label: "P1", color: "#ef4444" },

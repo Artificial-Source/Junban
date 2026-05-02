@@ -9,9 +9,19 @@ const NOTE_G5 = 783.99;
 
 let audioCtx: AudioContext | null = null;
 
+type WebAudioGlobal = typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
 function getAudioContext(): AudioContext {
   if (!audioCtx) {
-    audioCtx = new AudioContext();
+    const AudioContextConstructor =
+      globalThis.AudioContext ?? (globalThis as WebAudioGlobal).webkitAudioContext;
+    if (!AudioContextConstructor) {
+      throw new Error("Audio output is not available in this environment");
+    }
+
+    audioCtx = new AudioContextConstructor();
   }
   return audioCtx;
 }
@@ -28,7 +38,8 @@ function scheduleNote(
   const gain = ctx.createGain();
   osc.type = waveType;
   osc.frequency.setValueAtTime(frequency, startTime);
-  gain.gain.setValueAtTime(volume, startTime);
+  gain.gain.setValueAtTime(0.001, startTime);
+  gain.gain.linearRampToValueAtTime(volume, startTime + 0.01);
   // Quick fade-out to avoid clicks
   gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
   osc.connect(gain);
@@ -79,6 +90,9 @@ export async function playSound(event: SoundEvent, volume: number): Promise<void
   const ctx = getAudioContext();
   if (ctx.state === "suspended") {
     await ctx.resume();
+  }
+  if (ctx.state === "suspended") {
+    throw new Error("Audio output is blocked until sound playback is allowed");
   }
   SOUND_MAP[event](ctx, Math.min(volume, 1));
 }

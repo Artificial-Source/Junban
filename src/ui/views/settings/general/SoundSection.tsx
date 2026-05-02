@@ -1,4 +1,5 @@
 import { Volume2 } from "lucide-react";
+import { useState } from "react";
 import { useGeneralSettings } from "../../../context/SettingsContext.js";
 import { SettingRow, Toggle } from "../components.js";
 import { previewSound, type SoundEvent } from "../../../../utils/sounds.js";
@@ -18,9 +19,19 @@ export function SoundSection() {
   const { settings, updateSetting } = useGeneralSettings();
   const enabled = settings.sound_enabled === "true";
   const volume = parseInt(settings.sound_volume, 10) || 0;
+  const [previewStatus, setPreviewStatus] = useState<"idle" | "playing" | "played" | "failed">(
+    "idle",
+  );
 
-  const handlePreview = (event: SoundEvent) => {
-    previewSound(event, volume / 100).catch((err) => console.warn("[sound] Preview failed:", err));
+  const handlePreview = async (event: SoundEvent) => {
+    setPreviewStatus("playing");
+    try {
+      await previewSound(event, volume / 100);
+      setPreviewStatus("played");
+    } catch (err) {
+      console.warn("[sound] Preview failed:", err);
+      setPreviewStatus("failed");
+    }
   };
 
   return (
@@ -49,6 +60,14 @@ export function SoundSection() {
             />
           </SettingRow>
         </div>
+        {enabled && previewStatus === "played" && (
+          <p className="text-xs text-success">Preview sound played.</p>
+        )}
+        {enabled && previewStatus === "failed" && (
+          <p className="text-xs text-warning">
+            Junban could not play sound. Check your system output device and app volume.
+          </p>
+        )}
 
         {SOUND_EVENTS.map(({ event, settingKey, label }) => (
           <div
@@ -66,9 +85,10 @@ export function SoundSection() {
             </div>
             <button
               onClick={() => handlePreview(event)}
+              disabled={previewStatus === "playing"}
               className="text-xs text-accent hover:text-accent-hover px-2 py-1 rounded transition-colors"
             >
-              Preview
+              {previewStatus === "playing" ? "Playing..." : "Preview"}
             </button>
           </div>
         ))}

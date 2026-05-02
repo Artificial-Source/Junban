@@ -48,6 +48,7 @@ function installMockAudioContext() {
       const g = {
         gain: {
           setValueAtTime: vi.fn(),
+          linearRampToValueAtTime: vi.fn(),
           exponentialRampToValueAtTime: vi.fn(),
         },
         connect: vi.fn(),
@@ -66,6 +67,7 @@ describe("sounds", () => {
 
   afterEach(() => {
     delete (globalThis as any).AudioContext;
+    delete (globalThis as any).webkitAudioContext;
   });
 
   it("creates AudioContext on first playSound call", async () => {
@@ -89,6 +91,24 @@ describe("sounds", () => {
     mockState = "suspended";
     await playSound("create", 0.5);
     expect(mockResume).toHaveBeenCalled();
+  });
+
+  it("uses the WebKit-prefixed AudioContext fallback", async () => {
+    const audioContextConstructor = (globalThis as any).AudioContext;
+    delete (globalThis as any).AudioContext;
+    (globalThis as any).webkitAudioContext = audioContextConstructor;
+
+    await playSound("create", 0.5);
+
+    expect(constructorSpy).toHaveBeenCalledTimes(1);
+    expect(createdOscillators).toHaveLength(1);
+  });
+
+  it("reports blocked audio when the context stays suspended", async () => {
+    mockState = "suspended";
+    mockResume.mockResolvedValueOnce(undefined);
+
+    await expect(playSound("create", 0.5)).rejects.toThrow("Audio output is blocked");
   });
 
   it("does not call resume when context is running", async () => {
@@ -148,7 +168,10 @@ describe("sounds", () => {
 
   it("clamps volume to 1", async () => {
     await playSound("create", 1.5);
-    expect(createdGains[0].gain.setValueAtTime).toHaveBeenCalledWith(1, expect.any(Number));
+    expect(createdGains[0].gain.linearRampToValueAtTime).toHaveBeenCalledWith(
+      1,
+      expect.any(Number),
+    );
   });
 
   it("previewSound delegates to playSound", async () => {

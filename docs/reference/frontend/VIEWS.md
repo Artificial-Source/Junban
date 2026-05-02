@@ -246,7 +246,7 @@ Current tab implementations:
 | ----------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `src/ui/views/settings/GeneralTab.tsx`    | Core essentials such as date/time and task defaults                                          |
 | `src/ui/views/settings/AppearanceTab.tsx` | Theme, density, font, and other visual preferences                                           |
-| `src/ui/views/settings/AlertsTab.tsx`     | Notifications, sounds, and smart nudges                                                      |
+| `src/ui/views/settings/AlertsTab.tsx`     | App/browser notifications with permission and test actions, sound previews, and smart nudges  |
 | `src/ui/views/settings/FiltersLabelsTab.tsx` | Saved filter and label management moved into Settings                                      |
 | `src/ui/views/settings/FeaturesTab.tsx`   | Advanced feature flags and developer controls                                                |
 | `src/ui/views/settings/KeyboardTab.tsx`   | Shortcut customization, keyboard chords, and quick-capture hotkey settings                   |

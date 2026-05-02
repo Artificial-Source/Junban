@@ -179,6 +179,7 @@ function runInstaller({
     delete env[key];
   }
   env.JUNBAN_RELEASE_API = "https://api.github.com/repos/Artificial-Source/Junban/releases/latest";
+  env.JUNBAN_OS_RELEASE_FILE = path.join(tempDir, "missing-os-release");
   env.JUNBAN_TEST_LOG_DIR = logDir;
   env.PATH = mockBin;
   if (homeDir === null) {
@@ -223,7 +224,7 @@ describe("Linux installer", () => {
   it("uses the .deb path in auto mode on Debian-like systems", () => {
     const osReleaseDir = createTempDir();
     const osReleaseFile = path.join(osReleaseDir, "os-release");
-    fs.writeFileSync(osReleaseFile, "ID=ubuntu\nID_LIKE=debian\n");
+    fs.writeFileSync(osReleaseFile, 'PRETTY_NAME="Ubuntu 24.04 LTS"\nID=ubuntu\nID_LIKE=debian\n');
 
     const { homeDir, logDir, result } = runInstaller({
       args: ["--auto"],
@@ -232,6 +233,11 @@ describe("Linux installer", () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Detected Linux distro: Ubuntu 24.04 LTS (ubuntu)");
+    expect(result.stdout).toContain("Detected distro family: debian");
+    expect(result.stdout).toContain(
+      "Selected .deb install because this looks like Debian/Ubuntu and apt-get is available",
+    );
     expect(result.stdout).toContain("Downloading Junban .deb");
     expect(fs.readFileSync(path.join(logDir, "apt-get.args"), "utf8").trim()).toMatch(
       /^install -y .*junban-latest-amd64\.deb$/,
@@ -281,6 +287,10 @@ describe("Linux installer", () => {
     const legacyHiddenPath = path.join(applicationsDir, "ASF Junban.desktop");
 
     expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Detected Linux distro: Linux (unknown)");
+    expect(result.stdout).toContain(
+      "Selected AppImage install because this distro is not Debian/Ubuntu-like",
+    );
     expect(result.stdout).toContain("Downloading Junban AppImage");
     expect(fs.readFileSync(appimagePath, "utf8")).toBe("appimage asset\n");
     expect(fs.statSync(appimagePath).mode & 0o111).toBeGreaterThan(0);

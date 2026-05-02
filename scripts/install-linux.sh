@@ -4,9 +4,14 @@ set -eu
 REPO="${JUNBAN_REPO:-Artificial-Source/Junban}"
 API_URL="${JUNBAN_RELEASE_API:-https://api.github.com/repos/${REPO}/releases/latest}"
 INSTALL_KIND="${JUNBAN_INSTALL_KIND:-auto}"
+REQUESTED_INSTALL_KIND="$INSTALL_KIND"
 INSTALL_DIR="${JUNBAN_INSTALL_DIR:-}"
 OS_RELEASE_FILE="${JUNBAN_OS_RELEASE_FILE:-/etc/os-release}"
 ASSET_ARCH="amd64"
+DETECTED_ARCH=""
+DETECTED_DISTRO_NAME="Linux"
+DETECTED_DISTRO_ID="unknown"
+DETECTED_DISTRO_ID_LIKE=""
 
 usage() {
   printf '%s\n' 'Usage: install-linux.sh [--auto|--deb|--appimage]'
@@ -63,10 +68,12 @@ case "$INSTALL_KIND" in
   auto | deb | appimage) ;;
   *) die "JUNBAN_INSTALL_KIND must be auto, deb, or appimage" ;;
 esac
+REQUESTED_INSTALL_KIND="$INSTALL_KIND"
 
 [ "$(uname -s)" = "Linux" ] || die "this installer only supports Linux"
 
-case "$(uname -m)" in
+DETECTED_ARCH="$(uname -m)"
+case "$DETECTED_ARCH" in
   x86_64 | amd64) ;;
   *)
     die "only amd64 Linux release assets are currently published; use the release page or build from source"
@@ -87,17 +94,58 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-is_debian_like() {
+detect_linux_distro() {
   if [ -r "$OS_RELEASE_FILE" ]; then
+    PRETTY_NAME=""
+    NAME=""
+    ID=""
+    ID_LIKE=""
+
     # /etc/os-release is the standard Linux distribution identity file.
     # shellcheck disable=SC1090,SC1091
     . "$OS_RELEASE_FILE"
-    case "${ID:-} ${ID_LIKE:-}" in
-      *debian* | *ubuntu*) return 0 ;;
-    esac
+
+    DETECTED_DISTRO_NAME="${PRETTY_NAME:-${NAME:-Linux}}"
+    DETECTED_DISTRO_ID="${ID:-unknown}"
+    DETECTED_DISTRO_ID_LIKE="${ID_LIKE:-}"
   fi
+}
+
+is_debian_like() {
+  case "${DETECTED_DISTRO_ID} ${DETECTED_DISTRO_ID_LIKE}" in
+    *debian* | *ubuntu*) return 0 ;;
+  esac
 
   return 1
+}
+
+describe_detection() {
+  info "Detected Linux distro: ${DETECTED_DISTRO_NAME} (${DETECTED_DISTRO_ID})"
+  [ -z "$DETECTED_DISTRO_ID_LIKE" ] || info "Detected distro family: ${DETECTED_DISTRO_ID_LIKE}"
+  info "Detected CPU architecture: ${DETECTED_ARCH}; using ${ASSET_ARCH} release assets"
+}
+
+describe_install_choice() {
+  case "$INSTALL_KIND" in
+    deb)
+      if [ "$REQUESTED_INSTALL_KIND" = "auto" ]; then
+        info "Selected .deb install because this looks like Debian/Ubuntu and apt-get is available"
+      else
+        info "Selected .deb install because it was requested explicitly"
+      fi
+      ;;
+    appimage)
+      if [ "$REQUESTED_INSTALL_KIND" = "auto" ]; then
+        if is_debian_like; then
+          info "Selected AppImage install because apt-get is not available"
+        else
+          info "Selected AppImage install because this distro is not Debian/Ubuntu-like"
+        fi
+      else
+        info "Selected AppImage install because it was requested explicitly"
+      fi
+      ;;
+  esac
 }
 
 find_asset_url() {
@@ -229,6 +277,9 @@ install_appimage() {
   info "Junban AppImage installed. Launch it from your app menu or run: ${appimage_path}"
 }
 
+detect_linux_distro
+describe_detection
+
 if [ "$INSTALL_KIND" = "auto" ]; then
   if is_debian_like && command_exists apt-get; then
     INSTALL_KIND="deb"
@@ -236,6 +287,7 @@ if [ "$INSTALL_KIND" = "auto" ]; then
     INSTALL_KIND="appimage"
   fi
 fi
+describe_install_choice
 
 info "Fetching latest Junban release metadata"
 curl -fsSL "$API_URL" -o "$RELEASE_JSON"

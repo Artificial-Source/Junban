@@ -24,7 +24,7 @@ On Linux, run the installer helper to fetch the latest release and choose the ri
 curl -fsSL https://raw.githubusercontent.com/Artificial-Source/Junban/main/scripts/install-linux.sh | sh
 ```
 
-The helper installs the `.deb` on Debian/Ubuntu systems and installs the portable AppImage under `~/Applications` elsewhere. It also refreshes the Junban launcher entry so the app menu shows one `Junban` result. The `.deb` path explains and asks before using `sudo` because `apt-get` installs a system package. Use the AppImage path for an install under your home directory without `sudo`.
+The helper prints the detected distro, architecture, and selected install path. It installs the `.deb` on Debian/Ubuntu systems and installs the portable AppImage under `~/Applications` elsewhere. It also refreshes the Junban launcher entry so the app menu shows one `Junban` result. The `.deb` path explains and asks before using `sudo` because `apt-get` installs a system package. Use the AppImage path for an install under your home directory without `sudo`.
 
 You can force either path with an explicit argument:
 

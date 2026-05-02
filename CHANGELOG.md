@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Linux installer now refreshes a single `Junban` launcher entry and removes stale local AppImage launcher files that could create duplicate app finder results.
 - Linux installer now supports the shorter `curl ... | sh` install command while keeping the `.deb` sudo confirmation prompt attached to the user's terminal.
+- Linux installer now prints the detected distro, CPU architecture, selected install path, and why that path was chosen.
 
 ## [1.0.9] — 2026-05-02
 

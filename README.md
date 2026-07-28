@@ -13,13 +13,26 @@ This repository contains a ground-up implementation with:
 
 ## Status
 
-The new implementation is being built in validated phases and has not released a usable version yet. The hosted/Tailnet server is the first delivery priority. Follow [`goals/rust-rewrite/execplan.md`](goals/rust-rewrite/execplan.md) for current scope and progress.
+Phase 0 foundation is in place: a Rust 2024 workspace, React/Vite/Tailwind frontend tooling, CI, and contributor docs. No usable product release yet. The hosted/Tailnet server is the first delivery priority. Follow [`goals/rust-rewrite/execplan.md`](goals/rust-rewrite/execplan.md) for scope and progress.
 
 The retired implementation is private and archived. It is not a supported download or compatibility target.
 
 ## Development
 
-Start with [`AGENTS.md`](AGENTS.md), [`CLAUDE.md`](CLAUDE.md), and [`docs/README.md`](docs/README.md). Commands will be documented as the initial workspace foundation is committed.
+Requirements:
+
+- Rust **1.93.0** (see `rust-toolchain.toml`)
+- Node.js **>= 22.12** and pnpm **10.29.1** for frontend build/test only
+
+```bash
+pnpm install
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-features
+pnpm check
+```
+
+Node is not a shipped runtime. Details: [`docs/setup.md`](docs/setup.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md), and [`CLAUDE.md`](CLAUDE.md).
 
 ## License
 

@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28. Phase 0 is active.
+**Status:** approved by the user on 2026-07-28. Phase 0 is complete; Phase 1 has not started.
 
 ## Purpose and user-visible outcome
 
@@ -322,6 +322,8 @@ The dependency chain is `0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9
 
 **Outcome:** a public, coherent fresh repository whose empty workspace is reproducible and whose rules prevent old architecture from returning.
 
+**Completion evidence:** local acceptance, architecture approval, exact-head GitHub checks on PR #1, and public repository configuration are recorded in the Phase 0 evidence and retrospective.
+
 Work:
 
 - finalize this plan and baseline evidence;
@@ -335,8 +337,8 @@ Work:
 Acceptance:
 
 - `cargo fmt --all -- --check`
-- `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- `cargo test --workspace --all-features`
+- `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
+- `cargo test --locked --workspace --all-features`
 - frontend format, lint, typecheck, unit-test and production-build commands
 - docs link/format checks and `git diff --check`
 - CI passes on the exact commit
@@ -586,8 +588,8 @@ Run nearest checks first. The expected mature command families are:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-features
 cargo audit
 cargo deny check
 pnpm format:check
@@ -668,7 +670,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Plugin runtime research completed.
 - [x] Independent plan-gate review approved after `PLAN-001`–`PLAN-003` were fixed.
 - [x] User approved this plan and explicitly requested simple, functional, non-overengineered implementation.
-- [ ] Phase 0 implementation.
+- [x] Phase 0 implementation, validation, architecture review and exact-head CI.
 - [ ] Phase 1 implementation.
 - [ ] Phase 2 implementation.
 - [ ] Phase 3 implementation.
@@ -706,7 +708,18 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - One database authority is easy for web and desktop but needs deliberate CLI/MCP ownership behavior.
 - AI provider APIs and local voice tooling change quickly; implementation must verify current official contracts rather than port old adapters blindly.
 - The most likely way to lose the memory benefit is eager initialization or dependency aggregation. Per-phase release-memory evidence is therefore part of correctness, not optional optimization.
+- Phase 0: the official Vite React-TS template already prefers Oxlint over ESLint, which keeps the frontend toolchain smaller without a custom lint stack.
+- Phase 0: Tailwind v4 via `@tailwindcss/vite` needs no `tailwind.config` for an empty shell; keep config absent until design tokens are ported.
+- Phase 0: with an empty Rust dependency graph, wiring `cargo-audit`/`cargo-deny` into CI would only compile tooling noise; gate them when Phase 1 adds production crates.
+- Phase 0: a root `pnpm-workspace.yaml` is required even for this single-package repo so a checkout nested beneath an unrelated ancestor workspace remains reproducible and audits only Junban.
 
 ## Outcome and retrospective
 
-Not yet applicable. Update this section at each completed phase with the commit, commands, evidence, material review decisions and any adjustment to later phases.
+### Phase 0
+
+- **Outcome:** reproducible Rust workspace + frontend toolchain + narrow repo checks + docs skeletons. No product behavior.
+- **Evidence:** `goals/rust-rewrite/evidence/phase-0-foundation.md`
+- **Local commands passed:** `cargo fmt --all -- --check`; `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`; `cargo test --locked --workspace --all-features`; `pnpm install --frozen-lockfile`; `pnpm format:check`; `pnpm lint`; `pnpm typecheck`; `pnpm test`; `pnpm build`; `pnpm check:docs`; `pnpm check:runtime-boundary`; `pnpm check`; `pnpm audit --audit-level high`; `git diff --check`; negative Node-import boundary probe; GitHub API resolution of all Action SHA pins; manual `dist/` inspection (frontend assets only).
+- **Review ledger:** `ARCH-001` fixed by making Clippy/tests enforce the committed Cargo dependency graph with `--locked`; canonical commands were aligned. Focused architecture recheck approved the fix with no remaining blocker.
+- **Remote verification:** PR #1 required the Rust and frontend/repository checks on its exact final head; both passed before fast-forward merge. The fresh repository was then made public.
+- **Follow-ups for later phases:** enable `cargo-audit`/`cargo-deny` when Rust production dependencies arrive; begin UI migration and hosted vertical slice in Phase 1.

@@ -1,0 +1,8 @@
+pnpm-lock.yaml
+target
+dist
+coverage
+node_modules
+playwright-report
+test-results
+*.tsbuildinfo

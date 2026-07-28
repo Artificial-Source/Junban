@@ -61,7 +61,9 @@ The Phase 0 architecture gate reported `ARCH-001`: Clippy and test CI did not ye
 
 ## Remote verification
 
-PR #1 required the `Rust` and `Frontend and repository` checks on its exact final head; both passed before fast-forward merge to `main`. The fresh repository was then made public. The four distinct Actions references were also resolved through GitHub's API, and all five `uses:` entries are full 40-character SHA pins.
+PR #1 required the `Rust` and `Frontend and repository` checks on its exact final head; both passed before fast-forward merge to `main`. The same exact SHA passed both jobs again on the main push. The fresh repository was then made public with protected required checks and secret-scanning push protection. The four distinct Actions references were also resolved through GitHub's API, and all five `uses:` entries are full 40-character SHA pins.
+
+Dependabot's first public-repository run immediately proposed incompatible TypeScript 7 and Node 26 type majors. The policy was corrected to group routine patch/minor updates and ignore majors until an explicit migration is planned; those automatic major PRs were closed.
 
 ## Intentionally deferred
 

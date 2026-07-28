@@ -34,7 +34,7 @@ Junban never invokes, installs, or configures Tailscale. Setup guidance may be d
 ## Supply chain
 
 - Pin GitHub Actions to full commit SHAs.
-- Dependabot covers Cargo, npm, and GitHub Actions.
+- Dependabot groups routine patch/minor Cargo, npm, and GitHub Actions updates. Major upgrades require an explicit migration decision instead of automatic churn.
 - When production Rust dependencies arrive in Phase 1, `cargo-audit` and `cargo-deny` become mandatory CI checks. They are intentionally not required in Phase 0 while the Rust dependency graph is empty.
 - Frontend production dependencies stay limited to browser UI libraries.
 

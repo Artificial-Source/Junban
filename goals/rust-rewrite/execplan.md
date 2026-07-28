@@ -358,7 +358,7 @@ Work:
 - implement schema v1, migration runner, owner lock and private runtime metadata;
 - evaluate dedicated single SQLite worker versus a minimal pool and record the decision;
 - implement versioned API/error envelope, generated frontend types and contract drift gate;
-- implement loopback default, auth, exact host allowlist, body limits and static asset serving;
+- implement loopback default, exact Host checks and security headers for every response; keep static shell/assets unauthenticated for fragment bootstrap; require auth on every `/api/v1` route except health; use authenticated fetch-based SSE; enforce body limits;
 - implement operation IDs/receipts and post-commit event revision;
 - port only the visual shell, themes, fonts/assets, Sidebar, Today, Inbox, TaskItem and minimum editor;
 - add deterministic seed and memory/startup benchmark harness.
@@ -372,7 +372,7 @@ Acceptance:
 - optimized release process contains no resident Node and no backend JS resources;
 - same-host idle/warm/startup measurements compare with the 179.25 MiB baseline;
 - before Phase 2, record and approve the numeric final hosted-server memory ceiling, exact workload/protocol, variance and regression rule that Phase 9 must pass;
-- desktop/mobile screenshot and axe checks pass for the implemented shell;
+- all eight deterministic legacy-derived Today/Inbox desktop/mobile light/dark comparisons in `evidence/phase-1-visual-baseline/` pass at threshold 0.2 and maximum 1% differing pixels; axe and structural checks pass separately; intentional visible differences require explicit user approval;
 - Rust unit/integration tests, frontend checks, Playwright task smoke and security review pass;
 - decision records cover SQLite worker and contract generation;
 - one clean commit: `feat: deliver Rust hosted task vertical slice`.
@@ -683,6 +683,9 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 
 ## Plan review ledger
 
+- `P1-SEC-001` — **fixed**. Phase 1 now distinguishes unauthenticated static shell/assets from authenticated application APIs. Exact Host/security headers still apply globally; every `/api/v1` route except health requires bearer auth; SSE uses authenticated fetch rather than native EventSource.
+- `P1-UI-001` — **fixed**. Eight legacy-rendered Phase 1 authority images freeze Today/Inbox at desktop/mobile in light/dark with a fixed clock, seed, viewport, and blocking diff tolerance. Rewrite-generated screenshots cannot silently replace them.
+- Phase 1 focused planning recheck — **approved**. Both `P1-SEC-001` and `P1-UI-001` are closed with no remaining blocker.
 - `PLAN-001` — **fixed**. Added all five Smart Nudge behaviors and session dismissal semantics to the inventory, Phase 3 implementation and acceptance. Added plugin dependency constraints, dependency-first activation, dependent-aware disable/removal, missing/incompatible failures and cycle rejection to the inventory, Phase 7 work and acceptance.
 - `PLAN-002` — **fixed**. Phase 1 must freeze a numeric final hosted-memory ceiling and exact protocol before Phase 2; Phase 9 must pass it and cannot waive it by explaining cumulative deltas.
 - `PLAN-003` — **fixed**. Phase 8 and Phase 9 now require target-native package/install/launch evidence for Linux x64, macOS Intel/ARM64 and Windows x64/ARM64. Only an explicit recorded user exception can permit a missing target.
@@ -697,6 +700,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-07-28: made `Junban-legacy` private, archived and read-only; created the new `Junban` repository privately until its initial foundation is approved and coherent.
 - 2026-07-28: declined a guessed RAM promise; Phase 1 evidence will establish the numeric final hosted-memory ceiling, exact protocol, variance and regression rule that Phase 9 must pass.
 - 2026-07-28: user approved the plan and required Google's code-health posture: good functional progress, small focused changes and no speculative overengineering.
+- 2026-07-28: froze eight deterministic legacy-rendered Today/Inbox reference scenes for Phase 1 rather than allowing the rewrite to generate its own visual authority.
 
 ## Discoveries and risks
 
@@ -713,6 +717,8 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 0: with an empty Rust dependency graph, wiring `cargo-audit`/`cargo-deny` into CI would only compile tooling noise; gate them when Phase 1 adds production crates.
 - Phase 0: a root `pnpm-workspace.yaml` is required even for this single-package repo so a checkout nested beneath an unrelated ancestor workspace remains reproducible and audits only Junban.
 - Phase 0: Dependabot's first activation proposed incompatible TypeScript 7 and Node 26 type majors. Routine patch/minor updates are now grouped; major upgrades require an explicit migration decision instead of automatic PR churn.
+- Phase 1 planning: URL fragments never reach the server, so bearer-protecting static assets would make browser bootstrap impossible. Static shell/assets stay unauthenticated but exact-Host/security-header protected; the fragment token authenticates API fetches including SSE.
+- Phase 1 planning: existing broad screenshots were not a valid exact-design gate for the reduced Phase 1 field set. A private legacy capture produced eight fixed-reference scenes instead.
 
 ## Outcome and retrospective
 

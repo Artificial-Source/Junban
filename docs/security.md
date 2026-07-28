@@ -10,22 +10,27 @@ Security implementation lands with the phases that introduce each surface. This 
 - Plugins are capability-limited portable packages. Unrestricted in-process native plugin APIs are out of scope.
 - Optional AI, voice, and plugin subsystems must not inflate default startup or idle memory when unused.
 
-## Hosted server (Phase 1+)
+## Hosted server
 
-Planned controls:
+The Phase 1 server implements:
 
-- loopback bind by default;
-- authentication on all non-health application endpoints;
-- exact configured hostnames only (no wildcard host trust);
-- owner-only runtime metadata and token storage;
-- token rotation and bounded authentication lockout/rate limiting;
-- browser security headers, request/body limits, origin/host validation;
-- redacted logging;
-- restore/maintenance barriers when backup restore lands.
+- `127.0.0.1:4219` as the default bind, with explicit bind override;
+- exact raw `Host` allowlisting on every request; `Forwarded` and `X-Forwarded-Host` are ignored;
+- unauthenticated health and static shell/assets, with bearer authentication on every other `/api/v1` request including fetch-parsed SSE;
+- a persistent random bearer token in the private profile's `access-token` file; the token is never placed in runtime metadata or logs;
+- a small global in-memory invalid-auth limiter (eight attempts per rolling 30 seconds). It is deliberately bounded and resets at process restart; per-client/scoped credentials belong to the CLI/MCP phase;
+- rejection of unsafe browser mutations when an optional `Origin` does not exactly match the raw Host, while clients with no Origin remain usable;
+- a 64 KiB JSON body limit with JSON errors, global CSP/frame/content-type/referrer headers, and generated request IDs returned in `x-request-id` and error envelopes;
+- explicit `/api` fallback routes before the static SPA fallback, so unknown API paths never return HTML;
+- startup rejection when the static web directory and private profile directory overlap, preventing accidental token/database serving.
 
-Junban never invokes, installs, or configures Tailscale. Setup guidance may be displayed only.
+Static assets must remain public because URL fragments are not sent to the server. The dependent frontend wave will move a fragment bootstrap token to session storage and remove the fragment before authenticated fetches. Query-string tokens and native `EventSource` are not supported.
 
-## Secrets and diagnostics
+Junban never invokes, installs, or configures Tailscale. Setup guidance may be displayed only. Restore/maintenance barriers arrive with backup/restore.
+
+## Profile files and secrets
+
+The profile directory is owner-only (`0700`) and its database, lock, token and runtime metadata files are owner-only (`0600`) on Unix. The default Windows profile is under `%LOCALAPPDATA%` and inherits that user-profile ACL; a custom profile inherits its selected parent ACL. Junban never broadens inherited Windows permissions. Runtime metadata contains only the bound address and process ID and is removed on graceful shutdown.
 
 - Provider API keys and local tokens are secrets.
 - Diagnostics and error logs must redact secrets and sensitive URLs.
@@ -35,7 +40,7 @@ Junban never invokes, installs, or configures Tailscale. Setup guidance may be d
 
 - Pin GitHub Actions to full commit SHAs.
 - Dependabot groups routine patch/minor Cargo, npm, and GitHub Actions updates. Major upgrades require an explicit migration decision instead of automatic churn.
-- When production Rust dependencies arrive in Phase 1, `cargo-audit` and `cargo-deny` become mandatory CI checks. They are intentionally not required in Phase 0 while the Rust dependency graph is empty.
+- `cargo-audit` and `cargo-deny` are mandatory CI checks. CI installs exact locked tool versions before running the checked `deny.toml` policy.
 - Frontend production dependencies stay limited to browser UI libraries.
 
 ## Reporting

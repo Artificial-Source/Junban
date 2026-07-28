@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28. Phase 0 is complete; Phase 1 has not started.
+**Status:** approved by the user on 2026-07-28. Phase 0 is complete. The Phase 1 backend/contract wave is implemented; frontend integration, optimized evidence, review and phase closure remain.
 
 ## Purpose and user-visible outcome
 
@@ -671,7 +671,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Independent plan-gate review approved after `PLAN-001`–`PLAN-003` were fixed.
 - [x] User approved this plan and explicitly requested simple, functional, non-overengineered implementation.
 - [x] Phase 0 implementation, validation, architecture review and exact-head CI.
-- [ ] Phase 1 implementation.
+- [ ] Phase 1 implementation (backend/contract wave implemented; frontend/evidence/review remain).
 - [ ] Phase 2 implementation.
 - [ ] Phase 3 implementation.
 - [ ] Phase 4 implementation.
@@ -701,6 +701,8 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-07-28: declined a guessed RAM promise; Phase 1 evidence will establish the numeric final hosted-memory ceiling, exact protocol, variance and regression rule that Phase 9 must pass.
 - 2026-07-28: user approved the plan and required Google's code-health posture: good functional progress, small focused changes and no speculative overengineering.
 - 2026-07-28: froze eight deterministic legacy-rendered Today/Inbox reference scenes for Phase 1 rather than allowing the rewrite to generate its own visual authority.
+- 2026-07-28: selected one dedicated long-lived SQLite connection thread rather than a pool. The required Phase 1 mutation volume is serialized, executor threads never block on SQLite, and a pool would add ownership and memory complexity without demonstrated benefit.
+- 2026-07-28: selected Utoipa-derived OpenAPI plus checked `openapi-typescript` output. Rust transport DTOs and route annotations remain the only hand-maintained contract authority; generation and non-mutating drift checks cover both artifacts.
 
 ## Discoveries and risks
 
@@ -719,6 +721,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 0: Dependabot's first activation proposed incompatible TypeScript 7 and Node 26 type majors. Routine patch/minor updates are now grouped; major upgrades require an explicit migration decision instead of automatic PR churn.
 - Phase 1 planning: URL fragments never reach the server, so bearer-protecting static assets would make browser bootstrap impossible. Static shell/assets stay unauthenticated but exact-Host/security-header protected; the fragment token authenticates API fetches including SSE.
 - Phase 1 planning: existing broad screenshots were not a valid exact-design gate for the reduced Phase 1 field set. A private legacy capture produced eight fixed-reference scenes instead.
+- Phase 1 backend: `rusqlite` 0.40's bundled build dependency requires an unstable `cfg_select` on pinned Rust 1.93, so Phase 1 uses `rusqlite` 0.39 with only bundled/cache features. No product behavior is lost.
 
 ## Outcome and retrospective
 

@@ -41,10 +41,12 @@ pnpm format:check        # Prettier check
 pnpm format:write        # Prettier write
 pnpm lint                # Oxlint
 pnpm typecheck           # tsc project build
-pnpm test                # Vitest (passWithNoTests while no product tests exist)
+pnpm test                # Vitest (passWithNoTests while no product UI tests exist)
+pnpm contract:generate   # regenerate checked OpenAPI and TypeScript types
+pnpm contract:check      # non-mutating contract drift check
 pnpm check:docs          # local Markdown link check
 pnpm check:runtime-boundary
-pnpm check               # aggregate frontend/repo checks
+pnpm check               # aggregate frontend/repo and contract checks
 ```
 
 ## Rust workspace
@@ -55,12 +57,33 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-features
 ```
 
-Phase 0 contains one library crate, `junban-domain`, so workspace commands operate on a real target.
+The Phase 1 backend crates are `junban-domain`, `junban-app`, `junban-storage`, and `junban-server`. Supply-chain checks are also required:
+
+```bash
+cargo deny check
+cargo audit
+```
+
+## Run the hosted server
+
+Build the frontend first, then start the Rust server:
+
+```bash
+pnpm build
+cargo run --locked -p junban-server -- \
+  --data-dir ./data \
+  --web-dir ./dist
+```
+
+The default listener is `127.0.0.1:4219`. `--bind` changes the listener and repeatable `--host` values add exact raw Host header values (include the port when clients send one). The default profile is `./data` on Unix and `%LOCALAPPDATA%/Junban` on Windows; `--data-dir` overrides it. The server creates a private bearer token at `<profile>/access-token` and private token-free discovery metadata at `<profile>/runtime.json`. Do not paste the token into query strings or logs. The Phase 1 frontend bootstrap that consumes a URL-fragment token is a dependent integration wave; API clients can send `Authorization: Bearer <token>` directly now.
+
+Run `cargo run --locked -p junban-server -- --help` for the complete small configuration surface.
 
 ## Repository invariants
 
 - `pnpm check:runtime-boundary` rejects Node API imports in `src/`, Node package trees, backend Node production packages, and Node executables under native areas (`crates/`, `src-tauri/`), while allowing bundled frontend assets in `dist/`.
-- `cargo-audit` / `cargo-deny` are documented for Phase 1 when production Rust dependencies arrive; they are not CI-gated on the empty Phase 0 graph.
+- `cargo-audit` and `cargo-deny` are CI-gated now that production Rust dependencies exist.
+- Rust DTOs and route annotations own `openapi/junban-v1.json`; never hand-edit it or `src/ui/api/generated.ts`.
 
 ## Further reading
 

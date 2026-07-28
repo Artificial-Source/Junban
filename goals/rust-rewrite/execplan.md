@@ -712,6 +712,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 0: Tailwind v4 via `@tailwindcss/vite` needs no `tailwind.config` for an empty shell; keep config absent until design tokens are ported.
 - Phase 0: with an empty Rust dependency graph, wiring `cargo-audit`/`cargo-deny` into CI would only compile tooling noise; gate them when Phase 1 adds production crates.
 - Phase 0: a root `pnpm-workspace.yaml` is required even for this single-package repo so a checkout nested beneath an unrelated ancestor workspace remains reproducible and audits only Junban.
+- Phase 0: Dependabot's first activation proposed incompatible TypeScript 7 and Node 26 type majors. Routine patch/minor updates are now grouped; major upgrades require an explicit migration decision instead of automatic PR churn.
 
 ## Outcome and retrospective
 
@@ -721,5 +722,5 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - **Evidence:** `goals/rust-rewrite/evidence/phase-0-foundation.md`
 - **Local commands passed:** `cargo fmt --all -- --check`; `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`; `cargo test --locked --workspace --all-features`; `pnpm install --frozen-lockfile`; `pnpm format:check`; `pnpm lint`; `pnpm typecheck`; `pnpm test`; `pnpm build`; `pnpm check:docs`; `pnpm check:runtime-boundary`; `pnpm check`; `pnpm audit --audit-level high`; `git diff --check`; negative Node-import boundary probe; GitHub API resolution of all Action SHA pins; manual `dist/` inspection (frontend assets only).
 - **Review ledger:** `ARCH-001` fixed by making Clippy/tests enforce the committed Cargo dependency graph with `--locked`; canonical commands were aligned. Focused architecture recheck approved the fix with no remaining blocker.
-- **Remote verification:** PR #1 required the Rust and frontend/repository checks on its exact final head; both passed before fast-forward merge. The fresh repository was then made public.
+- **Remote verification:** PR #1 required the Rust and frontend/repository checks on its exact final head; both passed before fast-forward merge and again on the main push. The fresh repository was then made public with protected required checks and secret-scanning push protection. A focused policy follow-up grouped routine Dependabot updates and disabled automatic major-version PRs after the first activation exposed that noise.
 - **Follow-ups for later phases:** enable `cargo-audit`/`cargo-deny` when Rust production dependencies arrive; begin UI migration and hosted vertical slice in Phase 1.

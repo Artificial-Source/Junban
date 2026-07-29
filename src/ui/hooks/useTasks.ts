@@ -47,9 +47,48 @@ export function formatError(error: unknown): string {
 }
 
 /**
+ * Choose whether an authoritative list snapshot may replace local state.
+ * Equal revisions are allowed so a snapshot can confirm a mutation at the same head.
+ */
+export function nextStateFromListSnapshot(
+  currentRevision: number,
+  snapshot: { revision: number; tasks: TaskDto[] },
+): { revision: number; tasks: TaskDto[] } | null {
+  if (snapshot.revision < currentRevision) {
+    return null;
+  }
+  return { revision: snapshot.revision, tasks: snapshot.tasks };
+}
+
+/** Insert or replace a task by id so duplicate create/update deliveries stay idempotent. */
+export function upsertTaskById(tasks: TaskDto[], task: TaskDto): TaskDto[] {
+  const index = tasks.findIndex((candidate) => candidate.id === task.id);
+  if (index === -1) {
+    return [...tasks, task];
+  }
+  if (tasks[index] === task) {
+    return tasks;
+  }
+  const next = tasks.slice();
+  next[index] = task;
+  return next;
+}
+
+/** Remove a task by id; no-op when the id is already absent. */
+export function removeTaskById(tasks: TaskDto[], taskId: string): TaskDto[] {
+  const next = tasks.filter((task) => task.id !== taskId);
+  return next.length === tasks.length ? tasks : next;
+}
+
+/**
  * Manages task list state with SSE-driven convergence.
  * Mutations generate one UUID idempotency key per logical operation,
  * retain it across transport retry, and reload the list after relevant events.
+ *
+ * List snapshots apply monotonically by server revision. Concurrent reloads
+ * coalesce to one in-flight fetch plus at most one follow-up. Mutation task
+ * payloads upsert by task id so an own-create SSE/list result cannot duplicate
+ * when the mutation response arrives later.
  */
 export function useTasks(): TaskState & TaskActions {
   const [tasks, setTasks] = useState<TaskDto[]>([]);
@@ -57,29 +96,67 @@ export function useTasks(): TaskState & TaskActions {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Track pending operation IDs so SSE events from our own mutations
-  // don't cause redundant list reloads.
+  // Track pending operation IDs so SSE handlers can clear own-mutation receipts.
   const pendingOps = useRef(new Set<string>());
-  // Track the last revision applied from SSE to avoid reload waterfalls.
-  const lastAppliedRevision = useRef(0);
+  // Highest authoritative revision already applied to local state.
+  const appliedRevisionRef = useRef(0);
+  // Coalesce reloads: one in flight, one queued follow-up max.
+  const reloadInFlightRef = useRef(false);
+  const reloadQueuedRef = useRef(false);
+
+  const applyListSnapshot = useCallback((snapshotRevision: number, snapshotTasks: TaskDto[]) => {
+    const next = nextStateFromListSnapshot(appliedRevisionRef.current, {
+      revision: snapshotRevision,
+      tasks: snapshotTasks,
+    });
+    if (!next) {
+      return false;
+    }
+    appliedRevisionRef.current = next.revision;
+    setTasks(next.tasks);
+    setRevision(next.revision);
+    return true;
+  }, []);
+
+  const applyMutationTask = useCallback((task: TaskDto, eventRevision: number) => {
+    if (eventRevision < appliedRevisionRef.current) {
+      // A newer authoritative snapshot already won; do not regress task fields.
+      return;
+    }
+    appliedRevisionRef.current = eventRevision;
+    setRevision(eventRevision);
+    setTasks((prev) => upsertTaskById(prev, task));
+  }, []);
 
   const reloadTasks = useCallback(async () => {
     if (!hasStoredToken()) {
       setLoading(false);
       return;
     }
-    try {
-      const result = await listTasks();
-      setTasks(result.tasks);
-      setRevision(result.revision);
-      lastAppliedRevision.current = result.revision;
-      setError(null);
-    } catch (err) {
-      setError(formatError(err));
-    } finally {
-      setLoading(false);
+
+    if (reloadInFlightRef.current) {
+      reloadQueuedRef.current = true;
+      return;
     }
-  }, []);
+
+    reloadInFlightRef.current = true;
+    try {
+      do {
+        reloadQueuedRef.current = false;
+        try {
+          const result = await listTasks();
+          applyListSnapshot(result.revision, result.tasks);
+          setError(null);
+        } catch (err) {
+          setError(formatError(err));
+        } finally {
+          setLoading(false);
+        }
+      } while (reloadQueuedRef.current);
+    } finally {
+      reloadInFlightRef.current = false;
+    }
+  }, [applyListSnapshot]);
 
   // Initial load
   useEffect(() => {
@@ -95,10 +172,9 @@ export function useTasks(): TaskState & TaskActions {
         // If this event came from our own pending operation, clear it.
         pendingOps.current.delete(event.data.operation_id);
 
-        // Reload the task list to converge with the server state.
-        // Dedup by revision: only reload if we haven't already seen this revision.
-        if (event.data.revision > lastAppliedRevision.current) {
-          lastAppliedRevision.current = event.data.revision;
+        // Reload when the stream is ahead of applied state. Do not advance the
+        // applied revision here — only list/mutation payloads are authoritative.
+        if (event.data.revision > appliedRevisionRef.current) {
           void reloadTasks();
         }
       },
@@ -125,10 +201,7 @@ export function useTasks(): TaskState & TaskActions {
       try {
         const result = await createTask({ title, due_date: dueDate }, operationId);
         if (result.task) {
-          // Optimistic update: add the task to the list immediately
-          setTasks((prev) => [...prev, result.task!]);
-          setRevision(result.event.revision);
-          lastAppliedRevision.current = result.event.revision;
+          applyMutationTask(result.task, result.event.revision);
         }
         return result.task ?? null;
       } catch (err) {
@@ -138,7 +211,7 @@ export function useTasks(): TaskState & TaskActions {
         pendingOps.current.delete(operationId);
       }
     },
-    [],
+    [applyMutationTask],
   );
 
   const handleUpdateTask = useCallback(
@@ -148,9 +221,7 @@ export function useTasks(): TaskState & TaskActions {
       try {
         const result = await replaceTask(taskId, { title, due_date: dueDate }, operationId);
         if (result.task) {
-          setTasks((prev) => prev.map((t) => (t.id === taskId ? result.task! : t)));
-          setRevision(result.event.revision);
-          lastAppliedRevision.current = result.event.revision;
+          applyMutationTask(result.task, result.event.revision);
         }
         return result.task ?? null;
       } catch (err) {
@@ -160,7 +231,7 @@ export function useTasks(): TaskState & TaskActions {
         pendingOps.current.delete(operationId);
       }
     },
-    [],
+    [applyMutationTask],
   );
 
   const handleToggleComplete = useCallback(
@@ -174,9 +245,7 @@ export function useTasks(): TaskState & TaskActions {
             ? await uncompleteTask(taskId, operationId)
             : await completeTask(taskId, operationId);
         if (result.task) {
-          setTasks((prev) => prev.map((t) => (t.id === taskId ? result.task! : t)));
-          setRevision(result.event.revision);
-          lastAppliedRevision.current = result.event.revision;
+          applyMutationTask(result.task, result.event.revision);
         }
         return result.task ?? null;
       } catch (err) {
@@ -186,15 +255,19 @@ export function useTasks(): TaskState & TaskActions {
         pendingOps.current.delete(operationId);
       }
     },
-    [tasks],
+    [applyMutationTask, tasks],
   );
 
   const handleDeleteTask = useCallback(async (taskId: string): Promise<boolean> => {
     const operationId = generateOperationId();
     pendingOps.current.add(operationId);
     try {
-      await deleteTask(taskId, operationId);
-      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      const result = await deleteTask(taskId, operationId);
+      if (result.event.revision >= appliedRevisionRef.current) {
+        appliedRevisionRef.current = result.event.revision;
+        setRevision(result.event.revision);
+      }
+      setTasks((prev) => removeTaskById(prev, taskId));
       return true;
     } catch (err) {
       setError(formatError(err));

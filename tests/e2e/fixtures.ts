@@ -41,7 +41,9 @@ async function stopServer(child: ChildProcess | undefined): Promise<void> {
   if (await waitForExit(child, SHUTDOWN_TIMEOUT_MS)) return;
 
   child.kill("SIGKILL");
-  await waitForExit(child, SHUTDOWN_TIMEOUT_MS);
+  if (!(await waitForExit(child, SHUTDOWN_TIMEOUT_MS))) {
+    throw new Error(`Server process ${child.pid ?? "unknown"} did not exit after SIGKILL`);
+  }
 }
 
 /**

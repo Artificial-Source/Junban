@@ -83,6 +83,27 @@ The default listener is `127.0.0.1:4219`. `--bind` changes the listener and repe
 
 Run `cargo run --locked -p junban-server -- --help` for the complete small configuration surface.
 
+## Use over Tailnet
+
+Keep the Rust listener on loopback and let [Tailscale Serve](https://tailscale.com/kb/1242/tailscale-serve) provide the private HTTPS endpoint. Add the exact MagicDNS hostname to Junban's Host allowlist:
+
+Find this machine's MagicDNS name with `tailscale status`, then start the optimized server:
+
+```bash
+TAILNET_HOST="your-machine.your-tailnet.ts.net"
+target/release/junban-server \
+  --bind 127.0.0.1:4219 \
+  --host "$TAILNET_HOST"
+```
+
+In another terminal, publish that loopback listener only to the tailnet:
+
+```bash
+tailscale serve --bg http://127.0.0.1:4219
+```
+
+Open `https://<TAILNET_HOST>/#access_token=<TOKEN>` once, replacing `<TOKEN>` with the contents of the private profile's `access-token` file. Junban stores the token only for that browser tab's session and removes it from the visible URL immediately. Never put the token in a query string, shell log, screenshot, or chat message. Use `tailscale serve reset` to remove the temporary Serve configuration.
+
 ## Repository invariants
 
 - `pnpm check:runtime-boundary` rejects Node API imports in `src/`, Node package trees, backend Node production packages, and Node executables under native areas (`crates/`, `src-tauri/`), while allowing bundled frontend assets in `dist/`.

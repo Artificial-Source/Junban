@@ -78,6 +78,21 @@ test("no-token state shows connection screen", async ({ page }) => {
   await expect(page.getByPlaceholder("Add a task for today...")).not.toBeVisible();
 });
 
+test("same-page connection fragment authenticates without a forced reload", async ({ page }) => {
+  await page.goto(server.baseUrl + "/today");
+  await expect(page.getByText("No access token found")).toBeVisible();
+
+  await page.evaluate((token) => {
+    window.location.hash = `access_token=${encodeURIComponent(token)}`;
+  }, server.token);
+
+  await expect(page.getByPlaceholder("Add a task for today...")).toBeVisible();
+  expect(page.url()).not.toContain("access_token");
+  expect(await page.evaluate(() => sessionStorage.getItem("junban-access-token"))).toBe(
+    server.token,
+  );
+});
+
 test("authenticated CRUD: create, edit, complete, uncomplete, delete", async ({ page }) => {
   await authenticate(page);
 

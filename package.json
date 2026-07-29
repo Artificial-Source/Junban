@@ -18,6 +18,7 @@
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test",
+    "audit:dependencies": "pnpm audit --audit-level high",
     "contract:generate": "node scripts/contract.mjs generate",
     "contract:check": "node scripts/contract.mjs check",
     "check:docs": "node scripts/check-docs.mjs",
@@ -47,5 +48,11 @@
     "typescript": "~6.0.2",
     "vite": "^8.1.5",
     "vitest": "^4.1.10"
+  },
+  "pnpm": {
+    "overrides": {
+      "brace-expansion": "5.0.8",
+      "js-yaml": "4.3.0"
+    }
   }
 }

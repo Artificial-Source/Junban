@@ -9,12 +9,20 @@ import { ConnectionScreen } from "./ui/components/ConnectionScreen";
 export default function App() {
   const [authenticated, setAuthenticated] = useState(false);
 
-  // Initialize theme and bootstrap fragment token on first mount.
+  // Initialize the theme and accept connection links on first load or same-page navigation.
   useEffect(() => {
     initTheme();
     applyDefaultAccentColor();
-    const hasToken = bootstrapFragmentToken() || hasStoredToken();
-    setAuthenticated(hasToken);
+
+    const authenticateFromLocation = () => {
+      if (bootstrapFragmentToken() || hasStoredToken()) {
+        setAuthenticated(true);
+      }
+    };
+
+    authenticateFromLocation();
+    window.addEventListener("hashchange", authenticateFromLocation);
+    return () => window.removeEventListener("hashchange", authenticateFromLocation);
   }, []);
 
   const { view, navigate } = useRouting();

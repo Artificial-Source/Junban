@@ -8,8 +8,8 @@ test.beforeAll(async () => {
   server = await startServer({ seed: true });
 });
 
-test.afterAll(() => {
-  server.cleanup();
+test.afterAll(async () => {
+  await server.cleanup();
 });
 
 test.beforeEach(async ({ page }) => {
@@ -144,4 +144,27 @@ test("keyboard: task input is focusable and operable", async ({ page }) => {
   await input.fill("Keyboard test task");
   await input.press("Enter");
   await expect(page.getByText("Keyboard test task")).toBeVisible({ timeout: 5000 });
+});
+
+test("keyboard: task dialog traps focus, escapes, and restores its opener", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await authenticate(page, "/today");
+
+  const opener = page.getByRole("button", {
+    name: "Edit task: Review accessibility audit findings",
+  });
+  await opener.click();
+  const dialog = page.getByRole("dialog", { name: /Task: Review accessibility audit findings/ });
+  await expect(dialog.getByLabel("Task title")).toBeFocused();
+
+  const close = dialog.getByRole("button", { name: "Close task details" });
+  await close.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.getByRole("button", { name: "Delete task" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(opener).toBeFocused();
 });

@@ -5,7 +5,7 @@ import { formatDate } from "../lib/dates";
 
 interface OverdueSectionProps {
   tasks: TaskDto[];
-  onToggleTask: (id: string) => void;
+  onToggleTask: (id: string) => Promise<boolean>;
   onSelectTask: (id: string) => void;
   onReschedule: () => void;
   selectedTaskId: string | null;
@@ -19,6 +19,21 @@ export function OverdueSection({
   selectedTaskId,
 }: OverdueSectionProps) {
   const [expanded, setExpanded] = useState(true);
+  const [pendingTaskIds, setPendingTaskIds] = useState<Set<string>>(new Set());
+
+  const toggleTask = (taskId: string) => {
+    if (pendingTaskIds.has(taskId)) return;
+    setPendingTaskIds((current) => new Set(current).add(taskId));
+    void onToggleTask(taskId)
+      .catch(() => false)
+      .finally(() => {
+        setPendingTaskIds((current) => {
+          const next = new Set(current);
+          next.delete(taskId);
+          return next;
+        });
+      });
+  };
 
   if (tasks.length === 0) return null;
 
@@ -62,7 +77,8 @@ export function OverdueSection({
             >
               <button
                 type="button"
-                onClick={() => onToggleTask(task.id)}
+                onClick={() => toggleTask(task.id)}
+                disabled={pendingTaskIds.has(task.id)}
                 aria-label={`Complete task: ${task.title}`}
                 className={`mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 border-on-surface-muted/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 ${
                   task.status === "completed"

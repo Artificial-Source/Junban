@@ -7,8 +7,8 @@ test.beforeAll(async () => {
   server = await startServer({ seed: true });
 });
 
-test.afterAll(() => {
-  server.cleanup();
+test.afterAll(async () => {
+  await server.cleanup();
 });
 
 test.beforeEach(async ({ page }) => {
@@ -30,20 +30,44 @@ async function authenticate(page: Page): Promise<void> {
   await page.waitForSelector("h1", { timeout: 5000 });
 }
 
-test("fragment token is saved and URL fragment is scrubbed", async ({ page }) => {
-  await page.goto(appUrlWithToken(server.baseUrl, server.token, "/today"));
+test("fragment token is saved, URL token parts are scrubbed, and reload stays authenticated", async ({
+  page,
+}) => {
+  await page.goto(
+    `${server.baseUrl}/today?view=compact&access_token=ignored#access_token=${server.token}`,
+  );
   await page.waitForSelector("h1");
 
-  // Fragment should be scrubbed
+  expect(page.url()).toContain("?view=compact");
   expect(page.url()).not.toContain("#access_token");
-  expect(page.url()).not.toContain("access_token");
+  expect(page.url()).not.toContain("access_token=ignored");
 
-  // Token should be in sessionStorage (not localStorage)
   const sessionToken = await page.evaluate(() => sessionStorage.getItem("junban-access-token"));
   expect(sessionToken).toBe(server.token);
+  expect(await page.evaluate(() => localStorage.getItem("junban-access-token"))).toBeNull();
 
-  const localToken = await page.evaluate(() => localStorage.getItem("junban-access-token"));
-  expect(localToken).toBeNull();
+  await page.reload();
+  await expect(page.locator("h1")).toBeVisible();
+});
+
+test("rejects malformed and query-only tokens while immediately scrubbing URL token parts", async ({
+  browser,
+}) => {
+  for (const fragment of [
+    "#access_token=",
+    "#access_token=one&access_token=two",
+    "#access_token=%E0%A4%A",
+  ]) {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.goto(`${server.baseUrl}/today?view=compact&access_token=ignored${fragment}`);
+
+    await expect(page.getByText("No access token found")).toBeVisible();
+    expect(page.url()).toContain("?view=compact");
+    expect(page.url()).not.toContain("access_token");
+    expect(await page.evaluate(() => sessionStorage.getItem("junban-access-token"))).toBeNull();
+    await context.close();
+  }
 });
 
 test("no-token state shows connection screen", async ({ page }) => {
@@ -239,29 +263,64 @@ test("API-vs-SPA fallback: /api/unknown returns JSON 404, not SPA HTML", async (
   expect(response.body).not.toContain("<html");
 });
 
-test("cross-tab SSE convergence after create", async ({ browser }) => {
+test("cross-tab SSE convergence covers create, update, completion reversal, and delete", async ({
+  browser,
+}) => {
   const page1 = await browser.newPage();
   const page2 = await browser.newPage();
 
   await page1.clock.setFixedTime(new Date("2026-07-23T10:30:00-07:00"));
   await page2.clock.setFixedTime(new Date("2026-07-23T10:30:00-07:00"));
-
-  // Both tabs authenticate and load the task list
   await page1.goto(appUrlWithToken(server.baseUrl, server.token, "/today"));
   await page2.goto(appUrlWithToken(server.baseUrl, server.token, "/inbox"));
   await page1.waitForSelector("h1");
   await page2.waitForSelector("h1");
 
-  // Create a task in tab 1
   await page1.getByPlaceholder("Add a task for today...").fill("Cross-tab convergence test");
   await page1.getByPlaceholder("Add a task for today...").press("Enter");
-  await expect(page1.getByText("Cross-tab convergence test")).toBeVisible({ timeout: 5000 });
-
-  // Tab 2 should converge via SSE without reload — the task should appear
   await expect(page2.getByText("Cross-tab convergence test")).toBeVisible({ timeout: 10000 });
 
+  await page1.getByRole("button", { name: "Edit task: Cross-tab convergence test" }).click();
+  await page1.getByLabel("Task title").fill("Cross-tab updated task");
+  await page1.getByRole("button", { name: "Save" }).click();
+  await expect(page2.getByText("Cross-tab updated task")).toBeVisible({ timeout: 10000 });
+  await expect(page2.getByText("Cross-tab convergence test")).not.toBeVisible();
+
+  const dialog = page1.getByRole("dialog", { name: /Task: Cross-tab updated task/ });
+  await dialog.getByRole("button", { name: /Complete task: Cross-tab updated task/ }).click();
+  await expect(
+    page2.getByRole("button", { name: /Mark task incomplete: Cross-tab updated task/ }),
+  ).toBeVisible({
+    timeout: 10000,
+  });
+
+  await dialog
+    .getByRole("button", { name: /Mark task incomplete: Cross-tab updated task/ })
+    .click();
+  await expect(
+    page2.getByRole("button", { name: /Complete task: Cross-tab updated task/ }),
+  ).toBeVisible({
+    timeout: 10000,
+  });
+
+  await dialog.getByRole("button", { name: "Delete" }).click();
+  await expect(page2.getByText("Cross-tab updated task")).not.toBeVisible({ timeout: 10000 });
   await page1.close();
   await page2.close();
+});
+
+test("optimized server restart retains task state for an authenticated reload", async ({
+  page,
+}) => {
+  await authenticate(page);
+  await page.getByPlaceholder("Add a task for today...").fill("Restart persistence test");
+  await page.getByPlaceholder("Add a task for today...").press("Enter");
+  await expect(page.getByText("Restart persistence test")).toBeVisible();
+
+  await server.restart();
+  await page.reload();
+  await expect(page.locator("h1")).toBeVisible();
+  await expect(page.getByText("Restart persistence test")).toBeVisible();
 });
 
 test("malformed request returns validation error", async ({ page }) => {

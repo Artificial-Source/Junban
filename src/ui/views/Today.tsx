@@ -10,7 +10,7 @@ import { useToday } from "../hooks/useToday";
 interface TodayProps {
   tasks: TaskDto[];
   onCreateTask: (title: string, dueDate: string | null) => Promise<boolean>;
-  onToggleTask: (id: string) => void;
+  onToggleTask: (id: string) => Promise<boolean>;
   onSelectTask: (id: string) => void;
   selectedTaskId: string | null;
   autoFocusTrigger?: number;

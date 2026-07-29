@@ -106,6 +106,9 @@ export function useTasks(): TaskState & TaskActions {
         // On reconnect, reload to catch any missed events
         void reloadTasks();
       },
+      (streamError) => {
+        setError(streamError.message);
+      },
       revision,
     );
 
@@ -129,9 +132,10 @@ export function useTasks(): TaskState & TaskActions {
         }
         return result.task ?? null;
       } catch (err) {
-        pendingOps.current.delete(operationId);
         setError(formatError(err));
         return null;
+      } finally {
+        pendingOps.current.delete(operationId);
       }
     },
     [],
@@ -150,9 +154,10 @@ export function useTasks(): TaskState & TaskActions {
         }
         return result.task ?? null;
       } catch (err) {
-        pendingOps.current.delete(operationId);
         setError(formatError(err));
         return null;
+      } finally {
+        pendingOps.current.delete(operationId);
       }
     },
     [],
@@ -175,9 +180,10 @@ export function useTasks(): TaskState & TaskActions {
         }
         return result.task ?? null;
       } catch (err) {
-        pendingOps.current.delete(operationId);
         setError(formatError(err));
         return null;
+      } finally {
+        pendingOps.current.delete(operationId);
       }
     },
     [tasks],
@@ -191,9 +197,10 @@ export function useTasks(): TaskState & TaskActions {
       setTasks((prev) => prev.filter((t) => t.id !== taskId));
       return true;
     } catch (err) {
-      pendingOps.current.delete(operationId);
       setError(formatError(err));
       return false;
+    } finally {
+      pendingOps.current.delete(operationId);
     }
   }, []);
 

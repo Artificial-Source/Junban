@@ -24,7 +24,7 @@ The Phase 1 server implements:
 - explicit `/api` fallback routes before the static SPA fallback, so unknown API paths never return HTML;
 - startup rejection when the static web directory and private profile directory overlap, preventing accidental token/database serving.
 
-Static assets must remain public because URL fragments are not sent to the server. The dependent frontend wave will move a fragment bootstrap token to session storage and remove the fragment before authenticated fetches. Query-string tokens and native `EventSource` are not supported.
+Static assets remain public because URL fragments are not sent to the server. The browser accepts only one nonempty, correctly decoded `#access_token=<value>` fragment, moves it to `sessionStorage`, and immediately removes the fragment. Any fragment shape outside that exact form is discarded; `access_token` query parameters are removed without being used, while unrelated query parameters remain. Query-string tokens and native `EventSource` are not supported.
 
 Junban never invokes, installs, or configures Tailscale. Setup guidance may be displayed only. Restore/maintenance barriers arrive with backup/restore.
 

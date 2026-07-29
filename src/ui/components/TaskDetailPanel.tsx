@@ -26,6 +26,7 @@ export function TaskDetailPanel({
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
 
   // Sync state when task changes
   useEffect(() => {
@@ -34,22 +35,46 @@ export function TaskDetailPanel({
     setError(null);
   }, [task.id, task.title, task.due_date]);
 
-  // Focus trap: focus title on open
+  // Keep keyboard focus within the modal and return it to the control that opened it.
+  useEffect(() => {
+    openerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    titleRef.current?.focus();
+    return () => openerRef.current?.focus();
+  }, []);
+
   useEffect(() => {
     titleRef.current?.focus();
   }, [task.id]);
 
-  // Close on Escape
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab" || !dialogRef.current) return;
+
+    const focusable = Array.from(
+      dialogRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   const handleSave = async () => {
     if (pending) return;
@@ -66,6 +91,8 @@ export function TaskDetailPanel({
       if (!success) {
         setError("Could not save changes.");
       }
+    } catch {
+      setError("Could not save changes.");
     } finally {
       setPending(false);
     }
@@ -82,6 +109,8 @@ export function TaskDetailPanel({
       } else {
         setError("Could not delete the task.");
       }
+    } catch {
+      setError("Could not delete the task.");
     } finally {
       setPending(false);
     }
@@ -90,8 +119,14 @@ export function TaskDetailPanel({
   const handleToggleComplete = async () => {
     if (pending) return;
     setPending(true);
+    setError(null);
     try {
-      await onToggleComplete(task.id);
+      const success = await onToggleComplete(task.id);
+      if (!success) {
+        setError("Could not update the task.");
+      }
+    } catch {
+      setError("Could not update the task.");
     } finally {
       setPending(false);
     }
@@ -108,6 +143,7 @@ export function TaskDetailPanel({
       aria-modal="true"
       aria-label={`Task: ${task.title}`}
       onClick={onClose}
+      onKeyDown={handleDialogKeyDown}
     >
       <div
         ref={dialogRef}

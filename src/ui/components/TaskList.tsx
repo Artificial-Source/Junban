@@ -5,7 +5,7 @@ import { EmptyState } from "./EmptyState";
 
 interface TaskListProps {
   tasks: TaskDto[];
-  onToggle: (id: string) => void;
+  onToggle: (id: string) => Promise<boolean>;
   onSelect: (id: string) => void;
   selectedTaskId: string | null;
   emptyMessage: string;

@@ -33,7 +33,7 @@ export default function App() {
       error={taskState.error}
       onRetry={taskState.retry}
       onCreateTask={async (title, dueDate) => (await taskState.createTask(title, dueDate)) !== null}
-      onToggleTask={(id) => void taskState.toggleComplete(id)}
+      onToggleTask={async (id) => (await taskState.toggleComplete(id)) !== null}
       onUpdateTask={async (taskId, title, dueDate) =>
         (await taskState.updateTask(taskId, title, dueDate)) !== null
       }

@@ -1,5 +1,6 @@
-import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -8,93 +9,119 @@ export interface ServerContext {
   baseUrl: string;
   token: string;
   dataDir: string;
-  cleanup: () => void;
+  restart: () => Promise<void>;
+  cleanup: () => Promise<void>;
 }
 
 const HOST = "127.0.0.1";
 const PORT = 4299;
 const TOKEN = "test-deterministic-token-for-phase-1-visual-baseline-verification";
+const SHUTDOWN_TIMEOUT_MS = 5_000;
+
+function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const onExit = () => finish(true);
+    const finish = (exited: boolean) => {
+      if (timeout) clearTimeout(timeout);
+      child.off("exit", onExit);
+      resolve(exited);
+    };
+    child.once("exit", onExit);
+    timeout = setTimeout(() => finish(false), timeoutMs);
+  });
+}
+
+async function stopServer(child: ChildProcess | undefined): Promise<void> {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+
+  child.kill("SIGINT");
+  if (await waitForExit(child, SHUTDOWN_TIMEOUT_MS)) return;
+
+  child.kill("SIGKILL");
+  await waitForExit(child, SHUTDOWN_TIMEOUT_MS);
+}
 
 /**
  * Start the optimized Rust server with a private temp profile and deterministic token.
  * Seeds the five documented tasks via the real API before returning.
- * Returns a cleanup function that kills the server and removes the temp directory.
  */
 export async function startServer(options: { seed?: boolean } = {}): Promise<ServerContext> {
-  const dataDir = mkdtempSync(join(tmpdir(), `junban-e2e-${randomUUID()}-`));
+  const dataDir = await mkdtemp(join(tmpdir(), `junban-e2e-${randomUUID()}-`));
   const distDir = join(process.cwd(), "dist");
 
   if (!existsSync(join(distDir, "index.html"))) {
     throw new Error("dist/index.html not found — run `pnpm build` first");
   }
 
-  // Write the deterministic token directly to the profile
-  writeFileSync(join(dataDir, "access-token"), `${TOKEN}\n`, { mode: 0o600 });
-
-  // Build the server binary if not already built
   const binaryPath = join(process.cwd(), "target", "release", "junban-server");
   if (!existsSync(binaryPath)) {
     throw new Error("junban-server release binary not found — run `cargo build --release` first");
   }
 
-  const child = spawn(
-    binaryPath,
-    ["--bind", `${HOST}:${PORT}`, "--data-dir", dataDir, "--web-dir", distDir],
-    {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, RUST_LOG: "warn" },
-    },
-  );
+  await writeFile(join(dataDir, "access-token"), `${TOKEN}\n`, { mode: 0o600 });
 
-  let stderrBuffer = "";
-  child.stderr?.on("data", (data) => {
-    stderrBuffer += data.toString();
-  });
-
-  // Wait for server to be ready
   const baseUrl = `http://${HOST}:${PORT}`;
-  let ready = false;
-  for (let i = 0; i < 50; i++) {
-    try {
-      const response = await fetch(`${baseUrl}/api/v1/health`);
-      if (response.ok) {
-        ready = true;
-        break;
+  let child: ChildProcess | undefined;
+
+  const launch = async () => {
+    child = spawn(
+      binaryPath,
+      ["--bind", `${HOST}:${PORT}`, "--data-dir", dataDir, "--web-dir", distDir],
+      {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, RUST_LOG: "warn" },
+      },
+    );
+
+    let stderr = "";
+    child.stderr?.on("data", (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      try {
+        const response = await fetch(`${baseUrl}/api/v1/health`);
+        if (response.ok) return;
+      } catch {
+        // The process has not bound its listener yet.
       }
-    } catch {
-      // Server not ready yet
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
 
-  if (!ready) {
-    child.kill("SIGKILL");
-    throw new Error(`Server failed to start. stderr: ${stderrBuffer}`);
-  }
-
-  // Seed tasks if requested
-  if (options.seed !== false) {
-    await seedTasks(baseUrl, TOKEN);
-  }
-
-  const cleanup = () => {
-    try {
-      child.kill("SIGTERM");
-      // Give it a moment to shut down gracefully
-      child.kill("SIGKILL");
-    } catch {
-      // Already dead
-    }
-    rmSync(dataDir, { recursive: true, force: true });
+    await stopServer(child);
+    throw new Error(`Server failed to start. stderr: ${stderr}`);
   };
 
-  return { baseUrl, token: TOKEN, dataDir, cleanup };
+  try {
+    await launch();
+    if (options.seed !== false) {
+      await seedTasks(baseUrl, TOKEN);
+    }
+  } catch (error) {
+    await stopServer(child);
+    await rm(dataDir, { recursive: true, force: true });
+    throw error;
+  }
+
+  return {
+    baseUrl,
+    token: TOKEN,
+    dataDir,
+    restart: async () => {
+      await stopServer(child);
+      await launch();
+    },
+    cleanup: async () => {
+      await stopServer(child);
+      await rm(dataDir, { recursive: true, force: true });
+    },
+  };
 }
 
-/**
- * Seed the five documented Phase 1 tasks via the real API.
- * Tasks match the visual baseline README.
- */
+/** Seed tasks matching the visual baseline README via the real API. */
 async function seedTasks(baseUrl: string, token: string): Promise<void> {
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -113,37 +140,28 @@ async function seedTasks(baseUrl: string, token: string): Promise<void> {
   for (const task of tasks) {
     const response = await fetch(`${baseUrl}/api/v1/tasks`, {
       method: "POST",
-      headers: {
-        ...headers,
-        "Idempotency-Key": randomUUID(),
-      },
+      headers: { ...headers, "Idempotency-Key": randomUUID() },
       body: JSON.stringify(task),
     });
     if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Failed to seed task "${task.title}": ${response.status} ${text}`);
+      throw new Error(
+        `Failed to seed task "${task.title}": ${response.status} ${await response.text()}`,
+      );
     }
   }
 
-  // Complete the last task ("Completed setup checklist")
   const listResponse = await fetch(`${baseUrl}/api/v1/tasks`, { headers });
   const list = (await listResponse.json()) as { tasks: Array<{ id: string; title: string }> };
-  const checklistTask = list.tasks.find((t) => t.title === "Completed setup checklist");
+  const checklistTask = list.tasks.find((task) => task.title === "Completed setup checklist");
   if (checklistTask) {
     await fetch(`${baseUrl}/api/v1/tasks/${checklistTask.id}/complete`, {
       method: "POST",
-      headers: {
-        ...headers,
-        "Idempotency-Key": randomUUID(),
-      },
+      headers: { ...headers, "Idempotency-Key": randomUUID() },
     });
   }
 }
 
-/**
- * Navigate to the app with the token in the URL fragment.
- * The app will save it to sessionStorage and scrub the fragment.
- */
+/** Navigate to the app with the token in the URL fragment. */
 export function appUrlWithToken(baseUrl: string, token: string, path: string = "/"): string {
   return `${baseUrl}${path}#access_token=${token}`;
 }

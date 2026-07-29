@@ -36,8 +36,8 @@ test.beforeAll(async () => {
   server = await startServer({ seed: true });
 });
 
-test.afterAll(() => {
-  server.cleanup();
+test.afterAll(async () => {
+  await server.cleanup();
 });
 
 // The visual fixture seeds a completed task whose `completed_at` is stamped by

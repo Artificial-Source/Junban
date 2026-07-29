@@ -20,7 +20,7 @@ interface AppLayoutProps {
   error: string | null;
   onRetry: () => void;
   onCreateTask: (title: string, dueDate: string | null) => Promise<boolean>;
-  onToggleTask: (id: string) => void;
+  onToggleTask: (id: string) => Promise<boolean>;
   onUpdateTask: (taskId: string, title: string, dueDate: string | null) => Promise<boolean>;
   onDeleteTask: (taskId: string) => Promise<boolean>;
 }
@@ -201,10 +201,7 @@ export function AppLayout({
           task={selectedTask}
           onUpdate={onUpdateTask}
           onDelete={onDeleteTask}
-          onToggleComplete={async (taskId) => {
-            onToggleTask(taskId);
-            return true;
-          }}
+          onToggleComplete={onToggleTask}
           onClose={() => setSelectedTaskId(null)}
           todayKey={today}
         />

@@ -5,7 +5,7 @@ import { formatTodayHeader } from "../../lib/dates";
 interface TodayTaskListProps {
   todayTasks: TaskDto[];
   overdueTasks: TaskDto[];
-  onToggleTask: (id: string) => void;
+  onToggleTask: (id: string) => Promise<boolean>;
   onSelectTask: (id: string) => void;
   selectedTaskId: string | null;
   todayKey: string;

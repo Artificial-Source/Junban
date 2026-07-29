@@ -1,16 +1,18 @@
+import { useState } from "react";
 import { Calendar, Pencil } from "lucide-react";
 import type { TaskDto } from "../api/client";
 import { calendarDayKey, formatDate } from "../lib/dates";
 
 interface TaskItemProps {
   task: TaskDto;
-  onToggle: (id: string) => void;
+  onToggle: (id: string) => Promise<boolean>;
   onSelect: (id: string) => void;
   isSelected: boolean;
   todayKey: string;
 }
 
 export function TaskItem({ task, onToggle, onSelect, isSelected, todayKey: today }: TaskItemProps) {
+  const [pending, setPending] = useState(false);
   const dueDay = task.due_date ? calendarDayKey(task.due_date) : null;
   const isOverdue = dueDay !== null && task.status === "pending" && dueDay < today;
   const isCompleted = task.status === "completed";
@@ -40,12 +42,17 @@ export function TaskItem({ task, onToggle, onSelect, isSelected, todayKey: today
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            onToggle(task.id);
+            if (pending) return;
+            setPending(true);
+            void onToggle(task.id)
+              .catch(() => false)
+              .finally(() => setPending(false));
           }}
+          disabled={pending}
           aria-label={
             isCompleted ? `Mark task incomplete: ${task.title}` : `Complete task: ${task.title}`
           }
-          className={`${checkboxClassName} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface`}
+          className={`${checkboxClassName} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60`}
         >
           {isCompleted && (
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className="text-surface">

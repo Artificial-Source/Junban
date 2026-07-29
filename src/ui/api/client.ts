@@ -42,11 +42,14 @@ export class ApiError extends Error {
   }
 }
 
-/** A network-level error when the server is unreachable or returns non-JSON. */
+/** A network-level error when the server is unreachable or returns an invalid response. */
 export class NetworkError extends Error {
-  constructor(message: string) {
+  readonly retryable: boolean;
+
+  constructor(message: string, retryable = true) {
     super(message);
     this.name = "NetworkError";
+    this.retryable = retryable;
   }
 }
 
@@ -76,22 +79,41 @@ export function hasStoredToken(): boolean {
   return getStoredToken() !== null;
 }
 
+function decodeFragmentToken(fragment: string): string | null {
+  const prefix = "access_token=";
+  if (!fragment.startsWith(prefix)) return null;
+
+  const encodedToken = fragment.slice(prefix.length);
+  if (!encodedToken || encodedToken.includes("&")) return null;
+
+  try {
+    const token = decodeURIComponent(encodedToken.replace(/\+/g, " "));
+    return token ? token : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Parse and save the URL fragment token, then scrub the fragment.
- * Accepts only `#access_token=...`. Returns true if a token was saved.
+ * Parse and save an exact URL-fragment token, then scrub all token-bearing URL parts.
+ * Query-string tokens are deliberately discarded and never used for authentication.
  */
 export function bootstrapFragmentToken(): boolean {
-  const hash = window.location.hash;
-  if (!hash) return false;
+  const fragment = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  const token = decodeFragmentToken(fragment);
+  const query = new URLSearchParams(window.location.search);
+  const hadQueryToken = query.has("access_token");
+  query.delete("access_token");
 
-  const fragment = hash.startsWith("#") ? hash.slice(1) : hash;
-  const params = new URLSearchParams(fragment);
-  const token = params.get("access_token");
+  if (window.location.hash || hadQueryToken) {
+    const search = query.toString();
+    history.replaceState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}`);
+  }
+
   if (!token) return false;
-
   storeToken(token);
-  // Scrub the fragment before any API call can leak it in a referrer.
-  history.replaceState(null, "", window.location.pathname + window.location.search);
   return true;
 }
 
@@ -108,51 +130,105 @@ export function generateOperationId(): string {
 
 function authHeaders(): Record<string, string> {
   const token = getStoredToken();
-  if (!token) throw new NetworkError("No access token available");
+  if (!token) throw new NetworkError("No access token available", false);
   return { Authorization: `Bearer ${token}` };
 }
 
-async function parseResponse<T>(response: Response): Promise<T> {
-  if (response.status === 204 || response.headers.get("content-length") === "0") {
-    return undefined as T;
+async function request(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new NetworkError("Network request failed");
   }
-  const text = await response.text();
-  if (!text) return undefined as T;
+}
+
+function isErrorEnvelope(body: unknown): body is ErrorEnvelope {
+  if (!body || typeof body !== "object") return false;
+  const envelope = body as Record<string, unknown>;
+  if (
+    typeof envelope.request_id !== "string" ||
+    !envelope.error ||
+    typeof envelope.error !== "object"
+  ) {
+    return false;
+  }
+  const error = envelope.error as Record<string, unknown>;
+  return (
+    typeof error.code === "string" &&
+    typeof error.message === "string" &&
+    typeof error.retryable === "boolean"
+  );
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
+  if (response.status === 204) return undefined as T;
+
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    throw new NetworkError("Could not read the server response", response.ok);
+  }
+  if (!text) {
+    throw new NetworkError(
+      `Server returned an empty response (status ${response.status})`,
+      response.ok,
+    );
+  }
+
   let body: unknown;
   try {
     body = JSON.parse(text);
   } catch {
-    throw new NetworkError(`Server returned non-JSON response (status ${response.status})`);
+    throw new NetworkError(
+      `Server returned non-JSON response (status ${response.status})`,
+      response.ok,
+    );
   }
   if (!response.ok) {
-    throw new ApiError(body as ErrorEnvelope, response.status);
+    if (!isErrorEnvelope(body)) {
+      throw new NetworkError(
+        `Server returned an invalid error response (status ${response.status})`,
+        false,
+      );
+    }
+    throw new ApiError(body, response.status);
   }
   return body as T;
 }
 
+async function mutate<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!(error instanceof NetworkError) || !error.retryable) throw error;
+    return operation();
+  }
+}
+
 /** List all tasks. Returns the task array and the current revision. */
 export async function listTasks(): Promise<TaskListResponse> {
-  const response = await fetch("/api/v1/tasks", {
-    headers: { ...authHeaders() },
-  });
+  const response = await request("/api/v1/tasks", { headers: { ...authHeaders() } });
   return parseResponse<TaskListResponse>(response);
 }
 
-/** Create a task with an idempotency key retained across retries. */
+/** Create a task with an idempotency key retained across one transport retry. */
 export async function createTask(
   body: CreateTaskRequest,
   operationId: string,
 ): Promise<MutationResponse> {
-  const response = await fetch("/api/v1/tasks", {
-    method: "POST",
-    headers: {
-      ...authHeaders(),
-      "Content-Type": "application/json",
-      "Idempotency-Key": operationId,
-    },
-    body: JSON.stringify(body),
+  return mutate(async () => {
+    const response = await request("/api/v1/tasks", {
+      method: "POST",
+      headers: {
+        ...authHeaders(),
+        "Content-Type": "application/json",
+        "Idempotency-Key": operationId,
+      },
+      body: JSON.stringify(body),
+    });
+    return parseResponse<MutationResponse>(response);
   });
-  return parseResponse<MutationResponse>(response);
 }
 
 /** Replace a task (title and nullable due date). */
@@ -161,25 +237,29 @@ export async function replaceTask(
   body: ReplaceTaskRequest,
   operationId: string,
 ): Promise<MutationResponse> {
-  const response = await fetch(`/api/v1/tasks/${taskId}`, {
-    method: "PUT",
-    headers: {
-      ...authHeaders(),
-      "Content-Type": "application/json",
-      "Idempotency-Key": operationId,
-    },
-    body: JSON.stringify(body),
+  return mutate(async () => {
+    const response = await request(`/api/v1/tasks/${taskId}`, {
+      method: "PUT",
+      headers: {
+        ...authHeaders(),
+        "Content-Type": "application/json",
+        "Idempotency-Key": operationId,
+      },
+      body: JSON.stringify(body),
+    });
+    return parseResponse<MutationResponse>(response);
   });
-  return parseResponse<MutationResponse>(response);
 }
 
 /** Mark a task as completed. */
 export async function completeTask(taskId: string, operationId: string): Promise<MutationResponse> {
-  const response = await fetch(`/api/v1/tasks/${taskId}/complete`, {
-    method: "POST",
-    headers: { ...authHeaders(), "Idempotency-Key": operationId },
+  return mutate(async () => {
+    const response = await request(`/api/v1/tasks/${taskId}/complete`, {
+      method: "POST",
+      headers: { ...authHeaders(), "Idempotency-Key": operationId },
+    });
+    return parseResponse<MutationResponse>(response);
   });
-  return parseResponse<MutationResponse>(response);
 }
 
 /** Mark a completed task as pending again. */
@@ -187,26 +267,30 @@ export async function uncompleteTask(
   taskId: string,
   operationId: string,
 ): Promise<MutationResponse> {
-  const response = await fetch(`/api/v1/tasks/${taskId}/uncomplete`, {
-    method: "POST",
-    headers: { ...authHeaders(), "Idempotency-Key": operationId },
+  return mutate(async () => {
+    const response = await request(`/api/v1/tasks/${taskId}/uncomplete`, {
+      method: "POST",
+      headers: { ...authHeaders(), "Idempotency-Key": operationId },
+    });
+    return parseResponse<MutationResponse>(response);
   });
-  return parseResponse<MutationResponse>(response);
 }
 
 /** Delete a task. */
 export async function deleteTask(taskId: string, operationId: string): Promise<MutationResponse> {
-  const response = await fetch(`/api/v1/tasks/${taskId}`, {
-    method: "DELETE",
-    headers: { ...authHeaders(), "Idempotency-Key": operationId },
+  return mutate(async () => {
+    const response = await request(`/api/v1/tasks/${taskId}`, {
+      method: "DELETE",
+      headers: { ...authHeaders(), "Idempotency-Key": operationId },
+    });
+    return parseResponse<MutationResponse>(response);
   });
-  return parseResponse<MutationResponse>(response);
 }
 
 /** Check server health (unauthenticated). */
 export async function checkHealth(): Promise<boolean> {
   try {
-    const response = await fetch("/api/v1/health");
+    const response = await request("/api/v1/health");
     return response.ok;
   } catch {
     return false;
@@ -220,33 +304,81 @@ export interface SseEvent {
   data: TaskEventDto;
 }
 
+export type SseTerminalError = {
+  kind: "authentication" | "protocol";
+  message: string;
+};
+
+function isTaskEvent(data: unknown): data is TaskEventDto {
+  if (!data || typeof data !== "object") return false;
+  const event = data as Record<string, unknown>;
+  return (
+    typeof event.revision === "number" &&
+    typeof event.operation_id === "string" &&
+    typeof event.task_id === "string" &&
+    typeof event.event_type === "string"
+  );
+}
+
+function reconnectDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(done, ms);
+    const onAbort = () => {
+      window.clearTimeout(timeout);
+      done();
+    };
+    function done() {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /**
  * Subscribe to the revisioned SSE event stream using authenticated fetch.
- * Parses incrementally with AbortController. Calls onEvent for each event,
- * reconnects from the last applied revision, and dedupes by revision.
- * Returns a cleanup function that aborts the connection.
+ * Transport failures reconnect from the last revision. Authentication and protocol
+ * failures are terminal so a rejected stream cannot retry forever.
  */
 export function subscribeToEvents(
   onEvent: (event: SseEvent) => void,
   onReconnect: () => void,
+  onTerminal: (error: SseTerminalError) => void,
   initialSince: number = 0,
 ): () => void {
   const controller = new AbortController();
   let lastRevision = initialSince;
   let stopped = false;
 
+  const stopWithError = (error: SseTerminalError) => {
+    if (stopped) return;
+    stopped = true;
+    onTerminal(error);
+    controller.abort();
+  };
+
   const connect = async () => {
     while (!stopped) {
       try {
-        const url = `/api/v1/events?since=${lastRevision}`;
-        const response = await fetch(url, {
+        const response = await request(`/api/v1/events?since=${lastRevision}`, {
           headers: authHeaders(),
           signal: controller.signal,
         });
-        if (!response.ok || !response.body) {
-          // Non-OK: wait and retry
-          await delay(2000);
-          continue;
+        if (response.status === 401 || response.status === 403) {
+          stopWithError({ kind: "authentication", message: "Event stream authentication failed." });
+          return;
+        }
+        if (
+          !response.ok ||
+          !response.body ||
+          !response.headers.get("content-type")?.includes("text/event-stream")
+        ) {
+          stopWithError({
+            kind: "protocol",
+            message: "Event stream returned an invalid response.",
+          });
+          return;
         }
 
         const reader = response.body.getReader();
@@ -263,8 +395,8 @@ export function subscribeToEvents(
 
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
+          for (const rawLine of lines) {
+            const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
             if (line.startsWith("event:")) {
               currentEvent = line.slice(6).trim();
             } else if (line.startsWith("id:")) {
@@ -272,15 +404,26 @@ export function subscribeToEvents(
             } else if (line.startsWith("data:")) {
               currentData += (currentData ? "\n" : "") + line.slice(5).trim();
             } else if (line === "" && currentData) {
-              // Blank line = event boundary
+              let data: unknown;
               try {
-                const data = JSON.parse(currentData) as TaskEventDto;
-                if (data.revision > lastRevision) {
-                  lastRevision = data.revision;
-                  onEvent({ id: currentId, event: currentEvent, data });
-                }
+                data = JSON.parse(currentData);
               } catch {
-                // Skip malformed event
+                stopWithError({
+                  kind: "protocol",
+                  message: "Event stream contained invalid JSON.",
+                });
+                return;
+              }
+              if (!isTaskEvent(data)) {
+                stopWithError({
+                  kind: "protocol",
+                  message: "Event stream contained an invalid event.",
+                });
+                return;
+              }
+              if (data.revision > lastRevision) {
+                lastRevision = data.revision;
+                onEvent({ id: currentId, event: currentEvent, data });
               }
               currentEvent = "";
               currentId = "";
@@ -289,16 +432,14 @@ export function subscribeToEvents(
           }
         }
 
-        // Stream ended normally — reconnect from last revision
         if (!stopped) {
           onReconnect();
-          await delay(1000);
+          await reconnectDelay(1000, controller.signal);
         }
       } catch {
         if (stopped || controller.signal.aborted) break;
-        // Network error or abort — reconnect after delay
         onReconnect();
-        await delay(2000);
+        await reconnectDelay(2000, controller.signal);
       }
     }
   };
@@ -309,8 +450,4 @@ export function subscribeToEvents(
     stopped = true;
     controller.abort();
   };
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

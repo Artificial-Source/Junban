@@ -9,6 +9,7 @@ Junban preserves the approved interface, including its accessibility behavior. T
 - Support light, dark, and Nord themes without losing contrast expectations from the approved design.
 - Honor reduced-motion and forced-colors where the approved UI already does.
 - Interactive controls need accessible names and roles; do not remove semantics while porting components.
+- Modal dialogs trap Tab and Shift+Tab focus, close on Escape, and restore the opener focus when closed.
 - Screen-reader-meaningful labels, headings, and live updates stay intact for ported views.
 
 ## Validation posture

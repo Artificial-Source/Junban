@@ -11,6 +11,7 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../SECURITY.md`](../SECURITY.md): vulnerability reporting
 - [`../goals/rust-rewrite/execplan.md`](../goals/rust-rewrite/execplan.md): live phased rewrite plan
 - [`../goals/rust-rewrite/evidence/baseline-memory.md`](../goals/rust-rewrite/evidence/baseline-memory.md): initial hosted-memory evidence
+- [`../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md): Phase 1 hosted-server measurement protocol
 
 ## Foundation docs
 

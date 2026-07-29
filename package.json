@@ -22,6 +22,8 @@
     "contract:check": "node scripts/contract.mjs check",
     "check:docs": "node scripts/check-docs.mjs",
     "check:runtime-boundary": "node scripts/check-runtime-boundary.mjs",
+    "bench:hosted-server": "python3 scripts/bench-hosted-server.py",
+    "bench:hosted-server:quick": "python3 scripts/bench-hosted-server.py --quick",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary"
   },
   "dependencies": {

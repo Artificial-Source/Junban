@@ -47,7 +47,11 @@ pnpm contract:check      # non-mutating contract drift check
 pnpm check:docs          # local Markdown link check
 pnpm check:runtime-boundary
 pnpm check               # aggregate frontend/repo and contract checks
+pnpm bench:hosted-server:quick   # non-authoritative harness dry-run
+pnpm bench:hosted-server         # Phase 1 hosted memory/latency protocol
 ```
+
+Hosted-server evidence requires a release binary, production `dist/`, and Linux cgroup v2 with `systemd --user`. See [`performance.md`](performance.md) and [`../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md).
 
 ## Rust workspace
 

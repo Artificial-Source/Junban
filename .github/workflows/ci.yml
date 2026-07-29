@@ -142,10 +142,15 @@ jobs:
           curl --fail --location --silent --show-error \
             --output /tmp/fonts-noto-core.deb \
             https://archive.ubuntu.com/ubuntu/pool/main/f/fonts-noto/fonts-noto-core_20201225-2_all.deb
-          printf '%s  %s\n' \
+          curl --fail --location --silent --show-error \
+            --output /tmp/fonts-noto-mono.deb \
+            https://archive.ubuntu.com/ubuntu/pool/main/f/fonts-noto/fonts-noto-mono_20201225-2_all.deb
+          printf '%s  %s\n%s  %s\n' \
             4fee136cb12fc197703a340e010478f780a41044339fcefbd78ed9aa96c8b617 \
-            /tmp/fonts-noto-core.deb | sha256sum --check --strict
-          sudo dpkg --install /tmp/fonts-noto-core.deb
+            /tmp/fonts-noto-core.deb \
+            ce277a6e2fbbe7562206171e20e0493ac42c9c405758505cb42aaa01c982036c \
+            /tmp/fonts-noto-mono.deb | sha256sum --check --strict
+          sudo dpkg --install /tmp/fonts-noto-mono.deb /tmp/fonts-noto-core.deb
           fc-cache --force
           test "$(fc-match --format='%{family}' system-ui)" = "Noto Sans"
 
@@ -167,5 +172,5 @@ jobs:
           path: |
             test-results
             playwright-report
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7

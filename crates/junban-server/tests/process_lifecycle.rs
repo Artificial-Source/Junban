@@ -55,8 +55,12 @@ fn assert_graceful_shutdown(signal: &str) {
     assert!(!metadata_text.contains(token.trim()));
     assert_health(metadata.address);
 
+    // An idle authenticated SSE stream must not pin the process across shutdown.
+    let sse = open_sse_stream(metadata.address, token.trim());
+
     send_signal(signal, child.id());
     wait_for_exit(&mut child, signal);
+    drop(sse);
 
     wait_until(
         || !runtime_path.exists(),
@@ -126,6 +130,39 @@ fn assert_health(address: SocketAddr) {
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
     assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+}
+
+fn open_sse_stream(address: SocketAddr, token: &str) -> TcpStream {
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    write!(
+        stream,
+        "GET /api/v1/events HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {token}\r\nAccept: text/event-stream\r\n\r\n"
+    )
+    .unwrap();
+
+    let mut header_bytes = Vec::new();
+    let mut buffer = [0_u8; 1];
+    loop {
+        let read = stream.read(&mut buffer).unwrap();
+        assert_ne!(read, 0, "SSE response closed before headers finished");
+        header_bytes.push(buffer[0]);
+        if header_bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+        assert!(
+            header_bytes.len() < 8 * 1024,
+            "SSE response headers exceeded 8 KiB"
+        );
+    }
+    let headers = String::from_utf8(header_bytes).unwrap();
+    assert!(
+        headers.starts_with("HTTP/1.1 200 OK"),
+        "expected SSE 200, got: {headers}"
+    );
+    stream
 }
 
 fn listener_accepts(address: SocketAddr) -> bool {

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Junban logo">
+  <title>Junban logo</title>
+  <rect width="1024" height="1024" rx="160" fill="#ffffff" />
+  <path fill="#050507" d="M144 144h478L526 324H252c-67 0-108-41-108-108v-72Z" />
+  <path fill="#050507" d="M246 407h236L378 602H144v-88c0-61 41-107 102-107Z" />
+  <path fill="#050507" d="M707 152c91 16 163 89 163 171-66 0-101 27-135 90L516 864H292c-83 0-148-66-148-149v-27h218c52 0 91-25 116-70L707 152Z" />
+  <path fill="#050507" d="M849 407h22v325c0 74-59 132-133 132H607l242-457Z" />
+</svg>

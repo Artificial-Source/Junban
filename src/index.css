@@ -1,1 +1,194 @@
 @import "tailwindcss";
+@import "./ui/fonts.css";
+@import "./ui/themes/light.css";
+@import "./ui/themes/dark.css";
+@import "./ui/themes/nord.css";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Space Grotesk", "Outfit", ui-sans-serif, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+  }
+}
+
+/* Unlayered so these system roles override the unlayered built-in theme files. */
+@media (forced-colors: active) {
+  :root,
+  .dark,
+  .nord {
+    --color-surface: Canvas;
+    --color-surface-secondary: Canvas;
+    --color-surface-tertiary: Canvas;
+    --color-on-surface: CanvasText;
+    --color-on-surface-secondary: CanvasText;
+    --color-on-surface-muted: CanvasText;
+    --color-border: CanvasText;
+    --color-accent-action: Highlight;
+    --color-accent-action-hover: Highlight;
+    --color-on-accent-action: HighlightText;
+    --color-accent-foreground: LinkText;
+    --color-accent-foreground-hover: LinkText;
+    --color-focus: Highlight;
+  }
+
+  :focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px !important;
+  }
+}
+
+@layer base {
+  .reduce-motion,
+  .reduce-motion::before,
+  .reduce-motion::after,
+  .reduce-motion *,
+  .reduce-motion *::before,
+  .reduce-motion *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-delay: 0ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-delay: 0ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .border-l-3 {
+    border-left-width: 3px;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+}
+
+/* ── Entrance animations ────────────────────────────────── */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up-fade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes drop-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateX(-50%) translateY(12px);
+  }
+  to {
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  70% {
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes checkmark-stroke {
+  0% {
+    opacity: 0;
+    stroke-dasharray: 24;
+    stroke-dashoffset: 24;
+  }
+  100% {
+    opacity: 1;
+    stroke-dasharray: 24;
+    stroke-dashoffset: 0;
+  }
+}
+
+@layer utilities {
+  .animate-fade-in {
+    animation: fade-in 150ms ease-out both;
+  }
+  .animate-scale-fade-in {
+    animation: scale-fade-in 200ms ease-out both;
+  }
+  .animate-drop-fade-in {
+    animation: drop-fade-in 200ms ease-out both;
+  }
+  .animate-pop-in {
+    animation: pop-in 300ms ease-out both;
+  }
+  .animate-checkmark-stroke {
+    animation: checkmark-stroke 220ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+  }
+}

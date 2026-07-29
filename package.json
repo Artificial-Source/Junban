@@ -17,6 +17,7 @@
     "lint": "oxlint .",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --passWithNoTests",
+    "test:e2e": "playwright test",
     "contract:generate": "node scripts/contract.mjs generate",
     "contract:check": "node scripts/contract.mjs check",
     "check:docs": "node scripts/check-docs.mjs",
@@ -24,15 +25,19 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary"
   },
   "dependencies": {
+    "lucide-react": "^0.548.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@playwright/test": "^1.55.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "jsdom": "30.0.0",
     "openapi-typescript": "7.13.0",
     "oxlint": "^1.76.0",
     "prettier": "^3.9.6",

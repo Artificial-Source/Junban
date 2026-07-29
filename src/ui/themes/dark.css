@@ -1,0 +1,43 @@
+/* ASF Junban — Dark Theme (overrides) */
+
+.dark {
+  --color-surface: #0a0a0a;
+  --color-surface-secondary: #141414;
+  --color-surface-tertiary: #1a1a1a;
+  --color-on-surface: #e8e8e8;
+  --color-on-surface-secondary: #c7c7c7;
+  --color-on-surface-muted: #a0a0a0;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-accent: #bf5af2;
+  --color-accent-hover: #d8b4fe;
+  --color-accent-action: #c084fc;
+  --color-accent-action-hover: #d8b4fe;
+  --color-accent-foreground: #d8b4fe;
+  --color-accent-foreground-hover: #e9d5ff;
+  --color-focus: #c084fc;
+  --color-on-accent: #0a0a0a;
+  --color-on-accent-action: #0a0a0a;
+  --color-success: #30d158;
+  --color-warning: #ffd60a;
+  --color-on-warning: #0a0a0a;
+  --color-error: #ff453a;
+  --color-priority-1: #ff453a;
+  --color-priority-2: #ff9f0a;
+  --color-priority-3: #bf5af2;
+  --color-priority-4: #585858;
+  --color-glass: rgba(10, 10, 10, 0.7);
+  --color-glass-border: rgba(255, 255, 255, 0.06);
+}
+
+@supports (color: oklch(from red l c h)) {
+  .dark {
+    --color-accent-hover: oklch(from var(--color-accent) 0.84 0.12 h);
+    --color-accent-action: oklch(from var(--color-accent) 0.78 0.12 h);
+    --color-accent-action-hover: oklch(from var(--color-accent) 0.84 0.12 h);
+    --color-accent-foreground: oklch(from var(--color-accent) 0.8 0.12 h);
+    --color-accent-foreground-hover: oklch(from var(--color-accent) 0.88 0.1 h);
+    --color-focus: oklch(from var(--color-accent) 0.8 0.12 h);
+    --color-on-accent: #0a0a0a;
+    --color-on-accent-action: #0a0a0a;
+  }
+}

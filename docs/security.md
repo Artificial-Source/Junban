@@ -30,7 +30,7 @@ Junban never invokes, installs, or configures Tailscale. Setup guidance may be d
 
 ## Profile files and secrets
 
-The profile directory is owner-only (`0700`) and its database, lock, token and runtime metadata files are owner-only (`0600`) on Unix. The default Windows profile is under `%LOCALAPPDATA%` and inherits that user-profile ACL; a custom profile inherits its selected parent ACL. Junban never broadens inherited Windows permissions. Runtime metadata contains only the bound address and process ID and is removed on graceful shutdown.
+The profile directory is owner-only (`0700`) and its database, lock, token and runtime metadata files are owner-only (`0600`) on Unix. Default profiles use the per-user application-data location for the host OS (`$XDG_DATA_HOME/junban` or `$HOME/.local/share/junban` on Linux/BSD, `$HOME/Library/Application Support/Junban` on macOS, `%LOCALAPPDATA%/Junban` on Windows), falling back to `./data` only when required environment data is missing. The default Windows profile inherits that user-profile ACL; a custom profile inherits its selected parent ACL. Junban never broadens inherited Windows permissions. Runtime metadata contains only the bound address and process ID and is removed on graceful shutdown (Ctrl-C everywhere; SIGTERM on Unix as well).
 
 - Provider API keys and local tokens are secrets.
 - Diagnostics and error logs must redact secrets and sensitive URLs.
@@ -40,7 +40,7 @@ The profile directory is owner-only (`0700`) and its database, lock, token and r
 
 - Pin GitHub Actions to full commit SHAs.
 - Dependabot groups routine patch/minor Cargo, npm, and GitHub Actions updates. Major upgrades require an explicit migration decision instead of automatic churn.
-- `cargo-audit` and `cargo-deny` are mandatory CI checks. CI installs exact locked tool versions before running the checked `deny.toml` policy.
+- `cargo-audit` and `cargo-deny` are mandatory CI checks. CI installs exact pinned tool versions from checksum-verified prebuilt binaries before running the checked `deny.toml` policy.
 - Frontend production dependencies stay limited to browser UI libraries.
 
 ## Reporting

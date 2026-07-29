@@ -75,7 +75,7 @@ cargo run --locked -p junban-server -- \
   --web-dir ./dist
 ```
 
-The default listener is `127.0.0.1:4219`. `--bind` changes the listener and repeatable `--host` values add exact raw Host header values (include the port when clients send one). The default profile is `./data` on Unix and `%LOCALAPPDATA%/Junban` on Windows; `--data-dir` overrides it. The server creates a private bearer token at `<profile>/access-token` and private token-free discovery metadata at `<profile>/runtime.json`. Do not paste the token into query strings or logs. The Phase 1 frontend bootstrap that consumes a URL-fragment token is a dependent integration wave; API clients can send `Authorization: Bearer <token>` directly now.
+The default listener is `127.0.0.1:4219`. `--bind` changes the listener and repeatable `--host` values add exact raw Host header values (include the port when clients send one). The default private profile directory is OS-appropriate: `$XDG_DATA_HOME/junban` or `$HOME/.local/share/junban` on Linux/BSD, `$HOME/Library/Application Support/Junban` on macOS, and `%LOCALAPPDATA%/Junban` on Windows. When the required environment data is unavailable the server falls back to `./data`. `--data-dir` overrides the default. The server creates a private bearer token at `<profile>/access-token` and private token-free discovery metadata at `<profile>/runtime.json`. Do not paste the token into query strings or logs. Browser clients bootstrap from a URL-fragment token; API clients can send `Authorization: Bearer <token>` directly. Graceful shutdown accepts Ctrl-C on every platform and also SIGTERM on Unix, then removes runtime metadata and releases the profile lock.
 
 Run `cargo run --locked -p junban-server -- --help` for the complete small configuration surface.
 

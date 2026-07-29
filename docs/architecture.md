@@ -70,4 +70,4 @@ Portable, capability-limited packages on the Wasmtime Component Model with WASI 
 ## Dependency policy
 
 - Prefer the smallest complete dependency set for the current phase.
-- `cargo-audit` and `cargo-deny` become mandatory in CI when production Rust dependencies arrive (Phase 1). Phase 0 has an empty Rust dependency graph and does not compile audit tooling in CI.
+- `cargo-audit` and `cargo-deny` are mandatory CI checks for the production Rust dependency graph. CI installs pinned prebuilt tool binaries rather than compiling those tools from source on every run.

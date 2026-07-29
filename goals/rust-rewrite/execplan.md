@@ -722,6 +722,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 1 planning: URL fragments never reach the server, so bearer-protecting static assets would make browser bootstrap impossible. Static shell/assets stay unauthenticated but exact-Host/security-header protected; the fragment token authenticates API fetches including SSE.
 - Phase 1 planning: existing broad screenshots were not a valid exact-design gate for the reduced Phase 1 field set. A private legacy capture produced eight fixed-reference scenes instead.
 - Phase 1 backend: `rusqlite` 0.40's bundled build dependency requires an unstable `cfg_select` on pinned Rust 1.93, so Phase 1 uses `rusqlite` 0.39 with only bundled/cache features. No product behavior is lost.
+- Phase 1 lifecycle/CI hardening: default profiles use OS app-data paths (`$XDG_DATA_HOME/junban` or `$HOME/.local/share/junban`, macOS Application Support, Windows LocalAppData) with `./data` only as an env-missing fallback; Unix graceful shutdown selects the first of Ctrl-C or SIGTERM; CI installs checksum-verified prebuilt `cargo-audit`/`cargo-deny` via SHA-pinned `taiki-e/install-action` and runs release-binary Playwright E2E without compiling supply-chain tools from source.
 
 ## Outcome and retrospective
 

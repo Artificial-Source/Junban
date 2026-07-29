@@ -1,7 +1,7 @@
 # Phase 1 hosted vertical slice
 
 **Date:** 2026-07-28  
-**Status:** implemented; final integrated validation and review recheck recorded below
+**Status:** complete; final integrated validation and review recheck recorded below
 
 ## Outcome
 
@@ -67,7 +67,9 @@ The final five-sample release workload remained within the 24 MiB warm / 32 MiB 
 - `P1-FINAL-LIFE-001` — **fixed**: disconnected/open SSE streams now cancel on response drop and shutdown; concurrent streams are bounded.
 - `P1-FINAL-CONV-001` — **fixed**: client snapshots apply monotonically, reloads coalesce, and own-operation results upsert by ID.
 - `P1-FINAL-GATE-001` — **fixed**: 24 MiB warm / 32 MiB peak ceilings, variance, and per-phase regression rules are frozen.
+- `P1-FINAL-TM-001` — **fixed**: bearer holders are untrusted for availability; the 64-stream cap enforces the threat decision.
 - `DOGFOOD-001` — **fixed**: a token fragment added to an already-open connection page is consumed and scrubbed without reload.
+- `P1-CI-VIS-001` — **fixed**: the visual job installs checksum-pinned Noto fonts matching the capture authority and retains failure images.
 
 No severe or material finding remains open.
 
@@ -84,4 +86,4 @@ The final integrated tree passed:
 - real private Tailscale Serve dogfood and focused connection recovery retest;
 - `git diff --check` and privacy/secret scans.
 
-Remote exact-head CI is recorded in the ExecPlan phase retrospective.
+PR #5 is the protected phase-delivery gate. Its exact merge head requires Rust, Rust supply-chain, frontend/repository, and release-binary E2E checks.

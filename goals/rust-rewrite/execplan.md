@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28. Phase 0 is complete. Phase 1 implementation, local validation, Tailnet dogfood, memory evidence, and focused security recheck are complete; exact-head CI and merge remain.
+**Status:** approved by the user on 2026-07-28. Phases 0 and 1 are complete. Phase 2 has not started.
 
 ## Purpose and user-visible outcome
 
@@ -671,7 +671,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Independent plan-gate review approved after `PLAN-001`–`PLAN-003` were fixed.
 - [x] User approved this plan and explicitly requested simple, functional, non-overengineered implementation.
 - [x] Phase 0 implementation, validation, architecture review and exact-head CI.
-- [ ] Phase 1 implementation (implementation, local validation, dogfood, benchmark and review complete; exact-head CI/merge remain).
+- [x] Phase 1 implementation, validation, dogfood, benchmark, review and protected delivery through PR #5.
 - [ ] Phase 2 implementation.
 - [ ] Phase 3 implementation.
 - [ ] Phase 4 implementation.
@@ -691,6 +691,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - `P1-FINAL-GATE-001` — **fixed**. The authoritative five-sample report passes the frozen 24 MiB warm / 32 MiB peak ceilings and records exact variance/regression rules.
 - `P1-FINAL-TM-001` — **fixed**. Bearer holders are untrusted for availability; the 64-stream nonblocking cap enforces that decision.
 - `DOGFOOD-001` — **fixed**. Same-page connection fragments now authenticate and scrub without a forced reload; focused Playwright and real Tailnet retests pass.
+- `P1-CI-VIS-001` — **fixed**. GitHub's browser runner resolved `system-ui` to DejaVu Sans while the immutable legacy authorities used Noto Sans. CI now checksum-verifies and installs the exact Ubuntu 24.04 Noto packages used for capture, asserts font resolution, and retains failure images for diagnosis; all eight visual comparisons pass remotely.
 - `PLAN-001` — **fixed**. Added all five Smart Nudge behaviors and session dismissal semantics to the inventory, Phase 3 implementation and acceptance. Added plugin dependency constraints, dependency-first activation, dependent-aware disable/removal, missing/incompatible failures and cycle rejection to the inventory, Phase 7 work and acceptance.
 - `PLAN-002` — **fixed**. Phase 1 must freeze a numeric final hosted-memory ceiling and exact protocol before Phase 2; Phase 9 must pass it and cannot waive it by explaining cumulative deltas.
 - `PLAN-003` — **fixed**. Phase 8 and Phase 9 now require target-native package/install/launch evidence for Linux x64, macOS Intel/ARM64 and Windows x64/ARM64. Only an explicit recorded user exception can permit a missing target.
@@ -732,6 +733,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 1 SSE lifecycle: idle forwarders that only awaited broadcast recv could outlive dropped HTTP bodies and block Axum graceful shutdown; explicit disconnect/shutdown cancellation plus a hard 64-connection cap close that availability gap without configuration surface.
 - Phase 1 convergence: unconstrained SSE reloads could apply older list responses after newer ones or duplicate an own-created task; revision-monotonic snapshots, coalesced reloads and task-ID upserts close the race without adding a state library.
 - Phase 1 dogfood: opening a complete connection URL worked, but adding its fragment to an already-open connection screen was same-document navigation and skipped mount-only bootstrap. A small `hashchange` listener restored the plausible recovery path.
+- Phase 1 CI: screenshot comparisons were deterministic locally but not across Linux font sets; every remote diff covered text rendered with DejaVu instead of the capture host's Noto Sans. Pinning the checksum-verified Noto package in the visual-test job makes the design gate portable without changing production typography.
 
 ## Outcome and retrospective
 
@@ -752,4 +754,4 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - **Local commands passed:** Rust format, Clippy with denied warnings, 44 workspace/unit/process tests, release build, `cargo-audit`, `cargo-deny`; `pnpm check` with 41 Vitest tests; 29 Playwright checks including 8 visual and 8 axe/keyboard checks; full and production npm audits; benchmark quick validation and five-sample authoritative run; docs/contract/runtime boundary/diff/privacy checks.
 - **Dogfood:** real private Tailscale Serve HTTPS passed create/edit/complete/uncomplete/restart/delete, desktop/mobile rendering and graceful cleanup. `DOGFOOD-001` same-page fragment recovery was fixed and retested.
 - **Review:** `P1-FINAL-LIFE-001`, `P1-FINAL-CONV-001`, `P1-FINAL-GATE-001`, and `P1-FINAL-TM-001` are fixed. The focused security recheck found no material named finding remaining.
-- **Remote verification:** pending exact-head pull-request CI and squash merge.
+- **Remote verification:** PR #5 is the protected phase-delivery gate. Rust, Rust supply-chain, frontend/repository, and release-binary E2E checks are all required on its exact merge head; failure screenshots are retained for diagnosis.

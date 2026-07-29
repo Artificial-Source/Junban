@@ -1,6 +1,6 @@
-import { Calendar, Pencil, Trash2 } from "lucide-react";
+import { Calendar, Pencil } from "lucide-react";
 import type { TaskDto } from "../api/client";
-import { calendarDayKey, formatRelativeDate } from "../lib/dates";
+import { calendarDayKey, formatDate } from "../lib/dates";
 
 interface TaskItemProps {
   task: TaskDto;
@@ -30,6 +30,10 @@ export function TaskItem({ task, onToggle, onSelect, isSelected, todayKey: today
           : "hover:bg-surface-secondary"
       }`}
     >
+      {/* Drag-handle slot — Phase 1 has no manual reorder; reserve the legacy
+          layout slot so task content aligns with the approved baseline. */}
+      <div aria-hidden="true" className="h-7 w-7 flex-shrink-0" />
+
       {/* Priority-colored circle (unified checkbox + completion) */}
       <div className="relative flex-shrink-0">
         <button
@@ -84,7 +88,7 @@ export function TaskItem({ task, onToggle, onSelect, isSelected, todayKey: today
                 }`}
               >
                 <Calendar size={11} />
-                {formatRelativeDate(task.due_date)}
+                {formatDate(task.due_date)}
               </span>
             </div>
           )}
@@ -106,14 +110,11 @@ export function TaskItem({ task, onToggle, onSelect, isSelected, todayKey: today
         </button>
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect(task.id);
-          }}
-          aria-label={`Delete task: ${task.title}`}
-          className="flex h-7 w-7 items-center justify-center rounded hover:bg-surface-tertiary text-on-surface-muted hover:text-error transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          disabled
+          aria-label={`Set due date for ${task.title} (unavailable)`}
+          className="flex h-7 w-7 items-center justify-center rounded text-on-surface-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
-          <Trash2 size={14} />
+          <Calendar size={14} />
         </button>
       </div>
     </div>

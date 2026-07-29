@@ -1,7 +1,7 @@
 import { AlertTriangle, Calendar, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import type { TaskDto } from "../api/client";
-import { formatRelativeDate } from "../lib/dates";
+import { formatDate } from "../lib/dates";
 
 interface OverdueSectionProps {
   tasks: TaskDto[];
@@ -105,7 +105,7 @@ export function OverdueSection({
                 </span>
                 <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-error">
                   <Calendar size={11} aria-hidden="true" />
-                  {formatRelativeDate(task.due_date!)}
+                  {formatDate(task.due_date!)}
                 </span>
               </button>
             </div>

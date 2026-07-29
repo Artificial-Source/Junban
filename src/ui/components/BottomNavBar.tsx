@@ -69,7 +69,7 @@ export function BottomNavBar({
           <button
             disabled
             aria-label="AI assistant (unavailable)"
-            className={`-mt-5 w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-95 bg-accent-action text-on-accent-action shadow-accent-action/20 opacity-50 cursor-not-allowed`}
+            className={`-mt-5 w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-95 bg-accent-action text-on-accent-action shadow-accent-action/20`}
           >
             <MessageCircle size={22} />
           </button>
@@ -82,7 +82,7 @@ export function BottomNavBar({
               key={item.id}
               disabled
               aria-label={`${item.label} (unavailable)`}
-              className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[44px] text-on-surface-muted transition-colors opacity-50 cursor-not-allowed`}
+              className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[44px] text-on-surface-muted transition-colors`}
             >
               <span className="relative">
                 <Icon size={20} strokeWidth={1.75} />

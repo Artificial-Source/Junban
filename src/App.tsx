@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { bootstrapFragmentToken, hasStoredToken } from "./ui/api/client";
-import { initTheme } from "./ui/themes/manager";
+import { initTheme, applyDefaultAccentColor } from "./ui/themes/manager";
 import { useRouting } from "./ui/hooks/useRouting";
 import { useTasks } from "./ui/hooks/useTasks";
 import { AppLayout } from "./ui/app/AppLayout";
@@ -12,6 +12,7 @@ export default function App() {
   // Initialize theme and bootstrap fragment token on first mount.
   useEffect(() => {
     initTheme();
+    applyDefaultAccentColor();
     const hasToken = bootstrapFragmentToken() || hasStoredToken();
     setAuthenticated(hasToken);
   }, []);

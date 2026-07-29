@@ -40,6 +40,15 @@ test.afterAll(() => {
   server.cleanup();
 });
 
+// The visual fixture seeds a completed task whose `completed_at` is stamped by
+// the real server clock (today), while the browser clock is fixed to 2026-07-23.
+// The approved baseline shows that task completed on the July 23 civil day
+// (ring 1/3). To keep the visual scene deterministic without a production test
+// clock, the visual spec alone normalizes the completed task's `completed_at` in
+// GET task-list responses to the documented baseline instant. Functional tests
+// are unaffected and continue using real server data.
+const VISUAL_FIXED_COMPLETED_AT = "2026-07-23T09:00:00.000Z";
+
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-07-23T10:30:00-07:00"));
   await page.addInitScript(() => {
@@ -53,6 +62,35 @@ test.beforeEach(async ({ page }) => {
       removeEventListener: () => {},
       dispatchEvent: () => false,
     });
+  });
+
+  // The approved baseline was captured while the legacy app's remote Google
+  // Fonts were unavailable (blocked by the CSP-'self' capture environment), so
+  // it renders in the system-ui fallback. The rewrite self-hosts the same fonts
+  // for production, but to compare against that authority baseline the visual
+  // harness blocks the self-hosted font files so the browser uses the same
+  // system-ui fallback. Content stays fully rendered; only the typeface is
+  // normalized to the baseline's capture condition (mirroring the completed-at
+  // normalization below). Functional tests are unaffected.
+  await page.route("**/fonts/*.woff2", (route) => route.abort());
+
+  // Normalize only the completed task's timestamp in GET /api/v1/tasks list
+  // responses. Mutations and other endpoints pass through untouched.
+  await page.route("**/api/v1/tasks", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const body = await response.json();
+    if (Array.isArray(body.tasks)) {
+      for (const task of body.tasks) {
+        if (task.status === "completed" && task.completed_at) {
+          task.completed_at = VISUAL_FIXED_COMPLETED_AT;
+        }
+      }
+    }
+    await route.fulfill({ response, json: body });
   });
 });
 

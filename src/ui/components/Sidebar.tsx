@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
 import type { View } from "../hooks/useRouting";
 
 interface SidebarHeaderProps {
@@ -166,11 +166,11 @@ export function Sidebar({
             );
           })}
 
-          {/* Upcoming — visible but disabled (Phase 2+) */}
+          {/* Upcoming — visible but inert (Phase 2+); rendered full-strength to match baseline. */}
           <button
             disabled
             aria-label="Upcoming (unavailable)"
-            className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors opacity-50 cursor-not-allowed ${
+            className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
               collapsed ? "justify-center" : "gap-3"
             } text-on-surface-secondary`}
           >
@@ -178,17 +178,45 @@ export function Sidebar({
             {!collapsed && <span className="flex-1">Upcoming</span>}
           </button>
 
-          {/* Filters & Labels — visible but disabled (Phase 2+) */}
+          {/* Filters & Labels — visible but inert (Phase 2+). */}
           <button
             disabled
             aria-label="Filters & Labels (unavailable)"
-            className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors opacity-50 cursor-not-allowed ${
+            className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
               collapsed ? "justify-center" : "gap-3"
             } text-on-surface-secondary`}
           >
             <SlidersHorizontal size={18} strokeWidth={1.75} />
             {!collapsed && <span className="flex-1">Filters & Labels</span>}
           </button>
+
+          {/* My Projects — Phase 1 has no projects; the header and add control
+              match the approved baseline layout and remain inert. */}
+          {!collapsed && (
+            <div>
+              <div className="flex items-center mt-5 mb-1 px-3">
+                <button
+                  type="button"
+                  disabled
+                  aria-label="My Projects (unavailable)"
+                  className="flex min-h-6 items-center gap-1 text-[11px] font-semibold text-on-surface-muted uppercase tracking-wider text-left flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <ChevronDown size={12} aria-hidden="true" />
+                  My Projects
+                </button>
+                <button
+                  type="button"
+                  disabled
+                  aria-label="New project (unavailable)"
+                  title="New project"
+                  className="flex h-6 w-6 items-center justify-center rounded text-on-surface-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+              <ul className="space-y-0.5" />
+            </div>
+          )}
         </div>
 
         {/* Workspace section */}
@@ -205,7 +233,7 @@ export function Sidebar({
               <button
                 disabled
                 aria-label="AI Chat (unavailable)"
-                className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors opacity-50 cursor-not-allowed ${
+                className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
                   collapsed ? "justify-center" : "gap-3"
                 } text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface`}
               >
@@ -217,7 +245,7 @@ export function Sidebar({
               <button
                 disabled
                 aria-label="Settings (unavailable)"
-                className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors opacity-50 cursor-not-allowed ${
+                className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
                   collapsed ? "justify-center" : "gap-3"
                 } text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface`}
               >

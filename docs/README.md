@@ -12,6 +12,7 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/execplan.md`](../goals/rust-rewrite/execplan.md): live phased rewrite plan
 - [`../goals/rust-rewrite/evidence/baseline-memory.md`](../goals/rust-rewrite/evidence/baseline-memory.md): initial hosted-memory evidence
 - [`../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md): Phase 1 hosted-server measurement protocol
+- [`../goals/rust-rewrite/evidence/phase-1-hosted-vertical-slice.md`](../goals/rust-rewrite/evidence/phase-1-hosted-vertical-slice.md): Phase 1 outcome and validation
 - [`../goals/rust-rewrite/evidence/phase-1-hosted-memory-budget.md`](../goals/rust-rewrite/evidence/phase-1-hosted-memory-budget.md): measured result and frozen memory ceiling
 - [`../goals/rust-rewrite/evidence/phase-1-tailnet-dogfood/report.md`](../goals/rust-rewrite/evidence/phase-1-tailnet-dogfood/report.md): real private-HTTPS dogfood evidence
 

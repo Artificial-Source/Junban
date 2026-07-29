@@ -1,0 +1,48 @@
+/* ASF Junban — Light Theme (default tokens) */
+
+@theme {
+  --color-surface: #ffffff;
+  --color-surface-secondary: #f5f5f7;
+  --color-surface-tertiary: #e8e8ed;
+  --color-on-surface: #1d1d1f;
+  --color-on-surface-secondary: #515154;
+  --color-on-surface-muted: #5f5f64;
+  --color-border: rgba(0, 0, 0, 0.08);
+  --color-accent: #8a2be2;
+  --color-accent-hover: #7620c2;
+  --color-accent-action: #8a2be2;
+  --color-accent-action-hover: #7620c2;
+  --color-accent-foreground: #7620c2;
+  --color-accent-foreground-hover: #6417a8;
+  --color-focus: #8a2be2;
+  --color-on-accent: #ffffff;
+  --color-on-accent-action: #ffffff;
+  --color-success: #28a745;
+  --color-warning: #e6a817;
+  --color-on-warning: #1d1d1f;
+  --color-error: #dc3545;
+  --color-priority-1: #dc3545;
+  --color-priority-2: #e6a817;
+  --color-priority-3: #bf5af2;
+  --color-priority-4: #aeaeb2;
+  --color-glass: rgba(255, 255, 255, 0.7);
+  --color-glass-border: rgba(0, 0, 0, 0.06);
+  --radius-sm: 0.125rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.375rem;
+  --width-sidebar: 16rem;
+  --height-bottom-nav: 3.5rem;
+}
+
+@supports (color: oklch(from red l c h)) {
+  :root {
+    --color-accent-hover: oklch(from var(--color-accent) 0.39 0.14 h);
+    --color-accent-action: oklch(from var(--color-accent) 0.44 0.14 h);
+    --color-accent-action-hover: oklch(from var(--color-accent) 0.39 0.14 h);
+    --color-accent-foreground: oklch(from var(--color-accent) 0.42 0.14 h);
+    --color-accent-foreground-hover: oklch(from var(--color-accent) 0.36 0.14 h);
+    --color-focus: oklch(from var(--color-accent) 0.42 0.14 h);
+    --color-on-accent: #ffffff;
+    --color-on-accent-action: #ffffff;
+  }
+}

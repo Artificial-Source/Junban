@@ -41,11 +41,17 @@ pnpm format:check        # Prettier check
 pnpm format:write        # Prettier write
 pnpm lint                # Oxlint
 pnpm typecheck           # tsc project build
-pnpm test                # Vitest (passWithNoTests while no product tests exist)
+pnpm test                # Vitest (passWithNoTests while no product UI tests exist)
+pnpm contract:generate   # regenerate checked OpenAPI and TypeScript types
+pnpm contract:check      # non-mutating contract drift check
 pnpm check:docs          # local Markdown link check
 pnpm check:runtime-boundary
-pnpm check               # aggregate frontend/repo checks
+pnpm check               # aggregate frontend/repo and contract checks
+pnpm bench:hosted-server:quick   # non-authoritative harness dry-run
+pnpm bench:hosted-server         # Phase 1 hosted memory/latency protocol
 ```
+
+Hosted-server evidence requires a release binary, production `dist/`, and Linux cgroup v2 with `systemd --user`. See [`performance.md`](performance.md) and [`../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md).
 
 ## Rust workspace
 
@@ -55,12 +61,54 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-features
 ```
 
-Phase 0 contains one library crate, `junban-domain`, so workspace commands operate on a real target.
+The Phase 1 backend crates are `junban-domain`, `junban-app`, `junban-storage`, and `junban-server`. Supply-chain checks are also required:
+
+```bash
+cargo deny check
+cargo audit
+```
+
+## Run the hosted server
+
+Build the frontend first, then start the Rust server:
+
+```bash
+pnpm build
+cargo run --locked -p junban-server -- \
+  --data-dir ./data \
+  --web-dir ./dist
+```
+
+The default listener is `127.0.0.1:4219`. `--bind` changes the listener and repeatable `--host` values add exact raw Host header values (include the port when clients send one). The default private profile directory is OS-appropriate: `$XDG_DATA_HOME/junban` or `$HOME/.local/share/junban` on Linux/BSD, `$HOME/Library/Application Support/Junban` on macOS, and `%LOCALAPPDATA%/Junban` on Windows. When the required environment data is unavailable the server falls back to `./data`. `--data-dir` overrides the default. The server creates a private bearer token at `<profile>/access-token` and private token-free discovery metadata at `<profile>/runtime.json`. Do not paste the token into query strings or logs. To open the browser shell, use one nonempty `#access_token=<token>` fragment; the client stores it in `sessionStorage` and immediately removes it from the URL. API clients can send `Authorization: Bearer <token>` directly. Graceful shutdown accepts Ctrl-C on every platform and also SIGTERM on Unix, then removes runtime metadata and releases the profile lock.
+
+Run `cargo run --locked -p junban-server -- --help` for the complete small configuration surface.
+
+## Use over Tailnet
+
+Keep the Rust listener on loopback and let [Tailscale Serve](https://tailscale.com/kb/1242/tailscale-serve) provide the private HTTPS endpoint. Add the exact MagicDNS hostname to Junban's Host allowlist:
+
+Find this machine's MagicDNS name with `tailscale status`, then start the optimized server:
+
+```bash
+TAILNET_HOST="your-machine.your-tailnet.ts.net"
+target/release/junban-server \
+  --bind 127.0.0.1:4219 \
+  --host "$TAILNET_HOST"
+```
+
+In another terminal, publish that loopback listener only to the tailnet:
+
+```bash
+tailscale serve --bg http://127.0.0.1:4219
+```
+
+Open `https://<TAILNET_HOST>/#access_token=<TOKEN>` once, replacing `<TOKEN>` with the contents of the private profile's `access-token` file. Junban stores the token only for that browser tab's session and removes it from the visible URL immediately. Never put the token in a query string, shell log, screenshot, or chat message. Use `tailscale serve reset` to remove the temporary Serve configuration.
 
 ## Repository invariants
 
 - `pnpm check:runtime-boundary` rejects Node API imports in `src/`, Node package trees, backend Node production packages, and Node executables under native areas (`crates/`, `src-tauri/`), while allowing bundled frontend assets in `dist/`.
-- `cargo-audit` / `cargo-deny` are documented for Phase 1 when production Rust dependencies arrive; they are not CI-gated on the empty Phase 0 graph.
+- `cargo-audit` and `cargo-deny` are CI-gated now that production Rust dependencies exist.
+- Rust DTOs and route annotations own `openapi/junban-v1.json`; never hand-edit it or `src/ui/api/generated.ts`.
 
 ## Further reading
 

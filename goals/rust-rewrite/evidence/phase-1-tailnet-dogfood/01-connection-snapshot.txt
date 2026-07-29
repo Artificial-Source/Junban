@@ -1,0 +1,2 @@
+- generic "JunbanNo access token found. Ask your Junban host for a connection URL that includes an access token" [ref=e1] clickable [onclick]
+  - heading "Junban" [level=1, ref=e2]

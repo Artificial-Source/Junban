@@ -1,0 +1,26 @@
+[package]
+name = "junban-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Single-owner SQLite persistence for Junban"
+publish = false
+
+[dependencies]
+fs4.workspace = true
+jiff.workspace = true
+junban-app = { path = "../junban-app", version = "0.1.0" }
+junban-domain = { path = "../junban-domain", version = "0.1.0" }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+uuid.workspace = true
+
+[lints]
+workspace = true

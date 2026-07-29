@@ -37,16 +37,51 @@ jobs:
       - name: Test
         run: cargo test --locked --workspace --all-features
 
-  frontend:
-    name: Frontend and repository
+      - name: Release build
+        run: cargo build --locked --release -p junban-server
+
+  supply-chain:
+    name: Rust supply chain
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: "1.93.0"
+
+      - name: Install pinned supply-chain tools
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
+          checksum: "true"
+          fallback: none
+
+      - name: Deny policy
+        run: cargo deny check
+
+      - name: Audit advisories
+        run: cargo audit
+
+  frontend:
+    name: Frontend and repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: "1.93.0"
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
@@ -60,5 +95,82 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Audit JavaScript dependencies
+        run: pnpm audit:dependencies
+
       - name: Check
         run: pnpm check
+
+  e2e:
+    name: Release binary E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: "1.93.0"
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 10.29.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.12.0
+          cache: pnpm
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend assets
+        run: pnpm build
+
+      - name: Build optimized server
+        run: cargo build --locked --release -p junban-server
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Install pinned visual-test font
+        run: |
+          curl --fail --location --silent --show-error \
+            --output /tmp/fonts-noto-core.deb \
+            https://archive.ubuntu.com/ubuntu/pool/main/f/fonts-noto/fonts-noto-core_20201225-2_all.deb
+          curl --fail --location --silent --show-error \
+            --output /tmp/fonts-noto-mono.deb \
+            https://archive.ubuntu.com/ubuntu/pool/main/f/fonts-noto/fonts-noto-mono_20201225-2_all.deb
+          printf '%s  %s\n%s  %s\n' \
+            4fee136cb12fc197703a340e010478f780a41044339fcefbd78ed9aa96c8b617 \
+            /tmp/fonts-noto-core.deb \
+            ce277a6e2fbbe7562206171e20e0493ac42c9c405758505cb42aaa01c982036c \
+            /tmp/fonts-noto-mono.deb | sha256sum --check --strict
+          sudo dpkg --install /tmp/fonts-noto-mono.deb /tmp/fonts-noto-core.deb
+          fc-cache --force
+          test "$(fc-match --format='%{family}' system-ui)" = "Noto Sans"
+
+      - name: Record visual environment
+        run: |
+          fc-match system-ui
+          fc-match sans-serif
+          chromium_version=$(pnpm exec playwright --version)
+          printf 'Playwright %s\n' "$chromium_version"
+
+      - name: Run Playwright against release server
+        run: pnpm test:e2e
+
+      - name: Upload Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-failure-${{ github.run_attempt }}
+          path: |
+            test-results
+            playwright-report
+          if-no-files-found: warn
+          retention-days: 7

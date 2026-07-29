@@ -1,0 +1,28 @@
+- generic "Skip to main contentJunbanAdd taskSearchCtrl+KInbox1Today1UpcomingFilters & LabelsMy ProjectsWorkspa" [ref=e1] clickable [onclick]
+  - link "Skip to main content" [ref=e2]
+  - heading "Today" [level=1, ref=e6]
+  - textbox "Add a task for today..." [ref=e20]
+  - heading "Jul 28 · Today · Tuesday" [level=2, ref=e7]
+  - button "Complete task: Tailnet task edited" [ref=e26]
+  - button "Task: Tailnet task edited" [ref=e22]
+  - button "Edit task: Tailnet task edited" [ref=e27]
+  - button "Set due date for Tailnet task edited (unavailable)" [disabled, ref=e28]
+  - button "Add task" [ref=e3]
+  - navigation "Mobile navigation" [ref=e4]
+    - button "1 Inbox" [ref=e8]
+    - button "1 Today" [ref=e9]
+    - button "AI assistant (unavailable)" [disabled, ref=e10]
+    - button "Upcoming (unavailable)" [disabled, ref=e11]
+    - button "Menu" [ref=e12]
+  - dialog "Task: Tailnet task edited" [ref=e5] clickable [onclick]
+    - generic "InboxDue: TodayDue DateClearSaveDelete" [ref=e13] clickable [onclick]
+      - button "Close task details" [ref=e14]
+      - button "Complete task: Tailnet task edited" [ref=e15]
+      - textbox "Task title" [ref=e16]: Tailnet task edited
+      - spinbutton "Month Month" [ref=e23]: 7
+      - spinbutton "Day Day" [ref=e24]: 28
+      - spinbutton "Year Year" [ref=e25]: 2026
+      - button "Show date picker" [ref=e21]
+      - button "Clear due date" [ref=e17]
+      - button "Save" [ref=e18]
+      - button "Delete task" [ref=e19]

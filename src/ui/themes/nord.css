@@ -1,0 +1,43 @@
+/* ASF Junban — Nord Theme (overrides dark theme tokens with Nord palette) */
+
+.nord {
+  --color-surface: #2e3440;
+  --color-surface-secondary: #3b4252;
+  --color-surface-tertiary: #434c5e;
+  --color-on-surface: #eceff4;
+  --color-on-surface-secondary: #d8dee9;
+  --color-on-surface-muted: #b1bdd0;
+  --color-border: rgba(216, 222, 233, 0.1);
+  --color-accent: #88c0d0;
+  --color-accent-hover: #b5e0e8;
+  --color-accent-action: #a3d4df;
+  --color-accent-action-hover: #b5e0e8;
+  --color-accent-foreground: #b5e0e8;
+  --color-accent-foreground-hover: #c7eaf0;
+  --color-focus: #a3d4df;
+  --color-on-accent: #2e3440;
+  --color-on-accent-action: #2e3440;
+  --color-success: #a3be8c;
+  --color-warning: #ebcb8b;
+  --color-on-warning: #2e3440;
+  --color-error: #bf616a;
+  --color-priority-1: #bf616a;
+  --color-priority-2: #ebcb8b;
+  --color-priority-3: #b48ead;
+  --color-priority-4: #b1bdd0;
+  --color-glass: rgba(46, 52, 64, 0.7);
+  --color-glass-border: rgba(216, 222, 233, 0.06);
+}
+
+@supports (color: oklch(from red l c h)) {
+  .nord {
+    --color-accent-hover: oklch(from var(--color-accent) 0.88 0.09 h);
+    --color-accent-action: oklch(from var(--color-accent) 0.82 0.1 h);
+    --color-accent-action-hover: oklch(from var(--color-accent) 0.88 0.09 h);
+    --color-accent-foreground: oklch(from var(--color-accent) 0.84 0.1 h);
+    --color-accent-foreground-hover: oklch(from var(--color-accent) 0.9 0.08 h);
+    --color-focus: oklch(from var(--color-accent) 0.84 0.1 h);
+    --color-on-accent: #2e3440;
+    --color-on-accent-action: #2e3440;
+  }
+}

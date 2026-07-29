@@ -8,6 +8,7 @@
 /coverage/
 /playwright-report/
 /test-results/
+/tests/e2e/visual.spec.ts-snapshots/
 *.tsbuildinfo
 
 # Tauri and platform builds

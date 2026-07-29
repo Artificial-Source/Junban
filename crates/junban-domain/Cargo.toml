@@ -9,6 +9,13 @@ description = "Pure domain types and rules for Junban"
 publish = false
 
 [dependencies]
+jiff.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

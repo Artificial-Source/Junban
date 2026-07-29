@@ -19,21 +19,21 @@ docs/             Canonical documentation
 goals/            Live plans and evidence
 ```
 
-Phase 0 creates only `crates/junban-domain` so Cargo workspace checks have a real long-lived target. Other crates appear when their owning phase begins.
+Phase 1 implements the backend/contract boundary in `junban-domain`, `junban-app`, `junban-storage`, and `junban-server`. UI integration remains a dependent Phase 1 wave.
 
-## Planned crate boundaries
+## Crate boundaries
 
-| Crate                | Responsibility                                                       |
-| -------------------- | -------------------------------------------------------------------- |
-| `junban-domain`      | Pure entities, value objects, validation, recurrence and query rules |
-| `junban-storage`     | SQLite schema, migrations, repositories, backup primitives           |
-| `junban-app`         | Use cases, transactions, idempotency, events, scheduler-facing ports |
-| `junban-server`      | Axum composition, auth, static UI serving, SSE, server binary        |
-| `junban-cli`         | Native CLI                                                           |
-| `junban-mcp`         | Native MCP adapter                                                   |
-| `junban-ai`          | Optional provider clients and orchestration                          |
-| `junban-plugin-sdk`  | WIT contract and package types                                       |
-| `junban-plugin-host` | Optional Wasmtime runtime after a measured spike                     |
+| Crate                | Responsibility                                                                |
+| -------------------- | ----------------------------------------------------------------------------- |
+| `junban-domain`      | Pure task entities, UUID IDs, title validation, civil dates and UTC instants  |
+| `junban-storage`     | SQLite schema/migrations, profile lock, receipts, activity and durable events |
+| `junban-app`         | Framework-free task use cases and application-owned repository/event ports    |
+| `junban-server`      | Axum composition, HTTP DTO/OpenAPI authority, auth, static serving and SSE    |
+| `junban-cli`         | Native CLI                                                                    |
+| `junban-mcp`         | Native MCP adapter                                                            |
+| `junban-ai`          | Optional provider clients and orchestration                                   |
+| `junban-plugin-sdk`  | WIT contract and package types                                                |
+| `junban-plugin-host` | Optional Wasmtime runtime after a measured spike                              |
 
 Rules:
 
@@ -44,7 +44,17 @@ Rules:
 
 ## Runtime ownership
 
-At any moment, one process owns a profile’s SQLite authority. Hosted server and desktop compositions both use that rule. CLI and MCP discover the active owner rather than silently opening a second database.
+At any moment, one process owns a profile’s SQLite authority. `fs4` acquires an exclusive profile lock before SQLite opens. The lock remains attached to every repository clone, so it cannot release while a connection is still usable.
+
+One long-lived OS thread owns one bundled `rusqlite` connection. Async callers send typed commands over a standard channel and await Tokio one-shot replies; SQLite work never blocks a Tokio executor thread. The connection uses WAL, foreign keys, a 2.5-second busy timeout and `NORMAL` synchronization. There is no pool.
+
+Schema v1 stores tasks, the global revision, operation receipts, activity and durable events. Each mutation uses one immediate transaction for the task effect, exact canonical-request receipt, activity row, revision and event. The application publishes only the committed event returned by storage. Replayed operations return the stored response exactly; reusing an operation ID for another canonical request conflicts.
+
+## HTTP contract and live updates
+
+Transport DTOs live in `junban-server`, not the domain. Utoipa derives the deterministic checked contract at `openapi/junban-v1.json`; `openapi-typescript` generates `src/ui/api/generated.ts`. `pnpm contract:generate` updates both and `pnpm contract:check` regenerates into a temporary directory without mutating the checkout.
+
+SSE clients subscribe before durable catch-up. Revision IDs deduplicate queued/live overlap, and a lagged in-process receiver catches up from SQLite again. This makes SQLite—not the broadcast queue—the live-change authority. Each forwarder selects on client disconnect, process shutdown cancellation, and broadcast work so dropped responses and SIGINT/SIGTERM both release the task promptly. Concurrent SSE connections are hard-capped per process.
 
 ## Frontend boundary
 
@@ -60,4 +70,4 @@ Portable, capability-limited packages on the Wasmtime Component Model with WASI 
 ## Dependency policy
 
 - Prefer the smallest complete dependency set for the current phase.
-- `cargo-audit` and `cargo-deny` become mandatory in CI when production Rust dependencies arrive (Phase 1). Phase 0 has an empty Rust dependency graph and does not compile audit tooling in CI.
+- `cargo-audit` and `cargo-deny` are mandatory CI checks for the production Rust dependency graph. CI installs pinned prebuilt tool binaries rather than compiling those tools from source on every run.

@@ -1,0 +1,34 @@
+[package]
+name = "junban-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Authenticated Axum server for Junban"
+publish = false
+
+[dependencies]
+axum.workspace = true
+clap.workspace = true
+futures-core.workspace = true
+jiff.workspace = true
+junban-app = { path = "../junban-app", version = "0.1.0" }
+junban-domain = { path = "../junban-domain", version = "0.1.0" }
+junban-storage = { path = "../junban-storage", version = "0.1.0" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+utoipa.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+http-body-util = "0.1.3"
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

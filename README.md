@@ -15,7 +15,7 @@ This repository contains a ground-up implementation with:
 
 Phase 1 provides the first source-built hosted vertical slice: the Rust server serves the preserved Today/Inbox interface and supports authenticated task creation, editing, completion, deletion, persistence, and live multi-client updates through one SQLite authority. There is still no packaged product release, and later feature phases remain incomplete.
 
-The optimized server measured 10.13 MiB maximum warm cgroup memory in the Phase 1 five-sample workload, versus 179.25 MiB for the retired implementation on the same host. See the [frozen memory budget](goals/rust-rewrite/evidence/phase-1-hosted-memory-budget.md) and follow the [live ExecPlan](goals/rust-rewrite/execplan.md) for exact scope and progress.
+The optimized server measured 9.23 MiB maximum warm cgroup memory in the Phase 1 five-sample workload, versus 179.25 MiB for the retired implementation on the same host. See the [frozen memory budget](goals/rust-rewrite/evidence/phase-1-hosted-memory-budget.md) and follow the [live ExecPlan](goals/rust-rewrite/execplan.md) for exact scope and progress.
 
 The retired implementation is private and archived. It is not a supported download or compatibility target.
 

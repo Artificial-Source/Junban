@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28. Phase 0 is complete. The Phase 1 backend/contract wave is implemented; frontend integration, optimized evidence, review and phase closure remain.
+**Status:** approved by the user on 2026-07-28. Phase 0 is complete. Phase 1 implementation, local validation, Tailnet dogfood, memory evidence, and focused security recheck are complete; exact-head CI and merge remain.
 
 ## Purpose and user-visible outcome
 
@@ -34,7 +34,7 @@ On 2026-07-28, both servers were measured on the same Linux host with empty fres
 
 The legacy server kept a launcher and a TypeScript/Node server process resident. Full methodology is in `evidence/baseline-memory.md`. Frontend migration evidence is in `evidence/frontend-preservation-map.md`; plugin runtime research is in `evidence/plugin-runtime-research.md`.
 
-No arbitrary final RAM promise is frozen before implementation evidence exists. Phase 1 establishes the first native Junban budget from an optimized implementation. **Before Phase 2 begins**, that evidence must produce a numeric final hosted-server ceiling, exact idle/warm workload protocol, allowed measurement variance, and per-phase regression rule. Phase 9 must pass that same protocol and ceiling; explaining individual deltas cannot waive the final bound. Every later phase records its memory delta, and an unexplained material regression blocks that phase. Final acceptance also requires no resident Node process.
+Phase 1's final five-sample optimized run measured 8.79 MiB median / 9.23 MiB maximum warm cgroup memory and 9.41 MiB maximum peak. The final hosted-server budget is frozen at 24 MiB maximum warm and 32 MiB peak under the exact Phase 1 protocol. Same-commit warm-median variance may not exceed the larger of 15% or 1 MiB without an idle-host rerun; per-phase median growth above the larger of 20% or 2 MiB requires measured explanation and explicit acceptance. Phase 9 must pass the same protocol and ceilings; explaining individual deltas cannot waive the final bounds. Every later phase records its memory delta, and an unexplained material regression blocks that phase. Final acceptance also requires no resident Node process.
 
 ## Product decisions already approved
 
@@ -671,7 +671,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Independent plan-gate review approved after `PLAN-001`–`PLAN-003` were fixed.
 - [x] User approved this plan and explicitly requested simple, functional, non-overengineered implementation.
 - [x] Phase 0 implementation, validation, architecture review and exact-head CI.
-- [ ] Phase 1 implementation (backend/contract wave implemented; frontend/evidence/review remain).
+- [ ] Phase 1 implementation (implementation, local validation, dogfood, benchmark and review complete; exact-head CI/merge remain).
 - [ ] Phase 2 implementation.
 - [ ] Phase 3 implementation.
 - [ ] Phase 4 implementation.
@@ -687,6 +687,10 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - `P1-UI-001` — **fixed**. Eight legacy-rendered Phase 1 authority images freeze Today/Inbox at desktop/mobile in light/dark with a fixed clock, seed, viewport, and blocking diff tolerance. Rewrite-generated screenshots cannot silently replace them.
 - Phase 1 focused planning recheck — **approved**. Both `P1-SEC-001` and `P1-UI-001` are closed with no remaining blocker.
 - `P1-FINAL-LIFE-001` — **fixed**. SSE `forward_events` tasks now select on stream receiver closure, process shutdown cancellation, and broadcast work; `send_event` also selects on disconnect/shutdown while awaiting a full mpsc buffer so backpressured catch-up cannot hang shutdown; `main` cancels a process-wide `CancellationToken` when shutdown is requested before Axum drains in-flight responses; concurrent authenticated SSE connections are hard-capped at 64 per process with retryable `503 sse_connection_limit`. Dropped bodies and SIGINT/SIGTERM with an open SSE stream release forwarders and profile locks.
+- `P1-FINAL-CONV-001` — **fixed**. React applies authoritative list snapshots monotonically by server revision, coalesces reloads to one in flight plus one follow-up, and upserts mutation results by task ID. Deterministic reversed-response and own-event-before-response tests pass.
+- `P1-FINAL-GATE-001` — **fixed**. The authoritative five-sample report passes the frozen 24 MiB warm / 32 MiB peak ceilings and records exact variance/regression rules.
+- `P1-FINAL-TM-001` — **fixed**. Bearer holders are untrusted for availability; the 64-stream nonblocking cap enforces that decision.
+- `DOGFOOD-001` — **fixed**. Same-page connection fragments now authenticate and scrub without a forced reload; focused Playwright and real Tailnet retests pass.
 - `PLAN-001` — **fixed**. Added all five Smart Nudge behaviors and session dismissal semantics to the inventory, Phase 3 implementation and acceptance. Added plugin dependency constraints, dependency-first activation, dependent-aware disable/removal, missing/incompatible failures and cycle rejection to the inventory, Phase 7 work and acceptance.
 - `PLAN-002` — **fixed**. Phase 1 must freeze a numeric final hosted-memory ceiling and exact protocol before Phase 2; Phase 9 must pass it and cannot waive it by explaining cumulative deltas.
 - `PLAN-003` — **fixed**. Phase 8 and Phase 9 now require target-native package/install/launch evidence for Linux x64, macOS Intel/ARM64 and Windows x64/ARM64. Only an explicit recorded user exception can permit a missing target.
@@ -704,6 +708,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-07-28: froze eight deterministic legacy-rendered Today/Inbox reference scenes for Phase 1 rather than allowing the rewrite to generate its own visual authority.
 - 2026-07-28: selected one dedicated long-lived SQLite connection thread rather than a pool. The required Phase 1 mutation volume is serialized, executor threads never block on SQLite, and a pool would add ownership and memory complexity without demonstrated benefit.
 - 2026-07-28: selected Utoipa-derived OpenAPI plus checked `openapi-typescript` output. Rust transport DTOs and route annotations remain the only hand-maintained contract authority; generation and non-mutating drift checks cover both artifacts.
+- 2026-07-28: froze the final hosted-server budget at 24 MiB maximum warm / 32 MiB peak after the integrated Phase 1 run measured 9.23 / 9.41 MiB maxima. Later phases use the same protocol and cannot waive the final ceiling.
 
 ## Discoveries and risks
 
@@ -725,6 +730,8 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 1 backend: `rusqlite` 0.40's bundled build dependency requires an unstable `cfg_select` on pinned Rust 1.93, so Phase 1 uses `rusqlite` 0.39 with only bundled/cache features. No product behavior is lost.
 - Phase 1 lifecycle/CI hardening: default profiles use OS app-data paths (`$XDG_DATA_HOME/junban` or `$HOME/.local/share/junban`, macOS Application Support, Windows LocalAppData) with `./data` only as an env-missing fallback; Unix graceful shutdown selects the first of Ctrl-C or SIGTERM; CI installs checksum-verified prebuilt `cargo-audit`/`cargo-deny` via SHA-pinned `taiki-e/install-action` and runs release-binary Playwright E2E without compiling supply-chain tools from source.
 - Phase 1 SSE lifecycle: idle forwarders that only awaited broadcast recv could outlive dropped HTTP bodies and block Axum graceful shutdown; explicit disconnect/shutdown cancellation plus a hard 64-connection cap close that availability gap without configuration surface.
+- Phase 1 convergence: unconstrained SSE reloads could apply older list responses after newer ones or duplicate an own-created task; revision-monotonic snapshots, coalesced reloads and task-ID upserts close the race without adding a state library.
+- Phase 1 dogfood: opening a complete connection URL worked, but adding its fragment to an already-open connection screen was same-document navigation and skipped mount-only bootstrap. A small `hashchange` listener restored the plausible recovery path.
 
 ## Outcome and retrospective
 
@@ -736,3 +743,13 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - **Review ledger:** `ARCH-001` fixed by making Clippy/tests enforce the committed Cargo dependency graph with `--locked`; canonical commands were aligned. Focused architecture recheck approved the fix with no remaining blocker.
 - **Remote verification:** PR #1 required the Rust and frontend/repository checks on its exact final head; both passed before fast-forward merge and again on the main push. The fresh repository was then made public with protected required checks and secret-scanning push protection. A focused policy follow-up grouped routine Dependabot updates and disabled automatic major-version PRs after the first activation exposed that noise.
 - **Follow-ups for later phases:** enable `cargo-audit`/`cargo-deny` when Rust production dependencies arrive; begin UI migration and hosted vertical slice in Phase 1.
+
+### Phase 1
+
+- **Outcome:** one optimized Rust server owns one SQLite profile, serves the preserved Today/Inbox shell, and provides authenticated durable create/list/edit/complete/uncomplete/delete plus revisioned live convergence. No shipped Node runtime exists.
+- **Evidence:** `goals/rust-rewrite/evidence/phase-1-hosted-vertical-slice.md`; `phase-1-hosted-memory.json`; `phase-1-hosted-memory-budget.md`; `phase-1-tailnet-dogfood/report.md`; eight independent visual authorities under `phase-1-visual-baseline/`.
+- **Memory:** five-sample authoritative result passed at 8.79 MiB median / 9.23 MiB maximum warm cgroup memory and 9.41 MiB maximum peak. The final budget is 24 MiB warm / 32 MiB peak.
+- **Local commands passed:** Rust format, Clippy with denied warnings, 44 workspace/unit/process tests, release build, `cargo-audit`, `cargo-deny`; `pnpm check` with 41 Vitest tests; 29 Playwright checks including 8 visual and 8 axe/keyboard checks; full and production npm audits; benchmark quick validation and five-sample authoritative run; docs/contract/runtime boundary/diff/privacy checks.
+- **Dogfood:** real private Tailscale Serve HTTPS passed create/edit/complete/uncomplete/restart/delete, desktop/mobile rendering and graceful cleanup. `DOGFOOD-001` same-page fragment recovery was fixed and retested.
+- **Review:** `P1-FINAL-LIFE-001`, `P1-FINAL-CONV-001`, `P1-FINAL-GATE-001`, and `P1-FINAL-TM-001` are fixed. The focused security recheck found no material named finding remaining.
+- **Remote verification:** pending exact-head pull-request CI and squash merge.

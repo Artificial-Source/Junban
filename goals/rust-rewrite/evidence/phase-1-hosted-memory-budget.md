@@ -20,16 +20,16 @@ Phase 2 will add a separate 10,000-task scale fixture. The 100-task protocol sta
 
 | Measure                         |                                                                                    Result |
 | ------------------------------- | ----------------------------------------------------------------------------------------: |
-| Startup to authenticated health |                                                         52.98 ms median; 68.03 ms maximum |
-| Idle cgroup memory              |                                                         2.09 MiB median; 2.30 MiB maximum |
-| Idle RSS / PSS                  |                                                                    6.89 / 4.67 MiB median |
-| Warm cgroup memory              |                                                        9.00 MiB median; 10.13 MiB maximum |
-| Warm cgroup peak                |                                                        9.46 MiB median; 10.26 MiB maximum |
-| Warm RSS / PSS                  |                                                                    7.51 / 5.26 MiB median |
-| Release binary                  |                                                                           4,715,512 bytes |
-| Pooled operation p95            | 0.81–3.99 ms across create/list/replace/complete/uncomplete/delete/static-read operations |
+| Startup to authenticated health |                                                        94.68 ms median; 141.31 ms maximum |
+| Idle cgroup memory              |                                                         2.96 MiB median; 3.42 MiB maximum |
+| Idle RSS / PSS                  |                                                                    7.13 / 4.94 MiB median |
+| Warm cgroup memory              |                                                         8.79 MiB median; 9.23 MiB maximum |
+| Warm cgroup peak                |                                                         9.05 MiB median; 9.41 MiB maximum |
+| Warm RSS / PSS                  |                                                                    7.69 / 5.49 MiB median |
+| Release binary                  |                                                                           4,736,312 bytes |
+| Pooled operation p95            | 0.35–9.81 ms across create/list/replace/complete/uncomplete/delete/static-read operations |
 
-The Phase 1 maximum warm cgroup reading is **94.4% below** the 179.25 MiB legacy hosted-server baseline measured on the same machine. This is an early vertical slice, not a claim that every future subsystem is free.
+The Phase 1 maximum warm cgroup reading is **94.9% below** the 179.25 MiB legacy hosted-server baseline measured on the same machine. This is an early vertical slice, not a claim that every future subsystem is free.
 
 ## Frozen acceptance budget
 

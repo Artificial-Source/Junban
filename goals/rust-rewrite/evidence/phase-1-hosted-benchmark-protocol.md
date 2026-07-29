@@ -114,7 +114,7 @@ Machine-readable JSON includes:
 
 ## Frozen budget
 
-The initial authoritative result measured 9.00 MiB median / 10.13 MiB maximum warm cgroup memory and 10.26 MiB maximum peak. Phase 1 froze:
+The final integrated authoritative result measured 8.79 MiB median / 9.23 MiB maximum warm cgroup memory and 9.41 MiB maximum peak. Phase 1 froze:
 
 - 24 MiB maximum warm memory;
 - 32 MiB maximum warm-workload peak;

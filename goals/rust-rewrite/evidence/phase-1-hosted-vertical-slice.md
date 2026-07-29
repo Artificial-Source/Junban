@@ -54,7 +54,7 @@ The frozen protocol and full raw samples are in:
 - [`phase-1-hosted-memory.json`](phase-1-hosted-memory.json)
 - [`phase-1-hosted-memory-budget.md`](phase-1-hosted-memory-budget.md)
 
-The final five-sample release workload remained within the 24 MiB warm / 32 MiB peak hosted-server budget. Phase 1 measured about 9 MiB median warm cgroup memory and roughly 10 MiB maximum, compared with 179.25 MiB for the retired implementation on the same machine. Startup-to-authenticated-health remained below 70 ms in all samples. Later phases must run the same protocol and explain material median growth; explanations cannot waive the final ceiling.
+The final five-sample release workload remained within the 24 MiB warm / 32 MiB peak hosted-server budget. Phase 1 measured 8.79 MiB median and 9.23 MiB maximum warm cgroup memory, compared with 179.25 MiB for the retired implementation on the same machine. Startup-to-authenticated-health measured 94.68 ms median and 141.31 ms maximum. Later phases must run the same protocol and explain material median growth; explanations cannot waive the final ceiling.
 
 ## Tailnet dogfood
 

@@ -901,10 +901,7 @@ async fn forward_events(
 ) {
     let mut last_sent = since;
     for event in catch_up {
-        if shutdown.is_cancelled() || sender.is_closed() {
-            return;
-        }
-        if !send_event(&sender, &event, &mut last_sent).await {
+        if !send_event(&sender, &event, &mut last_sent, &shutdown).await {
             return;
         }
     }
@@ -915,7 +912,7 @@ async fn forward_events(
             () = shutdown.cancelled() => return,
             result = live.recv() => match result {
                 Ok(event) => {
-                    if !send_event(&sender, &event, &mut last_sent).await {
+                    if !send_event(&sender, &event, &mut last_sent, &shutdown).await {
                         return;
                     }
                 }
@@ -932,10 +929,7 @@ async fn forward_events(
                         }
                     };
                     for event in events {
-                        if shutdown.is_cancelled() || sender.is_closed() {
-                            return;
-                        }
-                        if !send_event(&sender, &event, &mut last_sent).await {
+                        if !send_event(&sender, &event, &mut last_sent, &shutdown).await {
                             return;
                         }
                     }
@@ -950,6 +944,7 @@ async fn send_event(
     sender: &mpsc::Sender<Result<SseEvent, Infallible>>,
     event: &TaskEvent,
     last_sent: &mut u64,
+    shutdown: &CancellationToken,
 ) -> bool {
     if event.revision <= *last_sent {
         return true;
@@ -957,15 +952,20 @@ async fn send_event(
     let Ok(data) = serde_json::to_string(&TaskEventDto::from(event.clone())) else {
         return false;
     };
-    if sender
-        .send(Ok(SseEvent::default()
-            .id(event.revision.to_string())
-            .event(event.kind.as_str())
-            .data(data)))
-        .await
-        .is_err()
-    {
-        return false;
+    let message = Ok(SseEvent::default()
+        .id(event.revision.to_string())
+        .event(event.kind.as_str())
+        .data(data));
+    // A full mpsc buffer must not ignore shutdown or client disconnect.
+    tokio::select! {
+        biased;
+        () = sender.closed() => return false,
+        () = shutdown.cancelled() => return false,
+        result = sender.send(message) => {
+            if result.is_err() {
+                return false;
+            }
+        }
     }
     *last_sent = event.revision;
     true
@@ -1151,6 +1151,7 @@ mod tests {
     use std::{env, time::SystemTime};
 
     use http_body_util::BodyExt;
+    use junban_app::TaskEventKind;
     use junban_storage::ProfileOwner;
     use serde_json::Value;
     use tower::ServiceExt;
@@ -1603,6 +1604,48 @@ mod tests {
         assert_eq!(context.state.sse_connections.load(Ordering::SeqCst), 1);
         drop(response);
         context.wait_until_connections(0).await;
+    }
+
+    #[tokio::test]
+    async fn backpressured_send_observes_shutdown_without_dropping_receiver() {
+        let (sender, _receiver) = mpsc::channel::<Result<SseEvent, Infallible>>(1);
+        sender
+            .send(Ok(SseEvent::default().comment("occupy-buffer")))
+            .await
+            .unwrap();
+
+        let shutdown = CancellationToken::new();
+        let event = TaskEvent {
+            revision: 1,
+            operation_id: OperationId::parse(&Uuid::new_v4().to_string()).unwrap(),
+            kind: TaskEventKind::Created,
+            task_id: TaskId::new(),
+            task: None,
+            occurred_at: Timestamp::now(),
+        };
+
+        let send_task = {
+            let sender = sender.clone();
+            let shutdown = shutdown.clone();
+            tokio::spawn(async move {
+                let mut last_sent = 0;
+                send_event(&sender, &event, &mut last_sent, &shutdown).await
+            })
+        };
+
+        // The occupied buffer keeps send_event awaiting until cancellation.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !send_task.is_finished(),
+            "send_event should still be blocked on the full channel"
+        );
+
+        shutdown.cancel();
+        let finished = tokio::time::timeout(Duration::from_millis(500), send_task)
+            .await
+            .expect("backpressured send_event must observe shutdown")
+            .unwrap();
+        assert!(!finished);
     }
 
     #[test]

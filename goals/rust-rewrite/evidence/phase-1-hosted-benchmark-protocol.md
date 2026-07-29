@@ -4,7 +4,7 @@ Date: 2026-07-28
 
 Protocol name: `junban-phase1-hosted-server-v1`
 
-This document freezes the **measurement method** for Phase 1 hosted-server evidence. It does **not** freeze a numeric memory ceiling, variance band, or regression rule. Those fields stay null in harness output until the main agent runs an authoritative five-sample pass and records approved bounds before Phase 2.
+This document freezes the **measurement method** for hosted-server evidence. Phase 1's authoritative five-sample pass also froze the final 24 MiB warm / 32 MiB peak ceilings, variance band, and regression rule recorded in [`phase-1-hosted-memory-budget.md`](phase-1-hosted-memory-budget.md).
 
 Harness: [`../../../scripts/bench-hosted-server.py`](../../../scripts/bench-hosted-server.py)
 
@@ -49,7 +49,7 @@ pnpm bench:hosted-server -- \
   --output goals/rust-rewrite/evidence/phase-1-hosted-memory.json
 ```
 
-Only a report with `"evidence_status": "authoritative_candidate"` and `"protocol.authoritative": true` may be used to freeze the ceiling.
+Only a report with `"evidence_status": "authoritative_passed"`, `"protocol.authoritative": true`, and `"summary.budget_passed": true` satisfies the frozen memory gate.
 
 ## Quick dry-run (non-authoritative)
 
@@ -99,6 +99,7 @@ The harness exits non-zero if any of the following occur:
 - server not on loopback
 - lingering systemd unit after stop
 - profile/unit cleanup failure
+- an authoritative sample exceeds the frozen 24 MiB warm or 32 MiB peak cgroup ceiling
 
 ## Report fields
 
@@ -109,15 +110,18 @@ Machine-readable JSON includes:
 - protocol knobs and authoritative flag
 - every raw sample (startup, idle/warm memory, latencies, SQLite, cleanup)
 - summary medians/ranges and pooled latency p50/p95
-- `summary.memory_ceiling_mib`, `summary.variance_rule`, and `summary.regression_rule` left **null** for the main agent to fill after review
+- frozen warm and peak ceilings, variance rule, regression rule, and an explicit budget verdict
 
-## Ceiling freeze (main agent, not this harness)
+## Frozen budget
 
-After an authoritative five-sample run on the integration commit:
+The initial authoritative result measured 9.00 MiB median / 10.13 MiB maximum warm cgroup memory and 10.26 MiB maximum peak. Phase 1 froze:
 
-1. Inspect median/range idle and warm cgroup MiB, peak, startup, and latency p95.
-2. Record the numeric final hosted-server ceiling, allowed measurement variance, and per-phase regression rule in ExecPlan/evidence.
-3. Phase 9 must pass that same protocol and ceiling.
+- 24 MiB maximum warm memory;
+- 32 MiB maximum warm-workload peak;
+- same-commit median variance no greater than the larger of 15% or 1 MiB;
+- an explanation and explicit acceptance for per-phase median growth above the larger of 20% or 2 MiB.
+
+Phase 9 must pass the same protocol and hard ceilings. An explanation cannot waive the final bound.
 
 ## Assumptions
 

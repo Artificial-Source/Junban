@@ -3,7 +3,7 @@
 
 Optimized junban-server only, inside a transient systemd --user cgroup.
 Authoritative: 5 samples / 100 tasks / 20 cycles. --quick: 1 / 10 / 5 (not evidence).
-CLI: --server, --web-dir, --output, --quick. Ceiling fields stay null.
+CLI: --server, --web-dir, --output, --quick. Phase 1 froze the final budget.
 """
 
 from __future__ import annotations
@@ -35,6 +35,16 @@ POLL_INTERVAL_SECONDS = 0.025
 TOKEN_FILE, RUNTIME_FILE, DATABASE_FILE = "access-token", "runtime.json", "junban.sqlite3"
 NODE_MARKERS = frozenset({"node", "nodejs", "npm", "npx", "pnpm", "vite", "playwright"})
 LATENCY_OPS = ("static_read", "create", "list", "replace", "complete", "uncomplete", "delete")
+WARM_MEMORY_CEILING_MIB = 24.0
+PEAK_MEMORY_CEILING_MIB = 32.0
+VARIANCE_RULE = (
+    "same-commit warm median must remain within the larger of 15% or 1 MiB; "
+    "otherwise repeat on an idle host and retain both reports"
+)
+REGRESSION_RULE = (
+    "a per-phase warm-median increase above the larger of 20% or 2 MiB requires "
+    "measured explanation and explicit acceptance; final 24/32 MiB ceilings cannot be waived"
+)
 SUMMARY_PATHS = {
     "startup_to_health_ms": ("startup_to_health_ms",),
     "idle_cgroup_mib": ("idle", "cgroup_current_mib"),
@@ -529,8 +539,15 @@ def build_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "sample_count": len(samples),
         "sqlite_total_bytes": series_summary([float(s["sqlite"]["total_bytes"]) for s in samples]),
         "latencies_ms": latency_out,
-        "memory_ceiling_mib": None, "variance_rule": None, "regression_rule": None,
+        "warm_memory_ceiling_mib": WARM_MEMORY_CEILING_MIB,
+        "peak_memory_ceiling_mib": PEAK_MEMORY_CEILING_MIB,
+        "variance_rule": VARIANCE_RULE,
+        "regression_rule": REGRESSION_RULE,
     })
+    summary["budget_passed"] = (
+        summary["warm_cgroup_mib"]["max"] <= WARM_MEMORY_CEILING_MIB
+        and summary["warm_cgroup_peak_mib"]["max"] <= PEAK_MEMORY_CEILING_MIB
+    )
     return summary
 
 def protocol_config(quick: bool) -> dict[str, Any]:
@@ -552,10 +569,13 @@ def protocol_config(quick: bool) -> dict[str, Any]:
         "task_count_justification": (
             f"{TASK_COUNT} ordinary creates warm SQLite/list paths without Phase 2's 10_000-task fixture."
         ),
-        "memory_ceiling_mib": None, "variance_rule": None, "regression_rule": None,
+        "warm_memory_ceiling_mib": WARM_MEMORY_CEILING_MIB,
+        "peak_memory_ceiling_mib": PEAK_MEMORY_CEILING_MIB,
+        "variance_rule": VARIANCE_RULE,
+        "regression_rule": REGRESSION_RULE,
         "notes": [
             "Optimized release junban-server + production dist only; fail closed on protocol violations.",
-            "Do not freeze quick-mode; main agent freezes ceiling/variance/regression after 5-sample run.",
+            "Quick mode exercises the harness but cannot provide authoritative evidence.",
         ],
     }
 
@@ -596,13 +616,20 @@ def main(argv: list[str] | None = None) -> int:
                 )
         finally:
             shutil.rmtree(work_root, ignore_errors=True)
-        status = "authoritative_candidate" if protocol["authoritative"] else "non_authoritative_dry_run"
+        summary = build_summary(samples)
+        status = (
+            "authoritative_passed"
+            if protocol["authoritative"] and summary["budget_passed"]
+            else "authoritative_failed"
+            if protocol["authoritative"]
+            else "non_authoritative_dry_run"
+        )
         report = {
             "protocol": protocol, "run_id": run_id,
             "host": host_metadata(repo_root), "binary": binary_metadata(server),
             "web_dir": str(web_dir),
             "command": {"argv": [Path(__file__).name, *map(str, sys.argv[1:])], "cwd": str(Path.cwd())},
-            "samples": samples, "summary": build_summary(samples), "evidence_status": status,
+            "samples": samples, "summary": summary, "evidence_status": status,
         }
         text = json.dumps(report, indent=2, sort_keys=True) + "\n"
         if args.output:
@@ -611,7 +638,7 @@ def main(argv: list[str] | None = None) -> int:
             output.write_text(text, encoding="utf-8")
             print(f"wrote {output}", file=sys.stderr)
         sys.stdout.write(text)
-        return 0
+        return 0 if summary["budget_passed"] or not protocol["authoritative"] else 1
     except BenchError as error:
         print(f"benchmark failed: {error}", file=sys.stderr)
         return 1

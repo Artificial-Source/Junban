@@ -64,16 +64,6 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  // The approved baseline was captured while the legacy app's remote Google
-  // Fonts were unavailable (blocked by the CSP-'self' capture environment), so
-  // it renders in the system-ui fallback. The rewrite self-hosts the same fonts
-  // for production, but to compare against that authority baseline the visual
-  // harness blocks the self-hosted font files so the browser uses the same
-  // system-ui fallback. Content stays fully rendered; only the typeface is
-  // normalized to the baseline's capture condition (mirroring the completed-at
-  // normalization below). Functional tests are unaffected.
-  await page.route("**/fonts/*.woff2", (route) => route.abort());
-
   // Normalize only the completed task's timestamp in GET /api/v1/tasks list
   // responses. Mutations and other endpoints pass through untouched.
   await page.route("**/api/v1/tasks", async (route) => {

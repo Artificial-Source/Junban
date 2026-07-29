@@ -1,13 +1,13 @@
 @import "tailwindcss";
-@import "./ui/fonts.css";
 @import "./ui/themes/light.css";
 @import "./ui/themes/dark.css";
 @import "./ui/themes/nord.css";
 
 @theme {
-  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
-  --font-heading: "Space Grotesk", "Outfit", ui-sans-serif, sans-serif;
-  --font-mono: "Space Mono", ui-monospace, monospace;
+  /* The approved interface renders with the legacy runtime's system fallbacks. */
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-heading: ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
 }
 
 @layer base {

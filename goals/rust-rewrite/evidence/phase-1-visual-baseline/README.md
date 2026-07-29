@@ -7,6 +7,7 @@ These eight images freeze the approved legacy-rendered Today and Inbox shell for
 - Capture date: 2026-07-28
 - Frozen browser clock: `2026-07-23T10:30:00` (Thursday)
 - Browser: Playwright Chromium
+- Typography: system UI fallbacks, matching the legacy runtime capture (its remote font requests were unavailable)
 - Reduced motion: enabled
 - Desktop viewport: 1440 × 900
 - Mobile viewport: 390 × 844

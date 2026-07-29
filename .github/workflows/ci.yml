@@ -137,5 +137,23 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm exec playwright install chromium --with-deps
 
+      - name: Record visual environment
+        run: |
+          fc-match system-ui
+          fc-match sans-serif
+          chromium_version=$(pnpm exec playwright --version)
+          printf 'Playwright %s\n' "$chromium_version"
+
       - name: Run Playwright against release server
         run: pnpm test:e2e
+
+      - name: Upload Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-failure-${{ github.run_attempt }}
+          path: |
+            test-results
+            playwright-report
+          if-no-files-found: error
+          retention-days: 7

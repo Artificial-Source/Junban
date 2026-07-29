@@ -137,6 +137,18 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm exec playwright install chromium --with-deps
 
+      - name: Install pinned visual-test font
+        run: |
+          curl --fail --location --silent --show-error \
+            --output /tmp/fonts-noto-core.deb \
+            https://archive.ubuntu.com/ubuntu/pool/main/f/fonts-noto/fonts-noto-core_20201225-2_all.deb
+          printf '%s  %s\n' \
+            4fee136cb12fc197703a340e010478f780a41044339fcefbd78ed9aa96c8b617 \
+            /tmp/fonts-noto-core.deb | sha256sum --check --strict
+          sudo dpkg --install /tmp/fonts-noto-core.deb
+          fc-cache --force
+          test "$(fc-match --format='%{family}' system-ui)" = "Noto Sans"
+
       - name: Record visual environment
         run: |
           fc-match system-ui

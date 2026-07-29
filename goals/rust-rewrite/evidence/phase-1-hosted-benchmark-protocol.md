@@ -59,7 +59,7 @@ python3 scripts/bench-hosted-server.py --quick
 pnpm bench:hosted-server:quick
 ```
 
-Quick mode uses 1 sample and 10 tasks. It validates the harness only. Do not accept it as final Phase 1 evidence.
+Quick mode uses 1 sample, 10 tasks, and 5 mutation cycles. It validates the harness only. Do not accept it as final Phase 1 evidence.
 
 ## Why 100 tasks
 
@@ -75,12 +75,12 @@ For each independent sample:
 4. Bind `127.0.0.1:0`; discover the port from `runtime.json`.
 5. Poll `GET /api/v1/health` until ready (bounded; no fixed startup sleep).
 6. Record **startup-to-health** wall time from unit launch through first healthy response.
-7. Wait the documented settle window (default **2.0s**). This is the only intentional fixed sleep.
+7. Wait the documented settle window (**2.0s**). This is the only intentional fixed sleep.
 8. **Idle snapshot:** cgroup `memory.current` / `memory.peak`, process RSS/PSS, process count.
 9. **Warm workload** through the real authenticated HTTP contract:
-   - static `GET /` and `GET /index.html` (default 20)
+   - static `GET /` and `GET /index.html` (×20 authoritative; ×5 quick)
    - `POST /api/v1/tasks` × task count with `Authorization`, matching `Origin`, and unique UUID `Idempotency-Key`
-   - `GET /api/v1/tasks` list reads (default 20)
+   - `GET /api/v1/tasks` list reads (×20 authoritative; ×5 quick)
    - for each mutation cycle: replace → complete → uncomplete → delete with fresh idempotency keys
    - final list read asserting remaining task count
 10. **Warm snapshot:** same memory fields after the workload; peak is cumulative from process start.
@@ -123,5 +123,6 @@ After an authoritative five-sample run on the integration commit:
 
 - User systemd session is available (`systemctl --user`).
 - cgroup v2 provides `memory.current` and `memory.peak`.
-- PSS comes from `/proc/<pid>/smaps_rollup` (or full `smaps` fallback).
+- PSS comes from `/proc/<pid>/smaps_rollup`.
 - No other tool may place processes into the bench unit; the harness creates a unique unit name per sample.
+- Protocol knobs are fixed in the harness (authoritative vs `--quick` only). CLI accepts only `--server`, `--web-dir`, `--output`, and `--quick`.

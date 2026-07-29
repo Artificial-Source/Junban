@@ -46,15 +46,17 @@ pnpm bench:hosted-server -- \
   --output goals/rust-rewrite/evidence/phase-1-hosted-memory.json
 ```
 
-Default protocol knobs:
+Fixed protocol knobs (not CLI-configurable beyond `--quick`):
 
-| Knob            | Default | Notes                                                     |
-| --------------- | ------: | --------------------------------------------------------- |
-| samples         |       5 | Independent fresh profiles                                |
-| tasks           |     100 | Ordinary warm set; Phase 2 owns the 10_000-task fixture   |
-| mutation cycles |      20 | replace → complete → uncomplete → delete                  |
-| static / list   |   20/20 | Production shell reads + authenticated list               |
-| settle          |    2.0s | Only fixed sleep; readiness/shutdown are condition-polled |
+| Knob            | Authoritative | Quick | Notes                                                     |
+| --------------- | ------------: | ----: | --------------------------------------------------------- |
+| samples         |             5 |     1 | Independent fresh profiles                                |
+| tasks           |           100 |    10 | Ordinary warm set; Phase 2 owns the 10_000-task fixture   |
+| mutation cycles |            20 |     5 | replace → complete → uncomplete → delete                  |
+| static / list   |         20/20 |   5/5 | Production shell reads + authenticated list               |
+| settle          |          2.0s |  2.0s | Only fixed sleep; readiness/shutdown are condition-polled |
+
+CLI accepts only `--server`, `--web-dir`, `--output`, and `--quick`.
 
 Each sample records host/toolchain/commit/binary hash and size, startup-to-health, idle and warm cgroup current/peak, RSS/PSS, process count (must be 1), SQLite size, per-operation latency p50/p95, and cleanup success. The harness fails closed on non-2xx responses, malformed JSON, wrong process count, missing metrics, a lingering unit, or cleanup failure. Ceiling/variance/regression fields remain null until filled from authoritative results.
 
@@ -65,7 +67,7 @@ python3 scripts/bench-hosted-server.py --quick
 pnpm bench:hosted-server:quick
 ```
 
-Quick mode uses one sample and fewer tasks. Do not freeze it as the Phase 1 budget.
+Quick mode uses 1 sample, 10 tasks, and 5 mutation cycles. Do not freeze it as the Phase 1 budget.
 
 ## Measurement rules
 

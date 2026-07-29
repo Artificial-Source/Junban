@@ -19,6 +19,7 @@ The Phase 1 server implements:
 - unauthenticated health and static shell/assets, with bearer authentication on every other `/api/v1` request including fetch-parsed SSE;
 - a persistent random bearer token in the private profile's `access-token` file; the token is never placed in runtime metadata or logs;
 - a small global in-memory invalid-auth limiter (eight attempts per rolling 30 seconds). It is deliberately bounded and resets at process restart; per-client/scoped credentials belong to the CLI/MCP phase;
+- authenticated bearer holders are untrusted for availability: concurrent SSE connections are hard-capped at 64 per process with a retryable `503 sse_connection_limit` overflow, and SSE forwarders cancel on client disconnect and graceful shutdown so open streams cannot pin the process;
 - rejection of unsafe browser mutations when an optional `Origin` does not exactly match the raw Host, while clients with no Origin remain usable;
 - a 64 KiB JSON body limit with JSON errors, global CSP/frame/content-type/referrer headers, and generated request IDs returned in `x-request-id` and error envelopes;
 - explicit `/api` fallback routes before the static SPA fallback, so unknown API paths never return HTML;

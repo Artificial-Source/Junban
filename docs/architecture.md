@@ -54,7 +54,7 @@ Schema v1 stores tasks, the global revision, operation receipts, activity and du
 
 Transport DTOs live in `junban-server`, not the domain. Utoipa derives the deterministic checked contract at `openapi/junban-v1.json`; `openapi-typescript` generates `src/ui/api/generated.ts`. `pnpm contract:generate` updates both and `pnpm contract:check` regenerates into a temporary directory without mutating the checkout.
 
-SSE clients subscribe before durable catch-up. Revision IDs deduplicate queued/live overlap, and a lagged in-process receiver catches up from SQLite again. This makes SQLite—not the broadcast queue—the live-change authority.
+SSE clients subscribe before durable catch-up. Revision IDs deduplicate queued/live overlap, and a lagged in-process receiver catches up from SQLite again. This makes SQLite—not the broadcast queue—the live-change authority. Each forwarder selects on client disconnect, process shutdown cancellation, and broadcast work so dropped responses and SIGINT/SIGTERM both release the task promptly. Concurrent SSE connections are hard-capped per process.
 
 ## Frontend boundary
 

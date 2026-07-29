@@ -7,7 +7,10 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -31,6 +34,7 @@ use junban_domain::{OperationId, Task, TaskId, TaskStatus, ValidationError};
 use junban_storage::{SqliteRepository, write_private_file};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
+use tokio_util::sync::CancellationToken;
 use tower_http::services::{ServeDir, ServeFile};
 use utoipa::{
     Modify, OpenApi, ToSchema,
@@ -41,6 +45,8 @@ use uuid::Uuid;
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const AUTH_ATTEMPTS: usize = 8;
 const AUTH_WINDOW: Duration = Duration::from_secs(30);
+// Hard cap: bearer holders are untrusted for availability. Not configurable yet.
+const MAX_SSE_CONNECTIONS: usize = 64;
 pub const TOKEN_FILE: &str = "access-token";
 pub const RUNTIME_FILE: &str = "runtime.json";
 
@@ -77,6 +83,10 @@ pub struct ServerState {
     bearer_token: Arc<str>,
     allowed_hosts: Arc<HashSet<String>>,
     auth_limiter: Arc<AuthLimiter>,
+    shutdown: CancellationToken,
+    sse_connections: Arc<AtomicUsize>,
+    /// Live `forward_events` tasks; test-observable only.
+    active_forwarders: Arc<AtomicUsize>,
 }
 
 impl ServerState {
@@ -94,7 +104,20 @@ impl ServerState {
             bearer_token: Arc::from(bearer_token),
             allowed_hosts: Arc::new(allowed_hosts.into_iter().collect()),
             auth_limiter: Arc::new(AuthLimiter::new()),
+            shutdown: CancellationToken::new(),
+            sse_connections: Arc::new(AtomicUsize::new(0)),
+            active_forwarders: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    /// Cancelled when the process begins graceful shutdown.
+    #[must_use]
+    pub fn shutdown_token(&self) -> CancellationToken {
+        self.shutdown.clone()
+    }
+
+    fn try_acquire_sse(&self) -> Option<SseConnectionPermit> {
+        SseConnectionPermit::try_acquire(&self.sse_connections)
     }
 }
 
@@ -831,6 +854,16 @@ async fn events(
         0
     };
 
+    let permit = state.try_acquire_sse().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "sse_connection_limit",
+            "too many concurrent event streams",
+            true,
+            &request_id,
+        )
+    })?;
+
     // Subscribe first so commits racing with durable catch-up remain queued.
     let receiver = state.events.subscribe();
     let catch_up = state
@@ -840,9 +873,18 @@ async fn events(
         .map_err(|error| ApiError::from_app(error, &request_id))?;
     let (sender, stream_receiver) = mpsc::channel(32);
     let service = state.service.clone();
-    tokio::spawn(forward_events(service, receiver, catch_up, since, sender));
+    let shutdown = state.shutdown_token();
+    let forwarder_guard = ForwarderGuard::enter(Arc::clone(&state.active_forwarders));
+    tokio::spawn(async move {
+        let _forwarder_guard = forwarder_guard;
+        forward_events(service, receiver, catch_up, since, sender, shutdown).await;
+    });
 
-    Ok(Sse::new(ChannelStream(stream_receiver)).keep_alive(
+    Ok(Sse::new(ChannelStream {
+        receiver: stream_receiver,
+        _permit: permit,
+    })
+    .keep_alive(
         KeepAlive::new()
             .interval(Duration::from_secs(15))
             .text("keepalive"),
@@ -855,31 +897,51 @@ async fn forward_events(
     catch_up: Vec<TaskEvent>,
     since: u64,
     sender: mpsc::Sender<Result<SseEvent, Infallible>>,
+    shutdown: CancellationToken,
 ) {
     let mut last_sent = since;
     for event in catch_up {
+        if shutdown.is_cancelled() || sender.is_closed() {
+            return;
+        }
         if !send_event(&sender, &event, &mut last_sent).await {
             return;
         }
     }
     loop {
-        match live.recv().await {
-            Ok(event) => {
-                if !send_event(&sender, &event, &mut last_sent).await {
-                    return;
-                }
-            }
-            Err(broadcast::error::RecvError::Lagged(_)) => {
-                let Ok(events) = service.list_events(last_sent).await else {
-                    return;
-                };
-                for event in events {
+        tokio::select! {
+            biased;
+            () = sender.closed() => return,
+            () = shutdown.cancelled() => return,
+            result = live.recv() => match result {
+                Ok(event) => {
                     if !send_event(&sender, &event, &mut last_sent).await {
                         return;
                     }
                 }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let events = tokio::select! {
+                        biased;
+                        () = sender.closed() => return,
+                        () = shutdown.cancelled() => return,
+                        result = service.list_events(last_sent) => {
+                            let Ok(events) = result else {
+                                return;
+                            };
+                            events
+                        }
+                    };
+                    for event in events {
+                        if shutdown.is_cancelled() || sender.is_closed() {
+                            return;
+                        }
+                        if !send_event(&sender, &event, &mut last_sent).await {
+                            return;
+                        }
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => return,
             }
-            Err(broadcast::error::RecvError::Closed) => return,
         }
     }
 }
@@ -909,13 +971,67 @@ async fn send_event(
     true
 }
 
-pub struct ChannelStream(mpsc::Receiver<Result<SseEvent, Infallible>>);
+struct SseConnectionPermit {
+    connections: Arc<AtomicUsize>,
+}
+
+impl SseConnectionPermit {
+    fn try_acquire(connections: &Arc<AtomicUsize>) -> Option<Self> {
+        let mut current = connections.load(Ordering::SeqCst);
+        loop {
+            if current >= MAX_SSE_CONNECTIONS {
+                return None;
+            }
+            match connections.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => {
+                    return Some(Self {
+                        connections: Arc::clone(connections),
+                    });
+                }
+                Err(observed) => current = observed,
+            }
+        }
+    }
+}
+
+impl Drop for SseConnectionPermit {
+    fn drop(&mut self) {
+        self.connections.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+struct ForwarderGuard {
+    active: Arc<AtomicUsize>,
+}
+
+impl ForwarderGuard {
+    fn enter(active: Arc<AtomicUsize>) -> Self {
+        active.fetch_add(1, Ordering::SeqCst);
+        Self { active }
+    }
+}
+
+impl Drop for ForwarderGuard {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+struct ChannelStream {
+    receiver: mpsc::Receiver<Result<SseEvent, Infallible>>,
+    _permit: SseConnectionPermit,
+}
 
 impl Stream for ChannelStream {
     type Item = Result<SseEvent, Infallible>;
 
     fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.0.poll_recv(context)
+        self.receiver.poll_recv(context)
     }
 }
 
@@ -1047,6 +1163,7 @@ mod tests {
     struct TestContext {
         directory: PathBuf,
         _owner: ProfileOwner,
+        state: ServerState,
         app: Router,
     }
 
@@ -1066,16 +1183,59 @@ mod tests {
             fs::write(web_dir.join("assets/app.js"), "console.log('ui')").unwrap();
             let owner = ProfileOwner::open(directory.join("profile")).unwrap();
             let state = ServerState::new(owner.repository(), TOKEN.to_owned(), [HOST.to_owned()]);
-            let app = router(state, web_dir);
+            let app = router(state.clone(), web_dir);
             Self {
                 directory,
                 _owner: owner,
+                state,
                 app,
             }
         }
 
         async fn request(&self, request: axum::http::Request<Body>) -> Response {
             self.app.clone().oneshot(request).await.unwrap()
+        }
+
+        async fn open_sse(&self) -> Response {
+            let response = self
+                .request(
+                    authenticated(Method::GET, "/api/v1/events")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            response
+        }
+
+        async fn wait_until_forwarders(&self, expected: usize) {
+            let deadline = Instant::now() + Duration::from_secs(1);
+            loop {
+                let active = self.state.active_forwarders.load(Ordering::SeqCst);
+                if active == expected {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "expected {expected} SSE forwarders, still have {active}"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+
+        async fn wait_until_connections(&self, expected: usize) {
+            let deadline = Instant::now() + Duration::from_secs(1);
+            loop {
+                let active = self.state.sse_connections.load(Ordering::SeqCst);
+                if active == expected {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "expected {expected} SSE connections, still have {active}"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
         }
     }
 
@@ -1373,6 +1533,76 @@ mod tests {
         let text = String::from_utf8(data.to_vec()).unwrap();
         assert!(text.contains("id: 2"), "{text}");
         assert!(!text.contains("id: 1"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn dropping_sse_body_without_mutations_releases_forwarder() {
+        let context = TestContext::new();
+        let response = context.open_sse().await;
+        context.wait_until_forwarders(1).await;
+        drop(response);
+        context.wait_until_forwarders(0).await;
+        context.wait_until_connections(0).await;
+    }
+
+    #[tokio::test]
+    async fn repeated_sse_connect_drop_cycles_do_not_leave_forwarders() {
+        let context = TestContext::new();
+        for _ in 0..32 {
+            let response = context.open_sse().await;
+            context.wait_until_forwarders(1).await;
+            drop(response);
+            context.wait_until_forwarders(0).await;
+        }
+        assert_eq!(context.state.sse_connections.load(Ordering::SeqCst), 0);
+        assert_eq!(context.state.active_forwarders.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn sse_connection_cap_is_enforced_and_released() {
+        let context = TestContext::new();
+        let mut held = Vec::with_capacity(MAX_SSE_CONNECTIONS);
+        for _ in 0..MAX_SSE_CONNECTIONS {
+            held.push(context.open_sse().await);
+        }
+        context.wait_until_forwarders(MAX_SSE_CONNECTIONS).await;
+        context.wait_until_connections(MAX_SSE_CONNECTIONS).await;
+
+        let overflow = context
+            .request(
+                authenticated(Method::GET, "/api/v1/events")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(overflow.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = json(overflow).await;
+        assert_eq!(body["error"]["code"], "sse_connection_limit");
+        assert_eq!(body["error"]["retryable"], true);
+
+        held.pop();
+        context
+            .wait_until_connections(MAX_SSE_CONNECTIONS - 1)
+            .await;
+        let recovered = context.open_sse().await;
+        assert_eq!(recovered.status(), StatusCode::OK);
+        drop(recovered);
+        drop(held);
+        context.wait_until_forwarders(0).await;
+        context.wait_until_connections(0).await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_cancellation_ends_active_sse_forwarders() {
+        let context = TestContext::new();
+        let response = context.open_sse().await;
+        context.wait_until_forwarders(1).await;
+        context.state.shutdown_token().cancel();
+        context.wait_until_forwarders(0).await;
+        // Permit stays with the response body until the client drops it.
+        assert_eq!(context.state.sse_connections.load(Ordering::SeqCst), 1);
+        drop(response);
+        context.wait_until_connections(0).await;
     }
 
     #[test]

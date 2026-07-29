@@ -46,12 +46,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         allowed_hosts.push(format!("localhost:{}", address.port()));
     }
     let state = ServerState::new(owner.repository(), token, allowed_hosts);
+    let shutdown = state.shutdown_token();
     let app = router(state, config.web_dir);
     let runtime_metadata = RuntimeMetadataFile::create(&data_dir, address)?;
 
     tracing::info!(%address, "Junban server listening");
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            // Cancel SSE forwarders before Axum waits for in-flight responses.
+            shutdown.cancel();
+        })
         .await?;
     drop(runtime_metadata);
     drop(owner);

@@ -132,7 +132,7 @@ fn open_private_file(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-fn set_private_file_permissions(path: &Path) -> io::Result<()> {
+pub(crate) fn set_private_file_permissions(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1595,7 +1595,22 @@ fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
     connection.pragma_update(None, "synchronous", "NORMAL")?;
     connection.pragma_update(None, "wal_autocheckpoint", WAL_AUTOCHECKPOINT_PAGES)?;
     connection.pragma_update(None, "journal_size_limit", WAL_JOURNAL_SIZE_LIMIT_BYTES)?;
-    migration::migrate(&mut connection)?;
+    // Profile ownership is held by ProfileOwner before this runs. migrate needs the
+    // profile directory so an existing v2 database can write a verified pre-v3 backup
+    // beside the live DB under backups/pre-migration/.
+    let profile_dir = path.parent().ok_or_else(|| {
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::Unknown,
+                extended_code: 1,
+            },
+            Some(format!(
+                "database path '{}' has no parent profile directory",
+                path.display()
+            )),
+        )
+    })?;
+    migration::migrate(&mut connection, profile_dir)?;
     Ok(connection)
 }
 

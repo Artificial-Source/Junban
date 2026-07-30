@@ -30,7 +30,7 @@ The frontend uses:
 - Tailwind CSS 4 via `@tailwindcss/vite` and `@import "tailwindcss";` (build-time, zero runtime)
 - Oxlint, Prettier, and Vitest
 
-`src/` is frontend-only. Product UI migration begins in Phase 1; the Phase 0 entry may render no product chrome.
+`src/` is frontend-only. It contains the preserved React interface and communicates with the Rust runtime only through the generated HTTP client.
 
 ### Common commands
 
@@ -41,27 +41,37 @@ pnpm format:check        # Prettier check
 pnpm format:write        # Prettier write
 pnpm lint                # Oxlint
 pnpm typecheck           # tsc project build
-pnpm test                # Vitest (passWithNoTests while no product UI tests exist)
+pnpm test                # Vitest unit/component tests
+pnpm test:e2e            # Playwright functional, accessibility and visual checks
 pnpm contract:generate   # regenerate checked OpenAPI and TypeScript types
 pnpm contract:check      # non-mutating contract drift check
 pnpm check:docs          # local Markdown link check
 pnpm check:runtime-boundary
 pnpm check               # aggregate frontend/repo and contract checks
-pnpm bench:hosted-server:quick   # non-authoritative harness dry-run
+pnpm bench:hosted-server:quick   # non-authoritative Phase 1 harness dry-run
 pnpm bench:hosted-server         # Phase 1 hosted memory/latency protocol
+pnpm bench:scale:quick           # non-authoritative Phase 2 scale smoke (500 tasks)
+pnpm bench:scale                 # Phase 2 10_000-task scale protocol
+pnpm bench:self-check            # protocol constant / argument checks
 ```
 
-Hosted-server evidence requires a release binary, production `dist/`, and Linux cgroup v2 with `systemd --user`. See [`performance.md`](performance.md) and [`../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md).
+Hosted-server evidence requires a release binary, production `dist/`, and Linux cgroup v2 with `systemd --user`. Scale mode also needs the dev-only seeder:
+
+```bash
+cargo build --locked --release -p junban-storage --features scale-bench --bin junban-scale-seed
+```
+
+See [`performance.md`](performance.md), [`../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-1-hosted-benchmark-protocol.md), and the Phase 2 ten-thousand-task protocol in [`../goals/rust-rewrite/evidence/phase-2-context-map.md`](../goals/rust-rewrite/evidence/phase-2-context-map.md).
 
 ## Rust workspace
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo test --locked --workspace --all-features
+cargo test --locked --workspace --all-targets --all-features
 ```
 
-The Phase 1 backend crates are `junban-domain`, `junban-app`, `junban-storage`, and `junban-server`. Supply-chain checks are also required:
+The current backend crates are `junban-domain`, `junban-app`, `junban-storage`, and `junban-server`. Supply-chain checks are also required:
 
 ```bash
 cargo deny check

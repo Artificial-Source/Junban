@@ -9,6 +9,7 @@
 /playwright-report/
 /test-results/
 /tests/e2e/visual.spec.ts-snapshots/
+/tests/e2e/visual-phase-2.spec.ts-snapshots/
 *.tsbuildinfo
 
 # Tauri and platform builds

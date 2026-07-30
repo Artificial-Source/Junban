@@ -1,5 +1,18 @@
 //! SQLite persistence with one profile owner and one dedicated connection thread.
 
+mod catalog_ops;
+mod detail_ops;
+mod helpers;
+mod migration;
+mod ops_types;
+mod query_ops;
+mod rows;
+#[cfg(feature = "scale-bench")]
+pub mod scale_seed;
+mod task_ops;
+mod tx;
+mod undo_ops;
+
 use std::{
     fs::{self, File, OpenOptions},
     io,
@@ -10,20 +23,35 @@ use std::{
 };
 
 use fs4::FileExt;
-use jiff::{Timestamp, civil::Date};
+use jiff::Timestamp;
 use junban_app::{
-    CommittedMutation, RepositoryError, RepositoryFuture, TaskEvent, TaskEventKind, TaskList,
-    TaskRepository,
+    BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, MoveTarget,
+    ProjectDraft, ProjectPatch, ReorderScope, Repository, RepositoryError, RepositoryFuture,
+    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft, TagPatch,
+    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
 };
-use junban_domain::{OperationId, Task, TaskId, TaskStatus, TaskTitle};
-use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
-use serde::Serialize;
+use junban_domain::{
+    Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind, SavedFilterId,
+    SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId,
+};
+use rusqlite::Connection;
 use thiserror::Error;
 use tokio::sync::oneshot;
 
 const DATABASE_FILE: &str = "junban.sqlite3";
 const LOCK_FILE: &str = "profile.lock";
 const BUSY_TIMEOUT: Duration = Duration::from_millis(2_500);
+/// WAL pages between automatic PASSIVE checkpoints (4 KiB pages → 1 MiB).
+///
+/// SQLite's default is 1000 pages (~4 MiB). On a representative host, PASSIVE
+/// checkpoint of a ~4 MiB WAL measured 400–600 ms and produced bulk/reorder
+/// p95 stalls well above the Phase 2 scale budget. Bounding the threshold keeps
+/// commit-path checkpoints small. Tradeoff: checkpoints run more often, so
+/// median write cost can rise slightly while multi-hundred-millisecond outliers
+/// are avoided. Durability and the single-owner writer model are unchanged.
+pub(crate) const WAL_AUTOCHECKPOINT_PAGES: i64 = 250;
+/// After a checkpoint, keep the WAL file from retaining more than ~1 MiB.
+const WAL_JOURNAL_SIZE_LIMIT_BYTES: i64 = WAL_AUTOCHECKPOINT_PAGES * 4096;
 
 #[derive(Debug, Error)]
 pub enum OpenError {
@@ -64,8 +92,6 @@ impl ProfileOwner {
     }
 }
 
-/// Creates a private directory. On Windows, a newly created profile inherits
-/// the user's profile ACL; Junban never broadens that inherited protection.
 pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
     fs::create_dir_all(path)?;
     #[cfg(unix)]
@@ -123,7 +149,6 @@ pub struct SqliteRepository {
 }
 
 struct Worker {
-    // The lock outlives the connection thread and every repository clone.
     _lock: File,
     sender: Mutex<Option<mpsc::Sender<Command>>>,
     join: Mutex<Option<thread::JoinHandle<()>>>,
@@ -216,134 +241,825 @@ impl SqliteRepository {
     }
 }
 
-impl TaskRepository for SqliteRepository {
+macro_rules! mut_cmd {
+    ($self:ident, $variant:ident { $($field:ident),* }) => {
+        $self.request(move |reply| Command::$variant { $($field,)* reply })
+    };
+}
+
+impl Repository for SqliteRepository {
     fn create_task(
         &self,
         operation_id: OperationId,
         task_id: TaskId,
-        title: TaskTitle,
-        due_date: Option<Date>,
+        draft: TaskDraft,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation> {
-        self.request(move |reply| Command::Create {
-            operation_id,
-            task_id,
-            title,
-            due_date,
-            now,
-            reply,
-        })
+        mut_cmd!(
+            self,
+            CreateTask {
+                operation_id,
+                task_id,
+                draft,
+                now
+            }
+        )
     }
-
-    fn list_tasks(&self) -> RepositoryFuture<'_, TaskList> {
-        self.request(Command::List)
+    fn get_task(&self, task_id: TaskId) -> RepositoryFuture<'_, Task> {
+        mut_cmd!(self, GetTask { task_id })
     }
-
-    fn replace_task(
+    fn patch_task(
         &self,
         operation_id: OperationId,
         task_id: TaskId,
-        title: TaskTitle,
-        due_date: Option<Date>,
+        patch: TaskPatch,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation> {
-        self.request(move |reply| Command::Replace {
-            operation_id,
-            task_id,
-            title,
-            due_date,
-            now,
-            reply,
-        })
+        mut_cmd!(
+            self,
+            PatchTask {
+                operation_id,
+                task_id,
+                patch,
+                now
+            }
+        )
     }
-
     fn complete_task(
         &self,
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation> {
-        self.request(move |reply| Command::Complete {
-            operation_id,
-            task_id,
-            now,
-            reply,
-        })
+        mut_cmd!(
+            self,
+            CompleteTask {
+                operation_id,
+                task_id,
+                now
+            }
+        )
     }
-
     fn uncomplete_task(
         &self,
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation> {
-        self.request(move |reply| Command::Uncomplete {
-            operation_id,
-            task_id,
-            now,
-            reply,
-        })
+        mut_cmd!(
+            self,
+            UncompleteTask {
+                operation_id,
+                task_id,
+                now
+            }
+        )
     }
-
+    fn cancel_task(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CancelTask {
+                operation_id,
+                task_id,
+                now
+            }
+        )
+    }
+    fn reopen_task(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            ReopenTask {
+                operation_id,
+                task_id,
+                now
+            }
+        )
+    }
     fn delete_task(
         &self,
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation> {
-        self.request(move |reply| Command::Delete {
-            operation_id,
-            task_id,
-            now,
-            reply,
-        })
+        mut_cmd!(
+            self,
+            DeleteTask {
+                operation_id,
+                task_id,
+                now
+            }
+        )
     }
-
-    fn list_events(&self, since: u64) -> RepositoryFuture<'_, Vec<TaskEvent>> {
-        self.request(move |reply| Command::Events { since, reply })
+    fn move_task(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        target: MoveTarget,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            MoveTask {
+                operation_id,
+                task_id,
+                target,
+                now
+            }
+        )
+    }
+    fn reorder_tasks(
+        &self,
+        operation_id: OperationId,
+        scope: ReorderScope,
+        ordered_ids: Vec<TaskId>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            ReorderTasks {
+                operation_id,
+                scope,
+                ordered_ids,
+                now
+            }
+        )
+    }
+    fn bulk_tasks(
+        &self,
+        operation_id: OperationId,
+        task_ids: Vec<TaskId>,
+        action: BulkAction,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            BulkTasks {
+                operation_id,
+                task_ids,
+                action,
+                now
+            }
+        )
+    }
+    fn list_tasks(
+        &self,
+        query: TaskQuery,
+        as_of: TaskListAsOf,
+    ) -> RepositoryFuture<'_, TaskListPage> {
+        mut_cmd!(self, ListTasks { query, as_of })
+    }
+    fn list_catalog(&self) -> RepositoryFuture<'_, CatalogSnapshot> {
+        self.request(Command::ListCatalog)
+    }
+    fn create_project(
+        &self,
+        operation_id: OperationId,
+        project_id: ProjectId,
+        draft: ProjectDraft,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateProject {
+                operation_id,
+                project_id,
+                draft,
+                now
+            }
+        )
+    }
+    fn patch_project(
+        &self,
+        operation_id: OperationId,
+        project_id: ProjectId,
+        patch: ProjectPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            PatchProject {
+                operation_id,
+                project_id,
+                patch,
+                now
+            }
+        )
+    }
+    fn delete_project(
+        &self,
+        operation_id: OperationId,
+        project_id: ProjectId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteProject {
+                operation_id,
+                project_id,
+                now
+            }
+        )
+    }
+    fn create_section(
+        &self,
+        operation_id: OperationId,
+        section_id: SectionId,
+        draft: SectionDraft,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateSection {
+                operation_id,
+                section_id,
+                draft,
+                now
+            }
+        )
+    }
+    fn patch_section(
+        &self,
+        operation_id: OperationId,
+        section_id: SectionId,
+        patch: SectionPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            PatchSection {
+                operation_id,
+                section_id,
+                patch,
+                now
+            }
+        )
+    }
+    fn delete_section(
+        &self,
+        operation_id: OperationId,
+        section_id: SectionId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteSection {
+                operation_id,
+                section_id,
+                now
+            }
+        )
+    }
+    fn create_tag(
+        &self,
+        operation_id: OperationId,
+        tag_id: TagId,
+        draft: TagDraft,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateTag {
+                operation_id,
+                tag_id,
+                draft,
+                now
+            }
+        )
+    }
+    fn patch_tag(
+        &self,
+        operation_id: OperationId,
+        tag_id: TagId,
+        patch: TagPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            PatchTag {
+                operation_id,
+                tag_id,
+                patch,
+                now
+            }
+        )
+    }
+    fn delete_tag(
+        &self,
+        operation_id: OperationId,
+        tag_id: TagId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteTag {
+                operation_id,
+                tag_id,
+                now
+            }
+        )
+    }
+    fn create_template(
+        &self,
+        operation_id: OperationId,
+        template_id: TemplateId,
+        draft: TemplateDraft,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateTemplate {
+                operation_id,
+                template_id,
+                draft,
+                now
+            }
+        )
+    }
+    fn patch_template(
+        &self,
+        operation_id: OperationId,
+        template_id: TemplateId,
+        patch: TemplatePatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            PatchTemplate {
+                operation_id,
+                template_id,
+                patch,
+                now
+            }
+        )
+    }
+    fn delete_template(
+        &self,
+        operation_id: OperationId,
+        template_id: TemplateId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteTemplate {
+                operation_id,
+                template_id,
+                now
+            }
+        )
+    }
+    fn apply_template(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        apply: TemplateApply,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            ApplyTemplate {
+                operation_id,
+                task_id,
+                apply,
+                now
+            }
+        )
+    }
+    fn create_saved_filter(
+        &self,
+        operation_id: OperationId,
+        filter_id: SavedFilterId,
+        draft: SavedFilterDraft,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateSavedFilter {
+                operation_id,
+                filter_id,
+                draft,
+                now
+            }
+        )
+    }
+    fn patch_saved_filter(
+        &self,
+        operation_id: OperationId,
+        filter_id: SavedFilterId,
+        patch: SavedFilterPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            PatchSavedFilter {
+                operation_id,
+                filter_id,
+                patch,
+                now
+            }
+        )
+    }
+    fn delete_saved_filter(
+        &self,
+        operation_id: OperationId,
+        filter_id: SavedFilterId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteSavedFilter {
+                operation_id,
+                filter_id,
+                now
+            }
+        )
+    }
+    fn create_comment(
+        &self,
+        operation_id: OperationId,
+        comment_id: CommentId,
+        task_id: TaskId,
+        content: CommentBody,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateComment {
+                operation_id,
+                comment_id,
+                task_id,
+                content,
+                now
+            }
+        )
+    }
+    fn patch_comment(
+        &self,
+        operation_id: OperationId,
+        comment_id: CommentId,
+        patch: CommentPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            PatchComment {
+                operation_id,
+                comment_id,
+                patch,
+                now
+            }
+        )
+    }
+    fn delete_comment(
+        &self,
+        operation_id: OperationId,
+        comment_id: CommentId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteComment {
+                operation_id,
+                comment_id,
+                now
+            }
+        )
+    }
+    fn list_comments(&self, task_id: TaskId) -> RepositoryFuture<'_, Vec<Comment>> {
+        mut_cmd!(self, ListComments { task_id })
+    }
+    fn add_relation(
+        &self,
+        operation_id: OperationId,
+        from_task_id: TaskId,
+        to_task_id: TaskId,
+        kind: RelationKind,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            AddRelation {
+                operation_id,
+                from_task_id,
+                to_task_id,
+                kind,
+                now
+            }
+        )
+    }
+    fn remove_relation(
+        &self,
+        operation_id: OperationId,
+        from_task_id: TaskId,
+        to_task_id: TaskId,
+        kind: RelationKind,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            RemoveRelation {
+                operation_id,
+                from_task_id,
+                to_task_id,
+                kind,
+                now
+            }
+        )
+    }
+    fn list_relations(&self, task_id: TaskId) -> RepositoryFuture<'_, Vec<TaskRelation>> {
+        mut_cmd!(self, ListRelations { task_id })
+    }
+    fn list_task_activity(
+        &self,
+        task_id: TaskId,
+        after_revision: Option<u64>,
+        after_sequence: Option<u32>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, Vec<TaskActivity>> {
+        mut_cmd!(
+            self,
+            ListTaskActivity {
+                task_id,
+                after_revision,
+                after_sequence,
+                limit
+            }
+        )
+    }
+    fn list_events(&self, since: u64) -> RepositoryFuture<'_, EventCatchUp> {
+        mut_cmd!(self, ListEvents { since })
+    }
+    fn undo(
+        &self,
+        source_operation_id: OperationId,
+        new_operation_id: OperationId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            Undo {
+                source_operation_id,
+                new_operation_id,
+                now
+            }
+        )
     }
 }
 
 #[allow(clippy::large_enum_variant)]
 enum Command {
-    Create {
+    CreateTask {
         operation_id: OperationId,
         task_id: TaskId,
-        title: TaskTitle,
-        due_date: Option<Date>,
+        draft: TaskDraft,
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
-    List(oneshot::Sender<Result<TaskList, RepositoryError>>),
-    Replace {
+    GetTask {
+        task_id: TaskId,
+        reply: oneshot::Sender<Result<Task, RepositoryError>>,
+    },
+    PatchTask {
         operation_id: OperationId,
         task_id: TaskId,
-        title: TaskTitle,
-        due_date: Option<Date>,
+        patch: TaskPatch,
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
-    Complete {
-        operation_id: OperationId,
-        task_id: TaskId,
-        now: Timestamp,
-        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
-    },
-    Uncomplete {
+    CompleteTask {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
-    Delete {
+    UncompleteTask {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
-    Events {
+    CancelTask {
+        operation_id: OperationId,
+        task_id: TaskId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ReopenTask {
+        operation_id: OperationId,
+        task_id: TaskId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteTask {
+        operation_id: OperationId,
+        task_id: TaskId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    MoveTask {
+        operation_id: OperationId,
+        task_id: TaskId,
+        target: MoveTarget,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ReorderTasks {
+        operation_id: OperationId,
+        scope: ReorderScope,
+        ordered_ids: Vec<TaskId>,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    BulkTasks {
+        operation_id: OperationId,
+        task_ids: Vec<TaskId>,
+        action: BulkAction,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ListTasks {
+        query: TaskQuery,
+        as_of: TaskListAsOf,
+        reply: oneshot::Sender<Result<TaskListPage, RepositoryError>>,
+    },
+    ListCatalog(oneshot::Sender<Result<CatalogSnapshot, RepositoryError>>),
+    CreateProject {
+        operation_id: OperationId,
+        project_id: ProjectId,
+        draft: ProjectDraft,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PatchProject {
+        operation_id: OperationId,
+        project_id: ProjectId,
+        patch: ProjectPatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteProject {
+        operation_id: OperationId,
+        project_id: ProjectId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    CreateSection {
+        operation_id: OperationId,
+        section_id: SectionId,
+        draft: SectionDraft,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PatchSection {
+        operation_id: OperationId,
+        section_id: SectionId,
+        patch: SectionPatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteSection {
+        operation_id: OperationId,
+        section_id: SectionId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    CreateTag {
+        operation_id: OperationId,
+        tag_id: TagId,
+        draft: TagDraft,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PatchTag {
+        operation_id: OperationId,
+        tag_id: TagId,
+        patch: TagPatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteTag {
+        operation_id: OperationId,
+        tag_id: TagId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    CreateTemplate {
+        operation_id: OperationId,
+        template_id: TemplateId,
+        draft: TemplateDraft,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PatchTemplate {
+        operation_id: OperationId,
+        template_id: TemplateId,
+        patch: TemplatePatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteTemplate {
+        operation_id: OperationId,
+        template_id: TemplateId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ApplyTemplate {
+        operation_id: OperationId,
+        task_id: TaskId,
+        apply: TemplateApply,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    CreateSavedFilter {
+        operation_id: OperationId,
+        filter_id: SavedFilterId,
+        draft: SavedFilterDraft,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PatchSavedFilter {
+        operation_id: OperationId,
+        filter_id: SavedFilterId,
+        patch: SavedFilterPatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteSavedFilter {
+        operation_id: OperationId,
+        filter_id: SavedFilterId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    CreateComment {
+        operation_id: OperationId,
+        comment_id: CommentId,
+        task_id: TaskId,
+        content: CommentBody,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PatchComment {
+        operation_id: OperationId,
+        comment_id: CommentId,
+        patch: CommentPatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteComment {
+        operation_id: OperationId,
+        comment_id: CommentId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ListComments {
+        task_id: TaskId,
+        reply: oneshot::Sender<Result<Vec<Comment>, RepositoryError>>,
+    },
+    AddRelation {
+        operation_id: OperationId,
+        from_task_id: TaskId,
+        to_task_id: TaskId,
+        kind: RelationKind,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    RemoveRelation {
+        operation_id: OperationId,
+        from_task_id: TaskId,
+        to_task_id: TaskId,
+        kind: RelationKind,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ListRelations {
+        task_id: TaskId,
+        reply: oneshot::Sender<Result<Vec<TaskRelation>, RepositoryError>>,
+    },
+    ListTaskActivity {
+        task_id: TaskId,
+        after_revision: Option<u64>,
+        after_sequence: Option<u32>,
+        limit: u32,
+        reply: oneshot::Sender<Result<Vec<TaskActivity>, RepositoryError>>,
+    },
+    ListEvents {
         since: u64,
-        reply: oneshot::Sender<Result<Vec<TaskEvent>, RepositoryError>>,
+        reply: oneshot::Sender<Result<EventCatchUp, RepositoryError>>,
+    },
+    Undo {
+        source_operation_id: OperationId,
+        new_operation_id: OperationId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
     #[cfg(test)]
     Diagnostics(oneshot::Sender<Result<Diagnostics, RepositoryError>>),
@@ -357,81 +1073,504 @@ enum Command {
 fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
     for command in receiver {
         match command {
-            Command::Create {
+            Command::CreateTask {
                 operation_id,
                 task_id,
-                title,
-                due_date,
+                draft,
                 now,
                 reply,
             } => {
-                let _ = reply.send(create_task(
+                let _ = reply.send(task_ops::create_task(
                     connection,
                     operation_id,
                     task_id,
-                    title,
-                    due_date,
+                    draft,
                     now,
                 ));
             }
-            Command::List(reply) => {
-                let _ = reply.send(list_tasks(connection));
+            Command::GetTask { task_id, reply } => {
+                let _ = reply.send(task_ops::get_task(connection, task_id));
             }
-            Command::Replace {
+            Command::PatchTask {
                 operation_id,
                 task_id,
-                title,
-                due_date,
+                patch,
                 now,
                 reply,
             } => {
-                let _ = reply.send(replace_task(
+                let _ = reply.send(task_ops::patch_task(
                     connection,
                     operation_id,
                     task_id,
-                    title,
-                    due_date,
+                    patch,
                     now,
                 ));
             }
-            Command::Complete {
+            Command::CompleteTask {
                 operation_id,
                 task_id,
                 now,
                 reply,
             } => {
-                let _ = reply.send(change_completion(
+                let _ = reply.send(task_ops::complete_task(
                     connection,
                     operation_id,
                     task_id,
                     now,
-                    true,
                 ));
             }
-            Command::Uncomplete {
+            Command::UncompleteTask {
                 operation_id,
                 task_id,
                 now,
                 reply,
             } => {
-                let _ = reply.send(change_completion(
+                let _ = reply.send(task_ops::uncomplete_task(
                     connection,
                     operation_id,
                     task_id,
                     now,
-                    false,
                 ));
             }
-            Command::Delete {
+            Command::CancelTask {
                 operation_id,
                 task_id,
                 now,
                 reply,
             } => {
-                let _ = reply.send(delete_task(connection, operation_id, task_id, now));
+                let _ = reply.send(task_ops::cancel_task(
+                    connection,
+                    operation_id,
+                    task_id,
+                    now,
+                ));
             }
-            Command::Events { since, reply } => {
-                let _ = reply.send(list_events(connection, since));
+            Command::ReopenTask {
+                operation_id,
+                task_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(task_ops::reopen_task(
+                    connection,
+                    operation_id,
+                    task_id,
+                    now,
+                ));
+            }
+            Command::DeleteTask {
+                operation_id,
+                task_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(task_ops::delete_task(
+                    connection,
+                    operation_id,
+                    task_id,
+                    now,
+                ));
+            }
+            Command::MoveTask {
+                operation_id,
+                task_id,
+                target,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(task_ops::move_task(
+                    connection,
+                    operation_id,
+                    task_id,
+                    target,
+                    now,
+                ));
+            }
+            Command::ReorderTasks {
+                operation_id,
+                scope,
+                ordered_ids,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(task_ops::reorder_tasks(
+                    connection,
+                    operation_id,
+                    scope,
+                    ordered_ids,
+                    now,
+                ));
+            }
+            Command::BulkTasks {
+                operation_id,
+                task_ids,
+                action,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(task_ops::bulk_tasks(
+                    connection,
+                    operation_id,
+                    task_ids,
+                    action,
+                    now,
+                ));
+            }
+            Command::ListTasks {
+                query,
+                as_of,
+                reply,
+            } => {
+                let _ = reply.send(query_ops::list_tasks(connection, query, as_of));
+            }
+            Command::ListCatalog(reply) => {
+                let _ = reply.send(catalog_ops::list_catalog(connection));
+            }
+            Command::CreateProject {
+                operation_id,
+                project_id,
+                draft,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::create_project(
+                    connection,
+                    operation_id,
+                    project_id,
+                    draft,
+                    now,
+                ));
+            }
+            Command::PatchProject {
+                operation_id,
+                project_id,
+                patch,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::patch_project(
+                    connection,
+                    operation_id,
+                    project_id,
+                    patch,
+                    now,
+                ));
+            }
+            Command::DeleteProject {
+                operation_id,
+                project_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::delete_project(
+                    connection,
+                    operation_id,
+                    project_id,
+                    now,
+                ));
+            }
+            Command::CreateSection {
+                operation_id,
+                section_id,
+                draft,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::create_section(
+                    connection,
+                    operation_id,
+                    section_id,
+                    draft,
+                    now,
+                ));
+            }
+            Command::PatchSection {
+                operation_id,
+                section_id,
+                patch,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::patch_section(
+                    connection,
+                    operation_id,
+                    section_id,
+                    patch,
+                    now,
+                ));
+            }
+            Command::DeleteSection {
+                operation_id,
+                section_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::delete_section(
+                    connection,
+                    operation_id,
+                    section_id,
+                    now,
+                ));
+            }
+            Command::CreateTag {
+                operation_id,
+                tag_id,
+                draft,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::create_tag(
+                    connection,
+                    operation_id,
+                    tag_id,
+                    draft,
+                    now,
+                ));
+            }
+            Command::PatchTag {
+                operation_id,
+                tag_id,
+                patch,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::patch_tag(
+                    connection,
+                    operation_id,
+                    tag_id,
+                    patch,
+                    now,
+                ));
+            }
+            Command::DeleteTag {
+                operation_id,
+                tag_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::delete_tag(
+                    connection,
+                    operation_id,
+                    tag_id,
+                    now,
+                ));
+            }
+            Command::CreateTemplate {
+                operation_id,
+                template_id,
+                draft,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::create_template(
+                    connection,
+                    operation_id,
+                    template_id,
+                    draft,
+                    now,
+                ));
+            }
+            Command::PatchTemplate {
+                operation_id,
+                template_id,
+                patch,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::patch_template(
+                    connection,
+                    operation_id,
+                    template_id,
+                    patch,
+                    now,
+                ));
+            }
+            Command::DeleteTemplate {
+                operation_id,
+                template_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::delete_template(
+                    connection,
+                    operation_id,
+                    template_id,
+                    now,
+                ));
+            }
+            Command::ApplyTemplate {
+                operation_id,
+                task_id,
+                apply,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::apply_template(
+                    connection,
+                    operation_id,
+                    task_id,
+                    apply,
+                    now,
+                ));
+            }
+            Command::CreateSavedFilter {
+                operation_id,
+                filter_id,
+                draft,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::create_saved_filter(
+                    connection,
+                    operation_id,
+                    filter_id,
+                    draft,
+                    now,
+                ));
+            }
+            Command::PatchSavedFilter {
+                operation_id,
+                filter_id,
+                patch,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::patch_saved_filter(
+                    connection,
+                    operation_id,
+                    filter_id,
+                    patch,
+                    now,
+                ));
+            }
+            Command::DeleteSavedFilter {
+                operation_id,
+                filter_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(catalog_ops::delete_saved_filter(
+                    connection,
+                    operation_id,
+                    filter_id,
+                    now,
+                ));
+            }
+            Command::CreateComment {
+                operation_id,
+                comment_id,
+                task_id,
+                content,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(detail_ops::create_comment(
+                    connection,
+                    operation_id,
+                    comment_id,
+                    task_id,
+                    content,
+                    now,
+                ));
+            }
+            Command::PatchComment {
+                operation_id,
+                comment_id,
+                patch,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(detail_ops::patch_comment(
+                    connection,
+                    operation_id,
+                    comment_id,
+                    patch,
+                    now,
+                ));
+            }
+            Command::DeleteComment {
+                operation_id,
+                comment_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(detail_ops::delete_comment(
+                    connection,
+                    operation_id,
+                    comment_id,
+                    now,
+                ));
+            }
+            Command::ListComments { task_id, reply } => {
+                let _ = reply.send(detail_ops::list_comments(connection, task_id));
+            }
+            Command::AddRelation {
+                operation_id,
+                from_task_id,
+                to_task_id,
+                kind,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(detail_ops::add_relation(
+                    connection,
+                    operation_id,
+                    from_task_id,
+                    to_task_id,
+                    kind,
+                    now,
+                ));
+            }
+            Command::RemoveRelation {
+                operation_id,
+                from_task_id,
+                to_task_id,
+                kind,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(detail_ops::remove_relation(
+                    connection,
+                    operation_id,
+                    from_task_id,
+                    to_task_id,
+                    kind,
+                    now,
+                ));
+            }
+            Command::ListRelations { task_id, reply } => {
+                let _ = reply.send(detail_ops::list_relations(connection, task_id));
+            }
+            Command::ListTaskActivity {
+                task_id,
+                after_revision,
+                after_sequence,
+                limit,
+                reply,
+            } => {
+                let _ = reply.send(detail_ops::list_task_activity(
+                    connection,
+                    task_id,
+                    after_revision,
+                    after_sequence,
+                    limit,
+                ));
+            }
+            Command::ListEvents { since, reply } => {
+                let _ = reply.send(detail_ops::list_events(connection, since));
+            }
+            Command::Undo {
+                source_operation_id,
+                new_operation_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(undo_ops::undo(
+                    connection,
+                    source_operation_id,
+                    new_operation_id,
+                    now,
+                ));
             }
             #[cfg(test)]
             Command::Diagnostics(reply) => {
@@ -439,7 +1578,9 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
             }
             #[cfg(test)]
             Command::ExecuteBatch { sql, reply } => {
-                let result = connection.execute_batch(&sql).map_err(storage_error);
+                let result = connection
+                    .execute_batch(&sql)
+                    .map_err(|e| RepositoryError::Storage(e.to_string()));
                 let _ = reply.send(result);
             }
         }
@@ -452,497 +1593,10 @@ fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
     connection.pragma_update(None, "foreign_keys", true)?;
     connection.pragma_update(None, "journal_mode", "WAL")?;
     connection.pragma_update(None, "synchronous", "NORMAL")?;
-    migrate(&mut connection)?;
+    connection.pragma_update(None, "wal_autocheckpoint", WAL_AUTOCHECKPOINT_PAGES)?;
+    connection.pragma_update(None, "journal_size_limit", WAL_JOURNAL_SIZE_LIMIT_BYTES)?;
+    migration::migrate(&mut connection)?;
     Ok(connection)
-}
-
-fn migrate(connection: &mut Connection) -> rusqlite::Result<()> {
-    connection.execute_batch(
-        "CREATE TABLE IF NOT EXISTS schema_migrations (
-            version INTEGER PRIMARY KEY,
-            applied_at TEXT NOT NULL
-        );",
-    )?;
-    let current: i64 = connection.query_row(
-        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
-        [],
-        |row| row.get(0),
-    )?;
-    if current < 1 {
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute_batch(
-            "CREATE TABLE app_state (
-                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-                global_revision INTEGER NOT NULL CHECK (global_revision >= 0)
-            );
-            INSERT INTO app_state(singleton, global_revision) VALUES (1, 0);
-            CREATE TABLE tasks (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                due_date TEXT,
-                status TEXT NOT NULL CHECK (status IN ('pending', 'completed')),
-                completed_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                revision INTEGER NOT NULL CHECK (revision > 0)
-            );
-            CREATE TABLE operation_receipts (
-                operation_id TEXT PRIMARY KEY,
-                request_json TEXT NOT NULL,
-                response_json TEXT NOT NULL
-            );
-            CREATE TABLE activity (
-                id INTEGER PRIMARY KEY,
-                revision INTEGER NOT NULL UNIQUE,
-                operation_id TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                task_id TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-            CREATE TABLE events (
-                revision INTEGER PRIMARY KEY,
-                event_type TEXT NOT NULL,
-                operation_id TEXT NOT NULL,
-                task_id TEXT NOT NULL,
-                task_json TEXT,
-                occurred_at TEXT NOT NULL
-            );",
-        )?;
-        transaction.execute(
-            "INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?1)",
-            [Timestamp::now().to_string()],
-        )?;
-        transaction.commit()?;
-    }
-    Ok(())
-}
-
-#[derive(Serialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
-enum CanonicalRequest<'a> {
-    Create {
-        title: &'a str,
-        due_date: Option<String>,
-    },
-    Replace {
-        task_id: String,
-        title: &'a str,
-        due_date: Option<String>,
-    },
-    Complete {
-        task_id: String,
-    },
-    Uncomplete {
-        task_id: String,
-    },
-    Delete {
-        task_id: String,
-    },
-}
-
-fn create_task(
-    connection: &mut Connection,
-    operation_id: OperationId,
-    task_id: TaskId,
-    title: TaskTitle,
-    due_date: Option<Date>,
-    now: Timestamp,
-) -> Result<CommittedMutation, RepositoryError> {
-    let request = canonical_json(&CanonicalRequest::Create {
-        title: title.as_str(),
-        due_date: due_date.map(|date| date.to_string()),
-    })?;
-    mutate(
-        connection,
-        operation_id,
-        request,
-        TaskEventKind::Created,
-        task_id,
-        now,
-        move |transaction, revision| {
-            let task = Task::new(task_id, title, due_date, now, revision);
-            transaction
-                .execute(
-                    "INSERT INTO tasks(
-                        id, title, due_date, status, completed_at, created_at, updated_at, revision
-                    ) VALUES (?1, ?2, ?3, 'pending', NULL, ?4, ?4, ?5)",
-                    params![
-                        task.id.to_string(),
-                        task.title.as_str(),
-                        task.due_date.map(|date| date.to_string()),
-                        now.to_string(),
-                        revision_to_i64(revision)?,
-                    ],
-                )
-                .map_err(storage_error)?;
-            Ok(Some(task))
-        },
-    )
-}
-
-fn replace_task(
-    connection: &mut Connection,
-    operation_id: OperationId,
-    task_id: TaskId,
-    title: TaskTitle,
-    due_date: Option<Date>,
-    now: Timestamp,
-) -> Result<CommittedMutation, RepositoryError> {
-    let request = canonical_json(&CanonicalRequest::Replace {
-        task_id: task_id.to_string(),
-        title: title.as_str(),
-        due_date: due_date.map(|date| date.to_string()),
-    })?;
-    mutate(
-        connection,
-        operation_id,
-        request,
-        TaskEventKind::Replaced,
-        task_id,
-        now,
-        move |transaction, revision| {
-            let changed = transaction
-                .execute(
-                    "UPDATE tasks SET title = ?1, due_date = ?2, updated_at = ?3, revision = ?4
-                     WHERE id = ?5",
-                    params![
-                        title.as_str(),
-                        due_date.map(|date| date.to_string()),
-                        now.to_string(),
-                        revision_to_i64(revision)?,
-                        task_id.to_string(),
-                    ],
-                )
-                .map_err(storage_error)?;
-            if changed == 0 {
-                return Err(RepositoryError::NotFound);
-            }
-            load_task(transaction, task_id).map(Some)
-        },
-    )
-}
-
-fn change_completion(
-    connection: &mut Connection,
-    operation_id: OperationId,
-    task_id: TaskId,
-    now: Timestamp,
-    completed: bool,
-) -> Result<CommittedMutation, RepositoryError> {
-    let request = if completed {
-        canonical_json(&CanonicalRequest::Complete {
-            task_id: task_id.to_string(),
-        })?
-    } else {
-        canonical_json(&CanonicalRequest::Uncomplete {
-            task_id: task_id.to_string(),
-        })?
-    };
-    let kind = if completed {
-        TaskEventKind::Completed
-    } else {
-        TaskEventKind::Uncompleted
-    };
-    mutate(
-        connection,
-        operation_id,
-        request,
-        kind,
-        task_id,
-        now,
-        move |transaction, revision| {
-            let (status, completed_at) = if completed {
-                ("completed", Some(now.to_string()))
-            } else {
-                ("pending", None)
-            };
-            let changed = transaction
-                .execute(
-                    "UPDATE tasks SET status = ?1, completed_at = ?2, updated_at = ?3, revision = ?4
-                     WHERE id = ?5",
-                    params![
-                        status,
-                        completed_at,
-                        now.to_string(),
-                        revision_to_i64(revision)?,
-                        task_id.to_string(),
-                    ],
-                )
-                .map_err(storage_error)?;
-            if changed == 0 {
-                return Err(RepositoryError::NotFound);
-            }
-            load_task(transaction, task_id).map(Some)
-        },
-    )
-}
-
-fn delete_task(
-    connection: &mut Connection,
-    operation_id: OperationId,
-    task_id: TaskId,
-    now: Timestamp,
-) -> Result<CommittedMutation, RepositoryError> {
-    let request = canonical_json(&CanonicalRequest::Delete {
-        task_id: task_id.to_string(),
-    })?;
-    mutate(
-        connection,
-        operation_id,
-        request,
-        TaskEventKind::Deleted,
-        task_id,
-        now,
-        move |transaction, _| {
-            let changed = transaction
-                .execute("DELETE FROM tasks WHERE id = ?1", [task_id.to_string()])
-                .map_err(storage_error)?;
-            if changed == 0 {
-                return Err(RepositoryError::NotFound);
-            }
-            Ok(None)
-        },
-    )
-}
-
-fn mutate(
-    connection: &mut Connection,
-    operation_id: OperationId,
-    request_json: String,
-    kind: TaskEventKind,
-    task_id: TaskId,
-    now: Timestamp,
-    apply: impl FnOnce(&Transaction<'_>, u64) -> Result<Option<Task>, RepositoryError>,
-) -> Result<CommittedMutation, RepositoryError> {
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(storage_error)?;
-
-    let receipt = transaction
-        .query_row(
-            "SELECT request_json, response_json FROM operation_receipts WHERE operation_id = ?1",
-            [operation_id.to_string()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()
-        .map_err(storage_error)?;
-    if let Some((stored_request, stored_response)) = receipt {
-        if stored_request != request_json {
-            return Err(RepositoryError::IdempotencyMismatch);
-        }
-        return serde_json::from_str(&stored_response).map_err(storage_error);
-    }
-
-    let current_revision: i64 = transaction
-        .query_row(
-            "SELECT global_revision FROM app_state WHERE singleton = 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(storage_error)?;
-    let revision = u64::try_from(current_revision)
-        .ok()
-        .and_then(|value| value.checked_add(1))
-        .ok_or_else(|| RepositoryError::Storage("global revision overflow".to_owned()))?;
-
-    let task = apply(&transaction, revision)?;
-    let event = TaskEvent {
-        revision,
-        operation_id,
-        kind,
-        task_id,
-        task: task.clone(),
-        occurred_at: now,
-    };
-    let response = CommittedMutation { task, event };
-    let task_json = response
-        .event
-        .task
-        .as_ref()
-        .map(serde_json::to_string)
-        .transpose()
-        .map_err(storage_error)?;
-    let response_json = serde_json::to_string(&response).map_err(storage_error)?;
-
-    transaction
-        .execute(
-            "UPDATE app_state SET global_revision = ?1 WHERE singleton = 1",
-            [revision_to_i64(revision)?],
-        )
-        .map_err(storage_error)?;
-    transaction
-        .execute(
-            "INSERT INTO activity(revision, operation_id, kind, task_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                revision_to_i64(revision)?,
-                operation_id.to_string(),
-                kind.as_str(),
-                task_id.to_string(),
-                now.to_string(),
-            ],
-        )
-        .map_err(storage_error)?;
-    transaction
-        .execute(
-            "INSERT INTO events(revision, event_type, operation_id, task_id, task_json, occurred_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                revision_to_i64(revision)?,
-                kind.as_str(),
-                operation_id.to_string(),
-                task_id.to_string(),
-                task_json,
-                now.to_string(),
-            ],
-        )
-        .map_err(storage_error)?;
-    transaction
-        .execute(
-            "INSERT INTO operation_receipts(operation_id, request_json, response_json)
-             VALUES (?1, ?2, ?3)",
-            params![operation_id.to_string(), request_json, response_json],
-        )
-        .map_err(storage_error)?;
-    transaction.commit().map_err(storage_error)?;
-    Ok(response)
-}
-
-fn list_tasks(connection: &Connection) -> Result<TaskList, RepositoryError> {
-    let revision: i64 = connection
-        .query_row(
-            "SELECT global_revision FROM app_state WHERE singleton = 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(storage_error)?;
-    let mut statement = connection
-        .prepare_cached(
-            "SELECT id, title, due_date, status, completed_at, created_at, updated_at, revision
-             FROM tasks ORDER BY created_at, id",
-        )
-        .map_err(storage_error)?;
-    let rows = statement
-        .query_map([], task_from_row)
-        .map_err(storage_error)?;
-    let tasks = rows.collect::<Result<Vec<_>, _>>().map_err(storage_error)?;
-    Ok(TaskList {
-        tasks,
-        revision: u64::try_from(revision)
-            .map_err(|error| RepositoryError::Storage(error.to_string()))?,
-    })
-}
-
-fn load_task(transaction: &Transaction<'_>, id: TaskId) -> Result<Task, RepositoryError> {
-    transaction
-        .query_row(
-            "SELECT id, title, due_date, status, completed_at, created_at, updated_at, revision
-             FROM tasks WHERE id = ?1",
-            [id.to_string()],
-            task_from_row,
-        )
-        .map_err(|error| match error {
-            rusqlite::Error::QueryReturnedNoRows => RepositoryError::NotFound,
-            other => storage_error(other),
-        })
-}
-
-fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
-    let id: String = row.get(0)?;
-    let title: String = row.get(1)?;
-    let due_date: Option<String> = row.get(2)?;
-    let status: String = row.get(3)?;
-    let completed_at: Option<String> = row.get(4)?;
-    let created_at: String = row.get(5)?;
-    let updated_at: String = row.get(6)?;
-    let revision: i64 = row.get(7)?;
-
-    Ok(Task {
-        id: parse_sql(id, TaskId::parse)?,
-        title: parse_sql(title, |raw| TaskTitle::new(raw.to_owned()))?,
-        due_date: due_date
-            .map(|value| parse_sql(value, |raw| raw.parse::<Date>()))
-            .transpose()?,
-        status: match status.as_str() {
-            "pending" => TaskStatus::Pending,
-            "completed" => TaskStatus::Completed,
-            _ => return Err(invalid_sql("invalid task status")),
-        },
-        completed_at: completed_at
-            .map(|value| parse_sql(value, |raw| raw.parse::<Timestamp>()))
-            .transpose()?,
-        created_at: parse_sql(created_at, |raw| raw.parse::<Timestamp>())?,
-        updated_at: parse_sql(updated_at, |raw| raw.parse::<Timestamp>())?,
-        revision: u64::try_from(revision).map_err(|error| invalid_sql(error.to_string()))?,
-    })
-}
-
-fn list_events(connection: &Connection, since: u64) -> Result<Vec<TaskEvent>, RepositoryError> {
-    let mut statement = connection
-        .prepare_cached(
-            "SELECT revision, event_type, operation_id, task_id, task_json, occurred_at
-             FROM events WHERE revision > ?1 ORDER BY revision",
-        )
-        .map_err(storage_error)?;
-    let rows = statement
-        .query_map([revision_to_i64(since)?], |row| {
-            let revision: i64 = row.get(0)?;
-            let kind: String = row.get(1)?;
-            let operation_id: String = row.get(2)?;
-            let task_id: String = row.get(3)?;
-            let task_json: Option<String> = row.get(4)?;
-            let occurred_at: String = row.get(5)?;
-            Ok(TaskEvent {
-                revision: u64::try_from(revision)
-                    .map_err(|error| invalid_sql(error.to_string()))?,
-                operation_id: parse_sql(operation_id, OperationId::parse)?,
-                kind: match kind.as_str() {
-                    "task.created" => TaskEventKind::Created,
-                    "task.replaced" => TaskEventKind::Replaced,
-                    "task.completed" => TaskEventKind::Completed,
-                    "task.uncompleted" => TaskEventKind::Uncompleted,
-                    "task.deleted" => TaskEventKind::Deleted,
-                    _ => return Err(invalid_sql("invalid event kind")),
-                },
-                task_id: parse_sql(task_id, TaskId::parse)?,
-                task: task_json
-                    .map(|json| serde_json::from_str(&json).map_err(invalid_sql))
-                    .transpose()?,
-                occurred_at: parse_sql(occurred_at, |raw| raw.parse::<Timestamp>())?,
-            })
-        })
-        .map_err(storage_error)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(storage_error)
-}
-
-fn parse_sql<T, E>(value: String, parse: impl FnOnce(&str) -> Result<T, E>) -> rusqlite::Result<T>
-where
-    E: std::fmt::Display,
-{
-    parse(&value).map_err(invalid_sql)
-}
-
-fn invalid_sql(error: impl std::fmt::Display) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(
-        0,
-        rusqlite::types::Type::Text,
-        Box::new(io::Error::new(
-            io::ErrorKind::InvalidData,
-            error.to_string(),
-        )),
-    )
-}
-
-fn canonical_json(value: &impl Serialize) -> Result<String, RepositoryError> {
-    serde_json::to_string(value).map_err(storage_error)
-}
-
-fn revision_to_i64(revision: u64) -> Result<i64, RepositoryError> {
-    i64::try_from(revision).map_err(|error| RepositoryError::Storage(error.to_string()))
-}
-
-fn storage_error(error: impl std::fmt::Display) -> RepositoryError {
-    RepositoryError::Storage(error.to_string())
 }
 
 #[cfg(test)]
@@ -953,6 +1607,8 @@ struct Diagnostics {
     foreign_keys: i64,
     busy_timeout: i64,
     synchronous: i64,
+    wal_autocheckpoint: i64,
+    journal_size_limit: i64,
     tasks: i64,
     receipts: i64,
     activity: i64,
@@ -967,19 +1623,25 @@ fn read_diagnostics(connection: &Connection) -> Result<Diagnostics, RepositoryEr
             .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
                 row.get(0)
             })
-            .map_err(storage_error)?,
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?,
         journal_mode: connection
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
-            .map_err(storage_error)?,
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?,
         foreign_keys: connection
             .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
-            .map_err(storage_error)?,
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?,
         busy_timeout: connection
             .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
-            .map_err(storage_error)?,
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?,
         synchronous: connection
             .query_row("PRAGMA synchronous", [], |row| row.get(0))
-            .map_err(storage_error)?,
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?,
+        wal_autocheckpoint: connection
+            .query_row("PRAGMA wal_autocheckpoint", [], |row| row.get(0))
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?,
+        journal_size_limit: connection
+            .query_row("PRAGMA journal_size_limit", [], |row| row.get(0))
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?,
         tasks: table_count(connection, "tasks")?,
         receipts: table_count(connection, "operation_receipts")?,
         activity: table_count(connection, "activity")?,
@@ -990,7 +1652,7 @@ fn read_diagnostics(connection: &Connection) -> Result<Diagnostics, RepositoryEr
                 [],
                 |row| row.get(0),
             )
-            .map_err(storage_error)?,
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?,
     })
 }
 
@@ -1000,234 +1662,8 @@ fn table_count(connection: &Connection, table: &str) -> Result<i64, RepositoryEr
         .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
             row.get(0)
         })
-        .map_err(storage_error)
+        .map_err(|e| RepositoryError::Storage(e.to_string()))
 }
 
 #[cfg(test)]
-mod tests {
-    use std::{env, time::SystemTime};
-
-    use super::*;
-    use uuid::Uuid;
-
-    struct TestDir(PathBuf);
-
-    impl TestDir {
-        fn new() -> Self {
-            let path = env::temp_dir().join(format!(
-                "junban-storage-test-{}-{}",
-                std::process::id(),
-                SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            fs::create_dir(&path).unwrap();
-            Self(path)
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn operation() -> OperationId {
-        OperationId::parse(&Uuid::new_v4().to_string()).unwrap()
-    }
-
-    fn now() -> Timestamp {
-        "2026-07-28T12:00:00Z".parse().unwrap()
-    }
-
-    async fn create(
-        repository: &SqliteRepository,
-        operation_id: OperationId,
-        title: &str,
-    ) -> Result<CommittedMutation, RepositoryError> {
-        repository
-            .create_task(
-                operation_id,
-                TaskId::new(),
-                TaskTitle::new(title).unwrap(),
-                Some("2026-07-28".parse().unwrap()),
-                now(),
-            )
-            .await
-    }
-
-    #[tokio::test]
-    async fn migration_and_connection_pragmas_are_applied() {
-        let directory = TestDir::new();
-        let owner = ProfileOwner::open(&directory.0).unwrap();
-        let diagnostics = owner.repository().diagnostics().await.unwrap();
-
-        assert_eq!(diagnostics.migration, 1);
-        assert_eq!(diagnostics.journal_mode, "wal");
-        assert_eq!(diagnostics.foreign_keys, 1);
-        assert_eq!(diagnostics.busy_timeout, 2_500);
-        assert_eq!(diagnostics.synchronous, 1); // NORMAL
-    }
-
-    #[test]
-    fn a_second_profile_owner_is_rejected_until_all_clones_drop() {
-        let directory = TestDir::new();
-        let owner = ProfileOwner::open(&directory.0).unwrap();
-        let repository = owner.repository();
-        assert!(matches!(
-            ProfileOwner::open(&directory.0),
-            Err(OpenError::AlreadyOwned)
-        ));
-        drop(owner);
-        assert!(matches!(
-            ProfileOwner::open(&directory.0),
-            Err(OpenError::AlreadyOwned)
-        ));
-        drop(repository);
-        assert!(ProfileOwner::open(&directory.0).is_ok());
-    }
-
-    #[tokio::test]
-    async fn exact_replay_returns_the_original_result_and_mismatch_conflicts() {
-        let directory = TestDir::new();
-        let owner = ProfileOwner::open(&directory.0).unwrap();
-        let repository = owner.repository();
-        let operation = operation();
-
-        let first = create(&repository, operation, "First").await.unwrap();
-        let replay = create(&repository, operation, "First").await.unwrap();
-        assert_eq!(replay, first);
-        assert_eq!(repository.list_tasks().await.unwrap().tasks.len(), 1);
-
-        assert_eq!(
-            create(&repository, operation, "Different").await,
-            Err(RepositoryError::IdempotencyMismatch)
-        );
-        let diagnostics = repository.diagnostics().await.unwrap();
-        assert_eq!((diagnostics.tasks, diagnostics.receipts), (1, 1));
-        assert_eq!(
-            (
-                diagnostics.activity,
-                diagnostics.events,
-                diagnostics.revision
-            ),
-            (1, 1, 1)
-        );
-    }
-
-    #[tokio::test]
-    async fn mutations_write_effect_receipt_activity_revision_and_event_atomically() {
-        let directory = TestDir::new();
-        let owner = ProfileOwner::open(&directory.0).unwrap();
-        let repository = owner.repository();
-        let created = create(&repository, operation(), "Task").await.unwrap();
-        let id = created.task.unwrap().id;
-        repository
-            .complete_task(operation(), id, now())
-            .await
-            .unwrap();
-
-        let diagnostics = repository.diagnostics().await.unwrap();
-        assert_eq!((diagnostics.tasks, diagnostics.receipts), (1, 2));
-        assert_eq!(
-            (
-                diagnostics.activity,
-                diagnostics.events,
-                diagnostics.revision
-            ),
-            (2, 2, 2)
-        );
-        let events = repository.list_events(1).await.unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, TaskEventKind::Completed);
-    }
-
-    #[tokio::test]
-    async fn restart_preserves_tasks_receipts_events_and_deleted_replays() {
-        let directory = TestDir::new();
-        let create_operation = operation();
-        let delete_operation = operation();
-        let (repository, id, deleted) = {
-            let owner = ProfileOwner::open(&directory.0).unwrap();
-            let repository = owner.repository();
-            let created = create(&repository, create_operation, "Persistent")
-                .await
-                .unwrap();
-            let id = created.task.unwrap().id;
-            let deleted = repository
-                .delete_task(delete_operation, id, now())
-                .await
-                .unwrap();
-            (repository, id, deleted)
-        };
-        drop(repository);
-
-        let owner = ProfileOwner::open(&directory.0).unwrap();
-        let repository = owner.repository();
-        assert!(repository.list_tasks().await.unwrap().tasks.is_empty());
-        assert_eq!(repository.list_events(0).await.unwrap().len(), 2);
-        assert_eq!(
-            repository
-                .delete_task(delete_operation, id, Timestamp::now())
-                .await
-                .unwrap(),
-            deleted
-        );
-    }
-
-    #[tokio::test]
-    async fn failed_activity_insert_rolls_back_every_mutation_row() {
-        let directory = TestDir::new();
-        let owner = ProfileOwner::open(&directory.0).unwrap();
-        let repository = owner.repository();
-        repository
-            .execute_batch(
-                "CREATE TRIGGER fail_activity BEFORE INSERT ON activity
-                 BEGIN SELECT RAISE(ABORT, 'injected rollback'); END;"
-                    .to_owned(),
-            )
-            .await
-            .unwrap();
-
-        assert!(matches!(
-            create(&repository, operation(), "Rollback").await,
-            Err(RepositoryError::Storage(_))
-        ));
-        let diagnostics = repository.diagnostics().await.unwrap();
-        assert_eq!((diagnostics.tasks, diagnostics.receipts), (0, 0));
-        assert_eq!(
-            (
-                diagnostics.activity,
-                diagnostics.events,
-                diagnostics.revision
-            ),
-            (0, 0, 0)
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn profile_files_are_owner_only() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = TestDir::new();
-        let owner = ProfileOwner::open(&directory.0).unwrap();
-        write_private_file(&directory.0.join("token"), b"secret").unwrap();
-        drop(owner);
-        assert_eq!(
-            fs::metadata(&directory.0).unwrap().permissions().mode() & 0o777,
-            0o700
-        );
-        for file in [LOCK_FILE, DATABASE_FILE, "token"] {
-            assert_eq!(
-                fs::metadata(directory.0.join(file))
-                    .unwrap()
-                    .permissions()
-                    .mode()
-                    & 0o777,
-                0o600
-            );
-        }
-    }
-}
+mod tests;

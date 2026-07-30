@@ -1,30 +1,44 @@
 /**
- * Task state management with SSE convergence.
- * Uses local React state/hooks; no external state framework.
+ * Compatibility task state for the Phase 1 Today/Inbox shell.
+ * Backed by view-scoped keyset queries + SSE convergence primitives.
+ * The next UI wave should prefer useTaskQuery / useCatalog / useMutations directly.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { TaskDto } from "../api/client";
+import type { CommittedEventDto, MutationResponse, TaskDto } from "../api/client";
 import {
   ApiError,
+  NetworkError,
   completeTask,
   createTask,
   deleteTask,
   generateOperationId,
   hasStoredToken,
   listTasks,
-  replaceTask,
+  patchTask,
   subscribeToEvents,
+  taskFromCommittedEvent,
   uncompleteTask,
 } from "../api/client";
+import {
+  applyTaskEventToList,
+  nextStateFromListSnapshot,
+  removeTaskById,
+  upsertTaskById,
+} from "./useTaskQuery";
+import { RefreshCoalescer } from "./liveQuery";
+import { isOutcomeUnknown } from "./useMutations";
 
 export type { TaskDto };
+export { nextStateFromListSnapshot, removeTaskById, upsertTaskById } from "./useTaskQuery";
 
 export interface TaskState {
   tasks: TaskDto[];
   revision: number;
+  asOfDate: string | null;
   loading: boolean;
   error: string | null;
+  mutationPhase: "idle" | "pending" | "error" | "outcome-unknown";
 }
 
 export interface TaskActions {
@@ -46,86 +60,78 @@ export function formatError(error: unknown): string {
   return "An unexpected error occurred";
 }
 
-/**
- * Choose whether an authoritative list snapshot may replace local state.
- * Equal revisions are allowed so a snapshot can confirm a mutation at the same head.
- */
-export function nextStateFromListSnapshot(
-  currentRevision: number,
-  snapshot: { revision: number; tasks: TaskDto[] },
-): { revision: number; tasks: TaskDto[] } | null {
-  if (snapshot.revision < currentRevision) {
-    return null;
-  }
-  return { revision: snapshot.revision, tasks: snapshot.tasks };
-}
+function applyMutationResult(
+  result: MutationResponse,
+  appliedRevision: number,
+  applyTask: (task: TaskDto, revision: number) => void,
+  onDelete?: (taskIds: string[] | undefined, revision: number) => void,
+): void {
+  const event = result.event;
+  if (event.revision < appliedRevision) return;
 
-/** Insert or replace a task by id so duplicate create/update deliveries stay idempotent. */
-export function upsertTaskById(tasks: TaskDto[], task: TaskDto): TaskDto[] {
-  const index = tasks.findIndex((candidate) => candidate.id === task.id);
-  if (index === -1) {
-    return [...tasks, task];
+  if (event.event_type === "task.deleted") {
+    onDelete?.(event.affected.task_ids, event.revision);
+    return;
   }
-  if (tasks[index] === task) {
-    return tasks;
-  }
-  const next = tasks.slice();
-  next[index] = task;
-  return next;
-}
 
-/** Remove a task by id; no-op when the id is already absent. */
-export function removeTaskById(tasks: TaskDto[], taskId: string): TaskDto[] {
-  const next = tasks.filter((task) => task.id !== taskId);
-  return next.length === tasks.length ? tasks : next;
+  const task = taskFromCommittedEvent(event);
+  if (task) {
+    applyTask(task, event.revision);
+  }
 }
 
 /**
- * Manages task list state with SSE-driven convergence.
- * Mutations generate one UUID idempotency key per logical operation,
- * retain it across transport retry, and reload the list after relevant events.
- *
- * List snapshots apply monotonically by server revision. Concurrent reloads
- * coalesce to one in-flight fetch plus at most one follow-up. Mutation task
- * payloads upsert by task id so an own-create SSE/list result cannot duplicate
- * when the mutation response arrives later.
+ * Manages task list state with SSE-driven convergence for the existing shell.
+ * Loads at most one 100-task page (never the full table). Mutations mint one
+ * UUID idempotency key per user action and refresh after outcome-unknown failures.
  */
 export function useTasks(): TaskState & TaskActions {
   const [tasks, setTasks] = useState<TaskDto[]>([]);
   const [revision, setRevision] = useState(0);
+  const [asOfDate, setAsOfDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mutationPhase, setMutationPhase] = useState<
+    "idle" | "pending" | "error" | "outcome-unknown"
+  >("idle");
 
-  // Track pending operation IDs so SSE handlers can clear own-mutation receipts.
   const pendingOps = useRef(new Set<string>());
-  // Highest authoritative revision already applied to local state.
   const appliedRevisionRef = useRef(0);
-  // Coalesce reloads: one in flight, one queued follow-up max.
-  const reloadInFlightRef = useRef(false);
-  const reloadQueuedRef = useRef(false);
+  const tasksRef = useRef<TaskDto[]>([]);
+  const coalescerRef = useRef(new RefreshCoalescer());
 
-  const applyListSnapshot = useCallback((snapshotRevision: number, snapshotTasks: TaskDto[]) => {
-    const next = nextStateFromListSnapshot(appliedRevisionRef.current, {
-      revision: snapshotRevision,
-      tasks: snapshotTasks,
-    });
-    if (!next) {
-      return false;
-    }
-    appliedRevisionRef.current = next.revision;
-    setTasks(next.tasks);
-    setRevision(next.revision);
-    return true;
-  }, []);
+  const applyListSnapshot = useCallback(
+    (snapshot: {
+      revision: number;
+      tasks: TaskDto[];
+      as_of_date: string;
+      next_cursor?: string | null;
+    }) => {
+      const next = nextStateFromListSnapshot(appliedRevisionRef.current, snapshot);
+      if (!next) {
+        return false;
+      }
+      appliedRevisionRef.current = next.revision;
+      tasksRef.current = next.tasks;
+      setTasks(next.tasks);
+      setRevision(next.revision);
+      setAsOfDate(next.as_of_date);
+      return true;
+    },
+    [],
+  );
 
   const applyMutationTask = useCallback((task: TaskDto, eventRevision: number) => {
     if (eventRevision < appliedRevisionRef.current) {
-      // A newer authoritative snapshot already won; do not regress task fields.
       return;
     }
     appliedRevisionRef.current = eventRevision;
     setRevision(eventRevision);
-    setTasks((prev) => upsertTaskById(prev, task));
+    setTasks((prev) => {
+      const next = upsertTaskById(prev, task);
+      tasksRef.current = next;
+      return next;
+    });
   }, []);
 
   const reloadTasks = useCallback(async () => {
@@ -134,151 +140,187 @@ export function useTasks(): TaskState & TaskActions {
       return;
     }
 
-    if (reloadInFlightRef.current) {
-      reloadQueuedRef.current = true;
-      return;
-    }
-
-    reloadInFlightRef.current = true;
-    try {
-      do {
-        reloadQueuedRef.current = false;
-        try {
-          const result = await listTasks();
-          applyListSnapshot(result.revision, result.tasks);
-          setError(null);
-        } catch (err) {
-          setError(formatError(err));
-        } finally {
-          setLoading(false);
-        }
-      } while (reloadQueuedRef.current);
-    } finally {
-      reloadInFlightRef.current = false;
-    }
+    await coalescerRef.current.run(async () => {
+      try {
+        // First page only — never walk the full table from this compatibility hook.
+        const result = await listTasks({ limit: 100 });
+        applyListSnapshot(result);
+        setError(null);
+      } catch (err) {
+        setError(formatError(err));
+      } finally {
+        setLoading(false);
+      }
+    });
   }, [applyListSnapshot]);
 
-  // Initial load
   useEffect(() => {
     void reloadTasks();
   }, [reloadTasks]);
 
-  // SSE subscription with reconnect and dedup
+  const handleEvent = useCallback(
+    (event: CommittedEventDto) => {
+      pendingOps.current.delete(event.operation_id);
+      const result = applyTaskEventToList(tasksRef.current, appliedRevisionRef.current, event);
+      if (result.needsRefresh) {
+        void reloadTasks();
+        return;
+      }
+      if (result.revision !== appliedRevisionRef.current || result.tasks !== tasksRef.current) {
+        appliedRevisionRef.current = result.revision;
+        tasksRef.current = result.tasks;
+        setTasks(result.tasks);
+        setRevision(result.revision);
+      }
+    },
+    [reloadTasks],
+  );
+
   useEffect(() => {
     if (!hasStoredToken()) return;
 
     const cleanup = subscribeToEvents(
-      (event) => {
-        // If this event came from our own pending operation, clear it.
-        pendingOps.current.delete(event.data.operation_id);
-
-        // Reload when the stream is ahead of applied state. Do not advance the
-        // applied revision here — only list/mutation payloads are authoritative.
-        if (event.data.revision > appliedRevisionRef.current) {
-          void reloadTasks();
-        }
+      (sseEvent) => {
+        handleEvent(sseEvent.data);
       },
       () => {
-        // On reconnect, reload to catch any missed events
+        // Durable catch-up on reconnect — one coalesced reload, not a loop.
         void reloadTasks();
       },
       (streamError) => {
         setError(streamError.message);
       },
-      revision,
+      appliedRevisionRef.current,
+      (scope) => {
+        if (scope.tasks) void reloadTasks();
+      },
     );
 
     return cleanup;
-    // revision is intentionally not in deps — we don't want to resubscribe
-    // every time the revision updates; the SSE stream tracks its own cursor.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasStoredToken()]);
+  }, [handleEvent, reloadTasks]);
 
-  const handleCreateTask = useCallback(
-    async (title: string, dueDate: string | null): Promise<TaskDto | null> => {
-      const operationId = generateOperationId();
+  const runMutation = useCallback(
+    async (
+      operationId: string,
+      execute: () => Promise<MutationResponse>,
+      onSuccess: (result: MutationResponse) => void,
+    ): Promise<MutationResponse | null> => {
       pendingOps.current.add(operationId);
+      setMutationPhase("pending");
       try {
-        const result = await createTask({ title, due_date: dueDate }, operationId);
-        if (result.task) {
-          applyMutationTask(result.task, result.event.revision);
+        const result = await execute();
+        onSuccess(result);
+        setMutationPhase("idle");
+        setError(null);
+        // When the event asks for a query resync (bulk/cascade), refresh.
+        if (result.event.resync.tasks) {
+          void reloadTasks();
         }
-        return result.task ?? null;
+        return result;
       } catch (err) {
+        if (isOutcomeUnknown(err)) {
+          setMutationPhase("outcome-unknown");
+          setError(formatError(err));
+          // Explicit authoritative refresh after ambiguous network failure.
+          await reloadTasks();
+          return null;
+        }
+        setMutationPhase("error");
         setError(formatError(err));
         return null;
       } finally {
         pendingOps.current.delete(operationId);
       }
     },
-    [applyMutationTask],
+    [reloadTasks],
+  );
+
+  const handleCreateTask = useCallback(
+    async (title: string, dueDate: string | null): Promise<TaskDto | null> => {
+      const operationId = generateOperationId();
+      const result = await runMutation(
+        operationId,
+        () => createTask({ title, due_date: dueDate }, operationId),
+        (response) => {
+          applyMutationResult(response, appliedRevisionRef.current, applyMutationTask);
+        },
+      );
+      return result ? taskFromCommittedEvent(result.event) : null;
+    },
+    [applyMutationTask, runMutation],
   );
 
   const handleUpdateTask = useCallback(
     async (taskId: string, title: string, dueDate: string | null): Promise<TaskDto | null> => {
       const operationId = generateOperationId();
-      pendingOps.current.add(operationId);
-      try {
-        const result = await replaceTask(taskId, { title, due_date: dueDate }, operationId);
-        if (result.task) {
-          applyMutationTask(result.task, result.event.revision);
-        }
-        return result.task ?? null;
-      } catch (err) {
-        setError(formatError(err));
-        return null;
-      } finally {
-        pendingOps.current.delete(operationId);
-      }
+      const result = await runMutation(
+        operationId,
+        () => patchTask(taskId, { title, due_date: dueDate }, operationId),
+        (response) => {
+          applyMutationResult(response, appliedRevisionRef.current, applyMutationTask);
+        },
+      );
+      return result ? taskFromCommittedEvent(result.event) : null;
     },
-    [applyMutationTask],
+    [applyMutationTask, runMutation],
   );
 
   const handleToggleComplete = useCallback(
     async (taskId: string): Promise<TaskDto | null> => {
-      const current = tasks.find((t) => t.id === taskId);
+      const current = tasksRef.current.find((t) => t.id === taskId);
       const operationId = generateOperationId();
-      pendingOps.current.add(operationId);
-      try {
-        const result =
+      const result = await runMutation(
+        operationId,
+        () =>
           current?.status === "completed"
-            ? await uncompleteTask(taskId, operationId)
-            : await completeTask(taskId, operationId);
-        if (result.task) {
-          applyMutationTask(result.task, result.event.revision);
-        }
-        return result.task ?? null;
-      } catch (err) {
-        setError(formatError(err));
-        return null;
-      } finally {
-        pendingOps.current.delete(operationId);
-      }
+            ? uncompleteTask(taskId, operationId)
+            : completeTask(taskId, operationId),
+        (response) => {
+          applyMutationResult(response, appliedRevisionRef.current, applyMutationTask);
+        },
+      );
+      return result ? taskFromCommittedEvent(result.event) : null;
     },
-    [applyMutationTask, tasks],
+    [applyMutationTask, runMutation],
   );
 
-  const handleDeleteTask = useCallback(async (taskId: string): Promise<boolean> => {
-    const operationId = generateOperationId();
-    pendingOps.current.add(operationId);
-    try {
-      const result = await deleteTask(taskId, operationId);
-      if (result.event.revision >= appliedRevisionRef.current) {
-        appliedRevisionRef.current = result.event.revision;
-        setRevision(result.event.revision);
-      }
-      setTasks((prev) => removeTaskById(prev, taskId));
-      return true;
-    } catch (err) {
-      setError(formatError(err));
-      return false;
-    } finally {
-      pendingOps.current.delete(operationId);
-    }
-  }, []);
+  const handleDeleteTask = useCallback(
+    async (taskId: string): Promise<boolean> => {
+      const operationId = generateOperationId();
+      const result = await runMutation(
+        operationId,
+        () => deleteTask(taskId, operationId),
+        (response) => {
+          applyMutationResult(
+            response,
+            appliedRevisionRef.current,
+            applyMutationTask,
+            (taskIds, eventRevision) => {
+              if (eventRevision >= appliedRevisionRef.current) {
+                appliedRevisionRef.current = eventRevision;
+                setRevision(eventRevision);
+              }
+              setTasks((prev) => {
+                const ids = taskIds && taskIds.length > 0 ? taskIds : [taskId];
+                let next = prev;
+                for (const id of ids) {
+                  next = removeTaskById(next, id);
+                }
+                tasksRef.current = next;
+                return next;
+              });
+            },
+          );
+        },
+      );
+      return result !== null;
+    },
+    [applyMutationTask, runMutation],
+  );
 
   const handleRetry = useCallback(() => {
     setError(null);
+    setMutationPhase("idle");
     setLoading(true);
     void reloadTasks();
   }, [reloadTasks]);
@@ -286,8 +328,10 @@ export function useTasks(): TaskState & TaskActions {
   return {
     tasks,
     revision,
+    asOfDate,
     loading,
     error,
+    mutationPhase,
     createTask: handleCreateTask,
     updateTask: handleUpdateTask,
     toggleComplete: handleToggleComplete,
@@ -295,3 +339,6 @@ export function useTasks(): TaskState & TaskActions {
     retry: handleRetry,
   };
 }
+
+// Re-export NetworkError recognition for tests that mock client modules.
+export { NetworkError, isOutcomeUnknown };

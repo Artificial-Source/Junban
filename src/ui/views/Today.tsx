@@ -1,38 +1,54 @@
+/**
+ * Today view: overdue section + today tasks with workload summary.
+ * Preserves the legacy header with completion ring.
+ * Phase 3 Plan My Day / End of Day controls are absent in Phase 2.
+ * Create defaults to today when the Rust parser gives no date.
+ */
 import { useMemo } from "react";
-import type { TaskDto } from "../api/client";
 import { TaskInput } from "../components/TaskInput";
 import { OverdueSection } from "../components/OverdueSection";
 import { TodayHeader } from "./today/TodayHeader";
 import { TodayTaskList } from "./today/TodayTaskList";
 import { calendarDayKey } from "../lib/dates";
 import { useToday } from "../hooks/useToday";
+import { useViewTasks } from "../hooks/useViewTasks";
+import { useTaskMutations } from "../hooks/useTaskMutations";
 
 interface TodayProps {
-  tasks: TaskDto[];
-  onCreateTask: (title: string, dueDate: string | null) => Promise<boolean>;
   onToggleTask: (id: string) => Promise<boolean>;
   onSelectTask: (id: string) => void;
   selectedTaskId: string | null;
+  selectedTaskIds?: Set<string>;
+  onMultiSelect?: (
+    id: string,
+    event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+    orderedIds: string[],
+  ) => void;
   autoFocusTrigger?: number;
 }
 
 export function Today({
-  tasks,
-  onCreateTask,
   onToggleTask,
   onSelectTask,
   selectedTaskId,
+  selectedTaskIds,
+  onMultiSelect,
   autoFocusTrigger,
 }: TodayProps) {
   const today = useToday();
+  const { parseQuickEntry, createFromQuickEntry, patchTask } = useTaskMutations();
+  const { tasks, loading, error, reload, asOfDate } = useViewTasks({ view: "today", limit: 100 });
+
+  // Use server as_of_date if available, otherwise browser local date
+  const effectiveToday = asOfDate ?? today;
 
   const overdueTasks = useMemo(
     () =>
       tasks.filter((t) => {
         const dueDay = t.due_date ? calendarDayKey(t.due_date) : null;
-        return t.status === "pending" && dueDay !== null && dueDay < today;
+        return t.status === "pending" && dueDay !== null && dueDay < effectiveToday;
       }),
-    [tasks, today],
+    [tasks, effectiveToday],
   );
 
   const todayTasks = useMemo(
@@ -42,31 +58,70 @@ export function Today({
           t.status === "pending" &&
           t.due_date !== null &&
           t.due_date !== undefined &&
-          calendarDayKey(t.due_date) === today,
+          calendarDayKey(t.due_date) === effectiveToday,
       ),
-    [tasks, today],
+    [tasks, effectiveToday],
   );
 
   const todayCompletedCount = useMemo(
     () =>
       tasks.filter((t) => {
         if (t.status !== "completed" || !t.completed_at) return false;
-        const completedDay = calendarDayKey(t.completed_at);
-        return completedDay === today;
+        return calendarDayKey(t.completed_at) === effectiveToday;
       }).length,
-    [tasks, today],
+    [tasks, effectiveToday],
   );
 
   const totalCount = overdueTasks.length + todayTasks.length;
   const ringTotal = todayCompletedCount + todayTasks.length;
 
-  const handleReschedule = () => {
-    // Phase 1: reschedule overdue tasks to today
-    // This is handled by the parent via updateTask
-    // For now, it's a no-op since we don't have access to updateTask here
-    // in the exact same way the legacy did. The overdue section is visible
-    // but the reschedule button is present for visual parity.
+  // Workload: sum of estimated minutes for today's tasks
+  const workloadMinutes = useMemo(
+    () => todayTasks.reduce((sum, t) => sum + (t.estimated_minutes ?? 0), 0),
+    [todayTasks],
+  );
+
+  const handleParseAndCreate = async (input: string): Promise<boolean> => {
+    const parsed = await parseQuickEntry(input);
+    const result = await createFromQuickEntry(parsed, {
+      due_date: parsed.due_date ?? effectiveToday,
+    });
+    if (!result) {
+      throw new Error("The task could not be created.");
+    }
+    return true;
   };
+
+  const handleReschedule = async () => {
+    for (const task of overdueTasks) {
+      await patchTask(task.id, { due_date: effectiveToday });
+    }
+  };
+
+  if (loading) {
+    return (
+      <div>
+        <TodayHeader totalCount={0} todayCompletedCount={0} ringTotal={0} />
+        <p className="text-sm text-on-surface-muted" role="status">
+          Loading tasks…
+        </p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div role="alert" className="rounded-lg border border-error/30 bg-error/5 p-4">
+        <p className="text-sm font-medium text-error">Could not load tasks: {error}</p>
+        <button
+          onClick={reload}
+          className="mt-2 rounded-md bg-accent-action px-3 py-1.5 text-sm text-on-accent-action"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -74,12 +129,16 @@ export function Today({
         totalCount={totalCount}
         todayCompletedCount={todayCompletedCount}
         ringTotal={ringTotal}
-        onPlanMyDay={() => {}}
-        onEndOfDay={() => {}}
       />
 
+      {workloadMinutes > 0 && (
+        <p className="mb-2 text-xs text-on-surface-muted" aria-live="polite">
+          Workload: {Math.floor(workloadMinutes / 60)}h {workloadMinutes % 60}m estimated
+        </p>
+      )}
+
       <TaskInput
-        onSubmit={(title) => onCreateTask(title, today)}
+        onParseAndCreate={handleParseAndCreate}
         placeholder="Add a task for today..."
         autoFocusTrigger={autoFocusTrigger}
       />
@@ -98,7 +157,9 @@ export function Today({
         onToggleTask={onToggleTask}
         onSelectTask={onSelectTask}
         selectedTaskId={selectedTaskId}
-        todayKey={today}
+        selectedTaskIds={selectedTaskIds}
+        onMultiSelect={onMultiSelect}
+        todayKey={effectiveToday}
       />
     </div>
   );

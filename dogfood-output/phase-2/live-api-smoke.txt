@@ -1,0 +1,15 @@
+health:
+200
+{"status":"ok"}
+unauthorized:
+401
+{"error":{"code":"authentication_required","message":"a valid bearer token is required","retryable":false},"request_id":"019fb035-5fc2-79b3-a69e-338aa0d90961"}
+wrong token:
+401
+{"error":{"code":"authentication_required","message":"a valid bearer token is required","retryable":false},"request_id":"019fb035-5fc6-7033-9744-d7e95ca3d3f8"}
+auth list:
+200
+{'revision': 17, 'count': 2, 'has_more': True}
+missing idempotency:
+422
+{"error":{"code":"validation_error","message":"request validation failed","retryable":false,"fields":{"idempotency_key":"a UUID Idempotency-Key header is required"}},"request_id":"019fb035-5fe0-7803-b0f1-cdde550d1cd0"}

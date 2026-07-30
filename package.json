@@ -25,12 +25,17 @@
     "check:runtime-boundary": "node scripts/check-runtime-boundary.mjs",
     "bench:hosted-server": "python3 scripts/bench-hosted-server.py",
     "bench:hosted-server:quick": "python3 scripts/bench-hosted-server.py --quick",
+    "bench:scale": "python3 scripts/bench-hosted-server.py --mode scale",
+    "bench:scale:quick": "python3 scripts/bench-hosted-server.py --mode scale --quick",
+    "bench:self-check": "python3 scripts/bench-hosted-server.py --self-check",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary"
   },
   "dependencies": {
     "lucide-react": "^0.548.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.0",

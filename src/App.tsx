@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { bootstrapFragmentToken, hasStoredToken } from "./ui/api/client";
 import { initTheme, applyDefaultAccentColor } from "./ui/themes/manager";
 import { useRouting } from "./ui/hooks/useRouting";
-import { useTasks } from "./ui/hooks/useTasks";
+import { WorkspaceProvider } from "./ui/context/WorkspaceContext";
 import { AppLayout } from "./ui/app/AppLayout";
 import { ConnectionScreen } from "./ui/components/ConnectionScreen";
 
@@ -25,27 +25,16 @@ export default function App() {
     return () => window.removeEventListener("hashchange", authenticateFromLocation);
   }, []);
 
-  const { view, navigate } = useRouting();
-  const taskState = useTasks();
+  // useRouting is called here to ensure the History API listener is registered early.
+  useRouting();
 
   if (!authenticated) {
     return <ConnectionScreen />;
   }
 
   return (
-    <AppLayout
-      view={view}
-      navigate={navigate}
-      tasks={taskState.tasks}
-      loading={taskState.loading}
-      error={taskState.error}
-      onRetry={taskState.retry}
-      onCreateTask={async (title, dueDate) => (await taskState.createTask(title, dueDate)) !== null}
-      onToggleTask={async (id) => (await taskState.toggleComplete(id)) !== null}
-      onUpdateTask={async (taskId, title, dueDate) =>
-        (await taskState.updateTask(taskId, title, dueDate)) !== null
-      }
-      onDeleteTask={taskState.deleteTask}
-    />
+    <WorkspaceProvider>
+      <AppLayout />
+    </WorkspaceProvider>
   );
 }

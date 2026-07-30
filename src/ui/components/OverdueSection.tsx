@@ -79,7 +79,11 @@ export function OverdueSection({
                 type="button"
                 onClick={() => toggleTask(task.id)}
                 disabled={pendingTaskIds.has(task.id)}
-                aria-label={`Complete task: ${task.title}`}
+                aria-label={
+                  task.status === "completed"
+                    ? `Mark task incomplete: ${task.title}`
+                    : `Complete task: ${task.title}`
+                }
                 className={`mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 border-on-surface-muted/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 ${
                   task.status === "completed"
                     ? "bg-success border-success"
@@ -107,7 +111,7 @@ export function OverdueSection({
               <button
                 type="button"
                 onClick={() => onSelectTask(task.id)}
-                aria-label={`Open task: ${task.title}`}
+                aria-label={`Edit task: ${task.title}`}
                 className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <span

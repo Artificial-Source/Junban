@@ -19,7 +19,7 @@ docs/             Canonical documentation
 goals/            Live plans and evidence
 ```
 
-Phase 1 implements the backend/contract boundary in `junban-domain`, `junban-app`, `junban-storage`, and `junban-server`. UI integration remains a dependent Phase 1 wave.
+Phases 1 and 2 implement the hosted product in `junban-domain`, `junban-app`, `junban-storage`, and `junban-server`. The React client consumes only the generated HTTP contract; later surfaces reuse these same application boundaries.
 
 ## Crate boundaries
 
@@ -46,15 +46,15 @@ Rules:
 
 At any moment, one process owns a profile’s SQLite authority. `fs4` acquires an exclusive profile lock before SQLite opens. The lock remains attached to every repository clone, so it cannot release while a connection is still usable.
 
-One long-lived OS thread owns one bundled `rusqlite` connection. Async callers send typed commands over a standard channel and await Tokio one-shot replies; SQLite work never blocks a Tokio executor thread. The connection uses WAL, foreign keys, a 2.5-second busy timeout and `NORMAL` synchronization. There is no pool.
+One long-lived OS thread owns one bundled `rusqlite` connection. Async callers send typed commands over a standard channel and await Tokio one-shot replies; SQLite work never blocks a Tokio executor thread. The connection uses WAL, foreign keys, a 2.5-second busy timeout, `NORMAL` synchronization, and a 250-page (~1 MiB) WAL auto-checkpoint bound (below SQLite's 1000-page default) so commit-path checkpoints stay small. There is no pool.
 
-Schema v1 stores tasks, the global revision, operation receipts, activity and durable events. Each mutation uses one immediate transaction for the task effect, exact canonical-request receipt, activity row, revision and event. The application publishes only the committed event returned by storage. Replayed operations return the stored response exactly; reusing an operation ID for another canonical request conflicts.
+Schema v2 stores complete tasks plus projects, sections, tags, templates, comments, directed relations and saved filters. A single global revision orders task activity and bounded durable events. Each mutation uses one immediate transaction for its complete effect, canonical-request receipt, activity summary, revision and event; bulk and cascade work is capped at 500 affected tasks. The application publishes only the newly committed event returned by storage. Replayed operations return the original bytes and generated IDs exactly; reusing an operation ID for another canonical request conflicts. Supported task operations carry bounded before/post material for conflict-safe undo.
 
 ## HTTP contract and live updates
 
 Transport DTOs live in `junban-server`, not the domain. Utoipa derives the deterministic checked contract at `openapi/junban-v1.json`; `openapi-typescript` generates `src/ui/api/generated.ts`. `pnpm contract:generate` updates both and `pnpm contract:check` regenerates into a temporary directory without mutating the checkout.
 
-SSE clients subscribe before durable catch-up. Revision IDs deduplicate queued/live overlap, and a lagged in-process receiver catches up from SQLite again. This makes SQLite—not the broadcast queue—the live-change authority. Each forwarder selects on client disconnect, process shutdown cancellation, and broadcast work so dropped responses and SIGINT/SIGTERM both release the task promptly. Concurrent SSE connections are hard-capped per process.
+SSE clients subscribe before durable catch-up. Revision IDs deduplicate queued/live overlap, and a lagged in-process receiver catches up from SQLite again. Catch-up pages are bounded to 100 events and 2 MiB; retained history is bounded to 2,048 events and 64 MiB, with an explicit resync signal when a client falls behind retained history. This makes SQLite—not the broadcast queue—the live-change authority. Each forwarder selects on client disconnect, process shutdown cancellation, and broadcast work so dropped responses and SIGINT/SIGTERM both release the task promptly. Concurrent SSE connections are hard-capped per process.
 
 ## Frontend boundary
 

@@ -8,6 +8,12 @@ interface TodayTaskListProps {
   onToggleTask: (id: string) => Promise<boolean>;
   onSelectTask: (id: string) => void;
   selectedTaskId: string | null;
+  selectedTaskIds?: Set<string>;
+  onMultiSelect?: (
+    id: string,
+    event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+    orderedIds: string[],
+  ) => void;
   todayKey: string;
 }
 
@@ -17,6 +23,8 @@ export function TodayTaskList({
   onToggleTask,
   onSelectTask,
   selectedTaskId,
+  selectedTaskIds,
+  onMultiSelect,
   todayKey,
 }: TodayTaskListProps) {
   return (
@@ -28,6 +36,8 @@ export function TodayTaskList({
         onToggle={onToggleTask}
         onSelect={onSelectTask}
         selectedTaskId={selectedTaskId}
+        selectedTaskIds={selectedTaskIds}
+        onMultiSelect={onMultiSelect}
         emptyMessage={
           overdueTasks.length === 0
             ? "No tasks for today. Add one above to get started!"

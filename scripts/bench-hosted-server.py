@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Phase 1 hosted-server memory/startup/latency benchmark harness.
+"""Junban hosted-server benchmark harness (Phase 1 memory + Phase 2 scale).
 
 Optimized junban-server only, inside a transient systemd --user cgroup.
-Authoritative: 5 samples / 100 tasks / 20 cycles. --quick: 1 / 10 / 5 (not evidence).
-CLI: --server, --web-dir, --output, --quick. Phase 1 froze the final budget.
+
+Phase 1 (default --mode phase1):
+  Authoritative: 5 samples / 100 tasks / 20 cycles. --quick: 1 / 10 / 5 (not evidence).
+
+Phase 2 scale (--mode scale):
+  Authoritative: 3 samples / 10_000 pre-seeded tasks. --quick: 1 / 500 (harness only).
+  Seeder runs outside the measured cgroup via junban-scale-seed.
+
+CLI: --mode, --server, --web-dir, --seeder, --output, --quick.
 """
 
 from __future__ import annotations
@@ -19,22 +26,79 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any, Callable
+
+# ── Phase 1 protocol (frozen; do not change knobs) ──────────────────────────
 PROTOCOL_NAME = "junban-phase1-hosted-server-v1"
 PROTOCOL_VERSION = 1
 SAMPLES, TASK_COUNT, MUTATION_CYCLES, STATIC_READS, LIST_READS = 5, 100, 20, 20, 20
 QUICK_SAMPLES, QUICK_TASKS, QUICK_CYCLES, QUICK_STATIC, QUICK_LIST = 1, 10, 5, 5, 5
+
+# ── Phase 2 scale protocol ──────────────────────────────────────────────────
+SCALE_PROTOCOL_NAME = "junban-phase2-scale-v1"
+SCALE_PROTOCOL_VERSION = 1
+SCALE_SAMPLES, SCALE_TASK_COUNT = 3, 10_000
+SCALE_QUICK_SAMPLES, SCALE_QUICK_TASK_COUNT = 1, 500
+SCALE_PAGE_LIMIT = 100
+SCALE_LIST_VIEW_P95_MS = 75.0
+SCALE_SEARCH_FILTER_P95_MS = 100.0
+SCALE_SINGLE_MUTATION_P95_MS = 75.0
+SCALE_BULK_REORDER_P95_MS = 150.0
+SCALE_PARTIAL_UPDATES = 50
+SCALE_COMPLETE_PAIRS = 50
+SCALE_BULK_BATCHES = 20
+SCALE_BULK_BATCH_SIZE = 25
+SCALE_REORDER_BATCHES = 20
+SCALE_REORDER_BATCH_SIZE = 25
+
 # Only intentional fixed sleep; readiness/shutdown are condition-polled.
 SETTLE_SECONDS = 2.0
 READY_TIMEOUT_SECONDS = 15.0
 STOP_TIMEOUT_SECONDS = 15.0
 POLL_INTERVAL_SECONDS = 0.025
 TOKEN_FILE, RUNTIME_FILE, DATABASE_FILE = "access-token", "runtime.json", "junban.sqlite3"
+SEED_MANIFEST_FILE = "scale-seed-manifest.json"
 NODE_MARKERS = frozenset({"node", "nodejs", "npm", "npx", "pnpm", "vite", "playwright"})
 LATENCY_OPS = ("static_read", "create", "list", "replace", "complete", "uncomplete", "delete")
+SCALE_LIST_VIEW_OPS = (
+    "list_unfiltered",
+    "view_inbox",
+    "view_today",
+    "view_project",
+)
+SCALE_SEARCH_FILTER_OPS = (
+    "search_hit",
+    "search_miss",
+    "filter_tag_priority",
+    "filter_due_range",
+    "filter_project_section",
+)
+SCALE_SINGLE_MUTATION_OPS = (
+    "partial_update",
+    "complete",
+    "uncomplete",
+)
+SCALE_BULK_REORDER_OPS = (
+    "bulk_25",
+    "reorder_25",
+)
+SCALE_NEAR_CAP_OPS = (
+    "near_cap_complete",
+    "near_cap_complete_undo",
+    "near_cap_delete",
+    "near_cap_delete_undo",
+)
+SCALE_LATENCY_OPS = (
+    SCALE_LIST_VIEW_OPS
+    + SCALE_SEARCH_FILTER_OPS
+    + SCALE_SINGLE_MUTATION_OPS
+    + SCALE_BULK_REORDER_OPS
+    + SCALE_NEAR_CAP_OPS
+)
 WARM_MEMORY_CEILING_MIB = 24.0
 PEAK_MEMORY_CEILING_MIB = 32.0
 VARIANCE_RULE = (
@@ -383,6 +447,28 @@ def memory_snapshot(unit_name: str, server: Path, label: str) -> dict[str, Any]:
         "exe": proc["exe"], "cmdline": proc["cmdline"],
     }
 
+def _phase1_require_mutation_event(payload: Any, *, op: str) -> dict[str, Any]:
+    if not isinstance(payload, dict) or "event" not in payload:
+        raise BenchError(f"{op} response missing event: {payload!r}")
+    event = payload["event"]
+    if not isinstance(event, dict) or "revision" not in event or "event_type" not in event:
+        raise BenchError(f"{op} event malformed: {event!r}")
+    return event
+
+
+def _phase1_task_id_from_mutation(payload: Any, *, op: str) -> str:
+    event = _phase1_require_mutation_event(payload, op=op)
+    snapshot = event.get("snapshot")
+    if isinstance(snapshot, dict):
+        task = snapshot.get("task")
+        if isinstance(task, dict) and task.get("id"):
+            return str(task["id"])
+    primary = event.get("primary")
+    if isinstance(primary, dict) and primary.get("id"):
+        return str(primary["id"])
+    raise BenchError(f"{op} response missing task id: {payload!r}")
+
+
 def run_workload(
     base_url: str,
     host: str,
@@ -410,14 +496,13 @@ def run_workload(
             body={"title": f"bench-task-{i:04d}", "due_date": None},
             expect_statuses={201}, as_json=True,
         )
-        task = payload.get("task") if isinstance(payload, dict) else None
-        if not isinstance(task, dict) or not task.get("id"):
-            raise BenchError(f"create response missing task.id: {payload!r}")
-        task_ids.append(str(task["id"]))
+        # Phase 2 mutation envelope: event.snapshot.task / event.primary.id
+        task_id = _phase1_task_id_from_mutation(payload, op="create")
+        task_ids.append(task_id)
         buckets["create"].append(ms)
     for _ in range(list_reads):
         payload, ms = http_request(
-            "GET", f"{base_url}/api/v1/tasks",
+            "GET", f"{base_url}/api/v1/tasks?limit=100",
             headers=auth_headers(token, host, origin, mutation=False),
             expect_statuses={200}, as_json=True,
         )
@@ -429,23 +514,23 @@ def run_workload(
     cycles = min(mutation_cycles, len(task_ids))
     for i in range(cycles):
         tid = task_ids[i]
-        for name, method, path, body, key in (
-            ("replace", "PUT", f"/api/v1/tasks/{tid}",
-             {"title": f"bench-task-{i:04d}-updated", "due_date": None}, "task"),
-            ("complete", "POST", f"/api/v1/tasks/{tid}/complete", None, "task"),
-            ("uncomplete", "POST", f"/api/v1/tasks/{tid}/uncomplete", None, "task"),
-            ("delete", "DELETE", f"/api/v1/tasks/{tid}", None, "event"),
+        # PUT replace became PATCH in Phase 2; measure the same single-task title update.
+        for name, method, path, body in (
+            ("replace", "PATCH", f"/api/v1/tasks/{tid}",
+             {"title": f"bench-task-{i:04d}-updated", "due_date": None}),
+            ("complete", "POST", f"/api/v1/tasks/{tid}/complete", None),
+            ("uncomplete", "POST", f"/api/v1/tasks/{tid}/uncomplete", None),
+            ("delete", "DELETE", f"/api/v1/tasks/{tid}", None),
         ):
             payload, ms = http_request(
                 method, f"{base_url}{path}",
                 headers=auth_headers(token, host, origin, mutation=True),
                 body=body, expect_statuses={200}, as_json=True,
             )
-            if not isinstance(payload, dict) or key not in payload:
-                raise BenchError(f"{name} response malformed: {payload!r}")
+            _phase1_require_mutation_event(payload, op=name)
             buckets[name].append(ms)
     payload, ms = http_request(
-        "GET", f"{base_url}/api/v1/tasks",
+        "GET", f"{base_url}/api/v1/tasks?limit=100",
         headers=auth_headers(token, host, origin, mutation=False),
         expect_statuses={200}, as_json=True,
     )
@@ -558,7 +643,7 @@ def protocol_config(quick: bool) -> dict[str, Any]:
         samples, tasks, cycles = SAMPLES, TASK_COUNT, MUTATION_CYCLES
         static_reads, list_reads = STATIC_READS, LIST_READS
     return {
-        "name": PROTOCOL_NAME, "version": PROTOCOL_VERSION,
+        "name": PROTOCOL_NAME, "version": PROTOCOL_VERSION, "mode": "phase1",
         "authoritative": not quick, "quick": quick,
         "samples": samples, "task_count": tasks, "mutation_cycles": cycles,
         "static_reads": static_reads, "list_reads": list_reads,
@@ -579,36 +664,691 @@ def protocol_config(quick: bool) -> dict[str, Any]:
         ],
     }
 
+
+def scale_protocol_config(quick: bool) -> dict[str, Any]:
+    if quick:
+        samples, tasks = SCALE_QUICK_SAMPLES, SCALE_QUICK_TASK_COUNT
+    else:
+        samples, tasks = SCALE_SAMPLES, SCALE_TASK_COUNT
+    return {
+        "name": SCALE_PROTOCOL_NAME,
+        "version": SCALE_PROTOCOL_VERSION,
+        "mode": "scale",
+        "authoritative": not quick,
+        "quick": quick,
+        "samples": samples,
+        "task_count": tasks,
+        "page_limit": SCALE_PAGE_LIMIT,
+        "settle_seconds": SETTLE_SECONDS,
+        "bind": "127.0.0.1:0",
+        "profile_mode": "0700",
+        "token": "deterministic per sample, pre-written owner-only access-token",
+        "cgroup": "transient systemd --user service with MemoryAccounting=yes",
+        "driver_outside_cgroup": True,
+        "seeder_outside_cgroup": True,
+        "seeder": "junban-scale-seed (scale-bench feature; not in release server artifacts)",
+        "budgets_p95_ms": {
+            "list_view": SCALE_LIST_VIEW_P95_MS,
+            "search_filter": SCALE_SEARCH_FILTER_P95_MS,
+            "single_mutation": SCALE_SINGLE_MUTATION_P95_MS,
+            "bulk_reorder_25": SCALE_BULK_REORDER_P95_MS,
+        },
+        "workload": {
+            "partial_updates": SCALE_PARTIAL_UPDATES,
+            "complete_uncomplete_pairs": SCALE_COMPLETE_PAIRS,
+            "bulk_batches": SCALE_BULK_BATCHES,
+            "bulk_batch_size": SCALE_BULK_BATCH_SIZE,
+            "reorder_batches": SCALE_REORDER_BATCHES,
+            "reorder_batch_size": SCALE_REORDER_BATCH_SIZE,
+            "near_cap_complete_undo": True,
+            "near_cap_delete_undo": True,
+        },
+        "warm_memory_ceiling_mib": WARM_MEMORY_CEILING_MIB,
+        "peak_memory_ceiling_mib": PEAK_MEMORY_CEILING_MIB,
+        "variance_rule": VARIANCE_RULE,
+        "regression_rule": REGRESSION_RULE,
+        "notes": [
+            "Rust seeder creates the fixture before server start; seed duration is recorded separately.",
+            "Queries always use limit<=100; the harness never lists all tasks in one response.",
+            "Quick mode (500 tasks / 1 sample) validates the harness only.",
+        ],
+    }
+
+
+def run_seeder(seeder: Path, profile_dir: Path, task_count: int) -> dict[str, Any]:
+    started = time.perf_counter()
+    result = run_cmd(
+        [
+            str(seeder),
+            "--data-dir", str(profile_dir),
+            "--task-count", str(task_count),
+        ],
+        check=False,
+    )
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or f"exit {result.returncode}").strip()
+        raise BenchError(f"seeder failed: {detail}")
+    manifest_path = profile_dir / SEED_MANIFEST_FILE
+    if not manifest_path.is_file():
+        raise BenchError(f"seeder did not write {SEED_MANIFEST_FILE}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise BenchError(f"malformed seed manifest: {error}") from error
+    if int(manifest.get("task_count", -1)) != task_count:
+        raise BenchError(
+            f"seed manifest task_count {manifest.get('task_count')!r} != expected {task_count}"
+        )
+    seed_ms = float(manifest.get("seed_duration_ms") or elapsed_ms)
+    return {
+        "duration_ms": seed_ms,
+        "wall_ms": elapsed_ms,
+        "manifest": manifest,
+        "stdout": (result.stdout or "").strip(),
+    }
+
+
+def _require_task_page(payload: Any, *, op: str, limit: int) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict) or "tasks" not in payload:
+        raise BenchError(f"{op}: malformed list response: {payload!r}")
+    tasks = payload["tasks"]
+    if not isinstance(tasks, list):
+        raise BenchError(f"{op}: tasks is not a list")
+    if len(tasks) > limit:
+        raise BenchError(f"{op}: page returned {len(tasks)} tasks > limit {limit}")
+    for task in tasks:
+        if not isinstance(task, dict) or not task.get("id"):
+            raise BenchError(f"{op}: task missing id: {task!r}")
+    return tasks
+
+
+def _mutation_event(payload: Any, *, op: str) -> dict[str, Any]:
+    if not isinstance(payload, dict) or "event" not in payload:
+        raise BenchError(f"{op}: mutation response missing event: {payload!r}")
+    event = payload["event"]
+    if not isinstance(event, dict):
+        raise BenchError(f"{op}: event is not an object")
+    for key in ("revision", "operation_id", "event_type"):
+        if key not in event:
+            raise BenchError(f"{op}: event missing {key}: {event!r}")
+    return event
+
+
+def _mutate_with_replay(
+    base_url: str,
+    host: str,
+    origin: str,
+    token: str,
+    method: str,
+    path: str,
+    body: dict[str, Any] | None,
+    *,
+    op: str,
+    expect_statuses: set[int] | None = None,
+) -> tuple[dict[str, Any], float]:
+    expect = expect_statuses or {200}
+    headers = auth_headers(token, host, origin, mutation=True)
+    idem = headers["Idempotency-Key"]
+    payload, ms = http_request(
+        method, f"{base_url}{path}",
+        headers=headers, body=body, expect_statuses=expect, as_json=True,
+    )
+    event = _mutation_event(payload, op=op)
+    replay_headers = auth_headers(token, host, origin, mutation=True)
+    replay_headers["Idempotency-Key"] = idem
+    replay, _ = http_request(
+        method, f"{base_url}{path}",
+        headers=replay_headers, body=body, expect_statuses=expect, as_json=True,
+    )
+    replay_event = _mutation_event(replay, op=f"{op}_replay")
+    for key in ("revision", "operation_id", "event_type"):
+        if replay_event.get(key) != event.get(key):
+            raise BenchError(
+                f"{op}: receipt replay mismatch on {key}: "
+                f"first={event.get(key)!r} replay={replay_event.get(key)!r}"
+            )
+    return event, ms
+
+
+def _list_query(
+    base_url: str,
+    host: str,
+    origin: str,
+    token: str,
+    query: dict[str, Any],
+    *,
+    op: str,
+    limit: int = SCALE_PAGE_LIMIT,
+) -> tuple[dict[str, Any], list[dict[str, Any]], float]:
+    params = dict(query)
+    params["limit"] = limit
+    if int(params["limit"]) > SCALE_PAGE_LIMIT:
+        raise BenchError(f"{op}: refused oversize page limit {params['limit']}")
+    qs = urllib.parse.urlencode(params, doseq=True)
+    payload, ms = http_request(
+        "GET", f"{base_url}/api/v1/tasks?{qs}",
+        headers=auth_headers(token, host, origin, mutation=False),
+        expect_statuses={200}, as_json=True,
+    )
+    tasks = _require_task_page(payload, op=op, limit=limit)
+    return payload, tasks, ms
+
+
+def run_scale_workload(
+    base_url: str,
+    host: str,
+    origin: str,
+    token: str,
+    manifest: dict[str, Any],
+    *,
+    quick: bool,
+) -> dict[str, Any]:
+    buckets: dict[str, list[float]] = {name: [] for name in SCALE_LATENCY_OPS}
+    response_counts: dict[str, int] = {}
+    limit = SCALE_PAGE_LIMIT
+
+    def record(op: str, ms: float, count: int) -> None:
+        buckets[op].append(ms)
+        response_counts[op] = count
+
+    # Unmeasured warmup so the first timed sample is not a cold-path outlier.
+    _list_query(base_url, host, origin, token, {}, op="warmup_list", limit=limit)
+    http_request(
+        "GET", f"{base_url}/api/v1/profile",
+        headers=auth_headers(token, host, origin, mutation=False),
+        expect_statuses={200}, as_json=True,
+    )
+
+    for op, query in (
+        ("list_unfiltered", {}),
+        ("view_inbox", {"view": "inbox"}),
+        ("view_today", {"view": "today"}),
+        (
+            "view_project",
+            {
+                "view": "project",
+                "project_id": manifest["project_view_project_id"],
+            },
+        ),
+    ):
+        _, tasks, ms = _list_query(
+            base_url, host, origin, token, query, op=op, limit=limit,
+        )
+        record(op, ms, len(tasks))
+
+    _, hit_tasks, ms = _list_query(
+        base_url, host, origin, token,
+        {"search": manifest["search_hit"]}, op="search_hit", limit=limit,
+    )
+    if len(hit_tasks) < 1:
+        raise BenchError("search_hit returned zero tasks")
+    record("search_hit", ms, len(hit_tasks))
+
+    _, miss_tasks, ms = _list_query(
+        base_url, host, origin, token,
+        {"search": manifest["search_miss"]}, op="search_miss", limit=limit,
+    )
+    if len(miss_tasks) != 0:
+        raise BenchError(f"search_miss expected 0 tasks, got {len(miss_tasks)}")
+    record("search_miss", ms, len(miss_tasks))
+
+    _, tasks, ms = _list_query(
+        base_url, host, origin, token,
+        {
+            "tag_id": manifest["filter_tag_id"],
+            "priority": manifest["filter_priority"],
+        },
+        op="filter_tag_priority", limit=limit,
+    )
+    record("filter_tag_priority", ms, len(tasks))
+
+    _, tasks, ms = _list_query(
+        base_url, host, origin, token,
+        {
+            "due_after": manifest["due_after"],
+            "due_before": manifest["due_before"],
+        },
+        op="filter_due_range", limit=limit,
+    )
+    record("filter_due_range", ms, len(tasks))
+
+    _, tasks, ms = _list_query(
+        base_url, host, origin, token,
+        {
+            "project_id": manifest["project_view_project_id"],
+            "section_id": manifest["project_view_section_id"],
+        },
+        op="filter_project_section", limit=limit,
+    )
+    record("filter_project_section", ms, len(tasks))
+
+    partial_n = 5 if quick else SCALE_PARTIAL_UPDATES
+    complete_n = 5 if quick else SCALE_COMPLETE_PAIRS
+    bulk_n = 2 if quick else SCALE_BULK_BATCHES
+    reorder_n = 2 if quick else SCALE_REORDER_BATCHES
+
+    patch_ids = list(manifest.get("patch_task_ids") or [])
+    if len(patch_ids) < partial_n:
+        raise BenchError(f"manifest patch_task_ids has {len(patch_ids)} < {partial_n}")
+    for i in range(partial_n):
+        tid = patch_ids[i]
+        _, ms = _mutate_with_replay(
+            base_url, host, origin, token,
+            "PATCH", f"/api/v1/tasks/{tid}",
+            {"title": f"scale-patched-{i:04d}"},
+            op="partial_update",
+        )
+        buckets["partial_update"].append(ms)
+    response_counts["partial_update"] = partial_n
+
+    pair_ids = patch_ids[partial_n:partial_n + complete_n]
+    if len(pair_ids) < complete_n:
+        pair_ids = list(manifest.get("bulk_task_ids") or [])[:complete_n]
+    if len(pair_ids) < complete_n:
+        raise BenchError(f"not enough tasks for complete pairs: {len(pair_ids)}")
+    for tid in pair_ids:
+        _, ms = _mutate_with_replay(
+            base_url, host, origin, token,
+            "POST", f"/api/v1/tasks/{tid}/complete", None, op="complete",
+        )
+        buckets["complete"].append(ms)
+        _, ms = _mutate_with_replay(
+            base_url, host, origin, token,
+            "POST", f"/api/v1/tasks/{tid}/uncomplete", None, op="uncomplete",
+        )
+        buckets["uncomplete"].append(ms)
+    response_counts["complete"] = complete_n
+    response_counts["uncomplete"] = complete_n
+
+    bulk_ids = list(manifest.get("bulk_task_ids") or [])
+    if len(bulk_ids) < SCALE_BULK_BATCH_SIZE:
+        raise BenchError(
+            f"manifest bulk_task_ids has {len(bulk_ids)} < {SCALE_BULK_BATCH_SIZE}"
+        )
+    for i in range(bulk_n):
+        priority = (i % 4) + 1
+        _, ms = _mutate_with_replay(
+            base_url, host, origin, token,
+            "POST", "/api/v1/tasks/actions",
+            {
+                "task_ids": bulk_ids[:SCALE_BULK_BATCH_SIZE],
+                "action": {"type": "priority", "priority": priority},
+            },
+            op="bulk_25",
+        )
+        buckets["bulk_25"].append(ms)
+    response_counts["bulk_25"] = bulk_n
+
+    reorder_ids = list(manifest.get("reorder_task_ids") or [])
+    if len(reorder_ids) < SCALE_REORDER_BATCH_SIZE:
+        raise BenchError(
+            f"manifest reorder_task_ids has {len(reorder_ids)} < {SCALE_REORDER_BATCH_SIZE}"
+        )
+    ordered = reorder_ids[:SCALE_REORDER_BATCH_SIZE]
+    for i in range(reorder_n):
+        perm = list(reversed(ordered)) if i % 2 == 0 else list(ordered)
+        _, ms = _mutate_with_replay(
+            base_url, host, origin, token,
+            "POST", "/api/v1/tasks/reorder",
+            {
+                "project_id": manifest["reorder_project_id"],
+                "section_id": manifest["reorder_section_id"],
+                "parent_id": None,
+                "ordered_ids": perm,
+            },
+            op="reorder_25",
+        )
+        buckets["reorder_25"].append(ms)
+    response_counts["reorder_25"] = reorder_n
+
+    complete_root = manifest["complete_tree_root_id"]
+    delete_root = manifest["delete_tree_root_id"]
+    near_cap = int(manifest["near_cap_size"])
+
+    event, ms = _mutate_with_replay(
+        base_url, host, origin, token,
+        "POST", f"/api/v1/tasks/{complete_root}/complete", None,
+        op="near_cap_complete",
+    )
+    affected = event.get("affected", {}).get("task_ids", [])
+    if not isinstance(affected, list) or len(affected) != near_cap:
+        raise BenchError(
+            f"near_cap_complete affected {len(affected) if isinstance(affected, list) else affected} "
+            f"!= near_cap_size {near_cap}"
+        )
+    buckets["near_cap_complete"].append(ms)
+    response_counts["near_cap_complete"] = len(affected)
+    complete_op = event["operation_id"]
+
+    event, ms = _mutate_with_replay(
+        base_url, host, origin, token,
+        "POST", f"/api/v1/operations/{complete_op}/undo", None,
+        op="near_cap_complete_undo",
+    )
+    buckets["near_cap_complete_undo"].append(ms)
+    response_counts["near_cap_complete_undo"] = len(
+        event.get("affected", {}).get("task_ids", []) or []
+    )
+
+    root_payload, _ = http_request(
+        "GET", f"{base_url}/api/v1/tasks/{complete_root}",
+        headers=auth_headers(token, host, origin, mutation=False),
+        expect_statuses={200}, as_json=True,
+    )
+    if not isinstance(root_payload, dict) or root_payload.get("status") != "pending":
+        raise BenchError(
+            f"near_cap_complete_undo did not restore pending status: {root_payload!r}"
+        )
+
+    event, ms = _mutate_with_replay(
+        base_url, host, origin, token,
+        "DELETE", f"/api/v1/tasks/{delete_root}", None,
+        op="near_cap_delete",
+    )
+    affected = event.get("affected", {}).get("task_ids", [])
+    if not isinstance(affected, list) or len(affected) != near_cap:
+        raise BenchError(
+            f"near_cap_delete affected {len(affected) if isinstance(affected, list) else affected} "
+            f"!= near_cap_size {near_cap}"
+        )
+    buckets["near_cap_delete"].append(ms)
+    response_counts["near_cap_delete"] = len(affected)
+    delete_op = event["operation_id"]
+
+    event, ms = _mutate_with_replay(
+        base_url, host, origin, token,
+        "POST", f"/api/v1/operations/{delete_op}/undo", None,
+        op="near_cap_delete_undo",
+    )
+    buckets["near_cap_delete_undo"].append(ms)
+    response_counts["near_cap_delete_undo"] = len(
+        event.get("affected", {}).get("task_ids", []) or []
+    )
+
+    restored, _ = http_request(
+        "GET", f"{base_url}/api/v1/tasks/{delete_root}",
+        headers=auth_headers(token, host, origin, mutation=False),
+        expect_statuses={200}, as_json=True,
+    )
+    if not isinstance(restored, dict) or restored.get("id") != delete_root:
+        raise BenchError(f"near_cap_delete_undo did not restore root: {restored!r}")
+
+    return {
+        "task_count": int(manifest["task_count"]),
+        "page_limit": limit,
+        "response_counts": response_counts,
+        "latencies": {name: latency_summary(vals) for name, vals in buckets.items() if vals},
+        "partial_updates": partial_n,
+        "complete_uncomplete_pairs": complete_n,
+        "bulk_batches": bulk_n,
+        "reorder_batches": reorder_n,
+        "near_cap_size": near_cap,
+    }
+
+
+def build_scale_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    def collect(path: tuple[str, ...]) -> list[float]:
+        out: list[float] = []
+        for sample in samples:
+            cursor: Any = sample
+            for key in path:
+                cursor = cursor[key]
+            out.append(float(cursor))
+        return out
+
+    latency_out: dict[str, Any] = {}
+    for name in SCALE_LATENCY_OPS:
+        pooled: list[float] = []
+        p50s: list[float] = []
+        p95s: list[float] = []
+        present = False
+        for sample in samples:
+            latencies = sample["workload"].get("latencies", {})
+            if name not in latencies:
+                continue
+            present = True
+            lat = latencies[name]
+            pooled.extend(lat["values_ms"])
+            p50s.append(lat["p50_ms"])
+            p95s.append(lat["p95_ms"])
+        if not present:
+            continue
+        ordered = sorted(pooled)
+        latency_out[name] = {
+            "pooled_p50_ms": percentile(ordered, 50),
+            "pooled_p95_ms": percentile(ordered, 95),
+            "per_sample_p50_ms": series_summary(p50s),
+            "per_sample_p95_ms": series_summary(p95s),
+            "count": len(ordered),
+        }
+
+    def group_p95(names: tuple[str, ...]) -> float:
+        values = [latency_out[n]["pooled_p95_ms"] for n in names if n in latency_out]
+        if not values:
+            raise BenchError(f"missing latency groups for {names}")
+        return max(values)
+
+    list_view_p95 = group_p95(SCALE_LIST_VIEW_OPS)
+    search_filter_p95 = group_p95(SCALE_SEARCH_FILTER_OPS)
+    single_mut_p95 = group_p95(SCALE_SINGLE_MUTATION_OPS)
+    bulk_reorder_p95 = group_p95(SCALE_BULK_REORDER_OPS)
+
+    budget_checks = {
+        "list_view_p95_ms": {
+            "value": list_view_p95,
+            "limit_ms": SCALE_LIST_VIEW_P95_MS,
+            "passed": list_view_p95 <= SCALE_LIST_VIEW_P95_MS,
+        },
+        "search_filter_p95_ms": {
+            "value": search_filter_p95,
+            "limit_ms": SCALE_SEARCH_FILTER_P95_MS,
+            "passed": search_filter_p95 <= SCALE_SEARCH_FILTER_P95_MS,
+        },
+        "single_mutation_p95_ms": {
+            "value": single_mut_p95,
+            "limit_ms": SCALE_SINGLE_MUTATION_P95_MS,
+            "passed": single_mut_p95 <= SCALE_SINGLE_MUTATION_P95_MS,
+        },
+        "bulk_reorder_25_p95_ms": {
+            "value": bulk_reorder_p95,
+            "limit_ms": SCALE_BULK_REORDER_P95_MS,
+            "passed": bulk_reorder_p95 <= SCALE_BULK_REORDER_P95_MS,
+        },
+    }
+
+    summary: dict[str, Any] = {k: series_summary(collect(p)) for k, p in SUMMARY_PATHS.items()}
+    summary.update({
+        "sample_count": len(samples),
+        "seed_duration_ms": series_summary([float(s["seed"]["duration_ms"]) for s in samples]),
+        "sqlite_total_bytes": series_summary([float(s["sqlite"]["total_bytes"]) for s in samples]),
+        "latencies_ms": latency_out,
+        "budget_checks": budget_checks,
+        "warm_memory_ceiling_mib": WARM_MEMORY_CEILING_MIB,
+        "peak_memory_ceiling_mib": PEAK_MEMORY_CEILING_MIB,
+        "variance_rule": VARIANCE_RULE,
+        "regression_rule": REGRESSION_RULE,
+    })
+    latency_ok = all(item["passed"] for item in budget_checks.values())
+    memory_ok = (
+        summary["warm_cgroup_mib"]["max"] <= WARM_MEMORY_CEILING_MIB
+        and summary["warm_cgroup_peak_mib"]["max"] <= PEAK_MEMORY_CEILING_MIB
+    )
+    summary["latency_budget_passed"] = latency_ok
+    summary["memory_budget_passed"] = memory_ok
+    summary["budget_passed"] = latency_ok and memory_ok
+    return summary
+
+
+def run_scale_sample(
+    sample_index: int,
+    run_id: str,
+    repo_root: Path,
+    server: Path,
+    seeder: Path,
+    web_dir: Path,
+    work_root: Path,
+    protocol: dict[str, Any],
+) -> dict[str, Any]:
+    profile_dir = work_root / f"profile-{sample_index:02d}"
+    material = f"{SCALE_PROTOCOL_NAME}:{run_id}:{sample_index}".encode()
+    digest = hashlib.sha256(material).hexdigest()
+    token = digest + hashlib.sha256(digest.encode()).hexdigest()[:16]
+    prepare_profile(profile_dir, token)
+    unit_name = f"junban-scale-{run_id}-s{sample_index:02d}"[:180]
+    started = cleanup_ok = False
+    try:
+        seed = run_seeder(seeder, profile_dir, int(protocol["task_count"]))
+        base_url, host, startup_ms = start_server(unit_name, server, profile_dir, web_dir, repo_root)
+        started = True
+        time.sleep(SETTLE_SECONDS)
+        idle = memory_snapshot(unit_name, server, "idle")
+        workload = run_scale_workload(
+            base_url, host, base_url, token, seed["manifest"],
+            quick=bool(protocol["quick"]),
+        )
+        warm = memory_snapshot(unit_name, server, "warm")
+        db_sizes = sqlite_size_bytes(profile_dir)
+        stop_server(unit_name, profile_dir)
+        started = False
+        shutil.rmtree(profile_dir)
+        cleanup_ok = True
+        return {
+            "sample_index": sample_index,
+            "startup_to_health_ms": startup_ms,
+            "settle_seconds": SETTLE_SECONDS,
+            "seed": {
+                "duration_ms": seed["duration_ms"],
+                "wall_ms": seed["wall_ms"],
+                "task_count": seed["manifest"]["task_count"],
+                "near_cap_size": seed["manifest"]["near_cap_size"],
+                "as_of_date": seed["manifest"]["as_of_date"],
+            },
+            "idle": idle,
+            "warm": warm,
+            "workload": workload,
+            "sqlite": db_sizes,
+            "cleanup_success": cleanup_ok,
+            "unit": f"{unit_name}.service",
+        }
+    except Exception:
+        if started:
+            try:
+                stop_server(unit_name, profile_dir)
+            except BenchError:
+                pass
+        raise
+    finally:
+        if not cleanup_ok and profile_dir.exists():
+            shutil.rmtree(profile_dir, ignore_errors=True)
+
+
+def self_check_protocol() -> None:
+    """Focused argument/protocol assertions for CI-friendly validation."""
+    phase1 = protocol_config(False)
+    phase1_q = protocol_config(True)
+    assert phase1["name"] == PROTOCOL_NAME
+    assert phase1["samples"] == 5 and phase1["task_count"] == 100
+    assert phase1_q["quick"] is True and phase1_q["task_count"] == 10
+    assert phase1["authoritative"] is True and phase1_q["authoritative"] is False
+
+    scale = scale_protocol_config(False)
+    scale_q = scale_protocol_config(True)
+    assert scale["name"] == SCALE_PROTOCOL_NAME
+    assert scale["samples"] == 3 and scale["task_count"] == 10_000
+    assert scale_q["samples"] == 1 and scale_q["task_count"] == 500
+    assert scale["page_limit"] == 100
+    assert scale["budgets_p95_ms"]["list_view"] == 75.0
+    assert scale["budgets_p95_ms"]["search_filter"] == 100.0
+    assert scale["budgets_p95_ms"]["single_mutation"] == 75.0
+    assert scale["budgets_p95_ms"]["bulk_reorder_25"] == 150.0
+    assert scale["seeder_outside_cgroup"] is True
+    assert scale["warm_memory_ceiling_mib"] == 24.0
+    assert scale["peak_memory_ceiling_mib"] == 32.0
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Junban Phase 1 hosted-server benchmark harness")
+    parser = argparse.ArgumentParser(
+        description="Junban hosted-server benchmark harness (phase1 memory + scale)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("phase1", "scale"),
+        default="phase1",
+        help="phase1 = frozen 100-task memory protocol; scale = Phase 2 10k-task protocol",
+    )
     parser.add_argument("--server", type=Path, default=Path("target/release/junban-server"))
+    parser.add_argument(
+        "--seeder",
+        type=Path,
+        default=Path("target/release/junban-scale-seed"),
+        help="Path to junban-scale-seed (scale mode only)",
+    )
     parser.add_argument("--web-dir", type=Path, default=Path("dist"))
     parser.add_argument(
         "--quick", action="store_true",
-        help="Non-authoritative dry run: 1 sample, 10 tasks, 5 mutation cycles",
+        help="Non-authoritative dry run (phase1: 10 tasks; scale: 500 tasks)",
+    )
+    parser.add_argument(
+        "--self-check",
+        action="store_true",
+        help="Validate protocol constants/argument defaults and exit",
     )
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args(argv)
     repo_root = Path(__file__).resolve().parent.parent
+
+    if args.self_check:
+        try:
+            self_check_protocol()
+        except AssertionError as error:
+            print(f"self-check failed: {error}", file=sys.stderr)
+            return 1
+        print("self-check passed", file=sys.stderr)
+        return 0
+
     server = (args.server if args.server.is_absolute() else repo_root / args.server).resolve()
     web_dir = (args.web_dir if args.web_dir.is_absolute() else repo_root / args.web_dir).resolve()
+    seeder = (args.seeder if args.seeder.is_absolute() else repo_root / args.seeder).resolve()
     try:
         require_linux_cgroup_v2()
         if not server.is_file() or not os.access(server, os.X_OK):
             raise BenchError(f"server binary missing or not executable: {server}")
         if not web_dir.is_dir() or not (web_dir / "index.html").is_file():
             raise BenchError(f"web-dir missing or lacks index.html: {web_dir}")
-        protocol = protocol_config(bool(args.quick))
+        if args.mode == "scale":
+            if not seeder.is_file() or not os.access(seeder, os.X_OK):
+                raise BenchError(
+                    f"seeder binary missing or not executable: {seeder} "
+                    "(build with: cargo build --locked --release -p junban-storage "
+                    "--features scale-bench --bin junban-scale-seed)"
+                )
+            protocol = scale_protocol_config(bool(args.quick))
+        else:
+            protocol = protocol_config(bool(args.quick))
+
         run_id = uuid.uuid4().hex[:12]
-        work_root = Path(tempfile.mkdtemp(prefix=f"junban-bench-{run_id}-", dir="/tmp"))
+        prefix = "junban-scale-" if args.mode == "scale" else "junban-bench-"
+        work_root = Path(tempfile.mkdtemp(prefix=f"{prefix}{run_id}-", dir="/tmp"))
         os.chmod(work_root, 0o700)
         samples: list[dict[str, Any]] = []
         try:
             for i in range(protocol["samples"]):
-                sample = run_sample(i, run_id, repo_root, server, web_dir, work_root, protocol)
+                if args.mode == "scale":
+                    sample = run_scale_sample(
+                        i, run_id, repo_root, server, seeder, web_dir, work_root, protocol,
+                    )
+                else:
+                    sample = run_sample(
+                        i, run_id, repo_root, server, web_dir, work_root, protocol,
+                    )
                 samples.append(sample)
+                seed_bit = ""
+                if args.mode == "scale":
+                    seed_bit = f" seed={sample['seed']['duration_ms']:.1f}ms"
                 print(
-                    f"sample {i}: startup={sample['startup_to_health_ms']:.1f}ms "
+                    f"sample {i}: startup={sample['startup_to_health_ms']:.1f}ms"
+                    f"{seed_bit} "
                     f"idle={sample['idle']['cgroup_current_mib']:.2f}MiB "
                     f"warm={sample['warm']['cgroup_current_mib']:.2f}MiB "
                     f"peak={sample['warm']['cgroup_peak_mib']:.2f}MiB",
@@ -616,7 +1356,12 @@ def main(argv: list[str] | None = None) -> int:
                 )
         finally:
             shutil.rmtree(work_root, ignore_errors=True)
-        summary = build_summary(samples)
+
+        if args.mode == "scale":
+            summary = build_scale_summary(samples)
+        else:
+            summary = build_summary(samples)
+
         status = (
             "authoritative_passed"
             if protocol["authoritative"] and summary["budget_passed"]
@@ -624,13 +1369,15 @@ def main(argv: list[str] | None = None) -> int:
             if protocol["authoritative"]
             else "non_authoritative_dry_run"
         )
-        report = {
+        report: dict[str, Any] = {
             "protocol": protocol, "run_id": run_id,
             "host": host_metadata(repo_root), "binary": binary_metadata(server),
             "web_dir": str(web_dir),
             "command": {"argv": [Path(__file__).name, *map(str, sys.argv[1:])], "cwd": str(Path.cwd())},
             "samples": samples, "summary": summary, "evidence_status": status,
         }
+        if args.mode == "scale":
+            report["seeder"] = binary_metadata(seeder)
         text = json.dumps(report, indent=2, sort_keys=True) + "\n"
         if args.output:
             output = args.output if args.output.is_absolute() else repo_root / args.output
@@ -642,6 +1389,7 @@ def main(argv: list[str] | None = None) -> int:
     except BenchError as error:
         print(f"benchmark failed: {error}", file=sys.stderr)
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

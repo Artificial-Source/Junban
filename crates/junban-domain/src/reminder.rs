@@ -1,22 +1,32 @@
 //! Reminder intent and delivery value types.
 //!
-//! Coordination (leases, claims) stays control-plane in app/storage. These types only
-//! bound the durable codes and settings that later layers persist.
+//! Task schedule intent lives on `Task.remind_at`. Occurrence rows, leases, and claims
+//! are control-plane state owned by app/storage. These types only bound the durable
+//! codes, claim/lease limits, and occurrence snapshots that later layers persist.
 
 use std::time::Duration;
 
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use crate::ValidationError;
+use crate::{TaskId, ValidationError};
 
 /// Default rows returned by one reminder claim.
 pub const DEFAULT_REMINDER_CLAIM_LIMIT: u32 = 20;
 /// Hard ceiling for one reminder claim batch.
 pub const MAX_REMINDER_CLAIM_LIMIT: u32 = 100;
+/// Default owner lease / claim TTL (seconds).
+pub const DEFAULT_REMINDER_LEASE_SECS: u64 = 90;
+/// Hard ceiling for lease and claim TTLs accepted from callers.
+pub const MAX_REMINDER_LEASE_SECS: u64 = 300;
+/// Default claim batch size matches the frozen coordinator default.
+pub const DEFAULT_REMINDER_CLAIM_SECS: u64 = 90;
 /// Initial failure backoff.
 pub const REMINDER_FAILURE_BACKOFF_START_SECS: u64 = 30;
 /// Failure backoff ceiling (one hour).
 pub const REMINDER_FAILURE_BACKOFF_MAX_SECS: u64 = 60 * 60;
+/// Hard ceiling for one owner-lost sweep.
+pub const MAX_OWNER_LOST_MARK_LIMIT: u32 = 100;
 
 /// Allowlisted delivery channels. Arbitrary external channel names are rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -25,6 +35,8 @@ pub enum ReminderChannel {
     InApp,
     WebNotification,
     Sound,
+    /// Desktop/native path (Phase 8). Stored in schema v3 allowlist now.
+    Native,
 }
 
 impl ReminderChannel {
@@ -33,9 +45,10 @@ impl ReminderChannel {
             "in_app" => Ok(Self::InApp),
             "web_notification" => Ok(Self::WebNotification),
             "sound" => Ok(Self::Sound),
+            "native" => Ok(Self::Native),
             _ => Err(ValidationError::InvalidFormat {
                 field: "reminder_channel",
-                expected: "in_app|web_notification|sound",
+                expected: "in_app|web_notification|sound|native",
             }),
         }
     }
@@ -46,6 +59,7 @@ impl ReminderChannel {
             Self::InApp => "in_app",
             Self::WebNotification => "web_notification",
             Self::Sound => "sound",
+            Self::Native => "native",
         }
     }
 }
@@ -214,6 +228,42 @@ pub fn validate_reminder_claim_limit(limit: u32) -> Result<u32, ValidationError>
     Ok(limit)
 }
 
+/// Validate a positive bounded lease or claim TTL in seconds.
+pub fn validate_reminder_lease_secs(secs: u64) -> Result<u64, ValidationError> {
+    if secs == 0 {
+        return Err(ValidationError::TooSmall {
+            field: "reminder_lease_secs",
+            min: 1,
+        });
+    }
+    if secs > MAX_REMINDER_LEASE_SECS {
+        return Err(ValidationError::OutOfRange {
+            field: "reminder_lease_secs",
+            min: 1,
+            max: i64::try_from(MAX_REMINDER_LEASE_SECS).unwrap_or(i64::MAX),
+        });
+    }
+    Ok(secs)
+}
+
+/// Validate a positive bounded owner-lost sweep size.
+pub fn validate_owner_lost_mark_limit(limit: u32) -> Result<u32, ValidationError> {
+    if limit == 0 {
+        return Err(ValidationError::TooSmall {
+            field: "owner_lost_mark_limit",
+            min: 1,
+        });
+    }
+    if limit > MAX_OWNER_LOST_MARK_LIMIT {
+        return Err(ValidationError::OutOfRange {
+            field: "owner_lost_mark_limit",
+            min: 1,
+            max: i64::from(MAX_OWNER_LOST_MARK_LIMIT),
+        });
+    }
+    Ok(limit)
+}
+
 /// Exponential-ish failure backoff: 30s, 60s, 120s… capped at one hour.
 ///
 /// `attempt` is the 1-based failure count after the attempt that just failed.
@@ -225,6 +275,93 @@ pub fn reminder_failure_backoff(attempt: u32) -> Duration {
     let shift = u32::min(attempt.saturating_sub(1), 16);
     let secs = REMINDER_FAILURE_BACKOFF_START_SECS.saturating_mul(1u64 << shift);
     Duration::from_secs(secs.min(REMINDER_FAILURE_BACKOFF_MAX_SECS))
+}
+
+/// Opaque fencing term issued by the delivery lease owner.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ReminderFenceTerm(String);
+
+impl ReminderFenceTerm {
+    pub fn parse(value: &str) -> Result<Self, ValidationError> {
+        if value.is_empty() || value.len() > 128 {
+            return Err(ValidationError::InvalidFormat {
+                field: "reminder_fence_term",
+                expected: "non-empty opaque term at most 128 chars",
+            });
+        }
+        if value.chars().any(|ch| ch.is_control()) {
+            return Err(ValidationError::InvalidFormat {
+                field: "reminder_fence_term",
+                expected: "non-control opaque term",
+            });
+        }
+        Ok(Self(value.to_owned()))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ReminderFenceTerm {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+/// Durable occurrence row keyed by `(task_id, remind_at)`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReminderOccurrence {
+    pub task_id: TaskId,
+    pub remind_at: Timestamp,
+    pub state: ReminderOccurrenceState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_term: Option<ReminderFenceTerm>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_expires_at: Option<Timestamp>,
+    pub attempts: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_attempt_at: Option<Timestamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_channel: Option<ReminderChannel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_error_code: Option<ReminderFailureCode>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+impl ReminderOccurrence {
+    /// Stable receipt/post-image map key for one occurrence identity.
+    #[must_use]
+    pub fn map_key(&self) -> String {
+        reminder_occurrence_key(self.task_id, self.remind_at)
+    }
+}
+
+/// Build the durable map key for one `(task_id, remind_at)` identity.
+#[must_use]
+pub fn reminder_occurrence_key(task_id: TaskId, remind_at: Timestamp) -> String {
+    format!("{task_id}/{remind_at}")
+}
+
+/// One global delivery-owner lease snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReminderDeliveryLease {
+    pub fence_term: ReminderFenceTerm,
+    pub expires_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// One claimed due occurrence returned to a lease owner.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimedReminder {
+    pub task_id: TaskId,
+    pub remind_at: Timestamp,
+    pub claim_term: ReminderFenceTerm,
+    pub claim_expires_at: Timestamp,
+    pub attempts: u32,
 }
 
 #[cfg(test)]
@@ -267,6 +404,14 @@ mod tests {
         assert!(validate_reminder_claim_limit(0).is_err());
         assert!(validate_reminder_claim_limit(MAX_REMINDER_CLAIM_LIMIT + 1).is_err());
         assert_eq!(
+            validate_reminder_lease_secs(DEFAULT_REMINDER_LEASE_SECS).unwrap(),
+            90
+        );
+        assert!(validate_reminder_lease_secs(0).is_err());
+        assert!(validate_reminder_lease_secs(MAX_REMINDER_LEASE_SECS + 1).is_err());
+        assert!(validate_owner_lost_mark_limit(0).is_err());
+        assert!(validate_owner_lost_mark_limit(MAX_OWNER_LOST_MARK_LIMIT + 1).is_err());
+        assert_eq!(
             reminder_failure_backoff(1).as_secs(),
             REMINDER_FAILURE_BACKOFF_START_SECS
         );
@@ -274,6 +419,11 @@ mod tests {
         assert_eq!(
             reminder_failure_backoff(20).as_secs(),
             REMINDER_FAILURE_BACKOFF_MAX_SECS
+        );
+        assert!(ReminderFenceTerm::parse("").is_err());
+        assert_eq!(
+            ReminderChannel::parse("native").unwrap(),
+            ReminderChannel::Native
         );
     }
 }

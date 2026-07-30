@@ -4,8 +4,10 @@ use std::{future::Future, pin::Pin};
 
 use jiff::Timestamp;
 use junban_domain::{
-    Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind, SavedFilterId,
-    SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId,
+    ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
+    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
+    TaskQuery, TaskRelation, TemplateId,
 };
 
 use crate::{
@@ -293,4 +295,84 @@ pub trait Repository: Send + Sync + 'static {
         new_operation_id: OperationId,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    /// List durable reminder occurrences for one task (all states).
+    fn list_task_reminders(&self, task_id: TaskId)
+    -> RepositoryFuture<'_, Vec<ReminderOccurrence>>;
+
+    /// User mutation: set `remind_at` and reconcile the pending occurrence.
+    fn reschedule_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    /// User mutation: clear `remind_at` and cancel still-pending occurrences.
+    fn dismiss_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    /// Control-plane: acquire the global delivery lease when absent or expired.
+    fn acquire_reminder_lease(
+        &self,
+        now: Timestamp,
+        lease_secs: u64,
+    ) -> RepositoryFuture<'_, ReminderDeliveryLease>;
+
+    /// Control-plane: renew the lease for the exact current fence term.
+    fn renew_reminder_lease(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        lease_secs: u64,
+    ) -> RepositoryFuture<'_, ReminderDeliveryLease>;
+
+    /// Control-plane: release the lease for the exact current fence term.
+    fn release_reminder_lease(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, ()>;
+
+    /// Control-plane: claim due pending occurrences under the current lease term.
+    fn claim_due_reminders(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        limit: u32,
+        claim_secs: u64,
+    ) -> RepositoryFuture<'_, Vec<ClaimedReminder>>;
+
+    /// Control-plane: settle a claim as delivered with the exact claim term.
+    fn settle_reminder_delivered(
+        &self,
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        channel: ReminderChannel,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, ()>;
+
+    /// Control-plane: settle a claim as failed with the exact claim term.
+    fn settle_reminder_failed(
+        &self,
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        error: ReminderFailureCode,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, ()>;
+
+    /// Control-plane: mark expired claimed rows failed/owner_lost under the new owner term.
+    fn mark_owner_lost_reminders(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        limit: u32,
+    ) -> RepositoryFuture<'_, u32>;
 }

@@ -41,10 +41,14 @@ pub use recurrence::{
     RecurrenceSource, next_occurrence, resolve_due_instant, shift_occurrence_absolutes,
 };
 pub use reminder::{
-    DEFAULT_REMINDER_CLAIM_LIMIT, MAX_REMINDER_CLAIM_LIMIT, REMINDER_FAILURE_BACKOFF_MAX_SECS,
-    REMINDER_FAILURE_BACKOFF_START_SECS, ReminderChannel, ReminderChannelSet, ReminderFailureCode,
-    ReminderLeadMinutes, ReminderOccurrenceState, ReminderSettings, reminder_failure_backoff,
-    validate_reminder_claim_limit,
+    ClaimedReminder, DEFAULT_REMINDER_CLAIM_LIMIT, DEFAULT_REMINDER_CLAIM_SECS,
+    DEFAULT_REMINDER_LEASE_SECS, MAX_OWNER_LOST_MARK_LIMIT, MAX_REMINDER_CLAIM_LIMIT,
+    MAX_REMINDER_LEASE_SECS, REMINDER_FAILURE_BACKOFF_MAX_SECS,
+    REMINDER_FAILURE_BACKOFF_START_SECS, ReminderChannel, ReminderChannelSet,
+    ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm, ReminderLeadMinutes,
+    ReminderOccurrence, ReminderOccurrenceState, ReminderSettings, reminder_failure_backoff,
+    reminder_occurrence_key, validate_owner_lost_mark_limit, validate_reminder_claim_limit,
+    validate_reminder_lease_secs,
 };
 pub use task::{
     Task, TaskDraft, TaskStatus, UncompleteOutcome, recurrence_rule_uses_anchor,

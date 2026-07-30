@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use junban_app::{MoveTarget, OrderAnchor, RepositoryError};
-use junban_domain::{Comment, CommentId, SortOrder, Task, TaskActivity, TaskId, TaskRelation};
+use junban_domain::{
+    Comment, CommentId, ReminderOccurrence, SortOrder, Task, TaskActivity, TaskId, TaskRelation,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::rows::storage_error;
@@ -20,6 +22,9 @@ pub(crate) enum Inverse {
     },
     RestoreTasks {
         tasks: Vec<Task>,
+        /// Full occurrence snapshot for the restored tasks (exact undo/retry).
+        #[serde(default)]
+        reminders: Vec<ReminderOccurrence>,
     },
     /// Undo a completion that may have generated next occurrences.
     ReverseCompletion {
@@ -27,6 +32,9 @@ pub(crate) enum Inverse {
         sources: Vec<Task>,
         /// Generated child IDs owned by the completion receipt.
         generated_ids: Vec<TaskId>,
+        /// Pre-completion occurrence rows for the source tasks.
+        #[serde(default)]
+        source_reminders: Vec<ReminderOccurrence>,
     },
     RestoreOrders {
         orders: Vec<(TaskId, SortOrder)>,
@@ -47,6 +55,8 @@ pub(crate) struct TaskClosure {
     pub comments: Vec<Comment>,
     pub relations: Vec<TaskRelation>,
     pub activity: Vec<TaskActivity>,
+    #[serde(default)]
+    pub reminders: Vec<ReminderOccurrence>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -65,6 +75,9 @@ pub(crate) struct PostImage {
     pub relations_absent: Vec<TaskRelation>,
     #[serde(default)]
     pub orders: BTreeMap<String, i64>,
+    /// Expected occurrence rows after the mutation (keyed by task_id/remind_at).
+    #[serde(default)]
+    pub reminders: BTreeMap<String, ReminderOccurrence>,
 }
 
 pub(crate) fn post_from_tasks(tasks: impl IntoIterator<Item = Task>) -> PostImage {

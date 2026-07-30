@@ -265,7 +265,14 @@ fn open_seed_connection(path: &Path) -> Result<Connection, SeedError> {
             crate::WAL_AUTOCHECKPOINT_PAGES * 4096,
         )
         .map_err(|e| SeedError::Database(e.to_string()))?;
-    migration::migrate(&mut connection).map_err(|e| SeedError::Database(e.to_string()))?;
+    let profile_dir = path.parent().ok_or_else(|| {
+        SeedError::Database(format!(
+            "database path '{}' has no parent profile directory",
+            path.display()
+        ))
+    })?;
+    migration::migrate(&mut connection, profile_dir)
+        .map_err(|e| SeedError::Database(e.to_string()))?;
     Ok(connection)
 }
 

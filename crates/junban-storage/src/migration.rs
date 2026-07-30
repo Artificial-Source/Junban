@@ -1,10 +1,25 @@
 //! Forward SQLite schema migrations for a single profile connection.
 
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
+
 use jiff::Timestamp;
-use rusqlite::{Connection, Transaction, TransactionBehavior};
+use rusqlite::{Connection, MAIN_DB, OpenFlags, Transaction, TransactionBehavior};
 
 /// Highest schema version applied by this crate.
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 2;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 3;
+
+/// Live database file name under a profile directory.
+const DATABASE_FILE: &str = "junban.sqlite3";
+/// Directory (under the profile) holding verified pre-migration snapshots.
+const PRE_MIGRATION_BACKUP_DIR: &str = "backups/pre-migration";
+/// Filename prefix for backups taken before leaving schema v2.
+const PRE_V2_BACKUP_PREFIX: &str = "pre-v2-";
+const PRE_V2_BACKUP_SUFFIX: &str = ".sqlite3";
+/// Keep only the newest verified pre-migration backups after a successful v2→v3 migrate.
+const PRE_MIGRATION_BACKUP_RETAIN: usize = 3;
 
 const V1_SCHEMA: &str = "
 CREATE TABLE app_state (
@@ -45,8 +60,15 @@ CREATE TABLE events (
 );
 ";
 
-/// Apply all pending forward migrations. Fresh profiles receive v1 then v2.
-pub(crate) fn migrate(connection: &mut Connection) -> rusqlite::Result<()> {
+/// Apply all pending forward migrations.
+///
+/// `profile_dir` is the owned profile directory that contains `junban.sqlite3`.
+/// Existing schema-v2 profiles receive a verified private backup under
+/// `backups/pre-migration/` before the v3 transaction runs. Fresh profiles
+/// advance v1→v2→v3 in-process and do not create a pre-migration backup.
+///
+/// Callers must hold the profile owner lock before invoking this function.
+pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqlite::Result<()> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
             version INTEGER PRIMARY KEY,
@@ -54,11 +76,11 @@ pub(crate) fn migrate(connection: &mut Connection) -> rusqlite::Result<()> {
         );",
     )?;
 
-    let current = current_version(connection)?;
-    if current > CURRENT_SCHEMA_VERSION {
-        return Err(unsupported_schema(current));
+    let starting_version = current_version(connection)?;
+    if starting_version > CURRENT_SCHEMA_VERSION {
+        return Err(unsupported_schema(starting_version));
     }
-    if current < 1 {
+    if starting_version < 1 {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         apply_v1(&transaction)?;
         record_version(&transaction, 1)?;
@@ -72,6 +94,28 @@ pub(crate) fn migrate(connection: &mut Connection) -> rusqlite::Result<()> {
         assert_foreign_keys_clean(&transaction)?;
         record_version(&transaction, 2)?;
         transaction.commit()?;
+    }
+
+    let current = current_version(connection)?;
+    if current < 3 {
+        // Only profiles that opened already at v2 need a recoverable pre-v3 snapshot.
+        // Fresh installs that just applied v1/v2 above skip backup creation.
+        let backup_path = if starting_version == 2 {
+            Some(create_verified_pre_v2_backup(connection, profile_dir)?)
+        } else {
+            None
+        };
+
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        apply_v3(&transaction)?;
+        assert_foreign_keys_clean(&transaction)?;
+        record_version(&transaction, 3)?;
+        transaction.commit()?;
+
+        if let Some(backup_path) = backup_path {
+            // Prune only after the new backup and the migrated DB both reopen cleanly.
+            finalize_successful_v2_to_v3(profile_dir, &backup_path)?;
+        }
     }
 
     let applied = current_version(connection)?;
@@ -492,6 +536,321 @@ fn migrate_events_to_envelope(transaction: &Transaction<'_>) -> rusqlite::Result
     Ok(())
 }
 
+/// Additive Phase 3 temporal/planning tables and task columns.
+fn apply_v3(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
+    // Extend tasks in place. New columns are nullable so existing rows stay valid.
+    transaction.execute_batch(
+        "
+ALTER TABLE tasks ADD COLUMN remind_at TEXT;
+ALTER TABLE tasks ADD COLUMN recurrence_anchor_day INTEGER
+    CHECK (
+        recurrence_anchor_day IS NULL
+        OR (recurrence_anchor_day BETWEEN 1 AND 31)
+    );
+ALTER TABLE tasks ADD COLUMN recurrence_source_id TEXT
+    REFERENCES tasks(id) ON DELETE SET NULL;
+ALTER TABLE tasks ADD COLUMN completion_operation_id TEXT;
+
+-- One generated child per completed source occurrence (unique lineage ownership).
+CREATE UNIQUE INDEX idx_tasks_recurrence_lineage
+    ON tasks(recurrence_source_id)
+    WHERE recurrence_source_id IS NOT NULL;
+CREATE INDEX idx_tasks_remind_at
+    ON tasks(remind_at)
+    WHERE remind_at IS NOT NULL;
+CREATE INDEX idx_tasks_completion_operation
+    ON tasks(completion_operation_id)
+    WHERE completion_operation_id IS NOT NULL;
+",
+    )?;
+
+    transaction.execute_batch(
+        "
+-- Allowlisted Phase 3 temporal settings only. Full settings UI lands in Phase 4.
+CREATE TABLE app_settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (key IN (
+        'notification_channels',
+        'reminder_defaults',
+        'capacity',
+        'work_hours',
+        'week_start',
+        'nudge_rules'
+    ))
+);
+
+CREATE TABLE reminder_occurrences (
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    remind_at TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN (
+        'pending', 'claimed', 'delivered', 'failed', 'cancelled'
+    )),
+    claim_term TEXT,
+    claim_expires_at TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    next_attempt_at TEXT,
+    terminal_channel TEXT CHECK (
+        terminal_channel IS NULL OR terminal_channel IN (
+            'in_app', 'web_notification', 'sound', 'native'
+        )
+    ),
+    terminal_error_code TEXT CHECK (
+        terminal_error_code IS NULL OR terminal_error_code IN (
+            'permission_denied',
+            'temporarily_unavailable',
+            'channel_failed',
+            'owner_lost'
+        )
+    ),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (task_id, remind_at)
+);
+CREATE INDEX idx_reminder_occurrences_due
+    ON reminder_occurrences(state, remind_at);
+CREATE INDEX idx_reminder_occurrences_claim
+    ON reminder_occurrences(state, claim_expires_at);
+
+-- At most one global delivery-owner row; application upserts on acquire.
+CREATE TABLE reminder_delivery_lease (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    fence_term TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE time_slots (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    civil_date TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    timezone TEXT NOT NULL,
+    color TEXT,
+    recurrence_rule TEXT,
+    recurrence_parent_id TEXT REFERENCES time_slots(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    CHECK (recurrence_parent_id IS NULL OR recurrence_parent_id != id)
+);
+CREATE INDEX idx_time_slots_date ON time_slots(civil_date, start_time, id);
+CREATE INDEX idx_time_slots_project ON time_slots(project_id);
+CREATE INDEX idx_time_slots_parent ON time_slots(recurrence_parent_id);
+
+CREATE TABLE time_blocks (
+    id TEXT PRIMARY KEY,
+    task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+    slot_id TEXT REFERENCES time_slots(id) ON DELETE SET NULL,
+    title TEXT NOT NULL,
+    civil_date TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    timezone TEXT NOT NULL,
+    color TEXT,
+    locked INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0, 1)),
+    recurrence_rule TEXT,
+    recurrence_parent_id TEXT REFERENCES time_blocks(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    CHECK (recurrence_parent_id IS NULL OR recurrence_parent_id != id)
+);
+CREATE INDEX idx_time_blocks_date ON time_blocks(civil_date, start_time, id);
+CREATE INDEX idx_time_blocks_task ON time_blocks(task_id);
+CREATE INDEX idx_time_blocks_slot ON time_blocks(slot_id);
+CREATE INDEX idx_time_blocks_parent ON time_blocks(recurrence_parent_id);
+
+-- Ordered slot membership. Max 100 tasks/slot is enforced by application later.
+CREATE TABLE time_slot_tasks (
+    slot_id TEXT NOT NULL REFERENCES time_slots(id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    PRIMARY KEY (slot_id, task_id),
+    UNIQUE (slot_id, position)
+);
+CREATE INDEX idx_time_slot_tasks_task ON time_slot_tasks(task_id);
+",
+    )?;
+
+    Ok(())
+}
+
+/// WAL-safe online backup of an existing v2 profile, verified before migration.
+fn create_verified_pre_v2_backup(
+    connection: &Connection,
+    profile_dir: &Path,
+) -> rusqlite::Result<PathBuf> {
+    let backup_dir = profile_dir.join(PRE_MIGRATION_BACKUP_DIR);
+    ensure_backup_dirs(profile_dir)?;
+
+    // Collapse WAL into the main DB so the backup API copies a consistent snapshot.
+    checkpoint_wal(connection)?;
+
+    let stamp = backup_timestamp_label(Timestamp::now());
+    let backup_path = backup_dir.join(format!(
+        "{PRE_V2_BACKUP_PREFIX}{stamp}{PRE_V2_BACKUP_SUFFIX}"
+    ));
+
+    // Remove a same-timestamp leftover so retry after a partial failure is clean.
+    if backup_path.exists() {
+        fs::remove_file(&backup_path).map_err(io_to_sqlite)?;
+    }
+
+    let backup_result = connection.backup(MAIN_DB, &backup_path, None);
+    if let Err(error) = backup_result {
+        let _ = fs::remove_file(&backup_path);
+        return Err(error);
+    }
+    if let Err(error) = crate::set_private_file_permissions(&backup_path) {
+        let _ = fs::remove_file(&backup_path);
+        return Err(io_to_sqlite(error));
+    }
+
+    if let Err(error) = verify_pre_v2_backup(&backup_path) {
+        let _ = fs::remove_file(&backup_path);
+        return Err(error);
+    }
+
+    Ok(backup_path)
+}
+
+fn finalize_successful_v2_to_v3(profile_dir: &Path, backup_path: &Path) -> rusqlite::Result<()> {
+    // Re-verify the snapshot we just took and reopen the migrated live DB.
+    verify_pre_v2_backup(backup_path)?;
+    verify_migrated_database(profile_dir)?;
+    prune_pre_migration_backups(profile_dir)?;
+    Ok(())
+}
+
+fn ensure_backup_dirs(profile_dir: &Path) -> rusqlite::Result<()> {
+    // Set private perms on each created level (create_dir_all alone would not).
+    crate::ensure_private_dir(&profile_dir.join("backups")).map_err(io_to_sqlite)?;
+    crate::ensure_private_dir(&profile_dir.join(PRE_MIGRATION_BACKUP_DIR)).map_err(io_to_sqlite)?;
+    Ok(())
+}
+
+fn checkpoint_wal(connection: &Connection) -> rusqlite::Result<()> {
+    let (blocked, _log, _checkpointed): (i64, i64, i64) =
+        connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+    if blocked != 0 {
+        return Err(migration_err(
+            "wal_checkpoint(TRUNCATE) blocked; cannot create pre-migration backup",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_pre_v2_backup(path: &Path) -> rusqlite::Result<()> {
+    let connection = open_readonly(path)?;
+    let version = current_version(&connection)?;
+    if version != 2 {
+        return Err(migration_err(format!(
+            "pre-migration backup schema version {version} is not 2"
+        )));
+    }
+    if !integrity_check_ok(&connection)? {
+        return Err(migration_err(
+            "pre-migration backup failed PRAGMA integrity_check",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_migrated_database(profile_dir: &Path) -> rusqlite::Result<()> {
+    let path = profile_dir.join(DATABASE_FILE);
+    let connection = open_readonly(&path)?;
+    let version = current_version(&connection)?;
+    if version != CURRENT_SCHEMA_VERSION {
+        return Err(migration_err(format!(
+            "migrated database schema version {version} is not {CURRENT_SCHEMA_VERSION}"
+        )));
+    }
+    if !integrity_check_ok(&connection)? {
+        return Err(migration_err(
+            "migrated database failed PRAGMA integrity_check",
+        ));
+    }
+    Ok(())
+}
+
+fn open_readonly(path: &Path) -> rusqlite::Result<Connection> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let connection = Connection::open_with_flags(path, flags)?;
+    // Foreign keys are not required for integrity_check/schema_version reads,
+    // but enable them so any accidental write attempt would still enforce FKs.
+    connection.pragma_update(None, "foreign_keys", true)?;
+    Ok(connection)
+}
+
+fn integrity_check_ok(connection: &Connection) -> rusqlite::Result<bool> {
+    let mut statement = connection.prepare("PRAGMA integrity_check")?;
+    let mut rows = statement.query([])?;
+    let mut messages = Vec::new();
+    while let Some(row) = rows.next()? {
+        messages.push(row.get::<_, String>(0)?);
+    }
+    Ok(messages.len() == 1 && messages[0] == "ok")
+}
+
+fn prune_pre_migration_backups(profile_dir: &Path) -> rusqlite::Result<()> {
+    let backup_dir = profile_dir.join(PRE_MIGRATION_BACKUP_DIR);
+    if !backup_dir.exists() {
+        return Ok(());
+    }
+
+    let mut backups = list_pre_v2_backups(&backup_dir)?;
+    // Newest first by filename (UTC stamp is sortable after ':' → '-').
+    backups.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    for stale in backups.into_iter().skip(PRE_MIGRATION_BACKUP_RETAIN) {
+        fs::remove_file(&stale).map_err(io_to_sqlite)?;
+    }
+    Ok(())
+}
+
+fn list_pre_v2_backups(backup_dir: &Path) -> rusqlite::Result<Vec<PathBuf>> {
+    let mut backups = Vec::new();
+    let entries = fs::read_dir(backup_dir).map_err(io_to_sqlite)?;
+    for entry in entries {
+        let entry = entry.map_err(io_to_sqlite)?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.starts_with(PRE_V2_BACKUP_PREFIX) && name.ends_with(PRE_V2_BACKUP_SUFFIX) {
+            backups.push(path);
+        }
+    }
+    Ok(backups)
+}
+
+fn backup_timestamp_label(now: Timestamp) -> String {
+    // Filesystem-safe UTC stamp; lexicographic order matches chronological order.
+    now.to_string().replace(':', "-")
+}
+
+fn io_to_sqlite(error: io::Error) -> rusqlite::Error {
+    migration_err(format!("pre-migration backup I/O error: {error}"))
+}
+
+fn migration_err(message: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error {
+            code: rusqlite::ErrorCode::Unknown,
+            extended_code: 1,
+        },
+        Some(message.into()),
+    )
+}
+
 fn assert_foreign_keys_clean(connection: &Connection) -> rusqlite::Result<()> {
     let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
     let mut rows = statement.query([])?;
@@ -543,12 +902,23 @@ mod tests {
             Self { path, _dir: dir }
         }
 
+        fn profile_dir(&self) -> &std::path::Path {
+            &self._dir
+        }
+
         fn open(&self) -> Connection {
             let connection = Connection::open(&self.path).unwrap();
             connection
                 .pragma_update(None, "foreign_keys", true)
                 .unwrap();
             connection
+                .pragma_update(None, "journal_mode", "WAL")
+                .unwrap();
+            connection
+        }
+
+        fn migrate(&self, connection: &mut Connection) -> rusqlite::Result<()> {
+            migrate(connection, self.profile_dir())
         }
     }
 
@@ -637,6 +1007,25 @@ mod tests {
         transaction.commit().unwrap();
     }
 
+    fn seed_v2_with_sample_rows(connection: &mut Connection) {
+        seed_v1_with_sample_rows(connection);
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        apply_v2(&transaction).unwrap();
+        assert_foreign_keys_clean(&transaction).unwrap();
+        record_version(&transaction, 2).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    fn pre_migration_backups(profile_dir: &std::path::Path) -> Vec<PathBuf> {
+        let dir = profile_dir.join(PRE_MIGRATION_BACKUP_DIR);
+        if !dir.exists() {
+            return Vec::new();
+        }
+        list_pre_v2_backups(&dir).unwrap()
+    }
+
     fn table_names(connection: &Connection) -> HashSet<String> {
         let mut statement = connection
             .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -674,22 +1063,23 @@ mod tests {
             )
             .unwrap();
 
-        let error = migrate(&mut connection).unwrap_err().to_string();
+        let error = db.migrate(&mut connection).unwrap_err().to_string();
         assert!(error.contains("newer than supported"));
         assert_eq!(current_version(&connection).unwrap(), 99);
         let sentinel: String = connection
             .query_row("SELECT value FROM future_sentinel", [], |row| row.get(0))
             .unwrap();
         assert_eq!(sentinel, "untouched");
+        assert!(pre_migration_backups(db.profile_dir()).is_empty());
     }
 
     #[test]
-    fn fresh_migrate_reaches_schema_v2_with_expected_tables() {
+    fn fresh_migrate_reaches_schema_v3_with_expected_tables() {
         let db = TestDb::new();
         let mut connection = db.open();
-        migrate(&mut connection).unwrap();
+        db.migrate(&mut connection).unwrap();
 
-        assert_eq!(current_version(&connection).unwrap(), 2);
+        assert_eq!(current_version(&connection).unwrap(), 3);
         let tables = table_names(&connection);
         for name in [
             "app_state",
@@ -709,9 +1099,18 @@ mod tests {
             "saved_filters",
             "task_activity",
             "operation_undo",
+            "app_settings",
+            "reminder_occurrences",
+            "reminder_delivery_lease",
+            "time_blocks",
+            "time_slots",
+            "time_slot_tasks",
         ] {
             assert!(tables.contains(name), "missing table {name}");
         }
+
+        // Fresh profiles must not create a pre-migration backup.
+        assert!(pre_migration_backups(db.profile_dir()).is_empty());
 
         let foreign_keys: i64 = connection
             .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
@@ -781,8 +1180,114 @@ mod tests {
             "created_at",
             "updated_at",
             "revision",
+            "remind_at",
+            "recurrence_anchor_day",
+            "recurrence_source_id",
+            "completion_operation_id",
         ] {
             assert!(columns.contains(required), "missing column {required}");
+        }
+
+        let settings_columns: HashSet<_> = table_columns(&connection, "app_settings")
+            .into_iter()
+            .collect();
+        for required in ["key", "value_json", "updated_at"] {
+            assert!(
+                settings_columns.contains(required),
+                "missing app_settings column {required}"
+            );
+        }
+
+        let occurrence_columns: HashSet<_> = table_columns(&connection, "reminder_occurrences")
+            .into_iter()
+            .collect();
+        for required in [
+            "task_id",
+            "remind_at",
+            "state",
+            "claim_term",
+            "claim_expires_at",
+            "attempts",
+            "next_attempt_at",
+            "terminal_channel",
+            "terminal_error_code",
+            "created_at",
+            "updated_at",
+        ] {
+            assert!(
+                occurrence_columns.contains(required),
+                "missing reminder_occurrences column {required}"
+            );
+        }
+
+        let lease_columns: HashSet<_> = table_columns(&connection, "reminder_delivery_lease")
+            .into_iter()
+            .collect();
+        for required in ["singleton", "fence_term", "expires_at", "updated_at"] {
+            assert!(
+                lease_columns.contains(required),
+                "missing lease column {required}"
+            );
+        }
+
+        let block_columns: HashSet<_> = table_columns(&connection, "time_blocks")
+            .into_iter()
+            .collect();
+        for required in [
+            "id",
+            "task_id",
+            "slot_id",
+            "title",
+            "civil_date",
+            "start_time",
+            "end_time",
+            "timezone",
+            "color",
+            "locked",
+            "recurrence_rule",
+            "recurrence_parent_id",
+            "created_at",
+            "updated_at",
+            "revision",
+        ] {
+            assert!(
+                block_columns.contains(required),
+                "missing time_blocks column {required}"
+            );
+        }
+
+        let slot_columns: HashSet<_> = table_columns(&connection, "time_slots")
+            .into_iter()
+            .collect();
+        for required in [
+            "id",
+            "title",
+            "project_id",
+            "civil_date",
+            "start_time",
+            "end_time",
+            "timezone",
+            "color",
+            "recurrence_rule",
+            "recurrence_parent_id",
+            "created_at",
+            "updated_at",
+            "revision",
+        ] {
+            assert!(
+                slot_columns.contains(required),
+                "missing time_slots column {required}"
+            );
+        }
+
+        let membership_columns: HashSet<_> = table_columns(&connection, "time_slot_tasks")
+            .into_iter()
+            .collect();
+        for required in ["slot_id", "task_id", "position"] {
+            assert!(
+                membership_columns.contains(required),
+                "missing time_slot_tasks column {required}"
+            );
         }
     }
 
@@ -793,8 +1298,10 @@ mod tests {
             let mut connection = db.open();
             seed_v1_with_sample_rows(&mut connection);
             assert_eq!(current_version(&connection).unwrap(), 1);
-            migrate(&mut connection).unwrap();
-            assert_eq!(current_version(&connection).unwrap(), 2);
+            db.migrate(&mut connection).unwrap();
+            assert_eq!(current_version(&connection).unwrap(), 3);
+            // v1→v3 in one open does not create a pre-v2 backup.
+            assert!(pre_migration_backups(db.profile_dir()).is_empty());
 
             let title: String = connection
                 .query_row(
@@ -899,7 +1406,7 @@ mod tests {
             .execute_batch("CREATE TABLE comments (id TEXT PRIMARY KEY);")
             .unwrap();
 
-        let err = migrate(&mut connection).unwrap_err();
+        let err = db.migrate(&mut connection).unwrap_err();
         assert!(
             err.to_string().contains("comments")
                 || matches!(err, rusqlite::Error::SqliteFailure(..)),
@@ -939,10 +1446,11 @@ mod tests {
         assert_eq!(receipt_count, 1);
 
         connection.execute_batch("DROP TABLE comments;").unwrap();
-        migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 2);
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 3);
         assert!(table_names(&connection).contains("projects"));
         assert!(table_names(&connection).contains("operation_undo"));
+        assert!(table_names(&connection).contains("app_settings"));
         let title: String = connection
             .query_row(
                 "SELECT title FROM tasks WHERE id = ?1",
@@ -962,10 +1470,343 @@ mod tests {
     }
 
     #[test]
+    fn v2_fixture_migrates_to_v3_with_verified_private_backup() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        seed_v2_with_sample_rows(&mut connection);
+        assert_eq!(current_version(&connection).unwrap(), 2);
+
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 3);
+
+        let title: String = connection
+            .query_row(
+                "SELECT title FROM tasks WHERE id = ?1",
+                ["11111111-1111-7111-8111-111111111111"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "Legacy task");
+
+        let (remind_at, anchor, source, completion_op): (
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+            Option<String>,
+        ) = connection
+            .query_row(
+                "SELECT remind_at, recurrence_anchor_day, recurrence_source_id,
+                        completion_operation_id
+                 FROM tasks WHERE id = ?1",
+                ["11111111-1111-7111-8111-111111111111"],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(remind_at, None);
+        assert_eq!(anchor, None);
+        assert_eq!(source, None);
+        assert_eq!(completion_op, None);
+
+        let backups = pre_migration_backups(db.profile_dir());
+        assert_eq!(backups.len(), 1);
+        let backup_path = &backups[0];
+        let name = backup_path.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with(PRE_V2_BACKUP_PREFIX));
+        assert!(name.ends_with(PRE_V2_BACKUP_SUFFIX));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let file_mode = fs::metadata(backup_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(file_mode, 0o600);
+            let dir_mode = fs::metadata(backup_path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(dir_mode, 0o700);
+        }
+
+        // Backup reopens read-only as schema v2 with a clean integrity check.
+        verify_pre_v2_backup(backup_path).unwrap();
+        let backup = open_readonly(backup_path).unwrap();
+        let backup_title: String = backup
+            .query_row(
+                "SELECT title FROM tasks WHERE id = ?1",
+                ["11111111-1111-7111-8111-111111111111"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(backup_title, "Legacy task");
+        assert!(!table_names(&backup).contains("app_settings"));
+        assert!(!task_columns(&backup).contains(&"remind_at".to_owned()));
+    }
+
+    #[test]
+    fn failed_v3_rolls_back_keeps_backup_and_retry_succeeds() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        seed_v2_with_sample_rows(&mut connection);
+
+        // Collision with a v3 table created after the tasks ALTER statements.
+        connection
+            .execute_batch("CREATE TABLE app_settings (key TEXT PRIMARY KEY);")
+            .unwrap();
+
+        let err = db.migrate(&mut connection).unwrap_err();
+        assert!(
+            err.to_string().contains("app_settings")
+                || matches!(err, rusqlite::Error::SqliteFailure(..)),
+            "unexpected error: {err}"
+        );
+
+        // v2 remains authoritative.
+        assert_eq!(current_version(&connection).unwrap(), 2);
+        assert!(!task_columns(&connection).contains(&"remind_at".to_owned()));
+        assert!(!table_names(&connection).contains("reminder_occurrences"));
+
+        // Verified backup is retained for recovery; prune does not run on failure.
+        let backups = pre_migration_backups(db.profile_dir());
+        assert_eq!(backups.len(), 1);
+        verify_pre_v2_backup(&backups[0]).unwrap();
+
+        let title: String = connection
+            .query_row(
+                "SELECT title FROM tasks WHERE id = ?1",
+                ["11111111-1111-7111-8111-111111111111"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "Legacy task");
+
+        connection
+            .execute_batch("DROP TABLE app_settings;")
+            .unwrap();
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 3);
+        assert!(table_names(&connection).contains("app_settings"));
+        assert!(table_names(&connection).contains("time_slot_tasks"));
+        assert!(task_columns(&connection).contains(&"completion_operation_id".to_owned()));
+
+        // Exact retry leaves usable backups (at least the successful attempt's snapshot).
+        let backups_after = pre_migration_backups(db.profile_dir());
+        assert!(!backups_after.is_empty());
+        assert!(backups_after.len() <= PRE_MIGRATION_BACKUP_RETAIN);
+        for path in &backups_after {
+            verify_pre_v2_backup(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn pre_migration_backup_retention_keeps_newest_three() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        seed_v2_with_sample_rows(&mut connection);
+
+        let backup_dir = db.profile_dir().join(PRE_MIGRATION_BACKUP_DIR);
+        crate::ensure_private_dir(&db.profile_dir().join("backups")).unwrap();
+        crate::ensure_private_dir(&backup_dir).unwrap();
+
+        // Four older verified-looking names; contents need not be valid — only the
+        // migration-created backup is re-verified before prune runs.
+        for stamp in [
+            "2020-01-01T00-00-00Z",
+            "2020-01-02T00-00-00Z",
+            "2020-01-03T00-00-00Z",
+            "2020-01-04T00-00-00Z",
+        ] {
+            let path = backup_dir.join(format!(
+                "{PRE_V2_BACKUP_PREFIX}{stamp}{PRE_V2_BACKUP_SUFFIX}"
+            ));
+            fs::write(&path, b"stale-pre-migration-placeholder").unwrap();
+            crate::set_private_file_permissions(&path).unwrap();
+        }
+        assert_eq!(pre_migration_backups(db.profile_dir()).len(), 4);
+
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 3);
+
+        let mut remaining = pre_migration_backups(db.profile_dir());
+        remaining.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        assert_eq!(remaining.len(), PRE_MIGRATION_BACKUP_RETAIN);
+
+        // Newest three by filename: the fresh backup plus Jan 4 and Jan 3.
+        let names: Vec<_> = remaining
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(names[0].starts_with(PRE_V2_BACKUP_PREFIX));
+        assert!(!names.iter().any(|n| n.contains("2020-01-01")));
+        assert!(!names.iter().any(|n| n.contains("2020-01-02")));
+        assert!(names.iter().any(|n| n.contains("2020-01-03")));
+        assert!(names.iter().any(|n| n.contains("2020-01-04")));
+
+        // The migration-created backup is still a true verified v2 snapshot.
+        let fresh = remaining
+            .iter()
+            .find(|p| {
+                !p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains("2020-01-")
+            })
+            .expect("fresh pre-v2 backup");
+        verify_pre_v2_backup(fresh).unwrap();
+    }
+
+    #[test]
+    fn schema_v3_enforces_lineage_settings_and_membership_uniqueness() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        db.migrate(&mut connection).unwrap();
+
+        connection
+            .execute(
+                "INSERT INTO tasks(
+                    id, title, status, completed_at, created_at, updated_at, revision
+                ) VALUES (
+                    'aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa',
+                    'Source',
+                    'completed',
+                    '2026-07-28T12:00:00Z',
+                    '2026-07-28T12:00:00Z',
+                    '2026-07-28T12:00:00Z',
+                    1
+                )",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO tasks(
+                    id, title, status, recurrence_source_id, recurrence_anchor_day,
+                    created_at, updated_at, revision
+                ) VALUES (
+                    'bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb',
+                    'Child',
+                    'pending',
+                    'aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa',
+                    31,
+                    '2026-07-28T12:00:00Z',
+                    '2026-07-28T12:00:00Z',
+                    1
+                )",
+                [],
+            )
+            .unwrap();
+
+        let duplicate_lineage = connection.execute(
+            "INSERT INTO tasks(
+                id, title, status, recurrence_source_id,
+                created_at, updated_at, revision
+            ) VALUES (
+                'cccccccc-cccc-7ccc-8ccc-cccccccccccc',
+                'Twin',
+                'pending',
+                'aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa',
+                '2026-07-28T12:00:00Z',
+                '2026-07-28T12:00:00Z',
+                1
+            )",
+            [],
+        );
+        assert!(duplicate_lineage.is_err());
+
+        let bad_anchor = connection.execute(
+            "UPDATE tasks SET recurrence_anchor_day = 32
+             WHERE id = 'bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb'",
+            [],
+        );
+        assert!(bad_anchor.is_err());
+
+        let bad_setting = connection.execute(
+            "INSERT INTO app_settings(key, value_json, updated_at)
+             VALUES ('theme', '{}', '2026-07-28T12:00:00Z')",
+            [],
+        );
+        assert!(bad_setting.is_err());
+
+        connection
+            .execute(
+                "INSERT INTO app_settings(key, value_json, updated_at)
+                 VALUES ('week_start', '{\"day\":\"monday\"}', '2026-07-28T12:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        connection
+            .execute(
+                "INSERT INTO time_slots(
+                    id, title, civil_date, start_time, end_time, timezone,
+                    created_at, updated_at, revision
+                ) VALUES (
+                    'slot-1', 'Morning', '2026-07-28', '09:00:00', '11:00:00', 'UTC',
+                    '2026-07-28T12:00:00Z', '2026-07-28T12:00:00Z', 1
+                )",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO time_slot_tasks(slot_id, task_id, position)
+                 VALUES ('slot-1', 'bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb', 0)",
+                [],
+            )
+            .unwrap();
+        let duplicate_membership = connection.execute(
+            "INSERT INTO time_slot_tasks(slot_id, task_id, position)
+             VALUES ('slot-1', 'bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb', 1)",
+            [],
+        );
+        assert!(duplicate_membership.is_err());
+        let duplicate_position = connection.execute(
+            "INSERT INTO time_slot_tasks(slot_id, task_id, position)
+             VALUES ('slot-1', 'aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa', 0)",
+            [],
+        );
+        assert!(duplicate_position.is_err());
+
+        let bad_channel = connection.execute(
+            "INSERT INTO reminder_occurrences(
+                task_id, remind_at, state, terminal_channel, created_at, updated_at
+             ) VALUES (
+                'bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb',
+                '2026-07-28T13:00:00Z',
+                'delivered',
+                'email',
+                '2026-07-28T12:00:00Z',
+                '2026-07-28T12:00:00Z'
+             )",
+            [],
+        );
+        assert!(bad_channel.is_err());
+
+        connection
+            .execute(
+                "INSERT INTO reminder_delivery_lease(
+                    singleton, fence_term, expires_at, updated_at
+                 ) VALUES (
+                    1, 'fence-1', '2026-07-28T12:01:30Z', '2026-07-28T12:00:00Z'
+                 )",
+                [],
+            )
+            .unwrap();
+        let second_lease = connection.execute(
+            "INSERT INTO reminder_delivery_lease(
+                singleton, fence_term, expires_at, updated_at
+             ) VALUES (
+                2, 'fence-2', '2026-07-28T12:01:30Z', '2026-07-28T12:00:00Z'
+             )",
+            [],
+        );
+        assert!(second_lease.is_err());
+    }
+
+    #[test]
     fn schema_rejects_self_parent_self_relation_bounds_and_due_pair() {
         let db = TestDb::new();
         let mut connection = db.open();
-        migrate(&mut connection).unwrap();
+        db.migrate(&mut connection).unwrap();
 
         connection
             .execute(
@@ -1106,7 +1947,7 @@ mod tests {
     fn documented_cascades_and_set_null_hold() {
         let db = TestDb::new();
         let mut connection = db.open();
-        migrate(&mut connection).unwrap();
+        db.migrate(&mut connection).unwrap();
 
         connection
             .execute_batch(
@@ -1250,7 +2091,7 @@ INSERT INTO task_activity(
     fn receipt_retention_and_operation_undo_constraints() {
         let db = TestDb::new();
         let mut connection = db.open();
-        migrate(&mut connection).unwrap();
+        db.migrate(&mut connection).unwrap();
 
         connection
             .execute(

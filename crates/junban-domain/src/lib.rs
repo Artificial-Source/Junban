@@ -44,9 +44,10 @@ pub use reminder::{
     ClaimedReminder, DEFAULT_REMINDER_CLAIM_LIMIT, DEFAULT_REMINDER_CLAIM_SECS,
     DEFAULT_REMINDER_LEASE_SECS, MAX_OWNER_LOST_MARK_LIMIT, MAX_REMINDER_CLAIM_LIMIT,
     MAX_REMINDER_LEASE_SECS, REMINDER_FAILURE_BACKOFF_MAX_SECS,
-    REMINDER_FAILURE_BACKOFF_START_SECS, ReminderChannel, ReminderChannelSet,
-    ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm, ReminderLeadMinutes,
-    ReminderOccurrence, ReminderOccurrenceState, ReminderSettings, reminder_failure_backoff,
+    REMINDER_FAILURE_BACKOFF_START_SECS, REMINDER_TERMINAL_MAX_BYTES, REMINDER_TERMINAL_MAX_ROWS,
+    REMINDER_TERMINAL_RETENTION_DAYS, ReminderChannel, ReminderChannelSet, ReminderDeliveryLease,
+    ReminderFailureCode, ReminderFenceTerm, ReminderLeadMinutes, ReminderOccurrence,
+    ReminderOccurrenceState, ReminderSettings, format_reminder_timestamp, reminder_failure_backoff,
     reminder_occurrence_key, validate_owner_lost_mark_limit, validate_reminder_claim_limit,
     validate_reminder_lease_secs,
 };

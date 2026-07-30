@@ -14,7 +14,7 @@ use serde::Serialize;
 use crate::helpers::{diff_task_fields, validate_task_refs};
 use crate::ops_types::{Inverse, PostImage, TaskClosure, undo_pair};
 use crate::reminder_ops::{
-    load_reminder_occurrence, load_reminders_for_tasks, reminders_into_post,
+    load_reminder_occurrence, load_reminder_snapshot, reminders_into_post,
     replace_reminders_for_tasks, upsert_reminder_occurrence,
 };
 use crate::rows::{
@@ -544,6 +544,7 @@ pub(crate) fn apply_inverse(
 fn capture_redo_post(
     tx: &rusqlite::Transaction<'_>,
     affected: &AffectedIds,
+    now: Timestamp,
 ) -> Result<PostImage, RepositoryError> {
     let mut redo_post = PostImage::default();
     for id in &affected.task_ids {
@@ -563,7 +564,7 @@ fn capture_redo_post(
             redo_post.absent_comment_ids.push(*id);
         }
     }
-    let reminders = load_reminders_for_tasks(tx, &affected.task_ids)?;
+    let reminders = load_reminder_snapshot(tx, &affected.task_ids, now)?;
     reminders_into_post(&mut redo_post, reminders);
     Ok(redo_post)
 }
@@ -657,7 +658,7 @@ pub(crate) fn undo(
             validate_post_image(tx, &post)?;
             let (affected, activity, snapshot, resync) =
                 apply_inverse(tx, &inverse, now, revision, new_operation_id)?;
-            let redo_post = capture_redo_post(tx, &affected)?;
+            let redo_post = capture_redo_post(tx, &affected, now)?;
             // For undo of create/delete, use original post image as redo target when tasks vanished.
             let redo_source_post = if redo_post.tasks.is_empty() && !post.tasks.is_empty() {
                 // We deleted tasks; redo should restore post.
@@ -671,7 +672,7 @@ pub(crate) fn undo(
             let undo = undo_pair(&redo_inverse, &{
                 // After applying inverse, current state is redo_source_post for conflict checks
                 // on a subsequent undo (redo).
-                let mut current = capture_redo_post(tx, &affected)?;
+                let mut current = capture_redo_post(tx, &affected, now)?;
                 if current.tasks.is_empty() && current.absent_task_ids.is_empty() {
                     current = redo_source_post;
                 }

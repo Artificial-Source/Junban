@@ -706,10 +706,18 @@ where
         fence_term: ReminderFenceTerm,
         task_id: TaskId,
         remind_at: Timestamp,
+        claim_attempt: u32,
         channel: ReminderChannel,
     ) -> Result<(), AppError> {
         self.repository
-            .settle_reminder_delivered(fence_term, task_id, remind_at, channel, Timestamp::now())
+            .settle_reminder_delivered(
+                fence_term,
+                task_id,
+                remind_at,
+                claim_attempt,
+                channel,
+                Timestamp::now(),
+            )
             .await
             .map_err(Into::into)
     }
@@ -719,10 +727,18 @@ where
         fence_term: ReminderFenceTerm,
         task_id: TaskId,
         remind_at: Timestamp,
+        claim_attempt: u32,
         error: ReminderFailureCode,
     ) -> Result<(), AppError> {
         self.repository
-            .settle_reminder_failed(fence_term, task_id, remind_at, error, Timestamp::now())
+            .settle_reminder_failed(
+                fence_term,
+                task_id,
+                remind_at,
+                claim_attempt,
+                error,
+                Timestamp::now(),
+            )
             .await
             .map_err(Into::into)
     }
@@ -1210,6 +1226,7 @@ mod tests {
             _: ReminderFenceTerm,
             _: TaskId,
             _: Timestamp,
+            _: u32,
             _: ReminderChannel,
             _: Timestamp,
         ) -> crate::RepositoryFuture<'_, ()> {
@@ -1220,6 +1237,7 @@ mod tests {
             _: ReminderFenceTerm,
             _: TaskId,
             _: Timestamp,
+            _: u32,
             _: ReminderFailureCode,
             _: Timestamp,
         ) -> crate::RepositoryFuture<'_, ()> {

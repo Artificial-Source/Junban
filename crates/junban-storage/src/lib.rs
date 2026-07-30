@@ -827,7 +827,9 @@ impl Repository for SqliteRepository {
         &self,
         task_id: TaskId,
     ) -> RepositoryFuture<'_, Vec<ReminderOccurrence>> {
-        mut_cmd!(self, ListTaskReminders { task_id })
+        // Compaction uses a sampled instant; list remains control-plane bookkeeping.
+        let now = Timestamp::now();
+        mut_cmd!(self, ListTaskReminders { task_id, now })
     }
     fn reschedule_reminder(
         &self,
@@ -912,6 +914,7 @@ impl Repository for SqliteRepository {
         fence_term: ReminderFenceTerm,
         task_id: TaskId,
         remind_at: Timestamp,
+        claim_attempt: u32,
         channel: ReminderChannel,
         now: Timestamp,
     ) -> RepositoryFuture<'_, ()> {
@@ -921,6 +924,7 @@ impl Repository for SqliteRepository {
                 fence_term,
                 task_id,
                 remind_at,
+                claim_attempt,
                 channel,
                 now
             }
@@ -931,6 +935,7 @@ impl Repository for SqliteRepository {
         fence_term: ReminderFenceTerm,
         task_id: TaskId,
         remind_at: Timestamp,
+        claim_attempt: u32,
         error: ReminderFailureCode,
         now: Timestamp,
     ) -> RepositoryFuture<'_, ()> {
@@ -940,6 +945,7 @@ impl Repository for SqliteRepository {
                 fence_term,
                 task_id,
                 remind_at,
+                claim_attempt,
                 error,
                 now
             }
@@ -1213,6 +1219,7 @@ enum Command {
     },
     ListTaskReminders {
         task_id: TaskId,
+        now: Timestamp,
         reply: oneshot::Sender<Result<Vec<ReminderOccurrence>, RepositoryError>>,
     },
     RescheduleReminder {
@@ -1255,6 +1262,7 @@ enum Command {
         fence_term: ReminderFenceTerm,
         task_id: TaskId,
         remind_at: Timestamp,
+        claim_attempt: u32,
         channel: ReminderChannel,
         now: Timestamp,
         reply: oneshot::Sender<Result<(), RepositoryError>>,
@@ -1263,6 +1271,7 @@ enum Command {
         fence_term: ReminderFenceTerm,
         task_id: TaskId,
         remind_at: Timestamp,
+        claim_attempt: u32,
         error: ReminderFailureCode,
         now: Timestamp,
         reply: oneshot::Sender<Result<(), RepositoryError>>,
@@ -1790,8 +1799,12 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     now,
                 ));
             }
-            Command::ListTaskReminders { task_id, reply } => {
-                let _ = reply.send(reminder_ops::list_task_reminders(connection, task_id));
+            Command::ListTaskReminders {
+                task_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::list_task_reminders(connection, task_id, now));
             }
             Command::RescheduleReminder {
                 operation_id,
@@ -1864,24 +1877,38 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                 fence_term,
                 task_id,
                 remind_at,
+                claim_attempt,
                 channel,
                 now,
                 reply,
             } => {
                 let _ = reply.send(reminder_ops::settle_reminder_delivered(
-                    connection, fence_term, task_id, remind_at, channel, now,
+                    connection,
+                    fence_term,
+                    task_id,
+                    remind_at,
+                    claim_attempt,
+                    channel,
+                    now,
                 ));
             }
             Command::SettleReminderFailed {
                 fence_term,
                 task_id,
                 remind_at,
+                claim_attempt,
                 error,
                 now,
                 reply,
             } => {
                 let _ = reply.send(reminder_ops::settle_reminder_failed(
-                    connection, fence_term, task_id, remind_at, error, now,
+                    connection,
+                    fence_term,
+                    task_id,
+                    remind_at,
+                    claim_attempt,
+                    error,
+                    now,
                 ));
             }
             Command::MarkOwnerLostReminders {

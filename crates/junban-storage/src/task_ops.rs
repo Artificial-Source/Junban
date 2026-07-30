@@ -21,7 +21,7 @@ use crate::helpers::{
 };
 use crate::ops_types::{Inverse, PostImage, TaskClosure, post_from_tasks, status_name, undo_pair};
 use crate::reminder_ops::{
-    load_reminders_for_tasks, post_with_reminders, reminders_into_post, sync_task_reminder_intent,
+    load_reminder_snapshot, post_with_reminders, reminders_into_post, sync_task_reminder_intent,
 };
 use crate::rows::{
     collect_descendants, delete_task_row, ensure_tags_exist, field_activity, insert_task,
@@ -112,7 +112,7 @@ pub(crate) fn create_task(
             validate_task_refs(tx, &task)?;
             insert_task(tx, &task)?;
             sync_task_reminder_intent(tx, &task, now)?;
-            let reminders = load_reminders_for_tasks(tx, &[task.id])?;
+            let reminders = load_reminder_snapshot(tx, &[task.id], now)?;
             let activity = vec![field_activity(
                 revision,
                 0,
@@ -158,7 +158,7 @@ pub(crate) fn patch_task(
         now,
         move |tx, revision| {
             let before = load_task(tx, task_id)?;
-            let before_reminders = load_reminders_for_tasks(tx, &[task_id])?;
+            let before_reminders = load_reminder_snapshot(tx, &[task_id], now)?;
             let mut after = before.clone();
             apply_patch(&mut after, &patch)?;
             after.updated_at = now;
@@ -167,7 +167,7 @@ pub(crate) fn patch_task(
             update_task_row(tx, &after)?;
             // Reconcile occurrence rows when schedule or terminal status changes.
             sync_task_reminder_intent(tx, &after, now)?;
-            let after_reminders = load_reminders_for_tasks(tx, &[task_id])?;
+            let after_reminders = load_reminder_snapshot(tx, &[task_id], now)?;
             let activity = diff_task_fields(&before, &after, revision, operation_id, now, 0);
             let undo = undo_pair(
                 &Inverse::RestoreTasks {
@@ -408,7 +408,7 @@ fn change_status(
         now,
         move |tx, revision| {
             let before = load_task(tx, task_id)?;
-            let before_reminders = load_reminders_for_tasks(tx, &[task_id])?;
+            let before_reminders = load_reminder_snapshot(tx, &[task_id], now)?;
             let mut after = before.clone();
             transition(&mut after, now).map_err(map_transition)?;
             after.revision = revision;
@@ -420,7 +420,7 @@ fn change_status(
             update_task_row(tx, &after)?;
             // Cancel suppresses pending delivery; reopen restores pending intent when safe.
             sync_task_reminder_intent(tx, &after, now)?;
-            let after_reminders = load_reminders_for_tasks(tx, &[task_id])?;
+            let after_reminders = load_reminder_snapshot(tx, &[task_id], now)?;
             let activity = vec![field_activity(
                 revision,
                 0,
@@ -470,13 +470,13 @@ pub(crate) fn complete_task(
     })?;
     mutate(c, op, request, now, move |tx, revision| {
         let pending_ids = expand_complete_targets(tx, &[id])?;
-        let source_reminders = load_reminders_for_tasks(tx, &pending_ids)?;
+        let source_reminders = load_reminder_snapshot(tx, &pending_ids, now)?;
         let completed = complete_pending_set(tx, op, &pending_ids, now, revision, &temporal, 0)?;
         let multi = completed.post_tasks.len() > 1;
         let primary = load_task(tx, id)?;
         let mut affected = pending_ids;
         affected.extend(completed.generated_ids.iter().copied());
-        let after_reminders = load_reminders_for_tasks(tx, &affected)?;
+        let after_reminders = load_reminder_snapshot(tx, &affected, now)?;
         let undo = undo_pair(
             &Inverse::ReverseCompletion {
                 sources: completed.sources_before,
@@ -556,7 +556,7 @@ pub(crate) fn uncomplete_task(
                             uncomplete_post.tasks.insert(task.id.to_string(), task);
                         }
                     }
-                    let current_reminders = load_reminders_for_tasks(tx, &affected.task_ids)?;
+                    let current_reminders = load_reminder_snapshot(tx, &affected.task_ids, now)?;
                     reminders_into_post(&mut uncomplete_post, current_reminders);
                     let undo = undo_pair(
                         &Inverse::RestoreTasks {
@@ -598,14 +598,14 @@ pub(crate) fn uncomplete_task(
         // Source-only fallback: reopen just this task; leave generated children alone.
         // Do not resurrect cancelled/consumed reminder rows without exact receipt authority.
         let before = source;
-        let before_reminders = load_reminders_for_tasks(tx, &[id])?;
+        let before_reminders = load_reminder_snapshot(tx, &[id], now)?;
         let mut after = before.clone();
         after.try_uncomplete(now).map_err(map_transition)?;
         after.completion_operation_id = None;
         after.revision = revision;
         after.updated_at = now;
         update_task_row(tx, &after)?;
-        let after_reminders = load_reminders_for_tasks(tx, &[id])?;
+        let after_reminders = load_reminder_snapshot(tx, &[id], now)?;
         let activity = vec![field_activity(
             revision,
             0,
@@ -684,6 +684,7 @@ pub(crate) fn reopen_task(
 pub(crate) fn capture_closure(
     tx: &Transaction<'_>,
     root: TaskId,
+    now: Timestamp,
 ) -> Result<(Vec<TaskId>, TaskClosure), RepositoryError> {
     let ids = collect_descendants(tx, root)?;
     let mut tasks = Vec::with_capacity(ids.len());
@@ -697,7 +698,7 @@ pub(crate) fn capture_closure(
             comments: load_comments_for_tasks(tx, &ids)?,
             relations: load_relations_touching(tx, &ids)?,
             activity: load_task_activity_for_tasks(tx, &ids)?,
-            reminders: load_reminders_for_tasks(tx, &ids)?,
+            reminders: load_reminder_snapshot(tx, &ids, now)?,
         },
     ))
 }
@@ -715,7 +716,7 @@ pub(crate) fn delete_task(
         if !task_exists(tx, task_id)? {
             return Err(RepositoryError::NotFound);
         }
-        let (ids, closure) = capture_closure(tx, task_id)?;
+        let (ids, closure) = capture_closure(tx, task_id, now)?;
         for id in ids.iter().rev() {
             delete_task_row(tx, *id)?;
         }
@@ -906,8 +907,8 @@ pub(crate) fn move_task(
             post_tasks.push(current);
         }
         let before_ids: Vec<_> = restored.iter().map(|task| task.id).collect();
-        let before_reminders = load_reminders_for_tasks(tx, &before_ids)?;
-        let after_reminders = load_reminders_for_tasks(tx, &affected_ids)?;
+        let before_reminders = load_reminder_snapshot(tx, &before_ids, now)?;
+        let after_reminders = load_reminder_snapshot(tx, &affected_ids, now)?;
         let undo = undo_pair(
             &Inverse::RestoreTasks {
                 tasks: restored,
@@ -992,8 +993,8 @@ pub(crate) fn reorder_tasks(
             })
             .collect();
         let before_ids: Vec<_> = before_tasks.iter().map(|task| task.id).collect();
-        let before_reminders = load_reminders_for_tasks(tx, &before_ids)?;
-        let after_reminders = load_reminders_for_tasks(tx, &ordered_ids)?;
+        let before_reminders = load_reminder_snapshot(tx, &before_ids, now)?;
+        let after_reminders = load_reminder_snapshot(tx, &ordered_ids, now)?;
         let undo = undo_pair(
             &Inverse::RestoreTasks {
                 tasks: before_tasks,
@@ -1059,7 +1060,7 @@ pub(crate) fn bulk_tasks(
                 if !task_exists(tx, *task_id)? {
                     return Err(RepositoryError::NotFound);
                 }
-                let (ids, closure) = capture_closure(tx, *task_id)?;
+                let (ids, closure) = capture_closure(tx, *task_id, now)?;
                 for id in ids {
                     if seen.insert(id) {
                         all_ids.push(id);
@@ -1148,12 +1149,12 @@ pub(crate) fn bulk_tasks(
 
         if matches!(action, BulkAction::Complete) {
             let pending_ids = expand_complete_targets(tx, &task_ids)?;
-            let source_reminders = load_reminders_for_tasks(tx, &pending_ids)?;
+            let source_reminders = load_reminder_snapshot(tx, &pending_ids, now)?;
             let completed =
                 complete_pending_set(tx, op, &pending_ids, now, revision, &temporal, 0)?;
             let mut affected = pending_ids;
             affected.extend(completed.generated_ids.iter().copied());
-            let after_reminders = load_reminders_for_tasks(tx, &affected)?;
+            let after_reminders = load_reminder_snapshot(tx, &affected, now)?;
             let undo = undo_pair(
                 &Inverse::ReverseCompletion {
                     sources: completed.sources_before,
@@ -1258,11 +1259,11 @@ pub(crate) fn bulk_tasks(
             // Undo restores exact completed post-images plus source-only befores.
             redo_tasks.extend(before_tasks.iter().cloned());
             for task in &before_tasks {
-                redo_reminders.extend(load_reminders_for_tasks(tx, &[task.id])?);
+                redo_reminders.extend(load_reminder_snapshot(tx, &[task.id], now)?);
             }
             let mut post = post_from_tasks(after_tasks);
             post.absent_task_ids = absent_generated;
-            let current_reminders = load_reminders_for_tasks(tx, &affected)?;
+            let current_reminders = load_reminder_snapshot(tx, &affected, now)?;
             reminders_into_post(&mut post, current_reminders);
             let undo = undo_pair(
                 &Inverse::RestoreTasks {
@@ -1297,7 +1298,7 @@ pub(crate) fn bulk_tasks(
         let mut seq = 0u32;
         for task_id in &task_ids {
             let before = load_task(tx, *task_id)?;
-            before_reminders.extend(load_reminders_for_tasks(tx, &[*task_id])?);
+            before_reminders.extend(load_reminder_snapshot(tx, &[*task_id], now)?);
             let mut after = before.clone();
             match &action {
                 BulkAction::Complete | BulkAction::Uncomplete | BulkAction::Delete => {
@@ -1384,7 +1385,7 @@ pub(crate) fn bulk_tasks(
             before_tasks.push(before);
             after_tasks.push(after);
         }
-        let after_reminders = load_reminders_for_tasks(tx, &task_ids)?;
+        let after_reminders = load_reminder_snapshot(tx, &task_ids, now)?;
         let undo = undo_pair(
             &Inverse::RestoreTasks {
                 tasks: before_tasks,

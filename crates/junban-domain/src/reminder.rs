@@ -27,6 +27,12 @@ pub const REMINDER_FAILURE_BACKOFF_START_SECS: u64 = 30;
 pub const REMINDER_FAILURE_BACKOFF_MAX_SECS: u64 = 60 * 60;
 /// Hard ceiling for one owner-lost sweep.
 pub const MAX_OWNER_LOST_MARK_LIMIT: u32 = 100;
+/// Terminal reminder audit retention window.
+pub const REMINDER_TERMINAL_RETENTION_DAYS: i64 = 90;
+/// Maximum retained terminal reminder audit rows (non-protected).
+pub const REMINDER_TERMINAL_MAX_ROWS: usize = 2_000;
+/// Maximum retained serialized terminal reminder audit material.
+pub const REMINDER_TERMINAL_MAX_BYTES: usize = 2 * 1024 * 1024;
 
 /// Allowlisted delivery channels. Arbitrary external channel names are rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -340,10 +346,21 @@ impl ReminderOccurrence {
     }
 }
 
+/// Fixed-width UTC text for every reminder comparison/ordering column.
+///
+/// Jiff's default `Display` omits trailing fractional zeros, so variable-width
+/// RFC3339 text is not lexicographically ordered (whole seconds sort after any
+/// fractional second). Nine fractional digits preserve nanosecond precision and
+/// keep SQL text comparisons aligned with instant order.
+#[must_use]
+pub fn format_reminder_timestamp(ts: Timestamp) -> String {
+    format!("{ts:.9}")
+}
+
 /// Build the durable map key for one `(task_id, remind_at)` identity.
 #[must_use]
 pub fn reminder_occurrence_key(task_id: TaskId, remind_at: Timestamp) -> String {
-    format!("{task_id}/{remind_at}")
+    format!("{task_id}/{}", format_reminder_timestamp(remind_at))
 }
 
 /// One global delivery-owner lease snapshot.
@@ -355,13 +372,17 @@ pub struct ReminderDeliveryLease {
 }
 
 /// One claimed due occurrence returned to a lease owner.
+///
+/// `claim_attempt` is the durable `attempts` value after the successful claim
+/// UPDATE. Settlement must present this exact generation so a delayed callback
+/// cannot finish a newer claim that reused the same fence term.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimedReminder {
     pub task_id: TaskId,
     pub remind_at: Timestamp,
     pub claim_term: ReminderFenceTerm,
     pub claim_expires_at: Timestamp,
-    pub attempts: u32,
+    pub claim_attempt: u32,
 }
 
 #[cfg(test)]
@@ -424,6 +445,30 @@ mod tests {
         assert_eq!(
             ReminderChannel::parse("native").unwrap(),
             ReminderChannel::Native
+        );
+    }
+
+    #[test]
+    fn reminder_timestamp_text_is_fixed_width_and_sortable() {
+        let whole: Timestamp = "2026-07-28T15:00:00Z".parse().unwrap();
+        let frac_low: Timestamp = "2026-07-28T15:00:00.1Z".parse().unwrap();
+        let frac_high: Timestamp = "2026-07-28T15:00:00.5Z".parse().unwrap();
+        let whole_text = format_reminder_timestamp(whole);
+        let low_text = format_reminder_timestamp(frac_low);
+        let high_text = format_reminder_timestamp(frac_high);
+        assert_eq!(whole_text, "2026-07-28T15:00:00.000000000Z");
+        assert_eq!(low_text, "2026-07-28T15:00:00.100000000Z");
+        assert_eq!(high_text, "2026-07-28T15:00:00.500000000Z");
+        // Default Display is not ordered; canonical text is.
+        assert!(whole.to_string() > frac_low.to_string());
+        assert!(whole_text.as_str() < low_text.as_str());
+        assert!(low_text.as_str() < high_text.as_str());
+        assert_eq!(
+            reminder_occurrence_key(
+                TaskId::parse("01900000-0000-7000-8000-000000000001").unwrap(),
+                whole
+            ),
+            "01900000-0000-7000-8000-000000000001/2026-07-28T15:00:00.000000000Z"
         );
     }
 }

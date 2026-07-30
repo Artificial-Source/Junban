@@ -5,10 +5,12 @@
 //! short SQLite transactions with no global revision, activity, SSE event, or
 //! undo receipt.
 //!
-//! Durable ack is idempotent for `(task_id, remind_at, channel)`. External
-//! browser/OS presentation remains at-least-once across the accept-before-ack
-//! window. Expired claims are never auto-retried; an explicit owner-lost sweep
-//! returns them to pending with bounded backoff under the new fence term.
+//! Durable ack is idempotent for `(task_id, remind_at, claim_attempt, channel)`.
+//! External browser/OS presentation remains at-least-once across the
+//! accept-before-ack window. Expired claims are never auto-retried; an explicit
+//! owner-lost sweep returns them to pending with bounded backoff under the new
+//! fence term. Terminal audit rows are compacted in-process under the frozen
+//! 90-day / 2_000-row / 2 MiB bounds without a background framework.
 
 use jiff::{Timestamp, ToSpan};
 use junban_app::{
@@ -16,10 +18,11 @@ use junban_app::{
     ResyncScope, TaskPatch,
 };
 use junban_domain::{
-    ClaimedReminder, OperationId, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode,
+    ClaimedReminder, OperationId, REMINDER_TERMINAL_MAX_BYTES, REMINDER_TERMINAL_MAX_ROWS,
+    REMINDER_TERMINAL_RETENTION_DAYS, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode,
     ReminderFenceTerm, ReminderOccurrence, ReminderOccurrenceState, Task, TaskActivityAction,
-    TaskId, TaskStatus, reminder_failure_backoff, validate_owner_lost_mark_limit,
-    validate_reminder_claim_limit, validate_reminder_lease_secs,
+    TaskId, TaskStatus, format_reminder_timestamp, reminder_failure_backoff,
+    validate_owner_lost_mark_limit, validate_reminder_claim_limit, validate_reminder_lease_secs,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::Serialize;
@@ -30,6 +33,12 @@ use crate::rows::{
     field_activity, load_task, parse_sql, storage_error, task_exists, update_task_row,
 };
 use crate::tx::{MutationEffect, canonical_json, mutate};
+
+/// Canonical fixed-width UTC text for reminder comparison columns.
+#[inline]
+fn ts_text(ts: Timestamp) -> String {
+    format_reminder_timestamp(ts)
+}
 
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -52,7 +61,7 @@ pub(crate) fn load_reminder_occurrence(
                 next_attempt_at, terminal_channel, terminal_error_code, created_at, updated_at
          FROM reminder_occurrences
          WHERE task_id = ?1 AND remind_at = ?2",
-        params![task_id.to_string(), remind_at.to_string()],
+        params![task_id.to_string(), ts_text(remind_at)],
         map_occurrence_row,
     )
     .optional()
@@ -136,6 +145,19 @@ fn parse_optional_timestamp(value: Option<String>) -> rusqlite::Result<Option<Ti
     }
 }
 
+/// Load occurrence rows for the given tasks after compacting terminal audit.
+///
+/// Call this before user-mutation reminder snapshots so receipt/undo material
+/// cannot grow past the frozen global audit bounds plus current intents.
+pub(crate) fn load_reminder_snapshot(
+    tx: &Transaction<'_>,
+    task_ids: &[TaskId],
+    now: Timestamp,
+) -> Result<Vec<ReminderOccurrence>, RepositoryError> {
+    compact_terminal_reminder_audit(tx, now)?;
+    load_reminders_for_tasks(tx, task_ids)
+}
+
 pub(crate) fn load_reminders_for_tasks(
     tx: &Transaction<'_>,
     task_ids: &[TaskId],
@@ -143,30 +165,125 @@ pub(crate) fn load_reminders_for_tasks(
     if task_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let mut out = Vec::new();
-    for task_id in task_ids {
-        let mut statement = tx
-            .prepare(
-                "SELECT task_id, remind_at, state, claim_term, claim_expires_at, attempts,
-                        next_attempt_at, terminal_channel, terminal_error_code, created_at, updated_at
-                 FROM reminder_occurrences
-                 WHERE task_id = ?1
-                 ORDER BY remind_at, task_id",
-            )
-            .map_err(storage_error)?;
-        let rows = statement
-            .query_map(params![task_id.to_string()], map_occurrence_row)
-            .map_err(storage_error)?;
-        for row in rows {
-            out.push(row.map_err(storage_error)?);
+    // One batched query — never one prepare/query per task.
+    let mut placeholders = String::new();
+    for index in 0..task_ids.len() {
+        if index > 0 {
+            placeholders.push(',');
         }
+        placeholders.push('?');
     }
-    out.sort_by(|left, right| {
-        left.remind_at
-            .cmp(&right.remind_at)
-            .then_with(|| left.task_id.as_uuid().cmp(&right.task_id.as_uuid()))
-    });
+    let sql = format!(
+        "SELECT task_id, remind_at, state, claim_term, claim_expires_at, attempts,
+                next_attempt_at, terminal_channel, terminal_error_code, created_at, updated_at
+         FROM reminder_occurrences
+         WHERE task_id IN ({placeholders})
+         ORDER BY remind_at ASC, task_id ASC"
+    );
+    let mut statement = tx.prepare(&sql).map_err(storage_error)?;
+    let params_owned: Vec<String> = task_ids.iter().map(ToString::to_string).collect();
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_owned
+        .iter()
+        .map(|value| value as &dyn rusqlite::types::ToSql)
+        .collect();
+    let rows = statement
+        .query_map(params_refs.as_slice(), map_occurrence_row)
+        .map_err(storage_error)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(storage_error)?);
+    }
     Ok(out)
+}
+
+/// Prune terminal reminder audit under the frozen retention bounds.
+///
+/// Keeps every pending/claimed row and each task's current `remind_at` intent.
+/// Other delivered/failed/cancelled rows older than 90 days are removed first,
+/// then oldest remaining terminal audit rows until at most 2_000 rows and 2 MiB
+/// of serialized terminal audit material remain. Control-plane only: no revision,
+/// event, or receipt.
+pub(crate) fn compact_terminal_reminder_audit(
+    tx: &Transaction<'_>,
+    now: Timestamp,
+) -> Result<(), RepositoryError> {
+    // Timestamp arithmetic rejects calendar-day units; express retention in hours.
+    let cutoff = now
+        .checked_sub((REMINDER_TERMINAL_RETENTION_DAYS * 24).hours())
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    let cutoff_text = ts_text(cutoff);
+
+    // Age prune first: drop unprotected terminal rows past the retention window.
+    tx.execute(
+        "DELETE FROM reminder_occurrences
+         WHERE state IN ('delivered', 'failed', 'cancelled')
+           AND updated_at < ?1
+           AND NOT EXISTS (
+                SELECT 1 FROM tasks t
+                WHERE t.id = reminder_occurrences.task_id
+                  AND t.remind_at IS NOT NULL
+                  AND t.remind_at = reminder_occurrences.remind_at
+           )",
+        params![cutoff_text.as_str()],
+    )
+    .map_err(storage_error)?;
+
+    // Load remaining unprotected terminal audit rows, oldest first.
+    let mut statement = tx
+        .prepare(
+            "SELECT task_id, remind_at, state, claim_term, claim_expires_at, attempts,
+                    next_attempt_at, terminal_channel, terminal_error_code, created_at, updated_at
+             FROM reminder_occurrences
+             WHERE state IN ('delivered', 'failed', 'cancelled')
+               AND NOT EXISTS (
+                    SELECT 1 FROM tasks t
+                    WHERE t.id = reminder_occurrences.task_id
+                      AND t.remind_at IS NOT NULL
+                      AND t.remind_at = reminder_occurrences.remind_at
+               )
+             ORDER BY updated_at ASC, remind_at ASC, task_id ASC",
+        )
+        .map_err(storage_error)?;
+    let rows = statement
+        .query_map([], map_occurrence_row)
+        .map_err(storage_error)?;
+    let mut audit = Vec::new();
+    for row in rows {
+        audit.push(row.map_err(storage_error)?);
+    }
+    drop(statement);
+
+    if audit.is_empty() {
+        return Ok(());
+    }
+
+    // Measure newest-retained suffix against count and serialized-byte ceilings.
+    let mut keep_from = 0usize;
+    let mut bytes = 0usize;
+    for (index, occurrence) in audit.iter().enumerate().rev() {
+        let encoded = serde_json::to_vec(occurrence)
+            .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+        let next_bytes = bytes.saturating_add(encoded.len());
+        let kept = audit.len() - index;
+        if kept > REMINDER_TERMINAL_MAX_ROWS || next_bytes > REMINDER_TERMINAL_MAX_BYTES {
+            keep_from = index + 1;
+            break;
+        }
+        bytes = next_bytes;
+        keep_from = index;
+    }
+
+    for occurrence in &audit[..keep_from] {
+        tx.execute(
+            "DELETE FROM reminder_occurrences WHERE task_id = ?1 AND remind_at = ?2",
+            params![
+                occurrence.task_id.to_string(),
+                ts_text(occurrence.remind_at)
+            ],
+        )
+        .map_err(storage_error)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn upsert_reminder_occurrence(
@@ -190,21 +307,21 @@ pub(crate) fn upsert_reminder_occurrence(
             updated_at = excluded.updated_at",
         params![
             occurrence.task_id.to_string(),
-            occurrence.remind_at.to_string(),
+            ts_text(occurrence.remind_at),
             occurrence.state.as_str(),
             occurrence
                 .claim_term
                 .as_ref()
                 .map(ReminderFenceTerm::as_str),
-            occurrence.claim_expires_at.map(|value| value.to_string()),
+            occurrence.claim_expires_at.map(ts_text),
             i64::from(occurrence.attempts),
-            occurrence.next_attempt_at.map(|value| value.to_string()),
+            occurrence.next_attempt_at.map(ts_text),
             occurrence.terminal_channel.map(ReminderChannel::as_str),
             occurrence
                 .terminal_error_code
                 .map(ReminderFailureCode::as_str),
-            occurrence.created_at.to_string(),
-            occurrence.updated_at.to_string(),
+            ts_text(occurrence.created_at),
+            ts_text(occurrence.updated_at),
         ],
     )
     .map_err(storage_error)?;
@@ -257,7 +374,7 @@ pub(crate) fn cancel_pending_occurrences(
              next_attempt_at = NULL,
              updated_at = ?1
          WHERE task_id = ?2 AND state = 'pending'",
-        params![now.to_string(), task_id.to_string()],
+        params![ts_text(now), task_id.to_string()],
     )
     .map_err(storage_error)?;
     Ok(())
@@ -337,7 +454,7 @@ pub(crate) fn sync_task_reminder_intent(
                      WHERE task_id = ?2
                        AND state = 'pending'
                        AND remind_at != ?3",
-                    params![now.to_string(), task.id.to_string(), remind_at.to_string()],
+                    params![ts_text(now), task.id.to_string(), ts_text(remind_at)],
                 )
                 .map_err(storage_error)?;
                 ensure_pending_occurrence(tx, task.id, remind_at, now)
@@ -379,7 +496,7 @@ pub(crate) fn reschedule_reminder(
 ) -> Result<CommittedMutation, RepositoryError> {
     let request = canonical_json(&ReminderUserReq::RescheduleReminder {
         task_id: task_id.to_string(),
-        remind_at: remind_at.to_string(),
+        remind_at: ts_text(remind_at),
     })?;
     mutate(
         connection,
@@ -391,7 +508,7 @@ pub(crate) fn reschedule_reminder(
             if before.status != TaskStatus::Pending {
                 return Err(RepositoryError::Conflict);
             }
-            let before_reminders = load_reminders_for_tasks(tx, &[task_id])?;
+            let before_reminders = load_reminder_snapshot(tx, &[task_id], now)?;
             let patch = TaskPatch {
                 remind_at: Some(Some(remind_at)),
                 ..TaskPatch::default()
@@ -402,7 +519,7 @@ pub(crate) fn reschedule_reminder(
             after.revision = revision;
             update_task_row(tx, &after)?;
             sync_task_reminder_intent(tx, &after, now)?;
-            let after_reminders = load_reminders_for_tasks(tx, &[task_id])?;
+            let after_reminders = load_reminder_snapshot(tx, &[task_id], now)?;
             let activity = diff_task_fields(&before, &after, revision, operation_id, now, 0);
             let undo = undo_pair(
                 &Inverse::RestoreTasks {
@@ -449,7 +566,7 @@ pub(crate) fn dismiss_reminder(
             if before.status != TaskStatus::Pending {
                 return Err(RepositoryError::Conflict);
             }
-            let before_reminders = load_reminders_for_tasks(tx, &[task_id])?;
+            let before_reminders = load_reminder_snapshot(tx, &[task_id], now)?;
             let patch = TaskPatch {
                 remind_at: Some(None),
                 ..TaskPatch::default()
@@ -460,7 +577,7 @@ pub(crate) fn dismiss_reminder(
             after.revision = revision;
             update_task_row(tx, &after)?;
             sync_task_reminder_intent(tx, &after, now)?;
-            let after_reminders = load_reminders_for_tasks(tx, &[task_id])?;
+            let after_reminders = load_reminder_snapshot(tx, &[task_id], now)?;
             let activity = if before.remind_at.is_none() && after.remind_at.is_none() {
                 // Exact no-op still records a stable activity row for receipt identity.
                 vec![field_activity(
@@ -504,14 +621,19 @@ pub(crate) fn dismiss_reminder(
 }
 
 pub(crate) fn list_task_reminders(
-    connection: &Connection,
+    connection: &mut Connection,
     task_id: TaskId,
+    now: Timestamp,
 ) -> Result<Vec<ReminderOccurrence>, RepositoryError> {
-    let tx = connection.unchecked_transaction().map_err(storage_error)?;
+    let tx = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(storage_error)?;
     if !task_exists(&tx, task_id)? {
         return Err(RepositoryError::NotFound);
     }
-    load_reminders_for_tasks(&tx, &[task_id])
+    let rows = load_reminder_snapshot(&tx, &[task_id], now)?;
+    tx.commit().map_err(storage_error)?;
+    Ok(rows)
 }
 
 // ---------------------------------------------------------------------------
@@ -575,18 +697,15 @@ fn write_lease(tx: &Transaction<'_>, lease: &ReminderDeliveryLease) -> Result<()
             updated_at = excluded.updated_at",
         params![
             lease.fence_term.as_str(),
-            lease.expires_at.to_string(),
-            lease.updated_at.to_string(),
+            ts_text(lease.expires_at),
+            ts_text(lease.updated_at),
         ],
     )
     .map_err(storage_error)?;
     Ok(())
 }
 
-/// Require the caller's term to still be the durable lease owner.
-///
-/// Expiry alone does not fence out settlement of in-flight claims; only a term
-/// change does. Claim acquisition still requires an unexpired lease.
+/// Require the caller's term to still be the durable lease owner (term only).
 fn require_current_term(
     tx: &Transaction<'_>,
     fence_term: &ReminderFenceTerm,
@@ -668,8 +787,8 @@ pub(crate) fn release_reminder_lease(
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(storage_error)?;
     let _ = require_current_term(&tx, &fence_term)?;
-    // Expire immediately while keeping the term so in-flight settles with this
-    // term can still finish until another owner acquires a fresh term.
+    // Expire immediately. Still-claimed settlement requires an unexpired lease,
+    // so release fails closed for in-flight delivered/failed callbacks.
     let lease = ReminderDeliveryLease {
         fence_term,
         expires_at: now,
@@ -696,7 +815,7 @@ fn read_claimed_row(
         remind_at,
         claim_term: fence_term.clone(),
         claim_expires_at,
-        attempts: occurrence.attempts,
+        claim_attempt: occurrence.attempts,
     })
 }
 
@@ -714,7 +833,8 @@ pub(crate) fn claim_due_reminders(
         .map_err(storage_error)?;
     let _ = require_unexpired_owner(&tx, &fence_term, now)?;
     let claim_expires_at = add_secs(now, claim_secs)?;
-    let now_s = now.to_string();
+    let now_s = ts_text(now);
+    let claim_expires_s = ts_text(claim_expires_at);
 
     // Same current owner recovers its still-unexpired claimed batch first so a
     // coordinator restart can finish in-flight work before taking new pending rows.
@@ -811,10 +931,10 @@ pub(crate) fn claim_due_reminders(
                    AND (next_attempt_at IS NULL OR next_attempt_at <= ?3)",
                 params![
                     fence_term.as_str(),
-                    claim_expires_at.to_string(),
+                    claim_expires_s.as_str(),
                     now_s.as_str(),
                     task_id.to_string(),
-                    remind_at.to_string(),
+                    ts_text(remind_at),
                 ],
             )
             .map_err(storage_error)?;
@@ -841,6 +961,7 @@ fn settle_claimed(
     fence_term: &ReminderFenceTerm,
     task_id: TaskId,
     remind_at: Timestamp,
+    claim_attempt: u32,
     now: Timestamp,
     state: ReminderOccurrenceState,
     channel: Option<ReminderChannel>,
@@ -849,17 +970,19 @@ fn settle_claimed(
     let tx = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(storage_error)?;
-    // Stale owners are rejected once the lease term changes.
-    let _ = require_current_term(&tx, fence_term)?;
     let Some(existing) = load_reminder_occurrence(&tx, task_id, remind_at)? else {
         return Err(RepositoryError::NotFound);
     };
     match existing.state {
         ReminderOccurrenceState::Delivered => {
-            // Durable ack is idempotent for task+instant+channel.
+            // Exact duplicate from the same claim attempt stays idempotent even
+            // after lease release/expiry. Conflicting terminal results fail closed.
             if state == ReminderOccurrenceState::Delivered
                 && existing.terminal_channel == channel
                 && error.is_none()
+                && existing.attempts == claim_attempt
+                && existing.claim_term.as_ref().map(ReminderFenceTerm::as_str)
+                    == Some(fence_term.as_str())
             {
                 tx.commit().map_err(storage_error)?;
                 return Ok(());
@@ -870,6 +993,9 @@ fn settle_claimed(
             if state == ReminderOccurrenceState::Failed
                 && existing.terminal_error_code == error
                 && channel.is_none()
+                && existing.attempts == claim_attempt
+                && existing.claim_term.as_ref().map(ReminderFenceTerm::as_str)
+                    == Some(fence_term.as_str())
             {
                 tx.commit().map_err(storage_error)?;
                 return Ok(());
@@ -881,21 +1007,60 @@ fn settle_claimed(
             return Err(RepositoryError::Conflict);
         }
     }
+
+    // Live claim settlement requires matching term+attempt, unexpired claim, and
+    // a current unexpired lease with the same term.
+    let _ = require_unexpired_owner(&tx, fence_term, now)?;
     let Some(claim_term) = existing.claim_term.as_ref() else {
         return Err(RepositoryError::Conflict);
     };
     if claim_term.as_str() != fence_term.as_str() {
         return Err(RepositoryError::Conflict);
     }
-    let mut settled = existing;
-    settled.state = state;
-    settled.terminal_channel = channel;
-    settled.terminal_error_code = error;
-    settled.claim_term = Some(fence_term.clone());
-    settled.claim_expires_at = None;
-    settled.next_attempt_at = None;
-    settled.updated_at = now;
-    upsert_reminder_occurrence(&tx, &settled)?;
+    if existing.attempts != claim_attempt {
+        return Err(RepositoryError::Conflict);
+    }
+    let Some(claim_expires_at) = existing.claim_expires_at else {
+        return Err(RepositoryError::Conflict);
+    };
+    if claim_expires_at <= now {
+        return Err(RepositoryError::Conflict);
+    }
+
+    let now_s = ts_text(now);
+    let updated = tx
+        .execute(
+            "UPDATE reminder_occurrences
+             SET state = ?1,
+                 terminal_channel = ?2,
+                 terminal_error_code = ?3,
+                 claim_expires_at = NULL,
+                 next_attempt_at = NULL,
+                 updated_at = ?4
+             WHERE task_id = ?5
+               AND remind_at = ?6
+               AND state = 'claimed'
+               AND claim_term = ?7
+               AND attempts = ?8
+               AND claim_expires_at IS NOT NULL
+               AND claim_expires_at > ?4",
+            params![
+                state.as_str(),
+                channel.map(ReminderChannel::as_str),
+                error.map(ReminderFailureCode::as_str),
+                now_s.as_str(),
+                task_id.to_string(),
+                ts_text(remind_at),
+                fence_term.as_str(),
+                i64::from(claim_attempt),
+            ],
+        )
+        .map_err(storage_error)?;
+    if updated != 1 {
+        return Err(RepositoryError::Conflict);
+    }
+    // Bound terminal audit after control-plane settlement; same transaction.
+    compact_terminal_reminder_audit(&tx, now)?;
     tx.commit().map_err(storage_error)?;
     Ok(())
 }
@@ -905,6 +1070,7 @@ pub(crate) fn settle_reminder_delivered(
     fence_term: ReminderFenceTerm,
     task_id: TaskId,
     remind_at: Timestamp,
+    claim_attempt: u32,
     channel: ReminderChannel,
     now: Timestamp,
 ) -> Result<(), RepositoryError> {
@@ -913,6 +1079,7 @@ pub(crate) fn settle_reminder_delivered(
         &fence_term,
         task_id,
         remind_at,
+        claim_attempt,
         now,
         ReminderOccurrenceState::Delivered,
         Some(channel),
@@ -925,6 +1092,7 @@ pub(crate) fn settle_reminder_failed(
     fence_term: ReminderFenceTerm,
     task_id: TaskId,
     remind_at: Timestamp,
+    claim_attempt: u32,
     error: ReminderFailureCode,
     now: Timestamp,
 ) -> Result<(), RepositoryError> {
@@ -940,6 +1108,7 @@ pub(crate) fn settle_reminder_failed(
         &fence_term,
         task_id,
         remind_at,
+        claim_attempt,
         now,
         ReminderOccurrenceState::Failed,
         None,
@@ -960,7 +1129,7 @@ pub(crate) fn mark_owner_lost_reminders(
     // Only the current unexpired owner may recover abandoned claims. This is an
     // explicit sweep — expired claims are never auto-retried in the background.
     let _ = require_unexpired_owner(&tx, &fence_term, now)?;
-    let now_s = now.to_string();
+    let now_s = ts_text(now);
     let mut statement = tx
         .prepare(
             "SELECT task_id, remind_at, attempts
@@ -1014,10 +1183,10 @@ pub(crate) fn mark_owner_lost_reminders(
                    AND claim_expires_at IS NOT NULL
                    AND claim_expires_at <= ?2",
                 params![
-                    next_attempt_at.to_string(),
+                    ts_text(next_attempt_at),
                     now_s.as_str(),
                     task_id.to_string(),
-                    remind_at.to_string()
+                    ts_text(remind_at)
                 ],
             )
             .map_err(storage_error)?;

@@ -348,22 +348,24 @@ pub trait Repository: Send + Sync + 'static {
         claim_secs: u64,
     ) -> RepositoryFuture<'_, Vec<ClaimedReminder>>;
 
-    /// Control-plane: settle a claim as delivered with the exact claim term.
+    /// Control-plane: settle a claim as delivered with the exact claim term+attempt.
     fn settle_reminder_delivered(
         &self,
         fence_term: ReminderFenceTerm,
         task_id: TaskId,
         remind_at: Timestamp,
+        claim_attempt: u32,
         channel: ReminderChannel,
         now: Timestamp,
     ) -> RepositoryFuture<'_, ()>;
 
-    /// Control-plane: settle a claim as failed with the exact claim term.
+    /// Control-plane: settle a claim as failed with the exact claim term+attempt.
     fn settle_reminder_failed(
         &self,
         fence_term: ReminderFenceTerm,
         task_id: TaskId,
         remind_at: Timestamp,
+        claim_attempt: u32,
         error: ReminderFailureCode,
         now: Timestamp,
     ) -> RepositoryFuture<'_, ()>;

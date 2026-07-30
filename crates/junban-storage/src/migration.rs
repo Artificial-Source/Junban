@@ -6,6 +6,7 @@ use std::{
 };
 
 use jiff::Timestamp;
+use junban_domain::format_reminder_timestamp;
 use rusqlite::{Connection, MAIN_DB, OpenFlags, Transaction, TransactionBehavior};
 
 /// Highest schema version applied by this crate.
@@ -131,7 +132,161 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
         ));
     }
 
+    // Schema v3 is active but unreleased. Coherently rewrite any variable-width
+    // reminder comparison text written by the immediately preceding v3 build so
+    // SQL ordering matches instant order. Idempotent on already-canonical rows.
+    if applied == CURRENT_SCHEMA_VERSION {
+        normalize_reminder_timestamp_text(connection)?;
+    }
+
     Ok(())
+}
+
+/// Rewrite reminder comparison columns to fixed nine-fractional-digit UTC text.
+fn normalize_reminder_timestamp_text(connection: &mut Connection) -> rusqlite::Result<()> {
+    let exists: bool = connection.query_row(
+        "SELECT COUNT(*) > 0 FROM sqlite_master
+         WHERE type = 'table' AND name = 'reminder_occurrences'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Ok(());
+    }
+
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+    // tasks.remind_at is a reminder comparison column (intent / protect-from-compact key).
+    let mut task_rows = Vec::new();
+    {
+        let mut statement =
+            tx.prepare("SELECT id, remind_at FROM tasks WHERE remind_at IS NOT NULL")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            task_rows.push(row?);
+        }
+    }
+    for (id, raw) in task_rows {
+        if let Some(canonical) = canonicalize_reminder_ts(&raw) {
+            tx.execute(
+                "UPDATE tasks SET remind_at = ?1 WHERE id = ?2 AND remind_at = ?3",
+                rusqlite::params![canonical, id, raw],
+            )?;
+        }
+    }
+
+    // Occurrence rows: PK remind_at may change string form for the same instant.
+    let mut occurrence_rows = Vec::new();
+    {
+        let mut statement = tx.prepare(
+            "SELECT task_id, remind_at, claim_expires_at, next_attempt_at, created_at, updated_at
+             FROM reminder_occurrences",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+        for row in rows {
+            occurrence_rows.push(row?);
+        }
+    }
+    for (task_id, remind_at, claim_expires_at, next_attempt_at, created_at, updated_at) in
+        occurrence_rows
+    {
+        let new_remind_at =
+            canonicalize_reminder_ts(&remind_at).unwrap_or_else(|| remind_at.clone());
+        let new_claim_expires = claim_expires_at
+            .as_deref()
+            .and_then(canonicalize_reminder_ts)
+            .or(claim_expires_at.clone());
+        let new_next_attempt = next_attempt_at
+            .as_deref()
+            .and_then(canonicalize_reminder_ts)
+            .or(next_attempt_at.clone());
+        let new_created =
+            canonicalize_reminder_ts(&created_at).unwrap_or_else(|| created_at.clone());
+        let new_updated =
+            canonicalize_reminder_ts(&updated_at).unwrap_or_else(|| updated_at.clone());
+        if new_remind_at == remind_at
+            && new_claim_expires == claim_expires_at
+            && new_next_attempt == next_attempt_at
+            && new_created == created_at
+            && new_updated == updated_at
+        {
+            continue;
+        }
+        // UPDATE may change the composite PK string; no-op when already canonical.
+        tx.execute(
+            "UPDATE reminder_occurrences
+             SET remind_at = ?1,
+                 claim_expires_at = ?2,
+                 next_attempt_at = ?3,
+                 created_at = ?4,
+                 updated_at = ?5
+             WHERE task_id = ?6 AND remind_at = ?7",
+            rusqlite::params![
+                new_remind_at,
+                new_claim_expires,
+                new_next_attempt,
+                new_created,
+                new_updated,
+                task_id,
+                remind_at,
+            ],
+        )?;
+    }
+
+    let mut lease_rows = Vec::new();
+    {
+        let mut statement =
+            tx.prepare("SELECT singleton, expires_at, updated_at FROM reminder_delivery_lease")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            lease_rows.push(row?);
+        }
+    }
+    for (singleton, expires_at, updated_at) in lease_rows {
+        let new_expires =
+            canonicalize_reminder_ts(&expires_at).unwrap_or_else(|| expires_at.clone());
+        let new_updated =
+            canonicalize_reminder_ts(&updated_at).unwrap_or_else(|| updated_at.clone());
+        if new_expires == expires_at && new_updated == updated_at {
+            continue;
+        }
+        tx.execute(
+            "UPDATE reminder_delivery_lease
+             SET expires_at = ?1, updated_at = ?2
+             WHERE singleton = ?3",
+            rusqlite::params![new_expires, new_updated, singleton],
+        )?;
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
+fn canonicalize_reminder_ts(raw: &str) -> Option<String> {
+    let parsed = raw.parse::<Timestamp>().ok()?;
+    let canonical = format_reminder_timestamp(parsed);
+    if canonical == raw {
+        None
+    } else {
+        Some(canonical)
+    }
 }
 
 fn unsupported_schema(version: i64) -> rusqlite::Error {

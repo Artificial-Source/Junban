@@ -3211,21 +3211,24 @@ async fn reminder_settle_delivered_failed_and_stale_rejection() {
         .unwrap();
     assert_eq!(claimed.len(), 1);
     let remind_at = claimed[0].remind_at;
+    let attempt = claimed[0].claim_attempt;
 
     repo.settle_reminder_delivered(
         lease.fence_term.clone(),
         id,
         remind_at,
+        attempt,
         ReminderChannel::InApp,
         t0,
     )
     .await
     .unwrap();
-    // Idempotent ack for same task+instant+channel.
+    // Idempotent ack for same task+instant+attempt+channel.
     repo.settle_reminder_delivered(
         lease.fence_term.clone(),
         id,
         remind_at,
+        attempt,
         ReminderChannel::InApp,
         t0,
     )
@@ -3246,6 +3249,7 @@ async fn reminder_settle_delivered_failed_and_stale_rejection() {
         lease.fence_term.clone(),
         id2,
         claimed2[0].remind_at,
+        claimed2[0].claim_attempt,
         ReminderFailureCode::ChannelFailed,
         t0,
     )
@@ -3275,6 +3279,7 @@ async fn reminder_settle_delivered_failed_and_stale_rejection() {
             lease.fence_term.clone(),
             id3,
             claimed3[0].remind_at,
+            claimed3[0].claim_attempt,
             ReminderChannel::Sound,
             later,
         )
@@ -3471,6 +3476,7 @@ async fn reminder_control_plane_does_not_bump_task_revision() {
         lease.fence_term.clone(),
         id,
         claimed[0].remind_at,
+        claimed[0].claim_attempt,
         ReminderChannel::WebNotification,
         t0,
     )
@@ -3479,4 +3485,402 @@ async fn reminder_control_plane_does_not_bump_task_revision() {
     let after_task = repo.get_task(id).await.unwrap();
     assert_eq!(after_task.revision, before_task.revision);
     assert_eq!(repo.diagnostics().await.unwrap().revision, before_rev);
+}
+
+#[tokio::test]
+async fn reminder_settle_binds_claim_attempt_and_unexpired_lease() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let t0: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
+
+    // Release fails closed for still-claimed settlement.
+    let id_release = create_with_remind_at(&repo, "release", "2026-07-28T11:00:00Z").await;
+    let lease = repo
+        .acquire_reminder_lease(t0, DEFAULT_REMINDER_LEASE_SECS)
+        .await
+        .unwrap();
+    let claimed = repo
+        .claim_due_reminders(lease.fence_term.clone(), t0, 1, 90)
+        .await
+        .unwrap();
+    assert_eq!(claimed[0].task_id, id_release);
+    repo.release_reminder_lease(lease.fence_term.clone(), t0)
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.settle_reminder_delivered(
+            lease.fence_term.clone(),
+            id_release,
+            claimed[0].remind_at,
+            claimed[0].claim_attempt,
+            ReminderChannel::InApp,
+            t0,
+        )
+        .await,
+        Err(RepositoryError::Conflict)
+    );
+
+    // Claim expiry fails closed while the lease remains live.
+    let id_exp = create_with_remind_at(&repo, "expiry", "2026-07-28T11:01:00Z").await;
+    let t_exp: Timestamp = "2026-07-28T12:05:00Z".parse().unwrap();
+    let lease2 = repo
+        .acquire_reminder_lease(t_exp, DEFAULT_REMINDER_LEASE_SECS)
+        .await
+        .unwrap();
+    let claimed_exp = repo
+        .claim_due_reminders(lease2.fence_term.clone(), t_exp, 1, 1)
+        .await
+        .unwrap();
+    assert_eq!(claimed_exp[0].task_id, id_exp);
+    let after_claim_expiry: Timestamp = "2026-07-28T12:05:02Z".parse().unwrap();
+    assert_eq!(
+        repo.settle_reminder_delivered(
+            lease2.fence_term.clone(),
+            id_exp,
+            claimed_exp[0].remind_at,
+            claimed_exp[0].claim_attempt,
+            ReminderChannel::InApp,
+            after_claim_expiry,
+        )
+        .await,
+        Err(RepositoryError::Conflict)
+    );
+
+    // Same-term reclaim: a delayed prior attempt must not settle the new claim.
+    // Use a fresh profile so leftover claimed rows cannot occupy the batch.
+    drop(repo);
+    drop(owner);
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let id_reclaim = create_with_remind_at(&repo, "reclaim", "2026-07-28T11:02:00Z").await;
+    let t_claim: Timestamp = "2026-07-28T12:10:00Z".parse().unwrap();
+    let lease3 = repo
+        .acquire_reminder_lease(t_claim, DEFAULT_REMINDER_LEASE_SECS)
+        .await
+        .unwrap();
+    let first = repo
+        .claim_due_reminders(lease3.fence_term.clone(), t_claim, 1, 1)
+        .await
+        .unwrap();
+    assert_eq!(first[0].task_id, id_reclaim);
+    assert_eq!(first[0].claim_attempt, 1);
+    let t_lost = first[0].claim_expires_at.checked_add(1.seconds()).unwrap();
+    let _ = repo
+        .renew_reminder_lease(lease3.fence_term.clone(), t_lost, 90)
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.mark_owner_lost_reminders(lease3.fence_term.clone(), t_lost, 10)
+            .await
+            .unwrap(),
+        1
+    );
+    let row = &repo.list_task_reminders(id_reclaim).await.unwrap()[0];
+    let after_backoff = row.next_attempt_at.unwrap();
+    let second = repo
+        .claim_due_reminders(lease3.fence_term.clone(), after_backoff, 1, 90)
+        .await
+        .unwrap();
+    assert_eq!(second[0].claim_attempt, 2);
+    assert_eq!(
+        repo.settle_reminder_delivered(
+            lease3.fence_term.clone(),
+            id_reclaim,
+            first[0].remind_at,
+            first[0].claim_attempt,
+            ReminderChannel::InApp,
+            after_backoff,
+        )
+        .await,
+        Err(RepositoryError::Conflict)
+    );
+    repo.settle_reminder_delivered(
+        lease3.fence_term.clone(),
+        id_reclaim,
+        second[0].remind_at,
+        second[0].claim_attempt,
+        ReminderChannel::InApp,
+        after_backoff,
+    )
+    .await
+    .unwrap();
+    // Exact duplicate remains idempotent after lease release.
+    repo.release_reminder_lease(lease3.fence_term.clone(), after_backoff)
+        .await
+        .unwrap();
+    repo.settle_reminder_delivered(
+        lease3.fence_term.clone(),
+        id_reclaim,
+        second[0].remind_at,
+        second[0].claim_attempt,
+        ReminderChannel::InApp,
+        after_backoff,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        repo.settle_reminder_delivered(
+            lease3.fence_term.clone(),
+            id_reclaim,
+            second[0].remind_at,
+            second[0].claim_attempt,
+            ReminderChannel::Sound,
+            after_backoff,
+        )
+        .await,
+        Err(RepositoryError::Conflict)
+    );
+
+    // Fence replacement fails closed.
+    drop(repo);
+    drop(owner);
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let id_fence = create_with_remind_at(&repo, "fence", "2026-07-28T11:03:00Z").await;
+    let t_fence: Timestamp = "2026-07-28T12:20:00Z".parse().unwrap();
+    let lease_a = repo
+        .acquire_reminder_lease(t_fence, DEFAULT_REMINDER_LEASE_SECS)
+        .await
+        .unwrap();
+    let claimed_a = repo
+        .claim_due_reminders(lease_a.fence_term.clone(), t_fence, 1, 90)
+        .await
+        .unwrap();
+    assert_eq!(claimed_a[0].task_id, id_fence);
+    repo.release_reminder_lease(lease_a.fence_term.clone(), t_fence)
+        .await
+        .unwrap();
+    let t_b = t_fence.checked_add(1.seconds()).unwrap();
+    let _lease_b = repo
+        .acquire_reminder_lease(t_b, DEFAULT_REMINDER_LEASE_SECS)
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.settle_reminder_delivered(
+            lease_a.fence_term.clone(),
+            id_fence,
+            claimed_a[0].remind_at,
+            claimed_a[0].claim_attempt,
+            ReminderChannel::InApp,
+            t_b,
+        )
+        .await,
+        Err(RepositoryError::Conflict)
+    );
+}
+
+#[tokio::test]
+async fn reminder_terminal_compaction_bounds_and_preserves_live_intent() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let t0: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
+
+    let live = create_with_remind_at(&repo, "live", "2026-07-28T11:00:00Z").await;
+    let claimed_id = create_with_remind_at(&repo, "claimed", "2026-07-28T10:00:00Z").await;
+    let lease = repo
+        .acquire_reminder_lease(t0, DEFAULT_REMINDER_LEASE_SECS)
+        .await
+        .unwrap();
+    let claimed = repo
+        .claim_due_reminders(lease.fence_term.clone(), t0, 1, 90)
+        .await
+        .unwrap();
+    assert_eq!(claimed[0].task_id, claimed_id);
+
+    // 50 age-expired terminal rows + 2050 recent terminal rows over the count ceiling.
+    let mut seed = String::new();
+    for i in 0..2100 {
+        let task = format!("00000000-0000-4000-8000-{i:012x}");
+        let remind = format!(
+            "2025-06-01T00:{:02}:{:02}.000000000Z",
+            (i / 60) % 60,
+            i % 60
+        );
+        let updated = if i < 50 {
+            "2025-01-01T00:00:00.000000000Z".to_owned()
+        } else {
+            format!("2026-07-01T00:00:00.{i:09}Z")
+        };
+        seed.push_str(&format!(
+            "INSERT INTO tasks(id, title, status, created_at, updated_at, revision)
+             VALUES ('{task}', 't{i}', 'pending',
+                    '2026-07-28T12:00:00.000000000Z',
+                    '2026-07-28T12:00:00.000000000Z', 1);
+             INSERT INTO reminder_occurrences(
+                task_id, remind_at, state, attempts, created_at, updated_at
+             ) VALUES (
+                '{task}', '{remind}', 'delivered', 1,
+                '{updated}', '{updated}'
+             );"
+        ));
+    }
+    repo.execute_batch(seed).await.unwrap();
+
+    let before_rev = repo.diagnostics().await.unwrap().revision;
+    repo.settle_reminder_delivered(
+        lease.fence_term.clone(),
+        claimed_id,
+        claimed[0].remind_at,
+        claimed[0].claim_attempt,
+        ReminderChannel::InApp,
+        t0,
+    )
+    .await
+    .unwrap();
+    // Control-plane compaction must not churn the user revision.
+    assert_eq!(repo.diagnostics().await.unwrap().revision, before_rev);
+
+    let live_rows = repo.list_task_reminders(live).await.unwrap();
+    assert!(live_rows.iter().any(|row| {
+        row.state == ReminderOccurrenceState::Pending
+            && row.remind_at.to_string() == "2026-07-28T11:00:00Z"
+    }));
+    assert_eq!(
+        repo.list_task_reminders(claimed_id).await.unwrap()[0].state,
+        ReminderOccurrenceState::Delivered
+    );
+
+    // User mutation snapshot path also compacts and stays bounded.
+    repo.reschedule_reminder(
+        operation(),
+        live,
+        "2026-07-28T11:00:00Z".parse().unwrap(),
+        t0,
+    )
+    .await
+    .unwrap();
+
+    // Age prune removes the 50 oldest-updated seeds; count prune then drops the
+    // next-oldest recent seeds so at most 2000 unprotected terminals remain.
+    let aged_id = TaskId::parse("00000000-0000-4000-8000-000000000000").unwrap();
+    let pruned_by_count =
+        TaskId::parse("00000000-0000-4000-8000-000000000032").unwrap(); // i=50
+    let kept_newest =
+        TaskId::parse("00000000-0000-4000-8000-000000000833").unwrap(); // i=2099
+    assert!(
+        repo.list_task_reminders(aged_id)
+            .await
+            .unwrap()
+            .is_empty(),
+        "rows older than 90 days must be pruned"
+    );
+    assert!(
+        repo.list_task_reminders(pruned_by_count)
+            .await
+            .unwrap()
+            .is_empty(),
+        "oldest terminal audit beyond the 2000-row ceiling must be pruned"
+    );
+    assert_eq!(
+        repo.list_task_reminders(kept_newest)
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "newest terminal audit rows must be retained"
+    );
+    // Snapshot for the live task cannot retain unbounded historical terminals.
+    assert!(repo.list_task_reminders(live).await.unwrap().len() <= 2);
+}
+
+#[tokio::test]
+async fn reminder_timestamps_use_canonical_sortable_text() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    // Fractional-second due ordering must follow instant order.
+    let early = create_with_remind_at(&repo, "early", "2026-07-28T15:00:00.1Z").await;
+    let whole = create_with_remind_at(&repo, "whole", "2026-07-28T15:00:00Z").await;
+    let mid = create_with_remind_at(&repo, "mid", "2026-07-28T15:00:00.5Z").await;
+
+    let t0: Timestamp = "2026-07-28T15:00:01Z".parse().unwrap();
+    let lease = repo
+        .acquire_reminder_lease(t0, DEFAULT_REMINDER_LEASE_SECS)
+        .await
+        .unwrap();
+    let claimed = repo
+        .claim_due_reminders(lease.fence_term.clone(), t0, 10, 90)
+        .await
+        .unwrap();
+    let order: Vec<_> = claimed.iter().map(|row| row.task_id).collect();
+    assert_eq!(order, vec![whole, early, mid]);
+
+    // Variable-width legacy text is normalized on open so comparisons stay correct.
+    let legacy_id = TaskId::new();
+    repo.execute_batch(format!(
+        "INSERT INTO tasks(id, title, status, created_at, updated_at, revision, remind_at)
+         VALUES ('{legacy_id}', 'legacy', 'pending',
+                '2026-07-28T12:00:00Z', '2026-07-28T12:00:00Z', 1,
+                '2026-07-28T15:00:00.25Z');
+         INSERT INTO reminder_occurrences(
+            task_id, remind_at, state, attempts, created_at, updated_at
+         ) VALUES (
+            '{legacy_id}', '2026-07-28T15:00:00.25Z', 'pending', 0,
+            '2026-07-28T12:00:00Z', '2026-07-28T12:00:00Z'
+         );"
+    ))
+    .await
+    .unwrap();
+    repo.release_reminder_lease(lease.fence_term.clone(), t0)
+        .await
+        .unwrap();
+    drop(repo);
+    drop(owner);
+
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    // Advance past any prior lease left released-at-t0 and any unexpired claims.
+    let t_open: Timestamp = "2026-07-28T16:30:00Z".parse().unwrap();
+    let lease = repo
+        .acquire_reminder_lease(t_open, DEFAULT_REMINDER_LEASE_SECS)
+        .await
+        .unwrap();
+    let _ = repo
+        .mark_owner_lost_reminders(lease.fence_term.clone(), t_open, 100)
+        .await
+        .unwrap();
+    repo.release_reminder_lease(lease.fence_term.clone(), t_open)
+        .await
+        .unwrap();
+    // Owner-lost applies backoff from attempts; wait out the window then reacquire.
+    let after_backoff: Timestamp = "2026-07-28T17:30:00Z".parse().unwrap();
+    let lease = repo
+        .acquire_reminder_lease(after_backoff, DEFAULT_REMINDER_LEASE_SECS)
+        .await
+        .unwrap();
+    let claimed = repo
+        .claim_due_reminders(lease.fence_term.clone(), after_backoff, 10, 90)
+        .await
+        .unwrap();
+    assert!(
+        claimed.iter().any(|row| row.task_id == legacy_id),
+        "normalized legacy fractional remind_at should be claimable: {claimed:?}"
+    );
+
+    // Retry boundary uses canonical next_attempt_at comparison.
+    let retry_id = create_with_remind_at(&repo, "retry", "2026-07-28T14:00:00.123456789Z").await;
+    repo.execute_batch(format!(
+        "UPDATE reminder_occurrences
+         SET next_attempt_at = '2026-07-28T17:30:00.500000000Z'
+         WHERE task_id = '{retry_id}';"
+    ))
+    .await
+    .unwrap();
+    let before_retry: Timestamp = "2026-07-28T17:30:00.499999999Z".parse().unwrap();
+    let claimed_before = repo
+        .claim_due_reminders(lease.fence_term.clone(), before_retry, 100, 90)
+        .await
+        .unwrap();
+    assert!(claimed_before.iter().all(|row| row.task_id != retry_id));
+    let at_retry: Timestamp = "2026-07-28T17:30:00.500000000Z".parse().unwrap();
+    let claimed_retry = repo
+        .claim_due_reminders(lease.fence_term.clone(), at_retry, 100, 90)
+        .await
+        .unwrap();
+    assert!(claimed_retry.iter().any(|row| row.task_id == retry_id));
 }

@@ -3911,11 +3911,15 @@ async fn next_reminder_wake_at_empty_pending_lease_claimed_backoff_and_fractiona
         "eligibility is max(remind_at, next_attempt_at)"
     );
 
-    // Lease expiry can be earlier than pending eligibility.
+    // Idle lease without claims must not participate (avoids forever-due wake).
     let t0: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
     let lease = repo.acquire_reminder_lease(t0, 90).await.unwrap();
     let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
-    assert_eq!(wake, lease.expires_at);
+    assert_eq!(
+        wake.to_string(),
+        "2026-07-28T17:30:00.25Z",
+        "lease without claims is ignored; pending eligibility remains"
+    );
 
     // Claimed claim_expires_at participates once work is claimed.
     // Make a due pending row and claim it under the lease.
@@ -3935,7 +3939,10 @@ async fn next_reminder_wake_at_empty_pending_lease_claimed_backoff_and_fractiona
     assert_eq!(wake, claim_exp);
     assert!(wake < lease.expires_at);
 
-    // Settling removes the claim wake candidate; lease remains.
+    // While claims exist, lease expiry is also a candidate (claim is still earlier).
+    assert!(claim_exp < lease.expires_at);
+
+    // Settling removes the claim; lease without remaining claims is ignored again.
     let due_claim = claimed.iter().find(|row| row.task_id == due_id).unwrap();
     repo.settle_reminder_delivered(
         lease.fence_term.clone(),
@@ -3948,16 +3955,18 @@ async fn next_reminder_wake_at_empty_pending_lease_claimed_backoff_and_fractiona
     .await
     .unwrap();
     let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
-    // Still have lease + remaining pending; lease is earlier than backoff pending.
-    assert_eq!(wake, lease.expires_at);
+    assert_eq!(
+        wake.to_string(),
+        "2026-07-28T17:30:00.25Z",
+        "after settle, idle lease is ignored"
+    );
 
-    // Release expires lease immediately; next wake becomes pending eligibility.
+    // Release expires lease immediately; still ignored without claims.
     repo.release_reminder_lease(lease.fence_term.clone(), t0)
         .await
         .unwrap();
     let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
-    // Released lease expires_at == t0, which is still a candidate and is earliest.
-    assert_eq!(wake, t0);
+    assert_eq!(wake.to_string(), "2026-07-28T17:30:00.25Z");
 
     // Drop the lease row so only pending remains (simulate no owner).
     repo.execute_batch("DELETE FROM reminder_delivery_lease;".into())
@@ -3973,6 +3982,67 @@ async fn next_reminder_wake_at_empty_pending_lease_claimed_backoff_and_fractiona
     repo.dismiss_reminder(operation(), far_id, t0)
         .await
         .unwrap();
+    assert_eq!(repo.next_reminder_wake_at().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn next_reminder_wake_at_ignores_idle_and_expired_lease_without_claims() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let t0: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
+
+    // Lease alone never supplies a wake.
+    let _lease = repo.acquire_reminder_lease(t0, 90).await.unwrap();
+    assert_eq!(repo.next_reminder_wake_at().await.unwrap(), None);
+
+    // Expired lease row still ignored without claims.
+    repo.execute_batch(
+        "UPDATE reminder_delivery_lease
+         SET expires_at = '2026-07-28T11:00:00Z'
+         WHERE singleton = 1;"
+            .to_string(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(repo.next_reminder_wake_at().await.unwrap(), None);
+
+    // Lease becomes meaningful only while a claim exists.
+    let due_id = create_with_remind_at(&repo, "claimed-only", "2026-07-28T11:00:00Z").await;
+    // Refresh to a live lease so claim can succeed.
+    let lease = repo.acquire_reminder_lease(t0, 90).await.unwrap();
+    let claimed = repo
+        .claim_due_reminders(lease.fence_term.clone(), t0, 10, 45)
+        .await
+        .unwrap();
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].task_id, due_id);
+    let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
+    assert_eq!(wake, claimed[0].claim_expires_at);
+
+    // Force lease expiry earlier than claim expiry; lease participates with claims.
+    repo.execute_batch(
+        "UPDATE reminder_delivery_lease
+         SET expires_at = '2026-07-28T12:00:10Z'
+         WHERE singleton = 1;"
+            .to_string(),
+    )
+    .await
+    .unwrap();
+    let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
+    assert_eq!(wake.to_string(), "2026-07-28T12:00:10Z");
+
+    // Settle claim → lease ignored again even if still present/expired.
+    repo.settle_reminder_delivered(
+        lease.fence_term.clone(),
+        due_id,
+        claimed[0].remind_at,
+        claimed[0].claim_attempt,
+        ReminderChannel::InApp,
+        t0,
+    )
+    .await
+    .unwrap();
     assert_eq!(repo.next_reminder_wake_at().await.unwrap(), None);
 }
 

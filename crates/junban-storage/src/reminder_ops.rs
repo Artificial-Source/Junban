@@ -646,6 +646,9 @@ pub(crate) fn next_reminder_wake_at(
     let tx = connection.unchecked_transaction().map_err(storage_error)?;
     let wake: Option<String> = tx
         .query_row(
+            // Lease expiry is only meaningful while claims exist. An idle or
+            // expired lease with no claimed rows must not pin the wake loop
+            // forever; pending rows already supply their own eligibility.
             "SELECT MIN(wake_at) FROM (
                 SELECT CASE
                     WHEN next_attempt_at IS NOT NULL AND next_attempt_at > remind_at
@@ -663,6 +666,9 @@ pub(crate) fn next_reminder_wake_at(
                 SELECT expires_at AS wake_at
                 FROM reminder_delivery_lease
                 WHERE singleton = 1
+                  AND EXISTS (
+                      SELECT 1 FROM reminder_occurrences WHERE state = 'claimed'
+                  )
             )",
             [],
             |row| row.get(0),

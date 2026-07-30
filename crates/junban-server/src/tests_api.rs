@@ -27,6 +27,9 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use super::*;
+use crate::reminder_wake::{
+    REMINDER_OVERDUE_WAKE_THROTTLE, REMINDER_WAKE_EVENT_TYPE, start_reminder_coordinator,
+};
 use crate::sse::{MAX_SSE_CONNECTIONS, send_event};
 
 const HOST: &str = "127.0.0.1:4219";
@@ -1627,4 +1630,335 @@ async fn reminder_invalid_failure_code_and_owner_lost_route() {
         .await;
     assert_eq!(sweep.status(), StatusCode::OK);
     assert_eq!(json(sweep).await["marked"], 0);
+}
+
+// ── Phase 3 reminder wake coordinator + ephemeral SSE ──────────────────────
+
+async fn open_reminder_sse(context: &TestContext) -> Response {
+    let response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/reminders/events")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    response
+}
+
+async fn read_sse_chunk(body: &mut axum::body::Body, deadline: Duration) -> String {
+    let frame = tokio::time::timeout(deadline, body.frame())
+        .await
+        .expect("SSE frame timed out")
+        .expect("SSE body ended")
+        .expect("SSE frame error");
+    let data = frame.into_data().expect("SSE data frame");
+    String::from_utf8(data.to_vec()).unwrap()
+}
+
+async fn recv_wake(
+    wakes: &mut tokio::sync::broadcast::Receiver<crate::reminder_wake::ReminderWakeEventDto>,
+) -> crate::reminder_wake::ReminderWakeEventDto {
+    // Drive the current-thread runtime until the coordinator publishes.
+    for _ in 0..50 {
+        tokio::select! {
+            biased;
+            result = wakes.recv() => return result.expect("wake channel"),
+            () = tokio::task::yield_now() => {}
+        }
+    }
+    // Final blocking recv with paused-time timeout as a safety net.
+    tokio::time::timeout(Duration::from_secs(5), wakes.recv())
+        .await
+        .expect("timed out waiting for reminder wake")
+        .expect("wake channel closed")
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn reminder_coordinator_due_wake_throttles_without_notify() {
+    let context = TestContext::new();
+    let mut wakes = context.state.reminder_wakes.subscribe();
+    let handle = context.state.start_reminder_coordinator();
+    tokio::task::yield_now().await;
+
+    let created = create_task(&context, "overdue-wake").await;
+    let id = task_id_from(&created);
+    let past = Timestamp::now()
+        .checked_sub(Duration::from_secs(300))
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        reschedule(&context, id, &past, None).await.status(),
+        StatusCode::OK
+    );
+
+    let first = recv_wake(&mut wakes).await;
+    assert_eq!(first.sequence, 1);
+
+    tokio::time::advance(REMINDER_OVERDUE_WAKE_THROTTLE - Duration::from_secs(1)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        wakes.try_recv().is_err(),
+        "overdue throttle must suppress rebroadcast"
+    );
+
+    tokio::time::advance(Duration::from_secs(1)).await;
+    let second = recv_wake(&mut wakes).await;
+    assert_eq!(second.sequence, 2);
+
+    context.state.shutdown_token().cancel();
+    handle.await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn reminder_coordinator_notification_bypasses_overdue_throttle() {
+    let context = TestContext::new();
+    let mut wakes = context.state.reminder_wakes.subscribe();
+    let handle = context.state.start_reminder_coordinator();
+    tokio::task::yield_now().await;
+
+    let created = create_task(&context, "overdue-notify").await;
+    let id = task_id_from(&created);
+    let past = Timestamp::now()
+        .checked_sub(Duration::from_secs(120))
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        reschedule(&context, id, &past, None).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(recv_wake(&mut wakes).await.sequence, 1);
+
+    context.state.notify_reminder_wake();
+    let second = recv_wake(&mut wakes).await;
+    assert_eq!(second.sequence, 2);
+
+    context.state.shutdown_token().cancel();
+    handle.await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn reminder_coordinator_sleeps_until_future_eligibility() {
+    let context = TestContext::new();
+    let mut wakes = context.state.reminder_wakes.subscribe();
+    let handle = context.state.start_reminder_coordinator();
+    tokio::task::yield_now().await;
+
+    let created = create_task(&context, "future-wake").await;
+    let id = task_id_from(&created);
+    let future = Timestamp::now()
+        .checked_add(Duration::from_secs(60))
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        reschedule(&context, id, &future, None).await.status(),
+        StatusCode::OK
+    );
+    // Let the coordinator observe the future wake and arm its sleep.
+    tokio::task::yield_now().await;
+    tokio::task::yield_now().await;
+
+    tokio::time::advance(Duration::from_secs(30)).await;
+    tokio::task::yield_now().await;
+    assert!(wakes.try_recv().is_err(), "must sleep until eligibility");
+
+    tokio::time::advance(Duration::from_secs(120)).await;
+    let wake = recv_wake(&mut wakes).await;
+    assert_eq!(wake.sequence, 1);
+
+    context.state.shutdown_token().cancel();
+    handle.await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn reminder_coordinator_idles_without_rows() {
+    let context = TestContext::new();
+    let mut wakes = context.state.reminder_wakes.subscribe();
+    let handle = context.state.start_reminder_coordinator();
+    tokio::task::yield_now().await;
+
+    tokio::time::advance(Duration::from_secs(600)).await;
+    tokio::task::yield_now().await;
+    assert!(wakes.try_recv().is_err(), "no-row idle must not poll");
+
+    context.state.shutdown_token().cancel();
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn reminder_sse_requires_auth_and_shares_connection_cap() {
+    let context = TestContext::new();
+
+    let unauth = context
+        .request(
+            request(Method::GET, "/api/v1/reminders/events")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+
+    let mut held = Vec::with_capacity(MAX_SSE_CONNECTIONS);
+    for _ in 0..MAX_SSE_CONNECTIONS {
+        held.push(context.open_sse().await);
+    }
+    context.wait_until_connections(MAX_SSE_CONNECTIONS).await;
+
+    let overflow = context
+        .request(
+            authenticated(Method::GET, "/api/v1/reminders/events")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(overflow.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = json(overflow).await;
+    assert_eq!(body["error"]["code"], "sse_connection_limit");
+
+    drop(held);
+    context.wait_until_connections(0).await;
+    let recovered = open_reminder_sse(&context).await;
+    drop(recovered);
+    context.wait_until_connections(0).await;
+}
+
+#[tokio::test]
+async fn reminder_sse_sends_immediate_wake_without_revision_bump() {
+    let context = TestContext::new();
+    let before = context
+        .request(
+            authenticated(Method::GET, "/api/v1/profile")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    let before_rev = json(before).await["revision"].as_u64().unwrap();
+
+    context.state.reminder_wakes.publish_due_wake();
+
+    let response = open_reminder_sse(&context).await;
+    context.wait_until_forwarders(1).await;
+    let mut body = response.into_body();
+    let text = read_sse_chunk(&mut body, Duration::from_secs(2)).await;
+    assert!(
+        text.contains(&format!("event: {REMINDER_WAKE_EVENT_TYPE}")),
+        "{text}"
+    );
+    assert!(text.contains("\"sequence\":"), "{text}");
+    assert!(text.contains("\"server_now\":"), "{text}");
+    assert!(
+        text.contains("id: 1"),
+        "immediate snapshot uses latest sequence: {text}"
+    );
+
+    let after = context
+        .request(
+            authenticated(Method::GET, "/api/v1/profile")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(json(after).await["revision"], before_rev);
+
+    drop(body);
+    context.wait_until_forwarders(0).await;
+    context.wait_until_connections(0).await;
+}
+
+#[tokio::test]
+async fn reminder_sse_forwards_live_wake_and_ends_on_shutdown_or_disconnect() {
+    let context = TestContext::new();
+    let response = open_reminder_sse(&context).await;
+    context.wait_until_forwarders(1).await;
+    let mut body = response.into_body();
+    let _ = read_sse_chunk(&mut body, Duration::from_secs(2)).await;
+
+    let wake = context.state.reminder_wakes.publish_due_wake();
+    let text = read_sse_chunk(&mut body, Duration::from_secs(2)).await;
+    assert!(text.contains(&format!("id: {}", wake.sequence)), "{text}");
+    assert!(text.contains(REMINDER_WAKE_EVENT_TYPE), "{text}");
+
+    context.state.shutdown_token().cancel();
+    context.wait_until_forwarders(0).await;
+    drop(body);
+    context.wait_until_connections(0).await;
+
+    let response = open_reminder_sse(&context).await;
+    context.wait_until_forwarders(1).await;
+    drop(response);
+    context.wait_until_forwarders(0).await;
+    context.wait_until_connections(0).await;
+}
+
+#[tokio::test]
+async fn reminder_sse_coalesces_after_broadcast_lag() {
+    let context = TestContext::new();
+    let response = open_reminder_sse(&context).await;
+    context.wait_until_forwarders(1).await;
+    let mut body = response.into_body();
+    let _ = read_sse_chunk(&mut body, Duration::from_secs(2)).await;
+
+    for _ in 0..96 {
+        context.state.reminder_wakes.publish_due_wake();
+    }
+
+    let mut text = String::new();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(250), body.frame()).await {
+            Ok(Some(Ok(frame))) => {
+                if let Ok(data) = frame.into_data() {
+                    text.push_str(std::str::from_utf8(&data).unwrap());
+                    if text.contains("event: reminders_due") {
+                        break;
+                    }
+                }
+            }
+            Ok(Some(Err(_))) | Ok(None) | Err(_) => break,
+        }
+    }
+    assert!(
+        text.contains("reminders_due") && text.contains("\"sequence\":"),
+        "expected coalesced or drained wake after lag, got: {text}"
+    );
+    drop(body);
+    context.wait_until_forwarders(0).await;
+}
+
+#[tokio::test]
+async fn reminder_control_plane_notifies_coordinator_hub() {
+    let context = TestContext::new();
+    let hub = std::sync::Arc::clone(&context.state.reminder_wakes);
+    let notified = hub.notified();
+    tokio::pin!(notified);
+
+    let lease = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/lease")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(lease.status(), StatusCode::OK);
+    tokio::time::timeout(Duration::from_secs(1), notified)
+        .await
+        .expect("successful lease must notify reminder hub");
+}
+
+#[tokio::test]
+async fn server_state_new_does_not_start_reminder_coordinator() {
+    let context = TestContext::new();
+    let mut wakes = context.state.reminder_wakes.subscribe();
+    let created = create_task(&context, "no-coordinator").await;
+    let id = task_id_from(&created);
+    assert_eq!(
+        reschedule(&context, id, "2020-01-01T00:00:00Z", None)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(context.state.reminder_wakes.latest_sequence(), 0);
+    assert!(wakes.try_recv().is_err());
+    let _ = start_reminder_coordinator;
 }

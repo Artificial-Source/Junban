@@ -1142,6 +1142,49 @@
         ]
       }
     },
+    "/api/v1/reminders/events": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "reminder_events",
+        "responses": {
+          "200": {
+            "description": "Ephemeral reminder wake stream (not revisioned task events)",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReminderWakeEventDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/reminders/lease": {
       "post": {
         "tags": ["routes"],
@@ -6726,6 +6769,24 @@
       "ReminderOccurrenceStateDto": {
         "type": "string",
         "enum": ["pending", "claimed", "delivered", "failed", "cancelled"]
+      },
+      "ReminderWakeEventDto": {
+        "type": "object",
+        "description": "Ephemeral wake payload for `/api/v1/reminders/events`.",
+        "required": ["sequence", "server_now"],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Monotonic process-local sequence. Not a durable revision.",
+            "minimum": 0
+          },
+          "server_now": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server clock sample for the signal, RFC3339 UTC."
+          }
+        }
       },
       "RenewReminderLeaseRequest": {
         "type": "object",

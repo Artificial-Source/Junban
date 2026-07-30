@@ -29,6 +29,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 http-body-util = "0.1.3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
 tower = { workspace = true, features = ["util"] }
 
 [lints]

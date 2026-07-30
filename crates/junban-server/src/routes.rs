@@ -33,6 +33,7 @@ use crate::dto::{
     TextImportDraftDto, TextImportResponse,
 };
 use crate::error::{ApiError, extract_json, operation_id, parse_path_id, validation_error};
+use crate::reminder_wake::open_reminder_sse_stream;
 use crate::sse::{MAX_SSE_CONNECTIONS, open_sse_stream};
 use crate::{RequestId, ServerState};
 
@@ -1582,6 +1583,7 @@ pub async fn acquire_reminder_lease(
         .acquire_reminder_lease(payload.lease_secs)
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
     Ok(Json(lease.into()))
 }
 
@@ -1613,6 +1615,7 @@ pub async fn renew_reminder_lease(
         .renew_reminder_lease(fence_term, payload.lease_secs)
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
     Ok(Json(lease.into()))
 }
 
@@ -1644,6 +1647,7 @@ pub async fn release_reminder_lease(
         .release_reminder_lease(fence_term)
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1675,6 +1679,7 @@ pub async fn claim_due_reminders(
         .claim_due_reminders(fence_term, payload.limit, payload.claim_secs)
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
     Ok(Json(ClaimRemindersResponse {
         reminders: reminders.into_iter().map(Into::into).collect(),
     }))
@@ -1716,6 +1721,7 @@ pub async fn settle_reminder_delivered(
         )
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1755,6 +1761,7 @@ pub async fn settle_reminder_failed(
         )
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1786,7 +1793,49 @@ pub async fn mark_owner_lost_reminders(
         .mark_owner_lost_reminders(fence_term, payload.limit)
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
     Ok(Json(MarkOwnerLostRemindersResponse { marked }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/reminders/events",
+    operation_id = "reminder_events",
+    responses(
+        (
+            status = 200,
+            description = "Ephemeral reminder wake stream (not revisioned task events)",
+            content_type = "text/event-stream",
+            body = crate::reminder_wake::ReminderWakeEventDto
+        ),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn reminder_events(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+) -> Result<impl IntoResponse, ApiError> {
+    let permit = state.try_acquire_sse().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "sse_connection_limit",
+            "too many concurrent event streams",
+            true,
+            &request_id,
+        )
+    })?;
+
+    // Subscribe before the immediate snapshot so live wakes stay queued.
+    let receiver = state.reminder_wakes.subscribe();
+    Ok(open_reminder_sse_stream(
+        std::sync::Arc::clone(&state.reminder_wakes),
+        receiver,
+        state.shutdown_token(),
+        permit,
+        std::sync::Arc::clone(&state.active_forwarders),
+    ))
 }
 
 pub async fn api_not_found(Extension(request_id): Extension<RequestId>) -> ApiError {

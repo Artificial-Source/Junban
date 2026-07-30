@@ -47,19 +47,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let state = ServerState::new(owner.repository(), token, allowed_hosts);
     let shutdown = state.shutdown_token();
+    // Exactly one process-global reminder coordinator; not started by router tests.
+    let reminder_coordinator = state.start_reminder_coordinator();
     let app = router(state, config.web_dir);
     let runtime_metadata = RuntimeMetadataFile::create(&data_dir, address)?;
 
     tracing::info!(%address, "Junban server listening");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown_signal().await;
-            // Cancel SSE forwarders before Axum waits for in-flight responses.
-            shutdown.cancel();
+    let serve_result = axum::serve(listener, app)
+        .with_graceful_shutdown({
+            let shutdown = shutdown.clone();
+            async move {
+                shutdown_signal().await;
+                // Cancel coordinator + SSE forwarders before Axum drains responses.
+                shutdown.cancel();
+            }
         })
-        .await?;
+        .await;
+    // Idempotent if graceful shutdown already cancelled; covers serve errors too.
+    shutdown.cancel();
+    // Wake the coordinator if it is idle on Notify so join cannot hang.
+    // (cancel is selected alongside notified inside the loop.)
+    let _ = reminder_coordinator.await;
     drop(runtime_metadata);
     drop(owner);
+    serve_result?;
     Ok(())
 }
 

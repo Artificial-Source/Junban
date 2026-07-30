@@ -3,6 +3,7 @@
 mod cursor;
 mod dto;
 mod error;
+mod reminder_wake;
 mod routes;
 mod sse;
 
@@ -37,6 +38,7 @@ use utoipa::{
 use uuid::Uuid;
 
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
+use crate::reminder_wake::{ReminderWakeEventDto, ReminderWakeHub, start_reminder_coordinator};
 use crate::routes::{
     acquire_reminder_lease, add_relation, api_not_found, apply_template, bulk_tasks, cancel_task,
     claim_due_reminders, complete_task, create_comment, create_project, create_saved_filter,
@@ -46,11 +48,13 @@ use crate::routes::{
     list_relations, list_task_activity, list_task_reminders, list_tasks, mark_owner_lost_reminders,
     move_task, parse_filter_route, parse_quick_entry_route, parse_text_import_route, patch_comment,
     patch_project, patch_saved_filter, patch_section, patch_tag, patch_task, patch_template,
-    release_reminder_lease, remove_relation, renew_reminder_lease, reopen_task, reorder_tasks,
-    reschedule_reminder, settle_reminder_delivered, settle_reminder_failed, uncomplete_task,
-    undo_operation,
+    release_reminder_lease, reminder_events, remove_relation, renew_reminder_lease, reopen_task,
+    reorder_tasks, reschedule_reminder, settle_reminder_delivered, settle_reminder_failed,
+    uncomplete_task, undo_operation,
 };
 use crate::sse::{AppService, SseConnectionPermit};
+
+pub use crate::reminder_wake::{REMINDER_OVERDUE_WAKE_THROTTLE, REMINDER_WAKE_EVENT_TYPE};
 
 /// Phase 2 HTTP body ceiling (matches frozen transport plan).
 pub const MAX_BODY_BYTES: usize = 512 * 1024;
@@ -62,13 +66,17 @@ pub const RUNTIME_FILE: &str = "runtime.json";
 #[derive(Clone)]
 pub struct BroadcastEventSink {
     sender: broadcast::Sender<CommittedEvent>,
+    reminder_wakes: Arc<ReminderWakeHub>,
 }
 
 impl BroadcastEventSink {
     #[must_use]
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, reminder_wakes: Arc<ReminderWakeHub>) -> Self {
         let (sender, _) = broadcast::channel(capacity);
-        Self { sender }
+        Self {
+            sender,
+            reminder_wakes,
+        }
     }
 
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<CommittedEvent> {
@@ -80,6 +88,8 @@ impl EventSink for BroadcastEventSink {
     fn publish(&self, event: CommittedEvent) {
         // No active SSE client is a normal state; durability lives in SQLite.
         let _ = self.sender.send(event);
+        // Every committed user mutation may affect reminder eligibility.
+        self.reminder_wakes.notify_recompute();
     }
 }
 
@@ -87,27 +97,35 @@ impl EventSink for BroadcastEventSink {
 pub struct ServerState {
     pub(crate) service: AppService,
     pub(crate) events: Arc<BroadcastEventSink>,
+    pub(crate) reminder_wakes: Arc<ReminderWakeHub>,
     bearer_token: Arc<str>,
     allowed_hosts: Arc<HashSet<String>>,
     auth_limiter: Arc<AuthLimiter>,
     shutdown: CancellationToken,
     sse_connections: Arc<AtomicUsize>,
-    /// Live `forward_events` tasks; test-observable only.
+    /// Live SSE forwarder tasks (revisioned events + reminder wakes); test-observable.
     pub(crate) active_forwarders: Arc<AtomicUsize>,
 }
 
 impl ServerState {
+    /// Build server state without starting the reminder coordinator.
+    ///
+    /// Router/unit tests use this path so they never accidentally spawn the
+    /// process-global wake loop. Production `main` must call
+    /// [`ServerState::start_reminder_coordinator`] exactly once after construction.
     #[must_use]
     pub fn new(
         repository: SqliteRepository,
         bearer_token: String,
         allowed_hosts: impl IntoIterator<Item = String>,
     ) -> Self {
-        let events = Arc::new(BroadcastEventSink::new(128));
+        let reminder_wakes = Arc::new(ReminderWakeHub::new());
+        let events = Arc::new(BroadcastEventSink::new(128, Arc::clone(&reminder_wakes)));
         let service = TaskService::new(Arc::new(repository), Arc::clone(&events));
         Self {
             service,
             events,
+            reminder_wakes,
             bearer_token: Arc::from(bearer_token),
             allowed_hosts: Arc::new(allowed_hosts.into_iter().collect()),
             auth_limiter: Arc::new(AuthLimiter::new()),
@@ -123,8 +141,25 @@ impl ServerState {
         self.shutdown.clone()
     }
 
+    /// Start the single process-global reminder wake coordinator.
+    ///
+    /// Cancelled by [`Self::shutdown_token`]. Await the join handle after Axum
+    /// returns so the task cannot outlive storage/profile teardown.
+    #[must_use]
+    pub fn start_reminder_coordinator(&self) -> tokio::task::JoinHandle<()> {
+        start_reminder_coordinator(
+            self.service.clone(),
+            Arc::clone(&self.reminder_wakes),
+            self.shutdown_token(),
+        )
+    }
+
     pub(crate) fn try_acquire_sse(&self) -> Option<SseConnectionPermit> {
         SseConnectionPermit::try_acquire(&self.sse_connections)
+    }
+
+    pub(crate) fn notify_reminder_wake(&self) {
+        self.reminder_wakes.notify_recompute();
     }
 }
 
@@ -222,6 +257,7 @@ pub fn router(state: ServerState, web_dir: impl Into<PathBuf>) -> Router {
             "/api/v1/reminders/owner-lost",
             post(mark_owner_lost_reminders),
         )
+        .route("/api/v1/reminders/events", get(reminder_events))
         .route("/api/v1/catalog", get(get_catalog))
         .route("/api/v1/projects", post(create_project))
         .route(
@@ -526,7 +562,8 @@ impl Modify for SecurityAddon {
         routes::claim_due_reminders,
         routes::settle_reminder_delivered,
         routes::settle_reminder_failed,
-        routes::mark_owner_lost_reminders
+        routes::mark_owner_lost_reminders,
+        routes::reminder_events
     ),
     components(schemas(
         ErrorEnvelope,
@@ -607,7 +644,8 @@ impl Modify for SecurityAddon {
         dto::ReminderDeliveryLeaseDto,
         dto::ClaimedReminderDto,
         dto::ClaimRemindersResponse,
-        dto::MarkOwnerLostRemindersResponse
+        dto::MarkOwnerLostRemindersResponse,
+        ReminderWakeEventDto
     )),
     modifiers(&SecurityAddon)
 )]

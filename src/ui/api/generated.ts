@@ -196,6 +196,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/reminders/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["reminder_events"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/reminders/lease": {
     parameters: {
       query?: never;
@@ -1159,6 +1175,19 @@ export interface components {
     };
     /** @enum {string} */
     ReminderOccurrenceStateDto: "pending" | "claimed" | "delivered" | "failed" | "cancelled";
+    /** @description Ephemeral wake payload for `/api/v1/reminders/events`. */
+    ReminderWakeEventDto: {
+      /**
+       * Format: int64
+       * @description Monotonic process-local sequence. Not a durable revision.
+       */
+      sequence: number;
+      /**
+       * Format: date-time
+       * @description Server clock sample for the signal, RFC3339 UTC.
+       */
+      server_now: string;
+    };
     RenewReminderLeaseRequest: {
       fence_term: string;
       /** Format: int64 */
@@ -2234,6 +2263,42 @@ export interface operations {
         };
       };
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  reminder_events: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ephemeral reminder wake stream (not revisioned task events) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["ReminderWakeEventDto"];
+        };
+      };
+      401: {
         headers: {
           [name: string]: unknown;
         };

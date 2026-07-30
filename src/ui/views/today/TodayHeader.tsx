@@ -4,39 +4,18 @@ interface TodayHeaderProps {
   totalCount: number;
   todayCompletedCount: number;
   ringTotal: number;
-  onPlanMyDay: () => void;
-  onEndOfDay: () => void;
 }
 
-export function TodayHeader({
-  totalCount,
-  todayCompletedCount,
-  ringTotal,
-  onPlanMyDay,
-  onEndOfDay,
-}: TodayHeaderProps) {
+/**
+ * Today header for Phase 2.
+ * Plan My Day / End of Day are Phase 3 and intentionally absent (not disabled stubs).
+ */
+export function TodayHeader({ totalCount, todayCompletedCount, ringTotal }: TodayHeaderProps) {
   // The approved baseline disables Eat the Frog, so no Task Jar is rendered.
-  // Plan My Day and End of Day remain visible but inert.
   return (
     <div className="flex items-center justify-between mb-4 md:mb-6">
       <div className="flex items-center gap-3">
         <h1 className="text-2xl md:text-3xl font-bold text-on-surface">Today</h1>
-        <button
-          onClick={onPlanMyDay}
-          disabled
-          aria-label="Plan My Day (unavailable)"
-          className="hidden lg:inline-flex px-3 py-1 text-xs font-medium rounded-full bg-accent-action/10 text-accent-foreground hover:bg-accent-action/20 transition-colors opacity-50 cursor-not-allowed"
-        >
-          Plan My Day
-        </button>
-        <button
-          onClick={onEndOfDay}
-          disabled
-          aria-label="End of Day (unavailable)"
-          className="hidden lg:inline-flex px-3 py-1 text-xs font-medium rounded-full bg-surface-tertiary text-on-surface-muted hover:bg-surface-tertiary/80 transition-colors opacity-50 cursor-not-allowed"
-        >
-          End of Day
-        </button>
       </div>
       <div className="flex items-center gap-3">
         <span className="text-sm text-on-surface-muted">

@@ -105,7 +105,7 @@ test("authenticated CRUD: create, edit, complete, uncomplete, delete", async ({ 
   await page.getByRole("button", { name: "Edit task: E2E test task" }).click();
 
   // Edit the title
-  const titleInput = page.getByLabel("Task title");
+  const titleInput = page.getByRole("textbox", { name: "Task title", exact: true });
   await titleInput.fill("E2E edited task");
   await page.getByRole("button", { name: "Save" }).click();
 
@@ -131,9 +131,13 @@ test("authenticated CRUD: create, edit, complete, uncomplete, delete", async ({ 
     timeout: 5000,
   });
 
-  // Delete the task
+  // Delete the task (custom confirm dialog — not window.confirm)
   await dialog.getByRole("button", { name: "Delete" }).click();
-  await expect(page.getByText("E2E edited task")).not.toBeVisible({ timeout: 5000 });
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete task" }).click();
+  await expect(page.getByRole("alertdialog")).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit task: E2E edited task" })).not.toBeVisible({
+    timeout: 5000,
+  });
 });
 
 test("nullable due-date clearing", async ({ page }) => {
@@ -166,10 +170,9 @@ test("nullable due-date clearing", async ({ page }) => {
 
   // Clean up — open detail and delete from dialog
   await page.getByRole("button", { name: "Edit task: Due date clear test" }).click();
-  await page
-    .getByRole("dialog", { name: /Task: Due date clear test/ })
-    .getByRole("button", { name: "Delete task" })
-    .click();
+  const clearDialog = page.getByRole("dialog", { name: /Task: Due date clear test/ });
+  await clearDialog.getByRole("button", { name: "Delete task" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete task" }).click();
 });
 
 test("completion reversal works", async ({ page }) => {
@@ -198,6 +201,7 @@ test("completion reversal works", async ({ page }) => {
 
   // Clean up
   await dialog.getByRole("button", { name: "Delete" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete task" }).click();
 });
 
 test("idempotent transport retry: same operation ID does not duplicate", async ({ page }) => {
@@ -243,7 +247,8 @@ test("idempotent transport retry: same operation ID does not duplicate", async (
   );
 
   expect(response2.status).toBe(201);
-  expect(response2.body.task.id).toBe(response1.body.task.id);
+  // Phase 2 mutation envelope: event.snapshot.task (not Phase 1 body.task).
+  expect(response2.body.event.snapshot.task.id).toBe(response1.body.event.snapshot.task.id);
 });
 
 test("unauthorized API calls return 401", async ({ page }) => {
@@ -296,7 +301,9 @@ test("cross-tab SSE convergence covers create, update, completion reversal, and 
   await expect(page2.getByText("Cross-tab convergence test")).toBeVisible({ timeout: 10000 });
 
   await page1.getByRole("button", { name: "Edit task: Cross-tab convergence test" }).click();
-  await page1.getByLabel("Task title").fill("Cross-tab updated task");
+  await page1
+    .getByRole("textbox", { name: "Task title", exact: true })
+    .fill("Cross-tab updated task");
   await page1.getByRole("button", { name: "Save" }).click();
   await expect(page2.getByText("Cross-tab updated task")).toBeVisible({ timeout: 10000 });
   await expect(page2.getByText("Cross-tab convergence test")).not.toBeVisible();
@@ -319,6 +326,7 @@ test("cross-tab SSE convergence covers create, update, completion reversal, and 
   });
 
   await dialog.getByRole("button", { name: "Delete" }).click();
+  await page1.getByRole("alertdialog").getByRole("button", { name: "Delete task" }).click();
   await expect(page2.getByText("Cross-tab updated task")).not.toBeVisible({ timeout: 10000 });
   await page1.close();
   await page2.close();
@@ -360,4 +368,101 @@ test("malformed request returns validation error", async ({ page }) => {
 
   expect(response.status).toBe(422);
   expect(response.body.error.code).toBe("validation_error");
+});
+
+test("board move control is keyboard-operable across sections (P2-FE-008)", async ({ page }) => {
+  await authenticate(page);
+
+  const setup = await page.evaluate(
+    async ({ url, token }) => {
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Origin: url,
+      };
+      const projectRes = await fetch(`${url}/api/v1/projects`, {
+        method: "POST",
+        headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({
+          name: "Board Keyboard Project",
+          color: "#3366ff",
+          view: "board",
+        }),
+      });
+      if (!projectRes.ok) {
+        throw new Error(`project create failed: ${projectRes.status} ${await projectRes.text()}`);
+      }
+      const projectEvent = (await projectRes.json()) as {
+        event: { snapshot?: { project?: { id: string } } };
+      };
+      const projectId = projectEvent.event.snapshot?.project?.id;
+      if (!projectId) throw new Error("missing project id");
+
+      const sectionIds: string[] = [];
+      for (const name of ["Todo", "Doing"]) {
+        const sectionRes = await fetch(`${url}/api/v1/sections`, {
+          method: "POST",
+          headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
+          body: JSON.stringify({ name, project_id: projectId }),
+        });
+        if (!sectionRes.ok) {
+          throw new Error(`section create failed: ${sectionRes.status} ${await sectionRes.text()}`);
+        }
+        const sectionEvent = (await sectionRes.json()) as {
+          event: { snapshot?: { section?: { id: string } } };
+        };
+        const sectionId = sectionEvent.event.snapshot?.section?.id;
+        if (!sectionId) throw new Error("missing section id");
+        sectionIds.push(sectionId);
+      }
+
+      const taskRes = await fetch(`${url}/api/v1/tasks`, {
+        method: "POST",
+        headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({
+          title: "Keyboard board card",
+          project_id: projectId,
+          section_id: sectionIds[0],
+        }),
+      });
+      if (!taskRes.ok) {
+        throw new Error(`task create failed: ${taskRes.status} ${await taskRes.text()}`);
+      }
+
+      return { projectId };
+    },
+    { url: server.baseUrl, token: server.token },
+  );
+
+  await page.goto(appUrlWithToken(server.baseUrl, server.token, `/projects/${setup.projectId}`));
+  await expect(page.getByRole("heading", { name: "Board Keyboard Project" })).toBeVisible();
+  await expect(page.getByText("Keyboard board card")).toBeVisible();
+
+  const moveBtn = page.getByRole("button", { name: "Move task Keyboard board card" });
+  await moveBtn.focus();
+  await page.keyboard.press("Enter");
+  const menu = page.getByRole("menu", { name: /Move Keyboard board card to section/ });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Doing" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "No Section" })).toBeVisible();
+
+  await menu.getByRole("menuitem", { name: "Doing" }).press("Enter");
+
+  const doingColumn = page.getByLabel("Doing board column");
+  await expect(doingColumn.getByText("Keyboard board card")).toBeVisible({ timeout: 5000 });
+  await expect(page.getByText("Task moved")).toBeVisible({ timeout: 5000 });
+});
+
+test("templates can be created from Filters & Labels (P2-FE-007)", async ({ page }) => {
+  await authenticate(page);
+  await page.goto(appUrlWithToken(server.baseUrl, server.token, "/filters-labels"));
+  await expect(page.getByRole("heading", { name: "Filters & Labels" })).toBeVisible();
+
+  await page.getByRole("button", { name: "New Template" }).click();
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("E2E Template");
+  await page.getByRole("textbox", { name: "Title Template", exact: true }).fill("Ship {{feature}}");
+  await page.getByRole("button", { name: "Create" }).click();
+
+  await expect(page.getByText("E2E Template")).toBeVisible({ timeout: 5000 });
+  await expect(page.getByText("Ship {{feature}}")).toBeVisible();
 });

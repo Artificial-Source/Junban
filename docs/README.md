@@ -15,6 +15,13 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-1-hosted-vertical-slice.md`](../goals/rust-rewrite/evidence/phase-1-hosted-vertical-slice.md): Phase 1 outcome and validation
 - [`../goals/rust-rewrite/evidence/phase-1-hosted-memory-budget.md`](../goals/rust-rewrite/evidence/phase-1-hosted-memory-budget.md): measured result and frozen memory ceiling
 - [`../goals/rust-rewrite/evidence/phase-1-tailnet-dogfood/report.md`](../goals/rust-rewrite/evidence/phase-1-tailnet-dogfood/report.md): real private-HTTPS dogfood evidence
+- [`../goals/rust-rewrite/evidence/phase-2-context-map.md`](../goals/rust-rewrite/evidence/phase-2-context-map.md): Phase 2 contract and frozen 10,000-task scale protocol
+- [`../goals/rust-rewrite/evidence/phase-2-outcome.md`](../goals/rust-rewrite/evidence/phase-2-outcome.md): delivered behavior, validation, memory and latency summary
+- [`../goals/rust-rewrite/evidence/phase-2-review-ledger.md`](../goals/rust-rewrite/evidence/phase-2-review-ledger.md): material Phase 2 findings and their regression evidence
+- [`../goals/rust-rewrite/evidence/phase-2-hosted-memory.json`](../goals/rust-rewrite/evidence/phase-2-hosted-memory.json): authoritative five-sample hosted-memory result
+- [`../goals/rust-rewrite/evidence/phase-2-scale-bench.json`](../goals/rust-rewrite/evidence/phase-2-scale-bench.json): authoritative 10,000-task performance result
+- [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings
+- [`performance.md`](performance.md): hosted memory and scale harness commands
 
 ## Foundation docs
 

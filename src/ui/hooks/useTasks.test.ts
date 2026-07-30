@@ -1,7 +1,13 @@
 import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MutationResponse, SseEvent, TaskDto, TaskListResponse } from "../api/client";
+import type {
+  CommittedEventDto,
+  MutationResponse,
+  SseEvent,
+  TaskDto,
+  TaskListResponse,
+} from "../api/client";
 import {
   nextStateFromListSnapshot,
   removeTaskById,
@@ -10,10 +16,14 @@ import {
   type TaskActions,
   type TaskState,
 } from "./useTasks";
+import { applyTaskEventToList } from "./useTaskQuery";
+import { RefreshCoalescer } from "./liveQuery";
+import { isOutcomeUnknown } from "./useMutations";
+import { NetworkError } from "../api/client";
 
-const listTasks = vi.fn<() => Promise<TaskListResponse>>();
+const listTasks = vi.fn<(params?: unknown) => Promise<TaskListResponse>>();
 const createTaskApi = vi.fn<(body: unknown, operationId: string) => Promise<MutationResponse>>();
-const replaceTask = vi.fn();
+const patchTask = vi.fn();
 const completeTask = vi.fn();
 const uncompleteTask = vi.fn();
 const deleteTaskApi = vi.fn();
@@ -25,37 +35,37 @@ type SubscribeArgs = {
   onReconnect: () => void;
   onTerminal: (error: { kind: "authentication" | "protocol"; message: string }) => void;
   initialSince: number;
+  onResync?: (scope: { tasks: boolean; catalog: boolean }, reason: string) => void;
 };
 
 let subscribeArgs: SubscribeArgs | null = null;
 
-vi.mock("../api/client", () => ({
-  ApiError: class ApiError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = "ApiError";
-    }
-  },
-  listTasks: (...args: []) => listTasks(...args),
-  createTask: (body: unknown, operationId: string) => createTaskApi(body, operationId),
-  replaceTask: (...args: unknown[]) => replaceTask(...args),
-  completeTask: (...args: unknown[]) => completeTask(...args),
-  uncompleteTask: (...args: unknown[]) => uncompleteTask(...args),
-  deleteTask: (...args: unknown[]) => deleteTaskApi(...args),
-  generateOperationId: () => generateOperationId(),
-  hasStoredToken: () => hasStoredToken(),
-  subscribeToEvents: (
-    onEvent: SubscribeArgs["onEvent"],
-    onReconnect: SubscribeArgs["onReconnect"],
-    onTerminal: SubscribeArgs["onTerminal"],
-    initialSince = 0,
-  ) => {
-    subscribeArgs = { onEvent, onReconnect, onTerminal, initialSince };
-    return () => {
-      subscribeArgs = null;
-    };
-  },
-}));
+vi.mock("../api/client", async () => {
+  const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
+  return {
+    ...actual,
+    listTasks: (...args: [unknown?]) => listTasks(...args),
+    createTask: (body: unknown, operationId: string) => createTaskApi(body, operationId),
+    patchTask: (...args: unknown[]) => patchTask(...args),
+    completeTask: (...args: unknown[]) => completeTask(...args),
+    uncompleteTask: (...args: unknown[]) => uncompleteTask(...args),
+    deleteTask: (...args: unknown[]) => deleteTaskApi(...args),
+    generateOperationId: () => generateOperationId(),
+    hasStoredToken: () => hasStoredToken(),
+    subscribeToEvents: (
+      onEvent: SubscribeArgs["onEvent"],
+      onReconnect: SubscribeArgs["onReconnect"],
+      onTerminal: SubscribeArgs["onTerminal"],
+      initialSince = 0,
+      onResync?: SubscribeArgs["onResync"],
+    ) => {
+      subscribeArgs = { onEvent, onReconnect, onTerminal, initialSince, onResync };
+      return () => {
+        subscribeArgs = null;
+      };
+    },
+  };
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -75,6 +85,29 @@ function makeTask(overrides: Partial<TaskDto> & Pick<TaskDto, "id" | "title">): 
     revision: 1,
     due_date: null,
     completed_at: null,
+    description: "",
+    someday: false,
+    tag_ids: [],
+    sort_order: 0,
+    ...overrides,
+  };
+}
+
+function makeEvent(
+  task: TaskDto | null,
+  revision: number,
+  eventType: string,
+  overrides: Partial<CommittedEventDto> = {},
+): CommittedEventDto {
+  return {
+    event_type: eventType,
+    occurred_at: "2026-07-28T00:00:00Z",
+    operation_id: "op-test-1",
+    revision,
+    affected: task ? { task_ids: [task.id] } : {},
+    resync: { tasks: false, catalog: false },
+    primary: task ? { resource_type: "task", id: task.id } : null,
+    snapshot: task ? { resource_type: "task", task } : null,
     ...overrides,
   };
 }
@@ -83,17 +116,10 @@ function makeMutation(
   task: TaskDto,
   revision: number,
   operationId = "op-test-1",
+  eventType = "task.created",
 ): MutationResponse {
   return {
-    task,
-    event: {
-      event_type: "task.created",
-      occurred_at: "2026-07-28T00:00:00Z",
-      operation_id: operationId,
-      revision,
-      task,
-      task_id: task.id,
-    },
+    event: makeEvent(task, revision, eventType, { operation_id: operationId }),
   };
 }
 
@@ -101,16 +127,17 @@ describe("nextStateFromListSnapshot", () => {
   const older = {
     revision: 3,
     tasks: [makeTask({ id: "a", title: "older", revision: 3 })],
+    as_of_date: "2026-07-28",
   };
   const newer = {
     revision: 5,
     tasks: [makeTask({ id: "b", title: "newer", revision: 5 })],
+    as_of_date: "2026-07-28",
   };
 
   it("accepts a newer snapshot and rejects a later older completion", () => {
-    // Reverse completion order: newer snapshot first, then older.
     const afterNewer = nextStateFromListSnapshot(0, newer);
-    expect(afterNewer).toEqual(newer);
+    expect(afterNewer).toMatchObject({ revision: 5, tasks: newer.tasks });
 
     const afterOlder = nextStateFromListSnapshot(afterNewer!.revision, older);
     expect(afterOlder).toBeNull();
@@ -118,7 +145,7 @@ describe("nextStateFromListSnapshot", () => {
 
   it("allows an equal revision snapshot to confirm the same head", () => {
     const confirmed = nextStateFromListSnapshot(5, newer);
-    expect(confirmed).toEqual(newer);
+    expect(confirmed).toMatchObject({ revision: 5 });
   });
 });
 
@@ -138,6 +165,62 @@ describe("upsertTaskById / removeTaskById", () => {
     expect(list).toEqual([updated]);
     expect(removeTaskById(list, "t1")).toEqual([]);
     expect(removeTaskById(list, "missing")).toEqual(list);
+  });
+});
+
+describe("RefreshCoalescer", () => {
+  it("runs one trailing refresh after a burst", async () => {
+    const coalescer = new RefreshCoalescer();
+    let runs = 0;
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const barriers = [first, second];
+
+    const kick = () =>
+      coalescer.run(async () => {
+        const barrier = barriers[runs];
+        runs += 1;
+        await barrier?.promise;
+      });
+
+    void kick();
+    void kick();
+    void kick();
+    expect(runs).toBe(1);
+
+    first.resolve();
+    await vi.waitFor(() => expect(runs).toBe(2));
+    second.resolve();
+    await vi.waitFor(() => expect(coalescer.isInFlight).toBe(false));
+    expect(runs).toBe(2);
+  });
+});
+
+describe("applyTaskEventToList", () => {
+  it("patches a visible single-resource snapshot and refreshes bulk/resync", () => {
+    const task = makeTask({ id: "t1", title: "One", revision: 1 });
+    const patched = applyTaskEventToList(
+      [task],
+      1,
+      makeEvent({ ...task, estimated_minutes: 25, revision: 2 }, 2, "task.updated"),
+    );
+    expect(patched.needsRefresh).toBe(false);
+    expect(patched.tasks[0]?.estimated_minutes).toBe(25);
+
+    const bulk = applyTaskEventToList(
+      [task],
+      2,
+      makeEvent(null, 3, "task.bulk", { resync: { tasks: true, catalog: false } }),
+    );
+    expect(bulk.needsRefresh).toBe(true);
+  });
+});
+
+describe("isOutcomeUnknown", () => {
+  it("marks retryable network failures as outcome-unknown", () => {
+    expect(isOutcomeUnknown(new NetworkError("boom", true))).toBe(true);
+    expect(isOutcomeUnknown(new NetworkError("aborted", false, true))).toBe(false);
+    expect(isOutcomeUnknown(new Error("nope"))).toBe(false);
   });
 });
 
@@ -180,7 +263,7 @@ describe("useTasks convergence", () => {
     subscribeArgs = null;
     listTasks.mockReset();
     createTaskApi.mockReset();
-    replaceTask.mockReset();
+    patchTask.mockReset();
     completeTask.mockReset();
     uncompleteTask.mockReset();
     deleteTaskApi.mockReset();
@@ -222,10 +305,10 @@ describe("useTasks convergence", () => {
     expect(latest?.revision).toBe(6);
     expect(latest?.tasks.map((task) => task.id)).toEqual(["new"]);
 
-    // Older list response completes after the newer mutation head is applied.
     await act(async () => {
       initialList.resolve({
         revision: 4,
+        as_of_date: "2026-07-28",
         tasks: [makeTask({ id: "stale", title: "Stale snapshot", revision: 4 })],
       });
       await initialList.promise;
@@ -240,7 +323,7 @@ describe("useTasks convergence", () => {
   });
 
   it("keeps one task when own-create SSE/list lands before the mutation response", async () => {
-    listTasks.mockResolvedValueOnce({ revision: 0, tasks: [] });
+    listTasks.mockResolvedValueOnce({ revision: 0, tasks: [], as_of_date: "2026-07-28" });
 
     mount();
     await flush();
@@ -257,20 +340,12 @@ describe("useTasks convergence", () => {
       createPromise = latest!.createTask("Solo", null);
     });
 
-    // Own-create SSE arrives first and the list reload already contains the task.
-    listTasks.mockResolvedValueOnce({ revision: 1, tasks: [task] });
+    listTasks.mockResolvedValueOnce({ revision: 1, tasks: [task], as_of_date: "2026-07-28" });
     await act(async () => {
       subscribeArgs!.onEvent({
         id: "1",
-        event: "task",
-        data: {
-          event_type: "task.created",
-          occurred_at: "2026-07-28T00:00:01Z",
-          operation_id: "op-test-1",
-          revision: 1,
-          task,
-          task_id: task.id,
-        },
+        event: "revision",
+        data: makeEvent(task, 1, "task.created"),
       });
       await Promise.resolve();
       await Promise.resolve();
@@ -280,10 +355,9 @@ describe("useTasks convergence", () => {
     expect(latest?.tasks).toHaveLength(1);
     expect(latest?.tasks[0]?.id).toBe("created-1");
 
-    // Mutation response arrives second with the same task id.
     await act(async () => {
       mutation.resolve(makeMutation(task, 1));
-      await createPromise;
+      await createPromise!;
       await Promise.resolve();
     });
 
@@ -307,11 +381,10 @@ describe("useTasks convergence", () => {
       latest!.retry();
       await Promise.resolve();
     });
-    // Still only the original in-flight fetch; follow-up is queued once.
     expect(listTasks).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      first.resolve({ revision: 1, tasks: [] });
+      first.resolve({ revision: 1, tasks: [], as_of_date: "2026-07-28" });
       await first.promise;
       await Promise.resolve();
       await Promise.resolve();
@@ -320,7 +393,11 @@ describe("useTasks convergence", () => {
     expect(listTasks).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      second.resolve({ revision: 2, tasks: [makeTask({ id: "t2", title: "Two", revision: 2 })] });
+      second.resolve({
+        revision: 2,
+        as_of_date: "2026-07-28",
+        tasks: [makeTask({ id: "t2", title: "Two", revision: 2 })],
+      });
       await second.promise;
       await Promise.resolve();
     });
@@ -337,6 +414,7 @@ describe("useTasks convergence", () => {
       .mockRejectedValueOnce(new Error("list failed"))
       .mockResolvedValueOnce({
         revision: 3,
+        as_of_date: "2026-07-28",
         tasks: [makeTask({ id: "recovered", title: "Recovered", revision: 3 })],
       });
 
@@ -349,17 +427,15 @@ describe("useTasks convergence", () => {
     });
 
     await act(async () => {
-      first.resolve({ revision: 0, tasks: [] });
+      first.resolve({ revision: 0, tasks: [], as_of_date: "2026-07-28" });
       await first.promise;
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    // Failed follow-up is visible...
     expect(latest?.error).toBe("list failed");
 
-    // ...and a subsequent reconnect still catch-up reloads successfully.
     await act(async () => {
       subscribeArgs!.onReconnect();
       await Promise.resolve();
@@ -369,5 +445,44 @@ describe("useTasks convergence", () => {
     expect(latest?.error).toBeNull();
     expect(latest?.revision).toBe(3);
     expect(latest?.tasks.map((task) => task.id)).toEqual(["recovered"]);
+  });
+
+  it("refreshes after outcome-unknown mutation failures", async () => {
+    listTasks.mockResolvedValue({ revision: 1, tasks: [], as_of_date: "2026-07-28" });
+    mount();
+    await flush();
+    const callsAfterMount = listTasks.mock.calls.length;
+
+    createTaskApi.mockRejectedValueOnce(new NetworkError("connection lost", true));
+
+    await act(async () => {
+      const created = await latest!.createTask("Maybe", null);
+      expect(created).toBeNull();
+    });
+
+    expect(latest?.mutationPhase).toBe("outcome-unknown");
+    expect(listTasks.mock.calls.length).toBeGreaterThan(callsAfterMount);
+  });
+
+  it("requests a resync when SSE reports unknown/bulk scopes", async () => {
+    listTasks.mockResolvedValue({ revision: 1, tasks: [], as_of_date: "2026-07-28" });
+    mount();
+    await flush();
+    const before = listTasks.mock.calls.length;
+
+    await act(async () => {
+      subscribeArgs!.onResync?.({ tasks: true, catalog: false }, "unknown_event_type");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(listTasks.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it("loads only a bounded first page", async () => {
+    listTasks.mockResolvedValue({ revision: 0, tasks: [], as_of_date: "2026-07-28" });
+    mount();
+    await flush();
+    expect(listTasks).toHaveBeenCalledWith({ limit: 100 });
   });
 });

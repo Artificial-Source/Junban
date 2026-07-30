@@ -1,16 +1,25 @@
+/**
+ * Quick-entry task input using the Rust parser.
+ * Submits the raw text to /parse/quick-entry, then creates a task from the result.
+ * Preserves the legacy input layout with explicit error feedback.
+ */
 import { useState, useRef, useId } from "react";
 import { Plus } from "lucide-react";
 
 interface TaskInputProps {
-  onSubmit: (title: string) => Promise<boolean>;
+  onSubmit?: (title: string) => Promise<boolean>;
+  onParseAndCreate?: (input: string) => Promise<boolean>;
   placeholder?: string;
   autoFocusTrigger?: number;
+  autoFocus?: boolean;
 }
 
 export function TaskInput({
   onSubmit,
+  onParseAndCreate,
   placeholder = 'Add a task... (e.g., "buy milk tomorrow p1 #groceries")',
   autoFocusTrigger,
+  autoFocus,
 }: TaskInputProps) {
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -25,9 +34,12 @@ export function TaskInput({
     setSubmitting(true);
     setError(null);
     try {
-      const success = await onSubmit(value.trim());
-      if (success) {
-        setValue("");
+      if (onParseAndCreate) {
+        const success = await onParseAndCreate(value.trim());
+        if (success) setValue("");
+      } else if (onSubmit) {
+        const success = await onSubmit(value.trim());
+        if (success) setValue("");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "The task could not be created.");
@@ -36,8 +48,12 @@ export function TaskInput({
     }
   };
 
-  // Focus on mount if autoFocusTrigger is set
-  if (autoFocusTrigger && autoFocusTrigger > 0 && inputRef.current && !submitting) {
+  // Focus on mount if autoFocus or autoFocusTrigger changes
+  if (
+    (autoFocus || (autoFocusTrigger && autoFocusTrigger > 0)) &&
+    inputRef.current &&
+    !submitting
+  ) {
     inputRef.current.focus();
   }
 

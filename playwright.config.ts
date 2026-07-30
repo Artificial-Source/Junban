@@ -26,8 +26,8 @@ export default defineConfig({
       },
     },
     {
-      name: "visual",
-      testMatch: /visual\.spec\.ts/,
+      name: "visual-phase-2",
+      testMatch: /visual-phase-2\.spec\.ts/,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1440, height: 900 },

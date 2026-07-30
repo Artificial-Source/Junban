@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28. Phases 0 and 1 are complete. Phase 2 has not started.
+**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 2 are complete. Phase 3 is active.
 
 ## Purpose and user-visible outcome
 
@@ -49,6 +49,7 @@ Phase 1's final five-sample optimized run measured 8.79 MiB median / 9.23 MiB ma
 9. The work proceeds in explicit, validated, cleanly committed phases. Replaced scaffolding is deleted.
 10. The retired repository remains private and archived.
 11. Implementation follows Google's code-health standard: make focused progress with simple, functional, maintainable code; do not pursue theoretical perfection or speculative abstraction.
+12. Phases 2–10 proceed sequentially without pausing at phase boundaries. Phase 10 performs a final evidence-driven codebase, developer-experience and documentation audit before any separately approved release tag.
 
 ## Scope
 
@@ -183,7 +184,7 @@ Tauri remains a thin native shell. It starts the same Rust server/application co
 
 The inventory is a verification checklist, not a mandate to preserve legacy implementation details. Each item receives a phase owner and at least one automated or manual acceptance case before final release.
 
-### Tasks and organization — Phases 1–2
+### Tasks and organization — Phases 1–3
 
 - create, read, edit, delete, complete, uncomplete and cancel tasks
 - title, Markdown description, priority P1–P4, due date/time, deadline, someday flag
@@ -198,7 +199,7 @@ The inventory is a verification checklist, not a mandate to preserve legacy impl
 - templates and template application
 - natural-language quick entry and query parsing
 - search, saved filters and advanced filtering
-- recurring tasks with exact undo/reversal semantics
+- recurring-task rule storage is established in Phase 2; occurrence generation and exact completion undo/reversal semantics ship in Phase 3
 
 ### Views and interaction design — Phases 1–4
 
@@ -304,7 +305,7 @@ Arbitrary plugin React execution is intentionally replaced by declarative host-r
 - secure updater flow and recovery behavior
 - package/resource verification and no Node runtime artifact
 
-### Product posture and release — Phase 9
+### Product posture and release — Phases 9–10
 
 - no account, telemetry or mandatory cloud service
 - local-first defaults and private data paths
@@ -316,7 +317,7 @@ Arbitrary plugin React execution is intentionally replaced by declarative host-r
 
 ## Phase graph and acceptance contracts
 
-The dependency chain is `0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9`. Small independent documentation or test work may run in parallel within a phase, but implementation phases do not overlap across an uncommitted boundary.
+The dependency chain is `0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10`. Small independent documentation or test work may run in parallel within a phase, but implementation phases do not overlap across an uncommitted boundary.
 
 ### Phase 0 — Repository and toolchain foundation
 
@@ -385,7 +386,7 @@ After evidence, freeze the first native memory regression budget instead of inve
 
 Work:
 
-- all task fields, projects, sections, tags, templates, hierarchy, relations, comments and activity;
+- all Phase 2 task fields, projects, sections, tags, templates, hierarchy, relations, comments and activity; persist validated recurrence rules without generating occurrences or exposing incomplete recurrence controls before Phase 3;
 - bulk actions, ordering, drag/drop contracts and undoable mutations;
 - natural-language quick entry and search/query/filter engine;
 - saved filters and Inbox/Today/Upcoming/Someday/Completed/Cancelled/Project/Task views;
@@ -395,7 +396,7 @@ Work:
 
 Acceptance:
 
-- feature checklist rows owned by Phase 2 are automated;
+- feature checklist rows owned by Phase 2 are automated; recurrence acceptance in this phase is limited to parser/API/storage round-trip, while occurrence generation and exact reversal remain Phase 3 gates;
 - parser golden tests and property tests cover dates, priorities and invalid input;
 - hierarchy/reorder/bulk operations preserve invariants transactionally;
 - 10,000-task list/search/filter/mutation benchmark records p50/p95 and peak memory;
@@ -557,9 +558,9 @@ Acceptance:
 - architecture and native lifecycle review passes;
 - one clean commit: `feat: deliver native Rust desktop`.
 
-### Phase 9 — Integrated parity, hardening and first release
+### Phase 9 — Integrated parity, hardening and release candidate
 
-**Outcome:** every in-scope feature row is closed with evidence and the fresh Junban can publish its first honest release.
+**Outcome:** every in-scope feature row is closed with evidence and the fresh Junban is a complete, honest release candidate ready for the final codebase audit.
 
 Work:
 
@@ -568,7 +569,7 @@ Work:
 - dogfood Tailnet/web first, then desktop, CLI, MCP, AI/voice and plugins;
 - release packaging, checksums, SBOM, provenance and updater-signature policy;
 - public setup, security, plugin-author, CLI/MCP and recovery docs;
-- create a release only after target-native evidence is complete.
+- assemble the release candidate only after target-native evidence is complete; publication waits for Phase 10 and the separately approved release tag.
 
 Acceptance:
 
@@ -580,7 +581,37 @@ Acceptance:
 - long-run and crash/recovery tests show no owner/process leaks;
 - working tree is clean and all canonical docs match behavior;
 - integrated final review passes;
-- one clean commit before the separately approved release tag: `chore: complete Junban Rust rewrite`.
+- one clean commit: `chore: complete Junban Rust rewrite`.
+
+### Phase 10 — Codebase excellence, DX and documentation audit
+
+**Outcome:** the completed rewrite receives one fresh, evidence-driven audit of implementation quality, architecture, dependencies, tests, contributor experience, documentation and operational maintainability. Verified high-value improvements land without redesigning the product or starting speculative framework work. The resulting tree is ready for a separately approved first release tag.
+
+Work:
+
+- create a fresh whole-repository map covering ownership, dependency direction, concurrency boundaries, public contracts, generated code and runtime entry points;
+- inspect production Rust and React for dead or superseded paths, needless duplication, unclear ownership, unsafe assumptions, panic/error behavior, hidden global state and avoidable complexity;
+- audit direct dependencies, enabled features, advisories, licenses, duplicate versions, binary contribution and optional-subsystem isolation; remove only dependencies or features whose value is not demonstrated;
+- assess test effectiveness, flake history, fixture duplication, slow suites and uncovered high-consequence invariants; add or simplify tests where evidence shows value rather than chasing a cosmetic coverage number;
+- dogfood a clean-clone contributor journey from setup through first focused change, local checks, debugging, contract generation, benchmarks, plugin authoring, CLI/MCP use and release rehearsal;
+- verify every canonical document, command, example, architecture diagram and troubleshooting path against the finished product; remove stale planning language and duplicated authorities;
+- review CI duration, cache behavior, diagnostics, artifact retention and release operations for reliable feedback without weakening gates;
+- rerun the final optimized memory, startup, seeded performance, accessibility, security, recovery, package and cross-surface evidence after all accepted audit fixes;
+- maintain a stable finding ledger. Fix verified material issues; reject or defer speculative polish with reasons.
+
+Acceptance:
+
+- a clean checkout on each supported development platform can follow the documented setup and reach the nearest focused checks without hidden machine state;
+- all runtime entry points, ownership boundaries, generated artifacts and optional feature-loading rules have one documented authority and match implementation;
+- no superseded implementation, unexplained production dependency, unresolved advisory, unapproved license, accidental runtime Node path or material dead code remains;
+- tests cover every verified high-consequence gap found by the audit, while redundant or flaky coverage is simplified without reducing behavior protection;
+- contributor, architecture, API, CLI/MCP, plugin-author, security, recovery, performance and release documentation is command-checked and task-oriented;
+- CI and release rehearsal complete with actionable diagnostics, exact artifact identity and no weakening of Phase 9 gates;
+- the Phase 1 hosted-memory ceiling, final seeded latency budgets, package checks and no-resident-Node invariant still pass after accepted fixes;
+- the finding ledger has no unresolved severe or material issue; an integrated final reviewer approves the changed delta, with a specialist checkpoint added only if a discovered issue creates a distinct severe-risk domain;
+- one clean commit before the separately approved release tag: `chore: complete Junban codebase excellence audit`.
+
+Phase 10 is deliberately bounded. “Take the codebase to the next level” means measurable improvements to correctness, clarity, feedback speed, onboarding and operational confidence—not an endless refactor or theoretical perfection exercise.
 
 ## Phase-level validation policy
 
@@ -657,6 +688,7 @@ Use one dominant-risk reviewer at each phase gate:
 - Phase 7: security with an explicit plugin threat model; adversarial review if warranted
 - Phase 8: architecture/native lifecycle
 - Phase 9: integrated final review
+- Phase 10: evidence-driven whole-codebase review; add one specialist only if a discovered issue has a distinct severe-risk domain
 
 Track findings by stable ID as open, fixed, rejected or deferred with reasons. A severe unresolved finding blocks the phase.
 
@@ -672,14 +704,20 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] User approved this plan and explicitly requested simple, functional, non-overengineered implementation.
 - [x] Phase 0 implementation, validation, architecture review and exact-head CI.
 - [x] Phase 1 implementation, validation, dogfood, benchmark, review and protected delivery through PR #5.
-- [ ] Phase 2 implementation.
-- [ ] Phase 3 implementation.
+- [x] Phase 2 context, behavior, UI, dependency, validation and database plan approved.
+- [x] Phase 2 domain model and invariant wave.
+- [x] Phase 2 parser and transactional schema waves.
+- [x] Phase 2 application, HTTP, React, scale, dogfood, review and delivery waves.
+- [ ] Phase 3 implementation (active).
 - [ ] Phase 4 implementation.
 - [ ] Phase 5 implementation.
 - [ ] Phase 6 implementation.
 - [ ] Phase 7 implementation.
 - [ ] Phase 8 implementation.
 - [ ] Phase 9 implementation.
+- [x] User requested sequential execution through a new Phase 10 without pausing at phase boundaries.
+- [x] Phase 10 scope and release sequencing passed focused planning review.
+- [ ] Phase 10 codebase excellence, DX and documentation audit.
 
 ## Plan review ledger
 
@@ -696,6 +734,9 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - `PLAN-002` — **fixed**. Phase 1 must freeze a numeric final hosted-memory ceiling and exact protocol before Phase 2; Phase 9 must pass it and cannot waive it by explaining cumulative deltas.
 - `PLAN-003` — **fixed**. Phase 8 and Phase 9 now require target-native package/install/launch evidence for Linux x64, macOS Intel/ARM64 and Windows x64/ARM64. Only an explicit recorded user exception can permit a missing target.
 - Focused recheck — **approved**. The planning reviewer found no remaining blocker in `PLAN-001`–`PLAN-003`.
+- Phase 10 planning review — **approved**. The final audit is bounded by evidence and stable findings, has observable DX/docs/quality acceptance, and precedes rather than follows the separately approved release tag.
+- `DBPLAN2-001`–`DBPLAN2-006` — **fixed and approved**. Phase 2 freezes a generalized one-event-per-revision envelope, SQLite table rebuild, bounded cascade/receipt/event payloads, complete delete-undo closure, pending-only completion cascade, and explicit section deletion. Focused database recheck approved implementation.
+- Phase 2 final review — **approved after fixes**. Frontend, accessibility, database and API findings plus six dogfood issues are fixed with focused regressions. Targeted closure re-review confirmed `P2-CLOSE-001`–`P2-CLOSE-003` fixed with no material finding remaining; the full ledger is `evidence/phase-2-review-ledger.md`.
 
 ## Decision log
 
@@ -710,6 +751,8 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-07-28: selected one dedicated long-lived SQLite connection thread rather than a pool. The required Phase 1 mutation volume is serialized, executor threads never block on SQLite, and a pool would add ownership and memory complexity without demonstrated benefit.
 - 2026-07-28: selected Utoipa-derived OpenAPI plus checked `openapi-typescript` output. Rust transport DTOs and route annotations remain the only hand-maintained contract authority; generation and non-mutating drift checks cover both artifacts.
 - 2026-07-28: froze the final hosted-server budget at 24 MiB maximum warm / 32 MiB peak after the integrated Phase 1 run measured 9.23 / 9.41 MiB maxima. Later phases use the same protocol and cannot waive the final ceiling.
+- 2026-07-29: user requested uninterrupted sequential execution through Phase 9 and added Phase 10 for a deep codebase, DX and documentation audit. Release publication now follows that audit and still requires a separately approved tag.
+- 2026-07-30: completed Phase 2 without adding crates or runtime owners. Recurrence remains validated rule storage only; Phase 3 owns occurrence generation, reminders and planning semantics. Final release-binary evidence passed at 6.96 MiB median warm for the frozen workload and 15.18 MiB maximum warm for deterministic 10,000-task scale.
 
 ## Discoveries and risks
 
@@ -734,6 +777,9 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 1 convergence: unconstrained SSE reloads could apply older list responses after newer ones or duplicate an own-created task; revision-monotonic snapshots, coalesced reloads and task-ID upserts close the race without adding a state library.
 - Phase 1 dogfood: opening a complete connection URL worked, but adding its fragment to an already-open connection screen was same-document navigation and skipped mount-only bootstrap. A small `hashchange` listener restored the plausible recovery path.
 - Phase 1 CI: screenshot comparisons were deterministic locally but not across Linux font sets; every remote diff covered text rendered with DejaVu instead of the capture host's Noto Sans. Pinning the checksum-verified Noto package in the visual-test job makes the design gate portable without changing production typography.
+- Phase 2 persistence: one schema-v2 migration and one dedicated SQLite worker were sufficient for complete task organization; no pool, FTS dependency or event-sourcing layer was required. A 250-page WAL auto-checkpoint removed periodic write-tail outliers while retaining full durability.
+- Phase 2 client correctness: view membership, own-response convergence, undo/redo identity and blocking-layer isolation needed explicit authority; focused pure helpers and component regressions closed those races without a state-management dependency.
+- Phase 2 scale: the final deterministic 10,000-task run stayed below 15.36 MiB peak and all p95 budgets by wide margins, so the simple indexed SQL query path remains authoritative.
 
 ## Outcome and retrospective
 
@@ -755,3 +801,12 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - **Dogfood:** real private Tailscale Serve HTTPS passed create/edit/complete/uncomplete/restart/delete, desktop/mobile rendering and graceful cleanup. `DOGFOOD-001` same-page fragment recovery was fixed and retested.
 - **Review:** `P1-FINAL-LIFE-001`, `P1-FINAL-CONV-001`, `P1-FINAL-GATE-001`, and `P1-FINAL-TM-001` are fixed. The focused security recheck found no material named finding remaining.
 - **Remote verification:** PR #5 is the protected phase-delivery gate. Rust, Rust supply-chain, frontend/repository, and release-binary E2E checks are all required on its exact merge head; failure screenshots are retained for diagnosis.
+
+### Phase 2
+
+- **Outcome:** complete Rust task and organization domain across the existing four crates and preserved React interface: full task fields, projects, sections, tags, templates, comments, relations, saved filters, search, palette, hierarchy, list/board movement, bulk actions, text/quick-entry parsers, activity, durable operations and conflict-safe undo.
+- **Evidence:** `goals/rust-rewrite/evidence/phase-2-outcome.md`; `phase-2-hosted-memory.json`; `phase-2-scale-bench.json`; `phase-2-review-ledger.md`; `dogfood-output/phase-2/report.md`; twelve visual authorities under `phase-2-visual-baseline/`.
+- **Memory and scale:** five-sample frozen workload passed at 6.96 MiB median / 7.13 MiB maximum warm and 7.63 MiB maximum peak. Three deterministic 10,000-task samples passed at 14.87–15.18 MiB warm and 15.35 MiB maximum peak; list/view, search/filter, single-mutation and 25-task bulk/reorder p95 were 3.89, 4.25, 3.90 and 8.69 ms respectively.
+- **Validation:** 150 Rust tests, 225 frontend tests and 38 Playwright scenarios passed alongside format, Clippy, type, contract, docs, runtime-boundary, npm/Rust audit, benchmark cleanup and no-Node checks.
+- **Dogfood and review:** six browser findings plus all API, database, frontend, accessibility and final closure findings are fixed with focused regressions. Targeted re-review confirmed `P2-CLOSE-001`–`P2-CLOSE-003` fixed with no material finding remaining.
+- **Follow-up:** Phase 3 activates recurrence occurrence generation, reminders and the planning/time surfaces over the same single worker and SQLite authority.

@@ -16,7 +16,9 @@ test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-07-23T10:30:00-07:00"));
   await page.addInitScript(() => {
     window.matchMedia = (query: string) => ({
-      matches: query === "(prefers-reduced-motion: reduce)",
+      matches:
+        query === "(prefers-reduced-motion: reduce)" ||
+        (query === "(max-width: 767px)" && window.innerWidth <= 767),
       media: query,
       onchange: null,
       addListener: () => {},
@@ -155,7 +157,12 @@ test("keyboard: task dialog traps focus, escapes, and restores its opener", asyn
   });
   await opener.click();
   const dialog = page.getByRole("dialog", { name: /Task: Review accessibility audit findings/ });
-  await expect(dialog.getByLabel("Task title")).toBeFocused();
+  await expect(dialog.getByRole("textbox", { name: "Task title", exact: true })).toBeFocused();
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => Boolean(element.closest('[inert][aria-hidden="true"]'))),
+  ).toBe(true);
 
   const close = dialog.getByRole("button", { name: "Close task details" });
   await close.focus();
@@ -167,4 +174,68 @@ test("keyboard: task dialog traps focus, escapes, and restores its opener", asyn
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();
   await expect(opener).toBeFocused();
+  expect(
+    await page.locator("#main-content").evaluate((element) => Boolean(element.closest("[inert]"))),
+  ).toBe(false);
+});
+
+test("a11y: mobile drawer traps focus, escapes, and restores menu trigger (P2-A11Y-001)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await authenticate(page, "/today");
+
+  const menu = page.getByRole("button", { name: "Open navigation menu" });
+  await menu.click();
+
+  const drawer = page.getByRole("dialog", { name: "Navigation drawer" });
+  await expect(drawer).toBeVisible();
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => Boolean(element.closest('[inert][aria-hidden="true"]'))),
+  ).toBe(true);
+
+  const focusedInDrawer = await page.evaluate(() => {
+    const d = document.querySelector('[aria-label="Navigation drawer"]');
+    return !!(d && document.activeElement && d.contains(document.activeElement));
+  });
+  expect(focusedInDrawer).toBe(true);
+
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  await expect(menu).toBeFocused();
+});
+
+test("a11y: command palette combobox is labelled without nested option buttons (P2-A11Y-006)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await authenticate(page, "/today");
+
+  await page.keyboard.press("Control+Shift+P");
+  const dialog = page.getByRole("dialog", { name: "Command palette" });
+  await expect(dialog).toBeVisible();
+
+  const combobox = dialog.getByRole("combobox", { name: "Filter commands" });
+  await expect(combobox).toBeVisible();
+  await expect(combobox).toBeFocused();
+
+  await expect(dialog.getByRole("option").first()).toBeVisible();
+  const nestedButtons = await dialog.locator('[role="option"] button').count();
+  expect(nestedButtons).toBe(0);
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
+test("a11y: Add Project closes on Escape (P2-A11Y-004)", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await authenticate(page, "/today");
+
+  await page.keyboard.press("Control+Shift+N");
+  const dialog = page.getByRole("dialog", { name: "New Project" });
+  await expect(dialog).toBeVisible({ timeout: 5000 });
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
 });

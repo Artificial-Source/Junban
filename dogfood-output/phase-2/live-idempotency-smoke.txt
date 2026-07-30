@@ -1,0 +1,4 @@
+idempotency_key=3e199bf2-0c59-4493-b13c-7960c661b68f
+response_bytes_equal=yes
+sha256=10d09c52206f6e5892180ecf8f57959382ac8ae2b479de36b924bc61bc8b8c64
+response={"event":{"revision":18,"operation_id":"3e199bf2-0c59-4493-b13c-7960c661b68f","event_type":"task.created","occurred_at":"2026-07-29T23:28:52.822417785Z","primary":{"resource_type":"task","id":"019fb035-a256-7ba3-b185-cedf56109d22"},"snapshot":{"resource_type":"task","task":{"id":"019fb035-a256-7ba3-b185-cedf56109d22","title":"Idempotency dogfood","description":"","someday":false,"tag_ids":[],"sort_order":0,"status":"pending","created_at":"2026-07-29T23:28:52.822417785Z","updated_at":"2026-07-29T23:28:52.822417785Z","revision":18}},"affected":{"task_ids":["019fb035-a256-7ba3-b185-cedf56109d22"]},"resync":{"tasks":false,"catalog":false}}}

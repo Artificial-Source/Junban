@@ -2,6 +2,8 @@
 
 These eight images freeze the approved legacy-rendered Today and Inbox shell for the exact Phase 1 field set. They were captured from the private `Junban-legacy` checkout at `5e2b2b5adc865f401843c5030285293c5fabccc5`, not generated from the rewrite.
 
+They are immutable historical evidence for Phase 1. Phase 2 necessarily expands the same shell with projects, filters, organization metadata, and full mobile navigation, so its bounded visual matrix supersedes these images as the active regression authority without rewriting them.
+
 ## Deterministic protocol
 
 - Capture date: 2026-07-28

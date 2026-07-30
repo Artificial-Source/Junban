@@ -1,15 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  DEFAULT_REQUEST_TIMEOUT_MS,
   NetworkError,
+  addRelation,
   bootstrapFragmentToken,
+  bulkTasks,
   clearStoredToken,
+  createComment,
+  createProject,
   createTask,
   generateOperationId,
   getStoredToken,
   hasStoredToken,
+  listTasks,
+  moveTask,
+  parseQuickEntry,
+  patchTask,
   storeToken,
   subscribeToEvents,
+  undoOperation,
+  type SseEvent,
 } from "./client";
 
 function setLocation(hash: string, search = "") {
@@ -20,11 +31,46 @@ function setLocation(hash: string, search = "") {
   });
 }
 
-function errorResponse(status: number, body: unknown): Response {
+function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function mutationEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    event: {
+      revision: 1,
+      operation_id: "11111111-1111-4111-8111-111111111111",
+      event_type: "task.created",
+      occurred_at: "2026-07-28T00:00:00Z",
+      affected: { task_ids: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"] },
+      resync: { tasks: false, catalog: false },
+      primary: {
+        resource_type: "task",
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      },
+      snapshot: {
+        resource_type: "task",
+        task: {
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          title: "Task",
+          description: "",
+          someday: false,
+          tag_ids: [],
+          sort_order: 0,
+          status: "pending",
+          created_at: "2026-07-28T00:00:00Z",
+          updated_at: "2026-07-28T00:00:00Z",
+          revision: 1,
+          due_date: null,
+          completed_at: null,
+        },
+      },
+      ...overrides,
+    },
+  };
 }
 
 describe("fragment token bootstrap", () => {
@@ -105,34 +151,36 @@ describe("mutation transport retries", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("retries one transport failure with the same idempotency key", async () => {
+  it("retries one transport failure with the same idempotency key and body", async () => {
     const fetchMock = vi
       .fn()
       .mockRejectedValueOnce(new TypeError("connection reset"))
-      .mockResolvedValueOnce(errorResponse(201, {}));
+      .mockResolvedValueOnce(jsonResponse(201, mutationEvent()));
     vi.stubGlobal("fetch", fetchMock);
 
-    await createTask(
-      { title: "Retry task", due_date: null },
-      "11111111-1111-4111-8111-111111111111",
-    );
+    const body = { title: "Retry task", due_date: null };
+    await createTask(body, "11111111-1111-4111-8111-111111111111");
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [, init] of fetchMock.mock.calls) {
-      expect((init as RequestInit).headers).toMatchObject({
+      const requestInit = init as RequestInit;
+      expect(requestInit.credentials).toBe("same-origin");
+      expect(requestInit.headers).toMatchObject({
         "Idempotency-Key": "11111111-1111-4111-8111-111111111111",
       });
+      expect(requestInit.body).toBe(JSON.stringify(body));
     }
   });
 
   it("does not retry an HTTP error envelope", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      errorResponse(422, {
+      jsonResponse(422, {
         request_id: "request-id",
         error: {
           code: "validation_error",
           message: "Title is invalid",
           retryable: false,
+          fields: { title: "required" },
         },
       }),
     );
@@ -140,18 +188,334 @@ describe("mutation transport retries", () => {
 
     await expect(
       createTask({ title: "", due_date: null }, "11111111-1111-4111-8111-111111111111"),
-    ).rejects.toBeInstanceOf(ApiError);
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      status: 422,
+      code: "validation_error",
+      fields: { title: "required" },
+      requestId: "request-id",
+    } satisfies Partial<ApiError>);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("turns malformed HTTP errors into NetworkError without retrying", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response("broken", { status: 401 }));
+  it("turns malformed HTTP errors into NetworkError without retrying or leaking bodies", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response("<html>secret-token</html>", { status: 401 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
       createTask({ title: "Task", due_date: null }, "11111111-1111-4111-8111-111111111111"),
-    ).rejects.toBeInstanceOf(NetworkError);
+    ).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(NetworkError);
+      expect(String(error)).not.toContain("secret-token");
+      expect(String(error)).not.toContain("<html>");
+      return true;
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("captures optional error details without treating them as retryable transport failures", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(409, {
+        request_id: "req-2",
+        error: {
+          code: "conflict",
+          message: "Conflict",
+          retryable: false,
+          details: { reason: "duplicate" },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await createTask({ title: "Task" }, "11111111-1111-4111-8111-111111111111").catch(
+      (err: unknown) => err,
+    );
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({
+      details: { reason: "duplicate" },
+      retryable: false,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("times out hanging ordinary fetches once per attempt and retries mutations with the same key", async () => {
+    vi.useFakeTimers();
+    const body = { title: "Hanging create" };
+    const opId = "22222222-2222-4222-8222-222222222222";
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) {
+          reject(new Error("expected abort signal"));
+          return;
+        }
+        const onAbort = () => {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        };
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = createTask(body, opId);
+    // Attach rejection handler before advancing timers so the retry rejection is not unhandled.
+    const expectation = expect(pending).rejects.toMatchObject({
+      name: "NetworkError",
+      message: "Request timed out",
+      retryable: true,
+      aborted: false,
+    } satisfies Partial<NetworkError>);
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_REQUEST_TIMEOUT_MS);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(DEFAULT_REQUEST_TIMEOUT_MS);
+    await expectation;
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      const requestInit = init as RequestInit;
+      expect(requestInit.headers).toMatchObject({ "Idempotency-Key": opId });
+      expect(requestInit.body).toBe(JSON.stringify(body));
+    }
+
+    vi.useRealTimers();
+  });
+
+  it("times out hanging parse/quick-entry calls as a retryable network error", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) {
+          reject(new Error("expected abort signal"));
+          return;
+        }
+        const onAbort = () => {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        };
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = parseQuickEntry({ input: "buy milk p1" });
+    const expectation = expect(pending).rejects.toMatchObject({
+      name: "NetworkError",
+      message: "Request timed out",
+      retryable: true,
+      aborted: false,
+    } satisfies Partial<NetworkError>);
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_REQUEST_TIMEOUT_MS);
+    await expectation;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
+  it("leaves the authenticated event stream unbounded by the ordinary request timeout", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      signal = init?.signal ?? undefined;
+      return new Promise<Response>(() => {
+        /* intentionally never settles */
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cleanup = subscribeToEvents(vi.fn(), vi.fn(), vi.fn());
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalled();
+    expect(signal?.aborted).toBe(false);
+
+    // Far beyond DEFAULT_REQUEST_TIMEOUT_MS — stream must stay open.
+    await vi.advanceTimersByTimeAsync(DEFAULT_REQUEST_TIMEOUT_MS * 4);
+    expect(signal?.aborted).toBe(false);
+
+    cleanup();
+    expect(signal?.aborted).toBe(true);
+    vi.useRealTimers();
+  });
+});
+
+describe("endpoint request shapes", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    storeToken("test-token");
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("lists tasks with view, filters, and clamped page limit", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        tasks: [],
+        revision: 0,
+        as_of_date: "2026-07-28",
+        next_cursor: null,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listTasks({
+      view: "today",
+      project_id: "-",
+      section_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      tag_ids: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      status: "pending,completed",
+      limit: 500,
+      cursor: "opaque-cursor",
+      sort: "due_asc",
+      overdue: true,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/tasks?");
+    expect(url).toContain("view=today");
+    expect(url).toContain("project_id=-");
+    expect(url).toContain(
+      "tag_ids=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa%2Cbbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    );
+    expect(url).toContain("status=pending%2Ccompleted");
+    expect(url).toContain("limit=100");
+    expect(url).toContain("cursor=opaque-cursor");
+    expect(url).toContain("overdue=true");
+    expect(init.credentials).toBe("same-origin");
+    expect(init.headers).toMatchObject({ Authorization: "Bearer test-token" });
+  });
+
+  it("omits client-generated ids from create bodies", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(jsonResponse(201, mutationEvent())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createTask(
+      { title: "No id", due_date: null, description: "x" },
+      "11111111-1111-4111-8111-111111111111",
+    );
+    await createProject({ name: "Work", color: "#fff" }, "22222222-2222-4222-8222-222222222222");
+    await createComment(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      { content: "Hello" },
+      "33333333-3333-4333-8333-333333333333",
+    );
+
+    for (const [, init] of fetchMock.mock.calls) {
+      const body = JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>;
+      expect(body).not.toHaveProperty("id");
+    }
+  });
+
+  it("patches tasks, moves with explicit anchors, and posts nested bulk actions", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(jsonResponse(200, mutationEvent())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await patchTask(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      { title: "Updated", priority: null },
+      "11111111-1111-4111-8111-111111111111",
+    );
+    await moveTask(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      {
+        project_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        section_id: null,
+        parent_id: null,
+        order: { after: { task_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" } },
+      },
+      "22222222-2222-4222-8222-222222222222",
+    );
+    await bulkTasks(
+      {
+        task_ids: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"],
+        action: {
+          type: "move",
+          target: {
+            project_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            order: "keep",
+          },
+        },
+      },
+      "33333333-3333-4333-8333-333333333333",
+    );
+    await addRelation(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      { to_task_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", kind: "blocks" },
+      "44444444-4444-4444-8444-444444444444",
+    );
+    await undoOperation(
+      "55555555-5555-4555-8555-555555555555",
+      "66666666-6666-4666-8666-666666666666",
+    );
+    await parseQuickEntry({ input: "Buy milk tomorrow #errands" });
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => ({
+      url: String(url),
+      method: (init as RequestInit).method,
+      body: (init as RequestInit).body
+        ? (JSON.parse(String((init as RequestInit).body)) as unknown)
+        : undefined,
+      headers: (init as RequestInit).headers as Record<string, string>,
+    }));
+
+    expect(calls[0]).toMatchObject({
+      url: "/api/v1/tasks/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      method: "PATCH",
+      body: { title: "Updated", priority: null },
+    });
+    expect(calls[1]).toMatchObject({
+      url: "/api/v1/tasks/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/move",
+      method: "POST",
+      body: {
+        order: { after: { task_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" } },
+      },
+    });
+    expect(calls[2]).toMatchObject({
+      url: "/api/v1/tasks/actions",
+      method: "POST",
+      body: {
+        action: {
+          type: "move",
+          target: { order: "keep" },
+        },
+      },
+    });
+    // Nested bulk shape must remain unknown-property-safe (no flattened fields).
+    expect(calls[2]?.body).toEqual({
+      task_ids: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"],
+      action: {
+        type: "move",
+        target: {
+          project_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          order: "keep",
+        },
+      },
+    });
+    expect(calls[3]).toMatchObject({
+      url: "/api/v1/tasks/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/relations",
+      method: "POST",
+    });
+    expect(calls[4]).toMatchObject({
+      url: "/api/v1/operations/55555555-5555-4555-8555-555555555555/undo",
+      method: "POST",
+      headers: expect.objectContaining({
+        "Idempotency-Key": "66666666-6666-4666-8666-666666666666",
+      }),
+    });
+    expect(calls[5]).toMatchObject({
+      url: "/api/v1/parse/quick-entry",
+      method: "POST",
+      body: { input: "Buy milk tomorrow #errands" },
+    });
+    expect(calls[5]?.headers["Idempotency-Key"]).toBeUndefined();
   });
 });
 
@@ -163,12 +527,31 @@ describe("event stream lifecycle", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  function streamResponse(chunks: string[]): Response {
+    const encoder = new TextEncoder();
+    let index = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (index >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(encoder.encode(chunks[index]));
+        index += 1;
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  }
+
   it("surfaces terminal authentication failures without reconnecting", async () => {
     const onReconnect = vi.fn();
     const onTerminal = vi.fn();
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(errorResponse(401, { error: "not used by stream parsing" })),
+      vi.fn().mockResolvedValue(jsonResponse(401, { error: "not used by stream parsing" })),
     );
 
     const cleanup = subscribeToEvents(vi.fn(), onReconnect, onTerminal);
@@ -225,5 +608,102 @@ describe("event stream lifecycle", () => {
     await vi.waitFor(() => expect(signal).toBeDefined());
     cleanup();
     expect(signal?.aborted).toBe(true);
+  });
+
+  it("parses committed envelopes, dedupes by revision, and sends Last-Event-ID on reconnect", async () => {
+    vi.useFakeTimers();
+    const onEvent = vi.fn();
+    const onReconnect = vi.fn();
+    const onResync = vi.fn();
+    const eventPayload = {
+      revision: 3,
+      operation_id: "11111111-1111-4111-8111-111111111111",
+      event_type: "task.updated",
+      occurred_at: "2026-07-28T00:00:00Z",
+      affected: { task_ids: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"] },
+      resync: { tasks: false, catalog: false },
+      primary: { resource_type: "task", id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+      snapshot: null,
+    };
+    const duplicate = { ...eventPayload };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        streamResponse([
+          `id: 3\nevent: revision\ndata: ${JSON.stringify(eventPayload)}\n\n`,
+          `id: 3\nevent: revision\ndata: ${JSON.stringify(duplicate)}\n\n`,
+        ]),
+      )
+      .mockImplementationOnce(() => new Promise(() => undefined));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cleanup = subscribeToEvents(onEvent, onReconnect, vi.fn(), 0, onResync);
+
+    await vi.waitFor(() => expect(onEvent).toHaveBeenCalledTimes(1));
+    const firstEvent = onEvent.mock.calls[0]?.[0] as SseEvent | undefined;
+    expect(firstEvent?.data.revision).toBe(3);
+
+    await vi.waitFor(() => expect(onReconnect).toHaveBeenCalled());
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const secondCall = fetchMock.mock.calls[1];
+    expect(secondCall).toBeDefined();
+    const secondInit = secondCall![1] as RequestInit;
+    const secondHeaders = secondInit.headers as Record<string, string>;
+    expect(secondHeaders["Last-Event-ID"]).toBe("3");
+    expect(String(secondCall![0])).toContain("since=3");
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("treats sync.resync_required and unknown event types as resync, not fatal", async () => {
+    const onEvent = vi.fn();
+    const onTerminal = vi.fn();
+    const onResync = vi.fn();
+    const resyncEvent = {
+      revision: 4,
+      operation_id: "00000000-0000-0000-0000-000000000000",
+      event_type: "sync.resync_required",
+      occurred_at: "2026-07-28T00:00:00Z",
+      affected: {},
+      resync: { tasks: true, catalog: true },
+    };
+    const unknownEvent = {
+      revision: 5,
+      operation_id: "11111111-1111-4111-8111-111111111111",
+      event_type: "future.capability",
+      occurred_at: "2026-07-28T00:00:01Z",
+      affected: {},
+      resync: { tasks: true, catalog: false },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          streamResponse([
+            `id: 4\ndata: ${JSON.stringify(resyncEvent)}\n\n`,
+            `id: 5\ndata: ${JSON.stringify(unknownEvent)}\n\n`,
+          ]),
+        ),
+    );
+
+    const cleanup = subscribeToEvents(onEvent, vi.fn(), onTerminal, 0, onResync);
+
+    await vi.waitFor(() => expect(onResync).toHaveBeenCalledTimes(2));
+    expect(onResync).toHaveBeenNthCalledWith(
+      1,
+      { tasks: true, catalog: true },
+      "sync.resync_required",
+    );
+    expect(onResync).toHaveBeenNthCalledWith(
+      2,
+      { tasks: true, catalog: false },
+      "unknown_event_type",
+    );
+    expect(onEvent).not.toHaveBeenCalled();
+    expect(onTerminal).not.toHaveBeenCalled();
+    cleanup();
   });
 });

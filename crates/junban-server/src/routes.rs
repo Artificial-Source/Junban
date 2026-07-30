@@ -17,15 +17,20 @@ use utoipa::IntoParams;
 
 use crate::cursor::decode_task_cursor;
 use crate::dto::{
-    AddRelationRequest, ApplyTemplateRequest, BulkTasksRequest, CatalogResponse, CommentDto,
+    AcquireReminderLeaseRequest, AddRelationRequest, ApplyTemplateRequest, BulkTasksRequest,
+    CatalogResponse, ClaimRemindersRequest, ClaimRemindersResponse, CommentDto,
     CommentListResponse, CreateCommentRequest, CreateProjectRequest, CreateSavedFilterRequest,
     CreateSectionRequest, CreateTagRequest, CreateTaskRequest, CreateTemplateRequest,
-    HealthResponse, MoveTaskRequest, MutationResponse, ParseFilterRequest, ParseQuickEntryRequest,
-    ParseTextImportRequest, ParsedFilterResponse, PatchCommentRequest, PatchProjectRequest,
-    PatchSavedFilterRequest, PatchSectionRequest, PatchTagRequest, PatchTaskRequest,
-    PatchTemplateRequest, ProfileResponse, QuickEntryDto, RelationDto, RelationListResponse,
-    ReorderTasksRequest, TaskActivityDto, TaskActivityResponse, TaskDto, TaskListResponse,
-    TaskSortDto, TaskViewPresetDto, TextImportDraftDto, TextImportResponse,
+    HealthResponse, MarkOwnerLostRemindersRequest, MarkOwnerLostRemindersResponse, MoveTaskRequest,
+    MutationResponse, ParseFilterRequest, ParseQuickEntryRequest, ParseTextImportRequest,
+    ParsedFilterResponse, PatchCommentRequest, PatchProjectRequest, PatchSavedFilterRequest,
+    PatchSectionRequest, PatchTagRequest, PatchTaskRequest, PatchTemplateRequest, ProfileResponse,
+    QuickEntryDto, RelationDto, RelationListResponse, ReleaseReminderLeaseRequest,
+    ReminderDeliveryLeaseDto, ReminderListResponse, ReminderOccurrenceDto,
+    RenewReminderLeaseRequest, ReorderTasksRequest, RescheduleReminderRequest,
+    SettleReminderDeliveredRequest, SettleReminderFailedRequest, TaskActivityDto,
+    TaskActivityResponse, TaskDto, TaskListResponse, TaskSortDto, TaskViewPresetDto,
+    TextImportDraftDto, TextImportResponse,
 };
 use crate::error::{ApiError, extract_json, operation_id, parse_path_id, validation_error};
 use crate::sse::{MAX_SSE_CONNECTIONS, open_sse_stream};
@@ -1434,6 +1439,356 @@ pub async fn events(
     ))
 }
 
+// ── reminders ──────────────────────────────────────────────────────────────
+
+fn parse_fence_term(
+    raw: &str,
+    request_id: &RequestId,
+) -> Result<junban_domain::ReminderFenceTerm, ApiError> {
+    junban_domain::ReminderFenceTerm::parse(raw).map_err(|e| validation_error(e, request_id))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/tasks/{task_id}/reminders",
+    operation_id = "list_task_reminders",
+    params(("task_id" = String, Path, format = Uuid)),
+    responses(
+        (status = 200, body = ReminderListResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_task_reminders(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(task_id): AxumPath<String>,
+) -> Result<Json<ReminderListResponse>, ApiError> {
+    let task_id = parse_path_id(&task_id, TaskId::parse, &request_id)?;
+    let reminders = state
+        .service
+        .list_task_reminders(task_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(ReminderListResponse {
+        reminders: reminders
+            .into_iter()
+            .map(ReminderOccurrenceDto::from)
+            .collect(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/tasks/{task_id}/reminders/reschedule",
+    operation_id = "reschedule_reminder",
+    request_body = RescheduleReminderRequest,
+    params(
+        ("task_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn reschedule_reminder(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(task_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<RescheduleReminderRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let task_id = parse_path_id(&task_id, TaskId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let mutation = state
+        .service
+        .reschedule_reminder(operation_id, task_id, payload.remind_at)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/tasks/{task_id}/reminders/dismiss",
+    operation_id = "dismiss_reminder",
+    params(
+        ("task_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn dismiss_reminder(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(task_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let task_id = parse_path_id(&task_id, TaskId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let mutation = state
+        .service
+        .dismiss_reminder(operation_id, task_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/lease",
+    operation_id = "acquire_reminder_lease",
+    request_body = AcquireReminderLeaseRequest,
+    responses(
+        (status = 200, body = ReminderDeliveryLeaseDto),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn acquire_reminder_lease(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<AcquireReminderLeaseRequest>, JsonRejection>,
+) -> Result<Json<ReminderDeliveryLeaseDto>, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let lease = state
+        .service
+        .acquire_reminder_lease(payload.lease_secs)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(lease.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/lease/renew",
+    operation_id = "renew_reminder_lease",
+    request_body = RenewReminderLeaseRequest,
+    responses(
+        (status = 200, body = ReminderDeliveryLeaseDto),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn renew_reminder_lease(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<RenewReminderLeaseRequest>, JsonRejection>,
+) -> Result<Json<ReminderDeliveryLeaseDto>, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    let lease = state
+        .service
+        .renew_reminder_lease(fence_term, payload.lease_secs)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(lease.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/lease/release",
+    operation_id = "release_reminder_lease",
+    request_body = ReleaseReminderLeaseRequest,
+    responses(
+        (status = 204),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn release_reminder_lease(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<ReleaseReminderLeaseRequest>, JsonRejection>,
+) -> Result<StatusCode, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    state
+        .service
+        .release_reminder_lease(fence_term)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/claim",
+    operation_id = "claim_due_reminders",
+    request_body = ClaimRemindersRequest,
+    responses(
+        (status = 200, body = ClaimRemindersResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn claim_due_reminders(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<ClaimRemindersRequest>, JsonRejection>,
+) -> Result<Json<ClaimRemindersResponse>, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    let reminders = state
+        .service
+        .claim_due_reminders(fence_term, payload.limit, payload.claim_secs)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(ClaimRemindersResponse {
+        reminders: reminders.into_iter().map(Into::into).collect(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/settle/delivered",
+    operation_id = "settle_reminder_delivered",
+    request_body = SettleReminderDeliveredRequest,
+    responses(
+        (status = 204),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn settle_reminder_delivered(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<SettleReminderDeliveredRequest>, JsonRejection>,
+) -> Result<StatusCode, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    let task_id = TaskId::parse(&payload.task_id).map_err(|e| validation_error(e, &request_id))?;
+    state
+        .service
+        .settle_reminder_delivered(
+            fence_term,
+            task_id,
+            payload.remind_at,
+            payload.claim_attempt,
+            payload.channel.into(),
+        )
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/settle/failed",
+    operation_id = "settle_reminder_failed",
+    request_body = SettleReminderFailedRequest,
+    responses(
+        (status = 204),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn settle_reminder_failed(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<SettleReminderFailedRequest>, JsonRejection>,
+) -> Result<StatusCode, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    let task_id = TaskId::parse(&payload.task_id).map_err(|e| validation_error(e, &request_id))?;
+    state
+        .service
+        .settle_reminder_failed(
+            fence_term,
+            task_id,
+            payload.remind_at,
+            payload.claim_attempt,
+            payload.error.into(),
+        )
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/owner-lost",
+    operation_id = "mark_owner_lost_reminders",
+    request_body = MarkOwnerLostRemindersRequest,
+    responses(
+        (status = 200, body = MarkOwnerLostRemindersResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn mark_owner_lost_reminders(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<MarkOwnerLostRemindersRequest>, JsonRejection>,
+) -> Result<Json<MarkOwnerLostRemindersResponse>, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    let marked = state
+        .service
+        .mark_owner_lost_reminders(fence_term, payload.limit)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(MarkOwnerLostRemindersResponse { marked }))
+}
+
 pub async fn api_not_found(Extension(request_id): Extension<RequestId>) -> ApiError {
     ApiError::new(
         StatusCode::NOT_FOUND,
@@ -1450,5 +1805,6 @@ const _: fn() = || {
     let _: Option<RelationDto> = None;
     let _: Option<TaskActivityDto> = None;
     let _: Option<TextImportDraftDto> = None;
+    let _: Option<ReminderOccurrenceDto> = None;
     let _: usize = MAX_SSE_CONNECTIONS;
 };

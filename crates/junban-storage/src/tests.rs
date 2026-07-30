@@ -3757,15 +3757,10 @@ async fn reminder_terminal_compaction_bounds_and_preserves_live_intent() {
     // Age prune removes the 50 oldest-updated seeds; count prune then drops the
     // next-oldest recent seeds so at most 2000 unprotected terminals remain.
     let aged_id = TaskId::parse("00000000-0000-4000-8000-000000000000").unwrap();
-    let pruned_by_count =
-        TaskId::parse("00000000-0000-4000-8000-000000000032").unwrap(); // i=50
-    let kept_newest =
-        TaskId::parse("00000000-0000-4000-8000-000000000833").unwrap(); // i=2099
+    let pruned_by_count = TaskId::parse("00000000-0000-4000-8000-000000000032").unwrap(); // i=50
+    let kept_newest = TaskId::parse("00000000-0000-4000-8000-000000000833").unwrap(); // i=2099
     assert!(
-        repo.list_task_reminders(aged_id)
-            .await
-            .unwrap()
-            .is_empty(),
+        repo.list_task_reminders(aged_id).await.unwrap().is_empty(),
         "rows older than 90 days must be pruned"
     );
     assert!(
@@ -3776,10 +3771,7 @@ async fn reminder_terminal_compaction_bounds_and_preserves_live_intent() {
         "oldest terminal audit beyond the 2000-row ceiling must be pruned"
     );
     assert_eq!(
-        repo.list_task_reminders(kept_newest)
-            .await
-            .unwrap()
-            .len(),
+        repo.list_task_reminders(kept_newest).await.unwrap().len(),
         1,
         "newest terminal audit rows must be retained"
     );
@@ -3883,4 +3875,115 @@ async fn reminder_timestamps_use_canonical_sortable_text() {
         .await
         .unwrap();
     assert!(claimed_retry.iter().any(|row| row.task_id == retry_id));
+}
+
+#[tokio::test]
+async fn next_reminder_wake_at_empty_pending_lease_claimed_backoff_and_fractional() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    // Empty profile: no pending, claimed, or lease.
+    assert_eq!(repo.next_reminder_wake_at().await.unwrap(), None);
+
+    // Future pending eligibility is remind_at.
+    let far_id = create_with_remind_at(&repo, "far", "2026-07-28T18:00:00.500000000Z").await;
+    let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
+    assert_eq!(wake.to_string(), "2026-07-28T18:00:00.5Z");
+
+    // Earlier pending wins (fractional boundary below whole second).
+    let near_id = create_with_remind_at(&repo, "near", "2026-07-28T17:00:00.100000000Z").await;
+    let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
+    assert_eq!(wake.to_string(), "2026-07-28T17:00:00.1Z");
+
+    // Backoff pushes pending eligibility past remind_at.
+    repo.execute_batch(format!(
+        "UPDATE reminder_occurrences
+         SET next_attempt_at = '2026-07-28T17:30:00.250000000Z'
+         WHERE task_id = '{near_id}';"
+    ))
+    .await
+    .unwrap();
+    let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
+    assert_eq!(
+        wake.to_string(),
+        "2026-07-28T17:30:00.25Z",
+        "eligibility is max(remind_at, next_attempt_at)"
+    );
+
+    // Lease expiry can be earlier than pending eligibility.
+    let t0: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
+    let lease = repo.acquire_reminder_lease(t0, 90).await.unwrap();
+    let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
+    assert_eq!(wake, lease.expires_at);
+
+    // Claimed claim_expires_at participates once work is claimed.
+    // Make a due pending row and claim it under the lease.
+    let due_id = create_with_remind_at(&repo, "due", "2026-07-28T11:00:00.000000001Z").await;
+    let claimed = repo
+        .claim_due_reminders(lease.fence_term.clone(), t0, 10, 30)
+        .await
+        .unwrap();
+    assert!(claimed.iter().any(|row| row.task_id == due_id));
+    let claim_exp = claimed
+        .iter()
+        .find(|row| row.task_id == due_id)
+        .unwrap()
+        .claim_expires_at;
+    // With lease at t0+90s and claim at t0+30s, claim expiry is the earliest wake.
+    let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
+    assert_eq!(wake, claim_exp);
+    assert!(wake < lease.expires_at);
+
+    // Settling removes the claim wake candidate; lease remains.
+    let due_claim = claimed.iter().find(|row| row.task_id == due_id).unwrap();
+    repo.settle_reminder_delivered(
+        lease.fence_term.clone(),
+        due_id,
+        due_claim.remind_at,
+        due_claim.claim_attempt,
+        ReminderChannel::InApp,
+        t0,
+    )
+    .await
+    .unwrap();
+    let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
+    // Still have lease + remaining pending; lease is earlier than backoff pending.
+    assert_eq!(wake, lease.expires_at);
+
+    // Release expires lease immediately; next wake becomes pending eligibility.
+    repo.release_reminder_lease(lease.fence_term.clone(), t0)
+        .await
+        .unwrap();
+    let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
+    // Released lease expires_at == t0, which is still a candidate and is earliest.
+    assert_eq!(wake, t0);
+
+    // Drop the lease row so only pending remains (simulate no owner).
+    repo.execute_batch("DELETE FROM reminder_delivery_lease;".into())
+        .await
+        .unwrap();
+    let wake = repo.next_reminder_wake_at().await.unwrap().unwrap();
+    assert_eq!(wake.to_string(), "2026-07-28T17:30:00.25Z");
+
+    // Cancel/dismiss remaining pending → empty again once far is also cleared.
+    repo.dismiss_reminder(operation(), near_id, t0)
+        .await
+        .unwrap();
+    repo.dismiss_reminder(operation(), far_id, t0)
+        .await
+        .unwrap();
+    assert_eq!(repo.next_reminder_wake_at().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn next_reminder_wake_at_is_control_plane_without_revision() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let _id = create_with_remind_at(&repo, "wake-rev", "2026-07-28T20:00:00Z").await;
+    let before = repo.diagnostics().await.unwrap().revision;
+    let wake = repo.next_reminder_wake_at().await.unwrap();
+    assert!(wake.is_some());
+    assert_eq!(repo.diagnostics().await.unwrap().revision, before);
 }

@@ -377,4 +377,10 @@ pub trait Repository: Send + Sync + 'static {
         now: Timestamp,
         limit: u32,
     ) -> RepositoryFuture<'_, u32>;
+
+    /// Control-plane: earliest meaningful wake instant for the reminder coordinator.
+    ///
+    /// Returns the minimum among pending eligibility (`max(remind_at, next_attempt_at)`),
+    /// claimed `claim_expires_at`, and the current lease expiry. No revision/event/receipt.
+    fn next_reminder_wake_at(&self) -> RepositoryFuture<'_, Option<Timestamp>>;
 }

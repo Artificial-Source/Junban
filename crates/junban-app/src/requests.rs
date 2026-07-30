@@ -467,15 +467,18 @@ pub struct DismissReminder {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReminderLeaseRequest {
     /// Positive bounded TTL in seconds. Defaults are applied by the service when omitted.
-    pub lease_secs: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_secs: Option<u64>,
 }
 
 /// Claim due pending occurrences under the caller's current fence term.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimRemindersRequest {
     pub fence_term: junban_domain::ReminderFenceTerm,
-    pub limit: u32,
-    pub claim_secs: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_secs: Option<u64>,
 }
 
 /// Settle one claimed occurrence as delivered on an allowlisted channel.
@@ -484,6 +487,8 @@ pub struct SettleReminderDelivered {
     pub fence_term: junban_domain::ReminderFenceTerm,
     pub task_id: TaskId,
     pub remind_at: Timestamp,
+    /// Exact generation returned by the successful claim for this occurrence.
+    pub claim_attempt: u32,
     pub channel: junban_domain::ReminderChannel,
 }
 
@@ -493,6 +498,8 @@ pub struct SettleReminderFailed {
     pub fence_term: junban_domain::ReminderFenceTerm,
     pub task_id: TaskId,
     pub remind_at: Timestamp,
+    /// Exact generation returned by the successful claim for this occurrence.
+    pub claim_attempt: u32,
     pub error: junban_domain::ReminderFailureCode,
 }
 
@@ -500,5 +507,6 @@ pub struct SettleReminderFailed {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarkOwnerLostReminders {
     pub fence_term: junban_domain::ReminderFenceTerm,
-    pub limit: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
 }

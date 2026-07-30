@@ -966,6 +966,9 @@ impl Repository for SqliteRepository {
             }
         )
     }
+    fn next_reminder_wake_at(&self) -> RepositoryFuture<'_, Option<Timestamp>> {
+        mut_cmd!(self, NextReminderWakeAt {})
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1281,6 +1284,9 @@ enum Command {
         now: Timestamp,
         limit: u32,
         reply: oneshot::Sender<Result<u32, RepositoryError>>,
+    },
+    NextReminderWakeAt {
+        reply: oneshot::Sender<Result<Option<Timestamp>, RepositoryError>>,
     },
     #[cfg(test)]
     Diagnostics(oneshot::Sender<Result<Diagnostics, RepositoryError>>),
@@ -1920,6 +1926,9 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                 let _ = reply.send(reminder_ops::mark_owner_lost_reminders(
                     connection, fence_term, now, limit,
                 ));
+            }
+            Command::NextReminderWakeAt { reply } => {
+                let _ = reply.send(reminder_ops::next_reminder_wake_at(connection));
             }
             #[cfg(test)]
             Command::Diagnostics(reply) => {

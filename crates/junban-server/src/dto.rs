@@ -189,6 +189,9 @@ pub struct TaskDto {
     #[schema(value_type = Option<String>, format = DateTime, nullable = true)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deadline: Option<Timestamp>,
+    #[schema(value_type = Option<String>, format = DateTime, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remind_at: Option<Timestamp>,
     pub someday: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimated_minutes: Option<u32>,
@@ -231,6 +234,7 @@ impl From<Task> for TaskDto {
             due_date: task.due_date,
             due_time: task.due_time.as_ref().map(Into::into),
             deadline: task.deadline,
+            remind_at: task.remind_at,
             someday: task.someday,
             estimated_minutes: task.estimated_minutes.map(EstimatedMinutes::get),
             actual_minutes: task.actual_minutes.map(ActualMinutes::get),
@@ -1609,6 +1613,270 @@ impl From<TextImportDraft> for TextImportDraftDto {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct TextImportResponse {
     pub drafts: Vec<TextImportDraftDto>,
+}
+
+// ── reminders ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderChannelDto {
+    InApp,
+    WebNotification,
+    Sound,
+    Native,
+}
+
+impl From<junban_domain::ReminderChannel> for ReminderChannelDto {
+    fn from(value: junban_domain::ReminderChannel) -> Self {
+        match value {
+            junban_domain::ReminderChannel::InApp => Self::InApp,
+            junban_domain::ReminderChannel::WebNotification => Self::WebNotification,
+            junban_domain::ReminderChannel::Sound => Self::Sound,
+            junban_domain::ReminderChannel::Native => Self::Native,
+        }
+    }
+}
+
+impl From<ReminderChannelDto> for junban_domain::ReminderChannel {
+    fn from(value: ReminderChannelDto) -> Self {
+        match value {
+            ReminderChannelDto::InApp => Self::InApp,
+            ReminderChannelDto::WebNotification => Self::WebNotification,
+            ReminderChannelDto::Sound => Self::Sound,
+            ReminderChannelDto::Native => Self::Native,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderOccurrenceStateDto {
+    Pending,
+    Claimed,
+    Delivered,
+    Failed,
+    Cancelled,
+}
+
+impl From<junban_domain::ReminderOccurrenceState> for ReminderOccurrenceStateDto {
+    fn from(value: junban_domain::ReminderOccurrenceState) -> Self {
+        match value {
+            junban_domain::ReminderOccurrenceState::Pending => Self::Pending,
+            junban_domain::ReminderOccurrenceState::Claimed => Self::Claimed,
+            junban_domain::ReminderOccurrenceState::Delivered => Self::Delivered,
+            junban_domain::ReminderOccurrenceState::Failed => Self::Failed,
+            junban_domain::ReminderOccurrenceState::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderFailureCodeDto {
+    PermissionDenied,
+    TemporarilyUnavailable,
+    ChannelFailed,
+    OwnerLost,
+}
+
+impl From<ReminderFailureCodeDto> for junban_domain::ReminderFailureCode {
+    fn from(value: ReminderFailureCodeDto) -> Self {
+        match value {
+            ReminderFailureCodeDto::PermissionDenied => Self::PermissionDenied,
+            ReminderFailureCodeDto::TemporarilyUnavailable => Self::TemporarilyUnavailable,
+            ReminderFailureCodeDto::ChannelFailed => Self::ChannelFailed,
+            ReminderFailureCodeDto::OwnerLost => Self::OwnerLost,
+        }
+    }
+}
+
+impl From<junban_domain::ReminderFailureCode> for ReminderFailureCodeDto {
+    fn from(value: junban_domain::ReminderFailureCode) -> Self {
+        match value {
+            junban_domain::ReminderFailureCode::PermissionDenied => Self::PermissionDenied,
+            junban_domain::ReminderFailureCode::TemporarilyUnavailable => {
+                Self::TemporarilyUnavailable
+            }
+            junban_domain::ReminderFailureCode::ChannelFailed => Self::ChannelFailed,
+            junban_domain::ReminderFailureCode::OwnerLost => Self::OwnerLost,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ReminderOccurrenceDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub task_id: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub remind_at: Timestamp,
+    pub state: ReminderOccurrenceStateDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_term: Option<String>,
+    #[schema(value_type = Option<String>, format = DateTime, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_expires_at: Option<Timestamp>,
+    pub attempts: u32,
+    #[schema(value_type = Option<String>, format = DateTime, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_attempt_at: Option<Timestamp>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_channel: Option<ReminderChannelDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_error_code: Option<ReminderFailureCodeDto>,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: Timestamp,
+}
+
+impl From<junban_domain::ReminderOccurrence> for ReminderOccurrenceDto {
+    fn from(value: junban_domain::ReminderOccurrence) -> Self {
+        Self {
+            task_id: value.task_id.to_string(),
+            remind_at: value.remind_at,
+            state: value.state.into(),
+            claim_term: value.claim_term.map(|term| term.as_str().to_owned()),
+            claim_expires_at: value.claim_expires_at,
+            attempts: value.attempts,
+            next_attempt_at: value.next_attempt_at,
+            terminal_channel: value.terminal_channel.map(Into::into),
+            terminal_error_code: value.terminal_error_code.map(Into::into),
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReminderListResponse {
+    pub reminders: Vec<ReminderOccurrenceDto>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RescheduleReminderRequest {
+    #[schema(value_type = String, format = DateTime)]
+    pub remind_at: Timestamp,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AcquireReminderLeaseRequest {
+    /// Positive bounded TTL in seconds. Omitted uses the service default (90).
+    #[serde(default)]
+    pub lease_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenewReminderLeaseRequest {
+    pub fence_term: String,
+    #[serde(default)]
+    pub lease_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReleaseReminderLeaseRequest {
+    pub fence_term: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClaimRemindersRequest {
+    pub fence_term: String,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub claim_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SettleReminderDeliveredRequest {
+    pub fence_term: String,
+    #[schema(value_type = String, format = Uuid)]
+    pub task_id: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub remind_at: Timestamp,
+    /// Exact `claim_attempt` from the claim response for this occurrence.
+    pub claim_attempt: u32,
+    pub channel: ReminderChannelDto,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SettleReminderFailedRequest {
+    pub fence_term: String,
+    #[schema(value_type = String, format = Uuid)]
+    pub task_id: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub remind_at: Timestamp,
+    /// Exact `claim_attempt` from the claim response for this occurrence.
+    pub claim_attempt: u32,
+    pub error: ReminderFailureCodeDto,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MarkOwnerLostRemindersRequest {
+    pub fence_term: String,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ReminderDeliveryLeaseDto {
+    pub fence_term: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub expires_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: Timestamp,
+}
+
+impl From<junban_domain::ReminderDeliveryLease> for ReminderDeliveryLeaseDto {
+    fn from(value: junban_domain::ReminderDeliveryLease) -> Self {
+        Self {
+            fence_term: value.fence_term.as_str().to_owned(),
+            expires_at: value.expires_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ClaimedReminderDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub task_id: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub remind_at: Timestamp,
+    pub claim_term: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub claim_expires_at: Timestamp,
+    /// Durable attempt generation that settle must echo exactly.
+    pub claim_attempt: u32,
+}
+
+impl From<junban_domain::ClaimedReminder> for ClaimedReminderDto {
+    fn from(value: junban_domain::ClaimedReminder) -> Self {
+        Self {
+            task_id: value.task_id.to_string(),
+            remind_at: value.remind_at,
+            claim_term: value.claim_term.as_str().to_owned(),
+            claim_expires_at: value.claim_expires_at,
+            claim_attempt: value.claim_attempt,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ClaimRemindersResponse {
+    pub reminders: Vec<ClaimedReminderDto>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MarkOwnerLostRemindersResponse {
+    pub marked: u32,
 }
 
 // ── optional/nullable helpers ──────────────────────────────────────────────

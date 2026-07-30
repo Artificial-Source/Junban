@@ -1244,3 +1244,387 @@ fn openapi_declares_security_and_operation_ids() {
     }
     assert!(missing.is_empty(), "openapi gaps: {missing:?}");
 }
+
+// ── Phase 3 reminder HTTP surface ──────────────────────────────────────────
+
+async fn reschedule(
+    context: &TestContext,
+    task_id: &str,
+    remind_at: &str,
+    key: Option<&str>,
+) -> Response {
+    let builder = authenticated(
+        Method::POST,
+        &format!("/api/v1/tasks/{task_id}/reminders/reschedule"),
+    )
+    .header(header::CONTENT_TYPE, "application/json");
+    let builder = match key {
+        Some(key) => operation_header_key(builder, key),
+        None => operation_header(builder),
+    };
+    context
+        .request(
+            builder
+                .body(Body::from(json!({ "remind_at": remind_at }).to_string()))
+                .unwrap(),
+        )
+        .await
+}
+
+async fn dismiss(context: &TestContext, task_id: &str, key: Option<&str>) -> Response {
+    let builder = authenticated(
+        Method::POST,
+        &format!("/api/v1/tasks/{task_id}/reminders/dismiss"),
+    );
+    let builder = match key {
+        Some(key) => operation_header_key(builder, key),
+        None => operation_header(builder),
+    };
+    context.request(builder.body(Body::empty()).unwrap()).await
+}
+
+#[tokio::test]
+async fn reminder_routes_require_auth_and_use_error_envelope() {
+    let context = TestContext::new();
+    let created = create_task(&context, "auth-rem").await;
+    let id = task_id_from(&created);
+
+    let unauth = context
+        .request(
+            request(Method::GET, &format!("/api/v1/tasks/{id}/reminders"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+    let body = json(unauth).await;
+    assert_eq!(body["error"]["code"], "authentication_required");
+    assert!(body["request_id"].as_str().unwrap().len() > 8);
+
+    let bad_id = context
+        .request(
+            authenticated(Method::GET, "/api/v1/tasks/not-a-uuid/reminders")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(bad_id.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = json(bad_id).await;
+    assert_eq!(body["error"]["code"], "validation_error");
+    assert!(body["error"]["fields"]["task_id"].is_string());
+
+    let bad_channel = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/settle/delivered")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "fence_term": "01900000-0000-7000-8000-000000000099",
+                        "task_id": id,
+                        "remind_at": "2026-07-28T15:00:00Z",
+                        "claim_attempt": 1,
+                        "channel": "email"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(bad_channel.status(), StatusCode::BAD_REQUEST);
+    let body = json(bad_channel).await;
+    assert_eq!(body["error"]["code"], "invalid_json");
+
+    let bad_fence = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/lease/renew")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "fence_term": "" }).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(bad_fence.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = json(bad_fence).await;
+    assert_eq!(body["error"]["code"], "validation_error");
+    assert!(body["error"]["fields"]["reminder_fence_term"].is_string());
+
+    let bad_time = reschedule(&context, id, "not-a-timestamp", None).await;
+    assert_eq!(bad_time.status(), StatusCode::BAD_REQUEST);
+    let body = json(bad_time).await;
+    assert_eq!(body["error"]["code"], "invalid_json");
+}
+
+#[tokio::test]
+async fn reminder_reschedule_dismiss_are_idempotent_user_mutations() {
+    let context = TestContext::new();
+    let created = create_task(&context, "snooze-me").await;
+    let id = task_id_from(&created);
+    let before_rev = created["event"]["revision"].as_u64().unwrap();
+
+    let key = new_id();
+    let first = reschedule(&context, id, "2026-07-28T15:00:00.100000000Z", Some(&key)).await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_body = json(first).await;
+    assert_eq!(first_body["event"]["event_type"], "task.updated");
+    assert_eq!(
+        first_body["event"]["snapshot"]["task"]["remind_at"],
+        "2026-07-28T15:00:00.1Z"
+    );
+    let rev = first_body["event"]["revision"].as_u64().unwrap();
+    assert!(rev > before_rev);
+
+    let replay = reschedule(&context, id, "2026-07-28T15:00:00.100000000Z", Some(&key)).await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    let replay_body = json(replay).await;
+    assert_eq!(replay_body["event"]["revision"], rev);
+    assert_eq!(
+        replay_body["event"]["operation_id"],
+        first_body["event"]["operation_id"]
+    );
+
+    let listed = context
+        .request(
+            authenticated(Method::GET, &format!("/api/v1/tasks/{id}/reminders"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed_body = json(listed).await;
+    let pending: Vec<_> = listed_body["reminders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["state"] == "pending")
+        .collect();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0]["remind_at"], "2026-07-28T15:00:00.1Z");
+
+    let dismiss_key = new_id();
+    let dismissed = dismiss(&context, id, Some(&dismiss_key)).await;
+    assert_eq!(dismissed.status(), StatusCode::OK);
+    let dismissed_body = json(dismissed).await;
+    assert!(dismissed_body["event"]["snapshot"]["task"]["remind_at"].is_null());
+    let dismiss_rev = dismissed_body["event"]["revision"].as_u64().unwrap();
+
+    let dismiss_replay = dismiss(&context, id, Some(&dismiss_key)).await;
+    assert_eq!(dismiss_replay.status(), StatusCode::OK);
+    let dismiss_replay_body = json(dismiss_replay).await;
+    assert_eq!(dismiss_replay_body["event"]["revision"], dismiss_rev);
+}
+
+#[tokio::test]
+async fn reminder_control_plane_claim_attempt_round_trip_without_revision_bump() {
+    let context = TestContext::new();
+    let created = create_task(&context, "deliver-me").await;
+    let id = task_id_from(&created);
+    let scheduled = reschedule(&context, id, "2026-07-28T11:00:00Z", None).await;
+    assert_eq!(scheduled.status(), StatusCode::OK);
+    let after_user = json(scheduled).await;
+    let user_rev = after_user["event"]["revision"].as_u64().unwrap();
+    let profile_before = context
+        .request(
+            authenticated(Method::GET, "/api/v1/profile")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(json(profile_before).await["revision"], user_rev);
+
+    let lease_resp = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/lease")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(lease_resp.status(), StatusCode::OK);
+    let lease = json(lease_resp).await;
+    let fence = lease["fence_term"].as_str().unwrap().to_owned();
+
+    let claim_resp = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/claim")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "fence_term": fence, "limit": 10 }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(claim_resp.status(), StatusCode::OK);
+    let claim_body = json(claim_resp).await;
+    let reminders = claim_body["reminders"].as_array().unwrap();
+    assert_eq!(reminders.len(), 1);
+    assert_eq!(reminders[0]["task_id"], id);
+    assert_eq!(reminders[0]["claim_attempt"], 1);
+    let claim_attempt = reminders[0]["claim_attempt"].as_u64().unwrap() as u32;
+    let remind_at = reminders[0]["remind_at"].as_str().unwrap().to_owned();
+
+    // Missing claim_attempt is rejected.
+    let missing_attempt = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/settle/delivered")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "fence_term": fence,
+                        "task_id": id,
+                        "remind_at": remind_at,
+                        "channel": "in_app"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(missing_attempt.status(), StatusCode::BAD_REQUEST);
+
+    // Wrong attempt conflicts.
+    let wrong_attempt = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/settle/delivered")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "fence_term": fence,
+                        "task_id": id,
+                        "remind_at": remind_at,
+                        "claim_attempt": claim_attempt + 1,
+                        "channel": "in_app"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(wrong_attempt.status(), StatusCode::CONFLICT);
+
+    let settle = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/settle/delivered")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "fence_term": fence,
+                        "task_id": id,
+                        "remind_at": remind_at,
+                        "claim_attempt": claim_attempt,
+                        "channel": "in_app"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(settle.status(), StatusCode::NO_CONTENT);
+
+    // Control-plane must not bump the global user revision.
+    let profile_after = context
+        .request(
+            authenticated(Method::GET, "/api/v1/profile")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(json(profile_after).await["revision"], user_rev);
+
+    let release = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/lease/release")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "fence_term": fence }).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(release.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn reminder_invalid_failure_code_and_owner_lost_route() {
+    let context = TestContext::new();
+    let created = create_task(&context, "fail-me").await;
+    let id = task_id_from(&created);
+    assert_eq!(
+        reschedule(&context, id, "2026-07-28T10:00:00Z", None)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    let lease_resp = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/lease")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "lease_secs": 90 }).to_string()))
+                .unwrap(),
+        )
+        .await;
+    let fence = json(lease_resp).await["fence_term"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let claim_body = json(
+        context
+            .request(
+                authenticated(Method::POST, "/api/v1/reminders/claim")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(json!({ "fence_term": fence }).to_string()))
+                    .unwrap(),
+            )
+            .await,
+    )
+    .await;
+    let row = &claim_body["reminders"][0];
+
+    let bad_error = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/settle/failed")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "fence_term": fence,
+                        "task_id": row["task_id"],
+                        "remind_at": row["remind_at"],
+                        "claim_attempt": row["claim_attempt"],
+                        "error": "boom"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(bad_error.status(), StatusCode::BAD_REQUEST);
+
+    // Settle failed with allowlisted code.
+    let failed = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/settle/failed")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "fence_term": fence,
+                        "task_id": row["task_id"],
+                        "remind_at": row["remind_at"],
+                        "claim_attempt": row["claim_attempt"],
+                        "error": "channel_failed"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(failed.status(), StatusCode::NO_CONTENT);
+
+    // Owner-lost sweep with empty expired set returns zero.
+    let sweep = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/owner-lost")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "fence_term": fence }).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(sweep.status(), StatusCode::OK);
+    assert_eq!(json(sweep).await["marked"], 0);
+}

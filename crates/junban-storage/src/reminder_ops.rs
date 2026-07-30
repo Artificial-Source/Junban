@@ -636,6 +636,56 @@ pub(crate) fn list_task_reminders(
     Ok(rows)
 }
 
+/// Earliest coordinator wake among pending eligibility, claimed expiry, and lease expiry.
+///
+/// Pending eligibility is `max(remind_at, next_attempt_at)` using canonical fixed-width
+/// timestamp text so fractional-second ordering matches instant order. Control-plane only.
+pub(crate) fn next_reminder_wake_at(
+    connection: &Connection,
+) -> Result<Option<Timestamp>, RepositoryError> {
+    let tx = connection.unchecked_transaction().map_err(storage_error)?;
+    let wake: Option<String> = tx
+        .query_row(
+            "SELECT MIN(wake_at) FROM (
+                SELECT CASE
+                    WHEN next_attempt_at IS NOT NULL AND next_attempt_at > remind_at
+                        THEN next_attempt_at
+                    ELSE remind_at
+                END AS wake_at
+                FROM reminder_occurrences
+                WHERE state = 'pending'
+                UNION ALL
+                SELECT claim_expires_at AS wake_at
+                FROM reminder_occurrences
+                WHERE state = 'claimed'
+                  AND claim_expires_at IS NOT NULL
+                UNION ALL
+                SELECT expires_at AS wake_at
+                FROM reminder_delivery_lease
+                WHERE singleton = 1
+            )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    // Read-only snapshot; no durable writes to commit.
+    drop(tx);
+    match wake {
+        None => Ok(None),
+        Some(text) => Ok(Some(
+            parse_sql(text, |value| {
+                value.parse::<Timestamp>().map_err(|_| {
+                    junban_domain::ValidationError::InvalidFormat {
+                        field: "next_reminder_wake_at",
+                        expected: "RFC3339 timestamp",
+                    }
+                })
+            })
+            .map_err(storage_error)?,
+        )),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Control-plane lease / claim / settle (no user revision)
 // ---------------------------------------------------------------------------

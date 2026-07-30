@@ -755,6 +755,14 @@ where
             .map_err(Into::into)
     }
 
+    /// Control-plane wake query for the later reminder coordinator. No fan-out.
+    pub async fn next_reminder_wake_at(&self) -> Result<Option<Timestamp>, AppError> {
+        self.repository
+            .next_reminder_wake_at()
+            .await
+            .map_err(Into::into)
+    }
+
     fn commit(
         &self,
         result: Result<CommittedMutation, RepositoryError>,
@@ -1250,6 +1258,10 @@ mod tests {
             _: u32,
         ) -> crate::RepositoryFuture<'_, u32> {
             unimplemented!()
+        }
+        fn next_reminder_wake_at(&self) -> crate::RepositoryFuture<'_, Option<Timestamp>> {
+            self.calls.lock().unwrap().push("next_reminder_wake_at");
+            Box::pin(async { Ok(None) })
         }
     }
 

@@ -38,14 +38,17 @@ use uuid::Uuid;
 
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 use crate::routes::{
-    add_relation, api_not_found, apply_template, bulk_tasks, cancel_task, complete_task,
-    create_comment, create_project, create_saved_filter, create_section, create_tag, create_task,
-    create_template, delete_comment, delete_project, delete_saved_filter, delete_section,
-    delete_tag, delete_task, delete_template, events, get_catalog, get_profile, get_task, health,
-    list_comments, list_relations, list_task_activity, list_tasks, move_task, parse_filter_route,
-    parse_quick_entry_route, parse_text_import_route, patch_comment, patch_project,
-    patch_saved_filter, patch_section, patch_tag, patch_task, patch_template, remove_relation,
-    reopen_task, reorder_tasks, uncomplete_task, undo_operation,
+    acquire_reminder_lease, add_relation, api_not_found, apply_template, bulk_tasks, cancel_task,
+    claim_due_reminders, complete_task, create_comment, create_project, create_saved_filter,
+    create_section, create_tag, create_task, create_template, delete_comment, delete_project,
+    delete_saved_filter, delete_section, delete_tag, delete_task, delete_template,
+    dismiss_reminder, events, get_catalog, get_profile, get_task, health, list_comments,
+    list_relations, list_task_activity, list_task_reminders, list_tasks, mark_owner_lost_reminders,
+    move_task, parse_filter_route, parse_quick_entry_route, parse_text_import_route, patch_comment,
+    patch_project, patch_saved_filter, patch_section, patch_tag, patch_task, patch_template,
+    release_reminder_lease, remove_relation, renew_reminder_lease, reopen_task, reorder_tasks,
+    reschedule_reminder, settle_reminder_delivered, settle_reminder_failed, uncomplete_task,
+    undo_operation,
 };
 use crate::sse::{AppService, SseConnectionPermit};
 
@@ -188,6 +191,37 @@ pub fn router(state: ServerState, web_dir: impl Into<PathBuf>) -> Router {
             delete(remove_relation),
         )
         .route("/api/v1/tasks/{task_id}/activity", get(list_task_activity))
+        .route(
+            "/api/v1/tasks/{task_id}/reminders",
+            get(list_task_reminders),
+        )
+        .route(
+            "/api/v1/tasks/{task_id}/reminders/reschedule",
+            post(reschedule_reminder),
+        )
+        .route(
+            "/api/v1/tasks/{task_id}/reminders/dismiss",
+            post(dismiss_reminder),
+        )
+        .route("/api/v1/reminders/lease", post(acquire_reminder_lease))
+        .route("/api/v1/reminders/lease/renew", post(renew_reminder_lease))
+        .route(
+            "/api/v1/reminders/lease/release",
+            post(release_reminder_lease),
+        )
+        .route("/api/v1/reminders/claim", post(claim_due_reminders))
+        .route(
+            "/api/v1/reminders/settle/delivered",
+            post(settle_reminder_delivered),
+        )
+        .route(
+            "/api/v1/reminders/settle/failed",
+            post(settle_reminder_failed),
+        )
+        .route(
+            "/api/v1/reminders/owner-lost",
+            post(mark_owner_lost_reminders),
+        )
         .route("/api/v1/catalog", get(get_catalog))
         .route("/api/v1/projects", post(create_project))
         .route(
@@ -482,7 +516,17 @@ impl Modify for SecurityAddon {
         routes::parse_quick_entry_route,
         routes::parse_filter_route,
         routes::parse_text_import_route,
-        routes::events
+        routes::events,
+        routes::list_task_reminders,
+        routes::reschedule_reminder,
+        routes::dismiss_reminder,
+        routes::acquire_reminder_lease,
+        routes::renew_reminder_lease,
+        routes::release_reminder_lease,
+        routes::claim_due_reminders,
+        routes::settle_reminder_delivered,
+        routes::settle_reminder_failed,
+        routes::mark_owner_lost_reminders
     ),
     components(schemas(
         ErrorEnvelope,
@@ -546,7 +590,24 @@ impl Modify for SecurityAddon {
         dto::TaskFilterDto,
         dto::ParseTextImportRequest,
         dto::TextImportDraftDto,
-        dto::TextImportResponse
+        dto::TextImportResponse,
+        dto::ReminderChannelDto,
+        dto::ReminderOccurrenceStateDto,
+        dto::ReminderFailureCodeDto,
+        dto::ReminderOccurrenceDto,
+        dto::ReminderListResponse,
+        dto::RescheduleReminderRequest,
+        dto::AcquireReminderLeaseRequest,
+        dto::RenewReminderLeaseRequest,
+        dto::ReleaseReminderLeaseRequest,
+        dto::ClaimRemindersRequest,
+        dto::SettleReminderDeliveredRequest,
+        dto::SettleReminderFailedRequest,
+        dto::MarkOwnerLostRemindersRequest,
+        dto::ReminderDeliveryLeaseDto,
+        dto::ClaimedReminderDto,
+        dto::ClaimRemindersResponse,
+        dto::MarkOwnerLostRemindersResponse
     )),
     modifiers(&SecurityAddon)
 )]

@@ -2,6 +2,8 @@
 
 Status: approved implementation authority
 
+Detailed per-feature operation rules are summarized in [`phase-3-implementation-contract.md`](phase-3-implementation-contract.md).
+
 This map defines the smallest complete Phase 3 extension of the shipped Rust architecture. It was synthesized from the active repository, the private archived implementation at `Junban-legacy@5e2b2b5` as a behavioral and visual oracle, current Jiff/Tokio/SQLite research, and the rewrite ExecPlan. It does not authorize copying the legacy backend.
 
 ## Outcome

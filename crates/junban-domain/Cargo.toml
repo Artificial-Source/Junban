@@ -9,7 +9,8 @@ description = "Pure domain types and rules for Junban"
 publish = false
 
 [dependencies]
-jiff.workspace = true
+# tzdb-zoneinfo reads the host zoneinfo tree for real IANA/DST evaluation without bundling a database.
+jiff = { workspace = true, features = ["tzdb-zoneinfo"] }
 serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

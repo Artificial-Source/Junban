@@ -5,10 +5,14 @@
 mod catalog;
 mod ids;
 mod invariants;
+mod planning;
 mod query;
 mod quick_entry;
+mod recurrence;
+mod reminder;
 mod task;
 mod text_import;
+mod timeblock;
 mod values;
 
 pub use catalog::{
@@ -17,18 +21,36 @@ pub use catalog::{
 };
 pub use ids::{
     CommentId, OperationId, ProjectId, SavedFilterId, SectionId, TagId, TaskId, TemplateId,
+    TimeBlockId, TimeSlotId,
 };
 pub use invariants::{
     blocks_edge_creates_cycle, validate_parent_chain, validate_project_parent_chain,
     validate_reorder_permutation, validate_task_tags, validate_unique_bulk_ids,
+};
+pub use planning::{
+    CapacitySettings, DailyCapacityMinutes, MAX_NUDGE_TASKS_COMBINED, MAX_NUDGE_TASKS_PER_RULE,
+    NudgeFacts, NudgeRuleFacts, NudgeRuleKind, NudgeRuleSettings, WeekStart, WorkHours,
 };
 pub use query::{
     MAX_FILTER_INPUT_CHARS, TaskCursor, TaskFilter, TaskQuery, TaskSort, TaskViewPreset,
     parse_filter, validate_page_limit,
 };
 pub use quick_entry::{MAX_QUICK_ENTRY_CHARS, QuickEntry, parse_quick_entry};
+pub use recurrence::{
+    MonthlyAnchorDay, NextOccurrence, NextOccurrenceRequest, RecurrenceSource, next_occurrence,
+    resolve_due_instant,
+};
+pub use reminder::{
+    DEFAULT_REMINDER_CLAIM_LIMIT, MAX_REMINDER_CLAIM_LIMIT, REMINDER_FAILURE_BACKOFF_MAX_SECS,
+    REMINDER_FAILURE_BACKOFF_START_SECS, ReminderChannel, ReminderChannelSet, ReminderFailureCode,
+    ReminderLeadMinutes, ReminderOccurrenceState, ReminderSettings, reminder_failure_backoff,
+    validate_reminder_claim_limit,
+};
 pub use task::{Task, TaskDraft, TaskStatus};
 pub use text_import::{MAX_TEXT_IMPORT_CHARS, TextImportDraft, parse_text_import};
+pub use timeblock::{
+    CivilTimeRange, MAX_SLOT_MEMBERSHIP, OrderedSlotMembership, TimeBlockDraft, TimeSlotDraft,
+};
 pub use values::{
     ActualMinutes, CommentBody, DreadLevel, EntityName, EstimatedMinutes, FilterQuery, HexColor,
     IconText, LocalDueTime, MAX_BULK_IDS, MAX_ENTITY_NAME_CHARS, MAX_ICON_CHARS,

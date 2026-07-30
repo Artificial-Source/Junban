@@ -372,10 +372,10 @@ impl fmt::Display for IconText {
     }
 }
 
-/// Opaque recurrence rule string. Occurrence generation is owned by a later phase.
+/// Opaque recurrence rule string in the canonical grammar.
 ///
-/// Phase 2 stores only the canonical grammar:
-/// `daily`, `weekly`, `monthly`, `yearly`, `weekdays`, or `every N day(s)|week(s)`.
+/// Accepted forms: `daily`, `weekly`, `monthly`, `yearly`, `weekdays`, or
+/// `every N day(s)|week(s)`. Occurrence generation lives in [`crate::recurrence`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RecurrenceRule(String);

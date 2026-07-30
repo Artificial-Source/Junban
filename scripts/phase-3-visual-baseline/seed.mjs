@@ -99,9 +99,7 @@ async function approvePlugin(request, pluginId) {
 async function timeblockingRpc(request, method, ...args) {
   const body = await post(request, "/api/plugins/timeblocking/rpc", { method, args });
   if (!body || body.ok === false) {
-    throw new Error(
-      `timeblocking RPC ${method} failed: ${body?.error ?? JSON.stringify(body)}`,
-    );
+    throw new Error(`timeblocking RPC ${method} failed: ${body?.error ?? JSON.stringify(body)}`);
   }
   return body.result;
 }

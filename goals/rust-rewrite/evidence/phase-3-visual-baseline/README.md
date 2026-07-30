@@ -16,20 +16,20 @@ are not modified by this evidence.
 
 ## 12-scene matrix
 
-| #   | Scene                                      | Baseline file                                  | Viewport   | Theme |
-| --- | ------------------------------------------ | ---------------------------------------------- | ---------- | ----- |
-| 1   | Calendar Day                               | `calendar-day-desktop-light.png`               | 1440 × 900 | light |
-| 2   | Calendar Week                              | `calendar-week-desktop-dark.png`               | 1440 × 900 | dark  |
-| 3   | Calendar Month                             | `calendar-month-mobile-light.png`              | 390 × 844  | light |
-| 4   | Matrix desktop                             | `matrix-desktop-nord.png`                      | 1440 × 900 | Nord  |
-| 5   | Plan My Day                                | `plan-my-day-desktop-light.png`                | 1440 × 900 | light |
-| 6   | End of Day                                 | `end-of-day-desktop-dark.png`                  | 1440 × 900 | dark  |
-| 7   | Weekly Review                              | `weekly-review-desktop-light.png`              | 1440 × 900 | light |
-| 8   | Focus Mode                                 | `focus-mobile-light.png`                       | 390 × 844  | light |
-| 9   | Task reminder + recurrence detail          | `task-reminder-recurrence-desktop-light.png`   | 1440 × 900 | light |
-| 10  | Stats + Smart Nudge toast                  | `stats-smart-nudge-desktop-light.png`          | 1440 × 900 | light |
-| 11  | Timeblocking Day with slots                | `timeblocking-day-slots-desktop-light.png`     | 1440 × 900 | light |
-| 12  | Timeblocking Week                          | `timeblocking-week-desktop-dark.png`           | 1440 × 900 | dark  |
+| #   | Scene                             | Baseline file                                | Viewport   | Theme |
+| --- | --------------------------------- | -------------------------------------------- | ---------- | ----- |
+| 1   | Calendar Day                      | `calendar-day-desktop-light.png`             | 1440 × 900 | light |
+| 2   | Calendar Week                     | `calendar-week-desktop-dark.png`             | 1440 × 900 | dark  |
+| 3   | Calendar Month                    | `calendar-month-mobile-light.png`            | 390 × 844  | light |
+| 4   | Matrix desktop                    | `matrix-desktop-nord.png`                    | 1440 × 900 | Nord  |
+| 5   | Plan My Day                       | `plan-my-day-desktop-light.png`              | 1440 × 900 | light |
+| 6   | End of Day                        | `end-of-day-desktop-dark.png`                | 1440 × 900 | dark  |
+| 7   | Weekly Review                     | `weekly-review-desktop-light.png`            | 1440 × 900 | light |
+| 8   | Focus Mode                        | `focus-mobile-light.png`                     | 390 × 844  | light |
+| 9   | Task reminder + recurrence detail | `task-reminder-recurrence-desktop-light.png` | 1440 × 900 | light |
+| 10  | Stats + Smart Nudge toast         | `stats-smart-nudge-desktop-light.png`        | 1440 × 900 | light |
+| 11  | Timeblocking Day with slots       | `timeblocking-day-slots-desktop-light.png`   | 1440 × 900 | light |
+| 12  | Timeblocking Week                 | `timeblocking-week-desktop-dark.png`         | 1440 × 900 | dark  |
 
 This is a hard maximum. Functional, semantic, and accessibility tests protect
 adjacent states (Dopamine Menu, Eat the Frog, Task Jar, keyboard alternatives)
@@ -37,20 +37,20 @@ rather than creating additional screenshot combinations.
 
 ## Scene content
 
-| Scene | Visible authority content |
-| ----- | ------------------------- |
-| Calendar Day | Day mode, Thursday 2026-07-23 header, today's dated tasks with projects/priorities/tags |
-| Calendar Week | Week mode 20–26 Jul 2026, multi-day task cards, dark theme |
-| Calendar Month | Month mode July 2026 on mobile chrome with bottom nav and day chips |
-| Matrix | Four labelled quadrants (Do First / Schedule / Delegate / Eliminate), Nord theme |
-| Plan My Day | Today header ritual modal step "Review Overdue" with overdue tasks and reschedule actions |
-| End of Day | Dark "Today's Wins" daily review step with completed counts and Next |
-| Weekly Review | Summary stats, daily completions chart, top accomplishments, neglected projects |
-| Focus Mode | Full-shell mobile Focus Mode overlay with pending task, Complete/Skip controls |
-| Task reminder/recurrence | Task detail panel showing Reminder value and Weekly recurrence controls |
-| Stats + Smart Nudge | Productivity stats (Last 7 Days) plus overdue Smart Nudge toast |
-| Timeblocking Day | Day timeline with task blocks, multi-task Collaboration slot, task sidebar |
-| Timeblocking Week | Week timeline with multi-day blocks, dark theme, Day/3D/5D/Week selector |
+| Scene                    | Visible authority content                                                                 |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| Calendar Day             | Day mode, Thursday 2026-07-23 header, today's dated tasks with projects/priorities/tags   |
+| Calendar Week            | Week mode 20–26 Jul 2026, multi-day task cards, dark theme                                |
+| Calendar Month           | Month mode July 2026 on mobile chrome with bottom nav and day chips                       |
+| Matrix                   | Four labelled quadrants (Do First / Schedule / Delegate / Eliminate), Nord theme          |
+| Plan My Day              | Today header ritual modal step "Review Overdue" with overdue tasks and reschedule actions |
+| End of Day               | Dark "Today's Wins" daily review step with completed counts and Next                      |
+| Weekly Review            | Summary stats, daily completions chart, top accomplishments, neglected projects           |
+| Focus Mode               | Full-shell mobile Focus Mode overlay with pending task, Complete/Skip controls            |
+| Task reminder/recurrence | Task detail panel showing Reminder value and Weekly recurrence controls                   |
+| Stats + Smart Nudge      | Productivity stats (Last 7 Days) plus overdue Smart Nudge toast                           |
+| Timeblocking Day         | Day timeline with task blocks, multi-task Collaboration slot, task sidebar                |
+| Timeblocking Week        | Week timeline with multi-day blocks, dark theme, Day/3D/5D/Week selector                  |
 
 Built-in legacy plugins enabled for capture: `calendar`, `matrix`, `stats`,
 `timeblocking`. Timeblocking was seeded through the real

@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -14,7 +15,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const LEGACY_ROOT =
-  process.env.JUNBAN_LEGACY_ROOT ?? "/home/xn3/Projects/Personal/ASF/Junban-legacy";
+  process.env.JUNBAN_LEGACY_ROOT ?? path.resolve(REPO_ROOT, "..", "Junban-legacy");
 const OUTPUT_DIR =
   process.env.PHASE3_VISUAL_OUT ??
   path.join(REPO_ROOT, "goals/rust-rewrite/evidence/phase-3-visual-baseline");
@@ -34,14 +35,18 @@ chmodSync(screenshotDbDirectory, 0o700);
 const SCREENSHOT_DB_PATH =
   process.env.SCREENSHOT_DB_PATH ?? path.join(screenshotDbDirectory, "junban.db");
 
-// Legacy better-sqlite3 is native-built for Node 22. Prefer an explicit Node 22
-// binary when the ambient shell is newer (e.g. Node 24).
-const NODE22_CANDIDATES = [
-  process.env.JUNBAN_LEGACY_NODE,
-  "/home/xn3/.nvm/versions/node/v22.22.0/bin/node",
-  "/home/xn3/.nvm/versions/node/v22.13.0/bin/node",
-].filter(Boolean);
-const NODE_BIN = NODE22_CANDIDATES.find((candidate) => existsSync(candidate)) ?? process.execPath;
+// Legacy better-sqlite3 is native-built for Node 22. Callers on a different
+// ambient Node may provide a portable absolute path through JUNBAN_LEGACY_NODE.
+const NODE_BIN = process.env.JUNBAN_LEGACY_NODE ?? process.execPath;
+if (!existsSync(NODE_BIN)) {
+  throw new Error(`JUNBAN_LEGACY_NODE does not exist: ${NODE_BIN}`);
+}
+const nodeVersion = execFileSync(NODE_BIN, ["--version"], { encoding: "utf8" }).trim();
+if (!/^v22\./.test(nodeVersion)) {
+  throw new Error(
+    `Phase 3 legacy capture requires Node 22, got ${nodeVersion}; set JUNBAN_LEGACY_NODE`,
+  );
+}
 
 process.env.PHASE3_VISUAL_OUT = OUTPUT_DIR;
 process.env.JUNBAN_LEGACY_ROOT = LEGACY_ROOT;

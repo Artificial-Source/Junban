@@ -41,7 +41,14 @@ async function waitForShell(page) {
         if (await mobileNav.isVisible().catch(() => false)) return true;
         if (await bottomMenu.isVisible().catch(() => false)) return true;
         // Authenticated app chrome always mounts a main landmark once hydrated.
-        if (await page.locator("main").first().isVisible().catch(() => false)) return true;
+        if (
+          await page
+            .locator("main")
+            .first()
+            .isVisible()
+            .catch(() => false)
+        )
+          return true;
         return false;
       },
       { timeout: 25_000 },
@@ -80,7 +87,11 @@ async function dismissNudges(page) {
     if (await dismiss.isVisible().catch(() => false)) {
       await dismiss.click();
     } else {
-      await toast.locator("button").last().click().catch(() => {});
+      await toast
+        .locator("button")
+        .last()
+        .click()
+        .catch(() => {});
     }
     await page.waitForTimeout(250);
   }
@@ -119,7 +130,10 @@ async function selectCalendarMode(page, mode) {
   if (await radio.count()) {
     await radio.check({ force: true });
   } else {
-    await page.locator("label", { hasText: new RegExp(`^${mode}$`) }).first().click();
+    await page
+      .locator("label", { hasText: new RegExp(`^${mode}$`) })
+      .first()
+      .click();
   }
   await settle(page);
 }

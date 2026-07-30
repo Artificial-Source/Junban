@@ -27,7 +27,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const HARNESS_DIR = path.join(__dirname, "phase-3-visual-baseline");
 const LEGACY_ROOT =
-  process.env.JUNBAN_LEGACY_ROOT ?? "/home/xn3/Projects/Personal/ASF/Junban-legacy";
+  process.env.JUNBAN_LEGACY_ROOT ?? path.resolve(REPO_ROOT, "..", "Junban-legacy");
 const OUT_DIR =
   process.env.PHASE3_VISUAL_OUT ??
   path.join(REPO_ROOT, "goals/rust-rewrite/evidence/phase-3-visual-baseline");
@@ -80,9 +80,7 @@ function assertLegacyPin() {
   }
   const head = legacyCommit();
   if (head !== EXPECTED_LEGACY_COMMIT) {
-    fail(
-      `Legacy HEAD is ${head}; expected fixed authority commit ${EXPECTED_LEGACY_COMMIT}`,
-    );
+    fail(`Legacy HEAD is ${head}; expected fixed authority commit ${EXPECTED_LEGACY_COMMIT}`);
   }
 }
 
@@ -108,7 +106,12 @@ function pngDimensions(filePath) {
   }
   const width = buf.readUInt32BE(16);
   const height = buf.readUInt32BE(20);
-  return { width, height, bytes: buf.length, sha256: createHash("sha256").update(buf).digest("hex") };
+  return {
+    width,
+    height,
+    bytes: buf.length,
+    sha256: createHash("sha256").update(buf).digest("hex"),
+  };
 }
 
 function privacyScan(filePath) {
@@ -117,11 +120,7 @@ function privacyScan(filePath) {
   // asserted during capture to be synthetic demo copy only.
   const buf = readFileSync(filePath);
   const haystack = buf.toString("latin1");
-  const bannedExact = [
-    "junban-phase3-visual-baseline-token",
-    "SCREENSHOT_API_TOKEN",
-    "Bearer ",
-  ];
+  const bannedExact = ["junban-phase3-visual-baseline-token", "SCREENSHOT_API_TOKEN", "Bearer "];
   for (const token of bannedExact) {
     if (haystack.includes(token)) {
       throw new Error(`Privacy scan failed for ${path.basename(filePath)}: found ${token}`);
@@ -195,25 +194,18 @@ async function main() {
   console.log(`  playwright cli   : ${cliPath}`);
   console.log(`  config           : ${configPath}`);
 
-  await run(
-    process.execPath,
-    [cliPath, "test", `--config=${configPath}`],
-    {
-      cwd: REPO_ROOT,
-      env: {
-        ...process.env,
-        JUNBAN_LEGACY_ROOT: LEGACY_ROOT,
-        PHASE3_VISUAL_OUT: OUT_DIR,
-        // Ensure Node resolves playwright from the chosen install.
-        NODE_PATH: [
-          path.join(cwdForModules, "node_modules"),
-          process.env.NODE_PATH,
-        ]
-          .filter(Boolean)
-          .join(path.delimiter),
-      },
+  await run(process.execPath, [cliPath, "test", `--config=${configPath}`], {
+    cwd: REPO_ROOT,
+    env: {
+      ...process.env,
+      JUNBAN_LEGACY_ROOT: LEGACY_ROOT,
+      PHASE3_VISUAL_OUT: OUT_DIR,
+      // Ensure Node resolves playwright from the chosen install.
+      NODE_PATH: [path.join(cwdForModules, "node_modules"), process.env.NODE_PATH]
+        .filter(Boolean)
+        .join(path.delimiter),
     },
-  );
+  });
 
   console.log("\nVerifying captured authorities…");
   verifyOutputs();

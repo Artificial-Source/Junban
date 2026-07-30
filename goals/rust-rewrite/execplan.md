@@ -708,6 +708,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 2 domain model and invariant wave.
 - [x] Phase 2 parser and transactional schema waves.
 - [x] Phase 2 application, HTTP, React, scale, dogfood, review and delivery waves.
+- [x] Phase 3 context, temporal authority, migration recovery, reminder fencing, timeblock/slot, bounds and visual-evidence plan approved.
 - [ ] Phase 3 implementation (active).
 - [ ] Phase 4 implementation.
 - [ ] Phase 5 implementation.
@@ -737,6 +738,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 10 planning review — **approved**. The final audit is bounded by evidence and stable findings, has observable DX/docs/quality acceptance, and precedes rather than follows the separately approved release tag.
 - `DBPLAN2-001`–`DBPLAN2-006` — **fixed and approved**. Phase 2 freezes a generalized one-event-per-revision envelope, SQLite table rebuild, bounded cascade/receipt/event payloads, complete delete-undo closure, pending-only completion cascade, and explicit section deletion. Focused database recheck approved implementation.
 - Phase 2 final review — **approved after fixes**. Frontend, accessibility, database and API findings plus six dogfood issues are fixed with focused regressions. Targeted closure re-review confirmed `P2-CLOSE-001`–`P2-CLOSE-003` fixed with no material finding remaining; the full ledger is `evidence/phase-2-review-ledger.md`.
+- `P3-REC-001`, `P3-REM-001`, `P3-MIG-001`, `P3-TIME-001`, `P3-BOUND-001`, `P3-UI-001` — **fixed and approved**. Phase 3 now freezes recurrence/uncomplete transitions, fenced reminder control-plane semantics and shutdown, verified pre-migration recovery, durable blocks/slots and ordered membership, numeric API/performance limits, and twelve independent legacy-rendered visual authorities.
 
 ## Decision log
 
@@ -753,6 +755,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-07-28: froze the final hosted-server budget at 24 MiB maximum warm / 32 MiB peak after the integrated Phase 1 run measured 9.23 / 9.41 MiB maxima. Later phases use the same protocol and cannot waive the final ceiling.
 - 2026-07-29: user requested uninterrupted sequential execution through Phase 9 and added Phase 10 for a deep codebase, DX and documentation audit. Release publication now follows that audit and still requires a separately approved tag.
 - 2026-07-30: completed Phase 2 without adding crates or runtime owners. Recurrence remains validated rule storage only; Phase 3 owns occurrence generation, reminders and planning semantics. Final release-binary evidence passed at 6.96 MiB median warm for the frozen workload and 15.18 MiB maximum warm for deterministic 10,000-task scale.
+- 2026-07-30: Phase 3 keeps the four-crate architecture and adds no scheduler/recurrence framework. One dormant Tokio wake loop, fenced browser/native delivery ownership, verified v2 backup before schema v3 migration, bounded virtual time recurrence, and independent legacy visual authority are required.
 
 ## Discoveries and risks
 

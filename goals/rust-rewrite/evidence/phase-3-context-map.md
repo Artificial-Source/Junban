@@ -193,6 +193,18 @@ Behavior anchors:
 
 Every overlay makes the background inert only while a rendered blocking layer exists. Drag/resize/move has keyboard alternatives and live announcements. Reminder controls have explicit names and live outcomes. Reduced motion applies to timelines and overlays.
 
+Frozen frontend integration choices:
+
+- Prefer the Phase 2 native pointer/keyboard drag pattern. Add a drag dependency only if timeblock resize/move acceptance cannot be met accessibly without it.
+- Focus Mode uses the legacy-compatible `?focus=1` query over the active History API route.
+- Weekly Review is always first-party and visible at the legacy large-desktop breakpoint; no plugin gate survives.
+- Preserve legacy temporal defaults until Phase 4 exposes settings: Sunday week start, week calendar mode, Eat the Frog/Task Jar disabled, and nudges enabled.
+- Extend the existing toast model with a non-undo Dismiss action for nudges; dismissal remains session-local.
+- Phase 3 exposes no general settings screen. Timeblocking keeps its local popover; all other temporal settings use documented defaults until Phase 4.
+- Server aggregates are authoritative even when they differ from legacy client-side arithmetic; visible labels, loading, and empty states remain unchanged.
+- `/projects/:id/calendar` renders the first-party Calendar view with a project filter, not a second calendar implementation.
+- When the first browser-notification reminder is configured, permission is requested non-blockingly. Denial keeps toast delivery available and must not prevent saving the reminder.
+
 ## Implementation waves
 
 1. Capture immutable legacy visual authority and commit benchmark thresholds.

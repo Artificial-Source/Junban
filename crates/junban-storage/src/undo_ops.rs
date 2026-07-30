@@ -32,7 +32,7 @@ fn missing_as_conflict(error: RepositoryError) -> RepositoryError {
     }
 }
 
-fn validate_post_image(
+pub(crate) fn validate_post_image(
     tx: &rusqlite::Transaction<'_>,
     post: &PostImage,
 ) -> Result<(), RepositoryError> {
@@ -178,7 +178,7 @@ fn restore_closure(
     Ok(())
 }
 
-fn apply_inverse(
+pub(crate) fn apply_inverse(
     tx: &rusqlite::Transaction<'_>,
     inverse: &Inverse,
     now: Timestamp,
@@ -247,6 +247,56 @@ fn apply_inverse(
             Ok((
                 AffectedIds {
                     task_ids: ids,
+                    ..AffectedIds::default()
+                },
+                activity,
+                None,
+                ResyncScope::TASKS,
+            ))
+        }
+        Inverse::ReverseCompletion {
+            sources,
+            generated_ids,
+        } => {
+            // Drop receipt-owned generated children first, then restore sources.
+            let mut affected = Vec::new();
+            let mut activity = Vec::new();
+            let mut seq = 0u32;
+            for id in generated_ids {
+                if task_exists(tx, *id)? {
+                    delete_task_row(tx, *id)?;
+                    affected.push(*id);
+                    activity.push(field_activity(
+                        revision,
+                        seq,
+                        operation_id,
+                        *id,
+                        TaskActivityAction::Deleted,
+                        None,
+                        None,
+                        None,
+                        now,
+                    ));
+                    seq = seq.saturating_add(1);
+                }
+            }
+            for task in sources {
+                let before = load_task(tx, task.id).map_err(missing_as_conflict)?;
+                let mut restored = task.clone();
+                if let Err(error) = validate_task_refs(tx, &restored) {
+                    return Err(missing_as_conflict(error));
+                }
+                restored.revision = revision;
+                restored.updated_at = now;
+                update_task_row(tx, &restored)?;
+                let diffs = diff_task_fields(&before, &restored, revision, operation_id, now, seq);
+                seq = seq.saturating_add(u32::try_from(diffs.len()).unwrap_or(0));
+                activity.extend(diffs);
+                affected.push(restored.id);
+            }
+            Ok((
+                AffectedIds {
+                    task_ids: affected,
                     ..AffectedIds::default()
                 },
                 activity,
@@ -507,6 +557,14 @@ fn redo_inverse_for(inverse: &Inverse, post: &PostImage, affected: &AffectedIds)
         Inverse::RestoreTasks { .. } => Inverse::RestoreTasks {
             tasks: post.tasks.values().cloned().collect(),
         },
+        Inverse::ReverseCompletion { generated_ids, .. } => {
+            // Undo of reverse-completion re-applies the completed post-image (sources +
+            // generated children). Generated IDs that are absent are reinserted from post.
+            let _ = generated_ids;
+            Inverse::RestoreTasks {
+                tasks: post.tasks.values().cloned().collect(),
+            }
+        }
         Inverse::RestoreOrders { .. } => Inverse::RestoreOrders {
             orders: post
                 .orders
@@ -605,6 +663,7 @@ pub(crate) fn undo(
                 summary_subject: Some(("operation".into(), source_operation_id.to_string())),
                 undo: Some(undo),
                 mark_undone: Some(source_operation_id),
+                uncomplete_outcome: None,
             })
         },
     )

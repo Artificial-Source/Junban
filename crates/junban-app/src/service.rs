@@ -14,6 +14,7 @@ use crate::{
     EventCatchUp, MoveTarget, ProjectDraft, ProjectPatch, ReorderScope, Repository,
     RepositoryError, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft,
     TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext,
 };
 
 pub trait EventSink: Send + Sync + 'static {
@@ -108,9 +109,20 @@ where
         operation_id: OperationId,
         task_id: TaskId,
     ) -> Result<CommittedMutation, AppError> {
+        self.complete_task_with(operation_id, task_id, TemporalContext::sample_now())
+            .await
+    }
+
+    /// Internal/test seam with an explicit sampled civil date/zone.
+    pub async fn complete_task_with(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        temporal: TemporalContext,
+    ) -> Result<CommittedMutation, AppError> {
         self.commit(
             self.repository
-                .complete_task(operation_id, task_id, Timestamp::now())
+                .complete_task(operation_id, task_id, Timestamp::now(), temporal)
                 .await,
         )
     }
@@ -120,9 +132,20 @@ where
         operation_id: OperationId,
         task_id: TaskId,
     ) -> Result<CommittedMutation, AppError> {
+        self.uncomplete_task_with(operation_id, task_id, TemporalContext::sample_now())
+            .await
+    }
+
+    /// Internal/test seam with an explicit sampled civil date/zone.
+    pub async fn uncomplete_task_with(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        temporal: TemporalContext,
+    ) -> Result<CommittedMutation, AppError> {
         self.commit(
             self.repository
-                .uncomplete_task(operation_id, task_id, Timestamp::now())
+                .uncomplete_task(operation_id, task_id, Timestamp::now(), temporal)
                 .await,
         )
     }
@@ -195,9 +218,26 @@ where
         task_ids: Vec<TaskId>,
         action: BulkAction,
     ) -> Result<CommittedMutation, AppError> {
+        self.bulk_tasks_with(
+            operation_id,
+            task_ids,
+            action,
+            TemporalContext::sample_now(),
+        )
+        .await
+    }
+
+    /// Internal/test seam with an explicit sampled civil date/zone.
+    pub async fn bulk_tasks_with(
+        &self,
+        operation_id: OperationId,
+        task_ids: Vec<TaskId>,
+        action: BulkAction,
+        temporal: TemporalContext,
+    ) -> Result<CommittedMutation, AppError> {
         self.commit(
             self.repository
-                .bulk_tasks(operation_id, task_ids, action, Timestamp::now())
+                .bulk_tasks(operation_id, task_ids, action, Timestamp::now(), temporal)
                 .await,
         )
     }
@@ -666,6 +706,7 @@ mod tests {
             _: OperationId,
             _: TaskId,
             _: Timestamp,
+            _: TemporalContext,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("complete")
         }
@@ -674,6 +715,7 @@ mod tests {
             _: OperationId,
             _: TaskId,
             _: Timestamp,
+            _: TemporalContext,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("uncomplete")
         }
@@ -725,6 +767,7 @@ mod tests {
             _: Vec<TaskId>,
             _: BulkAction,
             _: Timestamp,
+            _: TemporalContext,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("bulk")
         }
@@ -998,6 +1041,7 @@ mod tests {
                 affected: AffectedIds::default(),
                 resync: ResyncScope::NONE,
             },
+            uncomplete_outcome: None,
             newly_committed,
         }
     }

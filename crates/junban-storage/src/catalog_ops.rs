@@ -101,6 +101,7 @@ fn catalog_effect(
         summary_subject: Some((subject.0.into(), subject.1)),
         undo: None,
         mark_undone: None,
+        uncomplete_outcome: None,
     }
 }
 
@@ -472,6 +473,7 @@ pub(crate) fn delete_project(
             summary_subject: Some(("project".into(), project_id.to_string())),
             undo: None,
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -625,6 +627,7 @@ pub(crate) fn delete_section(
             summary_subject: Some(("section".into(), section_id.to_string())),
             undo: None,
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -762,6 +765,7 @@ pub(crate) fn delete_tag(
             summary_subject: Some(("tag".into(), tag_id.to_string())),
             undo: None,
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -934,6 +938,7 @@ pub(crate) fn delete_template(
             summary_subject: Some(("template".into(), template_id.to_string())),
             undo: None,
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -994,6 +999,7 @@ pub(crate) fn apply_template(
             summary_subject: Some(("task".into(), task.id.to_string())),
             undo: Some(undo),
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -1126,6 +1132,7 @@ pub(crate) fn delete_saved_filter(
             summary_subject: Some(("saved_filter".into(), filter_id.to_string())),
             undo: None,
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }

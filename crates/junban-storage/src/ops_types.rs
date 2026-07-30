@@ -21,6 +21,13 @@ pub(crate) enum Inverse {
     RestoreTasks {
         tasks: Vec<Task>,
     },
+    /// Undo a completion that may have generated next occurrences.
+    ReverseCompletion {
+        /// Pre-completion source images (pending).
+        sources: Vec<Task>,
+        /// Generated child IDs owned by the completion receipt.
+        generated_ids: Vec<TaskId>,
+    },
     RestoreOrders {
         orders: Vec<(TaskId, SortOrder)>,
     },

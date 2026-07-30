@@ -29,6 +29,7 @@ use junban_app::{
     ProjectDraft, ProjectPatch, ReorderScope, Repository, RepositoryError, RepositoryFuture,
     SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft, TagPatch,
     TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext,
 };
 use junban_domain::{
     Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind, SavedFilterId,
@@ -290,13 +291,15 @@ impl Repository for SqliteRepository {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
+        temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation> {
         mut_cmd!(
             self,
             CompleteTask {
                 operation_id,
                 task_id,
-                now
+                now,
+                temporal
             }
         )
     }
@@ -305,13 +308,15 @@ impl Repository for SqliteRepository {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
+        temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation> {
         mut_cmd!(
             self,
             UncompleteTask {
                 operation_id,
                 task_id,
-                now
+                now,
+                temporal
             }
         )
     }
@@ -400,6 +405,7 @@ impl Repository for SqliteRepository {
         task_ids: Vec<TaskId>,
         action: BulkAction,
         now: Timestamp,
+        temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation> {
         mut_cmd!(
             self,
@@ -407,7 +413,8 @@ impl Repository for SqliteRepository {
                 operation_id,
                 task_ids,
                 action,
-                now
+                now,
+                temporal
             }
         )
     }
@@ -839,12 +846,14 @@ enum Command {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
+        temporal: TemporalContext,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
     UncompleteTask {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
+        temporal: TemporalContext,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
     CancelTask {
@@ -884,6 +893,7 @@ enum Command {
         task_ids: Vec<TaskId>,
         action: BulkAction,
         now: Timestamp,
+        temporal: TemporalContext,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
     ListTasks {
@@ -1110,6 +1120,7 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                 operation_id,
                 task_id,
                 now,
+                temporal,
                 reply,
             } => {
                 let _ = reply.send(task_ops::complete_task(
@@ -1117,12 +1128,14 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     operation_id,
                     task_id,
                     now,
+                    temporal,
                 ));
             }
             Command::UncompleteTask {
                 operation_id,
                 task_id,
                 now,
+                temporal,
                 reply,
             } => {
                 let _ = reply.send(task_ops::uncomplete_task(
@@ -1130,6 +1143,7 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     operation_id,
                     task_id,
                     now,
+                    temporal,
                 ));
             }
             Command::CancelTask {
@@ -1206,6 +1220,7 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                 task_ids,
                 action,
                 now,
+                temporal,
                 reply,
             } => {
                 let _ = reply.send(task_ops::bulk_tasks(
@@ -1214,6 +1229,7 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     task_ids,
                     action,
                     now,
+                    temporal,
                 ));
             }
             Command::ListTasks {

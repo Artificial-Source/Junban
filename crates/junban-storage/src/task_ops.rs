@@ -5,13 +5,15 @@ use std::collections::HashSet;
 use jiff::Timestamp;
 use junban_app::{
     AffectedIds, BulkAction, CommittedMutation, EventType, MoveTarget, OrderAnchor, ReorderScope,
-    RepositoryError, ResourceRef, ResourceSnapshot, ResyncScope, TaskPatch,
+    RepositoryError, ResourceRef, ResourceSnapshot, ResyncScope, TaskPatch, TemporalContext,
 };
 use junban_domain::{
-    MAX_BULK_IDS, OperationId, SortOrder, Task, TaskActivityAction, TaskDraft, TaskId, TaskStatus,
-    ValidationError, validate_reorder_permutation, validate_task_tags, validate_unique_bulk_ids,
+    MAX_BULK_IDS, NextOccurrenceRequest, OperationId, RecurrenceSource, SortOrder, Task,
+    TaskActivityAction, TaskDraft, TaskId, TaskStatus, UncompleteOutcome, ValidationError,
+    next_occurrence, resolve_recurrence_anchor, shift_occurrence_absolutes,
+    validate_reorder_permutation, validate_task_tags, validate_unique_bulk_ids,
 };
-use rusqlite::{Connection, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::Serialize;
 
 use crate::helpers::{
@@ -24,6 +26,7 @@ use crate::rows::{
     parse_sql, storage_error, task_exists, update_task_row,
 };
 use crate::tx::{MutationEffect, canonical_json, mutate};
+use crate::undo_ops::{apply_inverse, validate_post_image};
 
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -84,6 +87,7 @@ fn single(
         summary_subject: Some(("task".into(), id.to_string())),
         undo: Some(undo),
         mark_undone: None,
+        uncomplete_outcome: None,
     }
 }
 
@@ -167,6 +171,210 @@ pub(crate) fn patch_task(
     )
 }
 
+fn build_generated_child(
+    source: &Task,
+    now: Timestamp,
+    revision: u64,
+    temporal: &TemporalContext,
+) -> Result<Task, RepositoryError> {
+    let rule = source
+        .recurrence_rule
+        .clone()
+        .ok_or_else(|| RepositoryError::Storage("recurring source missing rule".into()))?;
+    let recurrence_source = RecurrenceSource {
+        rule,
+        due_date: source.due_date,
+        due_time: source.due_time.clone(),
+        monthly_anchor: source.recurrence_anchor_day,
+    };
+    let next = next_occurrence(&NextOccurrenceRequest {
+        source: recurrence_source.clone(),
+        sampled_completion_date: temporal.sampled_completion_date,
+    })
+    .map_err(validation)?;
+    let offsets = shift_occurrence_absolutes(
+        &recurrence_source,
+        &next,
+        source.remind_at,
+        source.deadline,
+        &temporal.server_time_zone,
+    )
+    .map_err(validation)?;
+    Ok(Task {
+        id: TaskId::new(),
+        title: source.title.clone(),
+        description: source.description.clone(),
+        priority: source.priority,
+        due_date: Some(next.due_date),
+        due_time: next.due_time,
+        deadline: offsets.deadline,
+        someday: source.someday,
+        estimated_minutes: source.estimated_minutes,
+        actual_minutes: None,
+        dread: source.dread,
+        project_id: source.project_id,
+        section_id: source.section_id,
+        parent_id: None,
+        tag_ids: source.tag_ids.clone(),
+        sort_order: SortOrder::default(),
+        recurrence_rule: source.recurrence_rule.clone(),
+        remind_at: offsets.remind_at,
+        recurrence_anchor_day: next.monthly_anchor,
+        recurrence_source_id: Some(source.id),
+        completion_operation_id: None,
+        status: TaskStatus::Pending,
+        completed_at: None,
+        created_at: now,
+        updated_at: now,
+        revision,
+    })
+}
+
+struct CompletePendingResult {
+    sources_before: Vec<Task>,
+    generated_ids: Vec<TaskId>,
+    post_tasks: Vec<Task>,
+    activity: Vec<junban_domain::TaskActivity>,
+    #[allow(dead_code)]
+    seq: u32,
+}
+
+fn complete_pending_set(
+    tx: &Transaction<'_>,
+    operation_id: OperationId,
+    pending_ids: &[TaskId],
+    now: Timestamp,
+    revision: u64,
+    temporal: &TemporalContext,
+    mut seq: u32,
+) -> Result<CompletePendingResult, RepositoryError> {
+    let recurring_count = pending_ids
+        .iter()
+        .map(|id| load_task(tx, *id))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|task| task.recurrence_rule.is_some())
+        .count();
+    if pending_ids.len().saturating_add(recurring_count) > MAX_BULK_IDS {
+        return Err(RepositoryError::OperationTooLarge);
+    }
+
+    let mut sources_before = Vec::with_capacity(pending_ids.len());
+    let mut generated_ids = Vec::new();
+    let mut post_tasks = Vec::new();
+    let mut activity = Vec::new();
+
+    for task_id in pending_ids {
+        let before = load_task(tx, *task_id)?;
+        if before.status != TaskStatus::Pending {
+            return Err(RepositoryError::Conflict);
+        }
+        sources_before.push(before.clone());
+        let mut after = before.clone();
+        after.try_complete(now).map_err(map_transition)?;
+        after.completion_operation_id = Some(operation_id);
+        after.revision = revision;
+        after.updated_at = now;
+        update_task_row(tx, &after)?;
+        activity.push(field_activity(
+            revision,
+            seq,
+            operation_id,
+            after.id,
+            TaskActivityAction::Completed,
+            Some("status"),
+            Some("pending".into()),
+            Some("completed".into()),
+            now,
+        ));
+        seq = seq.saturating_add(1);
+
+        if before.recurrence_rule.is_some() {
+            let child = build_generated_child(&before, now, revision, temporal)?;
+            insert_task(tx, &child)?;
+            generated_ids.push(child.id);
+            activity.push(field_activity(
+                revision,
+                seq,
+                operation_id,
+                child.id,
+                TaskActivityAction::Created,
+                Some("recurrence_source_id"),
+                None,
+                Some(before.id.to_string()),
+                now,
+            ));
+            seq = seq.saturating_add(1);
+            post_tasks.push(child);
+        }
+        post_tasks.push(load_task(tx, after.id)?);
+    }
+
+    Ok(CompletePendingResult {
+        sources_before,
+        generated_ids,
+        post_tasks,
+        activity,
+        seq,
+    })
+}
+
+fn expand_complete_targets(
+    tx: &Transaction<'_>,
+    roots: &[TaskId],
+) -> Result<Vec<TaskId>, RepositoryError> {
+    let mut expanded = Vec::new();
+    let mut seen = HashSet::new();
+    for task_id in roots {
+        let selected = load_task(tx, *task_id)?;
+        if selected.status != TaskStatus::Pending {
+            return Err(RepositoryError::Conflict);
+        }
+        if seen.insert(selected.id) {
+            expanded.push(selected.id);
+        }
+        for descendant_id in collect_descendants(tx, selected.id)?.into_iter().skip(1) {
+            let descendant = load_task(tx, descendant_id)?;
+            if descendant.status != TaskStatus::Pending {
+                continue;
+            }
+            if seen.insert(descendant.id) {
+                expanded.push(descendant.id);
+            }
+            if expanded.len() > MAX_BULK_IDS {
+                return Err(RepositoryError::OperationTooLarge);
+            }
+        }
+        if expanded.len() > MAX_BULK_IDS {
+            return Err(RepositoryError::OperationTooLarge);
+        }
+    }
+    Ok(expanded)
+}
+
+fn load_completion_material(
+    tx: &Transaction<'_>,
+    completion_operation_id: OperationId,
+) -> Result<Option<(Inverse, PostImage)>, RepositoryError> {
+    let row = tx
+        .query_row(
+            "SELECT u.inverse_json, u.post_image_json
+             FROM operation_undo u
+             JOIN operation_receipts r ON r.operation_id = u.source_operation_id
+             WHERE u.source_operation_id = ?1",
+            [completion_operation_id.to_string()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(storage_error)?;
+    let Some((inverse_json, post_json)) = row else {
+        return Ok(None);
+    };
+    let inverse: Inverse = serde_json::from_str(&inverse_json).map_err(storage_error)?;
+    let post: PostImage = serde_json::from_str(&post_json).map_err(storage_error)?;
+    Ok(Some((inverse, post)))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn change_status(
     connection: &mut Connection,
@@ -176,7 +384,6 @@ fn change_status(
     request: Req<'_>,
     event_type: &'static str,
     action: TaskActivityAction,
-    cascade_complete: bool,
     transition: fn(&mut Task, Timestamp) -> Result<(), ValidationError>,
 ) -> Result<CommittedMutation, RepositoryError> {
     let request = canonical_json(&request)?;
@@ -186,22 +393,19 @@ fn change_status(
         request,
         now,
         move |tx, revision| {
-            let mut restored = Vec::new();
-            let mut activity = Vec::new();
-            let mut affected = Vec::new();
-            let mut seq = 0u32;
-
             let before = load_task(tx, task_id)?;
-            restored.push(before.clone());
             let mut after = before.clone();
             transition(&mut after, now).map_err(map_transition)?;
             after.revision = revision;
             after.updated_at = now;
+            // Status changes other than completion do not touch recurrence generation.
+            if !matches!(action, TaskActivityAction::Completed) {
+                after.completion_operation_id = None;
+            }
             update_task_row(tx, &after)?;
-            affected.push(after.id);
-            activity.push(field_activity(
+            let activity = vec![field_activity(
                 revision,
-                seq,
+                0,
                 operation_id,
                 after.id,
                 action,
@@ -209,68 +413,27 @@ fn change_status(
                 Some(status_name(before.status).to_owned()),
                 Some(status_name(after.status).to_owned()),
                 now,
-            ));
-            seq += 1;
-
-            if cascade_complete {
-                for child_id in collect_descendants(tx, task_id)?.into_iter().skip(1) {
-                    let child_before = load_task(tx, child_id)?;
-                    if child_before.status != TaskStatus::Pending {
-                        continue;
-                    }
-                    restored.push(child_before.clone());
-                    let mut child = child_before;
-                    child.try_complete(now).map_err(map_transition)?;
-                    child.revision = revision;
-                    child.updated_at = now;
-                    update_task_row(tx, &child)?;
-                    affected.push(child.id);
-                    activity.push(field_activity(
-                        revision,
-                        seq,
-                        operation_id,
-                        child.id,
-                        TaskActivityAction::Completed,
-                        Some("status"),
-                        Some("pending".into()),
-                        Some("completed".into()),
-                        now,
-                    ));
-                    seq = seq.saturating_add(1);
-                }
-            }
-
-            let mut post_tasks = Vec::new();
-            for id in &affected {
-                post_tasks.push(load_task(tx, *id)?);
-            }
-            let primary = load_task(tx, task_id)?;
+            )];
             let undo = undo_pair(
-                &Inverse::RestoreTasks { tasks: restored },
-                &post_from_tasks(post_tasks),
+                &Inverse::RestoreTasks {
+                    tasks: vec![before],
+                },
+                &post_from_tasks([after.clone()]),
             )?;
-            let multi = affected.len() > 1;
             Ok(MutationEffect {
                 event_type: EventType::new(event_type),
                 primary: Some(ResourceRef::task(task_id)),
-                snapshot: if multi {
-                    None
-                } else {
-                    Some(ResourceSnapshot::task(primary))
-                },
+                snapshot: Some(ResourceSnapshot::task(after)),
                 affected: AffectedIds {
-                    task_ids: affected,
+                    task_ids: vec![task_id],
                     ..AffectedIds::default()
                 },
-                resync: if multi {
-                    ResyncScope::TASKS
-                } else {
-                    ResyncScope::NONE
-                },
+                resync: ResyncScope::NONE,
                 task_activity: activity,
                 summary_subject: Some(("task".into(), task_id.to_string())),
                 undo: Some(undo),
                 mark_undone: None,
+                uncomplete_outcome: None,
             })
         },
     )
@@ -281,41 +444,172 @@ pub(crate) fn complete_task(
     op: OperationId,
     id: TaskId,
     now: Timestamp,
+    temporal: TemporalContext,
 ) -> Result<CommittedMutation, RepositoryError> {
-    change_status(
-        c,
-        op,
-        id,
-        now,
-        Req::CompleteTask {
-            task_id: id.to_string(),
-        },
-        EventType::TASK_COMPLETED,
-        TaskActivityAction::Completed,
-        true,
-        Task::try_complete,
-    )
+    let request = canonical_json(&Req::CompleteTask {
+        task_id: id.to_string(),
+    })?;
+    mutate(c, op, request, now, move |tx, revision| {
+        let pending_ids = expand_complete_targets(tx, &[id])?;
+        let completed = complete_pending_set(tx, op, &pending_ids, now, revision, &temporal, 0)?;
+        let multi = completed.post_tasks.len() > 1;
+        let primary = load_task(tx, id)?;
+        let undo = undo_pair(
+            &Inverse::ReverseCompletion {
+                sources: completed.sources_before,
+                generated_ids: completed.generated_ids.clone(),
+            },
+            &post_from_tasks(completed.post_tasks),
+        )?;
+        let mut affected = pending_ids;
+        affected.extend(completed.generated_ids);
+        let activity = completed.activity;
+        Ok(MutationEffect {
+            event_type: EventType::new(EventType::TASK_COMPLETED),
+            primary: Some(ResourceRef::task(id)),
+            snapshot: if multi {
+                None
+            } else {
+                Some(ResourceSnapshot::task(primary))
+            },
+            affected: AffectedIds {
+                task_ids: affected,
+                ..AffectedIds::default()
+            },
+            resync: if multi {
+                ResyncScope::TASKS
+            } else {
+                ResyncScope::NONE
+            },
+            task_activity: activity,
+            summary_subject: Some(("task".into(), id.to_string())),
+            undo: Some(undo),
+            mark_undone: None,
+            uncomplete_outcome: None,
+        })
+    })
 }
+
 pub(crate) fn uncomplete_task(
     c: &mut Connection,
     op: OperationId,
     id: TaskId,
     now: Timestamp,
+    _temporal: TemporalContext,
 ) -> Result<CommittedMutation, RepositoryError> {
-    change_status(
-        c,
-        op,
-        id,
-        now,
-        Req::UncompleteTask {
-            task_id: id.to_string(),
-        },
-        EventType::TASK_UNCOMPLETED,
-        TaskActivityAction::Uncompleted,
-        false,
-        Task::try_uncomplete,
-    )
+    let request = canonical_json(&Req::UncompleteTask {
+        task_id: id.to_string(),
+    })?;
+    mutate(c, op, request, now, move |tx, revision| {
+        let source = load_task(tx, id)?;
+        if source.status != TaskStatus::Completed {
+            return Err(RepositoryError::Conflict);
+        }
+
+        // Prefer exact receipt-backed reversal of the owning completion operation.
+        if let Some(completion_op) = source.completion_operation_id
+            && let Some((inverse, post)) = load_completion_material(tx, completion_op)?
+        {
+            match validate_post_image(tx, &post) {
+                Ok(()) => {
+                    let (affected, activity, _, _) =
+                        apply_inverse(tx, &inverse, now, revision, op)?;
+                    // Capture redo material: completed post-image must be restorable.
+                    let redo_tasks: Vec<Task> = post.tasks.values().cloned().collect();
+                    let mut uncomplete_post = PostImage {
+                        absent_task_ids: match &inverse {
+                            Inverse::ReverseCompletion { generated_ids, .. } => {
+                                generated_ids.clone()
+                            }
+                            _ => Vec::new(),
+                        },
+                        ..PostImage::default()
+                    };
+                    for task_id in &affected.task_ids {
+                        if let Ok(task) = load_task(tx, *task_id) {
+                            uncomplete_post
+                                .orders
+                                .insert(task.id.to_string(), task.sort_order.get());
+                            uncomplete_post.tasks.insert(task.id.to_string(), task);
+                        }
+                    }
+                    let undo = undo_pair(
+                        &Inverse::RestoreTasks { tasks: redo_tasks },
+                        &uncomplete_post,
+                    )?;
+                    // Keep single-task uncomplete snapshots for the existing HTTP surface.
+                    let multi =
+                        affected.task_ids.len() > 1 || !uncomplete_post.absent_task_ids.is_empty();
+                    let primary_task = load_task(tx, id)?;
+                    return Ok(MutationEffect {
+                        event_type: EventType::new(EventType::TASK_UNCOMPLETED),
+                        primary: Some(ResourceRef::task(id)),
+                        snapshot: if multi {
+                            None
+                        } else {
+                            Some(ResourceSnapshot::task(primary_task))
+                        },
+                        affected,
+                        resync: if multi {
+                            ResyncScope::TASKS
+                        } else {
+                            ResyncScope::NONE
+                        },
+                        task_activity: activity,
+                        summary_subject: Some(("task".into(), id.to_string())),
+                        undo: Some(undo),
+                        mark_undone: None,
+                        uncomplete_outcome: Some(UncompleteOutcome::Exact),
+                    });
+                }
+                Err(RepositoryError::Conflict) => return Err(RepositoryError::Conflict),
+                Err(error) => return Err(error),
+            }
+        }
+
+        // Source-only fallback: reopen just this task; leave generated children alone.
+        let before = source;
+        let mut after = before.clone();
+        after.try_uncomplete(now).map_err(map_transition)?;
+        after.completion_operation_id = None;
+        after.revision = revision;
+        after.updated_at = now;
+        update_task_row(tx, &after)?;
+        let activity = vec![field_activity(
+            revision,
+            0,
+            op,
+            after.id,
+            TaskActivityAction::Uncompleted,
+            Some("status"),
+            Some("completed".into()),
+            Some("pending".into()),
+            now,
+        )];
+        let undo = undo_pair(
+            &Inverse::RestoreTasks {
+                tasks: vec![before],
+            },
+            &post_from_tasks([after.clone()]),
+        )?;
+        Ok(MutationEffect {
+            event_type: EventType::new(EventType::TASK_UNCOMPLETED),
+            primary: Some(ResourceRef::task(id)),
+            snapshot: Some(ResourceSnapshot::task(after)),
+            affected: AffectedIds {
+                task_ids: vec![id],
+                ..AffectedIds::default()
+            },
+            resync: ResyncScope::NONE,
+            task_activity: activity,
+            summary_subject: Some(("task".into(), id.to_string())),
+            undo: Some(undo),
+            mark_undone: None,
+            uncomplete_outcome: Some(UncompleteOutcome::SourceOnly),
+        })
+    })
 }
+
 pub(crate) fn cancel_task(
     c: &mut Connection,
     op: OperationId,
@@ -332,7 +626,6 @@ pub(crate) fn cancel_task(
         },
         EventType::TASK_CANCELLED,
         TaskActivityAction::Cancelled,
-        false,
         Task::try_cancel,
     )
 }
@@ -352,7 +645,6 @@ pub(crate) fn reopen_task(
         },
         EventType::TASK_REOPENED,
         TaskActivityAction::Reopened,
-        false,
         Task::try_reopen,
     )
 }
@@ -429,6 +721,7 @@ pub(crate) fn delete_task(
             summary_subject: Some(("task".into(), task_id.to_string())),
             undo: Some(undo),
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -596,6 +889,7 @@ pub(crate) fn move_task(
             summary_subject: Some(("task".into(), task_id.to_string())),
             undo: Some(undo),
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -677,6 +971,7 @@ pub(crate) fn reorder_tasks(
             summary_subject: None,
             undo: Some(undo),
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -687,6 +982,7 @@ pub(crate) fn bulk_tasks(
     task_ids: Vec<TaskId>,
     action: BulkAction,
     now: Timestamp,
+    temporal: TemporalContext,
 ) -> Result<CommittedMutation, RepositoryError> {
     validate_unique_bulk_ids(&task_ids).map_err(validation)?;
     if let BulkAction::Move { target } = &action
@@ -795,56 +1091,154 @@ pub(crate) fn bulk_tasks(
                 summary_subject: None,
                 undo: Some(undo),
                 mark_undone: None,
+                uncomplete_outcome: None,
             });
         }
 
-        // Bulk complete expands pending descendants of each selected pending parent.
-        let effective_ids = if matches!(action, BulkAction::Complete) {
-            let mut expanded = Vec::new();
-            let mut seen = HashSet::new();
+        if matches!(action, BulkAction::Complete) {
+            let pending_ids = expand_complete_targets(tx, &task_ids)?;
+            let completed =
+                complete_pending_set(tx, op, &pending_ids, now, revision, &temporal, 0)?;
+            let mut affected = pending_ids;
+            affected.extend(completed.generated_ids.iter().copied());
+            let undo = undo_pair(
+                &Inverse::ReverseCompletion {
+                    sources: completed.sources_before,
+                    generated_ids: completed.generated_ids,
+                },
+                &post_from_tasks(completed.post_tasks),
+            )?;
+            return Ok(MutationEffect {
+                event_type: EventType::new(EventType::TASK_BULK),
+                primary: None,
+                snapshot: None,
+                affected: AffectedIds {
+                    task_ids: affected,
+                    ..AffectedIds::default()
+                },
+                resync: ResyncScope::TASKS,
+                task_activity: completed.activity,
+                summary_subject: None,
+                undo: Some(undo),
+                mark_undone: None,
+                uncomplete_outcome: None,
+            });
+        }
+
+        if matches!(action, BulkAction::Uncomplete) {
+            // Dedup by completion operation so overlapping cascade roots reverse once.
+            let mut seen_ops = HashSet::new();
+            let mut source_only_ids = Vec::new();
+            let mut exact_ops = Vec::new();
             for task_id in &task_ids {
-                let selected = load_task(tx, *task_id)?;
-                // Selected non-pending tasks remain hard conflicts.
-                if selected.status != TaskStatus::Pending {
+                let task = load_task(tx, *task_id)?;
+                if task.status != TaskStatus::Completed {
                     return Err(RepositoryError::Conflict);
                 }
-                if seen.insert(selected.id) {
-                    expanded.push(selected.id);
-                }
-                for descendant_id in collect_descendants(tx, selected.id)?.into_iter().skip(1) {
-                    let descendant = load_task(tx, descendant_id)?;
-                    if descendant.status != TaskStatus::Pending {
-                        continue;
+                match task.completion_operation_id {
+                    Some(completion_op) if seen_ops.insert(completion_op) => {
+                        if load_completion_material(tx, completion_op)?.is_some() {
+                            exact_ops.push(completion_op);
+                        } else {
+                            source_only_ids.push(*task_id);
+                        }
                     }
-                    if seen.insert(descendant.id) {
-                        expanded.push(descendant.id);
-                    }
-                    if expanded.len() > MAX_BULK_IDS {
-                        return Err(RepositoryError::OperationTooLarge);
-                    }
-                }
-                if expanded.len() > MAX_BULK_IDS {
-                    return Err(RepositoryError::OperationTooLarge);
+                    Some(_) => {}
+                    None => source_only_ids.push(*task_id),
                 }
             }
-            expanded
-        } else {
-            task_ids.clone()
-        };
+
+            // Validate every exact completion before mutating any.
+            let mut materials = Vec::new();
+            for completion_op in &exact_ops {
+                let (inverse, post) = load_completion_material(tx, *completion_op)?
+                    .ok_or(RepositoryError::Conflict)?;
+                validate_post_image(tx, &post)?;
+                materials.push((inverse, post));
+            }
+
+            let mut before_tasks = Vec::new();
+            let mut after_tasks = Vec::new();
+            let mut activity = Vec::new();
+            let mut affected = Vec::new();
+            let mut seq = 0u32;
+            let mut redo_tasks = Vec::new();
+            let mut absent_generated = Vec::new();
+
+            for (inverse, post) in materials {
+                redo_tasks.extend(post.tasks.values().cloned());
+                if let Inverse::ReverseCompletion { generated_ids, .. } = &inverse {
+                    absent_generated.extend(generated_ids.iter().copied());
+                }
+                let (part_affected, part_activity, _, _) =
+                    apply_inverse(tx, &inverse, now, revision, op)?;
+                // Re-sequence activity entries into this bulk operation.
+                for mut entry in part_activity {
+                    entry.sequence = seq;
+                    entry.operation_id = op;
+                    entry.revision = revision;
+                    seq = seq.saturating_add(1);
+                    activity.push(entry);
+                }
+                affected.extend(part_affected.task_ids);
+            }
+
+            for task_id in source_only_ids {
+                let before = load_task(tx, task_id)?;
+                let mut after = before.clone();
+                after.try_uncomplete(now).map_err(map_transition)?;
+                after.completion_operation_id = None;
+                after.updated_at = now;
+                after.revision = revision;
+                update_task_row(tx, &after)?;
+                let diffs = diff_task_fields(&before, &after, revision, op, now, seq);
+                seq = seq.saturating_add(u32::try_from(diffs.len()).unwrap_or(0));
+                activity.extend(diffs);
+                before_tasks.push(before);
+                after_tasks.push(after);
+                affected.push(task_id);
+            }
+
+            // Undo restores exact completed post-images plus source-only befores.
+            redo_tasks.extend(before_tasks.iter().cloned());
+            let mut post = post_from_tasks(after_tasks);
+            post.absent_task_ids = absent_generated;
+            let undo = undo_pair(&Inverse::RestoreTasks { tasks: redo_tasks }, &post)?;
+            affected.sort_by_key(|id| id.as_uuid());
+            affected.dedup();
+            return Ok(MutationEffect {
+                event_type: EventType::new(EventType::TASK_BULK),
+                primary: None,
+                snapshot: None,
+                affected: AffectedIds {
+                    task_ids: affected,
+                    ..AffectedIds::default()
+                },
+                resync: ResyncScope::TASKS,
+                task_activity: activity,
+                summary_subject: None,
+                undo: Some(undo),
+                mark_undone: None,
+                uncomplete_outcome: None,
+            });
+        }
 
         let mut before_tasks = Vec::new();
         let mut after_tasks = Vec::new();
         let mut activity = Vec::new();
         let mut seq = 0u32;
-        for task_id in &effective_ids {
+        for task_id in &task_ids {
             let before = load_task(tx, *task_id)?;
             let mut after = before.clone();
             match &action {
-                BulkAction::Complete => after.try_complete(now).map_err(map_transition)?,
-                BulkAction::Uncomplete => after.try_uncomplete(now).map_err(map_transition)?,
+                BulkAction::Complete | BulkAction::Uncomplete | BulkAction::Delete => {
+                    unreachable!()
+                }
                 BulkAction::Cancel => after.try_cancel(now).map_err(map_transition)?,
-                BulkAction::Reopen => after.try_reopen(now).map_err(map_transition)?,
-                BulkAction::Delete => unreachable!(),
+                BulkAction::Reopen => {
+                    after.try_reopen(now).map_err(map_transition)?;
+                    after.completion_operation_id = None;
+                }
                 BulkAction::Move { target } => {
                     if !matches!(target.order, OrderAnchor::Keep) {
                         return Err(validation(ValidationError::Invalid {
@@ -881,6 +1275,8 @@ pub(crate) fn bulk_tasks(
                     after.tag_ids = tag_ids;
                 }
                 BulkAction::Schedule { schedule } => {
+                    let due_before = after.due_date;
+                    let time_before = after.due_time.clone();
                     if let Some(due_date) = &schedule.due_date {
                         after.due_date = *due_date;
                     }
@@ -898,6 +1294,13 @@ pub(crate) fn bulk_tasks(
                             field: "due_time",
                             reason: "due_time requires due_date",
                         }));
+                    }
+                    if after.due_date != due_before || after.due_time != time_before {
+                        after.recurrence_anchor_day = resolve_recurrence_anchor(
+                            after.recurrence_rule.as_ref(),
+                            after.due_date,
+                            None,
+                        );
                     }
                 }
                 BulkAction::Priority { priority } => after.priority = *priority,
@@ -922,7 +1325,7 @@ pub(crate) fn bulk_tasks(
             primary: None,
             snapshot: None,
             affected: AffectedIds {
-                task_ids: effective_ids,
+                task_ids: task_ids.clone(),
                 ..AffectedIds::default()
             },
             resync: ResyncScope::TASKS,
@@ -930,6 +1333,7 @@ pub(crate) fn bulk_tasks(
             summary_subject: None,
             undo: Some(undo),
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }

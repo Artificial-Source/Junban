@@ -37,8 +37,8 @@ pub use query::{
 };
 pub use quick_entry::{MAX_QUICK_ENTRY_CHARS, QuickEntry, parse_quick_entry};
 pub use recurrence::{
-    MonthlyAnchorDay, NextOccurrence, NextOccurrenceRequest, RecurrenceSource, next_occurrence,
-    resolve_due_instant,
+    MonthlyAnchorDay, NextOccurrence, NextOccurrenceRequest, OccurrenceAbsoluteOffsets,
+    RecurrenceSource, next_occurrence, resolve_due_instant, shift_occurrence_absolutes,
 };
 pub use reminder::{
     DEFAULT_REMINDER_CLAIM_LIMIT, MAX_REMINDER_CLAIM_LIMIT, REMINDER_FAILURE_BACKOFF_MAX_SECS,
@@ -46,7 +46,10 @@ pub use reminder::{
     ReminderLeadMinutes, ReminderOccurrenceState, ReminderSettings, reminder_failure_backoff,
     validate_reminder_claim_limit,
 };
-pub use task::{Task, TaskDraft, TaskStatus};
+pub use task::{
+    Task, TaskDraft, TaskStatus, UncompleteOutcome, recurrence_rule_uses_anchor,
+    resolve_recurrence_anchor,
+};
 pub use text_import::{MAX_TEXT_IMPORT_CHARS, TextImportDraft, parse_text_import};
 pub use timeblock::{
     CivilTimeRange, MAX_SLOT_MEMBERSHIP, OrderedSlotMembership, TimeBlockDraft, TimeSlotDraft,

@@ -47,6 +47,41 @@ pub struct TaskPatch {
     pub sort_order: Option<SortOrder>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recurrence_rule: Option<Option<RecurrenceRule>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remind_at: Option<Option<Timestamp>>,
+    /// When set with a due/rule change, callers usually leave this `None` so storage resets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence_anchor_day: Option<Option<junban_domain::MonthlyAnchorDay>>,
+}
+
+/// One sampled server-local civil day and zone for temporal mutations.
+///
+/// Constructed at the use-case boundary (or with an explicit test sample). Domain and
+/// storage code never read the system clock independently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemporalContext {
+    pub sampled_completion_date: Date,
+    pub server_time_zone: TimeZone,
+}
+
+impl TemporalContext {
+    /// Sample once from the host zone via Jiff `tz-system`.
+    pub fn sample_now() -> Self {
+        let now = Zoned::now();
+        Self {
+            sampled_completion_date: now.date(),
+            server_time_zone: now.time_zone().clone(),
+        }
+    }
+
+    /// Deterministic internal/test seam.
+    #[must_use]
+    pub fn new(sampled_completion_date: Date, server_time_zone: TimeZone) -> Self {
+        Self {
+            sampled_completion_date,
+            server_time_zone,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

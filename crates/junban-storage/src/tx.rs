@@ -5,7 +5,7 @@ use junban_app::{
     AffectedIds, CommittedEvent, CommittedMutation, EVENT_RETAIN_MAX_BYTES, EVENT_RETAIN_MAX_COUNT,
     EventType, RepositoryError, ResourceRef, ResourceSnapshot, ResyncScope,
 };
-use junban_domain::{OperationId, TaskActivity};
+use junban_domain::{OperationId, TaskActivity, UncompleteOutcome};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +33,7 @@ pub(crate) struct MutationEffect {
     pub undo: Option<UndoRecord>,
     /// Mark this source operation as undone after the new receipt row exists.
     pub mark_undone: Option<OperationId>,
+    pub uncomplete_outcome: Option<UncompleteOutcome>,
 }
 
 pub(crate) fn mutate(
@@ -81,6 +82,7 @@ pub(crate) fn mutate(
     };
     let response = CommittedMutation {
         event: event.clone(),
+        uncomplete_outcome: effect.uncomplete_outcome,
         newly_committed: true,
     };
     let event_json = serde_json::to_string(&event).map_err(storage_error)?;

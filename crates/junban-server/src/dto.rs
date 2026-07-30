@@ -395,6 +395,8 @@ impl PatchTaskRequest {
             },
             sort_order: self.sort_order.map(SortOrder::new),
             recurrence_rule: map_opt_null(self.recurrence_rule, RecurrenceRule::new, request_id)?,
+            // Phase 3 remind/anchor fields are owned by a later server wave.
+            ..TaskPatch::default()
         })
     }
 }

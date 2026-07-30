@@ -12,7 +12,7 @@ use crate::{
     BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, MoveTarget,
     ProjectDraft, ProjectPatch, ReorderScope, RepositoryError, SavedFilterDraft, SavedFilterPatch,
     SectionDraft, SectionPatch, TagDraft, TagPatch, TaskListAsOf, TaskListPage, TaskPatch,
-    TemplateApply, TemplateDraft, TemplatePatch,
+    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext,
 };
 
 pub type RepositoryFuture<'a, T> =
@@ -43,6 +43,7 @@ pub trait Repository: Send + Sync + 'static {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
+        temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation>;
 
     fn uncomplete_task(
@@ -50,6 +51,7 @@ pub trait Repository: Send + Sync + 'static {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
+        temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation>;
 
     fn cancel_task(
@@ -95,6 +97,7 @@ pub trait Repository: Send + Sync + 'static {
         task_ids: Vec<TaskId>,
         action: BulkAction,
         now: Timestamp,
+        temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation>;
 
     fn list_tasks(

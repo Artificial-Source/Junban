@@ -6,6 +6,7 @@ use jiff::{Timestamp, ToSpan, tz::TimeZone};
 use junban_app::{
     BulkAction, EventCatchUp, MoveTarget, OrderAnchor, ProjectDraft, ReorderScope, Repository,
     RepositoryError, SectionDraft, TagDraft, TaskListAsOf, TaskPatch, TemplateApply, TemplateDraft,
+    TemporalContext,
 };
 use junban_domain::{
     CommentBody, CommentId, EntityName, HexColor, MAX_BULK_IDS, MarkdownText, OperationId,
@@ -45,6 +46,10 @@ fn operation() -> OperationId {
 
 fn now() -> Timestamp {
     "2026-07-28T12:00:00Z".parse().unwrap()
+}
+
+fn temporal() -> TemporalContext {
+    TemporalContext::new("2026-07-28".parse().unwrap(), TimeZone::UTC)
 }
 
 fn list_as_of(date: jiff::civil::Date) -> TaskListAsOf {
@@ -222,7 +227,7 @@ async fn mutations_write_effect_receipt_activity_revision_and_event_atomically()
     let created = create_simple(&repository, "Task").await;
     let id = created.task().unwrap().id;
     repository
-        .complete_task(operation(), id, now())
+        .complete_task(operation(), id, now(), temporal())
         .await
         .unwrap();
     let diagnostics = repository.diagnostics().await.unwrap();
@@ -386,11 +391,13 @@ async fn status_transitions_and_invalid_transition_conflict() {
     let repository = owner.repository();
     let id = create_simple(&repository, "T").await.task().unwrap().id;
     repository
-        .complete_task(operation(), id, now())
+        .complete_task(operation(), id, now(), temporal())
         .await
         .unwrap();
     assert_eq!(
-        repository.complete_task(operation(), id, now()).await,
+        repository
+            .complete_task(operation(), id, now(), temporal())
+            .await,
         Err(RepositoryError::Conflict)
     );
     repository
@@ -402,7 +409,9 @@ async fn status_transitions_and_invalid_transition_conflict() {
         .await
         .unwrap();
     assert_eq!(
-        repository.uncomplete_task(operation(), id, now()).await,
+        repository
+            .uncomplete_task(operation(), id, now(), temporal())
+            .await,
         Err(RepositoryError::Conflict)
     );
 }
@@ -436,7 +445,7 @@ async fn parent_completion_cascades_pending_descendants_only() {
         .await
         .unwrap();
     let mutation = repository
-        .complete_task(operation(), parent, now())
+        .complete_task(operation(), parent, now(), temporal())
         .await
         .unwrap();
     assert_eq!(mutation.event.affected.task_ids.len(), 2);
@@ -678,22 +687,22 @@ async fn p2_api_003_task_view_presets_match_the_complete_truth_table() {
 
     let recent = create_draft(&repository, draft("Recent completed")).await;
     repository
-        .complete_task(operation(), recent, now())
+        .complete_task(operation(), recent, now(), temporal())
         .await
         .unwrap();
     let boundary = create_draft(&repository, draft("Boundary completed")).await;
     repository
-        .complete_task(operation(), boundary, now())
+        .complete_task(operation(), boundary, now(), temporal())
         .await
         .unwrap();
     let old = create_draft(&repository, draft("Old completed")).await;
     repository
-        .complete_task(operation(), old, now())
+        .complete_task(operation(), old, now(), temporal())
         .await
         .unwrap();
     let future_completed = create_draft(&repository, draft("Future completed")).await;
     repository
-        .complete_task(operation(), future_completed, now())
+        .complete_task(operation(), future_completed, now(), temporal())
         .await
         .unwrap();
     repository
@@ -790,7 +799,9 @@ async fn inbox_recent_completed_uses_exact_local_day_utc_bounds() {
 
     async fn completed(repo: &SqliteRepository, title: &str, completed_at: &str) -> TaskId {
         let id = create_draft(repo, draft(title)).await;
-        repo.complete_task(operation(), id, now()).await.unwrap();
+        repo.complete_task(operation(), id, now(), temporal())
+            .await
+            .unwrap();
         repo.execute_batch(format!(
             "UPDATE tasks SET completed_at='{completed_at}' WHERE id='{id}'"
         ))
@@ -988,7 +999,7 @@ async fn query_and_combines_two_tags_with_status_list_and_project() {
     completed_both.tag_ids = vec![tag_a, tag_b];
     let completed_id = create_draft(&repository, completed_both).await;
     repository
-        .complete_task(operation(), completed_id, now())
+        .complete_task(operation(), completed_id, now(), temporal())
         .await
         .unwrap();
 
@@ -1118,7 +1129,13 @@ async fn reorder_requires_permutation_and_bulk_cap() {
         .collect::<Vec<_>>();
     assert!(matches!(
         repository
-            .bulk_tasks(operation(), too_many, BulkAction::Complete, now())
+            .bulk_tasks(
+                operation(),
+                too_many,
+                BulkAction::Complete,
+                now(),
+                temporal()
+            )
             .await,
         Err(RepositoryError::Validation(_))
     ));
@@ -1463,6 +1480,7 @@ async fn db_p2_002_bulk_complete_cascades_pending_descendants_and_caps() {
             vec![parent, other],
             BulkAction::Complete,
             now(),
+            temporal(),
         )
         .await
         .unwrap();
@@ -1491,12 +1509,18 @@ async fn db_p2_002_bulk_complete_cascades_pending_descendants_and_caps() {
 
     // Selected completed task is still a conflict.
     repository
-        .complete_task(operation(), other, now())
+        .complete_task(operation(), other, now(), temporal())
         .await
         .unwrap();
     assert_eq!(
         repository
-            .bulk_tasks(operation(), vec![other], BulkAction::Complete, now())
+            .bulk_tasks(
+                operation(),
+                vec![other],
+                BulkAction::Complete,
+                now(),
+                temporal()
+            )
             .await,
         Err(RepositoryError::Conflict)
     );
@@ -1518,7 +1542,13 @@ async fn db_p2_002_bulk_complete_cascades_pending_descendants_and_caps() {
     let before = repository.diagnostics().await.unwrap().revision;
     assert_eq!(
         repository
-            .bulk_tasks(operation(), vec![root], BulkAction::Complete, now())
+            .bulk_tasks(
+                operation(),
+                vec![root],
+                BulkAction::Complete,
+                now(),
+                temporal()
+            )
             .await,
         Err(RepositoryError::OperationTooLarge)
     );
@@ -2104,7 +2134,13 @@ async fn db_p2_007_overlapping_bulk_delete_dedupes_closure_and_undoes() {
 
     let delete_op = operation();
     repository
-        .bulk_tasks(delete_op, vec![parent, child], BulkAction::Delete, now())
+        .bulk_tasks(
+            delete_op,
+            vec![parent, child],
+            BulkAction::Delete,
+            now(),
+            temporal(),
+        )
         .await
         .unwrap();
     assert!(matches!(
@@ -2218,6 +2254,7 @@ async fn db_p2_009_bulk_move_rejects_non_keep_order_without_revision() {
                 },
             },
             now(),
+            temporal(),
         )
         .await
         .unwrap_err();
@@ -2296,4 +2333,541 @@ async fn db_p2_011_cursor_validation_covers_each_sort() {
             "invalid cursor not validated for {sort:?}: {err:?}"
         );
     }
+}
+
+// ── Phase 3 recurrence complete / uncomplete ───────────────────────────────
+
+use jiff::civil::{Time, date};
+use junban_domain::{
+    DreadLevel, EstimatedMinutes, LocalDueTime, MonthlyAnchorDay, Priority, RecurrenceRule,
+    UncompleteOutcome,
+};
+
+fn recurring_draft(title: &str, rule: &str, due: Option<&str>) -> TaskDraft {
+    let mut d = draft(title);
+    d.recurrence_rule = Some(RecurrenceRule::new(rule).unwrap());
+    if let Some(due) = due {
+        d.due_date = Some(due.parse().unwrap());
+    }
+    d
+}
+
+async fn find_generated(repo: &SqliteRepository, source: TaskId) -> Option<junban_domain::Task> {
+    let query = TaskQuery::new().with_limit(100).unwrap();
+    let page = repo
+        .list_tasks(query, list_as_of_str("2026-07-28"))
+        .await
+        .unwrap();
+    page.tasks
+        .into_iter()
+        .find(|task| task.recurrence_source_id == Some(source))
+}
+
+#[tokio::test]
+async fn p3_rec_daily_weekly_monthly_yearly_weekdays_every_n() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let cases = [
+        ("daily", "2026-07-28", "2026-07-29"),
+        ("weekly", "2026-07-28", "2026-08-04"),
+        ("monthly", "2026-01-31", "2026-02-28"),
+        ("yearly", "2024-02-29", "2025-03-01"),
+        ("weekdays", "2026-07-31", "2026-08-03"), // Friday -> Monday
+        ("every 3 days", "2026-07-28", "2026-07-31"),
+        ("every 2 weeks", "2026-07-28", "2026-08-11"),
+    ];
+    for (rule, due, expect_next) in cases {
+        let id = create_draft(&repo, recurring_draft(rule, rule, Some(due))).await;
+        let op = operation();
+        let mutation = repo.complete_task(op, id, now(), temporal()).await.unwrap();
+        assert_eq!(mutation.event.affected.task_ids.len(), 2, "rule={rule}");
+        let child = find_generated(&repo, id).await.expect("generated child");
+        assert_eq!(
+            child.due_date.unwrap().to_string(),
+            expect_next,
+            "rule={rule}"
+        );
+        assert_eq!(child.status, TaskStatus::Pending);
+        assert_eq!(child.recurrence_source_id, Some(id));
+        assert_eq!(
+            repo.get_task(id).await.unwrap().status,
+            TaskStatus::Completed
+        );
+        assert_eq!(
+            repo.get_task(id).await.unwrap().completion_operation_id,
+            Some(op)
+        );
+        if rule == "monthly" {
+            assert_eq!(
+                child.recurrence_anchor_day.map(MonthlyAnchorDay::get),
+                Some(31)
+            );
+        }
+        if rule == "yearly" {
+            assert_eq!(
+                child.recurrence_anchor_day.map(MonthlyAnchorDay::get),
+                Some(29)
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn p3_rec_date_only_timed_dst_no_due_overdue_offsets() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    // Date-only with reminder/deadline offsets from server-local start-of-day.
+    let mut date_only = recurring_draft("date-only", "daily", Some("2026-07-28"));
+    date_only.remind_at = Some("2026-07-28T06:00:00Z".parse().unwrap()); // 6h after UTC midnight
+    date_only.deadline = Some("2026-07-28T18:00:00Z".parse().unwrap());
+    let date_id = create_draft(&repo, date_only).await;
+    repo.complete_task(operation(), date_id, now(), temporal())
+        .await
+        .unwrap();
+    let child = find_generated(&repo, date_id).await.unwrap();
+    assert_eq!(child.due_date.unwrap().to_string(), "2026-07-29");
+    assert_eq!(child.due_time, None);
+    assert_eq!(child.remind_at.unwrap().to_string(), "2026-07-29T06:00:00Z");
+    assert_eq!(child.deadline.unwrap().to_string(), "2026-07-29T18:00:00Z");
+
+    // Timed through America/New_York spring-forward gap.
+    let mut timed = recurring_draft("timed", "daily", Some("2024-03-09"));
+    timed.due_time = Some(LocalDueTime::new(
+        Time::constant(2, 30, 0, 0),
+        junban_domain::TimeZoneName::new("America/New_York").unwrap(),
+    ));
+    timed.remind_at = Some("2024-03-09T06:30:00Z".parse().unwrap()); // 1h before 07:30Z due
+    timed.deadline = Some("2024-03-09T08:30:00Z".parse().unwrap()); // 1h after
+    let timed_id = create_draft(&repo, timed).await;
+    let tctx = TemporalContext::new(date(2024, 3, 9), TimeZone::UTC);
+    repo.complete_task(operation(), timed_id, now(), tctx)
+        .await
+        .unwrap();
+    let timed_child = find_generated(&repo, timed_id).await.unwrap();
+    assert_eq!(timed_child.due_date.unwrap().to_string(), "2024-03-10");
+    // Gap resolves 02:30 -> 03:30 EDT = 07:30Z; offsets preserved from source 07:30Z basis.
+    assert_eq!(
+        timed_child.remind_at.unwrap().to_string(),
+        "2024-03-10T06:30:00Z"
+    );
+    assert_eq!(
+        timed_child.deadline.unwrap().to_string(),
+        "2024-03-10T08:30:00Z"
+    );
+
+    // No-due clears absolute reminder/deadline and uses sampled date.
+    let mut no_due = recurring_draft("no-due", "daily", None);
+    no_due.remind_at = Some("2026-07-28T12:00:00Z".parse().unwrap());
+    no_due.deadline = Some("2026-07-28T18:00:00Z".parse().unwrap());
+    let no_due_id = create_draft(&repo, no_due).await;
+    repo.complete_task(operation(), no_due_id, now(), temporal())
+        .await
+        .unwrap();
+    let no_due_child = find_generated(&repo, no_due_id).await.unwrap();
+    assert_eq!(no_due_child.due_date.unwrap().to_string(), "2026-07-29");
+    assert_eq!(no_due_child.remind_at, None);
+    assert_eq!(no_due_child.deadline, None);
+
+    // Overdue advances once, not catch-up skip.
+    let overdue_id = create_draft(
+        &repo,
+        recurring_draft("overdue", "weekly", Some("2026-01-01")),
+    )
+    .await;
+    repo.complete_task(operation(), overdue_id, now(), temporal())
+        .await
+        .unwrap();
+    let overdue_child = find_generated(&repo, overdue_id).await.unwrap();
+    assert_eq!(overdue_child.due_date.unwrap().to_string(), "2026-01-08");
+}
+
+#[tokio::test]
+async fn p3_rec_manual_due_or_rule_resets_anchor_and_clearing_clears() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let mut d = recurring_draft("anchor", "monthly", Some("2026-01-31"));
+    d.recurrence_anchor_day = Some(MonthlyAnchorDay::new(31).unwrap());
+    let id = create_draft(&repo, d).await;
+    assert_eq!(
+        repo.get_task(id)
+            .await
+            .unwrap()
+            .recurrence_anchor_day
+            .map(MonthlyAnchorDay::get),
+        Some(31)
+    );
+    repo.patch_task(
+        operation(),
+        id,
+        TaskPatch {
+            due_date: Some(Some("2026-03-15".parse().unwrap())),
+            ..TaskPatch::default()
+        },
+        now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        repo.get_task(id)
+            .await
+            .unwrap()
+            .recurrence_anchor_day
+            .map(MonthlyAnchorDay::get),
+        Some(15)
+    );
+    repo.patch_task(
+        operation(),
+        id,
+        TaskPatch {
+            recurrence_rule: Some(None),
+            ..TaskPatch::default()
+        },
+        now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(repo.get_task(id).await.unwrap().recurrence_anchor_day, None);
+}
+
+#[tokio::test]
+async fn p3_rec_copies_user_fields_without_parent_comments_relations() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let project = repo
+        .create_project(
+            operation(),
+            ProjectId::new(),
+            ProjectDraft {
+                name: EntityName::new("P").unwrap(),
+                color: HexColor::new("#112233").unwrap(),
+                icon: None,
+                parent_id: None,
+                favorite: false,
+                archived: false,
+                view: Default::default(),
+                sort_order: SortOrder::default(),
+            },
+            now(),
+        )
+        .await
+        .unwrap()
+        .event
+        .primary
+        .unwrap()
+        .id;
+    let project_id = ProjectId::parse(&project).unwrap();
+    let section = repo
+        .create_section(
+            operation(),
+            junban_domain::SectionId::new(),
+            SectionDraft {
+                project_id,
+                name: EntityName::new("S").unwrap(),
+                collapsed: false,
+                sort_order: SortOrder::default(),
+            },
+            now(),
+        )
+        .await
+        .unwrap()
+        .event
+        .primary
+        .unwrap()
+        .id;
+    let section_id = junban_domain::SectionId::parse(&section).unwrap();
+    let tag = repo
+        .create_tag(
+            operation(),
+            TagId::new(),
+            TagDraft {
+                name: TagName::new("t").unwrap(),
+                color: HexColor::new("#abcdef").unwrap(),
+            },
+            now(),
+        )
+        .await
+        .unwrap()
+        .event
+        .primary
+        .unwrap()
+        .id;
+    let tag_id = TagId::parse(&tag).unwrap();
+    let parent = create_simple(&repo, "parent").await.task().unwrap().id;
+    let mut d = recurring_draft("rich", "daily", Some("2026-07-28"));
+    d.description = MarkdownText::new("body").unwrap();
+    d.priority = Some(Priority::new(2).unwrap());
+    d.estimated_minutes = Some(EstimatedMinutes::new(25).unwrap());
+    d.dread = Some(DreadLevel::new(3).unwrap());
+    d.project_id = Some(project_id);
+    d.section_id = Some(section_id);
+    d.tag_ids = vec![tag_id];
+    d.parent_id = Some(parent);
+    d.someday = true;
+    let id = create_draft(&repo, d).await;
+    repo.create_comment(
+        operation(),
+        CommentId::new(),
+        id,
+        CommentBody::new("note").unwrap(),
+        now(),
+    )
+    .await
+    .unwrap();
+    let other = create_simple(&repo, "blocked").await.task().unwrap().id;
+    repo.add_relation(operation(), id, other, RelationKind::Blocks, now())
+        .await
+        .unwrap();
+    repo.complete_task(operation(), id, now(), temporal())
+        .await
+        .unwrap();
+    let child = find_generated(&repo, id).await.unwrap();
+    assert_eq!(child.title.as_str(), "rich");
+    assert_eq!(child.description.as_str(), "body");
+    assert_eq!(child.priority.map(Priority::get), Some(2));
+    assert_eq!(child.estimated_minutes.map(|v| v.get()), Some(25));
+    assert_eq!(child.dread.map(|v| v.get()), Some(3));
+    assert_eq!(child.project_id, Some(project_id));
+    assert_eq!(child.section_id, Some(section_id));
+    assert_eq!(child.tag_ids, vec![tag_id]);
+    assert!(child.someday);
+    assert_eq!(child.parent_id, None);
+    assert!(repo.list_comments(child.id).await.unwrap().is_empty());
+    assert!(repo.list_relations(child.id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn p3_rec_exact_retry_restart_and_operation_undo() {
+    let directory = TestDir::new();
+    let op = operation();
+    let (id, child_id, first) = {
+        let owner = ProfileOwner::open(&directory.0).unwrap();
+        let repo = owner.repository();
+        let id = create_draft(&repo, recurring_draft("retry", "daily", Some("2026-07-28"))).await;
+        let first = repo.complete_task(op, id, now(), temporal()).await.unwrap();
+        assert!(first.newly_committed);
+        let child = find_generated(&repo, id).await.unwrap();
+        let second = repo.complete_task(op, id, now(), temporal()).await.unwrap();
+        assert!(!second.newly_committed);
+        assert_eq!(first.event, second.event);
+        assert_eq!(
+            first.event.affected.task_ids,
+            second.event.affected.task_ids
+        );
+        (id, child.id, first)
+    };
+    // Restart preserves generated occurrence and receipt replay.
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    assert_eq!(
+        repo.get_task(child_id).await.unwrap().status,
+        TaskStatus::Pending
+    );
+    let third = repo.complete_task(op, id, now(), temporal()).await.unwrap();
+    assert_eq!(third.event.revision, first.event.revision);
+    // Operation undo restores source + removes generated child.
+    repo.undo(op, operation(), now()).await.unwrap();
+    assert_eq!(repo.get_task(id).await.unwrap().status, TaskStatus::Pending);
+    assert!(matches!(
+        repo.get_task(child_id).await,
+        Err(RepositoryError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn p3_rec_parent_cascade_and_overlapping_bulk_roots() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let parent = create_draft(&repo, recurring_draft("P", "daily", Some("2026-07-28"))).await;
+    let mut child_d = recurring_draft("C", "weekly", Some("2026-07-28"));
+    child_d.parent_id = Some(parent);
+    let child = create_draft(&repo, child_d).await;
+    let mutation = repo
+        .complete_task(operation(), parent, now(), temporal())
+        .await
+        .unwrap();
+    // parent + child completed, plus one generated each.
+    assert_eq!(mutation.event.affected.task_ids.len(), 4);
+    assert!(find_generated(&repo, parent).await.is_some());
+    assert!(find_generated(&repo, child).await.is_some());
+
+    // Overlapping bulk roots dedupe before generation.
+    let p2 = create_draft(&repo, recurring_draft("P2", "daily", Some("2026-07-28"))).await;
+    let mut c2 = recurring_draft("C2", "daily", Some("2026-07-28"));
+    c2.parent_id = Some(p2);
+    let c2_id = create_draft(&repo, c2).await;
+    let bulk = repo
+        .bulk_tasks(
+            operation(),
+            vec![p2, c2_id],
+            BulkAction::Complete,
+            now(),
+            temporal(),
+        )
+        .await
+        .unwrap();
+    // two sources + two children, not three sources.
+    assert_eq!(bulk.event.affected.task_ids.len(), 4);
+}
+
+#[tokio::test]
+async fn p3_rec_500_bound_counts_generated_children() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    // 250 recurring roots => 250 + 250 generated = 500 ok; 251 rejects.
+    let mut ids = Vec::new();
+    for i in 0..251 {
+        ids.push(
+            create_draft(
+                &repo,
+                recurring_draft(&format!("r{i}"), "daily", Some("2026-07-28")),
+            )
+            .await,
+        );
+    }
+    let before = repo.diagnostics().await.unwrap().revision;
+    let err = repo
+        .bulk_tasks(
+            operation(),
+            ids.clone(),
+            BulkAction::Complete,
+            now(),
+            temporal(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err, RepositoryError::OperationTooLarge);
+    assert_eq!(repo.diagnostics().await.unwrap().revision, before);
+
+    ids.pop();
+    let ok = repo
+        .bulk_tasks(operation(), ids, BulkAction::Complete, now(), temporal())
+        .await
+        .unwrap();
+    assert_eq!(ok.event.affected.task_ids.len(), 500);
+}
+
+#[tokio::test]
+async fn p3_rec_ordinary_exact_uncomplete_source_only_and_divergence() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let id = create_draft(&repo, recurring_draft("exact", "daily", Some("2026-07-28"))).await;
+    let complete_op = operation();
+    repo.complete_task(complete_op, id, now(), temporal())
+        .await
+        .unwrap();
+    let child = find_generated(&repo, id).await.unwrap();
+    let un_op = operation();
+    let exact = repo
+        .uncomplete_task(un_op, id, now(), temporal())
+        .await
+        .unwrap();
+    assert_eq!(exact.uncomplete_outcome, Some(UncompleteOutcome::Exact));
+    assert_eq!(repo.get_task(id).await.unwrap().status, TaskStatus::Pending);
+    assert!(matches!(
+        repo.get_task(child.id).await,
+        Err(RepositoryError::NotFound)
+    ));
+    // Uncomplete itself is undoable and restores source+child.
+    repo.undo(un_op, operation(), now()).await.unwrap();
+    assert_eq!(
+        repo.get_task(id).await.unwrap().status,
+        TaskStatus::Completed
+    );
+    assert_eq!(
+        repo.get_task(child.id).await.unwrap().status,
+        TaskStatus::Pending
+    );
+
+    // Divergence: mutate generated child after complete, ordinary uncomplete conflicts.
+    let id2 = create_draft(&repo, recurring_draft("div", "daily", Some("2026-07-28"))).await;
+    repo.complete_task(operation(), id2, now(), temporal())
+        .await
+        .unwrap();
+    let child2 = find_generated(&repo, id2).await.unwrap();
+    repo.patch_task(
+        operation(),
+        child2.id,
+        TaskPatch {
+            title: Some(TaskTitle::new("changed").unwrap()),
+            ..TaskPatch::default()
+        },
+        now(),
+    )
+    .await
+    .unwrap();
+    let before = repo.diagnostics().await.unwrap().revision;
+    assert_eq!(
+        repo.uncomplete_task(operation(), id2, now(), temporal())
+            .await,
+        Err(RepositoryError::Conflict)
+    );
+    assert_eq!(repo.diagnostics().await.unwrap().revision, before);
+    assert_eq!(
+        repo.get_task(id2).await.unwrap().status,
+        TaskStatus::Completed
+    );
+    assert!(repo.get_task(child2.id).await.is_ok());
+
+    // Expired/missing receipt => source_only, child preserved.
+    let id3 = create_draft(
+        &repo,
+        recurring_draft("expire", "daily", Some("2026-07-28")),
+    )
+    .await;
+    let cop = operation();
+    repo.complete_task(cop, id3, now(), temporal())
+        .await
+        .unwrap();
+    let child3 = find_generated(&repo, id3).await.unwrap();
+    // Force-expire the completion receipt/undo material.
+    repo.execute_batch(
+        "UPDATE operation_receipts SET expires_at = '2000-01-01T00:00:00Z';
+         DELETE FROM operation_undo;"
+            .into(),
+    )
+    .await
+    .unwrap();
+    // Touch cleanup via a no-op path: next mutation runs expiry cleanup.
+    let source_only = repo
+        .uncomplete_task(operation(), id3, now(), temporal())
+        .await
+        .unwrap();
+    assert_eq!(
+        source_only.uncomplete_outcome,
+        Some(UncompleteOutcome::SourceOnly)
+    );
+    assert_eq!(
+        repo.get_task(id3).await.unwrap().status,
+        TaskStatus::Pending
+    );
+    assert_eq!(
+        repo.get_task(child3.id).await.unwrap().status,
+        TaskStatus::Pending
+    );
+}
+
+#[tokio::test]
+async fn p3_rec_cancel_does_not_generate_occurrence() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let id = create_draft(
+        &repo,
+        recurring_draft("cancel", "daily", Some("2026-07-28")),
+    )
+    .await;
+    repo.cancel_task(operation(), id, now()).await.unwrap();
+    assert!(find_generated(&repo, id).await.is_none());
+    assert_eq!(
+        repo.get_task(id).await.unwrap().status,
+        TaskStatus::Cancelled
+    );
 }

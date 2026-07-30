@@ -21,6 +21,7 @@ pub use requests::{
     CatalogSnapshot, CommentPatch, MoveTarget, OrderAnchor, ProjectDraft, ProjectPatch,
     ReorderScope, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft,
     TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext,
 };
 pub use service::{EventSink, JunbanService};
 

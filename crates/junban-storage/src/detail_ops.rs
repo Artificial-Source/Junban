@@ -119,6 +119,7 @@ pub(crate) fn create_comment(
             summary_subject: Some(("comment".into(), comment.id.to_string())),
             undo: Some(undo),
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -186,6 +187,7 @@ pub(crate) fn patch_comment(
             summary_subject: Some(("comment".into(), after.id.to_string())),
             undo: Some(undo),
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -240,6 +242,7 @@ pub(crate) fn delete_comment(
             summary_subject: Some(("comment".into(), comment_id.to_string())),
             undo: Some(undo),
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -324,6 +327,7 @@ pub(crate) fn add_relation(
             summary_subject: Some(("task".into(), from_task_id.to_string())),
             undo: Some(undo),
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }
@@ -392,6 +396,7 @@ pub(crate) fn remove_relation(
             summary_subject: Some(("task".into(), from_task_id.to_string())),
             undo: Some(undo),
             mark_undone: None,
+            uncomplete_outcome: None,
         })
     })
 }

@@ -3,7 +3,7 @@
 use jiff::Timestamp;
 use junban_domain::{
     Comment, CommentId, OperationId, Project, ProjectId, SavedFilter, SavedFilterId, Section,
-    SectionId, Tag, TagId, Task, TaskId, Template, TemplateId,
+    SectionId, Tag, TagId, Task, TaskId, Template, TemplateId, UncompleteOutcome,
 };
 use serde::{Deserialize, Serialize};
 
@@ -243,6 +243,9 @@ pub struct CommittedEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommittedMutation {
     pub event: CommittedEvent,
+    /// Present for ordinary uncomplete; retained in receipt material for exact retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uncomplete_outcome: Option<UncompleteOutcome>,
     /// True only for a freshly committed mutation. Receipt replays stay false and
     /// are never serialized, so HTTP bodies remain byte-identical across retries.
     #[serde(skip, default)]
@@ -252,7 +255,7 @@ pub struct CommittedMutation {
 impl PartialEq for CommittedMutation {
     fn eq(&self, other: &Self) -> bool {
         // Publication bookkeeping is not part of the durable mutation identity.
-        self.event == other.event
+        self.event == other.event && self.uncomplete_outcome == other.uncomplete_outcome
     }
 }
 

@@ -87,6 +87,88 @@ pub struct NextOccurrence {
     pub due_instant: Option<Timestamp>,
 }
 
+/// Absolute reminder/deadline values after advancing one occurrence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OccurrenceAbsoluteOffsets {
+    pub remind_at: Option<Timestamp>,
+    pub deadline: Option<Timestamp>,
+}
+
+/// Shift due-relative absolute timestamps onto the next occurrence basis.
+///
+/// When the source has no due basis, absolute reminder/deadline clear. Timed sources use
+/// their resolved due instants. Date-only sources use `server_zone` start-of-day for both
+/// the source due date and the next due date.
+pub fn shift_occurrence_absolutes(
+    source: &RecurrenceSource,
+    next: &NextOccurrence,
+    source_remind_at: Option<Timestamp>,
+    source_deadline: Option<Timestamp>,
+    server_zone: &TimeZone,
+) -> Result<OccurrenceAbsoluteOffsets, ValidationError> {
+    let Some(source_basis) = source_due_basis(source, server_zone)? else {
+        return Ok(OccurrenceAbsoluteOffsets {
+            remind_at: None,
+            deadline: None,
+        });
+    };
+    let next_basis = next_due_basis(next, server_zone)?;
+    Ok(OccurrenceAbsoluteOffsets {
+        remind_at: shift_absolute(source_basis, next_basis, source_remind_at)?,
+        deadline: shift_absolute(source_basis, next_basis, source_deadline)?,
+    })
+}
+
+fn source_due_basis(
+    source: &RecurrenceSource,
+    server_zone: &TimeZone,
+) -> Result<Option<Timestamp>, ValidationError> {
+    let Some(due_date) = source.due_date else {
+        return Ok(None);
+    };
+    match &source.due_time {
+        Some(local) => Ok(Some(resolve_due_instant(due_date, local)?)),
+        None => Ok(Some(civil_start_of_day(due_date, server_zone)?)),
+    }
+}
+
+fn next_due_basis(
+    next: &NextOccurrence,
+    server_zone: &TimeZone,
+) -> Result<Timestamp, ValidationError> {
+    if let Some(instant) = next.due_instant {
+        return Ok(instant);
+    }
+    civil_start_of_day(next.due_date, server_zone)
+}
+
+fn civil_start_of_day(date: Date, server_zone: &TimeZone) -> Result<Timestamp, ValidationError> {
+    date.to_zoned(server_zone.clone())
+        .map(|zoned| zoned.timestamp())
+        .map_err(|_| ValidationError::Invalid {
+            field: "due_date",
+            reason: "could not resolve local day start to a timestamp",
+        })
+}
+
+fn shift_absolute(
+    source_basis: Timestamp,
+    next_basis: Timestamp,
+    absolute: Option<Timestamp>,
+) -> Result<Option<Timestamp>, ValidationError> {
+    let Some(absolute) = absolute else {
+        return Ok(None);
+    };
+    let offset = absolute.duration_since(source_basis);
+    next_basis
+        .checked_add(offset)
+        .map(Some)
+        .map_err(|_| ValidationError::Invalid {
+            field: "remind_at",
+            reason: "shifted absolute timestamp is out of range",
+        })
+}
+
 /// Advance exactly one interval from the source due value (or sampled completion date
 /// when the source has no due date). Overdue sources do not skip intervals.
 pub fn next_occurrence(request: &NextOccurrenceRequest) -> Result<NextOccurrence, ValidationError> {
@@ -599,5 +681,56 @@ mod tests {
         assert!(MonthlyAnchorDay::new(32).is_err());
         assert_eq!(MonthlyAnchorDay::new(31).unwrap().get(), 31);
         assert_eq!(MonthlyAnchorDay::from_date(date(2026, 2, 28)).get(), 28);
+    }
+
+    #[test]
+    fn no_due_clears_absolute_offsets_and_date_only_preserves_them() {
+        let zone = TimeZone::UTC;
+        let next = next_occurrence(&request("daily", None, None, None, date(2026, 3, 10))).unwrap();
+        let cleared = shift_occurrence_absolutes(
+            &RecurrenceSource {
+                rule: rule("daily"),
+                due_date: None,
+                due_time: None,
+                monthly_anchor: None,
+            },
+            &next,
+            Some("2026-03-10T12:00:00Z".parse().unwrap()),
+            Some("2026-03-10T18:00:00Z".parse().unwrap()),
+            &zone,
+        )
+        .unwrap();
+        assert_eq!(cleared.remind_at, None);
+        assert_eq!(cleared.deadline, None);
+
+        let next = next_occurrence(&request(
+            "daily",
+            Some(date(2026, 3, 10)),
+            None,
+            None,
+            date(2026, 3, 10),
+        ))
+        .unwrap();
+        let shifted = shift_occurrence_absolutes(
+            &RecurrenceSource {
+                rule: rule("daily"),
+                due_date: Some(date(2026, 3, 10)),
+                due_time: None,
+                monthly_anchor: None,
+            },
+            &next,
+            Some("2026-03-10T06:00:00Z".parse().unwrap()),
+            Some("2026-03-10T18:00:00Z".parse().unwrap()),
+            &zone,
+        )
+        .unwrap();
+        assert_eq!(
+            shifted.remind_at.unwrap().to_string(),
+            "2026-03-11T06:00:00Z"
+        );
+        assert_eq!(
+            shifted.deadline.unwrap().to_string(),
+            "2026-03-11T18:00:00Z"
+        );
     }
 }

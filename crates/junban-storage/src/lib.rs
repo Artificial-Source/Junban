@@ -6,6 +6,7 @@ mod helpers;
 mod migration;
 mod ops_types;
 mod query_ops;
+mod reminder_ops;
 mod rows;
 #[cfg(feature = "scale-bench")]
 pub mod scale_seed;
@@ -32,8 +33,10 @@ use junban_app::{
     TemporalContext,
 };
 use junban_domain::{
-    Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind, SavedFilterId,
-    SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId,
+    ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
+    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
+    TaskQuery, TaskRelation, TemplateId,
 };
 use rusqlite::Connection;
 use thiserror::Error;
@@ -820,6 +823,143 @@ impl Repository for SqliteRepository {
             }
         )
     }
+    fn list_task_reminders(
+        &self,
+        task_id: TaskId,
+    ) -> RepositoryFuture<'_, Vec<ReminderOccurrence>> {
+        mut_cmd!(self, ListTaskReminders { task_id })
+    }
+    fn reschedule_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            RescheduleReminder {
+                operation_id,
+                task_id,
+                remind_at,
+                now
+            }
+        )
+    }
+    fn dismiss_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DismissReminder {
+                operation_id,
+                task_id,
+                now
+            }
+        )
+    }
+    fn acquire_reminder_lease(
+        &self,
+        now: Timestamp,
+        lease_secs: u64,
+    ) -> RepositoryFuture<'_, ReminderDeliveryLease> {
+        mut_cmd!(self, AcquireReminderLease { now, lease_secs })
+    }
+    fn renew_reminder_lease(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        lease_secs: u64,
+    ) -> RepositoryFuture<'_, ReminderDeliveryLease> {
+        mut_cmd!(
+            self,
+            RenewReminderLease {
+                fence_term,
+                now,
+                lease_secs
+            }
+        )
+    }
+    fn release_reminder_lease(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, ()> {
+        mut_cmd!(self, ReleaseReminderLease { fence_term, now })
+    }
+    fn claim_due_reminders(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        limit: u32,
+        claim_secs: u64,
+    ) -> RepositoryFuture<'_, Vec<ClaimedReminder>> {
+        mut_cmd!(
+            self,
+            ClaimDueReminders {
+                fence_term,
+                now,
+                limit,
+                claim_secs
+            }
+        )
+    }
+    fn settle_reminder_delivered(
+        &self,
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        channel: ReminderChannel,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, ()> {
+        mut_cmd!(
+            self,
+            SettleReminderDelivered {
+                fence_term,
+                task_id,
+                remind_at,
+                channel,
+                now
+            }
+        )
+    }
+    fn settle_reminder_failed(
+        &self,
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        error: ReminderFailureCode,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, ()> {
+        mut_cmd!(
+            self,
+            SettleReminderFailed {
+                fence_term,
+                task_id,
+                remind_at,
+                error,
+                now
+            }
+        )
+    }
+    fn mark_owner_lost_reminders(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        limit: u32,
+    ) -> RepositoryFuture<'_, u32> {
+        mut_cmd!(
+            self,
+            MarkOwnerLostReminders {
+                fence_term,
+                now,
+                limit
+            }
+        )
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1070,6 +1210,68 @@ enum Command {
         new_operation_id: OperationId,
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ListTaskReminders {
+        task_id: TaskId,
+        reply: oneshot::Sender<Result<Vec<ReminderOccurrence>, RepositoryError>>,
+    },
+    RescheduleReminder {
+        operation_id: OperationId,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DismissReminder {
+        operation_id: OperationId,
+        task_id: TaskId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    AcquireReminderLease {
+        now: Timestamp,
+        lease_secs: u64,
+        reply: oneshot::Sender<Result<ReminderDeliveryLease, RepositoryError>>,
+    },
+    RenewReminderLease {
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        lease_secs: u64,
+        reply: oneshot::Sender<Result<ReminderDeliveryLease, RepositoryError>>,
+    },
+    ReleaseReminderLease {
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<(), RepositoryError>>,
+    },
+    ClaimDueReminders {
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        limit: u32,
+        claim_secs: u64,
+        reply: oneshot::Sender<Result<Vec<ClaimedReminder>, RepositoryError>>,
+    },
+    SettleReminderDelivered {
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        channel: ReminderChannel,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<(), RepositoryError>>,
+    },
+    SettleReminderFailed {
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        error: ReminderFailureCode,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<(), RepositoryError>>,
+    },
+    MarkOwnerLostReminders {
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        limit: u32,
+        reply: oneshot::Sender<Result<u32, RepositoryError>>,
     },
     #[cfg(test)]
     Diagnostics(oneshot::Sender<Result<Diagnostics, RepositoryError>>),
@@ -1586,6 +1788,110 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     source_operation_id,
                     new_operation_id,
                     now,
+                ));
+            }
+            Command::ListTaskReminders { task_id, reply } => {
+                let _ = reply.send(reminder_ops::list_task_reminders(connection, task_id));
+            }
+            Command::RescheduleReminder {
+                operation_id,
+                task_id,
+                remind_at,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::reschedule_reminder(
+                    connection,
+                    operation_id,
+                    task_id,
+                    remind_at,
+                    now,
+                ));
+            }
+            Command::DismissReminder {
+                operation_id,
+                task_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::dismiss_reminder(
+                    connection,
+                    operation_id,
+                    task_id,
+                    now,
+                ));
+            }
+            Command::AcquireReminderLease {
+                now,
+                lease_secs,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::acquire_reminder_lease(
+                    connection, now, lease_secs,
+                ));
+            }
+            Command::RenewReminderLease {
+                fence_term,
+                now,
+                lease_secs,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::renew_reminder_lease(
+                    connection, fence_term, now, lease_secs,
+                ));
+            }
+            Command::ReleaseReminderLease {
+                fence_term,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::release_reminder_lease(
+                    connection, fence_term, now,
+                ));
+            }
+            Command::ClaimDueReminders {
+                fence_term,
+                now,
+                limit,
+                claim_secs,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::claim_due_reminders(
+                    connection, fence_term, now, limit, claim_secs,
+                ));
+            }
+            Command::SettleReminderDelivered {
+                fence_term,
+                task_id,
+                remind_at,
+                channel,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::settle_reminder_delivered(
+                    connection, fence_term, task_id, remind_at, channel, now,
+                ));
+            }
+            Command::SettleReminderFailed {
+                fence_term,
+                task_id,
+                remind_at,
+                error,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::settle_reminder_failed(
+                    connection, fence_term, task_id, remind_at, error, now,
+                ));
+            }
+            Command::MarkOwnerLostReminders {
+                fence_term,
+                now,
+                limit,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::mark_owner_lost_reminders(
+                    connection, fence_term, now, limit,
                 ));
             }
             #[cfg(test)]

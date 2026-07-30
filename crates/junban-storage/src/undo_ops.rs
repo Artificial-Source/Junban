@@ -13,6 +13,10 @@ use serde::Serialize;
 
 use crate::helpers::{diff_task_fields, validate_task_refs};
 use crate::ops_types::{Inverse, PostImage, TaskClosure, undo_pair};
+use crate::reminder_ops::{
+    load_reminder_occurrence, load_reminders_for_tasks, reminders_into_post,
+    replace_reminders_for_tasks, upsert_reminder_occurrence,
+};
 use crate::rows::{
     activity_action_str, delete_task_row, field_activity, insert_task, load_blocks_edges,
     load_comment, load_task, revision_to_i64, storage_error, task_exists, update_task_row,
@@ -83,6 +87,13 @@ pub(crate) fn validate_post_image(
         let task_id = TaskId::parse(id).map_err(storage_error)?;
         let actual = load_task(tx, task_id).map_err(missing_as_conflict)?;
         if actual.sort_order.get() != *order {
+            return Err(RepositoryError::Conflict);
+        }
+    }
+    for expected in post.reminders.values() {
+        let actual = load_reminder_occurrence(tx, expected.task_id, expected.remind_at)?
+            .ok_or(RepositoryError::Conflict)?;
+        if &actual != expected {
             return Err(RepositoryError::Conflict);
         }
     }
@@ -175,6 +186,9 @@ fn restore_closure(
         )
         .map_err(storage_error)?;
     }
+    for reminder in &closure.reminders {
+        upsert_reminder_occurrence(tx, reminder)?;
+    }
     Ok(())
 }
 
@@ -257,6 +271,7 @@ pub(crate) fn apply_inverse(
         Inverse::ReverseCompletion {
             sources,
             generated_ids,
+            source_reminders,
         } => {
             // Drop receipt-owned generated children first, then restore sources.
             let mut affected = Vec::new();
@@ -280,6 +295,7 @@ pub(crate) fn apply_inverse(
                     seq = seq.saturating_add(1);
                 }
             }
+            let mut source_ids = Vec::with_capacity(sources.len());
             for task in sources {
                 let before = load_task(tx, task.id).map_err(missing_as_conflict)?;
                 let mut restored = task.clone();
@@ -293,7 +309,9 @@ pub(crate) fn apply_inverse(
                 seq = seq.saturating_add(u32::try_from(diffs.len()).unwrap_or(0));
                 activity.extend(diffs);
                 affected.push(restored.id);
+                source_ids.push(restored.id);
             }
+            replace_reminders_for_tasks(tx, &source_ids, source_reminders)?;
             Ok((
                 AffectedIds {
                     task_ids: affected,
@@ -304,7 +322,7 @@ pub(crate) fn apply_inverse(
                 ResyncScope::TASKS,
             ))
         }
-        Inverse::RestoreTasks { tasks } => {
+        Inverse::RestoreTasks { tasks, reminders } => {
             let mut affected = Vec::new();
             let mut activity = Vec::new();
             let mut seq = 0u32;
@@ -351,6 +369,8 @@ pub(crate) fn apply_inverse(
                     snapshot = Some(ResourceSnapshot::task(restored));
                 }
             }
+            let task_ids: Vec<_> = tasks.iter().map(|task| task.id).collect();
+            replace_reminders_for_tasks(tx, &task_ids, reminders)?;
             Ok((
                 AffectedIds {
                     task_ids: affected,
@@ -543,6 +563,8 @@ fn capture_redo_post(
             redo_post.absent_comment_ids.push(*id);
         }
     }
+    let reminders = load_reminders_for_tasks(tx, &affected.task_ids)?;
+    reminders_into_post(&mut redo_post, reminders);
     Ok(redo_post)
 }
 
@@ -550,12 +572,14 @@ fn redo_inverse_for(inverse: &Inverse, post: &PostImage, affected: &AffectedIds)
     match inverse {
         Inverse::DeleteTasks { .. } => Inverse::RestoreTasks {
             tasks: post.tasks.values().cloned().collect(),
+            reminders: post.reminders.values().cloned().collect(),
         },
         Inverse::RestoreClosure { .. } => Inverse::DeleteTasks {
             task_ids: affected.task_ids.clone(),
         },
         Inverse::RestoreTasks { .. } => Inverse::RestoreTasks {
             tasks: post.tasks.values().cloned().collect(),
+            reminders: post.reminders.values().cloned().collect(),
         },
         Inverse::ReverseCompletion { generated_ids, .. } => {
             // Undo of reverse-completion re-applies the completed post-image (sources +
@@ -563,6 +587,7 @@ fn redo_inverse_for(inverse: &Inverse, post: &PostImage, affected: &AffectedIds)
             let _ = generated_ids;
             Inverse::RestoreTasks {
                 tasks: post.tasks.values().cloned().collect(),
+                reminders: post.reminders.values().cloned().collect(),
             }
         }
         Inverse::RestoreOrders { .. } => Inverse::RestoreOrders {

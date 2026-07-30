@@ -449,3 +449,56 @@ pub struct CommentPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<CommentBody>,
 }
+
+/// User-facing reminder schedule change. Reuses `Task.remind_at` as the intent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RescheduleReminder {
+    pub task_id: TaskId,
+    pub remind_at: Timestamp,
+}
+
+/// Clear the task reminder schedule and cancel any still-pending occurrence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DismissReminder {
+    pub task_id: TaskId,
+}
+
+/// Acquire or renew parameters for the single global delivery lease.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReminderLeaseRequest {
+    /// Positive bounded TTL in seconds. Defaults are applied by the service when omitted.
+    pub lease_secs: u64,
+}
+
+/// Claim due pending occurrences under the caller's current fence term.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimRemindersRequest {
+    pub fence_term: junban_domain::ReminderFenceTerm,
+    pub limit: u32,
+    pub claim_secs: u64,
+}
+
+/// Settle one claimed occurrence as delivered on an allowlisted channel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettleReminderDelivered {
+    pub fence_term: junban_domain::ReminderFenceTerm,
+    pub task_id: TaskId,
+    pub remind_at: Timestamp,
+    pub channel: junban_domain::ReminderChannel,
+}
+
+/// Settle one claimed occurrence as failed with a bounded error code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettleReminderFailed {
+    pub fence_term: junban_domain::ReminderFenceTerm,
+    pub task_id: TaskId,
+    pub remind_at: Timestamp,
+    pub error: junban_domain::ReminderFailureCode,
+}
+
+/// Mark expired claimed rows `failed/owner_lost` under the new valid owner term.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkOwnerLostReminders {
+    pub fence_term: junban_domain::ReminderFenceTerm,
+    pub limit: u32,
+}

@@ -4,9 +4,13 @@ use std::sync::Arc;
 
 use jiff::{Timestamp, Zoned, civil::Date};
 use junban_domain::{
-    Comment, CommentBody, CommentId, EntityName, FilterQuery, HexColor, MarkdownText, OperationId,
-    ProjectId, RelationKind, SavedFilterId, SectionId, TagId, TagName, Task, TaskActivity,
-    TaskDraft, TaskId, TaskQuery, TaskRelation, TaskTitle, TemplateId, ValidationError,
+    ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
+    DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, EntityName, FilterQuery, HexColor,
+    MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
+    ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId, TagId,
+    TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskTitle, TemplateId,
+    ValidationError, validate_owner_lost_mark_limit, validate_reminder_claim_limit,
+    validate_reminder_lease_secs,
 };
 
 use crate::{
@@ -598,6 +602,143 @@ where
         )
     }
 
+    pub async fn list_task_reminders(
+        &self,
+        task_id: TaskId,
+    ) -> Result<Vec<ReminderOccurrence>, AppError> {
+        self.repository
+            .list_task_reminders(task_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Set or replace the task reminder schedule (user mutation).
+    pub async fn reschedule_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        remind_at: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .reschedule_reminder(operation_id, task_id, remind_at, Timestamp::now())
+                .await,
+        )
+    }
+
+    /// Alias for reschedule — snooze is the same durable schedule write.
+    pub async fn snooze_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        remind_at: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        self.reschedule_reminder(operation_id, task_id, remind_at)
+            .await
+    }
+
+    /// Clear the task reminder schedule and cancel still-pending occurrences.
+    pub async fn dismiss_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .dismiss_reminder(operation_id, task_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    /// Control-plane lease acquire. No user revision/event is published.
+    pub async fn acquire_reminder_lease(
+        &self,
+        lease_secs: Option<u64>,
+    ) -> Result<ReminderDeliveryLease, AppError> {
+        let lease_secs =
+            validate_reminder_lease_secs(lease_secs.unwrap_or(DEFAULT_REMINDER_LEASE_SECS))?;
+        self.repository
+            .acquire_reminder_lease(Timestamp::now(), lease_secs)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn renew_reminder_lease(
+        &self,
+        fence_term: ReminderFenceTerm,
+        lease_secs: Option<u64>,
+    ) -> Result<ReminderDeliveryLease, AppError> {
+        let lease_secs =
+            validate_reminder_lease_secs(lease_secs.unwrap_or(DEFAULT_REMINDER_LEASE_SECS))?;
+        self.repository
+            .renew_reminder_lease(fence_term, Timestamp::now(), lease_secs)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn release_reminder_lease(
+        &self,
+        fence_term: ReminderFenceTerm,
+    ) -> Result<(), AppError> {
+        self.repository
+            .release_reminder_lease(fence_term, Timestamp::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn claim_due_reminders(
+        &self,
+        fence_term: ReminderFenceTerm,
+        limit: Option<u32>,
+        claim_secs: Option<u64>,
+    ) -> Result<Vec<ClaimedReminder>, AppError> {
+        let limit = validate_reminder_claim_limit(limit.unwrap_or(DEFAULT_REMINDER_CLAIM_LIMIT))?;
+        let claim_secs =
+            validate_reminder_lease_secs(claim_secs.unwrap_or(DEFAULT_REMINDER_CLAIM_SECS))?;
+        self.repository
+            .claim_due_reminders(fence_term, Timestamp::now(), limit, claim_secs)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn settle_reminder_delivered(
+        &self,
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        channel: ReminderChannel,
+    ) -> Result<(), AppError> {
+        self.repository
+            .settle_reminder_delivered(fence_term, task_id, remind_at, channel, Timestamp::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn settle_reminder_failed(
+        &self,
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        error: ReminderFailureCode,
+    ) -> Result<(), AppError> {
+        self.repository
+            .settle_reminder_failed(fence_term, task_id, remind_at, error, Timestamp::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn mark_owner_lost_reminders(
+        &self,
+        fence_term: ReminderFenceTerm,
+        limit: Option<u32>,
+    ) -> Result<u32, AppError> {
+        let limit = validate_owner_lost_mark_limit(limit.unwrap_or(DEFAULT_REMINDER_CLAIM_LIMIT))?;
+        self.repository
+            .mark_owner_lost_reminders(fence_term, Timestamp::now(), limit)
+            .await
+            .map_err(Into::into)
+    }
+
     fn commit(
         &self,
         result: Result<CommittedMutation, RepositoryError>,
@@ -1007,6 +1148,90 @@ mod tests {
             _: Timestamp,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("undo")
+        }
+        fn list_task_reminders(
+            &self,
+            _: TaskId,
+        ) -> crate::RepositoryFuture<'_, Vec<ReminderOccurrence>> {
+            self.calls.lock().unwrap().push("list_task_reminders");
+            Box::pin(async { Ok(Vec::new()) })
+        }
+        fn reschedule_reminder(
+            &self,
+            _: OperationId,
+            _: TaskId,
+            _: Timestamp,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("reschedule_reminder")
+        }
+        fn dismiss_reminder(
+            &self,
+            _: OperationId,
+            _: TaskId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("dismiss_reminder")
+        }
+        fn acquire_reminder_lease(
+            &self,
+            _: Timestamp,
+            _: u64,
+        ) -> crate::RepositoryFuture<'_, ReminderDeliveryLease> {
+            self.calls.lock().unwrap().push("acquire_reminder_lease");
+            Box::pin(async { Err(RepositoryError::Storage("fake lease".into())) })
+        }
+        fn renew_reminder_lease(
+            &self,
+            _: ReminderFenceTerm,
+            _: Timestamp,
+            _: u64,
+        ) -> crate::RepositoryFuture<'_, ReminderDeliveryLease> {
+            unimplemented!()
+        }
+        fn release_reminder_lease(
+            &self,
+            _: ReminderFenceTerm,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, ()> {
+            unimplemented!()
+        }
+        fn claim_due_reminders(
+            &self,
+            _: ReminderFenceTerm,
+            _: Timestamp,
+            _: u32,
+            _: u64,
+        ) -> crate::RepositoryFuture<'_, Vec<ClaimedReminder>> {
+            unimplemented!()
+        }
+        fn settle_reminder_delivered(
+            &self,
+            _: ReminderFenceTerm,
+            _: TaskId,
+            _: Timestamp,
+            _: ReminderChannel,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, ()> {
+            unimplemented!()
+        }
+        fn settle_reminder_failed(
+            &self,
+            _: ReminderFenceTerm,
+            _: TaskId,
+            _: Timestamp,
+            _: ReminderFailureCode,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, ()> {
+            unimplemented!()
+        }
+        fn mark_owner_lost_reminders(
+            &self,
+            _: ReminderFenceTerm,
+            _: Timestamp,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, u32> {
+            unimplemented!()
         }
     }
 

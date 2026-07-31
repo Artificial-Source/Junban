@@ -1,20 +1,21 @@
 //! Explicit transport DTOs. Domain and repository types are never leaked by accident.
 
-use jiff::{Timestamp, civil::Date};
+use jiff::{Timestamp, civil::Date, civil::Time};
 use junban_app::{
     AffectedIds, BulkAction, BulkSchedule, BulkTagChange, CatalogSnapshot, CommittedEvent,
     CommittedMutation, MoveTarget, OrderAnchor, ProjectDraft, ProjectPatch, ReorderScope,
     ResourceRef, ResourceSnapshot, ResourceType, ResyncScope, SavedFilterDraft, SavedFilterPatch,
     SectionDraft, SectionPatch, TagDraft, TagPatch, TaskListPage, TaskPatch, TemplateApply,
-    TemplateDraft, TemplatePatch,
+    TemplateDraft, TemplatePatch, TimeBlockPatch, TimeSlotPatch,
 };
 use junban_domain::{
-    ActualMinutes, Comment, DreadLevel, EntityName, EstimatedMinutes, FilterQuery, HexColor,
-    IconText, LocalDueTime, MarkdownText, Priority, Project, ProjectId, ProjectView, QuickEntry,
-    RecurrenceRule, RelationKind, SavedFilter, Section, SectionId, SortOrder, Tag, TagId, TagName,
-    Task, TaskActivity, TaskActivityAction, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort,
-    TaskStatus, TaskTitle, TaskViewPreset, Template, TemplateId, TextImportDraft, TimeBlock,
-    TimeSlot, ValidationError,
+    ActualMinutes, CivilTimeRange, Comment, DreadLevel, EntityName, EstimatedMinutes, FilterQuery,
+    HexColor, IconText, LocalDueTime, MarkdownText, Priority, Project, ProjectId, ProjectView,
+    QuickEntry, RecurrenceRule, RelationKind, SavedFilter, Section, SectionId, SortOrder, Tag,
+    TagId, TagName, Task, TaskActivity, TaskActivityAction, TaskDraft, TaskId, TaskQuery,
+    TaskRelation, TaskSort, TaskStatus, TaskTitle, TaskViewPreset, Template, TemplateId,
+    TextImportDraft, TimeBlock, TimeBlockDraft, TimeSlot, TimeSlotDraft, TimeSlotId, TimeZoneName,
+    ValidationError,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -1486,6 +1487,272 @@ impl From<TimeSlot> for TimeSlotDto {
     }
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TimeBlockListResponse {
+    pub time_blocks: Vec<TimeBlockDto>,
+    pub revision: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TimeSlotListResponse {
+    pub time_slots: Vec<TimeSlotDto>,
+    pub revision: u64,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateTimeBlockRequest {
+    pub title: String,
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    /// Civil wall-clock time `HH:MM[:SS]`.
+    pub start: String,
+    /// Civil wall-clock time `HH:MM[:SS]`.
+    pub end: String,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub locked: bool,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(default)]
+    pub slot_id: Option<String>,
+    #[serde(default)]
+    pub recurrence_rule: Option<String>,
+}
+
+impl CreateTimeBlockRequest {
+    pub fn into_draft(self, request_id: &RequestId) -> Result<TimeBlockDraft, ApiError> {
+        let range = parse_civil_range(
+            self.date,
+            &self.start,
+            &self.end,
+            self.time_zone.as_deref(),
+            request_id,
+        )?;
+        Ok(TimeBlockDraft {
+            title: EntityName::new(self.title).map_err(|e| validation_error(e, request_id))?,
+            range,
+            color: map_opt(self.color, HexColor::new, request_id)?,
+            locked: self.locked,
+            task_id: map_opt(self.task_id, |s| TaskId::parse(&s), request_id)?,
+            slot_id: map_opt(self.slot_id, |s| TimeSlotId::parse(&s), request_id)?,
+            recurrence_rule: map_opt(self.recurrence_rule, RecurrenceRule::new, request_id)?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PatchTimeBlockRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[schema(value_type = Option<String>, format = Date)]
+    #[serde(default)]
+    pub date: Option<Date>,
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default)]
+    pub end: Option<String>,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(nullable = true)]
+    pub color: Option<Option<String>>,
+    #[serde(default)]
+    pub locked: Option<bool>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(value_type = Option<Option<String>>, format = Uuid, nullable = true)]
+    pub task_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(value_type = Option<Option<String>>, format = Uuid, nullable = true)]
+    pub slot_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(nullable = true)]
+    pub recurrence_rule: Option<Option<String>>,
+}
+
+impl PatchTimeBlockRequest {
+    pub fn into_patch(self, request_id: &RequestId) -> Result<TimeBlockPatch, ApiError> {
+        Ok(TimeBlockPatch {
+            title: map_opt(self.title, EntityName::new, request_id)?,
+            range: parse_optional_civil_range(
+                self.date,
+                self.start.as_deref(),
+                self.end.as_deref(),
+                self.time_zone.as_deref(),
+                request_id,
+            )?,
+            color: map_opt_null(self.color, HexColor::new, request_id)?,
+            locked: self.locked,
+            task_id: map_opt_null(self.task_id, |s| TaskId::parse(&s), request_id)?,
+            slot_id: map_opt_null(self.slot_id, |s| TimeSlotId::parse(&s), request_id)?,
+            recurrence_rule: map_opt_null(self.recurrence_rule, RecurrenceRule::new, request_id)?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveTimeBlockRequest {
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub start: String,
+    pub end: String,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+}
+
+impl MoveTimeBlockRequest {
+    pub fn into_range(self, request_id: &RequestId) -> Result<CivilTimeRange, ApiError> {
+        parse_civil_range(
+            self.date,
+            &self.start,
+            &self.end,
+            self.time_zone.as_deref(),
+            request_id,
+        )
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResizeTimeBlockRequest {
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub start: String,
+    pub end: String,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+}
+
+impl ResizeTimeBlockRequest {
+    pub fn into_range(self, request_id: &RequestId) -> Result<CivilTimeRange, ApiError> {
+        parse_civil_range(
+            self.date,
+            &self.start,
+            &self.end,
+            self.time_zone.as_deref(),
+            request_id,
+        )
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateTimeSlotRequest {
+    pub title: String,
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub start: String,
+    pub end: String,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub recurrence_rule: Option<String>,
+}
+
+impl CreateTimeSlotRequest {
+    pub fn into_draft(self, request_id: &RequestId) -> Result<TimeSlotDraft, ApiError> {
+        let range = parse_civil_range(
+            self.date,
+            &self.start,
+            &self.end,
+            self.time_zone.as_deref(),
+            request_id,
+        )?;
+        Ok(TimeSlotDraft {
+            title: EntityName::new(self.title).map_err(|e| validation_error(e, request_id))?,
+            range,
+            color: map_opt(self.color, HexColor::new, request_id)?,
+            project_id: map_opt(self.project_id, |s| ProjectId::parse(&s), request_id)?,
+            recurrence_rule: map_opt(self.recurrence_rule, RecurrenceRule::new, request_id)?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PatchTimeSlotRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[schema(value_type = Option<String>, format = Date)]
+    #[serde(default)]
+    pub date: Option<Date>,
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default)]
+    pub end: Option<String>,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(nullable = true)]
+    pub color: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(value_type = Option<Option<String>>, format = Uuid, nullable = true)]
+    pub project_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(nullable = true)]
+    pub recurrence_rule: Option<Option<String>>,
+}
+
+impl PatchTimeSlotRequest {
+    pub fn into_patch(self, request_id: &RequestId) -> Result<TimeSlotPatch, ApiError> {
+        Ok(TimeSlotPatch {
+            title: map_opt(self.title, EntityName::new, request_id)?,
+            range: parse_optional_civil_range(
+                self.date,
+                self.start.as_deref(),
+                self.end.as_deref(),
+                self.time_zone.as_deref(),
+                request_id,
+            )?,
+            color: map_opt_null(self.color, HexColor::new, request_id)?,
+            project_id: map_opt_null(self.project_id, |s| ProjectId::parse(&s), request_id)?,
+            recurrence_rule: map_opt_null(self.recurrence_rule, RecurrenceRule::new, request_id)?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AppendTimeSlotTaskRequest {
+    #[schema(value_type = String, format = Uuid)]
+    pub task_id: String,
+}
+
+impl AppendTimeSlotTaskRequest {
+    pub fn into_task_id(self, request_id: &RequestId) -> Result<TaskId, ApiError> {
+        TaskId::parse(&self.task_id).map_err(|e| validation_error(e, request_id))
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceTimeSlotTasksRequest {
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub task_ids: Vec<String>,
+}
+
+impl ReplaceTimeSlotTasksRequest {
+    pub fn into_task_ids(self, request_id: &RequestId) -> Result<Vec<TaskId>, ApiError> {
+        self.task_ids
+            .into_iter()
+            .map(|id| TaskId::parse(&id))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| validation_error(e, request_id))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AffectedIdsDto {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2037,6 +2304,68 @@ where
         None => Ok(None),
         Some(value) => Ok(Some(
             map(value).map_err(|e| validation_error(e, request_id))?,
+        )),
+    }
+}
+
+fn default_time_zone_name(request_id: &RequestId) -> Result<TimeZoneName, ApiError> {
+    let now = jiff::Zoned::now();
+    let name = now.time_zone().iana_name().unwrap_or("UTC");
+    TimeZoneName::new(name.to_owned()).map_err(|e| validation_error(e, request_id))
+}
+
+fn parse_civil_time(
+    raw: &str,
+    field: &'static str,
+    request_id: &RequestId,
+) -> Result<Time, ApiError> {
+    raw.parse::<Time>().map_err(|_| {
+        validation_error(
+            ValidationError::InvalidFormat {
+                field,
+                expected: "civil time HH:MM[:SS]",
+            },
+            request_id,
+        )
+    })
+}
+
+fn parse_civil_range(
+    date: Date,
+    start: &str,
+    end: &str,
+    time_zone: Option<&str>,
+    request_id: &RequestId,
+) -> Result<CivilTimeRange, ApiError> {
+    let start = parse_civil_time(start, "start", request_id)?;
+    let end = parse_civil_time(end, "end", request_id)?;
+    let time_zone = match time_zone {
+        Some(value) => {
+            TimeZoneName::new(value.to_owned()).map_err(|e| validation_error(e, request_id))?
+        }
+        None => default_time_zone_name(request_id)?,
+    };
+    CivilTimeRange::new(date, start, end, time_zone).map_err(|e| validation_error(e, request_id))
+}
+
+fn parse_optional_civil_range(
+    date: Option<Date>,
+    start: Option<&str>,
+    end: Option<&str>,
+    time_zone: Option<&str>,
+    request_id: &RequestId,
+) -> Result<Option<CivilTimeRange>, ApiError> {
+    match (date, start, end, time_zone) {
+        (None, None, None, None) => Ok(None),
+        (Some(date), Some(start), Some(end), time_zone) => Ok(Some(parse_civil_range(
+            date, start, end, time_zone, request_id,
+        )?)),
+        _ => Err(validation_error(
+            ValidationError::Invalid {
+                field: "range",
+                reason: "date, start, and end must be provided together",
+            },
+            request_id,
         )),
     }
 }

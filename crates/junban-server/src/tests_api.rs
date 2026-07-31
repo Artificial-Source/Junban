@@ -1148,6 +1148,8 @@ fn p2_api_001_openapi_create_contracts_hide_generated_ids() {
         "CreateTemplateRequest",
         "CreateSavedFilterRequest",
         "CreateCommentRequest",
+        "CreateTimeBlockRequest",
+        "CreateTimeSlotRequest",
     ] {
         assert!(
             doc["components"]["schemas"][schema]["properties"]
@@ -1212,6 +1214,12 @@ fn p2_api_005_openapi_documents_operation_too_large_responses() {
         ("/api/v1/templates/{template_id}", "delete"),
         ("/api/v1/saved_filters/{filter_id}", "delete"),
         ("/api/v1/operations/{source_operation_id}/undo", "post"),
+        ("/api/v1/time-blocks/{time_block_id}", "delete"),
+        ("/api/v1/time-slots/{time_slot_id}", "delete"),
+        (
+            "/api/v1/time-slots/{time_slot_id}/tasks/{task_id}",
+            "delete",
+        ),
     ] {
         assert!(
             doc["paths"][path][method]["responses"].get("413").is_some(),
@@ -1229,6 +1237,11 @@ fn openapi_declares_security_and_operation_ids() {
     assert!(paths.contains_key("/api/v1/tasks"));
     assert!(paths.contains_key("/api/v1/events"));
     assert!(paths.contains_key("/api/v1/catalog"));
+    assert!(paths.contains_key("/api/v1/time-blocks"));
+    assert!(paths.contains_key("/api/v1/time-slots"));
+    assert!(paths.contains_key("/api/v1/time-blocks/{time_block_id}/move"));
+    assert!(paths.contains_key("/api/v1/time-blocks/{time_block_id}/resize"));
+    assert!(paths.contains_key("/api/v1/time-slots/{time_slot_id}/tasks"));
     let mut missing = Vec::new();
     for (path, item) in paths {
         for method in ["get", "post", "patch", "put", "delete"] {
@@ -1962,4 +1975,583 @@ async fn server_state_new_does_not_start_reminder_coordinator() {
     assert_eq!(context.state.reminder_wakes.latest_sequence(), 0);
     assert!(wakes.try_recv().is_err());
     let _ = start_reminder_coordinator;
+}
+
+// ── Phase 3 timeblocking HTTP API ──────────────────────────────────────────
+
+async fn mutate_json(
+    context: &TestContext,
+    method: Method,
+    uri: &str,
+    payload: Value,
+    key: Option<&str>,
+) -> Response {
+    let builder = match key {
+        Some(key) => operation_header_key(authenticated(method, uri), key),
+        None => operation_header(authenticated(method, uri)),
+    };
+    context
+        .request(
+            builder
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+}
+
+fn block_payload(title: &str, date: &str, start: &str, end: &str) -> Value {
+    json!({
+        "title": title,
+        "date": date,
+        "start": start,
+        "end": end,
+        "time_zone": "UTC",
+        "color": "#4F46E5"
+    })
+}
+
+fn slot_payload(title: &str, date: &str, start: &str, end: &str) -> Value {
+    json!({
+        "title": title,
+        "date": date,
+        "start": start,
+        "end": end,
+        "time_zone": "UTC",
+        "color": "#0EA5E9"
+    })
+}
+
+async fn create_block(context: &TestContext, payload: Value) -> Value {
+    let response = mutate_json(context, Method::POST, "/api/v1/time-blocks", payload, None).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = json(response).await;
+    assert_eq!(body["event"]["event_type"], "time_block.created");
+    body
+}
+
+async fn create_slot(context: &TestContext, payload: Value) -> Value {
+    let response = mutate_json(context, Method::POST, "/api/v1/time-slots", payload, None).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = json(response).await;
+    assert_eq!(body["event"]["event_type"], "time_slot.created");
+    body
+}
+
+fn block_id_from(body: &Value) -> &str {
+    body["event"]["snapshot"]["time_block"]["id"]
+        .as_str()
+        .unwrap()
+}
+
+fn slot_id_from(body: &Value) -> &str {
+    body["event"]["snapshot"]["time_slot"]["id"]
+        .as_str()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn timeblocking_routes_require_auth() {
+    let context = TestContext::new();
+    let denied = context
+        .request(
+            request(Method::GET, "/api/v1/time-blocks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let denied_slots = context
+        .request(
+            request(Method::GET, "/api/v1/time-slots")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(denied_slots.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn time_block_list_defaults_and_rejects_invalid_windows() {
+    let context = TestContext::new();
+    let today = jiff::Zoned::now().date().to_string();
+    let _ = create_block(
+        &context,
+        block_payload("Focus", &today, "09:00:00", "10:00:00"),
+    )
+    .await;
+
+    let listed = context
+        .request(
+            authenticated(Method::GET, "/api/v1/time-blocks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let body = json(listed).await;
+    assert_eq!(body["time_blocks"].as_array().unwrap().len(), 1);
+    assert!(body["revision"].as_u64().unwrap() >= 1);
+
+    let inverted = context
+        .request(
+            authenticated(
+                Method::GET,
+                "/api/v1/time-blocks?from=2026-03-10&to=2026-03-01",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(inverted.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json(inverted).await["error"]["code"], "validation_error");
+
+    let too_wide = context
+        .request(
+            authenticated(
+                Method::GET,
+                "/api/v1/time-blocks?from=2026-01-01&to=2026-03-01",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(too_wide.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let bad_date = context
+        .request(
+            authenticated(Method::GET, "/api/v1/time-blocks?from=not-a-date")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(bad_date.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let unknown = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-blocks",
+        json!({
+            "title": "X",
+            "date": "2026-03-08",
+            "start": "09:00:00",
+            "end": "10:00:00",
+            "time_zone": "UTC",
+            "extra": true
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn time_block_mutations_move_resize_and_idempotent_replay() {
+    let context = TestContext::new();
+    let task = create_task(&context, "Linked").await;
+    let task_id = task_id_from(&task).to_owned();
+
+    let key = Uuid::new_v4().to_string();
+    let payload = json!({
+        "title": "Deep work",
+        "date": "2026-03-08",
+        "start": "09:00:00",
+        "end": "10:00:00",
+        "time_zone": "UTC",
+        "task_id": task_id,
+        "color": "#111827"
+    });
+    let first = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-blocks",
+        payload.clone(),
+        Some(&key),
+    )
+    .await;
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first_bytes = response_bytes(first).await;
+    let first_json: Value = serde_json::from_slice(&first_bytes).unwrap();
+    let block_id = block_id_from(&first_json).to_owned();
+    assert_eq!(
+        first_json["event"]["snapshot"]["time_block"]["task_id"],
+        task_id
+    );
+    assert_eq!(
+        first_json["event"]["affected"]["time_block_ids"],
+        json!([block_id])
+    );
+
+    let replay = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-blocks",
+        payload,
+        Some(&key),
+    )
+    .await;
+    assert_eq!(replay.status(), StatusCode::CREATED);
+    assert_eq!(response_bytes(replay).await, first_bytes);
+
+    let listed = context
+        .request(
+            authenticated(
+                Method::GET,
+                "/api/v1/time-blocks?from=2026-03-08&to=2026-03-08",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(
+        json(listed).await["time_blocks"].as_array().unwrap().len(),
+        1
+    );
+
+    let patched = mutate_json(
+        &context,
+        Method::PATCH,
+        &format!("/api/v1/time-blocks/{block_id}"),
+        json!({
+            "title": "Focus block",
+            "task_id": null,
+            "color": null,
+            "locked": true,
+            "date": "2026-03-08",
+            "start": "09:30:00",
+            "end": "10:30:00",
+            "time_zone": "UTC"
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(patched.status(), StatusCode::OK);
+    let patched = json(patched).await;
+    assert_eq!(patched["event"]["event_type"], "time_block.updated");
+    assert_eq!(
+        patched["event"]["snapshot"]["time_block"]["title"],
+        "Focus block"
+    );
+    assert!(
+        patched["event"]["snapshot"]["time_block"]["task_id"].is_null()
+            || patched["event"]["snapshot"]["time_block"]
+                .get("task_id")
+                .is_none()
+    );
+    assert_eq!(
+        patched["event"]["snapshot"]["time_block"]["start"],
+        "09:30:00"
+    );
+    assert!(
+        patched["event"]["snapshot"]["time_block"]["locked"]
+            .as_bool()
+            .unwrap()
+    );
+
+    let moved = mutate_json(
+        &context,
+        Method::POST,
+        &format!("/api/v1/time-blocks/{block_id}/move"),
+        json!({
+            "date": "2026-03-09",
+            "start": "11:00:00",
+            "end": "12:00:00",
+            "time_zone": "UTC"
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(moved.status(), StatusCode::OK);
+    let moved = json(moved).await;
+    assert_eq!(
+        moved["event"]["snapshot"]["time_block"]["date"],
+        "2026-03-09"
+    );
+
+    let resized = mutate_json(
+        &context,
+        Method::POST,
+        &format!("/api/v1/time-blocks/{block_id}/resize"),
+        json!({
+            "date": "2026-03-09",
+            "start": "11:00:00",
+            "end": "12:30:00",
+            "time_zone": "UTC"
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(resized.status(), StatusCode::OK);
+    assert_eq!(
+        json(resized).await["event"]["snapshot"]["time_block"]["end"],
+        "12:30:00"
+    );
+
+    let inverted = mutate_json(
+        &context,
+        Method::POST,
+        &format!("/api/v1/time-blocks/{block_id}/resize"),
+        json!({
+            "date": "2026-03-09",
+            "start": "13:00:00",
+            "end": "12:00:00",
+            "time_zone": "UTC"
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(inverted.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let deleted = context
+        .request(
+            operation_header(authenticated(
+                Method::DELETE,
+                &format!("/api/v1/time-blocks/{block_id}"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(deleted.status(), StatusCode::OK);
+    assert_eq!(
+        json(deleted).await["event"]["event_type"],
+        "time_block.deleted"
+    );
+
+    let missing = context
+        .request(
+            operation_header(authenticated(
+                Method::DELETE,
+                &format!("/api/v1/time-blocks/{block_id}"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn time_slot_crud_filters_and_membership_operations() {
+    let context = TestContext::new();
+
+    let project = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/projects",
+        json!({ "name": "Planning", "color": "#22C55E" }),
+        None,
+    )
+    .await;
+    assert_eq!(project.status(), StatusCode::CREATED);
+    let project_id = json(project).await["event"]["snapshot"]["project"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let key = Uuid::new_v4().to_string();
+    let payload = json!({
+        "title": "Morning",
+        "date": "2026-03-08",
+        "start": "09:00:00",
+        "end": "11:00:00",
+        "time_zone": "UTC",
+        "project_id": project_id,
+        "color": "#0EA5E9"
+    });
+    let first = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-slots",
+        payload.clone(),
+        Some(&key),
+    )
+    .await;
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first_bytes = response_bytes(first).await;
+    let first_json: Value = serde_json::from_slice(&first_bytes).unwrap();
+    let slot_id = slot_id_from(&first_json).to_owned();
+    assert_eq!(
+        first_json["event"]["affected"]["time_slot_ids"],
+        json!([slot_id])
+    );
+
+    let replay = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-slots",
+        payload,
+        Some(&key),
+    )
+    .await;
+    assert_eq!(replay.status(), StatusCode::CREATED);
+    assert_eq!(response_bytes(replay).await, first_bytes);
+
+    let _unscoped = create_slot(
+        &context,
+        slot_payload("Open", "2026-03-08", "13:00:00", "14:00:00"),
+    )
+    .await;
+
+    let filtered = context
+        .request(
+            authenticated(
+                Method::GET,
+                &format!("/api/v1/time-slots?date=2026-03-08&project_id={project_id}"),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(filtered.status(), StatusCode::OK);
+    let filtered = json(filtered).await;
+    assert_eq!(filtered["time_slots"].as_array().unwrap().len(), 1);
+    assert_eq!(filtered["time_slots"][0]["id"], slot_id);
+
+    let unscoped = context
+        .request(
+            authenticated(
+                Method::GET,
+                "/api/v1/time-slots?date=2026-03-08&project_id=-",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(
+        json(unscoped).await["time_slots"].as_array().unwrap().len(),
+        1
+    );
+
+    let patched = mutate_json(
+        &context,
+        Method::PATCH,
+        &format!("/api/v1/time-slots/{slot_id}"),
+        json!({
+            "title": "Deep morning",
+            "project_id": null,
+            "color": null
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(patched.status(), StatusCode::OK);
+    let patched = json(patched).await;
+    assert_eq!(
+        patched["event"]["snapshot"]["time_slot"]["title"],
+        "Deep morning"
+    );
+    assert!(
+        patched["event"]["snapshot"]["time_slot"]["project_id"].is_null()
+            || patched["event"]["snapshot"]["time_slot"]
+                .get("project_id")
+                .is_none()
+    );
+
+    let t1 = task_id_from(&create_task(&context, "A").await).to_owned();
+    let t2 = task_id_from(&create_task(&context, "B").await).to_owned();
+    let t3 = task_id_from(&create_task(&context, "C").await).to_owned();
+
+    let append = mutate_json(
+        &context,
+        Method::POST,
+        &format!("/api/v1/time-slots/{slot_id}/tasks"),
+        json!({ "task_id": t1 }),
+        None,
+    )
+    .await;
+    assert_eq!(append.status(), StatusCode::OK);
+    assert_eq!(
+        json(append).await["event"]["event_type"],
+        "time_slot.membership_updated"
+    );
+
+    // Deterministic duplicate append remains success with no extra membership row.
+    let append_dup = mutate_json(
+        &context,
+        Method::POST,
+        &format!("/api/v1/time-slots/{slot_id}/tasks"),
+        json!({ "task_id": t1 }),
+        None,
+    )
+    .await;
+    assert_eq!(append_dup.status(), StatusCode::OK);
+    assert_eq!(
+        json(append_dup).await["event"]["snapshot"]["time_slot"]["task_ids"],
+        json!([t1])
+    );
+
+    let _ = mutate_json(
+        &context,
+        Method::POST,
+        &format!("/api/v1/time-slots/{slot_id}/tasks"),
+        json!({ "task_id": t2 }),
+        None,
+    )
+    .await;
+    let _ = mutate_json(
+        &context,
+        Method::POST,
+        &format!("/api/v1/time-slots/{slot_id}/tasks"),
+        json!({ "task_id": t3 }),
+        None,
+    )
+    .await;
+
+    let replaced = mutate_json(
+        &context,
+        Method::PUT,
+        &format!("/api/v1/time-slots/{slot_id}/tasks"),
+        json!({ "task_ids": [t3, t1, t2] }),
+        None,
+    )
+    .await;
+    assert_eq!(replaced.status(), StatusCode::OK);
+    assert_eq!(
+        json(replaced).await["event"]["snapshot"]["time_slot"]["task_ids"],
+        json!([t3, t1, t2])
+    );
+
+    let bad_replace = mutate_json(
+        &context,
+        Method::PUT,
+        &format!("/api/v1/time-slots/{slot_id}/tasks"),
+        json!({ "task_ids": [t1, t2] }),
+        None,
+    )
+    .await;
+    assert_eq!(bad_replace.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let removed = context
+        .request(
+            operation_header(authenticated(
+                Method::DELETE,
+                &format!("/api/v1/time-slots/{slot_id}/tasks/{t1}"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(removed.status(), StatusCode::OK);
+    assert_eq!(
+        json(removed).await["event"]["snapshot"]["time_slot"]["task_ids"],
+        json!([t3, t2])
+    );
+
+    let deleted = context
+        .request(
+            operation_header(authenticated(
+                Method::DELETE,
+                &format!("/api/v1/time-slots/{slot_id}"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(deleted.status(), StatusCode::OK);
+    assert_eq!(
+        json(deleted).await["event"]["event_type"],
+        "time_slot.deleted"
+    );
 }

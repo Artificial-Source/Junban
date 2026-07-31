@@ -40,17 +40,20 @@ use uuid::Uuid;
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 use crate::reminder_wake::{ReminderWakeEventDto, ReminderWakeHub, start_reminder_coordinator};
 use crate::routes::{
-    acquire_reminder_lease, add_relation, api_not_found, apply_template, bulk_tasks, cancel_task,
-    claim_due_reminders, complete_task, create_comment, create_project, create_saved_filter,
-    create_section, create_tag, create_task, create_template, delete_comment, delete_project,
-    delete_saved_filter, delete_section, delete_tag, delete_task, delete_template,
+    acquire_reminder_lease, add_relation, api_not_found, append_time_slot_task, apply_template,
+    bulk_tasks, cancel_task, claim_due_reminders, complete_task, create_comment, create_project,
+    create_saved_filter, create_section, create_tag, create_task, create_template,
+    create_time_block, create_time_slot, delete_comment, delete_project, delete_saved_filter,
+    delete_section, delete_tag, delete_task, delete_template, delete_time_block, delete_time_slot,
     dismiss_reminder, events, get_catalog, get_profile, get_task, health, list_comments,
-    list_relations, list_task_activity, list_task_reminders, list_tasks, mark_owner_lost_reminders,
-    move_task, parse_filter_route, parse_quick_entry_route, parse_text_import_route, patch_comment,
-    patch_project, patch_saved_filter, patch_section, patch_tag, patch_task, patch_template,
-    release_reminder_lease, reminder_events, remove_relation, renew_reminder_lease, reopen_task,
-    reorder_tasks, reschedule_reminder, settle_reminder_delivered, settle_reminder_failed,
-    uncomplete_task, undo_operation,
+    list_relations, list_task_activity, list_task_reminders, list_tasks, list_time_blocks,
+    list_time_slots, mark_owner_lost_reminders, move_task, move_time_block, parse_filter_route,
+    parse_quick_entry_route, parse_text_import_route, patch_comment, patch_project,
+    patch_saved_filter, patch_section, patch_tag, patch_task, patch_template, patch_time_block,
+    patch_time_slot, release_reminder_lease, reminder_events, remove_relation,
+    remove_time_slot_task, renew_reminder_lease, reopen_task, reorder_tasks,
+    replace_time_slot_tasks, reschedule_reminder, resize_time_block, settle_reminder_delivered,
+    settle_reminder_failed, uncomplete_task, undo_operation,
 };
 use crate::sse::{AppService, SseConnectionPermit};
 
@@ -293,6 +296,38 @@ pub fn router(state: ServerState, web_dir: impl Into<PathBuf>) -> Router {
         .route("/api/v1/parse/quick-entry", post(parse_quick_entry_route))
         .route("/api/v1/parse/filter", post(parse_filter_route))
         .route("/api/v1/parse/text-import", post(parse_text_import_route))
+        .route(
+            "/api/v1/time-blocks",
+            get(list_time_blocks).post(create_time_block),
+        )
+        .route(
+            "/api/v1/time-blocks/{time_block_id}",
+            patch(patch_time_block).delete(delete_time_block),
+        )
+        .route(
+            "/api/v1/time-blocks/{time_block_id}/move",
+            post(move_time_block),
+        )
+        .route(
+            "/api/v1/time-blocks/{time_block_id}/resize",
+            post(resize_time_block),
+        )
+        .route(
+            "/api/v1/time-slots",
+            get(list_time_slots).post(create_time_slot),
+        )
+        .route(
+            "/api/v1/time-slots/{time_slot_id}",
+            patch(patch_time_slot).delete(delete_time_slot),
+        )
+        .route(
+            "/api/v1/time-slots/{time_slot_id}/tasks",
+            post(append_time_slot_task).put(replace_time_slot_tasks),
+        )
+        .route(
+            "/api/v1/time-slots/{time_slot_id}/tasks/{task_id}",
+            delete(remove_time_slot_task),
+        )
         .route("/api/v1/events", get(events))
         .route("/api", get(api_not_found))
         .route("/api/{*path}", get(api_not_found).fallback(api_not_found))
@@ -563,7 +598,20 @@ impl Modify for SecurityAddon {
         routes::settle_reminder_delivered,
         routes::settle_reminder_failed,
         routes::mark_owner_lost_reminders,
-        routes::reminder_events
+        routes::reminder_events,
+        routes::list_time_blocks,
+        routes::create_time_block,
+        routes::patch_time_block,
+        routes::delete_time_block,
+        routes::move_time_block,
+        routes::resize_time_block,
+        routes::list_time_slots,
+        routes::create_time_slot,
+        routes::patch_time_slot,
+        routes::delete_time_slot,
+        routes::append_time_slot_task,
+        routes::replace_time_slot_tasks,
+        routes::remove_time_slot_task
     ),
     components(schemas(
         ErrorEnvelope,
@@ -618,6 +666,16 @@ impl Modify for SecurityAddon {
         dto::ResourceSnapshotDto,
         dto::TimeBlockDto,
         dto::TimeSlotDto,
+        dto::TimeBlockListResponse,
+        dto::TimeSlotListResponse,
+        dto::CreateTimeBlockRequest,
+        dto::PatchTimeBlockRequest,
+        dto::MoveTimeBlockRequest,
+        dto::ResizeTimeBlockRequest,
+        dto::CreateTimeSlotRequest,
+        dto::PatchTimeSlotRequest,
+        dto::AppendTimeSlotTaskRequest,
+        dto::ReplaceTimeSlotTasksRequest,
         dto::AffectedIdsDto,
         dto::ResyncScopeDto,
         dto::CommittedEventDto,

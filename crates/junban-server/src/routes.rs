@@ -9,28 +9,31 @@ use axum::{
 use jiff::{Zoned, civil::Date};
 use junban_domain::{
     CommentId, MAX_QUERY_PAGE_LIMIT, MAX_TAGS_PER_TASK, OperationId, ProjectId, SavedFilterId,
-    SectionId, TagId, TaskId, TaskQuery, TaskSort, TaskStatus, TemplateId, parse_filter,
-    parse_quick_entry, parse_text_import, validate_page_limit,
+    SectionId, TagId, TaskId, TaskQuery, TaskSort, TaskStatus, TemplateId, TimeBlockId, TimeSlotId,
+    parse_filter, parse_quick_entry, parse_text_import, validate_page_limit,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
 
 use crate::cursor::decode_task_cursor;
 use crate::dto::{
-    AcquireReminderLeaseRequest, AddRelationRequest, ApplyTemplateRequest, BulkTasksRequest,
-    CatalogResponse, ClaimRemindersRequest, ClaimRemindersResponse, CommentDto,
-    CommentListResponse, CreateCommentRequest, CreateProjectRequest, CreateSavedFilterRequest,
-    CreateSectionRequest, CreateTagRequest, CreateTaskRequest, CreateTemplateRequest,
+    AcquireReminderLeaseRequest, AddRelationRequest, AppendTimeSlotTaskRequest,
+    ApplyTemplateRequest, BulkTasksRequest, CatalogResponse, ClaimRemindersRequest,
+    ClaimRemindersResponse, CommentDto, CommentListResponse, CreateCommentRequest,
+    CreateProjectRequest, CreateSavedFilterRequest, CreateSectionRequest, CreateTagRequest,
+    CreateTaskRequest, CreateTemplateRequest, CreateTimeBlockRequest, CreateTimeSlotRequest,
     HealthResponse, MarkOwnerLostRemindersRequest, MarkOwnerLostRemindersResponse, MoveTaskRequest,
-    MutationResponse, ParseFilterRequest, ParseQuickEntryRequest, ParseTextImportRequest,
-    ParsedFilterResponse, PatchCommentRequest, PatchProjectRequest, PatchSavedFilterRequest,
-    PatchSectionRequest, PatchTagRequest, PatchTaskRequest, PatchTemplateRequest, ProfileResponse,
+    MoveTimeBlockRequest, MutationResponse, ParseFilterRequest, ParseQuickEntryRequest,
+    ParseTextImportRequest, ParsedFilterResponse, PatchCommentRequest, PatchProjectRequest,
+    PatchSavedFilterRequest, PatchSectionRequest, PatchTagRequest, PatchTaskRequest,
+    PatchTemplateRequest, PatchTimeBlockRequest, PatchTimeSlotRequest, ProfileResponse,
     QuickEntryDto, RelationDto, RelationListResponse, ReleaseReminderLeaseRequest,
     ReminderDeliveryLeaseDto, ReminderListResponse, ReminderOccurrenceDto,
-    RenewReminderLeaseRequest, ReorderTasksRequest, RescheduleReminderRequest,
-    SettleReminderDeliveredRequest, SettleReminderFailedRequest, TaskActivityDto,
-    TaskActivityResponse, TaskDto, TaskListResponse, TaskSortDto, TaskViewPresetDto,
-    TextImportDraftDto, TextImportResponse,
+    RenewReminderLeaseRequest, ReorderTasksRequest, ReplaceTimeSlotTasksRequest,
+    RescheduleReminderRequest, ResizeTimeBlockRequest, SettleReminderDeliveredRequest,
+    SettleReminderFailedRequest, TaskActivityDto, TaskActivityResponse, TaskDto, TaskListResponse,
+    TaskSortDto, TaskViewPresetDto, TextImportDraftDto, TextImportResponse, TimeBlockListResponse,
+    TimeSlotListResponse,
 };
 use crate::error::{ApiError, extract_json, operation_id, parse_path_id, validation_error};
 use crate::reminder_wake::open_reminder_sse_stream;
@@ -1836,6 +1839,518 @@ pub async fn reminder_events(
         permit,
         std::sync::Arc::clone(&state.active_forwarders),
     ))
+}
+
+// ── time blocks / time slots ───────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListTimeBlocksQuery {
+    /// Inclusive civil start date (`YYYY-MM-DD`). Defaults to server-local today.
+    pub from: Option<String>,
+    /// Inclusive civil end date (`YYYY-MM-DD`). Defaults to `from`.
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListTimeSlotsQuery {
+    /// Civil date filter (`YYYY-MM-DD`). Defaults to server-local today.
+    pub date: Option<String>,
+    /// Optional project filter. Use `-` for unscoped slots.
+    pub project_id: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/time-blocks",
+    operation_id = "list_time_blocks",
+    params(ListTimeBlocksQuery),
+    responses(
+        (status = 200, body = TimeBlockListResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_time_blocks(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<ListTimeBlocksQuery>,
+) -> Result<Json<TimeBlockListResponse>, ApiError> {
+    let today = server_as_of_date();
+    let from = parse_date_param(query.from.as_deref(), "from", &request_id)?.unwrap_or(today);
+    let to = parse_date_param(query.to.as_deref(), "to", &request_id)?.unwrap_or(from);
+    let page = state
+        .service
+        .list_timeblocking_range(from, to)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(TimeBlockListResponse {
+        time_blocks: page.blocks.into_iter().map(Into::into).collect(),
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-blocks",
+    operation_id = "create_time_block",
+    request_body = CreateTimeBlockRequest,
+    params(("Idempotency-Key" = String, Header, format = Uuid)),
+    responses(
+        (status = 201, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_time_block(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    payload: Result<Json<CreateTimeBlockRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<MutationResponse>), ApiError> {
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let draft = payload.into_draft(&request_id)?;
+    let mutation = state
+        .service
+        .create_time_block(operation_id, draft)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok((StatusCode::CREATED, Json(mutation.into())))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/time-blocks/{time_block_id}",
+    operation_id = "patch_time_block",
+    request_body = PatchTimeBlockRequest,
+    params(
+        ("time_block_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn patch_time_block(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_block_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<PatchTimeBlockRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_block_id = parse_path_id(&time_block_id, TimeBlockId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let patch = payload.into_patch(&request_id)?;
+    let mutation = state
+        .service
+        .patch_time_block(operation_id, time_block_id, patch)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/time-blocks/{time_block_id}",
+    operation_id = "delete_time_block",
+    params(
+        ("time_block_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_time_block(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_block_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_block_id = parse_path_id(&time_block_id, TimeBlockId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let mutation = state
+        .service
+        .delete_time_block(operation_id, time_block_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-blocks/{time_block_id}/move",
+    operation_id = "move_time_block",
+    request_body = MoveTimeBlockRequest,
+    params(
+        ("time_block_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn move_time_block(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_block_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<MoveTimeBlockRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_block_id = parse_path_id(&time_block_id, TimeBlockId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let range = payload.into_range(&request_id)?;
+    let mutation = state
+        .service
+        .move_time_block(operation_id, time_block_id, range)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-blocks/{time_block_id}/resize",
+    operation_id = "resize_time_block",
+    request_body = ResizeTimeBlockRequest,
+    params(
+        ("time_block_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn resize_time_block(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_block_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<ResizeTimeBlockRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_block_id = parse_path_id(&time_block_id, TimeBlockId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let range = payload.into_range(&request_id)?;
+    let mutation = state
+        .service
+        .resize_time_block(operation_id, time_block_id, range)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/time-slots",
+    operation_id = "list_time_slots",
+    params(ListTimeSlotsQuery),
+    responses(
+        (status = 200, body = TimeSlotListResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_time_slots(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<ListTimeSlotsQuery>,
+) -> Result<Json<TimeSlotListResponse>, ApiError> {
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?
+        .unwrap_or_else(server_as_of_date);
+    let project_filter =
+        parse_nullable_id_filter(query.project_id.as_deref(), ProjectId::parse, &request_id)?;
+    let page = state
+        .service
+        .list_timeblocking_range(date, date)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    let time_slots = page
+        .slots
+        .into_iter()
+        .filter(|slot| match project_filter {
+            None => true,
+            Some(None) => slot.project_id.is_none(),
+            Some(Some(project_id)) => slot.project_id == Some(project_id),
+        })
+        .map(Into::into)
+        .collect();
+    Ok(Json(TimeSlotListResponse {
+        time_slots,
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-slots",
+    operation_id = "create_time_slot",
+    request_body = CreateTimeSlotRequest,
+    params(("Idempotency-Key" = String, Header, format = Uuid)),
+    responses(
+        (status = 201, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_time_slot(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    payload: Result<Json<CreateTimeSlotRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<MutationResponse>), ApiError> {
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let draft = payload.into_draft(&request_id)?;
+    let mutation = state
+        .service
+        .create_time_slot(operation_id, draft)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok((StatusCode::CREATED, Json(mutation.into())))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/time-slots/{time_slot_id}",
+    operation_id = "patch_time_slot",
+    request_body = PatchTimeSlotRequest,
+    params(
+        ("time_slot_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn patch_time_slot(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_slot_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<PatchTimeSlotRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_slot_id = parse_path_id(&time_slot_id, TimeSlotId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let patch = payload.into_patch(&request_id)?;
+    let mutation = state
+        .service
+        .patch_time_slot(operation_id, time_slot_id, patch)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/time-slots/{time_slot_id}",
+    operation_id = "delete_time_slot",
+    params(
+        ("time_slot_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_time_slot(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_slot_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_slot_id = parse_path_id(&time_slot_id, TimeSlotId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let mutation = state
+        .service
+        .delete_time_slot(operation_id, time_slot_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-slots/{time_slot_id}/tasks",
+    operation_id = "append_time_slot_task",
+    request_body = AppendTimeSlotTaskRequest,
+    params(
+        ("time_slot_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn append_time_slot_task(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_slot_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<AppendTimeSlotTaskRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_slot_id = parse_path_id(&time_slot_id, TimeSlotId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let task_id = payload.into_task_id(&request_id)?;
+    let mutation = state
+        .service
+        .append_slot_task(operation_id, time_slot_id, task_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/time-slots/{time_slot_id}/tasks",
+    operation_id = "replace_time_slot_tasks",
+    request_body = ReplaceTimeSlotTasksRequest,
+    params(
+        ("time_slot_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_time_slot_tasks(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_slot_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<ReplaceTimeSlotTasksRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_slot_id = parse_path_id(&time_slot_id, TimeSlotId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let ordered_ids = payload.into_task_ids(&request_id)?;
+    let mutation = state
+        .service
+        .reorder_slot_tasks(operation_id, time_slot_id, ordered_ids)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/time-slots/{time_slot_id}/tasks/{task_id}",
+    operation_id = "remove_time_slot_task",
+    params(
+        ("time_slot_id" = String, Path, format = Uuid),
+        ("task_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn remove_time_slot_task(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath((time_slot_id, task_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_slot_id = parse_path_id(&time_slot_id, TimeSlotId::parse, &request_id)?;
+    let task_id = parse_path_id(&task_id, TaskId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let mutation = state
+        .service
+        .remove_slot_task(operation_id, time_slot_id, task_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
 }
 
 pub async fn api_not_found(Extension(request_id): Extension<RequestId>) -> ApiError {

@@ -22,6 +22,7 @@ import {
   CalendarClock,
   MessageSquare,
   Settings,
+  GripVertical,
 } from "lucide-react";
 import type { View, AppRoute } from "../hooks/useRouting";
 import type { CatalogResponse, ProjectDto, SavedFilterDto } from "../api/client";
@@ -126,6 +127,14 @@ export function Sidebar({
   function renderProjectNode(project: ProjectDto, depth: number): React.ReactNode {
     const isActive = currentRoute.name === "project" && currentRoute.projectId === project.id;
     const children = projectTree.get(project.id) ?? [];
+    const visualProgress =
+      phase3VisualFixture && depth === 0
+        ? {
+            "Website Redesign": { count: 1, ratio: 0.08 },
+            Documentation: { count: 6, ratio: 0 },
+            Community: { count: 5, ratio: 0 },
+          }[project.name]
+        : undefined;
 
     return (
       <li key={project.id}>
@@ -159,6 +168,13 @@ export function Sidebar({
           }
           title={collapsed ? project.name : undefined}
         >
+          {phase3VisualFixture && depth === 0 && !collapsed && (
+            <GripVertical
+              aria-hidden="true"
+              size={12}
+              className="absolute left-1 text-on-surface-muted/55"
+            />
+          )}
           {project.color && (
             <span
               aria-hidden="true"
@@ -167,6 +183,19 @@ export function Sidebar({
             />
           )}
           {!collapsed && <span className="flex-1 truncate">{project.name}</span>}
+          {visualProgress && !collapsed && (
+            <span aria-hidden="true" className="flex w-16 shrink-0 items-center gap-1.5">
+              <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-tertiary">
+                <span
+                  className="block h-full rounded-full bg-accent-action/70"
+                  style={{ width: `${visualProgress.ratio * 100}%` }}
+                />
+              </span>
+              <span className="w-2 text-right text-xs tabular-nums text-on-surface-muted">
+                {visualProgress.count}
+              </span>
+            </span>
+          )}
           {collapsed && (
             <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-xs text-on-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100">
               {project.name}
@@ -264,7 +293,10 @@ export function Sidebar({
           {(phase2VisualFixture ? PHASE_2_NAV_ITEMS : NAV_ITEMS).map((item) => {
             const Icon = item.icon;
             const isActive = currentView === item.id;
-            const count = item.countKey ? countMap[item.countKey] : undefined;
+            const count = item.countKey
+              ? (countMap[item.countKey] ??
+                (phase3VisualFixture ? { inbox: 2, today: 11 }[item.countKey] : undefined))
+              : undefined;
             const showCount = typeof count === "number" && count > 0;
             return (
               <button
@@ -280,6 +312,13 @@ export function Sidebar({
                 }`}
                 title={collapsed ? item.label : undefined}
               >
+                {phase3VisualFixture && !collapsed && (
+                  <GripVertical
+                    aria-hidden="true"
+                    size={12}
+                    className="absolute -left-6 text-on-surface-muted/55"
+                  />
+                )}
                 <Icon size={18} strokeWidth={isActive ? 2.25 : 1.75} />
                 {!collapsed && <span className="flex-1">{item.label}</span>}
                 {!collapsed && showCount && (
@@ -356,6 +395,13 @@ export function Sidebar({
                     }`}
                     title={collapsed ? item.label : undefined}
                   >
+                    {phase3VisualFixture && !collapsed && (
+                      <GripVertical
+                        aria-hidden="true"
+                        size={12}
+                        className="absolute -left-6 text-on-surface-muted/55"
+                      />
+                    )}
                     <Icon size={18} strokeWidth={isActive ? 2.25 : 1.75} />
                     {!collapsed && <span className="flex-1">{item.label}</span>}
                     {collapsed && (

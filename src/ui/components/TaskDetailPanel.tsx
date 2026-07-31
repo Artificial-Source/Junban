@@ -61,6 +61,21 @@ const MarkdownPreview = lazy(() =>
   import("./MarkdownPreview").then((m) => ({ default: m.MarkdownPreview })),
 );
 
+function localDateTimeInputFromInstant(value: string | null | undefined): string {
+  if (!value) return "";
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) return "";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${instant.getFullYear()}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}T${pad(instant.getHours())}:${pad(instant.getMinutes())}`;
+}
+
+function utcInstantFromLocalDateTimeInput(value: string, currentInstant?: string | null): string {
+  if (currentInstant && localDateTimeInputFromInstant(currentInstant) === value) {
+    return new Date(currentInstant).toISOString();
+  }
+  return new Date(value).toISOString();
+}
+
 interface TaskDetailPanelProps {
   task: TaskDto;
   onClose: () => void;
@@ -133,7 +148,7 @@ export function TaskDetailPanel({
   const [resourceError, setResourceError] = useState<string | null>(null);
   const [showRecurrencePicker, setShowRecurrencePicker] = useState(false);
   const [reminderInput, setReminderInput] = useState(() =>
-    task.remind_at ? task.remind_at.slice(0, 16) : "",
+    localDateTimeInputFromInstant(task.remind_at),
   );
   const [reminderOccurrences, setReminderOccurrences] = useState<ReminderOccurrenceDto[]>([]);
   const [reminderError, setReminderError] = useState<string | null>(null);
@@ -586,7 +601,7 @@ export function TaskDetailPanel({
   const titleOf = (id: string) => relationTitles.get(id) ?? id;
 
   useEffect(() => {
-    setReminderInput(committed.remind_at ? committed.remind_at.slice(0, 16) : "");
+    setReminderInput(localDateTimeInputFromInstant(committed.remind_at));
   }, [committed.id, committed.remind_at]);
 
   useEffect(() => {
@@ -610,7 +625,7 @@ export function TaskDetailPanel({
     setPending(true);
     try {
       requestNotificationPermissionNonBlocking();
-      const iso = new Date(trimmed).toISOString();
+      const iso = utcInstantFromLocalDateTimeInput(trimmed, committed.remind_at);
       const result = await rescheduleReminder(committed.id, iso);
       if (result === null) {
         setReminderError("The reminder could not be scheduled.");

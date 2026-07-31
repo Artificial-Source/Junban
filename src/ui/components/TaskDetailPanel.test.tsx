@@ -8,6 +8,12 @@ import { buildTaskPatch } from "./taskDraft";
 // React 19 act() requires this flag outside @testing-library.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const testEnvironment = (
+  globalThis as unknown as {
+    process: { env: Record<string, string | undefined> };
+  }
+).process.env;
+
 function setInputValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   const proto =
     el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -456,6 +462,78 @@ describe("TaskDetailPanel", () => {
     expect(container.textContent).toMatch(/Recurrence/i);
     expect(container.textContent).toMatch(/Weekly/);
     expect(container.textContent).toMatch(/Reminder/i);
+  });
+
+  it("displays and round-trips a UTC reminder in browser-local time", async () => {
+    const originalTimeZone = testEnvironment.TZ;
+    try {
+      testEnvironment.TZ = "America/Los_Angeles";
+      const task = makeTask({ remind_at: "2026-07-15T18:45:00.000Z" });
+      getTask.mockResolvedValue(task);
+      render(createElement(Host, { task }));
+
+      await act(async () => {
+        (
+          container.querySelector('button[aria-label="Edit reminder"]') as HTMLButtonElement
+        ).click();
+      });
+      const input = container.querySelector(
+        'input[aria-label="Edit reminder time"]',
+      ) as HTMLInputElement;
+      expect(input.value).toBe("2026-07-15T11:45");
+
+      await act(async () => {
+        const schedule = Array.from(container.querySelectorAll("button")).find(
+          (button) => button.textContent?.trim() === "Schedule",
+        ) as HTMLButtonElement;
+        schedule.click();
+        await Promise.resolve();
+      });
+
+      expect(rescheduleReminder).toHaveBeenCalledWith(
+        "11111111-1111-4111-8111-111111111111",
+        "2026-07-15T18:45:00.000Z",
+      );
+    } finally {
+      if (originalTimeZone === undefined) delete testEnvironment.TZ;
+      else testEnvironment.TZ = originalTimeZone;
+    }
+  });
+
+  it("round-trips an offset reminder during the repeated DST hour", async () => {
+    const originalTimeZone = testEnvironment.TZ;
+    try {
+      testEnvironment.TZ = "America/Los_Angeles";
+      const task = makeTask({ remind_at: "2026-11-01T01:30:00-08:00" });
+      getTask.mockResolvedValue(task);
+      render(createElement(Host, { task }));
+
+      await act(async () => {
+        (
+          container.querySelector('button[aria-label="Edit reminder"]') as HTMLButtonElement
+        ).click();
+      });
+      const input = container.querySelector(
+        'input[aria-label="Edit reminder time"]',
+      ) as HTMLInputElement;
+      expect(input.value).toBe("2026-11-01T01:30");
+
+      await act(async () => {
+        const schedule = Array.from(container.querySelectorAll("button")).find(
+          (button) => button.textContent?.trim() === "Schedule",
+        ) as HTMLButtonElement;
+        schedule.click();
+        await Promise.resolve();
+      });
+
+      expect(rescheduleReminder).toHaveBeenCalledWith(
+        "11111111-1111-4111-8111-111111111111",
+        "2026-11-01T09:30:00.000Z",
+      );
+    } finally {
+      if (originalTimeZone === undefined) delete testEnvironment.TZ;
+      else testEnvironment.TZ = originalTimeZone;
+    }
   });
 
   it("uses the wide two-column desktop detail structure with accessible naming", async () => {

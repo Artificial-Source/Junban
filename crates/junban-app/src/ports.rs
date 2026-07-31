@@ -4,17 +4,18 @@ use std::{future::Future, pin::Pin};
 
 use jiff::Timestamp;
 use junban_domain::{
-    ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
-    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    CivilTimeRange, ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId,
+    RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
     ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
-    TaskQuery, TaskRelation, TemplateId,
+    TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId,
 };
 
 use crate::{
     BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, MoveTarget,
-    ProjectDraft, ProjectPatch, ReorderScope, RepositoryError, SavedFilterDraft, SavedFilterPatch,
-    SectionDraft, SectionPatch, TagDraft, TagPatch, TaskListAsOf, TaskListPage, TaskPatch,
-    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext,
+    ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction, RepositoryError,
+    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft, TagPatch,
+    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
 };
 
 pub type RepositoryFuture<'a, T> =
@@ -383,4 +384,97 @@ pub trait Repository: Send + Sync + 'static {
     /// Returns the minimum among pending eligibility (`max(remind_at, next_attempt_at)`),
     /// claimed `claim_expires_at`, and the current lease expiry. No revision/event/receipt.
     fn next_reminder_wake_at(&self) -> RepositoryFuture<'_, Option<Timestamp>>;
+
+    /// Bounded inclusive range of series-owner blocks and slots.
+    fn list_timeblocking_range(
+        &self,
+        query: TimeblockingRangeQuery,
+    ) -> RepositoryFuture<'_, TimeblockingRangePage>;
+
+    fn create_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        draft: TimeBlockDraft,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn patch_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        patch: TimeBlockPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn delete_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn create_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        draft: TimeSlotDraft,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn patch_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        patch: TimeSlotPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn delete_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn append_slot_task(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn remove_slot_task(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn reorder_slot_tasks(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        ordered_ids: Vec<TaskId>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    /// Move or resize share the same range write path.
+    fn set_time_block_range(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        range: CivilTimeRange,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn replan_past_blocks(
+        &self,
+        operation_id: OperationId,
+        action: ReplanPastBlocksAction,
+        now: Timestamp,
+        temporal: TemporalContext,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
 }

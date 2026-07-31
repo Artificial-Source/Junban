@@ -2,10 +2,10 @@
 
 use jiff::{Timestamp, ToSpan, Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
-    ActualMinutes, CommentBody, DreadLevel, EntityName, EstimatedMinutes, FilterQuery, HexColor,
-    IconText, LocalDueTime, MarkdownText, Priority, Project, ProjectId, ProjectView,
-    RecurrenceRule, SavedFilter, Section, SectionId, SortOrder, Tag, TagId, TagName, Task,
-    TaskCursor, TaskId, TaskTitle, Template, TemplateId,
+    ActualMinutes, CivilTimeRange, CommentBody, DreadLevel, EntityName, EstimatedMinutes,
+    FilterQuery, HexColor, IconText, LocalDueTime, MarkdownText, Priority, Project, ProjectId,
+    ProjectView, RecurrenceRule, SavedFilter, Section, SectionId, SortOrder, Tag, TagId, TagName,
+    Task, TaskCursor, TaskId, TaskTitle, Template, TemplateId, TimeBlock, TimeSlot, TimeSlotId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -509,4 +509,73 @@ pub struct MarkOwnerLostReminders {
     pub fence_term: junban_domain::ReminderFenceTerm,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+}
+
+/// Partial time-block update. `None` leaves a field unchanged; `Some(None)` clears nullable fields.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeBlockPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<EntityName>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<CivilTimeRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<Option<HexColor>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Option<TaskId>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot_id: Option<Option<TimeSlotId>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence_rule: Option<Option<RecurrenceRule>>,
+}
+
+/// Partial time-slot update.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeSlotPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<EntityName>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<CivilTimeRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<Option<HexColor>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<Option<ProjectId>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence_rule: Option<Option<RecurrenceRule>>,
+}
+
+/// Inclusive civil-date range for first-party blocks and slots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeblockingRangeQuery {
+    pub from: Date,
+    pub to: Date,
+}
+
+/// Bounded range read of series-owner blocks and slots (no virtual expansion).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeblockingRangePage {
+    pub blocks: Vec<TimeBlock>,
+    pub slots: Vec<TimeSlot>,
+    pub revision: u64,
+}
+
+/// Automatic replan action for unlocked blocks in the prior seven civil days.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplanPastBlocksAction {
+    MoveToToday,
+    MoveToTomorrow,
+    Delete,
+}
+
+/// Helper constructors used by tests and thin service wrappers.
+impl TimeBlockPatch {
+    #[must_use]
+    pub fn range_only(range: CivilTimeRange) -> Self {
+        Self {
+            range: Some(range),
+            ..Self::default()
+        }
+    }
 }

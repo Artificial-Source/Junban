@@ -4065,3 +4065,426 @@ async fn next_reminder_wake_at_is_control_plane_without_revision() {
     assert!(wake.is_some());
     assert_eq!(repo.diagnostics().await.unwrap().revision, before);
 }
+
+// ── Phase 3 timeblocking core ──────────────────────────────────────────────
+
+fn civil_range(date: &str, start_h: i8, end_h: i8) -> junban_domain::CivilTimeRange {
+    use jiff::civil::Time;
+    junban_domain::CivilTimeRange::new(
+        date.parse().unwrap(),
+        Time::constant(start_h, 0, 0, 0),
+        Time::constant(end_h, 0, 0, 0),
+        junban_domain::TimeZoneName::new("UTC").unwrap(),
+    )
+    .unwrap()
+}
+
+fn block_draft(title: &str, date: &str) -> junban_domain::TimeBlockDraft {
+    junban_domain::TimeBlockDraft::new(EntityName::new(title).unwrap(), civil_range(date, 9, 10))
+}
+
+fn slot_draft(title: &str, date: &str) -> junban_domain::TimeSlotDraft {
+    junban_domain::TimeSlotDraft::new(EntityName::new(title).unwrap(), civil_range(date, 9, 12))
+}
+
+#[tokio::test]
+async fn timeblock_crud_event_receipt_and_exact_retry() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let before = repo.diagnostics().await.unwrap().revision;
+
+    let op = operation();
+    let block_id = junban_domain::TimeBlockId::new();
+    let first = repo
+        .create_time_block(op, block_id, block_draft("Focus", "2026-03-08"), now())
+        .await
+        .unwrap();
+    assert!(first.newly_committed);
+    assert_eq!(first.event.revision, (before + 1) as u64);
+    assert_eq!(first.event.event_type.as_str(), "time_block.created");
+    assert_eq!(first.time_block().unwrap().title.as_str(), "Focus");
+    assert_eq!(repo.diagnostics().await.unwrap().revision, before + 1);
+
+    let replay = repo
+        .create_time_block(
+            op,
+            junban_domain::TimeBlockId::new(),
+            block_draft("Focus", "2026-03-08"),
+            now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay, first);
+    assert!(!replay.newly_committed);
+    assert_eq!(repo.diagnostics().await.unwrap().revision, before + 1);
+    assert_eq!(
+        serde_json::to_string(&replay).unwrap(),
+        serde_json::to_string(&first).unwrap()
+    );
+
+    let patched = repo
+        .patch_time_block(
+            operation(),
+            block_id,
+            junban_app::TimeBlockPatch {
+                title: Some(EntityName::new("Deep focus").unwrap()),
+                locked: Some(true),
+                ..Default::default()
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(patched.event.event_type.as_str(), "time_block.updated");
+    assert_eq!(patched.time_block().unwrap().title.as_str(), "Deep focus");
+    assert!(patched.time_block().unwrap().locked);
+
+    let moved = repo
+        .set_time_block_range(
+            operation(),
+            block_id,
+            civil_range("2026-03-09", 10, 11),
+            now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        moved.time_block().unwrap().range.date.to_string(),
+        "2026-03-09"
+    );
+
+    let deleted = repo
+        .delete_time_block(operation(), block_id, now())
+        .await
+        .unwrap();
+    assert_eq!(deleted.event.event_type.as_str(), "time_block.deleted");
+    let page = repo
+        .list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-08".parse().unwrap(),
+            to: "2026-03-09".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    assert!(page.blocks.is_empty());
+}
+
+#[tokio::test]
+async fn timeslot_membership_order_cap_and_slot_delete_nulls_blocks() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let slot_id = junban_domain::TimeSlotId::new();
+    let created = repo
+        .create_time_slot(
+            operation(),
+            slot_id,
+            slot_draft("Deep work", "2026-03-08"),
+            now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.event.event_type.as_str(), "time_slot.created");
+
+    let t1 = create_simple(&repo, "A").await.task().unwrap().id;
+    let t2 = create_simple(&repo, "B").await.task().unwrap().id;
+    let t3 = create_simple(&repo, "C").await.task().unwrap().id;
+
+    let a1 = repo
+        .append_slot_task(operation(), slot_id, t1, now())
+        .await
+        .unwrap();
+    assert_eq!(a1.time_slot().unwrap().task_ids.as_slice(), &[t1]);
+    // Duplicate append is a deterministic no-op membership response.
+    let a1_dup = repo
+        .append_slot_task(operation(), slot_id, t1, now())
+        .await
+        .unwrap();
+    assert_eq!(a1_dup.time_slot().unwrap().task_ids.as_slice(), &[t1]);
+    assert!(a1_dup.newly_committed);
+
+    repo.append_slot_task(operation(), slot_id, t2, now())
+        .await
+        .unwrap();
+    repo.append_slot_task(operation(), slot_id, t3, now())
+        .await
+        .unwrap();
+    let reordered = repo
+        .reorder_slot_tasks(operation(), slot_id, vec![t3, t1, t2], now())
+        .await
+        .unwrap();
+    assert_eq!(
+        reordered.time_slot().unwrap().task_ids.as_slice(),
+        &[t3, t1, t2]
+    );
+    assert!(
+        repo.reorder_slot_tasks(operation(), slot_id, vec![t1, t2], now())
+            .await
+            .is_err()
+    );
+
+    let removed = repo
+        .remove_slot_task(operation(), slot_id, t1, now())
+        .await
+        .unwrap();
+    assert_eq!(removed.time_slot().unwrap().task_ids.as_slice(), &[t3, t2]);
+
+    // Cap at 100.
+    let mut ids = vec![t2, t3];
+    for index in 0..98 {
+        let id = create_simple(&repo, &format!("cap-{index}"))
+            .await
+            .task()
+            .unwrap()
+            .id;
+        ids.push(id);
+        repo.append_slot_task(operation(), slot_id, id, now())
+            .await
+            .unwrap();
+    }
+    assert_eq!(ids.len(), 100);
+    let overflow = create_simple(&repo, "overflow").await.task().unwrap().id;
+    let err = repo
+        .append_slot_task(operation(), slot_id, overflow, now())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, RepositoryError::Validation(_)));
+
+    // Missing task reference is not found.
+    assert_eq!(
+        repo.append_slot_task(operation(), slot_id, TaskId::new(), now())
+            .await
+            .unwrap_err(),
+        RepositoryError::NotFound
+    );
+
+    // Block linked to slot; deleting slot nulls slot_id.
+    let block_id = junban_domain::TimeBlockId::new();
+    let mut draft = block_draft("Linked", "2026-03-08");
+    draft.slot_id = Some(slot_id);
+    repo.create_time_block(operation(), block_id, draft, now())
+        .await
+        .unwrap();
+    repo.delete_time_slot(operation(), slot_id, now())
+        .await
+        .unwrap();
+    let page = repo
+        .list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-08".parse().unwrap(),
+            to: "2026-03-08".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    assert!(page.slots.is_empty());
+    assert_eq!(page.blocks.len(), 1);
+    assert!(page.blocks[0].slot_id.is_none());
+}
+
+#[tokio::test]
+async fn timeblocking_range_bounds_and_item_ceiling() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    assert!(matches!(
+        repo.list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-10".parse().unwrap(),
+            to: "2026-03-01".parse().unwrap(),
+        })
+        .await
+        .unwrap_err(),
+        RepositoryError::Validation(_)
+    ));
+    assert!(matches!(
+        repo.list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-01".parse().unwrap(),
+            to: "2026-04-12".parse().unwrap(), // 43 inclusive days
+        })
+        .await
+        .unwrap_err(),
+        RepositoryError::Validation(_)
+    ));
+
+    // Create one block and one slot inside a valid window.
+    repo.create_time_block(
+        operation(),
+        junban_domain::TimeBlockId::new(),
+        block_draft("B", "2026-03-08"),
+        now(),
+    )
+    .await
+    .unwrap();
+    repo.create_time_slot(
+        operation(),
+        junban_domain::TimeSlotId::new(),
+        slot_draft("S", "2026-03-08"),
+        now(),
+    )
+    .await
+    .unwrap();
+    let page = repo
+        .list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-01".parse().unwrap(),
+            to: "2026-03-08".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.blocks.len(), 1);
+    assert_eq!(page.slots.len(), 1);
+
+    // Force an over-limit count path without inserting 2001 rows.
+    // Inject enough synthetic rows via SQL to trip the combined ceiling.
+    let mut sql = String::new();
+    for index in 0..2000 {
+        sql.push_str(&format!(
+            "INSERT INTO time_blocks(
+                id, title, civil_date, start_time, end_time, timezone, locked,
+                created_at, updated_at, revision
+             ) VALUES (
+                '{id}', 'bulk', '2026-03-08', '09:00:00', '10:00:00', 'UTC', 0,
+                '2026-07-28T12:00:00Z', '2026-07-28T12:00:00Z', 1
+             );\n",
+            id = uuid::Uuid::from_u128(10_000 + index as u128)
+        ));
+    }
+    repo.execute_batch(sql).await.unwrap();
+    assert_eq!(
+        repo.list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-08".parse().unwrap(),
+            to: "2026-03-08".parse().unwrap(),
+        })
+        .await
+        .unwrap_err(),
+        RepositoryError::OperationTooLarge
+    );
+}
+
+#[tokio::test]
+async fn replan_skips_locked_blocks_and_is_atomic() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let today: jiff::civil::Date = "2026-03-15".parse().unwrap();
+    let temporal = TemporalContext::new(today, TimeZone::UTC);
+
+    let unlocked_id = junban_domain::TimeBlockId::new();
+    repo.create_time_block(
+        operation(),
+        unlocked_id,
+        block_draft("Past open", "2026-03-10"),
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let locked_id = junban_domain::TimeBlockId::new();
+    let mut locked = block_draft("Past locked", "2026-03-11");
+    locked.locked = true;
+    repo.create_time_block(operation(), locked_id, locked, now())
+        .await
+        .unwrap();
+
+    // Outside lookback window.
+    repo.create_time_block(
+        operation(),
+        junban_domain::TimeBlockId::new(),
+        block_draft("Too old", "2026-03-01"),
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let before = repo.diagnostics().await.unwrap().revision;
+    let replan = repo
+        .replan_past_blocks(
+            operation(),
+            junban_app::ReplanPastBlocksAction::MoveToToday,
+            now(),
+            temporal.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replan.event.event_type.as_str(), "time_block.replanned");
+    assert_eq!(replan.event.affected.time_block_ids, vec![unlocked_id]);
+    assert_eq!(repo.diagnostics().await.unwrap().revision, before + 1);
+
+    let page = repo
+        .list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-01".parse().unwrap(),
+            to: "2026-03-15".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    let unlocked = page
+        .blocks
+        .iter()
+        .find(|block| block.id == unlocked_id)
+        .unwrap();
+    let locked = page
+        .blocks
+        .iter()
+        .find(|block| block.id == locked_id)
+        .unwrap();
+    assert_eq!(unlocked.range.date, today);
+    assert_eq!(locked.range.date.to_string(), "2026-03-11");
+
+    // Missing slot on create rolls back without advancing revision.
+    let before = repo.diagnostics().await.unwrap().revision;
+    let mut bad = block_draft("Missing slot", "2026-03-15");
+    bad.slot_id = Some(junban_domain::TimeSlotId::new());
+    assert_eq!(
+        repo.create_time_block(operation(), junban_domain::TimeBlockId::new(), bad, now())
+            .await
+            .unwrap_err(),
+        RepositoryError::NotFound
+    );
+    assert_eq!(repo.diagnostics().await.unwrap().revision, before);
+
+    // Delete replan removes unlocked past blocks only.
+    let delete_id = junban_domain::TimeBlockId::new();
+    repo.create_time_block(
+        operation(),
+        delete_id,
+        block_draft("Delete me", "2026-03-12"),
+        now(),
+    )
+    .await
+    .unwrap();
+    let deleted = repo
+        .replan_past_blocks(
+            operation(),
+            junban_app::ReplanPastBlocksAction::Delete,
+            now(),
+            temporal,
+        )
+        .await
+        .unwrap();
+    assert!(deleted.event.affected.time_block_ids.contains(&delete_id));
+    assert!(!deleted.event.affected.time_block_ids.contains(&locked_id));
+}
+
+#[tokio::test]
+async fn timeblock_missing_task_and_project_refs_are_not_found() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let mut draft = block_draft("No task", "2026-03-08");
+    draft.task_id = Some(TaskId::new());
+    assert_eq!(
+        repo.create_time_block(operation(), junban_domain::TimeBlockId::new(), draft, now())
+            .await
+            .unwrap_err(),
+        RepositoryError::NotFound
+    );
+
+    let mut slot = slot_draft("No project", "2026-03-08");
+    slot.project_id = Some(ProjectId::new());
+    assert_eq!(
+        repo.create_time_slot(operation(), junban_domain::TimeSlotId::new(), slot, now())
+            .await
+            .unwrap_err(),
+        RepositoryError::NotFound
+    );
+}

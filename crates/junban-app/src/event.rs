@@ -3,7 +3,8 @@
 use jiff::Timestamp;
 use junban_domain::{
     Comment, CommentId, OperationId, Project, ProjectId, SavedFilter, SavedFilterId, Section,
-    SectionId, Tag, TagId, Task, TaskId, Template, TemplateId, UncompleteOutcome,
+    SectionId, Tag, TagId, Task, TaskId, Template, TemplateId, TimeBlock, TimeBlockId, TimeSlot,
+    TimeSlotId, UncompleteOutcome,
 };
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +47,14 @@ impl EventType {
     pub const RELATION_ADDED: &'static str = "relation.added";
     pub const RELATION_REMOVED: &'static str = "relation.removed";
     pub const OPERATION_UNDONE: &'static str = "operation.undone";
+    pub const TIME_BLOCK_CREATED: &'static str = "time_block.created";
+    pub const TIME_BLOCK_UPDATED: &'static str = "time_block.updated";
+    pub const TIME_BLOCK_DELETED: &'static str = "time_block.deleted";
+    pub const TIME_BLOCK_REPLANNED: &'static str = "time_block.replanned";
+    pub const TIME_SLOT_CREATED: &'static str = "time_slot.created";
+    pub const TIME_SLOT_UPDATED: &'static str = "time_slot.updated";
+    pub const TIME_SLOT_DELETED: &'static str = "time_slot.deleted";
+    pub const TIME_SLOT_MEMBERSHIP_UPDATED: &'static str = "time_slot.membership_updated";
 
     #[must_use]
     pub fn new(value: impl Into<String>) -> Self {
@@ -76,6 +85,8 @@ pub enum ResourceType {
     Comment,
     Relation,
     Operation,
+    TimeBlock,
+    TimeSlot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,6 +159,22 @@ impl ResourceRef {
             id: id.to_string(),
         }
     }
+
+    #[must_use]
+    pub fn time_block(id: TimeBlockId) -> Self {
+        Self {
+            resource_type: ResourceType::TimeBlock,
+            id: id.to_string(),
+        }
+    }
+
+    #[must_use]
+    pub fn time_slot(id: TimeSlotId) -> Self {
+        Self {
+            resource_type: ResourceType::TimeSlot,
+            id: id.to_string(),
+        }
+    }
 }
 
 /// At most one tagged resource snapshot is attached to a single-resource event.
@@ -161,6 +188,8 @@ pub enum ResourceSnapshot {
     Template { template: Template },
     SavedFilter { saved_filter: SavedFilter },
     Comment { comment: Comment },
+    TimeBlock { time_block: TimeBlock },
+    TimeSlot { time_slot: TimeSlot },
 }
 
 impl ResourceSnapshot {
@@ -173,6 +202,32 @@ impl ResourceSnapshot {
     pub fn as_task(&self) -> Option<&Task> {
         match self {
             Self::Task { task } => Some(task),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn time_block(time_block: TimeBlock) -> Self {
+        Self::TimeBlock { time_block }
+    }
+
+    #[must_use]
+    pub fn time_slot(time_slot: TimeSlot) -> Self {
+        Self::TimeSlot { time_slot }
+    }
+
+    #[must_use]
+    pub fn as_time_block(&self) -> Option<&TimeBlock> {
+        match self {
+            Self::TimeBlock { time_block } => Some(time_block),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn as_time_slot(&self) -> Option<&TimeSlot> {
+        match self {
+            Self::TimeSlot { time_slot } => Some(time_slot),
             _ => None,
         }
     }
@@ -194,6 +249,10 @@ pub struct AffectedIds {
     pub saved_filter_ids: Vec<SavedFilterId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comment_ids: Vec<CommentId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_block_ids: Vec<TimeBlockId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_slot_ids: Vec<TimeSlotId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -268,6 +327,22 @@ impl CommittedMutation {
             .snapshot
             .as_ref()
             .and_then(ResourceSnapshot::as_task)
+    }
+
+    #[must_use]
+    pub fn time_block(&self) -> Option<&TimeBlock> {
+        self.event
+            .snapshot
+            .as_ref()
+            .and_then(ResourceSnapshot::as_time_block)
+    }
+
+    #[must_use]
+    pub fn time_slot(&self) -> Option<&TimeSlot> {
+        self.event
+            .snapshot
+            .as_ref()
+            .and_then(ResourceSnapshot::as_time_slot)
     }
 }
 

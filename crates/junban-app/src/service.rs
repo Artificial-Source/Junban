@@ -4,21 +4,23 @@ use std::sync::Arc;
 
 use jiff::{Timestamp, Zoned, civil::Date};
 use junban_domain::{
-    ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
+    CivilTimeRange, ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
     DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, EntityName, FilterQuery, HexColor,
     MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
     ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId, TagId,
     TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskTitle, TemplateId,
-    ValidationError, validate_owner_lost_mark_limit, validate_reminder_claim_limit,
-    validate_reminder_lease_secs,
+    TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId, ValidationError,
+    validate_owner_lost_mark_limit, validate_reminder_claim_limit, validate_reminder_lease_secs,
+    validate_timeblock_date_range,
 };
 
 use crate::{
     AppError, BulkAction, CatalogSnapshot, CommentPatch, CommittedEvent, CommittedMutation,
-    EventCatchUp, MoveTarget, ProjectDraft, ProjectPatch, ReorderScope, Repository,
-    RepositoryError, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft,
-    TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext,
+    EventCatchUp, MoveTarget, ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction,
+    Repository, RepositoryError, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch,
+    TagDraft, TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft,
+    TemplatePatch, TemporalContext, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage,
+    TimeblockingRangeQuery,
 };
 
 pub trait EventSink: Send + Sync + 'static {
@@ -763,6 +765,177 @@ where
             .map_err(Into::into)
     }
 
+    pub async fn list_timeblocking_range(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> Result<TimeblockingRangePage, AppError> {
+        validate_timeblock_date_range(from, to)?;
+        self.repository
+            .list_timeblocking_range(TimeblockingRangeQuery { from, to })
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn create_time_block(
+        &self,
+        operation_id: OperationId,
+        draft: TimeBlockDraft,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .create_time_block(operation_id, TimeBlockId::new(), draft, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn patch_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        patch: TimeBlockPatch,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .patch_time_block(operation_id, block_id, patch, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn delete_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .delete_time_block(operation_id, block_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn create_time_slot(
+        &self,
+        operation_id: OperationId,
+        draft: TimeSlotDraft,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .create_time_slot(operation_id, TimeSlotId::new(), draft, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn patch_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        patch: TimeSlotPatch,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .patch_time_slot(operation_id, slot_id, patch, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn delete_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .delete_time_slot(operation_id, slot_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn append_slot_task(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .append_slot_task(operation_id, slot_id, task_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn remove_slot_task(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .remove_slot_task(operation_id, slot_id, task_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn reorder_slot_tasks(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        ordered_ids: Vec<TaskId>,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .reorder_slot_tasks(operation_id, slot_id, ordered_ids, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn move_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        range: CivilTimeRange,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .set_time_block_range(operation_id, block_id, range, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn resize_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        range: CivilTimeRange,
+    ) -> Result<CommittedMutation, AppError> {
+        // Move and resize share one range-write implementation.
+        self.move_time_block(operation_id, block_id, range).await
+    }
+
+    pub async fn replan_past_blocks(
+        &self,
+        operation_id: OperationId,
+        action: ReplanPastBlocksAction,
+    ) -> Result<CommittedMutation, AppError> {
+        self.replan_past_blocks_with(operation_id, action, TemporalContext::sample_now())
+            .await
+    }
+
+    /// Internal/test seam with an explicit sampled civil today.
+    pub async fn replan_past_blocks_with(
+        &self,
+        operation_id: OperationId,
+        action: ReplanPastBlocksAction,
+        temporal: TemporalContext,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .replan_past_blocks(operation_id, action, Timestamp::now(), temporal)
+                .await,
+        )
+    }
+
     fn commit(
         &self,
         result: Result<CommittedMutation, RepositoryError>,
@@ -1262,6 +1435,116 @@ mod tests {
         fn next_reminder_wake_at(&self) -> crate::RepositoryFuture<'_, Option<Timestamp>> {
             self.calls.lock().unwrap().push("next_reminder_wake_at");
             Box::pin(async { Ok(None) })
+        }
+        fn list_timeblocking_range(
+            &self,
+            _: TimeblockingRangeQuery,
+        ) -> crate::RepositoryFuture<'_, TimeblockingRangePage> {
+            self.calls.lock().unwrap().push("list_timeblocking_range");
+            Box::pin(async {
+                Ok(TimeblockingRangePage {
+                    blocks: Vec::new(),
+                    slots: Vec::new(),
+                    revision: 0,
+                })
+            })
+        }
+        fn create_time_block(
+            &self,
+            _: OperationId,
+            _: TimeBlockId,
+            _: TimeBlockDraft,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("create_time_block")
+        }
+        fn patch_time_block(
+            &self,
+            _: OperationId,
+            _: TimeBlockId,
+            _: TimeBlockPatch,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("patch_time_block")
+        }
+        fn delete_time_block(
+            &self,
+            _: OperationId,
+            _: TimeBlockId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("delete_time_block")
+        }
+        fn create_time_slot(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: TimeSlotDraft,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("create_time_slot")
+        }
+        fn patch_time_slot(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: TimeSlotPatch,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("patch_time_slot")
+        }
+        fn delete_time_slot(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("delete_time_slot")
+        }
+        fn append_slot_task(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: TaskId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("append_slot_task")
+        }
+        fn remove_slot_task(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: TaskId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("remove_slot_task")
+        }
+        fn reorder_slot_tasks(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: Vec<TaskId>,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("reorder_slot_tasks")
+        }
+        fn set_time_block_range(
+            &self,
+            _: OperationId,
+            _: TimeBlockId,
+            _: CivilTimeRange,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("set_time_block_range")
+        }
+        fn replan_past_blocks(
+            &self,
+            _: OperationId,
+            _: ReplanPastBlocksAction,
+            _: Timestamp,
+            _: TemporalContext,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("replan_past_blocks")
         }
     }
 

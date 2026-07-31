@@ -11,6 +11,7 @@ mod rows;
 #[cfg(feature = "scale-bench")]
 pub mod scale_seed;
 mod task_ops;
+mod timeblock_ops;
 mod tx;
 mod undo_ops;
 
@@ -27,16 +28,16 @@ use fs4::FileExt;
 use jiff::Timestamp;
 use junban_app::{
     BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, MoveTarget,
-    ProjectDraft, ProjectPatch, ReorderScope, Repository, RepositoryError, RepositoryFuture,
-    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft, TagPatch,
-    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext,
+    ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction, Repository, RepositoryError,
+    RepositoryFuture, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft,
+    TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
 };
 use junban_domain::{
-    ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
-    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    CivilTimeRange, ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId,
+    RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
     ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
-    TaskQuery, TaskRelation, TemplateId,
+    TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId,
 };
 use rusqlite::Connection;
 use thiserror::Error;
@@ -969,6 +970,195 @@ impl Repository for SqliteRepository {
     fn next_reminder_wake_at(&self) -> RepositoryFuture<'_, Option<Timestamp>> {
         mut_cmd!(self, NextReminderWakeAt {})
     }
+    fn list_timeblocking_range(
+        &self,
+        query: TimeblockingRangeQuery,
+    ) -> RepositoryFuture<'_, TimeblockingRangePage> {
+        mut_cmd!(self, ListTimeblockingRange { query })
+    }
+    fn create_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        draft: TimeBlockDraft,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateTimeBlock {
+                operation_id,
+                block_id,
+                draft,
+                now
+            }
+        )
+    }
+    fn patch_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        patch: TimeBlockPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            PatchTimeBlock {
+                operation_id,
+                block_id,
+                patch,
+                now
+            }
+        )
+    }
+    fn delete_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteTimeBlock {
+                operation_id,
+                block_id,
+                now
+            }
+        )
+    }
+    fn create_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        draft: TimeSlotDraft,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateTimeSlot {
+                operation_id,
+                slot_id,
+                draft,
+                now
+            }
+        )
+    }
+    fn patch_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        patch: TimeSlotPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            PatchTimeSlot {
+                operation_id,
+                slot_id,
+                patch,
+                now
+            }
+        )
+    }
+    fn delete_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteTimeSlot {
+                operation_id,
+                slot_id,
+                now
+            }
+        )
+    }
+    fn append_slot_task(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            AppendSlotTask {
+                operation_id,
+                slot_id,
+                task_id,
+                now
+            }
+        )
+    }
+    fn remove_slot_task(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            RemoveSlotTask {
+                operation_id,
+                slot_id,
+                task_id,
+                now
+            }
+        )
+    }
+    fn reorder_slot_tasks(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        ordered_ids: Vec<TaskId>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            ReorderSlotTasks {
+                operation_id,
+                slot_id,
+                ordered_ids,
+                now
+            }
+        )
+    }
+    fn set_time_block_range(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        range: CivilTimeRange,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            SetTimeBlockRange {
+                operation_id,
+                block_id,
+                range,
+                now
+            }
+        )
+    }
+    fn replan_past_blocks(
+        &self,
+        operation_id: OperationId,
+        action: ReplanPastBlocksAction,
+        now: Timestamp,
+        temporal: TemporalContext,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            ReplanPastBlocks {
+                operation_id,
+                action,
+                now,
+                temporal
+            }
+        )
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1287,6 +1477,85 @@ enum Command {
     },
     NextReminderWakeAt {
         reply: oneshot::Sender<Result<Option<Timestamp>, RepositoryError>>,
+    },
+    ListTimeblockingRange {
+        query: TimeblockingRangeQuery,
+        reply: oneshot::Sender<Result<TimeblockingRangePage, RepositoryError>>,
+    },
+    CreateTimeBlock {
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        draft: TimeBlockDraft,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PatchTimeBlock {
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        patch: TimeBlockPatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteTimeBlock {
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    CreateTimeSlot {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        draft: TimeSlotDraft,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PatchTimeSlot {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        patch: TimeSlotPatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteTimeSlot {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    AppendSlotTask {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    RemoveSlotTask {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ReorderSlotTasks {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        ordered_ids: Vec<TaskId>,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    SetTimeBlockRange {
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        range: CivilTimeRange,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ReplanPastBlocks {
+        operation_id: OperationId,
+        action: ReplanPastBlocksAction,
+        now: Timestamp,
+        temporal: TemporalContext,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
     #[cfg(test)]
     Diagnostics(oneshot::Sender<Result<Diagnostics, RepositoryError>>),
@@ -1929,6 +2198,170 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
             }
             Command::NextReminderWakeAt { reply } => {
                 let _ = reply.send(reminder_ops::next_reminder_wake_at(connection));
+            }
+            Command::ListTimeblockingRange { query, reply } => {
+                let _ = reply.send(timeblock_ops::list_timeblocking_range(connection, query));
+            }
+            Command::CreateTimeBlock {
+                operation_id,
+                block_id,
+                draft,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::create_time_block(
+                    connection,
+                    operation_id,
+                    block_id,
+                    draft,
+                    now,
+                ));
+            }
+            Command::PatchTimeBlock {
+                operation_id,
+                block_id,
+                patch,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::patch_time_block(
+                    connection,
+                    operation_id,
+                    block_id,
+                    patch,
+                    now,
+                ));
+            }
+            Command::DeleteTimeBlock {
+                operation_id,
+                block_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::delete_time_block(
+                    connection,
+                    operation_id,
+                    block_id,
+                    now,
+                ));
+            }
+            Command::CreateTimeSlot {
+                operation_id,
+                slot_id,
+                draft,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::create_time_slot(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    draft,
+                    now,
+                ));
+            }
+            Command::PatchTimeSlot {
+                operation_id,
+                slot_id,
+                patch,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::patch_time_slot(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    patch,
+                    now,
+                ));
+            }
+            Command::DeleteTimeSlot {
+                operation_id,
+                slot_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::delete_time_slot(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    now,
+                ));
+            }
+            Command::AppendSlotTask {
+                operation_id,
+                slot_id,
+                task_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::append_slot_task(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    task_id,
+                    now,
+                ));
+            }
+            Command::RemoveSlotTask {
+                operation_id,
+                slot_id,
+                task_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::remove_slot_task(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    task_id,
+                    now,
+                ));
+            }
+            Command::ReorderSlotTasks {
+                operation_id,
+                slot_id,
+                ordered_ids,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::reorder_slot_tasks(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    ordered_ids,
+                    now,
+                ));
+            }
+            Command::SetTimeBlockRange {
+                operation_id,
+                block_id,
+                range,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::set_time_block_range(
+                    connection,
+                    operation_id,
+                    block_id,
+                    range,
+                    now,
+                ));
+            }
+            Command::ReplanPastBlocks {
+                operation_id,
+                action,
+                now,
+                temporal,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::replan_past_blocks(
+                    connection,
+                    operation_id,
+                    action,
+                    now,
+                    temporal,
+                ));
             }
             #[cfg(test)]
             Command::Diagnostics(reply) => {

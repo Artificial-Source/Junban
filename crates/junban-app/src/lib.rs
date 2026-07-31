@@ -20,9 +20,10 @@ pub use requests::{
     ACTIVITY_PAGE_DEFAULT, ACTIVITY_PAGE_MAX, BulkAction, BulkSchedule, BulkTagChange,
     CatalogSnapshot, ClaimRemindersRequest, CommentPatch, DismissReminder, MarkOwnerLostReminders,
     MoveTarget, OrderAnchor, ProjectDraft, ProjectPatch, ReminderLeaseRequest, ReorderScope,
-    RescheduleReminder, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch,
-    SettleReminderDelivered, SettleReminderFailed, TagDraft, TagPatch, TaskListAsOf, TaskListPage,
-    TaskPatch, TemplateApply, TemplateDraft, TemplatePatch, TemporalContext,
+    ReplanPastBlocksAction, RescheduleReminder, SavedFilterDraft, SavedFilterPatch, SectionDraft,
+    SectionPatch, SettleReminderDelivered, SettleReminderFailed, TagDraft, TagPatch, TaskListAsOf,
+    TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch, TemporalContext,
+    TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
 };
 pub use service::{EventSink, JunbanService};
 

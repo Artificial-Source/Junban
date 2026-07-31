@@ -13,7 +13,8 @@ use junban_domain::{
     IconText, LocalDueTime, MarkdownText, Priority, Project, ProjectId, ProjectView, QuickEntry,
     RecurrenceRule, RelationKind, SavedFilter, Section, SectionId, SortOrder, Tag, TagId, TagName,
     Task, TaskActivity, TaskActivityAction, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort,
-    TaskStatus, TaskTitle, TaskViewPreset, Template, TemplateId, TextImportDraft, ValidationError,
+    TaskStatus, TaskTitle, TaskViewPreset, Template, TemplateId, TextImportDraft, TimeBlock,
+    TimeSlot, ValidationError,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -1296,6 +1297,8 @@ pub enum ResourceTypeDto {
     Comment,
     Relation,
     Operation,
+    TimeBlock,
+    TimeSlot,
 }
 
 impl From<ResourceType> for ResourceTypeDto {
@@ -1310,6 +1313,8 @@ impl From<ResourceType> for ResourceTypeDto {
             ResourceType::Comment => Self::Comment,
             ResourceType::Relation => Self::Relation,
             ResourceType::Operation => Self::Operation,
+            ResourceType::TimeBlock => Self::TimeBlock,
+            ResourceType::TimeSlot => Self::TimeSlot,
         }
     }
 }
@@ -1339,6 +1344,8 @@ pub enum ResourceSnapshotDto {
     Template { template: TemplateDto },
     SavedFilter { saved_filter: SavedFilterDto },
     Comment { comment: CommentDto },
+    TimeBlock { time_block: TimeBlockDto },
+    TimeSlot { time_slot: TimeSlotDto },
 }
 
 impl From<ResourceSnapshot> for ResourceSnapshotDto {
@@ -1361,6 +1368,120 @@ impl From<ResourceSnapshot> for ResourceSnapshotDto {
             ResourceSnapshot::Comment { comment } => Self::Comment {
                 comment: comment.into(),
             },
+            ResourceSnapshot::TimeBlock { time_block } => Self::TimeBlock {
+                time_block: time_block.into(),
+            },
+            ResourceSnapshot::TimeSlot { time_slot } => Self::TimeSlot {
+                time_slot: time_slot.into(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TimeBlockDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub id: String,
+    pub title: String,
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub start: String,
+    pub end: String,
+    pub time_zone: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    pub locked: bool,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence_rule: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence_parent_id: Option<String>,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: Timestamp,
+    pub revision: u64,
+}
+
+impl From<TimeBlock> for TimeBlockDto {
+    fn from(block: TimeBlock) -> Self {
+        Self {
+            id: block.id.to_string(),
+            title: block.title.to_string(),
+            date: block.range.date,
+            start: block.range.start.to_string(),
+            end: block.range.end.to_string(),
+            time_zone: block.range.time_zone.to_string(),
+            color: block.color.map(|color| color.to_string()),
+            locked: block.locked,
+            task_id: block.task_id.map(|id| id.to_string()),
+            slot_id: block.slot_id.map(|id| id.to_string()),
+            recurrence_rule: block.recurrence_rule.map(|rule| rule.to_string()),
+            recurrence_parent_id: block.recurrence_parent_id.map(|id| id.to_string()),
+            created_at: block.created_at,
+            updated_at: block.updated_at,
+            revision: block.revision,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TimeSlotDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub id: String,
+    pub title: String,
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub start: String,
+    pub end: String,
+    pub time_zone: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence_rule: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence_parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_ids: Vec<String>,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: Timestamp,
+    pub revision: u64,
+}
+
+impl From<TimeSlot> for TimeSlotDto {
+    fn from(slot: TimeSlot) -> Self {
+        Self {
+            id: slot.id.to_string(),
+            title: slot.title.to_string(),
+            date: slot.range.date,
+            start: slot.range.start.to_string(),
+            end: slot.range.end.to_string(),
+            time_zone: slot.range.time_zone.to_string(),
+            color: slot.color.map(|color| color.to_string()),
+            project_id: slot.project_id.map(|id| id.to_string()),
+            recurrence_rule: slot.recurrence_rule.map(|rule| rule.to_string()),
+            recurrence_parent_id: slot.recurrence_parent_id.map(|id| id.to_string()),
+            task_ids: slot
+                .task_ids
+                .as_slice()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            created_at: slot.created_at,
+            updated_at: slot.updated_at,
+            revision: slot.revision,
         }
     }
 }
@@ -1381,6 +1502,10 @@ pub struct AffectedIdsDto {
     pub saved_filter_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comment_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_block_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_slot_ids: Vec<String>,
 }
 
 impl From<AffectedIds> for AffectedIdsDto {
@@ -1397,6 +1522,16 @@ impl From<AffectedIds> for AffectedIdsDto {
                 .map(ToString::to_string)
                 .collect(),
             comment_ids: value.comment_ids.iter().map(ToString::to_string).collect(),
+            time_block_ids: value
+                .time_block_ids
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            time_slot_ids: value
+                .time_slot_ids
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
         }
     }
 }

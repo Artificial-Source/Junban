@@ -616,6 +616,8 @@ impl Modify for SecurityAddon {
         dto::ResourceTypeDto,
         dto::ResourceRefDto,
         dto::ResourceSnapshotDto,
+        dto::TimeBlockDto,
+        dto::TimeSlotDto,
         dto::AffectedIdsDto,
         dto::ResyncScopeDto,
         dto::CommittedEventDto,

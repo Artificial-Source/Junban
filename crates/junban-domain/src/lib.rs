@@ -57,7 +57,9 @@ pub use task::{
 };
 pub use text_import::{MAX_TEXT_IMPORT_CHARS, TextImportDraft, parse_text_import};
 pub use timeblock::{
-    CivilTimeRange, MAX_SLOT_MEMBERSHIP, OrderedSlotMembership, TimeBlockDraft, TimeSlotDraft,
+    CivilTimeRange, MAX_SLOT_MEMBERSHIP, MAX_TIMEBLOCK_RANGE_DAYS, MAX_TIMEBLOCK_RANGE_ITEMS,
+    OrderedSlotMembership, REPLAN_LOOKBACK_DAYS, TimeBlock, TimeBlockDraft, TimeSlot,
+    TimeSlotDraft, replan_window, validate_timeblock_date_range,
 };
 pub use values::{
     ActualMinutes, CommentBody, DreadLevel, EntityName, EstimatedMinutes, FilterQuery, HexColor,

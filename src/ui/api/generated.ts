@@ -733,6 +733,8 @@ export interface components {
       tag_ids?: string[];
       task_ids?: string[];
       template_ids?: string[];
+      time_block_ids?: string[];
+      time_slot_ids?: string[];
     };
     ApplyTemplateRequest: {
       /** Format: uuid */
@@ -1245,6 +1247,16 @@ export interface components {
           comment: components["schemas"]["CommentDto"];
           /** @enum {string} */
           resource_type: "comment";
+        }
+      | {
+          /** @enum {string} */
+          resource_type: "time_block";
+          time_block: components["schemas"]["TimeBlockDto"];
+        }
+      | {
+          /** @enum {string} */
+          resource_type: "time_slot";
+          time_slot: components["schemas"]["TimeSlotDto"];
         };
     /** @enum {string} */
     ResourceTypeDto:
@@ -1256,7 +1268,9 @@ export interface components {
       | "saved_filter"
       | "comment"
       | "relation"
-      | "operation";
+      | "operation"
+      | "time_block"
+      | "time_slot";
     ResyncScopeDto: {
       catalog: boolean;
       tasks: boolean;
@@ -1453,6 +1467,54 @@ export interface components {
     };
     TextImportResponse: {
       drafts: components["schemas"]["TextImportDraftDto"][];
+    };
+    TimeBlockDto: {
+      color?: string | null;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date */
+      date: string;
+      end: string;
+      /** Format: uuid */
+      id: string;
+      locked: boolean;
+      /** Format: uuid */
+      recurrence_parent_id?: string | null;
+      recurrence_rule?: string | null;
+      /** Format: int64 */
+      revision: number;
+      /** Format: uuid */
+      slot_id?: string | null;
+      start: string;
+      /** Format: uuid */
+      task_id?: string | null;
+      time_zone: string;
+      title: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    TimeSlotDto: {
+      color?: string | null;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date */
+      date: string;
+      end: string;
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      project_id?: string | null;
+      /** Format: uuid */
+      recurrence_parent_id?: string | null;
+      recurrence_rule?: string | null;
+      /** Format: int64 */
+      revision: number;
+      start: string;
+      task_ids?: string[];
+      time_zone: string;
+      title: string;
+      /** Format: date-time */
+      updated_at: string;
     };
   };
   responses: never;

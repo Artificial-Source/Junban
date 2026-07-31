@@ -5486,6 +5486,18 @@
             "items": {
               "type": "string"
             }
+          },
+          "time_block_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "time_slot_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -6944,6 +6956,32 @@
                 "enum": ["comment"]
               }
             }
+          },
+          {
+            "type": "object",
+            "required": ["time_block", "resource_type"],
+            "properties": {
+              "resource_type": {
+                "type": "string",
+                "enum": ["time_block"]
+              },
+              "time_block": {
+                "$ref": "#/components/schemas/TimeBlockDto"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["time_slot", "resource_type"],
+            "properties": {
+              "resource_type": {
+                "type": "string",
+                "enum": ["time_slot"]
+              },
+              "time_slot": {
+                "$ref": "#/components/schemas/TimeSlotDto"
+              }
+            }
           }
         ]
       },
@@ -6958,7 +6996,9 @@
           "saved_filter",
           "comment",
           "relation",
-          "operation"
+          "operation",
+          "time_block",
+          "time_slot"
         ]
       },
       "ResyncScopeDto": {
@@ -7479,6 +7519,146 @@
             "items": {
               "$ref": "#/components/schemas/TextImportDraftDto"
             }
+          }
+        }
+      },
+      "TimeBlockDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "date",
+          "start",
+          "end",
+          "time_zone",
+          "locked",
+          "created_at",
+          "updated_at",
+          "revision"
+        ],
+        "properties": {
+          "color": {
+            "type": ["string", "null"]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "end": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "recurrence_parent_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "recurrence_rule": {
+            "type": ["string", "null"]
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "slot_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "start": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TimeSlotDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "date",
+          "start",
+          "end",
+          "time_zone",
+          "created_at",
+          "updated_at",
+          "revision"
+        ],
+        "properties": {
+          "color": {
+            "type": ["string", "null"]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "end": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "recurrence_parent_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "recurrence_rule": {
+            "type": ["string", "null"]
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "start": {
+            "type": "string"
+          },
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }

@@ -115,6 +115,28 @@ describe("useReminderDelivery", () => {
     expect(settleReminderFailed).not.toHaveBeenCalled();
   });
 
+  it("recovers expired claims before a replacement owner claims for redelivery", async () => {
+    const onInApp = vi.fn().mockResolvedValue(undefined);
+    markOwnerLostReminders.mockResolvedValue({ marked: 1 });
+
+    renderHook(() => useReminderDelivery({ enabled: true, onInApp }));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(markOwnerLostReminders).toHaveBeenCalledWith({ fence_term: "fence-1" });
+    expect(markOwnerLostReminders.mock.invocationCallOrder[0]).toBeLessThan(
+      claimDueReminders.mock.invocationCallOrder[0]!,
+    );
+    expect(onInApp).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "task-1", title: "Ship docs" }),
+    );
+  });
+
   it("settles failed when presentation throws", async () => {
     const onInApp = vi.fn().mockRejectedValue(new Error("toast failed"));
 

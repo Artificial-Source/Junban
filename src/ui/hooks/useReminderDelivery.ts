@@ -247,20 +247,40 @@ export function useReminderDelivery({
 
     const acquire = async () => {
       if (!mounted || fenceTerm) return;
+      let acquiredTerm: string | null = null;
+      const releaseAcquired = async () => {
+        const term = acquiredTerm;
+        acquiredTerm = null;
+        if (!term) return;
+        try {
+          await releaseReminderLease({ fence_term: term });
+        } catch {
+          // Best-effort release after failed recovery or teardown.
+        }
+      };
+
       try {
         const lease = await acquireReminderLease({ lease_secs: REMINDER_LEASE_SECS });
+        acquiredTerm = lease.fence_term;
         if (!mounted) {
-          try {
-            await releaseReminderLease({ fence_term: lease.fence_term });
-          } catch {
-            // ignore
-          }
+          await releaseAcquired();
           return;
         }
-        fenceTerm = lease.fence_term;
+
+        // A new fence may have inherited claims from a browser that crashed
+        // before settling them. Recover those rows before any new claim.
+        await markOwnerLostReminders({ fence_term: acquiredTerm });
+        if (!mounted) {
+          await releaseAcquired();
+          return;
+        }
+
+        fenceTerm = acquiredTerm;
+        acquiredTerm = null;
         startRenew();
         await claimAndDeliver();
       } catch {
+        await releaseAcquired();
         // A later wake will retry acquisition.
       }
     };

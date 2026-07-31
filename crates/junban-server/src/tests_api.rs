@@ -17,7 +17,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use jiff::{Timestamp, ToSpan};
-use junban_app::{EventType, ResourceRef, ResyncScope};
+use junban_app::{EventType, Repository, ResourceRef, ResyncScope};
 use junban_domain::{OperationId, TaskId};
 use junban_storage::ProfileOwner;
 use serde_json::{Value, json};
@@ -1556,6 +1556,73 @@ async fn reminder_control_plane_claim_attempt_round_trip_without_revision_bump()
         )
         .await;
     assert_eq!(release.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn reminder_owner_lost_route_recovers_crashed_owner_for_redelivery() {
+    let context = TestContext::new();
+    let created = create_task(&context, "crashed-owner").await;
+    let id = TaskId::parse(task_id_from(&created)).unwrap();
+    let due = Timestamp::now()
+        .checked_sub(600.seconds())
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        reschedule(&context, &id.to_string(), &due, None)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    let repository = context._owner.repository();
+    let crashed_at = Timestamp::now().checked_sub(120.seconds()).unwrap();
+    let crashed_lease = repository
+        .acquire_reminder_lease(crashed_at, 1)
+        .await
+        .unwrap();
+    let claimed = repository
+        .claim_due_reminders(crashed_lease.fence_term, crashed_at, 1, 1)
+        .await
+        .unwrap();
+    assert_eq!(claimed.len(), 1);
+
+    let replacement_lease = repository
+        .acquire_reminder_lease(Timestamp::now(), 90)
+        .await
+        .unwrap();
+    let replacement_term = replacement_lease.fence_term.to_string();
+    let sweep = context
+        .request(
+            authenticated(Method::POST, "/api/v1/reminders/owner-lost")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "fence_term": replacement_term }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(sweep.status(), StatusCode::OK);
+    assert_eq!(json(sweep).await["marked"], 1);
+
+    let recovered = repository.list_task_reminders(id).await.unwrap();
+    assert_eq!(recovered.len(), 1);
+    let recovered = &recovered[0];
+    assert_eq!(
+        recovered.state,
+        junban_domain::ReminderOccurrenceState::Pending
+    );
+    let reclaimed = repository
+        .claim_due_reminders(
+            replacement_lease.fence_term,
+            recovered.next_attempt_at.unwrap(),
+            1,
+            90,
+        )
+        .await
+        .unwrap();
+    assert_eq!(reclaimed.len(), 1);
+    assert_eq!(reclaimed[0].task_id, id);
+    assert_eq!(reclaimed[0].claim_attempt, 2);
 }
 
 #[tokio::test]

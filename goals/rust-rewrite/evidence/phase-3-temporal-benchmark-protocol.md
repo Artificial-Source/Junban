@@ -60,7 +60,7 @@ The five-sample command reran on 2026-07-31 after replacing paged analysis reads
 | Warm cgroup memory (median / maximum)      |       16.1523 / 16.5586 MiB |
 | Warm cgroup peak (maximum)                 |                 18.1953 MiB |
 | Idle cgroup memory (median / maximum)      |         2.5898 / 3.4023 MiB |
-| Startup to health (median / maximum)       |        47.698 / 130.047 ms |
+| Startup to health (median / maximum)       |         47.698 / 130.047 ms |
 | Calendar 42-day p95                        |            46.724 ms (pass) |
 | Timeblocking 42-day p95                    |             0.472 ms (pass) |
 | Stats 366-day p95                          |            24.995 ms (pass) |
@@ -68,6 +68,6 @@ The five-sample command reran on 2026-07-31 after replacing paged analysis reads
 | Recurrence complete p95                    |             1.462 ms (pass) |
 | Bulk recurrence complete / reversal p95    | 285.390 / 343.658 ms (pass) |
 | Reminder lease + 20-row claim p95          |             2.307 ms (pass) |
-| Scheduler due-wake wait (median / maximum) |       87.733 / 288.641 ms |
+| Scheduler due-wake wait (median / maximum) |         87.733 / 288.641 ms |
 
 All five samples observed one scheduler due wake after the idle state, claimed and settled exactly 20 reminders, observed an empty post-settlement claim, and produced a 26-revision user-event delta. No Node process appeared in a measured cgroup and every profile cleaned up. `P3-FINAL-007` is fixed.

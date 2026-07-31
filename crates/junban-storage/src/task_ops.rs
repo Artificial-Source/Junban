@@ -28,6 +28,7 @@ use crate::rows::{
     load_comments_for_tasks, load_relations_touching, load_task, load_task_activity_for_tasks,
     parse_sql, storage_error, task_exists, update_task_row,
 };
+use crate::timeblock_ops::{detach_planning_links_for_tasks, load_planning_links_for_tasks};
 use crate::tx::{MutationEffect, canonical_json, mutate};
 use crate::undo_ops::{apply_inverse, validate_post_image};
 
@@ -691,6 +692,7 @@ pub(crate) fn capture_closure(
     for id in &ids {
         tasks.push(load_task(tx, *id)?);
     }
+    let (slot_memberships, block_links) = load_planning_links_for_tasks(tx, &ids)?;
     Ok((
         ids.clone(),
         TaskClosure {
@@ -699,6 +701,8 @@ pub(crate) fn capture_closure(
             relations: load_relations_touching(tx, &ids)?,
             activity: load_task_activity_for_tasks(tx, &ids)?,
             reminders: load_reminder_snapshot(tx, &ids, now)?,
+            slot_memberships,
+            block_links,
         },
     ))
 }
@@ -717,6 +721,9 @@ pub(crate) fn delete_task(
             return Err(RepositoryError::NotFound);
         }
         let (ids, closure) = capture_closure(tx, task_id, now)?;
+        // Explicit detach before task rows so membership/order and block links are
+        // receipt-owned rather than lost to FK CASCADE / SET NULL.
+        let planning = detach_planning_links_for_tasks(tx, &ids, now, revision)?;
         for id in ids.iter().rev() {
             delete_task_row(tx, *id)?;
         }
@@ -739,6 +746,8 @@ pub(crate) fn delete_task(
             .collect();
         let post = PostImage {
             absent_task_ids: ids.clone(),
+            time_slots: planning.post_slots,
+            time_blocks: planning.post_blocks,
             ..PostImage::default()
         };
         let undo = undo_pair(&Inverse::RestoreClosure { closure }, &post)?;
@@ -748,6 +757,8 @@ pub(crate) fn delete_task(
             snapshot: None,
             affected: AffectedIds {
                 task_ids: ids,
+                time_slot_ids: planning.time_slot_ids,
+                time_block_ids: planning.time_block_ids,
                 ..AffectedIds::default()
             },
             resync: ResyncScope::TASKS,
@@ -1051,11 +1062,15 @@ pub(crate) fn bulk_tasks(
                 relations: vec![],
                 activity: vec![],
                 reminders: vec![],
+                slot_memberships: vec![],
+                block_links: vec![],
             };
             let mut task_seen = HashSet::new();
             let mut comment_seen = HashSet::new();
             let mut relation_seen = HashSet::new();
             let mut activity_seen = HashSet::new();
+            let mut membership_seen = HashSet::new();
+            let mut block_link_seen = HashSet::new();
             for task_id in &task_ids {
                 if !task_exists(tx, *task_id)? {
                     return Err(RepositoryError::NotFound);
@@ -1102,7 +1117,19 @@ pub(crate) fn bulk_tasks(
                         merged.reminders.push(reminder);
                     }
                 }
+                for membership in closure.slot_memberships {
+                    let key = (membership.slot_id, membership.task_id);
+                    if membership_seen.insert(key) {
+                        merged.slot_memberships.push(membership);
+                    }
+                }
+                for link in closure.block_links {
+                    if block_link_seen.insert(link.block_id) {
+                        merged.block_links.push(link);
+                    }
+                }
             }
+            let planning = detach_planning_links_for_tasks(tx, &all_ids, now, revision)?;
             for id in all_ids.iter().rev() {
                 if task_exists(tx, *id)? {
                     delete_task_row(tx, *id)?;
@@ -1127,6 +1154,8 @@ pub(crate) fn bulk_tasks(
                 .collect();
             let post = PostImage {
                 absent_task_ids: all_ids.clone(),
+                time_slots: planning.post_slots,
+                time_blocks: planning.post_blocks,
                 ..PostImage::default()
             };
             let undo = undo_pair(&Inverse::RestoreClosure { closure: merged }, &post)?;
@@ -1136,6 +1165,8 @@ pub(crate) fn bulk_tasks(
                 snapshot: None,
                 affected: AffectedIds {
                     task_ids: all_ids,
+                    time_slot_ids: planning.time_slot_ids,
+                    time_block_ids: planning.time_block_ids,
                     ..AffectedIds::default()
                 },
                 resync: ResyncScope::TASKS,

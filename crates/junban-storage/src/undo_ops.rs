@@ -7,7 +7,9 @@ use junban_app::{
     AffectedIds, CommittedMutation, EventType, RepositoryError, ResourceRef, ResourceSnapshot,
     ResyncScope,
 };
-use junban_domain::{CommentId, OperationId, SortOrder, TaskActivityAction, TaskId};
+use junban_domain::{
+    CommentId, OperationId, SortOrder, TaskActivityAction, TaskId, TimeBlockId, TimeSlotId,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
@@ -20,6 +22,9 @@ use crate::reminder_ops::{
 use crate::rows::{
     activity_action_str, delete_task_row, field_activity, insert_task, load_blocks_edges,
     load_comment, load_task, revision_to_i64, storage_error, task_exists, update_task_row,
+};
+use crate::timeblock_ops::{
+    detach_planning_links_for_tasks, load_time_block, load_time_slot, restore_planning_links,
 };
 use crate::tx::{MutationEffect, canonical_json, mutate};
 
@@ -97,13 +102,31 @@ pub(crate) fn validate_post_image(
             return Err(RepositoryError::Conflict);
         }
     }
+    for (id, expected) in &post.time_slots {
+        let slot_id = TimeSlotId::parse(id).map_err(storage_error)?;
+        let actual = load_time_slot(tx, slot_id).map_err(missing_as_conflict)?;
+        if actual.revision != expected.revision
+            || actual.task_ids.as_slice() != expected.task_ids.as_slice()
+        {
+            return Err(RepositoryError::Conflict);
+        }
+    }
+    for (id, expected) in &post.time_blocks {
+        let block_id = TimeBlockId::parse(id).map_err(storage_error)?;
+        let actual = load_time_block(tx, block_id).map_err(missing_as_conflict)?;
+        if actual.revision != expected.revision || actual.task_id != expected.task_id {
+            return Err(RepositoryError::Conflict);
+        }
+    }
     Ok(())
 }
 
 fn restore_closure(
     tx: &rusqlite::Transaction<'_>,
     closure: &TaskClosure,
-) -> Result<(), RepositoryError> {
+    now: Timestamp,
+    revision: u64,
+) -> Result<(Vec<TimeSlotId>, Vec<TimeBlockId>), RepositoryError> {
     let mut remaining: HashMap<_, _> = closure
         .tasks
         .iter()
@@ -189,7 +212,13 @@ fn restore_closure(
     for reminder in &closure.reminders {
         upsert_reminder_occurrence(tx, reminder)?;
     }
-    Ok(())
+    restore_planning_links(
+        tx,
+        &closure.slot_memberships,
+        &closure.block_links,
+        now,
+        revision,
+    )
 }
 
 pub(crate) fn apply_inverse(
@@ -211,26 +240,33 @@ pub(crate) fn apply_inverse(
         Inverse::DeleteTasks { task_ids } => {
             let mut affected = Vec::new();
             let mut activity = Vec::new();
-            for (index, id) in task_ids.iter().enumerate() {
+            for id in task_ids {
                 if task_exists(tx, *id)? {
-                    delete_task_row(tx, *id)?;
                     affected.push(*id);
-                    activity.push(field_activity(
-                        revision,
-                        u32::try_from(index).unwrap_or(u32::MAX),
-                        operation_id,
-                        *id,
-                        TaskActivityAction::Deleted,
-                        None,
-                        None,
-                        None,
-                        now,
-                    ));
                 }
+            }
+            // Explicit planning detach on every delete inverse (create-undo and
+            // delete-redo) so FK CASCADE/SET NULL cannot drop unrecovered links.
+            let planning = detach_planning_links_for_tasks(tx, &affected, now, revision)?;
+            for (index, id) in affected.iter().enumerate() {
+                delete_task_row(tx, *id)?;
+                activity.push(field_activity(
+                    revision,
+                    u32::try_from(index).unwrap_or(u32::MAX),
+                    operation_id,
+                    *id,
+                    TaskActivityAction::Deleted,
+                    None,
+                    None,
+                    None,
+                    now,
+                ));
             }
             Ok((
                 AffectedIds {
                     task_ids: affected,
+                    time_slot_ids: planning.time_slot_ids,
+                    time_block_ids: planning.time_block_ids,
                     ..AffectedIds::default()
                 },
                 activity,
@@ -239,7 +275,7 @@ pub(crate) fn apply_inverse(
             ))
         }
         Inverse::RestoreClosure { closure } => {
-            restore_closure(tx, closure)?;
+            let (time_slot_ids, time_block_ids) = restore_closure(tx, closure, now, revision)?;
             let ids: Vec<_> = closure.tasks.iter().map(|t| t.id).collect();
             let activity = ids
                 .iter()
@@ -261,6 +297,8 @@ pub(crate) fn apply_inverse(
             Ok((
                 AffectedIds {
                     task_ids: ids,
+                    time_slot_ids,
+                    time_block_ids,
                     ..AffectedIds::default()
                 },
                 activity,
@@ -566,6 +604,28 @@ fn capture_redo_post(
     }
     let reminders = load_reminder_snapshot(tx, &affected.task_ids, now)?;
     reminders_into_post(&mut redo_post, reminders);
+    for id in &affected.time_slot_ids {
+        if let Ok(slot) = load_time_slot(tx, *id) {
+            redo_post.time_slots.insert(
+                slot.id.to_string(),
+                crate::ops_types::PostTimeSlotState {
+                    revision: slot.revision,
+                    task_ids: slot.task_ids.as_slice().to_vec(),
+                },
+            );
+        }
+    }
+    for id in &affected.time_block_ids {
+        if let Ok(block) = load_time_block(tx, *id) {
+            redo_post.time_blocks.insert(
+                block.id.to_string(),
+                crate::ops_types::PostTimeBlockState {
+                    revision: block.revision,
+                    task_id: block.task_id,
+                },
+            );
+        }
+    }
     Ok(redo_post)
 }
 

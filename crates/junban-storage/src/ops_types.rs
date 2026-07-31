@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use junban_app::{MoveTarget, OrderAnchor, RepositoryError};
 use junban_domain::{
     Comment, CommentId, ReminderOccurrence, SortOrder, Task, TaskActivity, TaskId, TaskRelation,
+    TimeBlockId, TimeSlotId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +50,36 @@ pub(crate) enum Inverse {
     },
 }
 
+/// Exact slot membership row owned by a deleted task closure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ClosureSlotMembership {
+    pub slot_id: TimeSlotId,
+    pub task_id: TaskId,
+    pub position: i64,
+}
+
+/// Exact time-block task link owned by a deleted task closure.
+/// The block row itself is retained; only `task_id` is cleared on delete.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ClosureBlockLink {
+    pub block_id: TimeBlockId,
+    pub task_id: TaskId,
+}
+
+/// Post-delete slot state used to fail closed if membership changes before undo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PostTimeSlotState {
+    pub revision: u64,
+    pub task_ids: Vec<TaskId>,
+}
+
+/// Post-delete block state used to fail closed if the task link changes before undo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PostTimeBlockState {
+    pub revision: u64,
+    pub task_id: Option<TaskId>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct TaskClosure {
     pub tasks: Vec<Task>,
@@ -57,6 +88,12 @@ pub(crate) struct TaskClosure {
     pub activity: Vec<TaskActivity>,
     #[serde(default)]
     pub reminders: Vec<ReminderOccurrence>,
+    /// Slot memberships for every task in the deleted closure (exact positions).
+    #[serde(default)]
+    pub slot_memberships: Vec<ClosureSlotMembership>,
+    /// Block task links for every task in the deleted closure (blocks remain).
+    #[serde(default)]
+    pub block_links: Vec<ClosureBlockLink>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -78,6 +115,12 @@ pub(crate) struct PostImage {
     /// Expected occurrence rows after the mutation (keyed by task_id/remind_at).
     #[serde(default)]
     pub reminders: BTreeMap<String, ReminderOccurrence>,
+    /// Expected slot membership/revision after the mutation (keyed by slot id).
+    #[serde(default)]
+    pub time_slots: BTreeMap<String, PostTimeSlotState>,
+    /// Expected block task link/revision after the mutation (keyed by block id).
+    #[serde(default)]
+    pub time_blocks: BTreeMap<String, PostTimeBlockState>,
 }
 
 pub(crate) fn post_from_tasks(tasks: impl IntoIterator<Item = Task>) -> PostImage {

@@ -4500,6 +4500,347 @@ fn inverted_civil_range(date: &str) -> junban_domain::CivilTimeRange {
     }
 }
 
+async fn planning_page(repo: &SqliteRepository, date: &str) -> junban_app::TimeblockingRangePage {
+    repo.list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+        from: date.parse().unwrap(),
+        to: date.parse().unwrap(),
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn p3_tb_001_delete_task_preserves_and_restores_planning_links() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let slot_id = junban_domain::TimeSlotId::new();
+    repo.create_time_slot(
+        operation(),
+        slot_id,
+        slot_draft("Focus", "2026-03-08"),
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let keep = create_simple(&repo, "Keep").await.task().unwrap().id;
+    let doomed = create_simple(&repo, "Doomed").await.task().unwrap().id;
+    let tail = create_simple(&repo, "Tail").await.task().unwrap().id;
+    repo.append_slot_task(operation(), slot_id, keep, now())
+        .await
+        .unwrap();
+    repo.append_slot_task(operation(), slot_id, doomed, now())
+        .await
+        .unwrap();
+    repo.append_slot_task(operation(), slot_id, tail, now())
+        .await
+        .unwrap();
+    // Exact middle position before delete: [keep, doomed, tail].
+    assert_eq!(
+        planning_page(&repo, "2026-03-08").await.slots[0]
+            .task_ids
+            .as_slice(),
+        &[keep, doomed, tail]
+    );
+
+    let block_id = junban_domain::TimeBlockId::new();
+    let mut draft = block_draft("Linked", "2026-03-08");
+    draft.task_id = Some(doomed);
+    let block_before = repo
+        .create_time_block(operation(), block_id, draft, now())
+        .await
+        .unwrap()
+        .time_block()
+        .unwrap()
+        .clone();
+    assert_eq!(block_before.task_id, Some(doomed));
+
+    let delete_op = operation();
+    let deleted = repo.delete_task(delete_op, doomed, now()).await.unwrap();
+    assert_eq!(deleted.event.event_type.as_str(), "task.deleted");
+    assert_eq!(deleted.event.affected.task_ids, vec![doomed]);
+    assert_eq!(deleted.event.affected.time_slot_ids, vec![slot_id]);
+    assert_eq!(deleted.event.affected.time_block_ids, vec![block_id]);
+    assert!(deleted.newly_committed);
+
+    // Exact retry is byte-identical and does not emit a second event.
+    let replay = repo.delete_task(delete_op, doomed, now()).await.unwrap();
+    assert_eq!(replay, deleted);
+    assert!(!replay.newly_committed);
+    assert_eq!(
+        serde_json::to_string(&replay).unwrap(),
+        serde_json::to_string(&deleted).unwrap()
+    );
+
+    let page = planning_page(&repo, "2026-03-08").await;
+    assert_eq!(page.slots[0].task_ids.as_slice(), &[keep, tail]);
+    assert_eq!(page.slots[0].revision, deleted.event.revision);
+    assert_eq!(page.slots[0].updated_at, now());
+    assert_eq!(page.blocks[0].task_id, None);
+    assert_eq!(page.blocks[0].revision, deleted.event.revision);
+    assert_eq!(page.blocks[0].updated_at, now());
+
+    let undo_op = operation();
+    let undone = repo.undo(delete_op, undo_op, now()).await.unwrap();
+    assert_eq!(undone.event.affected.task_ids, vec![doomed]);
+    assert_eq!(undone.event.affected.time_slot_ids, vec![slot_id]);
+    assert_eq!(undone.event.affected.time_block_ids, vec![block_id]);
+
+    let restored = planning_page(&repo, "2026-03-08").await;
+    assert_eq!(
+        restored.slots[0].task_ids.as_slice(),
+        &[keep, doomed, tail],
+        "undo must restore exact membership position"
+    );
+    assert_eq!(restored.slots[0].revision, undone.event.revision);
+    assert_eq!(restored.blocks[0].task_id, Some(doomed));
+    assert_eq!(restored.blocks[0].revision, undone.event.revision);
+    assert_eq!(
+        repo.get_task(doomed).await.unwrap().title.as_str(),
+        "Doomed"
+    );
+
+    // Redo deletes again, explicitly clears links, and reports affected planning IDs.
+    let redo_op = operation();
+    let redone = repo.undo(undo_op, redo_op, now()).await.unwrap();
+    assert_eq!(redone.event.affected.task_ids, vec![doomed]);
+    assert_eq!(redone.event.affected.time_slot_ids, vec![slot_id]);
+    assert_eq!(redone.event.affected.time_block_ids, vec![block_id]);
+    let after_redo = planning_page(&repo, "2026-03-08").await;
+    assert_eq!(after_redo.slots[0].task_ids.as_slice(), &[keep, tail]);
+    assert_eq!(after_redo.blocks[0].task_id, None);
+    assert!(matches!(
+        repo.get_task(doomed).await,
+        Err(RepositoryError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn p3_tb_001_delete_closure_restores_descendant_planning_links() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let parent = create_simple(&repo, "Parent").await.task().unwrap().id;
+    let mut child_draft = draft("Child");
+    child_draft.parent_id = Some(parent);
+    let child = repo
+        .create_task(operation(), TaskId::new(), child_draft, now())
+        .await
+        .unwrap()
+        .task()
+        .unwrap()
+        .id;
+
+    let slot_a = junban_domain::TimeSlotId::new();
+    let slot_b = junban_domain::TimeSlotId::new();
+    repo.create_time_slot(operation(), slot_a, slot_draft("A", "2026-03-08"), now())
+        .await
+        .unwrap();
+    repo.create_time_slot(operation(), slot_b, slot_draft("B", "2026-03-08"), now())
+        .await
+        .unwrap();
+    repo.append_slot_task(operation(), slot_a, parent, now())
+        .await
+        .unwrap();
+    repo.append_slot_task(operation(), slot_b, child, now())
+        .await
+        .unwrap();
+
+    let parent_block = junban_domain::TimeBlockId::new();
+    let child_block = junban_domain::TimeBlockId::new();
+    let mut parent_draft = block_draft("Parent block", "2026-03-08");
+    parent_draft.task_id = Some(parent);
+    let mut child_draft_block = block_draft("Child block", "2026-03-08");
+    child_draft_block.task_id = Some(child);
+    repo.create_time_block(operation(), parent_block, parent_draft, now())
+        .await
+        .unwrap();
+    repo.create_time_block(operation(), child_block, child_draft_block, now())
+        .await
+        .unwrap();
+
+    let delete_op = operation();
+    let deleted = repo.delete_task(delete_op, parent, now()).await.unwrap();
+    assert_eq!(deleted.event.affected.task_ids.len(), 2);
+    assert!(deleted.event.affected.task_ids.contains(&parent));
+    assert!(deleted.event.affected.task_ids.contains(&child));
+    assert_eq!(deleted.event.affected.time_slot_ids.len(), 2);
+    assert!(deleted.event.affected.time_slot_ids.contains(&slot_a));
+    assert!(deleted.event.affected.time_slot_ids.contains(&slot_b));
+    assert_eq!(deleted.event.affected.time_block_ids.len(), 2);
+    assert!(
+        deleted
+            .event
+            .affected
+            .time_block_ids
+            .contains(&parent_block)
+    );
+    assert!(deleted.event.affected.time_block_ids.contains(&child_block));
+
+    let after_delete = planning_page(&repo, "2026-03-08").await;
+    assert!(
+        after_delete
+            .slots
+            .iter()
+            .all(|slot| slot.task_ids.is_empty())
+    );
+    assert!(
+        after_delete
+            .blocks
+            .iter()
+            .all(|block| block.task_id.is_none())
+    );
+
+    let undone = repo.undo(delete_op, operation(), now()).await.unwrap();
+    assert_eq!(undone.event.affected.time_slot_ids.len(), 2);
+    assert_eq!(undone.event.affected.time_block_ids.len(), 2);
+
+    let restored = planning_page(&repo, "2026-03-08").await;
+    let slot_a_restored = restored
+        .slots
+        .iter()
+        .find(|slot| slot.id == slot_a)
+        .unwrap();
+    let slot_b_restored = restored
+        .slots
+        .iter()
+        .find(|slot| slot.id == slot_b)
+        .unwrap();
+    assert_eq!(slot_a_restored.task_ids.as_slice(), &[parent]);
+    assert_eq!(slot_b_restored.task_ids.as_slice(), &[child]);
+    let parent_block_restored = restored
+        .blocks
+        .iter()
+        .find(|block| block.id == parent_block)
+        .unwrap();
+    let child_block_restored = restored
+        .blocks
+        .iter()
+        .find(|block| block.id == child_block)
+        .unwrap();
+    assert_eq!(parent_block_restored.task_id, Some(parent));
+    assert_eq!(child_block_restored.task_id, Some(child));
+}
+
+#[tokio::test]
+async fn p3_tb_001_undo_conflicts_when_affected_slot_or_block_changes() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    // Slot-change path.
+    {
+        let slot_id = junban_domain::TimeSlotId::new();
+        repo.create_time_slot(
+            operation(),
+            slot_id,
+            slot_draft("Slot", "2026-03-08"),
+            now(),
+        )
+        .await
+        .unwrap();
+        let doomed = create_simple(&repo, "Slot-doomed").await.task().unwrap().id;
+        let other = create_simple(&repo, "Other").await.task().unwrap().id;
+        repo.append_slot_task(operation(), slot_id, doomed, now())
+            .await
+            .unwrap();
+        repo.append_slot_task(operation(), slot_id, other, now())
+            .await
+            .unwrap();
+
+        let delete_op = operation();
+        let deleted = repo.delete_task(delete_op, doomed, now()).await.unwrap();
+        let revision_after_delete = repo.diagnostics().await.unwrap().revision;
+
+        // Mutate the affected slot after delete.
+        repo.append_slot_task(
+            operation(),
+            slot_id,
+            create_simple(&repo, "Intruder").await.task().unwrap().id,
+            now(),
+        )
+        .await
+        .unwrap();
+        let revision_after_mutate = repo.diagnostics().await.unwrap().revision;
+        assert!(revision_after_mutate > revision_after_delete);
+
+        let before = planning_page(&repo, "2026-03-08").await;
+        assert_eq!(
+            repo.undo(delete_op, operation(), now()).await.unwrap_err(),
+            RepositoryError::Conflict
+        );
+        assert_eq!(
+            repo.diagnostics().await.unwrap().revision,
+            revision_after_mutate
+        );
+        let after = planning_page(&repo, "2026-03-08").await;
+        assert_eq!(
+            before, after,
+            "conflict must leave planning state unchanged"
+        );
+        assert!(matches!(
+            repo.get_task(doomed).await,
+            Err(RepositoryError::NotFound)
+        ));
+        assert_eq!(deleted.event.affected.time_slot_ids, vec![slot_id]);
+    }
+
+    // Block-change path.
+    {
+        let doomed = create_simple(&repo, "Block-doomed")
+            .await
+            .task()
+            .unwrap()
+            .id;
+        let block_id = junban_domain::TimeBlockId::new();
+        let mut draft = block_draft("Linked", "2026-03-09");
+        draft.task_id = Some(doomed);
+        repo.create_time_block(operation(), block_id, draft, now())
+            .await
+            .unwrap();
+
+        let delete_op = operation();
+        repo.delete_task(delete_op, doomed, now()).await.unwrap();
+        let revision_after_delete = repo.diagnostics().await.unwrap().revision;
+
+        // Mutate the affected block after delete (title bump).
+        repo.patch_time_block(
+            operation(),
+            block_id,
+            junban_app::TimeBlockPatch {
+                title: Some(EntityName::new("Changed").unwrap()),
+                ..Default::default()
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+        let revision_after_mutate = repo.diagnostics().await.unwrap().revision;
+        assert!(revision_after_mutate > revision_after_delete);
+
+        let before = planning_page(&repo, "2026-03-09").await;
+        assert_eq!(
+            repo.undo(delete_op, operation(), now()).await.unwrap_err(),
+            RepositoryError::Conflict
+        );
+        assert_eq!(
+            repo.diagnostics().await.unwrap().revision,
+            revision_after_mutate
+        );
+        let after = planning_page(&repo, "2026-03-09").await;
+        assert_eq!(before, after, "conflict must leave block state unchanged");
+        assert!(matches!(
+            repo.get_task(doomed).await,
+            Err(RepositoryError::NotFound)
+        ));
+        assert_eq!(before.blocks[0].title.as_str(), "Changed");
+        assert!(before.blocks[0].task_id.is_none());
+    }
+}
+
 #[tokio::test]
 async fn p3_tb_002_delete_time_slot_bumps_linked_block_revision_and_affected_ids() {
     let directory = TestDir::new();

@@ -1,5 +1,7 @@
 //! First-party time block and time slot persistence.
 
+use std::collections::{BTreeMap, HashMap, HashSet};
+
 use jiff::{Timestamp, ToSpan, civil::Date, civil::Time};
 use junban_app::{
     AffectedIds, CommittedMutation, EventType, ReplanPastBlocksAction, RepositoryError,
@@ -15,6 +17,9 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::Serialize;
 
 use crate::helpers::{constraint_conflict, validation};
+use crate::ops_types::{
+    ClosureBlockLink, ClosureSlotMembership, PostTimeBlockState, PostTimeSlotState,
+};
 use crate::rows::{ensure_project_exists, map_not_found, parse_sql, storage_error, task_exists};
 use crate::tx::{MutationEffect, canonical_json, global_revision, mutate};
 
@@ -932,4 +937,240 @@ fn time_slot_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TimeSlot> {
         updated_at: parse_sql(updated_at, |raw| raw.parse::<Timestamp>())?,
         revision: u64::try_from(revision).map_err(crate::rows::invalid_sql)?,
     })
+}
+
+fn task_id_placeholders(task_ids: &[TaskId]) -> (String, Vec<String>) {
+    let mut placeholders = String::new();
+    for index in 0..task_ids.len() {
+        if index > 0 {
+            placeholders.push(',');
+        }
+        placeholders.push('?');
+    }
+    let params_owned = task_ids.iter().map(ToString::to_string).collect();
+    (placeholders, params_owned)
+}
+
+/// Capture exact planning links owned by `task_ids` before a task-closure delete.
+pub(crate) fn load_planning_links_for_tasks(
+    tx: &Transaction<'_>,
+    task_ids: &[TaskId],
+) -> Result<(Vec<ClosureSlotMembership>, Vec<ClosureBlockLink>), RepositoryError> {
+    if task_ids.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let (placeholders, params_owned) = task_id_placeholders(task_ids);
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_owned
+        .iter()
+        .map(|value| value as &dyn rusqlite::types::ToSql)
+        .collect();
+
+    let mut memberships = Vec::new();
+    {
+        let sql = format!(
+            "SELECT slot_id, task_id, position FROM time_slot_tasks
+             WHERE task_id IN ({placeholders})
+             ORDER BY slot_id, position, task_id"
+        );
+        let mut statement = tx.prepare(&sql).map_err(storage_error)?;
+        let rows = statement
+            .query_map(params_refs.as_slice(), |row| {
+                let slot_id: String = row.get(0)?;
+                let task_id: String = row.get(1)?;
+                let position: i64 = row.get(2)?;
+                Ok(ClosureSlotMembership {
+                    slot_id: parse_sql(slot_id, TimeSlotId::parse)?,
+                    task_id: parse_sql(task_id, TaskId::parse)?,
+                    position,
+                })
+            })
+            .map_err(storage_error)?;
+        for row in rows {
+            memberships.push(row.map_err(storage_error)?);
+        }
+    }
+
+    let mut block_links = Vec::new();
+    {
+        let sql = format!(
+            "SELECT id, task_id FROM time_blocks
+             WHERE task_id IN ({placeholders})
+             ORDER BY id"
+        );
+        let mut statement = tx.prepare(&sql).map_err(storage_error)?;
+        let rows = statement
+            .query_map(params_refs.as_slice(), |row| {
+                let block_id: String = row.get(0)?;
+                let task_id: String = row.get(1)?;
+                Ok(ClosureBlockLink {
+                    block_id: parse_sql(block_id, TimeBlockId::parse)?,
+                    task_id: parse_sql(task_id, TaskId::parse)?,
+                })
+            })
+            .map_err(storage_error)?;
+        for row in rows {
+            block_links.push(row.map_err(storage_error)?);
+        }
+    }
+
+    Ok((memberships, block_links))
+}
+
+/// Result of explicitly detaching planning links before task rows are deleted.
+#[derive(Debug, Default)]
+pub(crate) struct PlanningDetachResult {
+    pub time_slot_ids: Vec<TimeSlotId>,
+    pub time_block_ids: Vec<TimeBlockId>,
+    pub post_slots: BTreeMap<String, PostTimeSlotState>,
+    pub post_blocks: BTreeMap<String, PostTimeBlockState>,
+}
+
+/// Remove membership rows and clear block task links for `task_ids`.
+///
+/// Compacts each affected slot's remaining positions and stamps slot/block
+/// `updated_at`/`revision` with the delete mutation values. Does not delete tasks.
+pub(crate) fn detach_planning_links_for_tasks(
+    tx: &Transaction<'_>,
+    task_ids: &[TaskId],
+    now: Timestamp,
+    revision: u64,
+) -> Result<PlanningDetachResult, RepositoryError> {
+    if task_ids.is_empty() {
+        return Ok(PlanningDetachResult::default());
+    }
+
+    let removed: HashSet<TaskId> = task_ids.iter().copied().collect();
+    let (memberships, block_links) = load_planning_links_for_tasks(tx, task_ids)?;
+
+    let mut slot_ids: HashSet<TimeSlotId> = HashSet::new();
+    for membership in &memberships {
+        slot_ids.insert(membership.slot_id);
+    }
+    let mut block_ids: HashSet<TimeBlockId> = HashSet::new();
+    for link in &block_links {
+        block_ids.insert(link.block_id);
+    }
+
+    let mut result = PlanningDetachResult::default();
+
+    let mut slot_ids: Vec<_> = slot_ids.into_iter().collect();
+    slot_ids.sort_by_key(ToString::to_string);
+    for slot_id in slot_ids {
+        let mut slot = load_time_slot(tx, slot_id)?;
+        let remaining: Vec<TaskId> = slot
+            .task_ids
+            .as_slice()
+            .iter()
+            .copied()
+            .filter(|id| !removed.contains(id))
+            .collect();
+        slot.task_ids = junban_domain::OrderedSlotMembership::new(remaining).map_err(validation)?;
+        slot.updated_at = now;
+        slot.revision = revision;
+        rewrite_slot_membership(tx, slot_id, slot.task_ids.as_slice())?;
+        update_time_slot_meta(tx, &slot)?;
+        result.post_slots.insert(
+            slot_id.to_string(),
+            PostTimeSlotState {
+                revision: slot.revision,
+                task_ids: slot.task_ids.as_slice().to_vec(),
+            },
+        );
+        result.time_slot_ids.push(slot_id);
+    }
+
+    let mut block_ids: Vec<_> = block_ids.into_iter().collect();
+    block_ids.sort_by_key(ToString::to_string);
+    for block_id in block_ids {
+        let mut block = load_time_block(tx, block_id)?;
+        block.task_id = None;
+        block.updated_at = now;
+        block.revision = revision;
+        update_time_block_row(tx, &block)?;
+        result.post_blocks.insert(
+            block_id.to_string(),
+            PostTimeBlockState {
+                revision: block.revision,
+                task_id: None,
+            },
+        );
+        result.time_block_ids.push(block_id);
+    }
+
+    Ok(result)
+}
+
+/// Restore exact block task links and slot membership positions after tasks return.
+///
+/// Callers must have already validated delete post-image slot/block state. Updates
+/// affected metadata to the undo mutation values and returns affected IDs.
+pub(crate) fn restore_planning_links(
+    tx: &Transaction<'_>,
+    memberships: &[ClosureSlotMembership],
+    block_links: &[ClosureBlockLink],
+    now: Timestamp,
+    revision: u64,
+) -> Result<(Vec<TimeSlotId>, Vec<TimeBlockId>), RepositoryError> {
+    let mut slot_ids = HashSet::new();
+    let mut block_ids = HashSet::new();
+
+    for link in block_links {
+        let mut block = match load_time_block(tx, link.block_id) {
+            Ok(block) => block,
+            Err(RepositoryError::NotFound) => return Err(RepositoryError::Conflict),
+            Err(error) => return Err(error),
+        };
+        // Post-image already required task_id=NULL; any non-null link is a conflict.
+        if block.task_id.is_some() {
+            return Err(RepositoryError::Conflict);
+        }
+        block.task_id = Some(link.task_id);
+        block.updated_at = now;
+        block.revision = revision;
+        update_time_block_row(tx, &block)?;
+        block_ids.insert(link.block_id);
+    }
+
+    // Group restored memberships by slot, then insert at exact original positions.
+    let mut by_slot: HashMap<TimeSlotId, Vec<&ClosureSlotMembership>> = HashMap::new();
+    for membership in memberships {
+        by_slot
+            .entry(membership.slot_id)
+            .or_default()
+            .push(membership);
+    }
+    let mut slot_entries: Vec<_> = by_slot.into_iter().collect();
+    slot_entries.sort_by_key(|(slot_id, _)| slot_id.to_string());
+    for (slot_id, mut restored) in slot_entries {
+        let mut slot = match load_time_slot(tx, slot_id) {
+            Ok(slot) => slot,
+            Err(RepositoryError::NotFound) => return Err(RepositoryError::Conflict),
+            Err(error) => return Err(error),
+        };
+        restored.sort_by_key(|item| item.position);
+        let mut ordered = slot.task_ids.as_slice().to_vec();
+        for membership in restored {
+            if ordered.contains(&membership.task_id) {
+                return Err(RepositoryError::Conflict);
+            }
+            let index =
+                usize::try_from(membership.position).map_err(|_| RepositoryError::Conflict)?;
+            if index > ordered.len() {
+                return Err(RepositoryError::Conflict);
+            }
+            ordered.insert(index, membership.task_id);
+        }
+        slot.task_ids = junban_domain::OrderedSlotMembership::new(ordered).map_err(validation)?;
+        slot.updated_at = now;
+        slot.revision = revision;
+        rewrite_slot_membership(tx, slot_id, slot.task_ids.as_slice())?;
+        update_time_slot_meta(tx, &slot)?;
+        slot_ids.insert(slot_id);
+    }
+
+    let mut slot_ids: Vec<_> = slot_ids.into_iter().collect();
+    slot_ids.sort_by_key(ToString::to_string);
+    let mut block_ids: Vec<_> = block_ids.into_iter().collect();
+    block_ids.sort_by_key(ToString::to_string);
+    Ok((slot_ids, block_ids))
 }

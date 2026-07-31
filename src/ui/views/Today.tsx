@@ -1,7 +1,7 @@
 /**
  * Today view: overdue section + today tasks with workload summary.
  * Preserves the legacy header with completion ring.
- * Phase 3 Plan My Day / End of Day controls are absent in Phase 2.
+ * Plan My Day / End of Day / Weekly Review openers are large-desktop only.
  * Create defaults to today when the Rust parser gives no date.
  */
 import { useMemo } from "react";
@@ -25,6 +25,9 @@ interface TodayProps {
     orderedIds: string[],
   ) => void;
   autoFocusTrigger?: number;
+  onPlanMyDay?: () => void;
+  onEndOfDay?: () => void;
+  onWeeklyReview?: () => void;
 }
 
 export function Today({
@@ -34,6 +37,9 @@ export function Today({
   selectedTaskIds,
   onMultiSelect,
   autoFocusTrigger,
+  onPlanMyDay,
+  onEndOfDay,
+  onWeeklyReview,
 }: TodayProps) {
   const today = useToday();
   const { parseQuickEntry, createFromQuickEntry, patchTask } = useTaskMutations();
@@ -101,7 +107,14 @@ export function Today({
   if (loading) {
     return (
       <div>
-        <TodayHeader totalCount={0} todayCompletedCount={0} ringTotal={0} />
+        <TodayHeader
+          totalCount={0}
+          todayCompletedCount={0}
+          ringTotal={0}
+          onPlanMyDay={onPlanMyDay}
+          onEndOfDay={onEndOfDay}
+          onWeeklyReview={onWeeklyReview}
+        />
         <p className="text-sm text-on-surface-muted" role="status">
           Loading tasks…
         </p>
@@ -129,6 +142,9 @@ export function Today({
         totalCount={totalCount}
         todayCompletedCount={todayCompletedCount}
         ringTotal={ringTotal}
+        onPlanMyDay={onPlanMyDay}
+        onEndOfDay={onEndOfDay}
+        onWeeklyReview={onWeeklyReview}
       />
 
       {workloadMinutes > 0 && (

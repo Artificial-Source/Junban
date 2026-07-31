@@ -6,27 +6,43 @@
  *
  * Phase 2 fields live in one draft and commit via a single PATCH on Save.
  * Comments / activity / relations stay as separate resource actions below.
- * Recurrence, reminders, and timeblocking are intentionally absent (later phases).
+ * Phase 3 adds recurrence (draft Save) and reminder controls (dedicated API).
  */
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
-import { X, Trash2, Inbox, Plus, Tag as TagIcon, Link, Search } from "lucide-react";
+import {
+  X,
+  Trash2,
+  Inbox,
+  Plus,
+  Tag as TagIcon,
+  Link,
+  Search,
+  Bell,
+  Repeat,
+  Focus,
+} from "lucide-react";
 import type { TaskDto, TagDto, CommentDto, TaskActivityDto, RelationDto } from "../api/client";
 import {
   getTask,
   listTasks,
+  listTaskReminders,
   createComment as createCommentApi,
   patchComment as patchCommentApi,
   deleteComment as deleteCommentApi,
   generateOperationId,
   taskFromCommittedEvent,
+  type ReminderOccurrenceDto,
 } from "../api/client";
 import { calendarDayKey, formatRelativeDate, todayKey } from "../lib/dates";
 import { wouldCreateParentCycle } from "../lib/taskHierarchy";
 import { useTaskMutations } from "../hooks/useTaskMutations";
 import { useComments, useRelations, useTaskActivity } from "../hooks/useTaskDetail";
 import { useWorkspace } from "../context/WorkspaceContext";
+import { requestNotificationPermissionNonBlocking } from "../hooks/useReminderDelivery";
+import { formatRecurrenceLabel } from "../lib/recurrence";
 import { TaskMutationFeedback } from "./TaskMutationFeedback";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { RecurrencePicker } from "./RecurrencePicker";
 import { buildTaskPatch, draftFromTask, type TaskDraft } from "./taskDraft";
 
 const MarkdownPreview = lazy(() =>
@@ -40,6 +56,8 @@ interface TaskDetailPanelProps {
   onOpenFullPage?: (taskId: string) => void;
   /** Captured before the async detail load isolates the application shell. */
   returnFocusTo?: HTMLElement | null;
+  /** Enter Focus Mode for this task (`?focus=1`). */
+  onEnterFocusMode?: (taskId: string) => void;
 }
 
 export function TaskDetailPanel({
@@ -47,6 +65,7 @@ export function TaskDetailPanel({
   onClose,
   onOpenFullPage,
   returnFocusTo,
+  onEnterFocusMode,
 }: TaskDetailPanelProps) {
   const { catalog, mutationPhase, mutationError, revision } = useWorkspace();
   const {
@@ -60,6 +79,8 @@ export function TaskDetailPanel({
     moveTask,
     addRelation,
     removeRelation,
+    rescheduleReminder,
+    dismissReminder,
   } = useTaskMutations();
   const { comments, loading: commentsLoading, reload: reloadComments } = useComments(task.id);
   const { blocks, blockedBy, reload: reloadRelations } = useRelations(task.id);
@@ -94,6 +115,12 @@ export function TaskDetailPanel({
   const [relKind, setRelKind] = useState<"blocks" | "blocked_by">("blocks");
   const [relationTitles, setRelationTitles] = useState<Map<string, string>>(new Map());
   const [resourceError, setResourceError] = useState<string | null>(null);
+  const [showRecurrencePicker, setShowRecurrencePicker] = useState(false);
+  const [reminderInput, setReminderInput] = useState(() =>
+    task.remind_at ? task.remind_at.slice(0, 16) : "",
+  );
+  const [reminderOccurrences, setReminderOccurrences] = useState<ReminderOccurrenceDto[]>([]);
+  const [reminderError, setReminderError] = useState<string | null>(null);
 
   const titleRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -537,6 +564,91 @@ export function TaskDetailPanel({
 
   const titleOf = (id: string) => relationTitles.get(id) ?? id;
 
+  useEffect(() => {
+    setReminderInput(committed.remind_at ? committed.remind_at.slice(0, 16) : "");
+  }, [committed.id, committed.remind_at]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listTaskReminders(committed.id)
+      .then((response) => {
+        if (!cancelled) setReminderOccurrences(response.reminders);
+      })
+      .catch(() => {
+        if (!cancelled) setReminderOccurrences([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [committed.id, committed.remind_at, revision]);
+
+  const handleSaveReminder = async () => {
+    const trimmed = reminderInput.trim();
+    if (!trimmed) return;
+    setReminderError(null);
+    setPending(true);
+    try {
+      requestNotificationPermissionNonBlocking();
+      const iso = new Date(trimmed).toISOString();
+      const result = await rescheduleReminder(committed.id, iso);
+      if (result === null) {
+        setReminderError("The reminder could not be scheduled.");
+        return;
+      }
+      const next = taskFromCommittedEvent(result.event) ?? (await getTask(committed.id));
+      if (next) setCommitted(next);
+    } catch (caught) {
+      setReminderError(
+        caught instanceof Error ? caught.message : "The reminder could not be scheduled.",
+      );
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const handleClearReminder = async () => {
+    setReminderError(null);
+    setPending(true);
+    try {
+      const result = await dismissReminder(committed.id);
+      if (result === null) {
+        setReminderError("The reminder could not be cleared.");
+        return;
+      }
+      setReminderInput("");
+      const next = taskFromCommittedEvent(result.event) ?? (await getTask(committed.id));
+      if (next) setCommitted(next);
+    } catch (caught) {
+      setReminderError(
+        caught instanceof Error ? caught.message : "The reminder could not be cleared.",
+      );
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const handleSnoozeReminder = async (minutes: number) => {
+    setReminderError(null);
+    setPending(true);
+    try {
+      const base = committed.remind_at ? new Date(committed.remind_at) : new Date();
+      base.setMinutes(base.getMinutes() + minutes);
+      const result = await rescheduleReminder(committed.id, base.toISOString(), "Snooze reminder");
+      if (result === null) {
+        setReminderError("The reminder could not be snoozed.");
+        return;
+      }
+      const next = taskFromCommittedEvent(result.event) ?? (await getTask(committed.id));
+      if (next) setCommitted(next);
+    } catch (caught) {
+      setReminderError(
+        caught instanceof Error ? caught.message : "The reminder could not be snoozed.",
+      );
+    } finally {
+      setPending(false);
+    }
+  };
+
   const dueDay = committed.due_date ? calendarDayKey(committed.due_date) : null;
   const isOverdue = dueDay !== null && committed.status === "pending" && dueDay < todayKey();
   const isCompleted = committed.status === "completed";
@@ -586,6 +698,19 @@ export function TaskDetailPanel({
               )}
             </span>
             <div className="ml-auto flex shrink-0 items-center gap-0.5">
+              {onEnterFocusMode && committed.status === "pending" && (
+                <button
+                  type="button"
+                  onClick={() => onEnterFocusMode(committed.id)}
+                  aria-label="Enter Focus Mode"
+                  className="min-h-7 rounded-md px-2 py-1 text-xs font-medium text-accent-foreground transition-colors hover:bg-accent-action/10"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    <Focus size={14} aria-hidden="true" />
+                    Focus
+                  </span>
+                </button>
+              )}
               <button
                 onClick={onClose}
                 aria-label="Close task details"
@@ -938,6 +1063,120 @@ export function TaskDetailPanel({
                   selectedTagIds={draft.tag_ids}
                   onAdd={(tagId) => updateDraft("tag_ids", [...draft.tag_ids, tagId])}
                 />
+              </div>
+            </div>
+
+            {/* Reminder + Recurrence (Phase 3) */}
+            <div className="mb-4 space-y-4">
+              <div className="relative">
+                <label className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-on-surface-muted">
+                  <Bell size={12} /> Reminder
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="datetime-local"
+                    value={reminderInput}
+                    onChange={(e) => setReminderInput(e.target.value)}
+                    disabled={pending}
+                    aria-label={committed.remind_at ? "Edit reminder" : "Set reminder"}
+                    className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-focus"
+                  />
+                  <button
+                    type="button"
+                    disabled={pending || !reminderInput.trim()}
+                    onClick={() => void handleSaveReminder()}
+                    className="rounded-md bg-accent-action/10 px-2 py-1.5 text-xs font-medium text-accent-foreground hover:bg-accent-action/20 disabled:opacity-50"
+                  >
+                    Schedule
+                  </button>
+                  {committed.remind_at && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => void handleSnoozeReminder(60)}
+                        className="rounded-md px-2 py-1.5 text-xs text-on-surface-muted hover:bg-surface-tertiary"
+                      >
+                        Snooze 1h
+                      </button>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => void handleClearReminder()}
+                        aria-label="Clear reminder"
+                        className="rounded-md p-1 text-on-surface-muted hover:text-on-surface"
+                      >
+                        <X size={12} />
+                      </button>
+                    </>
+                  )}
+                </div>
+                {committed.remind_at && (
+                  <p className="mt-1 text-xs text-on-surface-muted">
+                    {new Date(committed.remind_at).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                )}
+                {reminderOccurrences.length > 0 && (
+                  <ul className="mt-2 space-y-1" aria-label="Reminder history">
+                    {reminderOccurrences.slice(0, 5).map((row) => (
+                      <li
+                        key={`${row.remind_at}-${row.state}`}
+                        className="text-[11px] text-on-surface-muted"
+                      >
+                        {new Date(row.remind_at).toLocaleString()} · {row.state}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {reminderError && (
+                  <p role="alert" className="mt-1 text-xs text-error">
+                    {reminderError}
+                  </p>
+                )}
+              </div>
+
+              <div className="relative border-t border-border/60 pt-4">
+                <label className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-on-surface-muted">
+                  <Repeat size={12} /> Recurrence
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowRecurrencePicker((prev) => !prev)}
+                  className="w-full rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors hover:bg-surface-tertiary"
+                >
+                  {draft.recurrence_rule ? (
+                    formatRecurrenceLabel(draft.recurrence_rule)
+                  ) : (
+                    <span className="text-on-surface-muted">No repeat</span>
+                  )}
+                </button>
+                {draft.recurrence_rule && (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => updateDraft("recurrence_rule", "")}
+                    aria-label="Clear recurrence"
+                    className="absolute top-4 right-0 p-0.5 text-on-surface-muted transition-colors hover:text-on-surface"
+                    title="Clear recurrence"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+                {showRecurrencePicker && (
+                  <RecurrencePicker
+                    value={draft.recurrence_rule || null}
+                    pending={pending}
+                    onChange={(value) => {
+                      updateDraft("recurrence_rule", value ?? "");
+                    }}
+                    onClose={() => setShowRecurrencePicker(false)}
+                  />
+                )}
               </div>
             </div>
 

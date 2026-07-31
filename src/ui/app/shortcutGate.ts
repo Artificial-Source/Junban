@@ -8,6 +8,10 @@ export function shouldEnableAppShortcuts(state: {
   selectedTaskId: string | null;
   projectModalOpen: boolean;
   drawerOpen: boolean;
+  planMyDayOpen?: boolean;
+  endOfDayOpen?: boolean;
+  weeklyReviewOpen?: boolean;
+  focusModeOpen?: boolean;
 }): boolean {
   return (
     !state.quickAddOpen &&
@@ -15,6 +19,10 @@ export function shouldEnableAppShortcuts(state: {
     !state.paletteOpen &&
     !state.selectedTaskId &&
     !state.projectModalOpen &&
-    !state.drawerOpen
+    !state.drawerOpen &&
+    !state.planMyDayOpen &&
+    !state.endOfDayOpen &&
+    !state.weeklyReviewOpen &&
+    !state.focusModeOpen
   );
 }

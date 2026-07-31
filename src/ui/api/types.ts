@@ -95,6 +95,11 @@ export type CalendarTasksParams = NonNullable<operations["calendar_tasks"]["para
 export type DailyPlanResponse = Schemas["DailyPlanResponse"];
 export type EndOfDayResponse = Schemas["EndOfDayResponse"];
 export type WeeklyReviewResponse = Schemas["WeeklyReviewResponse"];
+export type WeeklySuggestionDto = Schemas["WeeklySuggestionDto"];
+export type NeglectedProjectFactDto = Schemas["NeglectedProjectFactDto"];
+export type NeglectedProjectReasonDto = Schemas["NeglectedProjectReasonDto"];
+export type CompletionTimeBucketDto = Schemas["CompletionTimeBucketDto"];
+export type CompletionTimeBucketsDto = Schemas["CompletionTimeBucketsDto"];
 export type TemporalSettingsResponse = Schemas["TemporalSettingsResponse"];
 export type WeekStartDto = Schemas["WeekStartDto"];
 

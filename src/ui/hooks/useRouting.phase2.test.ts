@@ -151,3 +151,14 @@ describe("viewToRoute", () => {
     expect(viewToRoute("saved-filter")).toBeNull();
   });
 });
+
+import { pathWithFocus, readFocusQuery } from "./useRouting";
+
+describe("focus query helpers", () => {
+  it("reads and builds ?focus=1", () => {
+    expect(readFocusQuery("?focus=1")).toBe(true);
+    expect(readFocusQuery("")).toBe(false);
+    expect(pathWithFocus(true, "/today", "")).toBe("/today?focus=1");
+    expect(pathWithFocus(false, "/today", "?focus=1")).toBe("/today");
+  });
+});

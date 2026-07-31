@@ -34,6 +34,8 @@ import {
   applyTemplate as applyTemplateApi,
   addRelation as addRelationApi,
   removeRelation as removeRelationApi,
+  rescheduleReminder as rescheduleReminderApi,
+  dismissReminder as dismissReminderApi,
 } from "../api/client";
 import { useWorkspace } from "../context/WorkspaceContext";
 import {
@@ -261,6 +263,24 @@ export function useTaskMutations() {
     [runMutation],
   );
 
+  const rescheduleReminder = useCallback(
+    async (taskId: string, remindAt: string, undoLabel?: string) =>
+      runMutation((opId) => rescheduleReminderApi(taskId, { remind_at: remindAt }, opId), {
+        undoLabel: undoLabel ?? "Schedule reminder",
+        successToast: "Reminder scheduled",
+      }),
+    [runMutation],
+  );
+
+  const dismissReminder = useCallback(
+    async (taskId: string) =>
+      runMutation((opId) => dismissReminderApi(taskId, opId), {
+        undoLabel: "Clear reminder",
+        successToast: "Reminder cleared",
+      }),
+    [runMutation],
+  );
+
   return {
     createTask,
     createFromQuickEntry,
@@ -270,6 +290,8 @@ export function useTaskMutations() {
     uncompleteTask,
     cancelTask,
     reopenTask,
+    rescheduleReminder,
+    dismissReminder,
     moveTask,
     reorderTasks,
     bulkTasks,

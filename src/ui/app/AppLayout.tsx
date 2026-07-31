@@ -1,8 +1,8 @@
 /**
- * Phase 2 App Layout: full sidebar, all views, modals, SSE, toasts, bulk actions.
+ * App Layout: full sidebar, all views, modals, SSE, toasts, bulk actions.
  * Preserves the exact legacy shell: responsive sidebar/header/main/skip-link,
  * mobile drawer and bottom nav, task detail panel, command palette, search,
- * quick add, and project modals.
+ * quick add, project modals, and Phase 3 planning/focus/reminder surfaces.
  */
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { NavigateTarget } from "../hooks/useRouting";
@@ -16,6 +16,8 @@ import {
 } from "../hooks/useKeyboardShortcuts";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useTaskMutations } from "../hooks/useTaskMutations";
+import { useSmartNudges } from "../hooks/useSmartNudges";
+import { useReminderDelivery } from "../hooks/useReminderDelivery";
 import { Sidebar } from "../components/Sidebar";
 import { BottomNavBar } from "../components/BottomNavBar";
 import { FAB } from "../components/FAB";
@@ -29,6 +31,10 @@ import { CommandPalette, type Command } from "../components/CommandPalette";
 import { SearchModal } from "../components/SearchModal";
 import { QuickAddModal } from "../components/QuickAddModal";
 import { AddProjectModal } from "../components/AddProjectModal";
+import { DailyPlanningModal } from "../components/DailyPlanningModal";
+import { DailyReviewModal } from "../components/DailyReviewModal";
+import { WeeklyReviewModal } from "../components/WeeklyReviewModal";
+import { FocusMode } from "../components/FocusMode";
 import { Today } from "../views/Today";
 import { Inbox } from "../views/Inbox";
 import { Upcoming } from "../views/Upcoming";
@@ -44,7 +50,7 @@ import { Matrix } from "../views/Matrix";
 import { Stats } from "../views/Stats";
 import { DopamineMenu } from "../views/DopamineMenu";
 import type { TaskDto } from "../api/client";
-import { getTask } from "../api/client";
+import { getTask, hasStoredToken } from "../api/client";
 import { detailRefreshFromEvent } from "./detailRefresh";
 import { isShellBlocking, isTaskDetailLayerActive, isolateShellSiblings } from "./shellIsolation";
 import { shouldEnableAppShortcuts } from "./shortcutGate";
@@ -52,12 +58,13 @@ import { shouldEnableAppShortcuts } from "./shortcutGate";
 const MOBILE_DRAWER_ID = "junban-mobile-nav-drawer";
 
 export function AppLayout() {
-  const { route, view, navigate } = useRouting();
+  const { route, view, navigate, focusModeOpen, setFocusModeOpen } = useRouting();
   const {
     catalog,
     catalogLoading,
     refreshCatalog,
     toasts,
+    showToast,
     dismissToast,
     undo,
     redo,
@@ -65,6 +72,7 @@ export function AppLayout() {
     registerTaskEventHandler,
   } = useWorkspace();
   const { completeTask, uncompleteTask, bulkTasks } = useTaskMutations();
+  useSmartNudges();
 
   const rootRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
@@ -77,8 +85,14 @@ export function AppLayout() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
+  const [planMyDayOpen, setPlanMyDayOpen] = useState(false);
+  const [endOfDayOpen, setEndOfDayOpen] = useState(false);
+  const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
   const [detailTask, setDetailTask] = useState<TaskDto | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [focusStartTaskId, setFocusStartTaskId] = useState<string | null>(null);
+  const [, setFocusMutationPending] = useState(false);
+  const focusMutationPendingRef = useRef(false);
   const multiSelect = useMultiSelect();
   const selectedTaskIdRef = useRef<string | null>(null);
   const taskDetailOpenerRef = useRef<HTMLElement | null>(null);
@@ -93,6 +107,48 @@ export function AppLayout() {
     paletteOpen,
     projectModalOpen,
     taskDetailActive,
+    planMyDayOpen,
+    endOfDayOpen,
+    weeklyReviewOpen,
+    focusModeOpen,
+  });
+
+  useReminderDelivery({
+    enabled: hasStoredToken() && !catalogLoading,
+    onInApp: (reminder) => {
+      showToast("info", reminder.title, {
+        inverted: true,
+        durationMs: 8000,
+        href: `/tasks/${reminder.taskId}`,
+        hrefLabel: "Open",
+      });
+    },
+    playSound: () => {
+      // Optional short beep only after a user gesture has unlocked audio.
+      try {
+        const Ctx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = new Ctx();
+        if (ctx.state !== "running") {
+          void ctx.close();
+          return;
+        }
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = 880;
+        gain.gain.value = 0.03;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.08);
+        void ctx.close();
+      } catch {
+        // Sound is never required for delivery.
+      }
+    },
+    soundEnabled: true,
   });
 
   // Keep every background sibling out of the accessibility and focus trees while
@@ -198,6 +254,21 @@ export function AppLayout() {
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSelectedTaskId(id);
   }, []);
+
+  const handleEnterFocusMode = useCallback(
+    (taskId?: string) => {
+      setFocusStartTaskId(taskId ?? selectedTaskIdRef.current);
+      setSelectedTaskId(null);
+      setFocusModeOpen(true);
+    },
+    [setFocusModeOpen],
+  );
+
+  const handleCloseFocusMode = useCallback(() => {
+    if (focusMutationPendingRef.current) return;
+    setFocusModeOpen(false);
+    setFocusStartTaskId(null);
+  }, [setFocusModeOpen]);
 
   const handleOpenFullPage = useCallback(
     (taskId: string) => {
@@ -335,6 +406,33 @@ export function AppLayout() {
       defaultKey: "",
       action: () => handleNavigate("filters-labels"),
     },
+    {
+      id: "focus-mode",
+      description: "Enter Focus Mode",
+      defaultKey: "cmd+shift+f",
+      action: () => handleEnterFocusMode(),
+    },
+    {
+      id: "plan-my-day",
+      description: "Plan My Day",
+      defaultKey: "",
+      chord: "g p",
+      action: () => setPlanMyDayOpen(true),
+    },
+    {
+      id: "end-of-day",
+      description: "End of Day",
+      defaultKey: "",
+      chord: "g e",
+      action: () => setEndOfDayOpen(true),
+    },
+    {
+      id: "weekly-review",
+      description: "Weekly Review",
+      defaultKey: "",
+      chord: "g w",
+      action: () => setWeeklyReviewOpen(true),
+    },
   ];
 
   const { chord } = useKeyboardShortcuts(
@@ -346,6 +444,10 @@ export function AppLayout() {
       selectedTaskId,
       projectModalOpen,
       drawerOpen,
+      planMyDayOpen,
+      endOfDayOpen,
+      weeklyReviewOpen,
+      focusModeOpen,
     }),
   );
 
@@ -389,6 +491,27 @@ export function AppLayout() {
       id: "timeblocking",
       name: "Go to Timeblocking",
       callback: () => handleNavigate("timeblocking"),
+    },
+    {
+      id: "focus-mode",
+      name: "Enter Focus Mode",
+      callback: () => handleEnterFocusMode(),
+      hotkey: "⌘⇧F",
+    },
+    {
+      id: "plan-my-day",
+      name: "Plan My Day",
+      callback: () => setPlanMyDayOpen(true),
+    },
+    {
+      id: "end-of-day",
+      name: "End of Day",
+      callback: () => setEndOfDayOpen(true),
+    },
+    {
+      id: "weekly-review",
+      name: "Weekly Review",
+      callback: () => setWeeklyReviewOpen(true),
     },
   ];
 
@@ -484,6 +607,9 @@ export function AppLayout() {
                     selectedTaskIds={multiSelect.selectedIds}
                     onMultiSelect={multiSelect.handleSelect}
                     autoFocusTrigger={addTaskTrigger}
+                    onPlanMyDay={() => setPlanMyDayOpen(true)}
+                    onEndOfDay={() => setEndOfDayOpen(true)}
+                    onWeeklyReview={() => setWeeklyReviewOpen(true)}
                   />
                 )}
                 {route.name === "inbox" && (
@@ -644,6 +770,7 @@ export function AppLayout() {
             onClose={() => setSelectedTaskId(null)}
             onOpenFullPage={handleOpenFullPage}
             returnFocusTo={taskDetailOpenerRef.current}
+            onEnterFocusMode={(taskId) => handleEnterFocusMode(taskId)}
           />
         )}
         {selectedTaskId && detailLoading && (!detailTask || detailTask.id !== selectedTaskId) && (
@@ -677,6 +804,18 @@ export function AppLayout() {
           onClose={() => setPaletteOpen(false)}
         />
         <AddProjectModal open={projectModalOpen} onClose={() => setProjectModalOpen(false)} />
+        <DailyPlanningModal open={planMyDayOpen} onClose={() => setPlanMyDayOpen(false)} />
+        <DailyReviewModal open={endOfDayOpen} onClose={() => setEndOfDayOpen(false)} />
+        <WeeklyReviewModal open={weeklyReviewOpen} onClose={() => setWeeklyReviewOpen(false)} />
+        <FocusMode
+          open={focusModeOpen}
+          startTaskId={focusStartTaskId}
+          onClose={handleCloseFocusMode}
+          onPendingChange={(pending) => {
+            focusMutationPendingRef.current = pending;
+            setFocusMutationPending(pending);
+          }}
+        />
       </div>
 
       {/* Toasts stay outside shell isolation so Undo remains usable over detail/modals. */}

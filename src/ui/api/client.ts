@@ -1315,4 +1315,98 @@ export function subscribeToEvents(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Reminder wake SSE (control-plane, not revisioned)
+// ---------------------------------------------------------------------------
+
+export type ReminderWakeHandler = (payload: { sequence: number; server_now: string }) => void;
+
+/**
+ * Subscribe to content-free `reminders_due` wakes.
+ * Authenticated fetch stream — no EventSource (Authorization header required).
+ * No polling; the caller claims work only on wake or after lease acquire.
+ */
+export function subscribeReminderWakes(onWake: ReminderWakeHandler): () => void {
+  const controller = new AbortController();
+  let stopped = false;
+  let backoffMs = DEFAULT_SSE_BACKOFF_MS;
+
+  const connect = async () => {
+    while (!stopped) {
+      try {
+        const response = await rawFetch(
+          "/api/v1/reminders/events",
+          {
+            headers: { ...authHeaders() },
+            signal: controller.signal,
+          },
+          { timeoutMs: null },
+        );
+        if (response.status === 401 || response.status === 403) return;
+        if (
+          !response.ok ||
+          !response.body ||
+          !response.headers.get("content-type")?.includes("text/event-stream")
+        ) {
+          await reconnectDelay(backoffMs, controller.signal);
+          backoffMs = nextBackoff(backoffMs);
+          continue;
+        }
+        backoffMs = DEFAULT_SSE_BACKOFF_MS;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let currentData = "";
+        while (!stopped) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const rawLine of lines) {
+            const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+            if (line.startsWith("data:")) {
+              const dataValue = line.slice(5).startsWith(" ") ? line.slice(6) : line.slice(5);
+              currentData += (currentData ? "\n" : "") + dataValue;
+            } else if (line === "" && currentData) {
+              try {
+                const payload = JSON.parse(currentData) as {
+                  sequence?: number;
+                  server_now?: string;
+                };
+                if (
+                  typeof payload.sequence === "number" &&
+                  typeof payload.server_now === "string"
+                ) {
+                  onWake({ sequence: payload.sequence, server_now: payload.server_now });
+                } else {
+                  // Content-free wakes may still arrive as empty/minimal frames.
+                  onWake({ sequence: 0, server_now: new Date().toISOString() });
+                }
+              } catch {
+                onWake({ sequence: 0, server_now: new Date().toISOString() });
+              }
+              currentData = "";
+            }
+          }
+        }
+        if (!stopped) {
+          await reconnectDelay(backoffMs, controller.signal);
+          backoffMs = nextBackoff(backoffMs);
+        }
+      } catch {
+        if (stopped || controller.signal.aborted) break;
+        await reconnectDelay(backoffMs, controller.signal);
+        backoffMs = nextBackoff(backoffMs);
+      }
+    }
+  };
+
+  void connect();
+  return () => {
+    stopped = true;
+    controller.abort();
+  };
+}
+
 export const TASK_PAGE_LIMIT = MAX_TASK_PAGE_LIMIT;

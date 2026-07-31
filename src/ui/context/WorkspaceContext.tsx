@@ -18,7 +18,7 @@ import type { CatalogResponse, CommittedEventDto, MutationResponse } from "../ap
 import { hasStoredToken } from "../api/client";
 import { useCatalog } from "../hooks/useCatalog";
 import { useMutations, type MutationPhase } from "../hooks/useMutations";
-import { useToasts, type ToastEntry } from "../components/Toast";
+import { useToasts, type ShowToastOptions, type ToastEntry } from "../components/Toast";
 import { useSseSubscription } from "../hooks/useSseSubscription";
 
 // Session undo/redo stacks: 50 entries max (per context map rule).
@@ -55,7 +55,7 @@ export interface WorkspaceContextValue {
   showToast: (
     kind: "success" | "error" | "info",
     message: string,
-    undoOperationId?: string | null,
+    options?: string | null | ShowToastOptions,
   ) => void;
   dismissToast: (id: string) => void;
 

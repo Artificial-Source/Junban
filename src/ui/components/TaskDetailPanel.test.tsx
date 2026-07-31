@@ -40,6 +40,9 @@ const reloadActivity = vi.fn();
 const createComment = vi.fn();
 const patchComment = vi.fn();
 const deleteComment = vi.fn();
+const rescheduleReminder = vi.fn();
+const dismissReminder = vi.fn();
+const listTaskReminders = vi.fn();
 
 vi.mock("../hooks/useTaskMutations", () => ({
   useTaskMutations: () => ({
@@ -53,6 +56,8 @@ vi.mock("../hooks/useTaskMutations", () => ({
     moveTask: (...args: unknown[]) => moveTask(...args),
     addRelation: (...args: unknown[]) => addRelation(...args),
     removeRelation: (...args: unknown[]) => removeRelation(...args),
+    rescheduleReminder: (...args: unknown[]) => rescheduleReminder(...args),
+    dismissReminder: (...args: unknown[]) => dismissReminder(...args),
   }),
 }));
 
@@ -106,6 +111,7 @@ vi.mock("../api/client", async () => {
     createComment: (...args: unknown[]) => createComment(...args),
     patchComment: (...args: unknown[]) => patchComment(...args),
     deleteComment: (...args: unknown[]) => deleteComment(...args),
+    listTaskReminders: (...args: unknown[]) => listTaskReminders(...args),
     generateOperationId: () => "op-test",
   };
 });
@@ -197,6 +203,9 @@ beforeEach(() => {
     as_of_date: "2026-07-23",
     next_cursor: null,
   });
+  listTaskReminders.mockReset().mockResolvedValue({ reminders: [] });
+  rescheduleReminder.mockReset().mockResolvedValue(mutationOk());
+  dismissReminder.mockReset().mockResolvedValue(mutationOk());
 });
 
 afterEach(() => {
@@ -223,6 +232,7 @@ describe("buildTaskPatch", () => {
       section_id: "",
       parent_id: "",
       tag_ids: [] as string[],
+      recurrence_rule: "",
     };
     expect(buildTaskPatch(task, draft)).toEqual({
       description: "new body",
@@ -246,6 +256,7 @@ describe("buildTaskPatch", () => {
       section_id: "",
       parent_id: "",
       tag_ids: [] as string[],
+      recurrence_rule: "",
     };
     expect(buildTaskPatch(task, draft)).toBeNull();
   });
@@ -438,11 +449,16 @@ describe("TaskDetailPanel", () => {
     opener.remove();
   });
 
-  it("does not expose recurrence_rule controls", () => {
-    render(createElement(Host, { task: makeTask({ recurrence_rule: "FREQ=DAILY" }) }));
-    const text = container.textContent ?? "";
-    expect(text.toLowerCase()).not.toContain("recurrence");
-    expect(container.querySelector('input[placeholder*="FREQ"]')).toBeNull();
+  it("exposes recurrence controls with canonical labels", async () => {
+    await act(async () => {
+      root.render(createElement(Host, { task: makeTask({ recurrence_rule: "weekly" }) }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.textContent).toMatch(/Recurrence/i);
+    expect(container.textContent).toMatch(/Weekly/);
+    expect(container.textContent).toMatch(/Reminder/i);
   });
 
   it("asks for in-product confirmation before deleting", async () => {

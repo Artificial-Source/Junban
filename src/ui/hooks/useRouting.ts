@@ -51,6 +51,27 @@ function isUuid(value: string): boolean {
   return UUID_RE.test(value);
 }
 
+/** Read the legacy-compatible Focus Mode query flag. */
+export function readFocusQuery(search: string = window.location.search): boolean {
+  const params = new URLSearchParams(search.startsWith("?") ? search : `?${search}`);
+  return params.get("focus") === "1";
+}
+
+/** Build a path that preserves the current route and sets/clears `?focus=1`. */
+export function pathWithFocus(focus: boolean, path?: string, search?: string): string {
+  const basePath = path ?? window.location.pathname;
+  const params = new URLSearchParams(
+    (search ?? window.location.search).startsWith("?")
+      ? (search ?? window.location.search)
+      : `?${search ?? ""}`,
+  );
+  if (focus) params.set("focus", "1");
+  else params.delete("focus");
+  // Drop empty focus-only noise.
+  const qs = params.toString();
+  return qs ? `${basePath}?${qs}` : basePath;
+}
+
 function normalizePath(path: string): string {
   if (!path) return "/";
   const trimmed = path.split("?")[0]?.split("#")[0] ?? "/";
@@ -227,6 +248,8 @@ export function useRouting(): {
   route: AppRoute;
   view: View;
   navigate: (target: NavigateTarget) => void;
+  focusModeOpen: boolean;
+  setFocusModeOpen: (open: boolean) => void;
 } {
   const [route, setRoute] = useState<AppRoute>(
     () =>
@@ -234,10 +257,12 @@ export function useRouting(): {
         name: "today",
       },
   );
+  const [focusModeOpen, setFocusModeOpenState] = useState(() => readFocusQuery());
 
   useEffect(() => {
     const handlePopState = () => {
       setRoute(parseRoute(window.location.pathname) ?? { name: "today" });
+      setFocusModeOpenState(readFocusQuery());
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -247,13 +272,24 @@ export function useRouting(): {
     const next = coerceTarget(target);
     if (!next) return;
     const path = routeToPath(next);
-    if (window.location.pathname !== path) {
-      window.history.pushState(null, "", path);
+    // Preserve focus query across ordinary navigation only when already open.
+    const url = readFocusQuery() ? pathWithFocus(true, path, "") : path;
+    if (`${window.location.pathname}${window.location.search}` !== url) {
+      window.history.pushState(null, "", url);
       setRoute(next);
+      setFocusModeOpenState(readFocusQuery());
     }
+  }, []);
+
+  const setFocusModeOpen = useCallback((open: boolean) => {
+    const url = pathWithFocus(open);
+    if (`${window.location.pathname}${window.location.search}` !== url) {
+      window.history.pushState(null, "", url);
+    }
+    setFocusModeOpenState(open);
   }, []);
 
   const view = useMemo(() => routeToView(route), [route]);
 
-  return { route, view, navigate };
+  return { route, view, navigate, focusModeOpen, setFocusModeOpen };
 }

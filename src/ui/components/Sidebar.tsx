@@ -19,7 +19,6 @@ import {
   CalendarRange,
   Compass,
   BarChart3,
-  CalendarClock,
   MessageSquare,
   Settings,
   GripVertical,
@@ -50,7 +49,7 @@ const TOOL_NAV_ITEMS: NavItem[] = [
   { id: "calendar", label: "Calendar", icon: CalendarRange },
   { id: "matrix", label: "Matrix", icon: Compass },
   { id: "stats", label: "Stats", icon: BarChart3 },
-  { id: "timeblocking", label: "Timeblocking", icon: CalendarClock },
+  { id: "timeblocking", label: "Timeblocking", icon: CalendarDays },
 ];
 
 interface SidebarProps {
@@ -184,7 +183,10 @@ export function Sidebar({
           )}
           {!collapsed && <span className="flex-1 truncate">{project.name}</span>}
           {visualProgress && !collapsed && (
-            <span aria-hidden="true" className="flex w-16 shrink-0 items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="absolute -right-3 flex w-[60px] items-center gap-1.5"
+            >
               <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-tertiary">
                 <span
                   className="block h-full rounded-full bg-accent-action/70"

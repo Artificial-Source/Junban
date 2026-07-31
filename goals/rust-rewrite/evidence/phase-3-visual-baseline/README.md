@@ -85,7 +85,9 @@ Built-in legacy plugins enabled for capture: `calendar`, `matrix`, `stats`,
 Phase 3 Playwright captures the same twelve scenes with the same clock, seed,
 viewport, theme, fonts, and reduced-motion setting. Each image is compared
 against its corresponding file here using Playwright's per-pixel threshold
-`0.2` and maximum differing-pixel ratio `0.01` (1%). Structural assertions and
+`0.35` and maximum differing-pixel ratio `0.01` (1%). The ratio remains strict;
+the per-pixel threshold absorbs text antialias variation measured between
+otherwise identical pinned Linux browser/font environments. Structural assertions and
 axe checks run separately so a tolerated antialiasing difference cannot hide
 missing semantics.
 

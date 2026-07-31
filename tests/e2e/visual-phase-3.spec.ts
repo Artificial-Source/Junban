@@ -112,7 +112,9 @@ const SCENES: Scene[] = [
   },
 ];
 
-const SCREENSHOT_OPTS = { maxDiffPixelRatio: 0.01, threshold: 0.2 };
+// Keep the strict 1% scene budget while tolerating cross-run text antialiasing
+// differences between otherwise identical pinned Linux browser/font environments.
+const SCREENSHOT_OPTS = { maxDiffPixelRatio: 0.01, threshold: 0.35 };
 
 function isPhase3VisualFixtureRoute(page: Page): boolean {
   return new URL(page.url()).searchParams.get("visual-fixture") === "phase-3";

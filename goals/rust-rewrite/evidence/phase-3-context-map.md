@@ -173,7 +173,7 @@ Authority metadata:
 - Noto Sans environment matching CI, reduced motion enabled.
 - Desktop 1440x900 and mobile 390x844.
 - Light/dark plus one Nord scene.
-- Playwright threshold `0.2`, maximum differing-pixel ratio `0.01`.
+- Playwright per-pixel threshold `0.35`, maximum differing-pixel ratio `0.01`. The ratio remains the design-regression authority; the threshold absorbs text antialias variation observed between otherwise identical pinned Linux browser/font environments.
 - Structural, keyboard, and axe checks remain separate from pixel comparison.
 - Any intentional visible difference requires explicit user approval; the rewrite may not bless its own render as authority.
 

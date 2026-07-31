@@ -6,8 +6,12 @@ use std::{
 };
 
 use jiff::Timestamp;
-use junban_domain::format_reminder_timestamp;
-use rusqlite::{Connection, MAIN_DB, OpenFlags, Transaction, TransactionBehavior};
+use junban_domain::{Task, TaskStatus, format_reminder_timestamp};
+use rusqlite::{
+    Connection, MAIN_DB, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
+};
+
+use crate::ops_types::{Inverse, PostImage};
 
 /// Highest schema version applied by this crate.
 pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 4;
@@ -870,7 +874,130 @@ SET cancelled_at = COALESCE(
 )
 WHERE status = 'cancelled';
 ",
-    )
+    )?;
+
+    reconcile_v3_undo_task_snapshots(transaction)
+}
+
+/// Add the v4 cancellation transition to retained v3 task snapshots.
+///
+/// Undo snapshots use the task revision they captured, so the latest durable
+/// cancellation no newer than that revision is the exact transition represented
+/// by the snapshot. Rewriting the undo row in the v4 transaction keeps live rows
+/// and their conflict-validation material atomic across migration retries.
+fn reconcile_v3_undo_task_snapshots(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
+    let mut rows = Vec::new();
+    {
+        let mut statement = transaction.prepare(
+            "SELECT source_operation_id, inverse_json, post_image_json FROM operation_undo",
+        )?;
+        let mapped = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in mapped {
+            rows.push(row?);
+        }
+    }
+
+    for (source_operation_id, inverse_json, post_image_json) in rows {
+        let mut inverse: Inverse = serde_json::from_str(&inverse_json).map_err(|error| {
+            migration_err(format!(
+                "invalid inverse_json for operation {source_operation_id}: {error}"
+            ))
+        })?;
+        let mut post: PostImage = serde_json::from_str(&post_image_json).map_err(|error| {
+            migration_err(format!(
+                "invalid post_image_json for operation {source_operation_id}: {error}"
+            ))
+        })?;
+
+        let mut changed = reconcile_inverse_tasks(transaction, &mut inverse)?;
+        for task in post.tasks.values_mut() {
+            changed |= reconcile_task_snapshot(transaction, task)?;
+        }
+        if !changed {
+            continue;
+        }
+
+        let inverse_json = serde_json::to_string(&inverse).map_err(|error| {
+            migration_err(format!(
+                "could not rewrite inverse_json for operation {source_operation_id}: {error}"
+            ))
+        })?;
+        let post_image_json = serde_json::to_string(&post).map_err(|error| {
+            migration_err(format!(
+                "could not rewrite post_image_json for operation {source_operation_id}: {error}"
+            ))
+        })?;
+        transaction.execute(
+            "UPDATE operation_undo SET inverse_json = ?1, post_image_json = ?2
+             WHERE source_operation_id = ?3",
+            rusqlite::params![inverse_json, post_image_json, source_operation_id],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn reconcile_inverse_tasks(
+    transaction: &Transaction<'_>,
+    inverse: &mut Inverse,
+) -> rusqlite::Result<bool> {
+    let tasks = match inverse {
+        Inverse::RestoreClosure { closure } => &mut closure.tasks,
+        Inverse::RestoreTasks { tasks, .. } => tasks,
+        Inverse::ReverseCompletion { sources, .. } => sources,
+        Inverse::DeleteTasks { .. }
+        | Inverse::RestoreOrders { .. }
+        | Inverse::RestoreComment { .. }
+        | Inverse::RestoreRelation { .. } => return Ok(false),
+    };
+
+    let mut changed = false;
+    for task in tasks {
+        changed |= reconcile_task_snapshot(transaction, task)?;
+    }
+    Ok(changed)
+}
+
+fn reconcile_task_snapshot(
+    transaction: &Transaction<'_>,
+    task: &mut Task,
+) -> rusqlite::Result<bool> {
+    if task.status != TaskStatus::Cancelled || task.cancelled_at.is_some() {
+        return Ok(false);
+    }
+
+    let revision = i64::try_from(task.revision)
+        .map_err(|error| migration_err(format!("invalid task snapshot revision: {error}")))?;
+    let cancelled_at: Option<String> = transaction
+        .query_row(
+            "SELECT created_at
+             FROM task_activity
+             WHERE task_id = ?1
+               AND field = 'status'
+               AND new_value = 'cancelled'
+               AND revision <= ?2
+             ORDER BY revision DESC, sequence DESC
+             LIMIT 1",
+            rusqlite::params![task.id.to_string(), revision],
+            |row| row.get(0),
+        )
+        .optional()?;
+    task.cancelled_at = Some(match cancelled_at {
+        Some(value) => value.parse().map_err(|error| {
+            migration_err(format!(
+                "invalid cancellation activity timestamp for task {}: {error}",
+                task.id
+            ))
+        })?,
+        None => task.updated_at,
+    });
+    Ok(true)
 }
 
 /// WAL-safe online backup of an existing v2 profile, verified before migration.
@@ -1077,6 +1204,11 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    use jiff::tz::TimeZone;
+    use junban_domain::{OperationId, TaskId, TaskTitle, WeekStart, weekly_review_summary};
+
+    use crate::ops_types::{post_from_tasks, restore_tasks_inverse};
+
     static TEST_DB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     struct TestDb {
@@ -1225,6 +1357,95 @@ mod tests {
         assert_foreign_keys_clean(&transaction).unwrap();
         record_version(&transaction, 3).unwrap();
         transaction.commit().unwrap();
+    }
+
+    fn v3_task_snapshot(
+        id: &str,
+        title: &str,
+        status: TaskStatus,
+        updated_at: &str,
+        revision: u64,
+    ) -> Task {
+        let created_at = "2026-03-01T12:00:00Z".parse().unwrap();
+        let mut task = Task::new(
+            TaskId::parse(id).unwrap(),
+            TaskTitle::new(title).unwrap(),
+            None,
+            created_at,
+            revision,
+        );
+        task.status = status;
+        task.updated_at = updated_at.parse().unwrap();
+        task
+    }
+
+    fn insert_v3_task(connection: &Connection, task: &Task) {
+        let status = match task.status {
+            TaskStatus::Pending => "pending",
+            TaskStatus::Completed => "completed",
+            TaskStatus::Cancelled => "cancelled",
+        };
+        connection
+            .execute(
+                "INSERT INTO tasks(id, title, status, completed_at, created_at, updated_at, revision)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    task.id.to_string(),
+                    task.title.as_str(),
+                    status,
+                    task.completed_at.map(|value| value.to_string()),
+                    task.created_at.to_string(),
+                    task.updated_at.to_string(),
+                    i64::try_from(task.revision).unwrap(),
+                ],
+            )
+            .unwrap();
+    }
+
+    fn insert_v3_undo(
+        connection: &Connection,
+        source_operation_id: OperationId,
+        source_revision: u64,
+        inverse: &Inverse,
+        post: &PostImage,
+    ) -> (String, String) {
+        let inverse_json = serde_json::to_string(inverse).unwrap();
+        let post_image_json = serde_json::to_string(post).unwrap();
+        connection
+            .execute(
+                "INSERT INTO operation_receipts(
+                    operation_id, request_json, response_json, created_at, expires_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    source_operation_id.to_string(),
+                    "{\"op\":\"legacy\"}",
+                    "{\"legacy\":true}",
+                    "2026-03-01T12:00:00Z",
+                    "2026-04-15T12:00:00Z",
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO operation_undo(
+                    source_operation_id, source_revision, inverse_json, post_image_json
+                 ) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![
+                    source_operation_id.to_string(),
+                    i64::try_from(source_revision).unwrap(),
+                    inverse_json,
+                    post_image_json,
+                ],
+            )
+            .unwrap();
+        (inverse_json, post_image_json)
+    }
+
+    fn load_task(connection: &mut Connection, task_id: TaskId) -> Task {
+        let transaction = connection.transaction().unwrap();
+        let task = crate::rows::load_task(&transaction, task_id).unwrap();
+        transaction.rollback().unwrap();
+        task
     }
 
     fn pre_migration_backups(profile_dir: &std::path::Path) -> Vec<PathBuf> {
@@ -1869,6 +2090,279 @@ INSERT INTO task_activity(
             )
             .unwrap();
         assert_eq!(retried, cancelled_at);
+    }
+
+    #[test]
+    fn v3_cancellation_undo_snapshot_reconciles_with_live_backfill() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        seed_v3_with_sample_rows(&mut connection);
+        let task_id = TaskId::parse("55555555-5555-7555-8555-555555555555").unwrap();
+        let source_operation_id =
+            OperationId::parse("33333333-3333-7333-8333-333333333333").unwrap();
+        let undo_operation_id = OperationId::parse("44444444-4444-7444-8444-444444444444").unwrap();
+        let redo_operation_id = OperationId::parse("66666666-6666-7666-8666-666666666666").unwrap();
+        let before = v3_task_snapshot(
+            &task_id.to_string(),
+            "Cancelled task",
+            TaskStatus::Pending,
+            "2026-03-01T12:00:00Z",
+            2,
+        );
+        let after = v3_task_snapshot(
+            &task_id.to_string(),
+            "Cancelled task",
+            TaskStatus::Cancelled,
+            "2026-03-07T23:59:59Z",
+            3,
+        );
+        insert_v3_task(&connection, &after);
+        connection
+            .execute(
+                "INSERT INTO task_activity(
+                    revision, sequence, operation_id, task_id, action, field,
+                    old_value, new_value, created_at
+                 ) VALUES (3, 0, ?1, ?2, 'cancelled', 'status', 'pending', 'cancelled', ?3)",
+                rusqlite::params![
+                    source_operation_id.to_string(),
+                    task_id.to_string(),
+                    "2026-03-07T23:59:59Z",
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE app_state SET global_revision = 3 WHERE singleton = 1",
+                [],
+            )
+            .unwrap();
+        let inverse = restore_tasks_inverse(vec![before], Vec::new());
+        let post = post_from_tasks([after]);
+        insert_v3_undo(&connection, source_operation_id, 3, &inverse, &post);
+
+        db.migrate(&mut connection).unwrap();
+
+        let (request_json, response_json, post_image_json): (String, String, String) = connection
+            .query_row(
+                "SELECT r.request_json, r.response_json, u.post_image_json
+                 FROM operation_receipts r
+                 JOIN operation_undo u ON u.source_operation_id = r.operation_id
+                 WHERE r.operation_id = ?1",
+                [source_operation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(request_json, "{\"op\":\"legacy\"}");
+        assert_eq!(response_json, "{\"legacy\":true}");
+        let migrated_post: PostImage = serde_json::from_str(&post_image_json).unwrap();
+        assert_eq!(
+            migrated_post.tasks[&task_id.to_string()]
+                .cancelled_at
+                .unwrap()
+                .to_string(),
+            "2026-03-07T23:59:59Z"
+        );
+
+        let undone = crate::undo_ops::undo(
+            &mut connection,
+            source_operation_id,
+            undo_operation_id,
+            "2026-03-12T12:00:00Z".parse().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            load_task(&mut connection, task_id).status,
+            TaskStatus::Pending
+        );
+        let replay = crate::undo_ops::undo(
+            &mut connection,
+            source_operation_id,
+            undo_operation_id,
+            "2026-03-13T12:00:00Z".parse().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(replay, undone);
+
+        crate::undo_ops::undo(
+            &mut connection,
+            undo_operation_id,
+            redo_operation_id,
+            "2026-03-14T12:00:00Z".parse().unwrap(),
+        )
+        .unwrap();
+        let redone = load_task(&mut connection, task_id);
+        assert_eq!(redone.status, TaskStatus::Cancelled);
+        assert_eq!(
+            redone.cancelled_at.unwrap().to_string(),
+            "2026-03-07T23:59:59Z"
+        );
+    }
+
+    #[test]
+    fn v3_reopen_undo_restores_cancellation_to_its_original_week() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        seed_v3_with_sample_rows(&mut connection);
+        let task_id = TaskId::parse("55555555-5555-7555-8555-555555555555").unwrap();
+        let source_operation_id =
+            OperationId::parse("33333333-3333-7333-8333-333333333333").unwrap();
+        let undo_operation_id = OperationId::parse("44444444-4444-7444-8444-444444444444").unwrap();
+        let cancelled = v3_task_snapshot(
+            &task_id.to_string(),
+            "Edited while cancelled",
+            TaskStatus::Cancelled,
+            "2026-03-10T12:00:00Z",
+            3,
+        );
+        let reopened = v3_task_snapshot(
+            &task_id.to_string(),
+            "Edited while cancelled",
+            TaskStatus::Pending,
+            "2026-03-16T12:00:00Z",
+            4,
+        );
+        insert_v3_task(&connection, &reopened);
+        connection
+            .execute_batch(&format!(
+                "INSERT INTO task_activity(
+                    revision, sequence, operation_id, task_id, action, field,
+                    old_value, new_value, created_at
+                 ) VALUES
+                    (2, 0, '77777777-7777-7777-8777-777777777777', '{task_id}',
+                     'cancelled', 'status', 'pending', 'cancelled', '2026-03-09T12:00:00Z'),
+                    (3, 0, '88888888-8888-7888-8888-888888888888', '{task_id}',
+                     'updated', 'title', 'Cancelled task', 'Edited while cancelled',
+                     '2026-03-10T12:00:00Z'),
+                    (4, 0, '{source_operation_id}', '{task_id}',
+                     'reopened', 'status', 'cancelled', 'pending', '2026-03-16T12:00:00Z');
+                 UPDATE app_state SET global_revision = 4 WHERE singleton = 1;"
+            ))
+            .unwrap();
+        let inverse = restore_tasks_inverse(vec![cancelled], Vec::new());
+        let post = post_from_tasks([reopened]);
+        insert_v3_undo(&connection, source_operation_id, 4, &inverse, &post);
+
+        db.migrate(&mut connection).unwrap();
+        crate::undo_ops::undo(
+            &mut connection,
+            source_operation_id,
+            undo_operation_id,
+            "2026-03-17T12:00:00Z".parse().unwrap(),
+        )
+        .unwrap();
+
+        let restored = load_task(&mut connection, task_id);
+        assert_eq!(restored.status, TaskStatus::Cancelled);
+        assert_eq!(
+            restored.cancelled_at.unwrap().to_string(),
+            "2026-03-09T12:00:00Z"
+        );
+        let correct_week = weekly_review_summary(
+            std::slice::from_ref(&restored),
+            &[],
+            "2026-03-18".parse().unwrap(),
+            WeekStart::Sunday,
+            &TimeZone::UTC,
+        )
+        .unwrap();
+        assert_eq!(correct_week.cancelled_count, 1);
+        let following_week = weekly_review_summary(
+            &[restored],
+            &[],
+            "2026-03-25".parse().unwrap(),
+            WeekStart::Sunday,
+            &TimeZone::UTC,
+        )
+        .unwrap();
+        assert_eq!(following_week.cancelled_count, 0);
+    }
+
+    #[test]
+    fn failed_v4_undo_reconciliation_rolls_back_and_retry_succeeds() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        seed_v3_with_sample_rows(&mut connection);
+        let task_id = TaskId::parse("55555555-5555-7555-8555-555555555555").unwrap();
+        let source_operation_id =
+            OperationId::parse("33333333-3333-7333-8333-333333333333").unwrap();
+        let cancelled = v3_task_snapshot(
+            &task_id.to_string(),
+            "Cancelled task",
+            TaskStatus::Cancelled,
+            "2026-03-08T12:00:00Z",
+            2,
+        );
+        insert_v3_task(&connection, &cancelled);
+        connection
+            .execute_batch(&format!(
+                "INSERT INTO task_activity(
+                    revision, sequence, operation_id, task_id, action, field,
+                    old_value, new_value, created_at
+                 ) VALUES (2, 0, '{source_operation_id}', '{task_id}',
+                           'cancelled', 'status', 'pending', 'cancelled',
+                           '2026-03-08T12:00:00Z');
+                 UPDATE app_state SET global_revision = 2 WHERE singleton = 1;"
+            ))
+            .unwrap();
+        let inverse = restore_tasks_inverse(
+            vec![v3_task_snapshot(
+                &task_id.to_string(),
+                "Cancelled task",
+                TaskStatus::Pending,
+                "2026-03-01T12:00:00Z",
+                1,
+            )],
+            Vec::new(),
+        );
+        let post = post_from_tasks([cancelled]);
+        let (original_inverse, original_post) =
+            insert_v3_undo(&connection, source_operation_id, 2, &inverse, &post);
+        connection
+            .execute_batch(
+                "CREATE TRIGGER fail_undo_reconciliation BEFORE UPDATE ON operation_undo
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected undo reconciliation failure');
+                 END;",
+            )
+            .unwrap();
+
+        let error = db.migrate(&mut connection).unwrap_err().to_string();
+        assert!(error.contains("injected undo reconciliation failure"));
+        assert_eq!(current_version(&connection).unwrap(), 3);
+        assert!(!task_columns(&connection).contains(&"cancelled_at".to_owned()));
+        let rolled_back: (String, String) = connection
+            .query_row(
+                "SELECT inverse_json, post_image_json FROM operation_undo
+                 WHERE source_operation_id = ?1",
+                [source_operation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(rolled_back, (original_inverse, original_post));
+
+        connection
+            .execute_batch("DROP TRIGGER fail_undo_reconciliation;")
+            .unwrap();
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 4);
+        let migrated_post: String = connection
+            .query_row(
+                "SELECT post_image_json FROM operation_undo WHERE source_operation_id = ?1",
+                [source_operation_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(migrated_post, rolled_back.1);
+
+        db.migrate(&mut connection).unwrap();
+        let retried_post: String = connection
+            .query_row(
+                "SELECT post_image_json FROM operation_undo WHERE source_operation_id = ?1",
+                [source_operation_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retried_post, migrated_post);
     }
 
     #[test]

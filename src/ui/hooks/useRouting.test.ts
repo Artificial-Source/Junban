@@ -57,12 +57,28 @@ describe("parseRoute rejection", () => {
     "/settings",
     "/focus",
     "/projects/not-a-uuid",
-    "/projects/11111111-1111-4111-8111-111111111111/calendar",
     "/tasks/nope",
     "/filters/saved/bad",
     "/projects//board",
   ])("rejects %s", (path) => {
     expect(parseRoute(path)).toBeNull();
+  });
+});
+
+describe("parseRoute Phase 3 acceptance", () => {
+  it("accepts project calendar layout", () => {
+    expect(parseRoute("/projects/11111111-1111-4111-8111-111111111111/calendar")).toEqual({
+      name: "project",
+      projectId: "11111111-1111-4111-8111-111111111111",
+      layout: "calendar",
+    });
+  });
+
+  it("accepts first-party Phase 3 tools", () => {
+    expect(parseRoute("/calendar")).toEqual({ name: "calendar" });
+    expect(parseRoute("/matrix")).toEqual({ name: "matrix" });
+    expect(parseRoute("/stats")).toEqual({ name: "stats" });
+    expect(parseRoute("/dopamine-menu")).toEqual({ name: "dopamine-menu" });
   });
 });
 

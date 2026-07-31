@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Simple view names used by the current chrome (Today/Inbox) and Phase 2 destinations. */
+/** Simple view names used by chrome and Phase 3 destinations. */
 export type View =
   | "today"
   | "inbox"
@@ -19,9 +19,14 @@ export type View =
   | "filters-labels"
   | "saved-filter"
   | "project"
-  | "task";
+  | "task"
+  | "calendar"
+  | "matrix"
+  | "stats"
+  | "dopamine-menu"
+  | "timeblocking";
 
-/** Structured application route. Later-phase destinations are intentionally absent. */
+/** Structured application route. */
 export type AppRoute =
   | { name: "today" }
   | { name: "inbox" }
@@ -32,8 +37,13 @@ export type AppRoute =
   | { name: "search" }
   | { name: "filters-labels" }
   | { name: "saved-filter"; filterId: string }
-  | { name: "project"; projectId: string; layout: "list" | "board" }
-  | { name: "task"; taskId: string };
+  | { name: "project"; projectId: string; layout: "list" | "board" | "calendar" }
+  | { name: "task"; taskId: string }
+  | { name: "calendar" }
+  | { name: "matrix" }
+  | { name: "stats" }
+  | { name: "dopamine-menu" }
+  | { name: "timeblocking" };
 
 export type NavigateTarget = View | AppRoute;
 
@@ -51,7 +61,7 @@ function normalizePath(path: string): string {
 }
 
 /**
- * Parse a pathname into a Phase 2 route.
+ * Parse a pathname into a route.
  * Returns null for unknown or malformed paths (including invalid UUIDs).
  */
 export function parseRoute(path: string): AppRoute | null {
@@ -76,6 +86,16 @@ export function parseRoute(path: string): AppRoute | null {
     case "/filters":
     case "/filters-labels":
       return { name: "filters-labels" };
+    case "/calendar":
+      return { name: "calendar" };
+    case "/matrix":
+      return { name: "matrix" };
+    case "/stats":
+      return { name: "stats" };
+    case "/dopamine-menu":
+      return { name: "dopamine-menu" };
+    case "/timeblocking":
+      return { name: "timeblocking" };
     default:
       break;
   }
@@ -100,9 +120,10 @@ export function parseRoute(path: string): AppRoute | null {
     return { name: "project", projectId, layout: "board" };
   }
 
-  // Calendar project layout is Phase 3 — reject rather than silently map.
   if (segments[0] === "projects" && segments.length === 3 && segments[2] === "calendar") {
-    return null;
+    const projectId = segments[1]!;
+    if (!isUuid(projectId)) return null;
+    return { name: "project", projectId, layout: "calendar" };
   }
 
   if (segments[0] === "tasks" && segments.length === 2) {
@@ -136,11 +157,21 @@ export function routeToPath(route: AppRoute): string {
     case "saved-filter":
       return `/filters/saved/${route.filterId}`;
     case "project":
-      return route.layout === "board"
-        ? `/projects/${route.projectId}/board`
-        : `/projects/${route.projectId}`;
+      if (route.layout === "board") return `/projects/${route.projectId}/board`;
+      if (route.layout === "calendar") return `/projects/${route.projectId}/calendar`;
+      return `/projects/${route.projectId}`;
     case "task":
       return `/tasks/${route.taskId}`;
+    case "calendar":
+      return "/calendar";
+    case "matrix":
+      return "/matrix";
+    case "stats":
+      return "/stats";
+    case "dopamine-menu":
+      return "/dopamine-menu";
+    case "timeblocking":
+      return "/timeblocking";
   }
 }
 
@@ -155,6 +186,11 @@ export function viewToRoute(view: View): AppRoute | null {
     case "cancelled":
     case "search":
     case "filters-labels":
+    case "calendar":
+    case "matrix":
+    case "stats":
+    case "dopamine-menu":
+    case "timeblocking":
       return { name: view };
     case "saved-filter":
     case "project":

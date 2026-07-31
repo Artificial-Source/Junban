@@ -14,6 +14,11 @@ import {
   ChevronLeft,
   Plus,
   Search,
+  CalendarRange,
+  Compass,
+  BarChart3,
+  Zap,
+  CalendarClock,
 } from "lucide-react";
 import type { View, AppRoute } from "../hooks/useRouting";
 import type { CatalogResponse, ProjectDto, SavedFilterDto } from "../api/client";
@@ -30,6 +35,15 @@ const NAV_ITEMS: NavItem[] = [
   { id: "today", label: "Today", icon: CalendarDays, countKey: "today" },
   { id: "upcoming", label: "Upcoming", icon: Clock },
   { id: "filters-labels", label: "Filters & Labels", icon: SlidersHorizontal },
+];
+
+/** First-party Phase 3 tools — placed after projects to match legacy plugin slot order. */
+const TOOL_NAV_ITEMS: NavItem[] = [
+  { id: "calendar", label: "Calendar", icon: CalendarRange },
+  { id: "matrix", label: "Matrix", icon: Compass },
+  { id: "stats", label: "Stats", icon: BarChart3 },
+  { id: "dopamine-menu", label: "Quick Wins", icon: Zap },
+  { id: "timeblocking", label: "Timeblocking", icon: CalendarClock },
 ];
 
 interface SidebarProps {
@@ -108,7 +122,12 @@ export function Sidebar({
             onNavigate({
               name: "project",
               projectId: project.id,
-              layout: project.view === "board" ? "board" : "list",
+              layout:
+                project.view === "board"
+                  ? "board"
+                  : project.view === "calendar"
+                    ? "calendar"
+                    : "list",
             })
           }
           aria-current={isActive ? "page" : undefined}
@@ -296,6 +315,37 @@ export function Sidebar({
               )}
             </div>
           )}
+
+          {/* Phase 3 first-party tools (after projects, matching legacy placement) */}
+          <div className={`${collapsed ? "" : "mt-5"} space-y-0.5`}>
+            {TOOL_NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
+              const isActive = currentView === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onNavigate(item.id)}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
+                    collapsed ? "justify-center" : "gap-3"
+                  } ${
+                    isActive
+                      ? "bg-accent-action/10 text-accent-foreground font-medium"
+                      : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
+                  }`}
+                  title={collapsed ? item.label : undefined}
+                >
+                  <Icon size={18} strokeWidth={isActive ? 2.25 : 1.75} />
+                  {!collapsed && <span className="flex-1">{item.label}</span>}
+                  {collapsed && (
+                    <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-xs text-on-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100">
+                      {item.label}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
           {/* Saved Filters section */}
           {!collapsed && savedFilters.length > 0 && (

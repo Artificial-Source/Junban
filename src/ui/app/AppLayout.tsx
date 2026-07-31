@@ -39,6 +39,10 @@ import { Project } from "../views/Project";
 import { TaskPage } from "../views/TaskPage";
 import { FiltersLabels } from "../views/FiltersLabels";
 import { FilterView } from "../views/FilterView";
+import { Calendar } from "../views/Calendar";
+import { Matrix } from "../views/Matrix";
+import { Stats } from "../views/Stats";
+import { DopamineMenu } from "../views/DopamineMenu";
 import type { TaskDto } from "../api/client";
 import { getTask } from "../api/client";
 import { detailRefreshFromEvent } from "./detailRefresh";
@@ -373,6 +377,19 @@ export function AppLayout() {
       name: "Go to Filters & Labels",
       callback: () => handleNavigate("filters-labels"),
     },
+    { id: "calendar", name: "Go to Calendar", callback: () => handleNavigate("calendar") },
+    { id: "matrix", name: "Go to Matrix", callback: () => handleNavigate("matrix") },
+    { id: "stats", name: "Go to Stats", callback: () => handleNavigate("stats") },
+    {
+      id: "dopamine-menu",
+      name: "Go to Quick Wins",
+      callback: () => handleNavigate("dopamine-menu"),
+    },
+    {
+      id: "timeblocking",
+      name: "Go to Timeblocking",
+      callback: () => handleNavigate("timeblocking"),
+    },
   ];
 
   // Find current project for Project view
@@ -512,7 +529,15 @@ export function AppLayout() {
                     onToggleTask={handleToggleTask}
                   />
                 )}
-                {route.name === "project" && currentProject && (
+                {route.name === "project" && currentProject && route.layout === "calendar" && (
+                  <Calendar
+                    projectId={currentProject.id}
+                    project={currentProject}
+                    onSelectTask={handleSelectTask}
+                    onToggleTask={handleToggleTask}
+                  />
+                )}
+                {route.name === "project" && currentProject && route.layout !== "calendar" && (
                   <Project
                     project={currentProject}
                     onSelectTask={handleSelectTask}
@@ -530,6 +555,34 @@ export function AppLayout() {
                 )}
                 {route.name === "project" && catalogLoading && <ViewSkeleton />}
                 {route.name === "task" && <TaskPage />}
+                {route.name === "calendar" && (
+                  <Calendar onSelectTask={handleSelectTask} onToggleTask={handleToggleTask} />
+                )}
+                {route.name === "matrix" && (
+                  <Matrix
+                    onSelectTask={handleSelectTask}
+                    onToggleTask={handleToggleTask}
+                    selectedTaskId={selectedTaskId}
+                  />
+                )}
+                {route.name === "stats" && <Stats />}
+                {route.name === "dopamine-menu" && (
+                  <DopamineMenu
+                    onSelectTask={handleSelectTask}
+                    onToggleTask={handleToggleTask}
+                    selectedTaskId={selectedTaskId}
+                    selectedTaskIds={multiSelect.selectedIds}
+                    onMultiSelect={multiSelect.handleSelect}
+                  />
+                )}
+                {route.name === "timeblocking" && (
+                  <div className="py-12 text-center">
+                    <h1 className="text-xl font-bold text-on-surface">Timeblocking</h1>
+                    <p className="mt-2 text-sm text-on-surface-muted">
+                      Timeblocking UI ships in a later Phase 3 wave.
+                    </p>
+                  </div>
+                )}
               </div>
             </ErrorBoundary>
           </div>

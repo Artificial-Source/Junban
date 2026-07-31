@@ -62,9 +62,13 @@ describe("parseRoute Phase 2 routes", () => {
     });
   });
 
-  it("rejects project calendar (Phase 3)", () => {
+  it("parses project calendar", () => {
     const uuid = "01234567-0123-4123-8123-0123456789ab";
-    expect(parseRoute(`/projects/${uuid}/calendar`)).toBeNull();
+    expect(parseRoute(`/projects/${uuid}/calendar`)).toEqual({
+      name: "project",
+      projectId: uuid,
+      layout: "calendar",
+    });
   });
 
   it("parses task page", () => {
@@ -75,9 +79,17 @@ describe("parseRoute Phase 2 routes", () => {
     });
   });
 
+  it("parses Phase 3 first-party routes", () => {
+    expect(parseRoute("/calendar")).toEqual({ name: "calendar" });
+    expect(parseRoute("/matrix")).toEqual({ name: "matrix" });
+    expect(parseRoute("/stats")).toEqual({ name: "stats" });
+    expect(parseRoute("/dopamine-menu")).toEqual({ name: "dopamine-menu" });
+    expect(parseRoute("/timeblocking")).toEqual({ name: "timeblocking" });
+  });
+
   it("returns null for unknown routes", () => {
     expect(parseRoute("/unknown")).toBeNull();
-    expect(parseRoute("/calendar")).toBeNull();
+    expect(parseRoute("/focus")).toBeNull();
   });
 });
 
@@ -93,7 +105,7 @@ describe("routeToPath", () => {
     expect(routeToPath({ name: "filters-labels" })).toBe("/filters");
   });
 
-  it("builds project board path", () => {
+  it("builds project board and calendar paths", () => {
     expect(
       routeToPath({
         name: "project",
@@ -101,6 +113,21 @@ describe("routeToPath", () => {
         layout: "board",
       }),
     ).toBe("/projects/01234567-0123-4123-8123-0123456789ab/board");
+    expect(
+      routeToPath({
+        name: "project",
+        projectId: "01234567-0123-4123-8123-0123456789ab",
+        layout: "calendar",
+      }),
+    ).toBe("/projects/01234567-0123-4123-8123-0123456789ab/calendar");
+  });
+
+  it("builds Phase 3 first-party paths", () => {
+    expect(routeToPath({ name: "calendar" })).toBe("/calendar");
+    expect(routeToPath({ name: "matrix" })).toBe("/matrix");
+    expect(routeToPath({ name: "stats" })).toBe("/stats");
+    expect(routeToPath({ name: "dopamine-menu" })).toBe("/dopamine-menu");
+    expect(routeToPath({ name: "timeblocking" })).toBe("/timeblocking");
   });
 });
 

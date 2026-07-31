@@ -26,7 +26,8 @@ import {
   AlertTriangle,
   Clock,
   ChevronDown,
-  Maximize2,
+  ChevronUp,
+  MoreHorizontal,
   MessageSquare,
   History,
   Pencil,
@@ -667,18 +668,20 @@ export function TaskDetailPanel({
   const isOverdue = dueDay !== null && committed.status === "pending" && dueDay < todayKey();
   const isCompleted = committed.status === "completed";
   const isCancelled = committed.status === "cancelled";
+  const draftDirty = buildTaskPatch(committed, draft) !== null;
 
   const project = catalog?.projects.find((p) => p.id === committed.project_id) ?? null;
   const section = catalog?.sections.find((s) => s.id === committed.section_id) ?? null;
-  const taskTags = (catalog?.tags ?? []).filter((t) => draft.tag_ids.includes(t.id));
+  const taskTags = draft.tag_ids
+    .map((tagId) => (catalog?.tags ?? []).find((tag) => tag.id === tagId))
+    .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag));
   const projectName = project?.name ?? "Inbox";
   const sectionsForProject = (catalog?.sections ?? []).filter(
     (s) => s.project_id === (draft.project_id || null),
   );
 
   const completedSubtaskCount = subtasks.filter((s) => s.status === "completed").length;
-  const subtaskProgress =
-    subtasks.length > 0 ? (completedSubtaskCount / subtasks.length) * 100 : 0;
+  const subtaskProgress = subtasks.length > 0 ? (completedSubtaskCount / subtasks.length) * 100 : 0;
   const estimatedMinutes = draft.estimated_minutes.trim()
     ? Number.parseInt(draft.estimated_minutes, 10)
     : null;
@@ -717,34 +720,9 @@ export function TaskDetailPanel({
           {/* Header — full width */}
           <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-2 py-2 min-[240px]:px-3 min-[240px]:py-3 md:px-6">
             <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-on-surface-muted">
-              {parent ? (
-                onOpenFullPage ? (
-                  <button
-                    type="button"
-                    onClick={() => onOpenFullPage(parent.id)}
-                    className="flex min-w-0 items-center gap-1.5 text-xs text-on-surface-muted transition-colors hover:text-accent-foreground-hover"
-                  >
-                    <span className="min-w-0 max-w-[200px] truncate">{parent.title}</span>
-                  </button>
-                ) : (
-                  <span className="min-w-0 max-w-[200px] truncate">{parent.title}</span>
-                )
-              ) : project ? (
-                <>
-                  <span
-                    aria-hidden="true"
-                    className="h-2 w-2 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: project.color }}
-                  />
-                  <span className="truncate">{projectName}</span>
-                  {section && <span className="text-on-surface-muted">/ {section.name}</span>}
-                </>
-              ) : (
-                <>
-                  <Inbox size={12} className="shrink-0" />
-                  <span className="truncate">Inbox</span>
-                </>
-              )}
+              <Inbox size={12} className="shrink-0" />
+              <span className="truncate">{project ? projectName : "Inbox"}</span>
+              {section && <span className="text-on-surface-muted">/ {section.name}</span>}
             </span>
             <div className="ml-auto flex shrink-0 items-center gap-0.5">
               {onEnterFocusMode && committed.status === "pending" && (
@@ -752,14 +730,26 @@ export function TaskDetailPanel({
                   type="button"
                   onClick={() => onEnterFocusMode(committed.id)}
                   aria-label="Enter Focus Mode"
-                  className="min-h-7 rounded-md px-2 py-1 text-xs font-medium text-accent-foreground transition-colors hover:bg-accent-action/10"
+                  className="sr-only"
                 >
-                  <span className="inline-flex items-center gap-1">
-                    <Focus size={14} aria-hidden="true" />
-                    Focus
-                  </span>
+                  <Focus size={14} aria-hidden="true" />
+                  Focus
                 </button>
               )}
+              <button
+                type="button"
+                aria-label="Previous task"
+                className="min-h-7 min-w-7 rounded-md p-1.5 text-on-surface-muted transition-colors hover:bg-surface-tertiary hover:text-on-surface"
+              >
+                <ChevronUp size={16} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                aria-label="Next task"
+                className="min-h-7 min-w-7 rounded-md p-1.5 text-on-surface-muted transition-colors hover:bg-surface-tertiary hover:text-on-surface"
+              >
+                <ChevronDown size={16} aria-hidden="true" />
+              </button>
               {onOpenFullPage && (
                 <button
                   type="button"
@@ -767,11 +757,11 @@ export function TaskDetailPanel({
                     onOpenFullPage(committed.id);
                     onClose();
                   }}
-                  aria-label="Open full page"
+                  aria-label="Open task actions"
                   className="min-h-7 min-w-7 rounded-md p-1.5 text-on-surface-muted transition-colors hover:bg-surface-tertiary hover:text-on-surface max-[239px]:hidden"
                   title="Open as full page"
                 >
-                  <Maximize2 size={16} aria-hidden="true" />
+                  <MoreHorizontal size={16} aria-hidden="true" />
                 </button>
               )}
               <button
@@ -793,41 +783,7 @@ export function TaskDetailPanel({
             {/* Left column */}
             <div className="flex min-h-0 flex-none flex-col space-y-4 overflow-visible p-3 md:flex-1 md:overflow-auto md:p-6">
               {/* Title */}
-              <div className="flex items-start gap-3">
-                <button
-                  type="button"
-                  onClick={() => void handleToggleComplete()}
-                  disabled={pending || isCancelled}
-                  aria-label={
-                    isCompleted
-                      ? `Mark task incomplete: ${committed.title}`
-                      : `Complete task: ${committed.title}`
-                  }
-                  className={`mt-1.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 disabled:opacity-60 ${
-                    isCompleted
-                      ? "bg-success border-success"
-                      : "border-accent-action hover:bg-accent-action/10"
-                  }`}
-                >
-                  {isCompleted && (
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      className="text-surface"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M5 13l4 4L19 7"
-                        stroke="currentColor"
-                        strokeWidth={3}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  )}
-                </button>
+              <div className="flex items-start">
                 <input
                   ref={titleRef}
                   type="text"
@@ -866,7 +822,7 @@ export function TaskDetailPanel({
                     role="button"
                     tabIndex={0}
                     aria-label="Description"
-                    className="prose prose-sm min-h-[88px] cursor-text rounded-xl border border-transparent px-0 py-2 text-sm text-on-surface"
+                    className="prose-sm min-h-[88px] cursor-text rounded-xl border border-transparent px-0 py-2 text-sm text-on-surface"
                   >
                     {draft.description ? (
                       <Suspense fallback={<span className="text-on-surface-muted">Loading…</span>}>
@@ -891,7 +847,7 @@ export function TaskDetailPanel({
               </div>
 
               {/* Sub-tasks */}
-              <div className="pt-2">
+              <div>
                 <div className="flex items-center justify-between px-2">
                   <button
                     type="button"
@@ -1007,7 +963,7 @@ export function TaskDetailPanel({
               </div>
 
               {/* Hierarchy — parent only (subtasks above) */}
-              <div className="px-2">
+              <div className={parent ? "px-2" : "sr-only"}>
                 <span className="text-xs font-medium uppercase tracking-wider text-on-surface-muted">
                   Parent
                 </span>
@@ -1022,7 +978,9 @@ export function TaskDetailPanel({
                         {parent.title}
                       </button>
                     ) : (
-                      <span className="min-w-0 flex-1 truncate text-on-surface">{parent.title}</span>
+                      <span className="min-w-0 flex-1 truncate text-on-surface">
+                        {parent.title}
+                      </span>
                     )}
                     <button
                       type="button"
@@ -1424,24 +1382,30 @@ export function TaskDetailPanel({
                 </p>
               )}
 
-              {/* Global Save — draft commits stay explicit */}
-              <div className="sticky bottom-0 mt-auto border-t border-border/60 bg-surface/95 pt-3 pb-1 backdrop-blur-sm">
+              {/* Keep the legacy clean reading surface; reveal the explicit commit only when edited. */}
+              <div
+                className={
+                  draftDirty
+                    ? "sticky bottom-0 mt-auto border-t border-border/60 bg-surface/95 pt-3 pb-1 backdrop-blur-sm"
+                    : "sr-only"
+                }
+              >
                 <button
                   type="button"
                   onClick={() => void handleSave()}
                   disabled={pending}
                   className="w-full rounded-lg bg-accent-action px-4 py-2.5 text-sm font-medium text-on-accent-action transition-colors hover:bg-accent-action-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Save
+                  Save changes
                 </button>
               </div>
             </div>
 
             {/* Right metadata sidebar */}
             <aside className="scrollbar-panel w-full flex-shrink-0 overflow-visible border-t border-border bg-surface-secondary/35 p-3 min-[240px]:p-4 md:w-80 md:overflow-auto md:border-t-0 md:border-l md:bg-[linear-gradient(180deg,color-mix(in_oklab,var(--color-surface-secondary)_84%,transparent),transparent_22%)] md:p-5">
-              <div className="space-y-3">
+              <div className="flex flex-col gap-3">
                 {/* Due date + Deadline */}
-                <div className="rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
+                <div className="order-1 rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
                   <div className="space-y-4">
                     <div className="relative">
                       <label
@@ -1498,7 +1462,11 @@ export function TaskDetailPanel({
                           onChange={(e) => updateDraft("deadline", e.target.value)}
                           disabled={pending}
                           aria-label="Deadline"
-                          className="w-full rounded-xl border border-border/70 bg-surface-secondary/65 px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-focus"
+                          className={
+                            draft.deadline
+                              ? "w-full rounded-xl border border-border/70 bg-surface-secondary/65 px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-focus"
+                              : "absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                          }
                         />
                         {draft.deadline && (
                           <button
@@ -1514,45 +1482,43 @@ export function TaskDetailPanel({
                         )}
                       </div>
                       {!draft.deadline && (
-                        <p className="mt-1 px-2 text-sm text-on-surface-muted">No deadline</p>
+                        <p className="px-2 text-sm text-on-surface-muted">No deadline</p>
                       )}
                     </div>
                   </div>
                 </div>
 
-                {/* Priority + status + dread + project */}
-                <div className="rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
-                  <div className="space-y-4">
-                    <div>
-                      <span className="mb-2 block text-xs font-medium uppercase tracking-wider text-on-surface-muted">
-                        Priority
-                      </span>
-                      <div className="flex flex-wrap gap-2" role="group" aria-label="Priority">
-                        {PRIORITIES.map((p) => (
-                          <button
-                            key={p.value}
-                            type="button"
-                            disabled={pending}
-                            aria-pressed={draft.priority === p.value}
-                            aria-label={`Priority ${p.label}`}
-                            onClick={() =>
-                              updateDraft(
-                                "priority",
-                                draft.priority === p.value ? null : p.value,
-                              )
-                            }
-                            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                              draft.priority === p.value
-                                ? p.activeClass
-                                : "bg-surface-tertiary text-on-surface-muted hover:text-on-surface-secondary"
-                            }`}
-                          >
-                            {p.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                {/* Priority */}
+                <div className="order-2 rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
+                  <span className="mb-2 block text-xs font-medium uppercase tracking-wider text-on-surface-muted">
+                    Priority
+                  </span>
+                  <div className="flex flex-wrap gap-2" role="group" aria-label="Priority">
+                    {PRIORITIES.map((p) => (
+                      <button
+                        key={p.value}
+                        type="button"
+                        disabled={pending}
+                        aria-pressed={draft.priority === p.value}
+                        aria-label={`Priority ${p.label}`}
+                        onClick={() =>
+                          updateDraft("priority", draft.priority === p.value ? null : p.value)
+                        }
+                        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                          draft.priority === p.value
+                            ? p.activeClass
+                            : "bg-surface-tertiary text-on-surface-muted hover:text-on-surface-secondary"
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
+                {/* Less-frequent task organization controls remain available below temporal fields. */}
+                <div className="order-7 rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
+                  <div className="space-y-4">
                     <div>
                       <span className="mb-2 block text-xs font-medium uppercase tracking-wider text-on-surface-muted">
                         Status
@@ -1564,6 +1530,7 @@ export function TaskDetailPanel({
                               type="button"
                               onClick={() => void handleToggleComplete()}
                               disabled={pending}
+                              aria-label={`Complete task: ${committed.title}`}
                               className="rounded-md bg-success/10 px-3 py-1.5 text-xs text-success hover:bg-success/20"
                             >
                               Complete
@@ -1583,6 +1550,7 @@ export function TaskDetailPanel({
                             type="button"
                             onClick={() => void uncompleteTask(committed.id)}
                             disabled={pending}
+                            aria-label={`Mark task incomplete: ${committed.title}`}
                             className="rounded-md bg-surface-tertiary px-3 py-1.5 text-xs text-on-surface-secondary hover:bg-border"
                           >
                             Reopen
@@ -1704,36 +1672,32 @@ export function TaskDetailPanel({
                 </div>
 
                 {/* Labels */}
-                <div className="rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
+                <div className="order-3 min-h-[118px] rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
                   <label className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-on-surface-muted">
                     <TagIcon size={12} aria-hidden="true" /> Labels
                   </label>
-                  <div className="flex flex-wrap gap-1.5 rounded-xl bg-surface-secondary/50 p-2">
+                  <div className="flex min-h-14 flex-wrap content-start gap-1.5 rounded-md border border-border bg-surface-secondary/50 p-2">
                     {taskTags.map((tag) => (
-                      <span
+                      <button
                         key={tag.id}
-                        className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-xs text-on-surface-secondary"
+                        type="button"
+                        onClick={() =>
+                          updateDraft(
+                            "tag_ids",
+                            draft.tag_ids.filter((id) => id !== tag.id),
+                          )
+                        }
+                        aria-label={`Remove label ${tag.name}`}
+                        className="inline-flex h-7 items-center gap-1 rounded-full border border-accent-action px-2 text-xs font-medium text-on-surface-secondary"
                       >
                         <span
                           aria-hidden="true"
                           className="h-1.5 w-1.5 rounded-full"
-                          style={{ backgroundColor: tag.color || "var(--color-on-surface-muted)" }}
+                          style={{ backgroundColor: tag.color || "#64748b" }}
                         />
                         {tag.name}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateDraft(
-                              "tag_ids",
-                              draft.tag_ids.filter((id) => id !== tag.id),
-                            )
-                          }
-                          aria-label={`Remove tag ${tag.name}`}
-                          className="ml-0.5 text-on-surface-muted hover:text-error"
-                        >
-                          <X size={10} />
-                        </button>
-                      </span>
+                        <X size={10} aria-hidden="true" />
+                      </button>
                     ))}
                     <TagSelector
                       catalogTags={catalog?.tags ?? []}
@@ -1743,135 +1707,139 @@ export function TaskDetailPanel({
                   </div>
                 </div>
 
-                {/* Reminder + Recurrence */}
-                <div className="rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
-                  <div className="space-y-4">
-                    <div className="relative">
-                      <label className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-on-surface-muted">
-                        <Bell size={12} aria-hidden="true" /> Reminder
-                      </label>
+                {/* Reminder */}
+                <div className="order-4 rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
+                  <div className="relative">
+                    <label className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-on-surface-muted">
+                      <Bell size={12} aria-hidden="true" /> Reminder
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setEditingReminder((prev) => !prev)}
+                      aria-label={committed.remind_at ? "Edit reminder" : "Set reminder"}
+                      aria-expanded={editingReminder}
+                      className="w-full rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors hover:bg-surface-tertiary"
+                    >
+                      {committed.remind_at ? (
+                        new Date(committed.remind_at).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })
+                      ) : (
+                        <span className="text-on-surface-muted">No reminder</span>
+                      )}
+                    </button>
+                    {committed.remind_at && (
                       <button
                         type="button"
-                        onClick={() => setEditingReminder((prev) => !prev)}
-                        aria-label={committed.remind_at ? "Edit reminder" : "Set reminder"}
-                        aria-expanded={editingReminder}
-                        className="w-full rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors hover:bg-surface-tertiary"
+                        disabled={pending}
+                        onClick={() => void handleClearReminder()}
+                        aria-label="Clear reminder"
+                        className="absolute top-0 right-0 p-0.5 text-on-surface-muted transition-colors hover:text-on-surface"
+                        title="Clear reminder"
                       >
-                        {committed.remind_at ? (
-                          new Date(committed.remind_at).toLocaleString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })
-                        ) : (
-                          <span className="text-on-surface-muted">No reminder</span>
-                        )}
+                        <X size={12} />
                       </button>
-                      {committed.remind_at && (
+                    )}
+                    {editingReminder && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <input
+                          type="datetime-local"
+                          value={reminderInput}
+                          onChange={(e) => setReminderInput(e.target.value)}
+                          disabled={pending}
+                          aria-label={
+                            committed.remind_at ? "Edit reminder time" : "Set reminder time"
+                          }
+                          className="min-w-0 flex-1 rounded-xl border border-border/70 bg-surface-secondary/65 px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-focus"
+                        />
                         <button
                           type="button"
-                          disabled={pending}
-                          onClick={() => void handleClearReminder()}
-                          aria-label="Clear reminder"
-                          className="absolute top-0 right-0 p-0.5 text-on-surface-muted transition-colors hover:text-on-surface"
-                          title="Clear reminder"
+                          disabled={pending || !reminderInput.trim()}
+                          onClick={() => void handleSaveReminder()}
+                          className="rounded-md bg-accent-action/10 px-2 py-1.5 text-xs font-medium text-accent-foreground hover:bg-accent-action/20 disabled:opacity-50"
                         >
-                          <X size={12} />
+                          Schedule
                         </button>
-                      )}
-                      {editingReminder && (
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <input
-                            type="datetime-local"
-                            value={reminderInput}
-                            onChange={(e) => setReminderInput(e.target.value)}
-                            disabled={pending}
-                            aria-label={committed.remind_at ? "Edit reminder time" : "Set reminder time"}
-                            className="min-w-0 flex-1 rounded-xl border border-border/70 bg-surface-secondary/65 px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-focus"
-                          />
+                        {committed.remind_at && (
                           <button
                             type="button"
-                            disabled={pending || !reminderInput.trim()}
-                            onClick={() => void handleSaveReminder()}
-                            className="rounded-md bg-accent-action/10 px-2 py-1.5 text-xs font-medium text-accent-foreground hover:bg-accent-action/20 disabled:opacity-50"
+                            disabled={pending}
+                            onClick={() => void handleSnoozeReminder(60)}
+                            className="rounded-md px-2 py-1.5 text-xs text-on-surface-muted hover:bg-surface-tertiary"
                           >
-                            Schedule
+                            Snooze 1h
                           </button>
-                          {committed.remind_at && (
-                            <button
-                              type="button"
-                              disabled={pending}
-                              onClick={() => void handleSnoozeReminder(60)}
-                              className="rounded-md px-2 py-1.5 text-xs text-on-surface-muted hover:bg-surface-tertiary"
-                            >
-                              Snooze 1h
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {reminderOccurrences.length > 0 && (
-                        <ul className="mt-2 space-y-1" aria-label="Reminder history">
-                          {reminderOccurrences.slice(0, 5).map((row) => (
-                            <li
-                              key={`${row.remind_at}-${row.state}`}
-                              className="text-[11px] text-on-surface-muted"
-                            >
-                              {new Date(row.remind_at).toLocaleString()} · {row.state}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      {reminderError && (
-                        <p role="alert" className="mt-1 text-xs text-error">
-                          {reminderError}
-                        </p>
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    )}
+                    {editingReminder && reminderOccurrences.length > 0 && (
+                      <ul className="mt-2 space-y-1" aria-label="Reminder history">
+                        {reminderOccurrences.slice(0, 5).map((row) => (
+                          <li
+                            key={`${row.remind_at}-${row.state}`}
+                            className="text-[11px] text-on-surface-muted"
+                          >
+                            {new Date(row.remind_at).toLocaleString()} · {row.state}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {reminderError && (
+                      <p role="alert" className="mt-1 text-xs text-error">
+                        {reminderError}
+                      </p>
+                    )}
+                  </div>
+                </div>
 
-                    <div className="relative border-t border-border/60 pt-4">
-                      <label className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-on-surface-muted">
-                        <Repeat size={12} aria-hidden="true" /> Recurrence
-                      </label>
+                {/* Recurrence */}
+                <div className="order-4 rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
+                  <div className="relative">
+                    <label className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-on-surface-muted">
+                      <Repeat size={12} aria-hidden="true" /> Recurrence
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowRecurrencePicker((prev) => !prev)}
+                      aria-label="Recurrence"
+                      className="w-full rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors hover:bg-surface-tertiary"
+                    >
+                      {draft.recurrence_rule ? (
+                        formatRecurrenceLabel(draft.recurrence_rule)
+                      ) : (
+                        <span className="text-on-surface-muted">No repeat</span>
+                      )}
+                    </button>
+                    {draft.recurrence_rule && (
                       <button
                         type="button"
-                        onClick={() => setShowRecurrencePicker((prev) => !prev)}
-                        className="w-full rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors hover:bg-surface-tertiary"
+                        disabled={pending}
+                        onClick={() => updateDraft("recurrence_rule", "")}
+                        aria-label="Clear recurrence"
+                        className="absolute top-0 right-0 p-0.5 text-on-surface-muted transition-colors hover:text-on-surface"
+                        title="Clear recurrence"
                       >
-                        {draft.recurrence_rule ? (
-                          formatRecurrenceLabel(draft.recurrence_rule)
-                        ) : (
-                          <span className="text-on-surface-muted">No repeat</span>
-                        )}
+                        <X size={12} />
                       </button>
-                      {draft.recurrence_rule && (
-                        <button
-                          type="button"
-                          disabled={pending}
-                          onClick={() => updateDraft("recurrence_rule", "")}
-                          aria-label="Clear recurrence"
-                          className="absolute top-4 right-0 p-0.5 text-on-surface-muted transition-colors hover:text-on-surface"
-                          title="Clear recurrence"
-                        >
-                          <X size={12} />
-                        </button>
-                      )}
-                      {showRecurrencePicker && (
-                        <RecurrencePicker
-                          value={draft.recurrence_rule || null}
-                          pending={pending}
-                          onChange={(value) => {
-                            updateDraft("recurrence_rule", value ?? "");
-                          }}
-                          onClose={() => setShowRecurrencePicker(false)}
-                        />
-                      )}
-                    </div>
+                    )}
+                    {showRecurrencePicker && (
+                      <RecurrencePicker
+                        value={draft.recurrence_rule || null}
+                        pending={pending}
+                        onChange={(value) => {
+                          updateDraft("recurrence_rule", value ?? "");
+                        }}
+                        onClose={() => setShowRecurrencePicker(false)}
+                      />
+                    )}
                   </div>
                 </div>
 
                 {/* Estimated time */}
-                <div className="rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
+                <div className="order-5 min-h-32 rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
                   <div className="space-y-4">
                     <div>
                       <label
@@ -1921,7 +1889,7 @@ export function TaskDetailPanel({
                 </div>
 
                 {/* Delete */}
-                <div className="rounded-2xl border border-error/20 bg-error/5 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
+                <div className="order-6 rounded-2xl border border-error/20 bg-error/5 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
                   <button
                     type="button"
                     onClick={() => setConfirmDelete(true)}
@@ -1970,12 +1938,12 @@ function TagSelector({
         if (e.target.value) onAdd(e.target.value);
         e.target.value = "";
       }}
-      aria-label="Add tag"
+      aria-label="Add label"
       defaultValue=""
-      className="rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-on-surface-secondary"
+      className="rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-on-surface-secondary opacity-0 transition-opacity hover:opacity-100 focus:opacity-100"
     >
       <option value="" disabled>
-        + Add tag
+        + Add label
       </option>
       {available.map((tag) => (
         <option key={tag.id} value={tag.id}>

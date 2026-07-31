@@ -24,7 +24,7 @@ function safeUrlTransform(url: string): string | null {
 
 export function MarkdownPreview({ content }: MarkdownPreviewProps) {
   return (
-    <div className="prose prose-sm max-w-none text-on-surface [&_a]:text-accent-foreground [&_a]:underline [&_code]:bg-surface-tertiary [&_code]:px-1 [&_code]:rounded [&_pre]:bg-surface-tertiary [&_pre]:p-2 [&_pre]:rounded-lg [&_ul]:list-disc [&_ol]:list-decimal">
+    <div className="prose prose-sm max-w-none text-on-surface [&_a]:text-accent-foreground [&_a]:underline [&_code]:rounded [&_code]:bg-surface-tertiary [&_code]:px-1 [&_h2:first-child]:mt-0 [&>*:last-child]:mb-0 [&_ol]:list-decimal [&_pre]:rounded-lg [&_pre]:bg-surface-tertiary [&_pre]:p-2 [&_ul]:list-disc">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         skipHtml

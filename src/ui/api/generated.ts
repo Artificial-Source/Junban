@@ -1807,6 +1807,10 @@ export interface components {
     };
     StatsResponse: {
       /** Format: int32 */
+      average_actual_minutes?: number | null;
+      /** Format: int32 */
+      average_estimated_minutes?: number | null;
+      /** Format: int32 */
       current_streak_days: number;
       days: components["schemas"]["DailyStatBucketDto"][];
       /** Format: int32 */

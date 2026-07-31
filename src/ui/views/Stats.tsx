@@ -2,40 +2,30 @@
  * Productivity stats from the Rust `/api/v1/stats` authority only.
  * Period controls request different inclusive civil ranges; no client aggregates.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BarChart3, Flame, Calendar, Clock, Target } from "lucide-react";
 import { ApiError, getStats, type StatsResponse } from "../api/client";
 import { useToday } from "../hooks/useToday";
-import { SegmentedControl } from "../components/SegmentedControl";
 import { ViewSkeleton } from "../components/Skeleton";
 import {
-  STATS_PERIOD_OPTIONS,
   chartRowsWithToday,
   completionsInRange,
   completionsOnDay,
   formatMinutes,
   statsPeriodRange,
   weekStartMonday,
-  type StatsPeriod,
 } from "./statsPeriods";
+
+function formatDecimalHours(minutes: number) {
+  return `${(minutes / 60).toFixed(1)}h`;
+}
 
 export function Stats() {
   const today = useToday();
-  const [period, setPeriod] = useState<StatsPeriod>("7d");
-  const [customFrom, setCustomFrom] = useState(() => statsPeriodRange("7d", today).from);
-  const [customTo, setCustomTo] = useState(today);
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const range = useMemo(() => {
-    if (period === "custom") {
-      const from = customFrom <= customTo ? customFrom : customTo;
-      const to = customFrom <= customTo ? customTo : customFrom;
-      return { from, to };
-    }
-    return statsPeriodRange(period, today);
-  }, [period, today, customFrom, customTo]);
+  const range = statsPeriodRange("7d", today);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,54 +52,12 @@ export function Stats() {
   const dailyCounts = stats ? chartRowsWithToday(stats, today) : [];
   const maxCount = Math.max(...dailyCounts.map((d) => d.count), 1);
 
-  const periodLabel =
-    period === "7d"
-      ? "Last 7 Days"
-      : period === "30d"
-        ? "Last 30 Days"
-        : period === "90d"
-          ? "Last 90 Days"
-          : period === "1y"
-            ? "Last Year"
-            : "Custom Range";
-
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 md:mb-6">
-        <div className="flex items-center gap-3">
-          <BarChart3 size={24} className="text-accent-foreground" />
-          <h1 className="text-xl font-bold text-on-surface md:text-2xl">Productivity</h1>
-        </div>
-        <SegmentedControl
-          label="Stats period"
-          options={STATS_PERIOD_OPTIONS}
-          value={period}
-          onChange={setPeriod}
-        />
+      <div className="flex items-center gap-3 mb-4 md:mb-6">
+        <BarChart3 size={24} className="text-accent-foreground" />
+        <h1 className="text-xl font-bold text-on-surface md:text-2xl">Productivity</h1>
       </div>
-
-      {period === "custom" && (
-        <div className="mb-4 flex flex-wrap items-end gap-3">
-          <label className="text-xs text-on-surface-muted">
-            From
-            <input
-              type="date"
-              value={customFrom}
-              onChange={(e) => setCustomFrom(e.target.value)}
-              className="mt-1 block rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-on-surface"
-            />
-          </label>
-          <label className="text-xs text-on-surface-muted">
-            To
-            <input
-              type="date"
-              value={customTo}
-              onChange={(e) => setCustomTo(e.target.value)}
-              className="mt-1 block rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-on-surface"
-            />
-          </label>
-        </div>
-      )}
 
       {error && (
         <div
@@ -187,7 +135,7 @@ export function Stats() {
           </div>
 
           <div>
-            <h2 className="mb-3 text-sm font-semibold text-on-surface">{periodLabel}</h2>
+            <h2 className="mb-3 text-sm font-semibold text-on-surface">Last 7 Days</h2>
             {dailyCounts.length === 0 ? (
               <p className="text-xs italic text-on-surface-muted">No activity in this period.</p>
             ) : (
@@ -237,9 +185,10 @@ export function Stats() {
                 </div>
                 <div className="rounded-xl border border-border bg-surface-secondary p-3 text-center">
                   <p className="text-xl font-bold text-on-surface">
-                    {stats.total_completions} / {stats.total_creations}
+                    {formatDecimalHours(stats.average_estimated_minutes ?? 0)} →{" "}
+                    {formatDecimalHours(stats.average_actual_minutes ?? 0)}
                   </p>
-                  <p className="text-xs text-on-surface-muted">Completed / created</p>
+                  <p className="text-xs text-on-surface-muted">Avg est. → actual</p>
                 </div>
                 <div className="rounded-xl border border-border bg-surface-secondary p-3 text-center">
                   <p className="text-xl font-bold text-on-surface">

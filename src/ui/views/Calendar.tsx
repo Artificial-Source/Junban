@@ -4,7 +4,13 @@
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CalendarRange, ChevronLeft, ChevronRight } from "lucide-react";
-import { ApiError, listCalendarTasks, type ProjectDto, type TaskDto } from "../api/client";
+import {
+  ApiError,
+  getTemporalSettings,
+  listCalendarTasks,
+  type ProjectDto,
+  type TaskDto,
+} from "../api/client";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { useTaskMutations } from "../hooks/useTaskMutations";
 import { SegmentedControl } from "../components/SegmentedControl";
@@ -32,7 +38,8 @@ interface CalendarProps {
 export function Calendar({ onSelectTask, onToggleTask, projectId = null }: CalendarProps) {
   const { catalog } = useWorkspace();
   const { patchTask } = useTaskMutations();
-  const nav = useCalendarNavigation({ initialMode: "week", weekStartDay: 0 });
+  const [weekStartDay, setWeekStartDay] = useState(0);
+  const nav = useCalendarNavigation({ initialMode: "week", weekStartDay });
   const [tasks, setTasks] = useState<TaskDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +58,20 @@ export function Calendar({ onSelectTask, onToggleTask, projectId = null }: Calen
   const projects = catalog?.projects ?? [];
   const tags = catalog?.tags ?? [];
 
+  useEffect(() => {
+    let active = true;
+    void getTemporalSettings()
+      .then((settings) => {
+        if (active) setWeekStartDay(settings.week_start === "monday" ? 1 : 0);
+      })
+      .catch(() => {
+        // The server default is Sunday. Calendar data remains usable if settings fail.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const load = useCallback(async () => {
     const seq = ++requestSeq.current;
     setLoading(true);
@@ -62,7 +83,14 @@ export function Calendar({ onSelectTask, onToggleTask, projectId = null }: Calen
         ...(projectId ? { project_id: projectId } : {}),
       });
       if (seq !== requestSeq.current) return;
-      setTasks(response.tasks);
+      setTasks(
+        [...response.tasks].sort(
+          (left, right) =>
+            (left.priority ?? 5) - (right.priority ?? 5) ||
+            left.sort_order - right.sort_order ||
+            left.id.localeCompare(right.id),
+        ),
+      );
     } catch (caught) {
       if (seq !== requestSeq.current) return;
       if (caught instanceof ApiError) {

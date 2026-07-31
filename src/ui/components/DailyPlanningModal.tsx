@@ -156,28 +156,6 @@ export function DailyPlanningModal({ open, onClose }: DailyPlanningModalProps) {
     [load, patchTask, runMutation, today],
   );
 
-  const handleAllToToday = useCallback(async () => {
-    if (!plan || pendingRef.current) return;
-    pendingRef.current = true;
-    setPending(true);
-    setError(null);
-    try {
-      for (const task of plan.overdue_tasks) {
-        const result = await patchTask(task.id, { due_date: today }, "Reschedule to today");
-        if (result === null) {
-          setError("Could not move every overdue task to today.");
-          return;
-        }
-      }
-      await load();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not move overdue tasks.");
-    } finally {
-      pendingRef.current = false;
-      setPending(false);
-    }
-  }, [load, patchTask, plan, today]);
-
   const handleSetAside = useCallback((taskId: string) => {
     setExcludedIds((prev) => {
       const next = new Set(prev);
@@ -270,16 +248,6 @@ export function DailyPlanningModal({ open, onClose }: DailyPlanningModalProps) {
               </p>
             ) : (
               <>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => void handleAllToToday()}
-                    className="min-h-6 rounded bg-accent-action/10 px-2 py-1 text-xs font-medium text-accent-foreground transition-colors hover:bg-accent-action/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                  >
-                    All to Today
-                  </button>
-                </div>
                 {overdueTasks.map((task) => (
                   <div
                     key={task.id}

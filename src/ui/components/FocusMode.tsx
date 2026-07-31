@@ -70,7 +70,7 @@ async function loadAllPending(): Promise<TaskDto[]> {
 
 export function FocusMode({ open, startTaskId, onClose, onPendingChange }: FocusModeProps) {
   const { catalog, registerTaskEventHandler, registerTaskResyncHandler } = useWorkspace();
-  const { completeTask, patchTask } = useTaskMutations();
+  const { completeTask } = useTaskMutations();
   const [tasks, setTasks] = useState<TaskDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -197,28 +197,6 @@ export function FocusMode({ open, startTaskId, onClose, onPendingChange }: Focus
     });
   }, [completeTask, currentTask, runAction]);
 
-  const snoozeOneDay = useCallback(async () => {
-    if (!currentTask) return;
-    const base = currentTask.due_date ?? todayKey();
-    const d = new Date(`${base}T12:00:00`);
-    d.setDate(d.getDate() + 1);
-    const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const ok = await runAction(
-      () => patchTask(currentTask.id, { due_date: next }, "Snooze task"),
-      "The task could not be snoozed.",
-    );
-    if (ok) goNext();
-  }, [currentTask, goNext, patchTask, runAction]);
-
-  const scheduleToday = useCallback(async () => {
-    if (!currentTask) return;
-    const ok = await runAction(
-      () => patchTask(currentTask.id, { due_date: todayKey() }, "Schedule today"),
-      "The task could not be scheduled.",
-    );
-    if (ok) goNext();
-  }, [currentTask, goNext, patchTask, runAction]);
-
   useEffect(() => {
     if (!open || !pending) return;
     const blockUnload = (event: BeforeUnloadEvent) => {
@@ -252,6 +230,10 @@ export function FocusMode({ open, startTaskId, onClose, onPendingChange }: Focus
           e.preventDefault();
           if (!pendingRef.current) void completeAndAdvance();
           break;
+        case "c":
+          e.preventDefault();
+          if (!pendingRef.current) void completeAndAdvance();
+          break;
         case "n":
           e.preventDefault();
           if (!pendingRef.current) goNext();
@@ -259,14 +241,6 @@ export function FocusMode({ open, startTaskId, onClose, onPendingChange }: Focus
         case "p":
           e.preventDefault();
           if (!pendingRef.current) goPrev();
-          break;
-        case "s":
-          e.preventDefault();
-          if (!pendingRef.current) void snoozeOneDay();
-          break;
-        case "t":
-          e.preventDefault();
-          if (!pendingRef.current) void scheduleToday();
           break;
         case "ArrowRight":
         case "ArrowDown":
@@ -292,7 +266,7 @@ export function FocusMode({ open, startTaskId, onClose, onPendingChange }: Focus
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, completeAndAdvance, goNext, goPrev, requestClose, scheduleToday, snoozeOneDay]);
+  }, [open, completeAndAdvance, goNext, goPrev, requestClose]);
 
   if (!open) return null;
 
@@ -505,25 +479,6 @@ export function FocusMode({ open, startTaskId, onClose, onPendingChange }: Focus
         </button>
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center justify-center gap-2 px-3 pb-2 sm:px-6">
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => void snoozeOneDay()}
-          className="rounded-md px-2 py-1 text-xs text-on-surface-muted hover:bg-surface-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          Snooze 1 day
-        </button>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => void scheduleToday()}
-          className="rounded-md px-2 py-1 text-xs text-on-surface-muted hover:bg-surface-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          Schedule today
-        </button>
-      </div>
-
       {pending && (
         <p
           id="focus-mode-pending"
@@ -547,10 +502,6 @@ export function FocusMode({ open, startTaskId, onClose, onPendingChange }: Focus
           <kbd className="rounded bg-surface-tertiary px-1.5 py-0.5 text-xs">N</kbd> Next
           {" · "}
           <kbd className="rounded bg-surface-tertiary px-1.5 py-0.5 text-xs">P</kbd> Previous
-          {" · "}
-          <kbd className="rounded bg-surface-tertiary px-1.5 py-0.5 text-xs">S</kbd> Snooze
-          {" · "}
-          <kbd className="rounded bg-surface-tertiary px-1.5 py-0.5 text-xs">T</kbd> Today
           {" · "}
           <kbd className="rounded bg-surface-tertiary px-1.5 py-0.5 text-xs">Esc</kbd> Exit
         </p>

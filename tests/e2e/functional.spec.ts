@@ -152,12 +152,8 @@ test("nullable due-date clearing", async ({ page }) => {
   await page.getByRole("button", { name: "Edit task: Due date clear test" }).click();
   const dialog = page.getByRole("dialog", { name: /Task: Due date clear test/ });
   const dateInput = dialog.locator("#task-due-date");
-  // Clear the date input
-  await dateInput.evaluate((el) => {
-    (el as HTMLInputElement).value = "";
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  // Clear the controlled date input through the same input path a user exercises.
+  await dateInput.fill("");
   await dialog.getByRole("button", { name: "Save" }).click();
   await dialog.getByRole("button", { name: "Close task details" }).click();
 
@@ -715,14 +711,11 @@ test("task reminder and recurrence editing", async ({ page }) => {
   await expect(dialog.getByText("Recurrence", { exact: true })).toBeVisible();
   await expect(dialog.getByText(/Daily/i).first()).toBeVisible();
 
-  // Change recurrence via the accessible control and save.
-  const recurrence = dialog.getByLabel("Recurrence");
-  if (await recurrence.isVisible().catch(() => false)) {
-    await recurrence.selectOption({ label: "Weekly" }).catch(async () => {
-      await recurrence.click();
-      await page.getByRole("option", { name: /Weekly/i }).click();
-    });
-  }
+  // Change recurrence through the accessible legacy picker and save.
+  await dialog.getByRole("button", { name: "Recurrence", exact: true }).click();
+  const recurrencePicker = page.getByRole("dialog", { name: "Recurrence", exact: true });
+  await expect(recurrencePicker).toBeVisible();
+  await recurrencePicker.getByRole("button", { name: "Weekly", exact: true }).click();
   const save = dialog.getByRole("button", { name: "Save" });
   if (await save.isVisible().catch(() => false)) {
     await save.click();
@@ -977,12 +970,12 @@ test("timeblocking Day/Week CRUD move resize replan and slot membership without 
   // UI Day/Week modes render seeded blocks and slot membership.
   await page.goto(appUrlWithToken(server.baseUrl, server.token, "/timeblocking"));
   await expect(page.getByTestId("timeblocking-view")).toBeVisible({ timeout: 10_000 });
-  const selectTbMode = async (mode: string) => {
-    const radio = page
+  const selectTbMode = async (mode: "Day" | "Week") => {
+    const button = page
       .getByTestId("view-mode-selector")
-      .getByRole("radio", { name: mode, exact: true });
-    if (!(await radio.isChecked())) {
-      await page.locator(`label[for="${await radio.getAttribute("id")}"]`).click();
+      .getByRole("button", { name: mode, exact: true });
+    if ((await button.getAttribute("aria-pressed")) !== "true") {
+      await button.click();
     }
   };
   await selectTbMode("Day");

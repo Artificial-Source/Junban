@@ -8,13 +8,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getNudges, getTemporalSettings, type NudgeRuleKindDto } from "../api/client";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { useToday } from "./useToday";
-import { nudgeHref, nudgeMessage } from "../lib/planningLabels";
+import { nudgeMessage } from "../lib/planningLabels";
 
 export type ActiveNudge = {
   id: string;
   kind: NudgeRuleKindDto;
   message: string;
-  href: string;
   taskIds: string[];
 };
 
@@ -43,7 +42,6 @@ export function useSmartNudges(): {
           id,
           kind: rule.kind,
           message: nudgeMessage(rule.kind, count),
-          href: nudgeHref(rule.kind),
           taskIds: rule.task_ids,
         });
       }
@@ -93,8 +91,6 @@ export function useSmartNudges(): {
     showToast("info", next.message, {
       inverted: true,
       durationMs: 8000,
-      href: next.href,
-      hrefLabel: "View",
       action: {
         label: "Dismiss",
         onClick: () => dismiss(next.id),

@@ -2607,6 +2607,10 @@ pub struct StatsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimate_accuracy_percent: Option<u32>,
     pub estimate_accuracy_samples: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub average_estimated_minutes: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub average_actual_minutes: Option<u32>,
     pub revision: u64,
 }
 
@@ -2622,6 +2626,8 @@ impl StatsResponse {
             current_streak_days,
             estimate_accuracy_percent,
             estimate_accuracy_samples,
+            average_estimated_minutes,
+            average_actual_minutes,
         } = page.summary;
         Self {
             from,
@@ -2633,6 +2639,8 @@ impl StatsResponse {
             current_streak_days,
             estimate_accuracy_percent,
             estimate_accuracy_samples,
+            average_estimated_minutes,
+            average_actual_minutes,
             revision: page.revision,
         }
     }

@@ -176,18 +176,4 @@ describe("DailyPlanningModal", () => {
     );
     expect(remaining.length).toBe(3);
   });
-
-  it("surfaces awaited mutation failures on All to Today", async () => {
-    patchTask.mockResolvedValueOnce(null);
-    await renderOpen();
-    const all = Array.from(document.querySelectorAll("button")).find(
-      (b) => b.textContent === "All to Today",
-    );
-    expect(all).toBeTruthy();
-    await act(async () => {
-      all!.click();
-      await Promise.resolve();
-    });
-    expect(document.body.textContent).toMatch(/could not move/i);
-  });
 });

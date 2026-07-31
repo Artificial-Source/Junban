@@ -350,7 +350,8 @@ describe("Timeblocking view", () => {
     const view = container.querySelector('[data-testid="timeblocking-view"]');
     expect(view).toBeTruthy();
     expect(view?.className).toContain("min-h-0");
-    expect(view?.className).toMatch(/-m-3/);
+    expect(view?.className).toContain("-my-3");
+    expect(view?.className).toContain("-mr-3");
 
     expect(container.querySelector('[data-testid="time-block-block-1:2026-07-23"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="time-slot-slot-1:2026-07-23"]')).toBeTruthy();

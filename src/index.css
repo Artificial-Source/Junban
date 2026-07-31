@@ -11,6 +11,10 @@
 }
 
 @layer base {
+  html,
+  body {
+    background-color: var(--color-surface-secondary);
+  }
   body {
     font-family: var(--font-sans);
   }
@@ -141,10 +145,10 @@
 
 @keyframes toast-in {
   from {
-    transform: translateX(-50%) translateY(12px);
+    transform: translateY(12px);
   }
   to {
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
   }
 }
 

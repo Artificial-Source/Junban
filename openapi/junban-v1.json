@@ -9919,6 +9919,16 @@
           "revision"
         ],
         "properties": {
+          "average_actual_minutes": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
+          "average_estimated_minutes": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
           "current_streak_days": {
             "type": "integer",
             "format": "int32",

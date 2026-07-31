@@ -1,10 +1,10 @@
 /**
  * Pending-task sidebar for scheduling onto the timeline or into slots.
  */
-import { AlertCircle, Calendar, ChevronDown, ChevronRight, Inbox } from "lucide-react";
+import { AlertCircle, Calendar, ChevronDown, ChevronRight, Clock, Inbox } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { TaskDto } from "../../api/client";
-import { formatRelativeDate, todayKey } from "../../lib/dates";
+import { calendarDayKey, todayKey } from "../../lib/dates";
 
 interface TaskSidebarProps {
   tasks: TaskDto[];
@@ -18,6 +18,15 @@ const PRIORITY_DOT: Record<number, string> = {
   2: "bg-priority-2",
   3: "bg-priority-3",
 };
+
+function formatSidebarDate(value: string): string {
+  const day = calendarDayKey(value);
+  if (day === null) return value;
+  return new Date(`${day}T00:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
 
 function groupTasks(tasks: TaskDto[], today: string) {
   const overdue: TaskDto[] = [];
@@ -33,6 +42,11 @@ function groupTasks(tasks: TaskDto[], today: string) {
       unscheduled.push(task);
     }
   }
+  const byPriority = (left: TaskDto, right: TaskDto) =>
+    (left.priority ?? 4) - (right.priority ?? 4);
+  overdue.sort(byPriority);
+  todayTasks.sort(byPriority);
+  unscheduled.sort(byPriority);
   return { overdue, todayTasks, unscheduled };
 }
 
@@ -69,29 +83,29 @@ function SidebarTask({
           </span>
         )}
       </div>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs text-on-surface-muted min-w-0">
+      {(task.due_date || task.estimated_minutes) && (
+        <div className="flex items-center gap-2 mt-1 text-xs text-on-surface-muted">
           {task.due_date && (
-            <span className="flex items-center gap-0.5 truncate">
+            <span className="flex items-center gap-0.5">
               <Calendar size={10} aria-hidden />
-              {formatRelativeDate(task.due_date)}
+              {formatSidebarDate(task.due_date)}
             </span>
           )}
           {task.estimated_minutes != null && <span>{task.estimated_minutes}m</span>}
         </div>
-        {onScheduleTask && (
-          <button
-            type="button"
-            className="text-[11px] text-accent-foreground hover:underline flex-shrink-0"
-            onClick={(event) => {
-              event.stopPropagation();
-              onScheduleTask(task.id);
-            }}
-          >
-            Add
-          </button>
-        )}
-      </div>
+      )}
+      {onScheduleTask && (
+        <button
+          type="button"
+          className="sr-only"
+          onClick={(event) => {
+            event.stopPropagation();
+            onScheduleTask(task.id);
+          }}
+        >
+          Add {task.title} to the schedule
+        </button>
+      )}
     </div>
   );
 }
@@ -157,12 +171,12 @@ export function TaskSidebar({
 
   return (
     <aside
-      className="flex h-full w-full min-w-0 flex-col border-r border-border bg-surface-secondary/40"
+      className="flex h-full w-full min-w-0 flex-col overflow-hidden border-r border-border bg-surface-secondary"
       data-testid="timeblocking-task-sidebar"
     >
-      <div className="border-b border-border px-3 py-2">
+      <div className="border-b border-border px-3 py-3">
         <h2 className="text-sm font-semibold text-on-surface">Tasks</h2>
-        <p className="text-xs text-on-surface-muted">Drag to schedule</p>
+        <p className="mt-0.5 text-xs text-on-surface-muted">Drag to schedule</p>
       </div>
       <div className="flex-1 space-y-3 overflow-y-auto p-2">
         <TaskGroup
@@ -176,7 +190,7 @@ export function TaskSidebar({
         />
         <TaskGroup
           label="Today"
-          icon={<Calendar size={12} />}
+          icon={<Clock size={12} />}
           tasks={groups.todayTasks}
           scheduledTaskIds={scheduledTaskIds}
           onSelectTask={onSelectTask}

@@ -377,7 +377,7 @@ describe("TaskDetailPanel", () => {
       'button[aria-label="Priority P1"]',
     ) as HTMLButtonElement;
     const save = Array.from(container.querySelectorAll("button")).find(
-      (btn) => btn.textContent?.trim() === "Save",
+      (btn) => btn.textContent?.trim() === "Save changes",
     ) as HTMLButtonElement;
 
     await act(async () => {
@@ -407,7 +407,7 @@ describe("TaskDetailPanel", () => {
       'button[aria-label="Clear due date"]',
     ) as HTMLButtonElement;
     const save = Array.from(container.querySelectorAll("button")).find(
-      (btn) => btn.textContent?.trim() === "Save",
+      (btn) => btn.textContent?.trim() === "Save changes",
     ) as HTMLButtonElement;
 
     await act(async () => {

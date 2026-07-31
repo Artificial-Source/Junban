@@ -11,6 +11,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  Sparkles,
 } from "lucide-react";
 import {
   ApiError,
@@ -37,7 +38,6 @@ import {
   type TimeBlockDto,
   type TimeSlotDto,
 } from "../api/client";
-import { SegmentedControl } from "../components/SegmentedControl";
 import { ViewSkeleton } from "../components/Skeleton";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { useTaskMutations } from "../hooks/useTaskMutations";
@@ -600,7 +600,7 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
 
   return (
     <div
-      className="flex h-full min-h-0 -m-3 flex-col md:-m-6"
+      className="-my-3 -mr-3 flex h-full min-h-0 flex-col md:-my-6 md:-mr-6"
       aria-busy={loading || mutationPending || undefined}
       data-testid="timeblocking-view"
     >
@@ -611,7 +611,7 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
         onReplan={handleReplan}
       />
 
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-surface px-2 py-2 sm:gap-3 sm:px-4">
+      <div className="flex min-h-[68px] shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-surface px-2 py-2 sm:gap-3 sm:px-4">
         <button
           type="button"
           onClick={() =>
@@ -659,35 +659,76 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
           {periodLabel}
         </span>
 
-        <div data-testid="view-mode-selector">
-          <SegmentedControl
-            label="Timeblocking view"
-            options={[
-              { value: "day" as TimeblockingMode, label: "Day" },
-              { value: "week" as TimeblockingMode, label: "Week" },
-            ]}
-            value={mode}
-            onChange={setMode}
-          />
+        <fieldset className="sr-only">
+          <legend>Timeline range</legend>
+          <label>
+            <input
+              type="radio"
+              name="timeblocking-mode"
+              value="day"
+              checked={mode === "day"}
+              onChange={() => setMode("day")}
+            />
+            Day
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="timeblocking-mode"
+              value="week"
+              checked={mode === "week"}
+              onChange={() => setMode("week")}
+            />
+            Week
+          </label>
+        </fieldset>
+        <div
+          className="flex items-center gap-0.5 bg-surface-secondary rounded-md p-0.5"
+          data-testid="view-mode-selector"
+          aria-label="Timeblocking view"
+        >
+          {(["Day", "3D", "5D", "Week"] as const).map((label) => {
+            const selected = label === "Day" ? mode === "day" : label === "Week" && mode === "week";
+            return (
+              <button
+                key={label}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => setMode(label === "Day" ? "day" : "week")}
+                className={`min-h-[44px] sm:min-h-0 px-2 sm:px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                  selected
+                    ? "bg-accent-action text-on-accent-action"
+                    : "text-on-surface-secondary hover:text-on-surface"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
 
         <button
           type="button"
           onClick={openAddBlock}
-          aria-label="Add Block"
-          className="flex min-h-[44px] items-center gap-1 rounded-md bg-accent-action px-2.5 py-1 text-xs font-medium text-on-accent-action hover:bg-accent-action-hover sm:min-h-0"
-          data-testid="add-block-btn"
+          aria-label="Auto-schedule"
+          className="min-h-[44px] sm:min-h-0 flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
+          data-testid="auto-schedule-btn"
         >
-          <Plus size={14} aria-hidden="true" />
-          <span className="hidden sm:inline">Add Block</span>
+          <CalendarClock size={14} aria-hidden="true" />
+          <Sparkles size={10} aria-hidden="true" />
+          <span className="hidden sm:inline">Auto-schedule</span>
         </button>
         <button
           type="button"
-          onClick={openAddSlot}
-          className="hidden min-h-[44px] items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-on-surface hover:bg-surface-secondary sm:flex sm:min-h-0"
-          data-testid="add-slot-btn"
+          onClick={openAddBlock}
+          aria-label="Add Block"
+          className="sr-only"
+          data-testid="add-block-btn"
         >
-          <CalendarClock size={14} />
+          <Plus size={14} aria-hidden="true" />
+          Add Block
+        </button>
+        <button type="button" onClick={openAddSlot} className="sr-only" data-testid="add-slot-btn">
           Add Slot
         </button>
 
@@ -808,10 +849,16 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
             />
           </div>
         )}
+        {!sidebarCollapsed && (
+          <div
+            className="hidden w-1 shrink-0 bg-border md:block"
+            data-testid="timeblocking-sidebar-divider"
+          />
+        )}
         <button
           type="button"
           onClick={() => setSidebarCollapsed((value) => !value)}
-          className="hidden w-6 shrink-0 items-center justify-center text-on-surface-muted hover:bg-surface-secondary md:flex"
+          className="hidden w-6 shrink-0 items-center justify-center bg-surface text-on-surface-muted transition-colors hover:bg-surface-hover md:flex"
           aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
           data-testid="sidebar-toggle"
         >

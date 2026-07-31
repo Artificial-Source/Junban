@@ -65,7 +65,7 @@ pub(crate) fn load_task_tag_ids(
     id: TaskId,
 ) -> Result<Vec<TagId>, RepositoryError> {
     let mut statement = tx
-        .prepare_cached("SELECT tag_id FROM task_tags WHERE task_id = ?1 ORDER BY tag_id")
+        .prepare_cached("SELECT tag_id FROM task_tags WHERE task_id = ?1 ORDER BY rowid")
         .map_err(storage_error)?;
     let rows = statement
         .query_map([id.to_string()], |row| {

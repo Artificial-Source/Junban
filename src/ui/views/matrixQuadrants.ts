@@ -84,5 +84,11 @@ export function groupMatrixTasks(
     if (task.status !== "pending") continue;
     map[classifyMatrixTask(task, today)].push(task);
   }
+  for (const tasksInQuadrant of Object.values(map)) {
+    tasksInQuadrant.sort(
+      (left, right) =>
+        (left.priority ?? 5) - (right.priority ?? 5) || left.sort_order - right.sort_order,
+    );
+  }
   return map;
 }

@@ -302,7 +302,7 @@ export function TimelineGrid({
 
   return (
     <div
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      className="relative top-px mr-6 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       data-testid="timeblocking-timeline"
       data-mode={mode}
     >
@@ -320,7 +320,7 @@ export function TimelineGrid({
               <div
                 key={date}
                 data-testid={`column-header-${date}`}
-                className={`min-w-[80px] flex-1 border-l border-border px-1 py-2 text-center text-xs font-medium sm:min-w-[100px] sm:text-sm ${
+                className={`min-w-[80px] flex-1 border-l border-border px-1 py-2 text-center text-xs font-medium sm:min-w-[120px] sm:text-sm ${
                   isToday
                     ? "bg-accent-action/10 text-accent-foreground"
                     : weekend
@@ -345,7 +345,10 @@ export function TimelineGrid({
             minWidth: mode === "week" ? `${dates.length * 80 + 40}px` : undefined,
           }}
         >
-          <div className="relative w-10 shrink-0 sm:w-14" aria-hidden="true">
+          <div
+            className={`relative w-10 shrink-0 ${mode === "week" ? "sm:w-14" : "sm:w-16"}`}
+            aria-hidden="true"
+          >
             {hourMarks.map(({ hour, top }) => (
               <div
                 key={hour}
@@ -365,7 +368,7 @@ export function TimelineGrid({
                 key={date}
                 data-timeline-date={date}
                 data-testid={`timeline-column-${date}`}
-                className="relative min-w-[80px] flex-1 border-l border-border sm:min-w-[100px]"
+                className="relative min-w-[80px] flex-1 border-l border-border sm:min-w-[120px]"
                 style={{ height: totalHeight }}
                 onPointerDown={(event) => {
                   if (mutationPending) return;

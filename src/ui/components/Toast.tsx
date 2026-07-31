@@ -132,7 +132,7 @@ function ToastItem({
       role={toast.action ? "alert" : "status"}
       className={
         inverted
-          ? "pointer-events-auto flex w-full items-center gap-3 rounded-lg bg-on-surface px-4 py-2.5 text-sm text-surface shadow-lg animate-toast-in"
+          ? "pointer-events-auto flex w-auto items-center gap-3 rounded-lg bg-on-surface px-4 py-2.5 text-sm text-surface shadow-lg animate-toast-in"
           : "pointer-events-auto flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-4 py-3 shadow-lg animate-toast-in"
       }
     >

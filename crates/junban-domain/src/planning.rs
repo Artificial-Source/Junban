@@ -1007,6 +1007,8 @@ pub struct StatsSummary {
     /// Estimate accuracy percent when any completed task has positive estimate+actual.
     pub estimate_accuracy_percent: Option<u32>,
     pub estimate_accuracy_samples: u32,
+    pub average_estimated_minutes: Option<u32>,
+    pub average_actual_minutes: Option<u32>,
 }
 
 /// Validate an inclusive civil date range for stats reads (max 366 days).
@@ -1128,7 +1130,10 @@ where
         .fold(0u32, u32::saturating_add);
 
     let current_streak_days = current_completion_streak(tasks, today, &civil_date_of);
-    let (estimate_accuracy_percent, estimate_accuracy_samples) = estimate_accuracy(tasks);
+    let (estimate_accuracy_percent, estimate_accuracy_samples, estimated_total, actual_total) =
+        estimate_accuracy_details(tasks);
+    let average_estimated_minutes = rounded_average(estimated_total, estimate_accuracy_samples);
+    let average_actual_minutes = rounded_average(actual_total, estimate_accuracy_samples);
 
     Ok(StatsSummary {
         from,
@@ -1140,6 +1145,8 @@ where
         current_streak_days,
         estimate_accuracy_percent,
         estimate_accuracy_samples,
+        average_estimated_minutes,
+        average_actual_minutes,
     })
 }
 
@@ -1149,8 +1156,15 @@ where
 /// Returns `(percent, sample_count)`. Percent is `None` when there are no samples.
 #[must_use]
 pub fn estimate_accuracy(tasks: &[Task]) -> (Option<u32>, u32) {
+    let (percent, count, _, _) = estimate_accuracy_details(tasks);
+    (percent, count)
+}
+
+fn estimate_accuracy_details(tasks: &[Task]) -> (Option<u32>, u32, u32, u32) {
     let mut total_ratio = 0.0_f64;
     let mut count = 0u32;
+    let mut estimated_total = 0u32;
+    let mut actual_total = 0u32;
     for task in tasks {
         if task.status != TaskStatus::Completed {
             continue;
@@ -1167,13 +1181,19 @@ pub fn estimate_accuracy(tasks: &[Task]) -> (Option<u32>, u32) {
         let ratio = f64::from(actual.abs_diff(estimate)) / f64::from(estimate);
         total_ratio += ratio;
         count = count.saturating_add(1);
+        estimated_total = estimated_total.saturating_add(estimate);
+        actual_total = actual_total.saturating_add(actual);
     }
     if count == 0 {
-        return (None, 0);
+        return (None, 0, 0, 0);
     }
     let mean = total_ratio / f64::from(count);
     let percent = ((1.0 - mean) * 100.0).round().max(0.0) as u32;
-    (Some(percent), count)
+    (Some(percent), count, estimated_total, actual_total)
+}
+
+fn rounded_average(total: u32, count: u32) -> Option<u32> {
+    (count > 0).then(|| total.saturating_add(count / 2) / count)
 }
 
 /// Consecutive civil days with ≥1 completion ending on `today`.

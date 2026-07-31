@@ -29,6 +29,8 @@ export interface SeededPhase3Workspace {
   serverToday: string;
   /** Actual server as_of_date sampled at seed time. */
   realServerToday: string;
+  /** Completed task ids and their legacy-relative completion-day offsets. */
+  completionOffsets: Array<{ taskId: string; dayOffset: number }>;
 }
 
 interface TaskSeed {
@@ -101,13 +103,10 @@ export async function seedPhase3Workspace(
   }
   const serverToday = ((await clockResponse.json()) as { as_of_date?: string }).as_of_date;
   if (!serverToday) throw new Error("Task clock response omitted as_of_date");
-  // Prefer frozen capture-day civil keys so browser-driven Calendar/Timeblocking
-  // range reads (frozen clock) hit the same dates the seed wrote. Server-side
-  // today/overdue selection for planning still works because the frozen day is
-  // earlier than real serverToday in normal runs, so capture-day tasks remain
-  // overdue/visible under server classification, and visual intercept can still
-  // normalize any serverToday-relative fields when present.
-  const dayOffset = (offset: number) => offsetDay(PHASE3_TODAY, offset);
+  // Seed relative to the server's real civil date so server-owned today/overdue
+  // classification remains truthful. The visual harness translates frozen
+  // capture-day requests and responses at the HTTP boundary.
+  const dayOffset = (offset: number) => offsetDay(serverToday, offset);
 
   // Prefer the server-reported zone for timed due values when available.
   let timeZone = "UTC";
@@ -198,7 +197,7 @@ export async function seedPhase3Workspace(
     if (seed.sectionId) body.section_id = seed.sectionId;
     if (seed.parentId) body.parent_id = seed.parentId;
     if (seed.priority) body.priority = seed.priority;
-    if (seed.tagIds) body.tag_ids = seed.tagIds;
+    if (seed.tagIds) body.tag_ids = [...seed.tagIds].reverse();
     if (seed.estimatedMinutes) body.estimated_minutes = seed.estimatedMinutes;
     if (seed.actualMinutes) body.actual_minutes = seed.actualMinutes;
     if (seed.description) body.description = seed.description;
@@ -211,6 +210,11 @@ export async function seedPhase3Workspace(
   const setReminder = async (taskId: string, remindAt: string) => {
     await post(`/api/v1/tasks/${taskId}/reminders/reschedule`, { remind_at: remindAt });
   };
+  const completionOffsets: Array<{ taskId: string; dayOffset: number }> = [];
+  const completeAtOffset = async (taskId: string, day: number) => {
+    await postStatus(`/api/v1/tasks/${taskId}/complete`);
+    completionOffsets.push({ taskId, dayOffset: day });
+  };
 
   // ── Today ─────────────────────────────────────────────────────────────────
   await createTask({
@@ -218,7 +222,7 @@ export async function seedPhase3Workspace(
     projectId: website,
     priority: 1,
     dueDate: dayOffset(0),
-    tagIds: tag("frontend", "review"),
+    tagIds: tag("review", "frontend"),
     estimatedMinutes: 45,
   });
   const blockedTaskId = await createTask({
@@ -344,13 +348,17 @@ export async function seedPhase3Workspace(
     description: RICH_DESCRIPTION,
   });
   await setReminder(richTaskId, RICH_REMIND_AT);
+  await post(`/api/v1/tasks/${richTaskId}/relations`, {
+    to_task_id: blockedTaskId,
+    kind: "blocks",
+  });
 
   const subDone = await createTask({
     title: "Document the completion API contract",
     parentId: richTaskId,
     priority: 2,
   });
-  await postStatus(`/api/v1/tasks/${subDone}/complete`);
+  await completeAtOffset(subDone, 0);
   await createTask({ title: "Refresh README screenshot gallery", parentId: richTaskId });
   await createTask({ title: "Add plugin migration notes", parentId: richTaskId });
   await post(`/api/v1/tasks/${richTaskId}/comments`, {
@@ -359,11 +367,6 @@ export async function seedPhase3Workspace(
   await post(`/api/v1/tasks/${richTaskId}/comments`, {
     content: "Make sure the API examples match the actual response shapes.",
   });
-  await post(`/api/v1/tasks/${richTaskId}/relations`, {
-    to_task_id: blockedTaskId,
-    kind: "blocks",
-  });
-
   // ── Board filler ──────────────────────────────────────────────────────────
   await createTask({
     title: "Add quick-capture keyboard shortcut",
@@ -389,7 +392,7 @@ export async function seedPhase3Workspace(
     estimatedMinutes: 120,
     actualMinutes: 135,
   });
-  await postStatus(`/api/v1/tasks/${boardDone}/complete`);
+  await completeAtOffset(boardDone, -4);
 
   // ── Matrix priorities ─────────────────────────────────────────────────────
   await createTask({
@@ -413,19 +416,19 @@ export async function seedPhase3Workspace(
   // Completions stamp the real server instant (no completed_at write API). Visual
   // interception can only normalize civil labels, not invent prior-day buckets.
   const history = [
-    { title: "Set up CI release workflow", est: 60, actual: 75 },
-    { title: "Write plugin sandbox docs", est: 90, actual: 80 },
-    { title: "Add Markdown storage backend", est: 180, actual: 150 },
-    { title: "Implement task completion receipts", est: 120, actual: 140 },
-    { title: "Design Today view header", est: 45, actual: 40 },
-    { title: "Add voice activity detection", est: 90, actual: 110 },
-    { title: "Migrate to Drizzle ORM", est: 240, actual: 220 },
-    { title: "Build command palette", est: 60, actual: 55 },
-    { title: "Write setup guide", est: 90, actual: 100 },
-    { title: "Add MCP server bridge", est: 120, actual: 130 },
-    { title: "Implement bulk task operations", est: 150, actual: 140 },
-    { title: "Create plugin example gallery", est: 45, actual: 50 },
-    { title: "Document idempotency contract", est: 90, actual: 85 },
+    { title: "Set up CI release workflow", est: 60, actual: 75, day: -6 },
+    { title: "Write plugin sandbox docs", est: 90, actual: 80, day: -6 },
+    { title: "Add Markdown storage backend", est: 180, actual: 150, day: -5 },
+    { title: "Implement task completion receipts", est: 120, actual: 140, day: -4 },
+    { title: "Design Today view header", est: 45, actual: 40, day: -4 },
+    { title: "Add voice activity detection", est: 90, actual: 110, day: -3 },
+    { title: "Migrate to Drizzle ORM", est: 240, actual: 220, day: -2 },
+    { title: "Build command palette", est: 60, actual: 55, day: -2 },
+    { title: "Write setup guide", est: 90, actual: 100, day: -2 },
+    { title: "Add MCP server bridge", est: 120, actual: 130, day: -1 },
+    { title: "Implement bulk task operations", est: 150, actual: 140, day: -1 },
+    { title: "Create plugin example gallery", est: 45, actual: 50, day: 0 },
+    { title: "Document idempotency contract", est: 90, actual: 85, day: 0 },
   ];
   for (const item of history) {
     const id = await createTask({
@@ -433,7 +436,7 @@ export async function seedPhase3Workspace(
       estimatedMinutes: item.est,
       actualMinutes: item.actual,
     });
-    await postStatus(`/api/v1/tasks/${id}/complete`);
+    await completeAtOffset(id, item.day);
   }
 
   // ── Timeblocking day blocks + multi-task slot ─────────────────────────────
@@ -540,10 +543,9 @@ export async function seedPhase3Workspace(
     slotTaskBId,
     collaborationSlotId,
     deepWorkBlockId,
-    // Seed civil keys are frozen capture-day relative; report PHASE3_TODAY so
-    // visual response normalization is a no-op for those dates.
-    serverToday: PHASE3_TODAY,
+    serverToday,
     realServerToday: serverToday,
+    completionOffsets,
   };
 }
 

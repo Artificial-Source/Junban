@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -10,6 +10,9 @@ export interface ServerContext {
   token: string;
   dataDir: string;
   restart: () => Promise<void>;
+  rewriteCompletionTimes: (
+    updates: Array<{ taskId: string; completedAt: string }>,
+  ) => Promise<void>;
   cleanup: () => Promise<void>;
 }
 
@@ -114,6 +117,27 @@ export async function startServer(options: { seed?: boolean } = {}): Promise<Ser
     dataDir,
     restart: async () => {
       await stopServer(child);
+      await launch();
+    },
+    rewriteCompletionTimes: async (updates) => {
+      await stopServer(child);
+      const script = [
+        "import json, sqlite3, sys",
+        "connection = sqlite3.connect(sys.argv[1])",
+        "updates = json.loads(sys.argv[2])",
+        "connection.executemany('UPDATE tasks SET completed_at = ?, updated_at = ? WHERE id = ?', [(item['completedAt'], item['completedAt'], item['taskId']) for item in updates])",
+        "connection.commit()",
+        "connection.close()",
+      ].join("\n");
+      const result = spawnSync(
+        "python3",
+        ["-c", script, join(dataDir, "junban.sqlite3"), JSON.stringify(updates)],
+        { encoding: "utf8" },
+      );
+      if (result.status !== 0) {
+        await launch();
+        throw new Error(`Failed to rewrite E2E completion times: ${result.stderr}`);
+      }
       await launch();
     },
     cleanup: async () => {

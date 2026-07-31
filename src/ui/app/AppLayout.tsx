@@ -525,7 +525,7 @@ export function AppLayout() {
   return (
     <div
       ref={rootRef}
-      className="flex flex-col h-screen bg-surface text-on-surface pb-[--height-bottom-nav] md:pb-0"
+      className="flex h-screen flex-col bg-surface text-on-surface pb-[--height-bottom-nav] md:h-[calc(100vh-25px)] md:pb-0"
     >
       <a
         href="#main-content"

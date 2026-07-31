@@ -49,6 +49,7 @@ import { Calendar } from "../views/Calendar";
 import { Matrix } from "../views/Matrix";
 import { Stats } from "../views/Stats";
 import { DopamineMenu } from "../views/DopamineMenu";
+import { Timeblocking } from "../views/Timeblocking";
 import type { TaskDto } from "../api/client";
 import { getTask, hasStoredToken } from "../api/client";
 import { detailRefreshFromEvent } from "./detailRefresh";
@@ -702,12 +703,7 @@ export function AppLayout() {
                   />
                 )}
                 {route.name === "timeblocking" && (
-                  <div className="py-12 text-center">
-                    <h1 className="text-xl font-bold text-on-surface">Timeblocking</h1>
-                    <p className="mt-2 text-sm text-on-surface-muted">
-                      Timeblocking UI ships in a later Phase 3 wave.
-                    </p>
-                  </div>
+                  <Timeblocking onSelectTask={handleSelectTask} onToggleTask={handleToggleTask} />
                 )}
               </div>
             </ErrorBoundary>

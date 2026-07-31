@@ -998,9 +998,13 @@ test("timeblocking Day/Week CRUD move resize replan and slot membership without 
     await expect(page.getByTestId("timeblocking-view")).toBeVisible();
   }
 
-  // Replan endpoint accepts a documented action (may no-op without stale blocks).
+  // Replan commits exactly the authoritative preview that the user reviewed.
+  const preview = await apiJson(page, "GET", "/api/v1/time-blocks/replan/preview");
+  expect(preview.status).toBeLessThan(300);
   const replan = await apiJson(page, "POST", "/api/v1/time-blocks/replan", {
     action: "move_to_today",
+    expected_as_of_date: preview.body.as_of_date,
+    expected_candidate_ids: preview.body.candidate_ids,
   });
   expect(replan.status).toBeLessThan(300);
 

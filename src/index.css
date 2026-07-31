@@ -194,8 +194,32 @@
   .animate-fade-in {
     animation: fade-in 150ms ease-out both;
   }
+  .animate-slide-up-fade {
+    animation: slide-up-fade 200ms ease-out both;
+  }
   .animate-scale-fade-in {
     animation: scale-fade-in 200ms ease-out both;
+  }
+  .scrollbar-panel {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-on-surface-muted) 55%, transparent)
+      color-mix(in srgb, var(--color-surface-secondary) 92%, transparent);
+  }
+  .scrollbar-panel::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .scrollbar-panel::-webkit-scrollbar-track {
+    background: color-mix(in srgb, var(--color-surface-secondary) 92%, transparent);
+    border-radius: 9999px;
+  }
+  .scrollbar-panel::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-on-surface-muted) 52%, transparent);
+    border: 2px solid color-mix(in srgb, var(--color-surface-secondary) 92%, transparent);
+    border-radius: 9999px;
+  }
+  .scrollbar-panel::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--color-on-surface-secondary) 68%, transparent);
   }
   .animate-drop-fade-in {
     animation: drop-fade-in 200ms ease-out both;

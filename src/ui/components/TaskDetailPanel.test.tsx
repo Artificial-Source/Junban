@@ -17,11 +17,6 @@ function setInputValue(el: HTMLInputElement | HTMLTextAreaElement, value: string
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-function setSelectValue(el: HTMLSelectElement, value: string) {
-  el.value = value;
-  el.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
 const patchTask = vi.fn<(taskId: string, body: unknown) => Promise<MutationResponse | null>>();
 const deleteTask = vi.fn<(taskId: string) => Promise<MutationResponse | null>>();
 const completeTask = vi.fn();
@@ -378,7 +373,9 @@ describe("TaskDetailPanel", () => {
 
     const title = container.querySelector('input[aria-label="Task title"]') as HTMLInputElement;
     const due = container.querySelector("#task-due-date") as HTMLInputElement;
-    const priority = container.querySelector('select[aria-label="Priority"]') as HTMLSelectElement;
+    const priorityP1 = container.querySelector(
+      'button[aria-label="Priority P1"]',
+    ) as HTMLButtonElement;
     const save = Array.from(container.querySelectorAll("button")).find(
       (btn) => btn.textContent?.trim() === "Save",
     ) as HTMLButtonElement;
@@ -386,7 +383,7 @@ describe("TaskDetailPanel", () => {
     await act(async () => {
       setInputValue(title, "Renamed task");
       setInputValue(due, "2026-08-01");
-      setSelectValue(priority, "1");
+      priorityP1.click();
     });
 
     expect(patchTask).not.toHaveBeenCalled();
@@ -459,6 +456,43 @@ describe("TaskDetailPanel", () => {
     expect(container.textContent).toMatch(/Recurrence/i);
     expect(container.textContent).toMatch(/Weekly/);
     expect(container.textContent).toMatch(/Reminder/i);
+  });
+
+  it("uses the wide two-column desktop detail structure with accessible naming", async () => {
+    render(
+      createElement(Host, {
+        task: makeTask({
+          title: "Ship docs",
+          recurrence_rule: "weekly",
+          remind_at: "2026-12-15T15:00:00.000Z",
+          estimated_minutes: 120,
+        }),
+      }),
+    );
+
+    const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.getAttribute("aria-label")).toBe("Task: Ship docs");
+    expect(container.querySelector('[data-testid="task-detail-surface"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="task-detail-scroll-region"]')).toBeTruthy();
+    expect(container.querySelector("aside.scrollbar-panel")).toBeTruthy();
+
+    // Right-rail cards present
+    expect(container.textContent).toMatch(/Deadline/i);
+    expect(container.textContent).toMatch(/Priority/i);
+    expect(container.textContent).toMatch(/Labels/i);
+    expect(container.textContent).toMatch(/Estimated time/i);
+    expect(container.textContent).toMatch(/Delete task/);
+    expect(container.textContent).toMatch(/Sub-tasks/i);
+    expect(container.textContent).toMatch(/Relations/i);
+    expect(container.textContent).toMatch(/Comments/);
+
+    // Reminder display value (legacy card presentation)
+    expect(container.querySelector('button[aria-label="Edit reminder"]')).toBeTruthy();
+    expect(container.textContent).toMatch(/Weekly/);
+    expect(container.textContent).toMatch(/2h/);
+
+    // Close control retained
+    expect(container.querySelector('button[aria-label="Close task details"]')).toBeTruthy();
   });
 
   it("asks for in-product confirmation before deleting", async () => {

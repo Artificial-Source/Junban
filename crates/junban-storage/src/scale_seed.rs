@@ -800,14 +800,21 @@ pub fn host_as_of_date() -> Result<Date, SeedError> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEST_PROFILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     fn temp_profile() -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("junban-scale-seed-{nanos}"));
+        let sequence = TEST_PROFILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "junban-scale-seed-{}-{nanos}-{sequence}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&path);
         path
     }

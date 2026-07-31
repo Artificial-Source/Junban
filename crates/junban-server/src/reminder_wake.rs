@@ -76,7 +76,9 @@ impl ReminderWakeHub {
 
     /// Wake the coordinator so it re-reads the next wake instant.
     pub fn notify_recompute(&self) {
-        self.notify.notify_waiters();
+        // There is exactly one coordinator. `notify_one` stores a permit when
+        // it is between polls, so a mutation cannot be lost in that window.
+        self.notify.notify_one();
     }
 
     /// Subscribe before work so concurrent publishes stay queued.
@@ -162,9 +164,15 @@ pub async fn run_reminder_coordinator(
 ) {
     let clock = CoordinatorClock::new();
     loop {
-        // Arm notification before reading so commits during the query are not lost.
+        // Register before querying, then check again afterwards. A stored
+        // mutation permit is consumed before the query; a mutation racing the
+        // query restarts it before any wake is published. This avoids both
+        // lost recomputes and duplicate overdue wakes.
         let notified = hub.notified();
         tokio::pin!(notified);
+        if notified.as_mut().enable() {
+            continue;
+        }
 
         if shutdown.is_cancelled() {
             return;
@@ -182,6 +190,9 @@ pub async fn run_reminder_coordinator(
                 }
             }
         };
+        if notified.as_mut().enable() {
+            continue;
+        }
 
         let now = clock.now();
         match next {

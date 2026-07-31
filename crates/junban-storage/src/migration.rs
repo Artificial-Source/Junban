@@ -1034,8 +1034,11 @@ mod tests {
         collections::HashSet,
         fs,
         path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    static TEST_DB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     struct TestDb {
         path: PathBuf,
@@ -1045,12 +1048,13 @@ mod tests {
     impl TestDb {
         fn new() -> Self {
             let dir = std::env::temp_dir().join(format!(
-                "junban-migration-{}-{}",
+                "junban-migration-{}-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
-                    .as_nanos()
+                    .as_nanos(),
+                TEST_DB_SEQUENCE.fetch_add(1, Ordering::Relaxed)
             ));
             fs::create_dir(&dir).unwrap();
             let path = dir.join("junban.sqlite3");

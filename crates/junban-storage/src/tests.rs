@@ -1,6 +1,11 @@
 //! Storage integration coverage for Phase 2 repository behavior.
 
-use std::{env, fs, path::PathBuf, time::SystemTime};
+use std::{
+    env, fs,
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+    time::SystemTime,
+};
 
 use jiff::{Timestamp, ToSpan, tz::TimeZone};
 use junban_app::{
@@ -18,17 +23,20 @@ use uuid::Uuid;
 
 use super::*;
 
+static TEST_DIR_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
 struct TestDir(PathBuf);
 
 impl TestDir {
     fn new() -> Self {
         let path = env::temp_dir().join(format!(
-            "junban-storage-test-{}-{}",
+            "junban-storage-test-{}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            TEST_DIR_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&path).unwrap();
         Self(path)

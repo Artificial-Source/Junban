@@ -5,7 +5,7 @@ use std::{
     env, fs,
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::atomic::Ordering,
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant, SystemTime},
 };
 
@@ -33,6 +33,7 @@ use crate::reminder_wake::{
 use crate::sse::{MAX_SSE_CONNECTIONS, send_event};
 
 const HOST: &str = "127.0.0.1:4219";
+static TEST_CONTEXT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const TOKEN: &str = "test-token-that-is-never-written-to-runtime-metadata";
 
 struct TestContext {
@@ -45,12 +46,13 @@ struct TestContext {
 impl TestContext {
     fn new() -> Self {
         let directory = env::temp_dir().join(format!(
-            "junban-server-test-{}-{}",
+            "junban-server-test-{}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            TEST_CONTEXT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
         let web_dir = directory.join("web");
         fs::create_dir_all(web_dir.join("assets")).unwrap();
@@ -1659,19 +1661,18 @@ async fn read_sse_chunk(body: &mut axum::body::Body, deadline: Duration) -> Stri
 async fn recv_wake(
     wakes: &mut tokio::sync::broadcast::Receiver<crate::reminder_wake::ReminderWakeEventDto>,
 ) -> crate::reminder_wake::ReminderWakeEventDto {
-    // Drive the current-thread runtime until the coordinator publishes.
-    for _ in 0..50 {
-        tokio::select! {
-            biased;
-            result = wakes.recv() => return result.expect("wake channel"),
-            () = tokio::task::yield_now() => {}
-        }
+    // These tests pause Tokio time, so a Tokio timeout can expire immediately
+    // while the SQLite owner thread is still returning the wake query. Use a
+    // wall-clock watchdog only as a hang guard; the wake itself is the condition.
+    let (watchdog_tx, watchdog_rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(5));
+        let _ = watchdog_tx.send(());
+    });
+    tokio::select! {
+        result = wakes.recv() => result.expect("wake channel"),
+        _ = watchdog_rx => panic!("timed out waiting for reminder wake"),
     }
-    // Final blocking recv with paused-time timeout as a safety net.
-    tokio::time::timeout(Duration::from_secs(5), wakes.recv())
-        .await
-        .expect("timed out waiting for reminder wake")
-        .expect("wake channel closed")
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]

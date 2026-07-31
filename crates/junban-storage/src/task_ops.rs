@@ -32,7 +32,7 @@ use crate::rows::{
 };
 use crate::timeblock_ops::{detach_planning_links_for_tasks, load_planning_links_for_tasks};
 use crate::tx::{MutationEffect, canonical_json, mutate};
-use crate::undo_ops::{apply_inverse, validate_post_image};
+use crate::undo_ops::{apply_inverse, validate_inverse_post_image};
 
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -529,7 +529,7 @@ pub(crate) fn uncomplete_task(
         if let Some(completion_op) = source.completion_operation_id
             && let Some((inverse, post)) = load_completion_material(tx, completion_op)?
         {
-            match validate_post_image(tx, &post) {
+            match validate_inverse_post_image(tx, &inverse, &post) {
                 Ok(()) => {
                     let applied = apply_inverse(tx, &inverse, now, revision, op)?;
                     // Capture redo material: completed post-image must be restorable.
@@ -1223,7 +1223,7 @@ pub(crate) fn bulk_tasks(
             for completion_op in &exact_ops {
                 let (inverse, post) = load_completion_material(tx, *completion_op)?
                     .ok_or(RepositoryError::Conflict)?;
-                validate_post_image(tx, &post)?;
+                validate_inverse_post_image(tx, &inverse, &post)?;
                 materials.push((inverse, post));
             }
 

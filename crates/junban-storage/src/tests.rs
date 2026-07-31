@@ -2447,6 +2447,57 @@ async fn find_generated(repo: &SqliteRepository, source: TaskId) -> Option<junba
         .find(|task| task.recurrence_source_id == Some(source))
 }
 
+async fn completed_recurrence(
+    repo: &SqliteRepository,
+    title: &str,
+) -> (OperationId, TaskId, TaskId) {
+    let source = create_draft(repo, recurring_draft(title, "daily", Some("2026-07-28"))).await;
+    let completion = operation();
+    repo.complete_task(completion, source, now(), temporal())
+        .await
+        .unwrap();
+    let generated = find_generated(repo, source).await.unwrap().id;
+    (completion, source, generated)
+}
+
+async fn assert_uncomplete_conflicts_without_writes(
+    repo: &SqliteRepository,
+    source: TaskId,
+    generated: TaskId,
+) {
+    let revision = repo.diagnostics().await.unwrap().revision;
+    assert_eq!(
+        repo.uncomplete_task(operation(), source, now(), temporal())
+            .await,
+        Err(RepositoryError::Conflict)
+    );
+    assert_eq!(repo.diagnostics().await.unwrap().revision, revision);
+    assert_eq!(
+        repo.get_task(source).await.unwrap().status,
+        TaskStatus::Completed
+    );
+    assert!(repo.get_task(generated).await.is_ok());
+}
+
+async fn assert_completion_undo_conflicts_without_writes(
+    repo: &SqliteRepository,
+    completion: OperationId,
+    source: TaskId,
+    generated: TaskId,
+) {
+    let revision = repo.diagnostics().await.unwrap().revision;
+    assert_eq!(
+        repo.undo(completion, operation(), now()).await,
+        Err(RepositoryError::Conflict)
+    );
+    assert_eq!(repo.diagnostics().await.unwrap().revision, revision);
+    assert_eq!(
+        repo.get_task(source).await.unwrap().status,
+        TaskStatus::Completed
+    );
+    assert!(repo.get_task(generated).await.is_ok());
+}
+
 #[tokio::test]
 async fn p3_rec_daily_weekly_monthly_yearly_weekdays_every_n() {
     let directory = TestDir::new();
@@ -2936,6 +2987,170 @@ async fn p3_rec_ordinary_exact_uncomplete_source_only_and_divergence() {
         repo.get_task(child3.id).await.unwrap().status,
         TaskStatus::Pending
     );
+}
+
+#[tokio::test]
+async fn p3_final_013_uncomplete_rejects_generated_child_task_atomically() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let (_, source, generated) = completed_recurrence(&repo, "child-reference").await;
+    let mut child = draft("dependent child");
+    child.parent_id = Some(generated);
+    let dependent = create_draft(&repo, child).await;
+
+    assert_uncomplete_conflicts_without_writes(&repo, source, generated).await;
+    assert_eq!(
+        repo.get_task(dependent).await.unwrap().parent_id,
+        Some(generated)
+    );
+}
+
+#[tokio::test]
+async fn p3_final_013_undo_rejects_generated_comment_atomically() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let (completion, source, generated) = completed_recurrence(&repo, "comment-reference").await;
+    let comment = CommentId::new();
+    repo.create_comment(
+        operation(),
+        comment,
+        generated,
+        CommentBody::new("keep me").unwrap(),
+        now(),
+    )
+    .await
+    .unwrap();
+
+    assert_completion_undo_conflicts_without_writes(&repo, completion, source, generated).await;
+    assert_eq!(repo.list_comments(generated).await.unwrap()[0].id, comment);
+}
+
+#[tokio::test]
+async fn p3_final_013_uncomplete_rejects_incoming_and_outgoing_relations_atomically() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let (_, source, generated) = completed_recurrence(&repo, "relation-reference").await;
+    let blocked = create_simple(&repo, "blocked").await.task().unwrap().id;
+    let blocker = create_simple(&repo, "blocker").await.task().unwrap().id;
+    repo.add_relation(operation(), generated, blocked, RelationKind::Blocks, now())
+        .await
+        .unwrap();
+    repo.add_relation(operation(), blocker, generated, RelationKind::Blocks, now())
+        .await
+        .unwrap();
+
+    assert_uncomplete_conflicts_without_writes(&repo, source, generated).await;
+    let relations = repo.list_relations(generated).await.unwrap();
+    assert!(
+        relations.iter().any(|relation| {
+            relation.from_task_id == generated && relation.to_task_id == blocked
+        })
+    );
+    assert!(
+        relations.iter().any(|relation| {
+            relation.from_task_id == blocker && relation.to_task_id == generated
+        })
+    );
+}
+
+#[tokio::test]
+async fn p3_final_013_undo_rejects_generated_timeblock_reference_atomically() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let (completion, source, generated) = completed_recurrence(&repo, "block-reference").await;
+    let block_id = junban_domain::TimeBlockId::new();
+    let mut draft = block_draft("Generated task block", "2026-07-29");
+    draft.task_id = Some(generated);
+    repo.create_time_block(operation(), block_id, draft, now())
+        .await
+        .unwrap();
+
+    assert_completion_undo_conflicts_without_writes(&repo, completion, source, generated).await;
+    let page = repo
+        .list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-07-29".parse().unwrap(),
+            to: "2026-07-29".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.blocks[0].task_id, Some(generated));
+}
+
+#[tokio::test]
+async fn p3_final_013_uncomplete_rejects_generated_slot_membership_atomically() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let (_, source, generated) = completed_recurrence(&repo, "slot-reference").await;
+    let slot_id = junban_domain::TimeSlotId::new();
+    repo.create_time_slot(
+        operation(),
+        slot_id,
+        slot_draft("Generated task slot", "2026-07-29"),
+        now(),
+    )
+    .await
+    .unwrap();
+    repo.append_slot_task(operation(), slot_id, generated, now())
+        .await
+        .unwrap();
+
+    assert_uncomplete_conflicts_without_writes(&repo, source, generated).await;
+    let page = repo
+        .list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-07-29".parse().unwrap(),
+            to: "2026-07-29".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.slots[0].task_ids.as_slice(), &[generated]);
+}
+
+#[tokio::test]
+async fn p3_final_013_bulk_uncomplete_conflict_leaves_all_recurrences_unchanged() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let (_, first_source, first_generated) = completed_recurrence(&repo, "bulk-safe").await;
+    let (_, second_source, second_generated) = completed_recurrence(&repo, "bulk-divergent").await;
+    repo.create_comment(
+        operation(),
+        CommentId::new(),
+        second_generated,
+        CommentBody::new("blocks the whole reversal").unwrap(),
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let revision = repo.diagnostics().await.unwrap().revision;
+    assert_eq!(
+        repo.bulk_tasks(
+            operation(),
+            vec![first_source, second_source],
+            BulkAction::Uncomplete,
+            now(),
+            temporal(),
+        )
+        .await,
+        Err(RepositoryError::Conflict)
+    );
+    assert_eq!(repo.diagnostics().await.unwrap().revision, revision);
+    assert_eq!(
+        repo.get_task(first_source).await.unwrap().status,
+        TaskStatus::Completed
+    );
+    assert_eq!(
+        repo.get_task(second_source).await.unwrap().status,
+        TaskStatus::Completed
+    );
+    assert!(repo.get_task(first_generated).await.is_ok());
+    assert!(repo.get_task(second_generated).await.is_ok());
+    assert_eq!(repo.list_comments(second_generated).await.unwrap().len(), 1);
 }
 
 #[tokio::test]

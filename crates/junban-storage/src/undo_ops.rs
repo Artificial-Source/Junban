@@ -44,8 +44,96 @@ fn missing_as_conflict(error: RepositoryError) -> RepositoryError {
     }
 }
 
-pub(crate) fn validate_post_image(
+fn validate_generated_task_references(
     tx: &rusqlite::Transaction<'_>,
+    generated_ids: &[TaskId],
+    post: &PostImage,
+) -> Result<(), RepositoryError> {
+    if generated_ids.is_empty() {
+        return Ok(());
+    }
+
+    let placeholders = vec!["?"; generated_ids.len()].join(",");
+    let sql = format!(
+        "SELECT
+            (SELECT COUNT(*) FROM tasks WHERE parent_id IN ({placeholders})),
+            (SELECT COUNT(*) FROM tasks WHERE recurrence_source_id IN ({placeholders})),
+            (SELECT COUNT(*) FROM comments WHERE task_id IN ({placeholders})),
+            (SELECT COUNT(*) FROM task_relations WHERE from_task_id IN ({placeholders})),
+            (SELECT COUNT(*) FROM task_relations WHERE to_task_id IN ({placeholders})),
+            (SELECT COUNT(*) FROM time_blocks WHERE task_id IN ({placeholders})),
+            (SELECT COUNT(*) FROM time_slot_tasks WHERE task_id IN ({placeholders})),
+            (SELECT COUNT(*) FROM reminder_occurrences WHERE task_id IN ({placeholders}))"
+    );
+    let params: Vec<String> = (0..8)
+        .flat_map(|_| generated_ids.iter().map(ToString::to_string))
+        .collect();
+    let actual: [i64; 8] = tx
+        .query_row(&sql, rusqlite::params_from_iter(&params), |row| {
+            Ok([
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+            ])
+        })
+        .map_err(storage_error)?;
+
+    let generated = |id: TaskId| generated_ids.contains(&id);
+    let expected = [
+        post.tasks
+            .values()
+            .filter(|task| task.parent_id.is_some_and(generated))
+            .count(),
+        post.tasks
+            .values()
+            .filter(|task| task.recurrence_source_id.is_some_and(generated))
+            .count(),
+        post.comments
+            .values()
+            .filter(|comment| generated(comment.task_id))
+            .count(),
+        post.relations_present
+            .iter()
+            .filter(|relation| generated(relation.from_task_id))
+            .count(),
+        post.relations_present
+            .iter()
+            .filter(|relation| generated(relation.to_task_id))
+            .count(),
+        post.time_blocks
+            .values()
+            .filter(|block| block.task_id.is_some_and(generated))
+            .count(),
+        post.time_slots
+            .values()
+            .map(|slot| {
+                slot.task_ids
+                    .iter()
+                    .filter(|task_id| generated(**task_id))
+                    .count()
+            })
+            .sum(),
+        post.reminders
+            .values()
+            .filter(|reminder| generated(reminder.task_id))
+            .count(),
+    ]
+    .map(|count| i64::try_from(count).unwrap_or(i64::MAX));
+
+    if actual != expected {
+        return Err(RepositoryError::Conflict);
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_inverse_post_image(
+    tx: &rusqlite::Transaction<'_>,
+    inverse: &Inverse,
     post: &PostImage,
 ) -> Result<(), RepositoryError> {
     for id in &post.absent_task_ids {
@@ -120,6 +208,9 @@ pub(crate) fn validate_post_image(
         if actual.revision != expected.revision || actual.task_id != expected.task_id {
             return Err(RepositoryError::Conflict);
         }
+    }
+    if let Inverse::ReverseCompletion { generated_ids, .. } = inverse {
+        validate_generated_task_references(tx, generated_ids, post)?;
     }
     Ok(())
 }
@@ -767,7 +858,7 @@ pub(crate) fn undo(
             }
             let inverse: Inverse = serde_json::from_str(&inverse_json).map_err(storage_error)?;
             let post: PostImage = serde_json::from_str(&post_image_json).map_err(storage_error)?;
-            validate_post_image(tx, &post)?;
+            validate_inverse_post_image(tx, &inverse, &post)?;
             let applied = apply_inverse(tx, &inverse, now, revision, new_operation_id)?;
             let redo_post = capture_redo_post(tx, &applied.affected, now)?;
             // For undo of create/delete, use original post image as redo target when tasks vanished.

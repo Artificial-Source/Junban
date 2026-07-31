@@ -34,6 +34,14 @@ export default defineConfig({
       },
     },
     {
+      name: "visual-phase-3",
+      testMatch: /visual-phase-3\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 900 },
+      },
+    },
+    {
       name: "axe",
       testMatch: /axe\.spec\.ts/,
       use: {

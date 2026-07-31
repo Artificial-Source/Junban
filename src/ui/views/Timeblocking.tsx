@@ -674,10 +674,11 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
         <button
           type="button"
           onClick={openAddBlock}
+          aria-label="Add Block"
           className="flex min-h-[44px] items-center gap-1 rounded-md bg-accent-action px-2.5 py-1 text-xs font-medium text-on-accent-action hover:bg-accent-action-hover sm:min-h-0"
           data-testid="add-block-btn"
         >
-          <Plus size={14} />
+          <Plus size={14} aria-hidden="true" />
           <span className="hidden sm:inline">Add Block</span>
         </button>
         <button

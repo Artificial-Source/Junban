@@ -1,14 +1,15 @@
 /**
- * Phase 2 Sidebar: full navigation, project tree, saved filters, collapsed mode.
- * Preserves the exact legacy layout, spacing, icons, and interaction affordances.
- * Settings/AI/Plugin commands are absent (not disabled) per Phase 2 scope.
+ * Sidebar: full navigation, project tree, saved filters, Phase 3 tools, workspace chrome.
+ * Phase 3 authority places Calendar/Matrix/Stats/Timeblocking after projects and keeps a
+ * non-functional Workspace footer (AI Chat / Settings) matching the frozen legacy shell.
+ * Filters & Labels and Quick Wins remain reachable via routes/command palette; they are
+ * omitted from the primary tool strip so the Phase 3 visual authority chrome matches.
  */
 import { useState, useMemo, type ComponentType } from "react";
 import {
   Inbox,
   CalendarDays,
   Clock,
-  SlidersHorizontal,
   ChevronDown,
   ChevronRight,
   ChevronLeft,
@@ -17,8 +18,9 @@ import {
   CalendarRange,
   Compass,
   BarChart3,
-  Zap,
   CalendarClock,
+  MessageSquare,
+  Settings,
 } from "lucide-react";
 import type { View, AppRoute } from "../hooks/useRouting";
 import type { CatalogResponse, ProjectDto, SavedFilterDto } from "../api/client";
@@ -34,15 +36,13 @@ const NAV_ITEMS: NavItem[] = [
   { id: "inbox", label: "Inbox", icon: Inbox, countKey: "inbox" },
   { id: "today", label: "Today", icon: CalendarDays, countKey: "today" },
   { id: "upcoming", label: "Upcoming", icon: Clock },
-  { id: "filters-labels", label: "Filters & Labels", icon: SlidersHorizontal },
 ];
 
-/** First-party Phase 3 tools — placed after projects to match legacy plugin slot order. */
+/** First-party Phase 3 tools — after projects, matching legacy plugin slot order. */
 const TOOL_NAV_ITEMS: NavItem[] = [
   { id: "calendar", label: "Calendar", icon: CalendarRange },
   { id: "matrix", label: "Matrix", icon: Compass },
   { id: "stats", label: "Stats", icon: BarChart3 },
-  { id: "dopamine-menu", label: "Quick Wins", icon: Zap },
   { id: "timeblocking", label: "Timeblocking", icon: CalendarClock },
 ];
 
@@ -398,6 +398,47 @@ export function Sidebar({
               )}
             </div>
           )}
+        </div>
+
+        {/* Workspace chrome — presentational until AI (Phase 6) and Settings (Phase 4). */}
+        <div
+          className={`shrink-0 border-t border-border/60 ${collapsed ? "pt-2 pb-3" : "pt-3 pb-3"}`}
+        >
+          {!collapsed && (
+            <h3 className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-on-surface-muted">
+              Workspace
+            </h3>
+          )}
+          <ul className="space-y-0.5">
+            <li>
+              <button
+                type="button"
+                title="AI Chat arrives in a later phase"
+                aria-disabled="true"
+                onClick={(event) => event.preventDefault()}
+                className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-on-surface-secondary transition-colors hover:bg-surface-tertiary hover:text-on-surface ${
+                  collapsed ? "justify-center" : "gap-3"
+                }`}
+              >
+                <MessageSquare size={18} strokeWidth={1.75} aria-hidden="true" />
+                {!collapsed && <span>AI Chat</span>}
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                title="Settings arrives in Phase 4"
+                aria-disabled="true"
+                onClick={(event) => event.preventDefault()}
+                className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-on-surface-secondary transition-colors hover:bg-surface-tertiary hover:text-on-surface ${
+                  collapsed ? "justify-center" : "gap-3"
+                }`}
+              >
+                <Settings size={18} strokeWidth={1.75} aria-hidden="true" />
+                {!collapsed && <span>Settings</span>}
+              </button>
+            </li>
+          </ul>
         </div>
       </nav>
     </aside>

@@ -10,6 +10,7 @@ import {
   Inbox,
   CalendarDays,
   Clock,
+  SlidersHorizontal,
   ChevronDown,
   ChevronRight,
   ChevronLeft,
@@ -38,6 +39,11 @@ const NAV_ITEMS: NavItem[] = [
   { id: "upcoming", label: "Upcoming", icon: Clock },
 ];
 
+const PHASE_2_NAV_ITEMS: NavItem[] = [
+  ...NAV_ITEMS,
+  { id: "filters-labels", label: "Filters & Labels", icon: SlidersHorizontal },
+];
+
 /** First-party Phase 3 tools — after projects, matching legacy plugin slot order. */
 const TOOL_NAV_ITEMS: NavItem[] = [
   { id: "calendar", label: "Calendar", icon: CalendarRange },
@@ -59,6 +65,8 @@ interface SidebarProps {
   inboxCount?: number;
   todayCount?: number;
   onOpenProjectModal: () => void;
+  /** Render only the immutable Phase 2 visual authority chrome. */
+  phase2VisualFixture?: boolean;
 }
 
 export function Sidebar({
@@ -73,6 +81,7 @@ export function Sidebar({
   inboxCount,
   todayCount,
   onOpenProjectModal,
+  phase2VisualFixture = false,
 }: SidebarProps) {
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [filtersExpanded, setFiltersExpanded] = useState(true);
@@ -243,7 +252,7 @@ export function Sidebar({
         className={`flex-1 shrink-0 flex flex-col ${collapsed ? "px-2" : "px-3"}`}
       >
         <div className="flex-1 shrink-0 scrollbar-hide space-y-0.5">
-          {NAV_ITEMS.map((item) => {
+          {(phase2VisualFixture ? PHASE_2_NAV_ITEMS : NAV_ITEMS).map((item) => {
             const Icon = item.icon;
             const isActive = currentView === item.id;
             const count = item.countKey ? countMap[item.countKey] : undefined;
@@ -317,35 +326,37 @@ export function Sidebar({
           )}
 
           {/* Phase 3 first-party tools (after projects, matching legacy placement) */}
-          <div className={`${collapsed ? "" : "mt-5"} space-y-0.5`}>
-            {TOOL_NAV_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const isActive = currentView === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onNavigate(item.id)}
-                  aria-current={isActive ? "page" : undefined}
-                  className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
-                    collapsed ? "justify-center" : "gap-3"
-                  } ${
-                    isActive
-                      ? "bg-accent-action/10 text-accent-foreground font-medium"
-                      : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
-                  }`}
-                  title={collapsed ? item.label : undefined}
-                >
-                  <Icon size={18} strokeWidth={isActive ? 2.25 : 1.75} />
-                  {!collapsed && <span className="flex-1">{item.label}</span>}
-                  {collapsed && (
-                    <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-xs text-on-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100">
-                      {item.label}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          {!phase2VisualFixture && (
+            <div className={`${collapsed ? "" : "mt-5"} space-y-0.5`}>
+              {TOOL_NAV_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const isActive = currentView === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onNavigate(item.id)}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
+                      collapsed ? "justify-center" : "gap-3"
+                    } ${
+                      isActive
+                        ? "bg-accent-action/10 text-accent-foreground font-medium"
+                        : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
+                    }`}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    <Icon size={18} strokeWidth={isActive ? 2.25 : 1.75} />
+                    {!collapsed && <span className="flex-1">{item.label}</span>}
+                    {collapsed && (
+                      <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-xs text-on-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100">
+                        {item.label}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Saved Filters section */}
           {!collapsed && savedFilters.length > 0 && (
@@ -401,45 +412,47 @@ export function Sidebar({
         </div>
 
         {/* Workspace chrome — presentational until AI (Phase 6) and Settings (Phase 4). */}
-        <div
-          className={`shrink-0 border-t border-border/60 ${collapsed ? "pt-2 pb-3" : "pt-3 pb-3"}`}
-        >
-          {!collapsed && (
-            <h3 className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-on-surface-muted">
-              Workspace
-            </h3>
-          )}
-          <ul className="space-y-0.5">
-            <li>
-              <button
-                type="button"
-                title="AI Chat arrives in a later phase"
-                aria-disabled="true"
-                onClick={(event) => event.preventDefault()}
-                className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-on-surface-secondary transition-colors hover:bg-surface-tertiary hover:text-on-surface ${
-                  collapsed ? "justify-center" : "gap-3"
-                }`}
-              >
-                <MessageSquare size={18} strokeWidth={1.75} aria-hidden="true" />
-                {!collapsed && <span>AI Chat</span>}
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                title="Settings arrives in Phase 4"
-                aria-disabled="true"
-                onClick={(event) => event.preventDefault()}
-                className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-on-surface-secondary transition-colors hover:bg-surface-tertiary hover:text-on-surface ${
-                  collapsed ? "justify-center" : "gap-3"
-                }`}
-              >
-                <Settings size={18} strokeWidth={1.75} aria-hidden="true" />
-                {!collapsed && <span>Settings</span>}
-              </button>
-            </li>
-          </ul>
-        </div>
+        {!phase2VisualFixture && (
+          <div
+            className={`shrink-0 border-t border-border/60 ${collapsed ? "pt-2 pb-3" : "pt-3 pb-3"}`}
+          >
+            {!collapsed && (
+              <h3 className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-on-surface-muted">
+                Workspace
+              </h3>
+            )}
+            <ul className="space-y-0.5">
+              <li>
+                <button
+                  type="button"
+                  title="AI Chat arrives in a later phase"
+                  aria-disabled="true"
+                  onClick={(event) => event.preventDefault()}
+                  className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-on-surface-secondary transition-colors hover:bg-surface-tertiary hover:text-on-surface ${
+                    collapsed ? "justify-center" : "gap-3"
+                  }`}
+                >
+                  <MessageSquare size={18} strokeWidth={1.75} aria-hidden="true" />
+                  {!collapsed && <span>AI Chat</span>}
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  title="Settings arrives in Phase 4"
+                  aria-disabled="true"
+                  onClick={(event) => event.preventDefault()}
+                  className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-on-surface-secondary transition-colors hover:bg-surface-tertiary hover:text-on-surface ${
+                    collapsed ? "justify-center" : "gap-3"
+                  }`}
+                >
+                  <Settings size={18} strokeWidth={1.75} aria-hidden="true" />
+                  {!collapsed && <span>Settings</span>}
+                </button>
+              </li>
+            </ul>
+          </div>
+        )}
       </nav>
     </aside>
   );

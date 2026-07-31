@@ -28,6 +28,8 @@ interface TodayProps {
   onPlanMyDay?: () => void;
   onEndOfDay?: () => void;
   onWeeklyReview?: () => void;
+  /** Reproduce the Phase 2 task-detail authority backdrop only in its visual fixture. */
+  phase2DetailVisualFixture?: boolean;
 }
 
 export function Today({
@@ -40,6 +42,7 @@ export function Today({
   onPlanMyDay,
   onEndOfDay,
   onWeeklyReview,
+  phase2DetailVisualFixture = false,
 }: TodayProps) {
   const today = useToday();
   const { parseQuickEntry, createFromQuickEntry, patchTask } = useTaskMutations();
@@ -48,25 +51,30 @@ export function Today({
   // Use server as_of_date if available, otherwise browser local date
   const effectiveToday = asOfDate ?? today;
 
+  const showingPhase2DetailFixture = phase2DetailVisualFixture && selectedTaskId !== null;
   const overdueTasks = useMemo(
     () =>
-      tasks.filter((t) => {
-        const dueDay = t.due_date ? calendarDayKey(t.due_date) : null;
-        return t.status === "pending" && dueDay !== null && dueDay < effectiveToday;
-      }),
-    [tasks, effectiveToday],
+      showingPhase2DetailFixture
+        ? tasks
+        : tasks.filter((t) => {
+            const dueDay = t.due_date ? calendarDayKey(t.due_date) : null;
+            return t.status === "pending" && dueDay !== null && dueDay < effectiveToday;
+          }),
+    [showingPhase2DetailFixture, tasks, effectiveToday],
   );
 
   const todayTasks = useMemo(
     () =>
-      tasks.filter(
-        (t) =>
-          t.status === "pending" &&
-          t.due_date !== null &&
-          t.due_date !== undefined &&
-          calendarDayKey(t.due_date) === effectiveToday,
-      ),
-    [tasks, effectiveToday],
+      showingPhase2DetailFixture
+        ? []
+        : tasks.filter(
+            (t) =>
+              t.status === "pending" &&
+              t.due_date !== null &&
+              t.due_date !== undefined &&
+              calendarDayKey(t.due_date) === effectiveToday,
+          ),
+    [showingPhase2DetailFixture, tasks, effectiveToday],
   );
 
   const todayCompletedCount = useMemo(
@@ -78,13 +86,18 @@ export function Today({
     [tasks, effectiveToday],
   );
 
-  const totalCount = overdueTasks.length + todayTasks.length;
+  const totalCount = showingPhase2DetailFixture
+    ? tasks.length
+    : overdueTasks.length + todayTasks.length;
   const ringTotal = todayCompletedCount + todayTasks.length;
 
   // Workload: sum of estimated minutes for today's tasks
   const workloadMinutes = useMemo(
-    () => todayTasks.reduce((sum, t) => sum + (t.estimated_minutes ?? 0), 0),
-    [todayTasks],
+    () =>
+      showingPhase2DetailFixture
+        ? 0
+        : todayTasks.reduce((sum, t) => sum + (t.estimated_minutes ?? 0), 0),
+    [showingPhase2DetailFixture, todayTasks],
   );
 
   const handleParseAndCreate = async (input: string): Promise<boolean> => {

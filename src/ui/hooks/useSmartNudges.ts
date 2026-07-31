@@ -17,7 +17,7 @@ export type ActiveNudge = {
   taskIds: string[];
 };
 
-export function useSmartNudges(): {
+export function useSmartNudges({ enabled = true }: { enabled?: boolean } = {}): {
   activeNudges: ActiveNudge[];
   dismiss: (id: string) => void;
 } {
@@ -67,11 +67,15 @@ export function useSmartNudges(): {
 
   // Fetch once per civil day and whenever the workspace revision moves.
   useEffect(() => {
+    if (!enabled) {
+      setNudges([]);
+      return;
+    }
     const key = `${today}:${revision}`;
     if (lastFetchKeyRef.current === key) return;
     lastFetchKeyRef.current = key;
     void fetchNudges();
-  }, [today, revision, fetchNudges]);
+  }, [enabled, today, revision, fetchNudges]);
 
   const dismiss = useCallback((id: string) => {
     dismissedRef.current.add(id);

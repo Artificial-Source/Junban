@@ -35,10 +35,12 @@ import { useSmartNudges } from "./useSmartNudges";
 
 function Probe({
   onReady,
+  enabled,
 }: {
   onReady: (api: ReturnType<typeof useSmartNudges>) => void;
+  enabled?: boolean;
 }): ReactElement {
-  const api = useSmartNudges();
+  const api = useSmartNudges({ enabled });
   useEffect(() => {
     onReady(api);
   }, [api, onReady]);
@@ -78,6 +80,16 @@ describe("useSmartNudges", () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+  });
+
+  it("does not fetch or surface a toast when explicitly disabled", async () => {
+    await act(async () => {
+      root.render(createElement(Probe, { enabled: false, onReady: () => {} }));
+    });
+
+    expect(getTemporalSettings).not.toHaveBeenCalled();
+    expect(getNudges).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
   });
 
   it("shows a dismissible session toast and does not re-show after dismiss", async () => {

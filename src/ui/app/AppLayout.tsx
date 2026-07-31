@@ -55,10 +55,15 @@ import { getTask, hasStoredToken } from "../api/client";
 import { detailRefreshFromEvent } from "./detailRefresh";
 import { isShellBlocking, isTaskDetailLayerActive, isolateShellSiblings } from "./shellIsolation";
 import { shouldEnableAppShortcuts } from "./shortcutGate";
+import { isVisualFixture } from "../lib/visualFixture";
 
 const MOBILE_DRAWER_ID = "junban-mobile-nav-drawer";
 
 export function AppLayout() {
+  const phase2VisualFixture = isVisualFixture(window.location.search, "phase-2");
+  const phase2DetailVisualFixture =
+    phase2VisualFixture &&
+    new URLSearchParams(window.location.search).get("phase2-detail-fixture") === "1";
   const { route, view, navigate, focusModeOpen, setFocusModeOpen } = useRouting();
   const {
     catalog,
@@ -73,7 +78,7 @@ export function AppLayout() {
     registerTaskEventHandler,
   } = useWorkspace();
   const { completeTask, uncompleteTask, bulkTasks } = useTaskMutations();
-  useSmartNudges();
+  useSmartNudges({ enabled: !phase2VisualFixture });
 
   const rootRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
@@ -115,7 +120,7 @@ export function AppLayout() {
   });
 
   useReminderDelivery({
-    enabled: hasStoredToken() && !catalogLoading,
+    enabled: !phase2VisualFixture && hasStoredToken() && !catalogLoading,
     onInApp: (reminder) => {
       showToast("info", reminder.title, {
         inverted: true,
@@ -407,33 +412,37 @@ export function AppLayout() {
       defaultKey: "",
       action: () => handleNavigate("filters-labels"),
     },
-    {
-      id: "focus-mode",
-      description: "Enter Focus Mode",
-      defaultKey: "cmd+shift+f",
-      action: () => handleEnterFocusMode(),
-    },
-    {
-      id: "plan-my-day",
-      description: "Plan My Day",
-      defaultKey: "",
-      chord: "g p",
-      action: () => setPlanMyDayOpen(true),
-    },
-    {
-      id: "end-of-day",
-      description: "End of Day",
-      defaultKey: "",
-      chord: "g e",
-      action: () => setEndOfDayOpen(true),
-    },
-    {
-      id: "weekly-review",
-      description: "Weekly Review",
-      defaultKey: "",
-      chord: "g w",
-      action: () => setWeeklyReviewOpen(true),
-    },
+    ...(!phase2VisualFixture
+      ? [
+          {
+            id: "focus-mode",
+            description: "Enter Focus Mode",
+            defaultKey: "cmd+shift+f",
+            action: () => handleEnterFocusMode(),
+          },
+          {
+            id: "plan-my-day",
+            description: "Plan My Day",
+            defaultKey: "",
+            chord: "g p",
+            action: () => setPlanMyDayOpen(true),
+          },
+          {
+            id: "end-of-day",
+            description: "End of Day",
+            defaultKey: "",
+            chord: "g e",
+            action: () => setEndOfDayOpen(true),
+          },
+          {
+            id: "weekly-review",
+            description: "Weekly Review",
+            defaultKey: "",
+            chord: "g w",
+            action: () => setWeeklyReviewOpen(true),
+          },
+        ]
+      : []),
   ];
 
   const { chord } = useKeyboardShortcuts(
@@ -480,40 +489,44 @@ export function AppLayout() {
       name: "Go to Filters & Labels",
       callback: () => handleNavigate("filters-labels"),
     },
-    { id: "calendar", name: "Go to Calendar", callback: () => handleNavigate("calendar") },
-    { id: "matrix", name: "Go to Matrix", callback: () => handleNavigate("matrix") },
-    { id: "stats", name: "Go to Stats", callback: () => handleNavigate("stats") },
-    {
-      id: "dopamine-menu",
-      name: "Go to Quick Wins",
-      callback: () => handleNavigate("dopamine-menu"),
-    },
-    {
-      id: "timeblocking",
-      name: "Go to Timeblocking",
-      callback: () => handleNavigate("timeblocking"),
-    },
-    {
-      id: "focus-mode",
-      name: "Enter Focus Mode",
-      callback: () => handleEnterFocusMode(),
-      hotkey: "⌘⇧F",
-    },
-    {
-      id: "plan-my-day",
-      name: "Plan My Day",
-      callback: () => setPlanMyDayOpen(true),
-    },
-    {
-      id: "end-of-day",
-      name: "End of Day",
-      callback: () => setEndOfDayOpen(true),
-    },
-    {
-      id: "weekly-review",
-      name: "Weekly Review",
-      callback: () => setWeeklyReviewOpen(true),
-    },
+    ...(!phase2VisualFixture
+      ? [
+          { id: "calendar", name: "Go to Calendar", callback: () => handleNavigate("calendar") },
+          { id: "matrix", name: "Go to Matrix", callback: () => handleNavigate("matrix") },
+          { id: "stats", name: "Go to Stats", callback: () => handleNavigate("stats") },
+          {
+            id: "dopamine-menu",
+            name: "Go to Quick Wins",
+            callback: () => handleNavigate("dopamine-menu"),
+          },
+          {
+            id: "timeblocking",
+            name: "Go to Timeblocking",
+            callback: () => handleNavigate("timeblocking"),
+          },
+          {
+            id: "focus-mode",
+            name: "Enter Focus Mode",
+            callback: () => handleEnterFocusMode(),
+            hotkey: "⌘⇧F",
+          },
+          {
+            id: "plan-my-day",
+            name: "Plan My Day",
+            callback: () => setPlanMyDayOpen(true),
+          },
+          {
+            id: "end-of-day",
+            name: "End of Day",
+            callback: () => setEndOfDayOpen(true),
+          },
+          {
+            id: "weekly-review",
+            name: "Weekly Review",
+            callback: () => setWeeklyReviewOpen(true),
+          },
+        ]
+      : []),
   ];
 
   // Find current project for Project view
@@ -525,7 +538,9 @@ export function AppLayout() {
   return (
     <div
       ref={rootRef}
-      className="flex h-screen flex-col bg-surface text-on-surface pb-[--height-bottom-nav] md:h-[calc(100vh-25px)] md:pb-0"
+      className={`flex h-screen flex-col bg-surface text-on-surface pb-[--height-bottom-nav] md:pb-0 ${
+        phase2VisualFixture ? "" : "md:h-[calc(100vh-25px)]"
+      }`}
     >
       <a
         href="#main-content"
@@ -565,6 +580,7 @@ export function AppLayout() {
               onToggleCollapsed={() => setSidebarCollapsed(!sidebarCollapsed)}
               catalog={catalog}
               onOpenProjectModal={() => setProjectModalOpen(true)}
+              phase2VisualFixture={phase2VisualFixture}
             />
           </ErrorBoundary>
         </div>
@@ -608,9 +624,12 @@ export function AppLayout() {
                     selectedTaskIds={multiSelect.selectedIds}
                     onMultiSelect={multiSelect.handleSelect}
                     autoFocusTrigger={addTaskTrigger}
-                    onPlanMyDay={() => setPlanMyDayOpen(true)}
-                    onEndOfDay={() => setEndOfDayOpen(true)}
-                    onWeeklyReview={() => setWeeklyReviewOpen(true)}
+                    onPlanMyDay={phase2VisualFixture ? undefined : () => setPlanMyDayOpen(true)}
+                    onEndOfDay={phase2VisualFixture ? undefined : () => setEndOfDayOpen(true)}
+                    onWeeklyReview={
+                      phase2VisualFixture ? undefined : () => setWeeklyReviewOpen(true)
+                    }
+                    phase2DetailVisualFixture={phase2DetailVisualFixture}
                   />
                 )}
                 {route.name === "inbox" && (
@@ -739,6 +758,7 @@ export function AppLayout() {
                 setDrawerOpen(false);
                 setProjectModalOpen(true);
               }}
+              phase2VisualFixture={phase2VisualFixture}
             />
           </MobileDrawer>
         </div>
@@ -767,6 +787,7 @@ export function AppLayout() {
             onOpenFullPage={handleOpenFullPage}
             returnFocusTo={taskDetailOpenerRef.current}
             onEnterFocusMode={(taskId) => handleEnterFocusMode(taskId)}
+            phase2VisualFixture={phase2VisualFixture}
           />
         )}
         {selectedTaskId && detailLoading && (!detailTask || detailTask.id !== selectedTaskId) && (

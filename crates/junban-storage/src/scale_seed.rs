@@ -1,4 +1,4 @@
-//! Development-only Phase 2 scale fixture seeder.
+//! Development-only scale benchmark fixture seeder.
 //!
 //! Gated behind the `scale-bench` feature so release `junban-server` artifacts
 //! never include this path. Seeds write SQLite rows directly (no mutation
@@ -104,6 +104,8 @@ pub struct SeedConfig {
     pub task_count: u32,
     /// Civil date used for today/overdue/upcoming fixture patterns.
     pub as_of_date: Date,
+    /// Adds the bounded recurring-source fixture used by the Phase 3 benchmark.
+    pub temporal_fixture: bool,
 }
 
 impl SeedConfig {
@@ -122,7 +124,28 @@ impl SeedConfig {
         Ok(Self {
             task_count,
             as_of_date,
+            temporal_fixture: false,
         })
+    }
+
+    #[must_use]
+    pub fn with_temporal_fixture(mut self) -> Self {
+        self.temporal_fixture = true;
+        self
+    }
+
+    #[must_use]
+    pub fn temporal_recurrence_source_count(&self) -> u32 {
+        if !self.temporal_fixture {
+            return 0;
+        }
+        if self.task_count >= AUTHORITATIVE_TASK_COUNT {
+            // 250 sources plus 250 generated children is the frozen 500-task
+            // affected-identity ceiling for one recurring bulk mutation.
+            250
+        } else {
+            25
+        }
     }
 
     #[must_use]
@@ -173,6 +196,7 @@ impl SeedConfig {
 #[derive(Debug, Clone, Serialize)]
 pub struct SeedManifest {
     pub protocol: &'static str,
+    pub temporal_fixture: bool,
     pub task_count: u32,
     pub as_of_date: String,
     pub seed_duration_ms: f64,
@@ -185,6 +209,8 @@ pub struct SeedManifest {
     pub reorder_task_ids: Vec<String>,
     pub bulk_task_ids: Vec<String>,
     pub patch_task_ids: Vec<String>,
+    /// Top-level pending recurring tasks, sized for the temporal bulk ceiling.
+    pub temporal_recurrence_source_ids: Vec<String>,
     pub project_view_project_id: String,
     pub project_view_section_id: String,
     pub reorder_project_id: String,
@@ -198,7 +224,7 @@ pub struct SeedManifest {
     pub sqlite_path: String,
 }
 
-/// Seed `profile_dir` with a deterministic Phase 2 scale fixture and write
+/// Seed `profile_dir` with a deterministic scale fixture and write
 /// `scale-seed-manifest.json` beside the database.
 pub fn seed_phase2_scale(
     profile_dir: impl AsRef<Path>,
@@ -294,6 +320,7 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
     let delete_root = config.delete_tree_root_index();
     let regular_start = config.regular_start_index();
     let reorder_start = config.reorder_pool_start();
+    let temporal_source_target = config.temporal_recurrence_source_count() as usize;
 
     if regular_start >= reorder_start {
         return Err(SeedError::InvalidConfig(
@@ -463,8 +490,17 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
         SeedConfig::reorder_section_index(),
     );
     let mut comment_seq = 1_u32;
+    let mut temporal_recurrence_source_ids = Vec::with_capacity(temporal_source_target);
     for index in regular_start..config.task_count {
         let in_reorder_pool = index >= reorder_start;
+        let local = index - regular_start;
+        // Do not select a subtask or a root with the fixture's immediate child;
+        // bulk recurrence remains exactly at the 500 affected-task ceiling.
+        let is_temporal_source = config.temporal_fixture
+            && temporal_recurrence_source_ids.len() < temporal_source_target
+            && !in_reorder_pool
+            && local % 20 != 10
+            && local % 20 != 11;
         let (project, section, parent, sort_order) = if in_reorder_pool {
             (
                 Some(reorder_project.clone()),
@@ -477,49 +513,58 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
         };
 
         let pattern = index % 20;
-        let (status, completed_at, someday, due_date, priority, title_extra) = match pattern {
-            0 => (
-                "completed",
-                Some(now.to_owned()),
-                0_i64,
-                Some(shift_date(as_of, -3)),
-                Some(1_i64),
-                "",
-            ),
-            1 => (
-                "cancelled",
-                None,
-                0,
-                Some(shift_date(as_of, -1)),
-                Some(4),
-                "",
-            ),
-            2 => ("pending", None, 1, None, Some(3), ""),
-            3 => ("pending", None, 0, Some(as_of.to_string()), Some(1), ""),
-            4 => ("pending", None, 0, Some(shift_date(as_of, 1)), Some(2), ""),
-            5 => ("pending", None, 0, Some(shift_date(as_of, -2)), Some(2), ""),
-            6 => ("pending", None, 0, Some(shift_date(as_of, 7)), Some(3), ""),
-            7 if index % 200 == 7 => (
-                "pending",
-                None,
-                0,
-                Some(as_of.to_string()),
-                Some(1),
-                SEARCH_HIT_TOKEN,
-            ),
-            _ => (
-                "pending",
-                None,
-                0,
-                if pattern % 2 == 0 {
-                    Some(shift_date(as_of, i32::try_from(pattern).unwrap_or(0) - 5))
-                } else {
-                    None
-                },
-                Some(i64::from((index % 4) + 1)),
-                "",
-            ),
-        };
+        let (mut status, mut completed_at, mut someday, mut due_date, mut priority, title_extra) =
+            match pattern {
+                0 => (
+                    "completed",
+                    Some(now.to_owned()),
+                    0_i64,
+                    Some(shift_date(as_of, -3)),
+                    Some(1_i64),
+                    "",
+                ),
+                1 => (
+                    "cancelled",
+                    None,
+                    0,
+                    Some(shift_date(as_of, -1)),
+                    Some(4),
+                    "",
+                ),
+                2 => ("pending", None, 1, None, Some(3), ""),
+                3 => ("pending", None, 0, Some(as_of.to_string()), Some(1), ""),
+                4 => ("pending", None, 0, Some(shift_date(as_of, 1)), Some(2), ""),
+                5 => ("pending", None, 0, Some(shift_date(as_of, -2)), Some(2), ""),
+                6 => ("pending", None, 0, Some(shift_date(as_of, 7)), Some(3), ""),
+                7 if index % 200 == 7 => (
+                    "pending",
+                    None,
+                    0,
+                    Some(as_of.to_string()),
+                    Some(1),
+                    SEARCH_HIT_TOKEN,
+                ),
+                _ => (
+                    "pending",
+                    None,
+                    0,
+                    if pattern % 2 == 0 {
+                        Some(shift_date(as_of, i32::try_from(pattern).unwrap_or(0) - 5))
+                    } else {
+                        None
+                    },
+                    Some(i64::from((index % 4) + 1)),
+                    "",
+                ),
+            };
+
+        if is_temporal_source {
+            status = "pending";
+            completed_at = None;
+            someday = 0;
+            due_date = Some(as_of.to_string());
+            priority = Some(1);
+        }
 
         let title = if title_extra.is_empty() {
             format!("scale-task-{index:05}")
@@ -531,7 +576,7 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
         } else {
             String::new()
         };
-        let recurrence = if index % 111 == 0 {
+        let recurrence = if is_temporal_source || index % 111 == 0 {
             Some("weekly")
         } else {
             None
@@ -569,6 +614,9 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
             ],
         )
         .map_err(|e| SeedError::Database(e.to_string()))?;
+        if is_temporal_source {
+            temporal_recurrence_source_ids.push(task_id(index));
+        }
 
         // ~15% of tasks get one tag; a smaller set gets two for AND filters.
         if index % 7 == 0 {
@@ -627,9 +675,19 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
 
     let due_after = shift_date(as_of, -7);
     let due_before = shift_date(as_of, 7);
+    if temporal_recurrence_source_ids.len() != temporal_source_target {
+        return Err(SeedError::InvalidConfig(
+            "not enough independent tasks for the temporal recurrence fixture".into(),
+        ));
+    }
 
     Ok(SeedManifest {
-        protocol: "junban-phase2-scale-v1",
+        protocol: if config.temporal_fixture {
+            "junban-phase3-temporal-v1"
+        } else {
+            "junban-phase2-scale-v1"
+        },
+        temporal_fixture: config.temporal_fixture,
         task_count: config.task_count,
         as_of_date: as_of.to_string(),
         seed_duration_ms: 0.0,
@@ -642,6 +700,7 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
         reorder_task_ids,
         bulk_task_ids,
         patch_task_ids,
+        temporal_recurrence_source_ids,
         project_view_project_id: project_id(1),
         project_view_section_id: section_id(1, 0),
         reorder_project_id: reorder_project,

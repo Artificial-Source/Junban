@@ -709,6 +709,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 2 parser and transactional schema waves.
 - [x] Phase 2 application, HTTP, React, scale, dogfood, review and delivery waves.
 - [x] Phase 3 context, temporal authority, migration recovery, reminder fencing, timeblock/slot, bounds and visual-evidence plan approved.
+- [x] Phase 3 temporal benchmark harness and five-sample release evidence recorded; `P3-FINAL-007` remains open because the frozen Stats and Nudge p95 budgets failed closed.
 - [ ] Phase 3 implementation (active).
 - [ ] Phase 4 implementation.
 - [ ] Phase 5 implementation.
@@ -740,6 +741,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 2 final review — **approved after fixes**. Frontend, accessibility, database and API findings plus six dogfood issues are fixed with focused regressions. Targeted closure re-review confirmed `P2-CLOSE-001`–`P2-CLOSE-003` fixed with no material finding remaining; the full ledger is `evidence/phase-2-review-ledger.md`.
 - `P3-REC-001`, `P3-REM-001`, `P3-MIG-001`, `P3-TIME-001`, `P3-BOUND-001`, `P3-UI-001` — **fixed and approved**. Phase 3 now freezes recurrence/uncomplete transitions, fenced reminder control-plane semantics and shutdown, verified pre-migration recovery, durable blocks/slots and ordered membership, numeric API/performance limits, and twelve independent legacy-rendered visual authorities.
 - `P3-FINAL-003` — **fixed**. Matrix consumes the existing authoritative task-list civil date; daily and weekly planning/review reads expose their sampled civil date, and ritual reschedules derive today/tomorrow from that response rather than browser time. Rust API and non-default-browser-timezone frontend regressions cover the contract.
+- `P3-FINAL-007` — **open**. The new five-sample 10,000-task temporal harness passed the frozen 24/32 MiB memory ceiling (17.9453 MiB median / 18.6680 MiB maximum warm; 20.1758 MiB maximum peak) and all scheduler lifecycle checks, but failed closed on Stats p95 304.074 ms (150 ms budget) and Nudges p95 292.476 ms (100 ms budget). Raw evidence: `evidence/phase-3-temporal-bench.json`.
 
 ## Decision log
 
@@ -757,6 +759,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-07-29: user requested uninterrupted sequential execution through Phase 9 and added Phase 10 for a deep codebase, DX and documentation audit. Release publication now follows that audit and still requires a separately approved tag.
 - 2026-07-30: completed Phase 2 without adding crates or runtime owners. Recurrence remains validated rule storage only; Phase 3 owns occurrence generation, reminders and planning semantics. Final release-binary evidence passed at 6.96 MiB median warm for the frozen workload and 15.18 MiB maximum warm for deterministic 10,000-task scale.
 - 2026-07-30: Phase 3 keeps the four-crate architecture and adds no scheduler/recurrence framework. One dormant Tokio wake loop, fenced browser/native delivery ownership, verified v2 backup before schema v3 migration, bounded virtual time recurrence, and independent legacy visual authority are required.
+- 2026-07-31: the Phase 3 temporal benchmark extends the existing hosted cgroup harness and existing development-only scale seeder rather than adding a runner or dependency. Its recurring bulk covers 250 sources plus 250 generated children because the frozen 500 affected-task ceiling includes generated occurrences.
 
 ## Discoveries and risks
 
@@ -784,6 +787,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 2 persistence: one schema-v2 migration and one dedicated SQLite worker were sufficient for complete task organization; no pool, FTS dependency or event-sourcing layer was required. A 250-page WAL auto-checkpoint removed periodic write-tail outliers while retaining full durability.
 - Phase 2 client correctness: view membership, own-response convergence, undo/redo identity and blocking-layer isolation needed explicit authority; focused pure helpers and component regressions closed those races without a state-management dependency.
 - Phase 2 scale: the final deterministic 10,000-task run stayed below 15.36 MiB peak and all p95 budgets by wide margins, so the simple indexed SQL query path remains authoritative.
+- Phase 3 temporal benchmark: memory and reminder scheduler lifecycle passed (all five samples observed idle → due wake → 20 claims/settlements → empty claim), but the server-side full-task analysis path missed the frozen 150 ms Stats and 100 ms Nudge p95 budgets at 304.074 ms and 292.476 ms. This is a blocking performance finding, not a reason to relax the predeclared limits.
 
 ## Outcome and retrospective
 

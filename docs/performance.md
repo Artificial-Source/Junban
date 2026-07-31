@@ -133,6 +133,41 @@ python3 scripts/bench-hosted-server.py --self-check
 pnpm bench:self-check
 ```
 
+## Phase 3 temporal harness (`junban-phase3-temporal-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-3-temporal-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-3-temporal-benchmark-protocol.md).
+
+`--mode temporal` extends the same cgroup harness; it does not add a second runner or runtime dependency. The existing development-only `junban-scale-seed --temporal-fixture` seeds a deterministic 10,000-task SQLite profile outside the measured cgroup before each server starts. The release server is the only measured process.
+
+```bash
+pnpm build
+cargo build --locked --release -p junban-server
+cargo build --locked --release -p junban-storage --features scale-bench --bin junban-scale-seed
+python3 scripts/bench-hosted-server.py \
+  --mode temporal \
+  --server target/release/junban-server \
+  --seeder target/release/junban-scale-seed \
+  --web-dir dist \
+  --output goals/rust-rewrite/evidence/phase-3-temporal-bench.json
+```
+
+Or use `pnpm bench:temporal -- --output goals/rust-rewrite/evidence/phase-3-temporal-bench.json`.
+
+Each of five fresh profiles records raw startup, idle/warm cgroup current/peak, RSS/PSS, SQLite size, every HTTP latency, response count, user-event revision delta, and scheduler observations. The workload uses Calendar (42 days), block/slot reads, daily/weekly planning, 366-day Stats, Nudges, exact recurring complete/uncomplete, a 250-source recurring bulk completion plus exact reversal (500 affected tasks, the frozen ceiling), and the reminder lifecycle: idle scheduler → SSE due wake → fenced lease → 20 claims → settlements → empty claim/idle.
+
+Pooled p95 budgets are Calendar and timeblocking ≤100 ms, Stats ≤150 ms, single recurrence ≤100 ms, each 500-affected bulk direction ≤1,000 ms, Nudges ≤100 ms, and lease + 20-row claim ≤50 ms. Every run fails closed if any latency budget or the frozen 24 MiB warm / 32 MiB peak memory ceiling fails.
+
+### Quick temporal smoke (not evidence)
+
+```bash
+python3 scripts/bench-hosted-server.py --mode temporal --quick
+pnpm bench:temporal:quick
+```
+
+Quick mode uses one 500-task profile, 25 recurring sources (50 affected tasks), and five reminder claims. It enforces the same ceilings but is not authoritative evidence.
+
+The 2026-07-31 authoritative result recorded 17.9453 MiB median / 18.6680 MiB maximum warm cgroup memory and a 20.1758 MiB maximum peak, so memory passed. It failed closed on the frozen Stats (304.074 ms vs 150 ms) and Nudge (292.476 ms vs 100 ms) p95 budgets; see the protocol for the complete result and scheduler evidence.
+
 ## Measurement rules
 
 - Optimized release binaries are authoritative. Development servers are not.

@@ -4610,7 +4610,120 @@ async fn p3_tb_001_delete_task_preserves_and_restores_planning_links() {
     assert_eq!(redone.event.affected.time_block_ids, vec![block_id]);
     let after_redo = planning_page(&repo, "2026-03-08").await;
     assert_eq!(after_redo.slots[0].task_ids.as_slice(), &[keep, tail]);
+    assert_eq!(after_redo.slots[0].revision, redone.event.revision);
     assert_eq!(after_redo.blocks[0].task_id, None);
+    assert_eq!(after_redo.blocks[0].revision, redone.event.revision);
+    assert!(matches!(
+        repo.get_task(doomed).await,
+        Err(RepositoryError::NotFound)
+    ));
+
+    // Undoing the redo must restore exact middle membership and block link again.
+    let undo_redo_op = operation();
+    let undone_redo = repo.undo(redo_op, undo_redo_op, now()).await.unwrap();
+    assert_eq!(undone_redo.event.affected.task_ids, vec![doomed]);
+    assert_eq!(undone_redo.event.affected.time_slot_ids, vec![slot_id]);
+    assert_eq!(undone_redo.event.affected.time_block_ids, vec![block_id]);
+    assert_eq!(undone_redo.event.revision, redone.event.revision + 1);
+
+    let after_undo_redo = planning_page(&repo, "2026-03-08").await;
+    assert_eq!(
+        after_undo_redo.slots[0].task_ids.as_slice(),
+        &[keep, doomed, tail],
+        "undo of redo must restore exact middle membership position"
+    );
+    assert_eq!(
+        after_undo_redo.slots[0].revision,
+        undone_redo.event.revision
+    );
+    assert_eq!(after_undo_redo.blocks[0].task_id, Some(doomed));
+    assert_eq!(
+        after_undo_redo.blocks[0].revision,
+        undone_redo.event.revision
+    );
+    assert_eq!(
+        repo.get_task(doomed).await.unwrap().title.as_str(),
+        "Doomed"
+    );
+
+    // Exact retry of the undo-of-redo is byte-identical.
+    let replay_undo_redo = repo.undo(redo_op, undo_redo_op, now()).await.unwrap();
+    assert_eq!(replay_undo_redo, undone_redo);
+    assert!(!replay_undo_redo.newly_committed);
+    assert_eq!(
+        serde_json::to_string(&replay_undo_redo).unwrap(),
+        serde_json::to_string(&undone_redo).unwrap()
+    );
+
+    // Further toggle (re-delete via undo of undo-redo) still detaches planning links.
+    let re_redo = repo.undo(undo_redo_op, operation(), now()).await.unwrap();
+    assert_eq!(re_redo.event.affected.task_ids, vec![doomed]);
+    assert_eq!(re_redo.event.affected.time_slot_ids, vec![slot_id]);
+    assert_eq!(re_redo.event.affected.time_block_ids, vec![block_id]);
+    let after_re_redo = planning_page(&repo, "2026-03-08").await;
+    assert_eq!(after_re_redo.slots[0].task_ids.as_slice(), &[keep, tail]);
+    assert_eq!(after_re_redo.blocks[0].task_id, None);
+}
+
+#[tokio::test]
+async fn p3_tb_001_undo_of_redo_conflicts_when_slot_changes() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let slot_id = junban_domain::TimeSlotId::new();
+    repo.create_time_slot(
+        operation(),
+        slot_id,
+        slot_draft("Focus", "2026-03-08"),
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let keep = create_simple(&repo, "Keep").await.task().unwrap().id;
+    let doomed = create_simple(&repo, "Doomed").await.task().unwrap().id;
+    repo.append_slot_task(operation(), slot_id, keep, now())
+        .await
+        .unwrap();
+    repo.append_slot_task(operation(), slot_id, doomed, now())
+        .await
+        .unwrap();
+
+    let delete_op = operation();
+    repo.delete_task(delete_op, doomed, now()).await.unwrap();
+    let undo_op = operation();
+    repo.undo(delete_op, undo_op, now()).await.unwrap();
+    let redo_op = operation();
+    repo.undo(undo_op, redo_op, now()).await.unwrap();
+    let revision_after_redo = repo.diagnostics().await.unwrap().revision;
+
+    // Mutate the post-delete slot before undoing the redo.
+    repo.append_slot_task(
+        operation(),
+        slot_id,
+        create_simple(&repo, "Intruder").await.task().unwrap().id,
+        now(),
+    )
+    .await
+    .unwrap();
+    let revision_after_mutate = repo.diagnostics().await.unwrap().revision;
+    assert!(revision_after_mutate > revision_after_redo);
+
+    let before = planning_page(&repo, "2026-03-08").await;
+    assert_eq!(
+        repo.undo(redo_op, operation(), now()).await.unwrap_err(),
+        RepositoryError::Conflict
+    );
+    assert_eq!(
+        repo.diagnostics().await.unwrap().revision,
+        revision_after_mutate
+    );
+    let after = planning_page(&repo, "2026-03-08").await;
+    assert_eq!(
+        before, after,
+        "conflict must leave planning state unchanged"
+    );
     assert!(matches!(
         repo.get_task(doomed).await,
         Err(RepositoryError::NotFound)

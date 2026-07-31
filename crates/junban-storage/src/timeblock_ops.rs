@@ -1023,6 +1023,10 @@ pub(crate) struct PlanningDetachResult {
     pub time_block_ids: Vec<TimeBlockId>,
     pub post_slots: BTreeMap<String, PostTimeSlotState>,
     pub post_blocks: BTreeMap<String, PostTimeBlockState>,
+    /// Exact memberships captured before detach (for receipt-owned restore).
+    pub slot_memberships: Vec<ClosureSlotMembership>,
+    /// Exact block links captured before detach (for receipt-owned restore).
+    pub block_links: Vec<ClosureBlockLink>,
 }
 
 /// Remove membership rows and clear block task links for `task_ids`.
@@ -1051,7 +1055,11 @@ pub(crate) fn detach_planning_links_for_tasks(
         block_ids.insert(link.block_id);
     }
 
-    let mut result = PlanningDetachResult::default();
+    let mut result = PlanningDetachResult {
+        slot_memberships: memberships.clone(),
+        block_links: block_links.clone(),
+        ..PlanningDetachResult::default()
+    };
 
     let mut slot_ids: Vec<_> = slot_ids.into_iter().collect();
     slot_ids.sort_by_key(ToString::to_string);

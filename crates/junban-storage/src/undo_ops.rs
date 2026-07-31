@@ -14,7 +14,10 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 use crate::helpers::{diff_task_fields, validate_task_refs};
-use crate::ops_types::{Inverse, PostImage, TaskClosure, undo_pair};
+use crate::ops_types::{
+    ClosureBlockLink, ClosureSlotMembership, Inverse, PostImage, TaskClosure,
+    restore_tasks_inverse, restore_tasks_with_planning, undo_pair,
+};
 use crate::reminder_ops::{
     load_reminder_occurrence, load_reminder_snapshot, reminders_into_post,
     replace_reminders_for_tasks, upsert_reminder_occurrence,
@@ -221,21 +224,29 @@ fn restore_closure(
     )
 }
 
+/// Planning links captured while applying a delete inverse, owned by the redo restore.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct DetachedPlanning {
+    slot_memberships: Vec<ClosureSlotMembership>,
+    block_links: Vec<ClosureBlockLink>,
+}
+
+/// Result of applying a stored inverse inside a mutation transaction.
+pub(crate) struct InverseApply {
+    pub affected: AffectedIds,
+    pub activity: Vec<junban_domain::TaskActivity>,
+    pub snapshot: Option<ResourceSnapshot>,
+    pub resync: ResyncScope,
+    pub detached: DetachedPlanning,
+}
+
 pub(crate) fn apply_inverse(
     tx: &rusqlite::Transaction<'_>,
     inverse: &Inverse,
     now: Timestamp,
     revision: u64,
     operation_id: OperationId,
-) -> Result<
-    (
-        AffectedIds,
-        Vec<junban_domain::TaskActivity>,
-        Option<ResourceSnapshot>,
-        ResyncScope,
-    ),
-    RepositoryError,
-> {
+) -> Result<InverseApply, RepositoryError> {
     match inverse {
         Inverse::DeleteTasks { task_ids } => {
             let mut affected = Vec::new();
@@ -247,7 +258,12 @@ pub(crate) fn apply_inverse(
             }
             // Explicit planning detach on every delete inverse (create-undo and
             // delete-redo) so FK CASCADE/SET NULL cannot drop unrecovered links.
+            // Capture exact live memberships/links for the redo RestoreTasks inverse.
             let planning = detach_planning_links_for_tasks(tx, &affected, now, revision)?;
+            let detached = DetachedPlanning {
+                slot_memberships: planning.slot_memberships,
+                block_links: planning.block_links,
+            };
             for (index, id) in affected.iter().enumerate() {
                 delete_task_row(tx, *id)?;
                 activity.push(field_activity(
@@ -262,17 +278,18 @@ pub(crate) fn apply_inverse(
                     now,
                 ));
             }
-            Ok((
-                AffectedIds {
+            Ok(InverseApply {
+                affected: AffectedIds {
                     task_ids: affected,
                     time_slot_ids: planning.time_slot_ids,
                     time_block_ids: planning.time_block_ids,
                     ..AffectedIds::default()
                 },
                 activity,
-                None,
-                ResyncScope::TASKS,
-            ))
+                snapshot: None,
+                resync: ResyncScope::TASKS,
+                detached,
+            })
         }
         Inverse::RestoreClosure { closure } => {
             let (time_slot_ids, time_block_ids) = restore_closure(tx, closure, now, revision)?;
@@ -294,17 +311,18 @@ pub(crate) fn apply_inverse(
                     )
                 })
                 .collect();
-            Ok((
-                AffectedIds {
+            Ok(InverseApply {
+                affected: AffectedIds {
                     task_ids: ids,
                     time_slot_ids,
                     time_block_ids,
                     ..AffectedIds::default()
                 },
                 activity,
-                None,
-                ResyncScope::TASKS,
-            ))
+                snapshot: None,
+                resync: ResyncScope::TASKS,
+                detached: DetachedPlanning::default(),
+            })
         }
         Inverse::ReverseCompletion {
             sources,
@@ -350,17 +368,23 @@ pub(crate) fn apply_inverse(
                 source_ids.push(restored.id);
             }
             replace_reminders_for_tasks(tx, &source_ids, source_reminders)?;
-            Ok((
-                AffectedIds {
+            Ok(InverseApply {
+                affected: AffectedIds {
                     task_ids: affected,
                     ..AffectedIds::default()
                 },
                 activity,
-                None,
-                ResyncScope::TASKS,
-            ))
+                snapshot: None,
+                resync: ResyncScope::TASKS,
+                detached: DetachedPlanning::default(),
+            })
         }
-        Inverse::RestoreTasks { tasks, reminders } => {
+        Inverse::RestoreTasks {
+            tasks,
+            reminders,
+            slot_memberships,
+            block_links,
+        } => {
             let mut affected = Vec::new();
             let mut activity = Vec::new();
             let mut seq = 0u32;
@@ -409,19 +433,27 @@ pub(crate) fn apply_inverse(
             }
             let task_ids: Vec<_> = tasks.iter().map(|task| task.id).collect();
             replace_reminders_for_tasks(tx, &task_ids, reminders)?;
-            Ok((
-                AffectedIds {
+            // Reattach receipt-owned planning links after task rows exist again.
+            let (time_slot_ids, time_block_ids) =
+                restore_planning_links(tx, slot_memberships, block_links, now, revision)?;
+            let resync =
+                if tasks.len() > 1 || !time_slot_ids.is_empty() || !time_block_ids.is_empty() {
+                    ResyncScope::TASKS
+                } else {
+                    ResyncScope::NONE
+                };
+            Ok(InverseApply {
+                affected: AffectedIds {
                     task_ids: affected,
+                    time_slot_ids,
+                    time_block_ids,
                     ..AffectedIds::default()
                 },
                 activity,
                 snapshot,
-                if tasks.len() > 1 {
-                    ResyncScope::TASKS
-                } else {
-                    ResyncScope::NONE
-                },
-            ))
+                resync,
+                detached: DetachedPlanning::default(),
+            })
         }
         Inverse::RestoreOrders { orders } => {
             let mut affected = Vec::new();
@@ -445,28 +477,29 @@ pub(crate) fn apply_inverse(
                     now,
                 ));
             }
-            Ok((
-                AffectedIds {
+            Ok(InverseApply {
+                affected: AffectedIds {
                     task_ids: affected,
                     ..AffectedIds::default()
                 },
                 activity,
-                None,
-                ResyncScope::TASKS,
-            ))
+                snapshot: None,
+                resync: ResyncScope::TASKS,
+                detached: DetachedPlanning::default(),
+            })
         }
         Inverse::RestoreComment { before, after_id } => match before {
             None => {
                 let current = load_comment(tx, *after_id).map_err(missing_as_conflict)?;
                 tx.execute("DELETE FROM comments WHERE id=?1", [after_id.to_string()])
                     .map_err(storage_error)?;
-                Ok((
-                    AffectedIds {
+                Ok(InverseApply {
+                    affected: AffectedIds {
                         comment_ids: vec![*after_id],
                         task_ids: vec![current.task_id],
                         ..AffectedIds::default()
                     },
-                    vec![field_activity(
+                    activity: vec![field_activity(
                         revision,
                         0,
                         operation_id,
@@ -477,9 +510,10 @@ pub(crate) fn apply_inverse(
                         None,
                         now,
                     )],
-                    None,
-                    ResyncScope::NONE,
-                ))
+                    snapshot: None,
+                    resync: ResyncScope::NONE,
+                    detached: DetachedPlanning::default(),
+                })
             }
             Some(comment) => {
                 if !task_exists(tx, comment.task_id)? {
@@ -509,13 +543,13 @@ pub(crate) fn apply_inverse(
                     .map_err(|_| RepositoryError::Conflict)?;
                 }
                 let restored = load_comment(tx, comment.id).map_err(missing_as_conflict)?;
-                Ok((
-                    AffectedIds {
+                Ok(InverseApply {
+                    affected: AffectedIds {
                         comment_ids: vec![comment.id],
                         task_ids: vec![comment.task_id],
                         ..AffectedIds::default()
                     },
-                    vec![field_activity(
+                    activity: vec![field_activity(
                         revision,
                         0,
                         operation_id,
@@ -526,9 +560,10 @@ pub(crate) fn apply_inverse(
                         Some(comment.id.to_string()),
                         now,
                     )],
-                    Some(ResourceSnapshot::Comment { comment: restored }),
-                    ResyncScope::NONE,
-                ))
+                    snapshot: Some(ResourceSnapshot::Comment { comment: restored }),
+                    resync: ResyncScope::NONE,
+                    detached: DetachedPlanning::default(),
+                })
             }
         },
         Inverse::RestoreRelation { relation, present } => {
@@ -556,12 +591,12 @@ pub(crate) fn apply_inverse(
                 )
                 .map_err(storage_error)?;
             }
-            Ok((
-                AffectedIds {
+            Ok(InverseApply {
+                affected: AffectedIds {
                     task_ids: vec![relation.from_task_id, relation.to_task_id],
                     ..AffectedIds::default()
                 },
-                vec![field_activity(
+                activity: vec![field_activity(
                     revision,
                     0,
                     operation_id,
@@ -572,9 +607,10 @@ pub(crate) fn apply_inverse(
                     Some(relation.to_task_id.to_string()),
                     now,
                 )],
-                None,
-                ResyncScope::TASKS,
-            ))
+                snapshot: None,
+                resync: ResyncScope::TASKS,
+                detached: DetachedPlanning::default(),
+            })
         }
     }
 }
@@ -629,27 +665,43 @@ fn capture_redo_post(
     Ok(redo_post)
 }
 
-fn redo_inverse_for(inverse: &Inverse, post: &PostImage, affected: &AffectedIds) -> Inverse {
+fn redo_inverse_for(
+    inverse: &Inverse,
+    post: &PostImage,
+    affected: &AffectedIds,
+    detached: DetachedPlanning,
+) -> Inverse {
     match inverse {
-        Inverse::DeleteTasks { .. } => Inverse::RestoreTasks {
-            tasks: post.tasks.values().cloned().collect(),
-            reminders: post.reminders.values().cloned().collect(),
-        },
+        Inverse::DeleteTasks { .. } => restore_tasks_with_planning(
+            post.tasks.values().cloned().collect(),
+            post.reminders.values().cloned().collect(),
+            detached.slot_memberships,
+            detached.block_links,
+        ),
         Inverse::RestoreClosure { .. } => Inverse::DeleteTasks {
             task_ids: affected.task_ids.clone(),
         },
-        Inverse::RestoreTasks { .. } => Inverse::RestoreTasks {
-            tasks: post.tasks.values().cloned().collect(),
-            reminders: post.reminders.values().cloned().collect(),
-        },
+        Inverse::RestoreTasks { .. } => {
+            // Undoing a delete-redo restore must re-delete; post holds absent tasks.
+            if post.tasks.is_empty() && !post.absent_task_ids.is_empty() {
+                Inverse::DeleteTasks {
+                    task_ids: post.absent_task_ids.clone(),
+                }
+            } else {
+                restore_tasks_inverse(
+                    post.tasks.values().cloned().collect(),
+                    post.reminders.values().cloned().collect(),
+                )
+            }
+        }
         Inverse::ReverseCompletion { generated_ids, .. } => {
             // Undo of reverse-completion re-applies the completed post-image (sources +
             // generated children). Generated IDs that are absent are reinserted from post.
             let _ = generated_ids;
-            Inverse::RestoreTasks {
-                tasks: post.tasks.values().cloned().collect(),
-                reminders: post.reminders.values().cloned().collect(),
-            }
+            restore_tasks_inverse(
+                post.tasks.values().cloned().collect(),
+                post.reminders.values().cloned().collect(),
+            )
         }
         Inverse::RestoreOrders { .. } => Inverse::RestoreOrders {
             orders: post
@@ -716,9 +768,8 @@ pub(crate) fn undo(
             let inverse: Inverse = serde_json::from_str(&inverse_json).map_err(storage_error)?;
             let post: PostImage = serde_json::from_str(&post_image_json).map_err(storage_error)?;
             validate_post_image(tx, &post)?;
-            let (affected, activity, snapshot, resync) =
-                apply_inverse(tx, &inverse, now, revision, new_operation_id)?;
-            let redo_post = capture_redo_post(tx, &affected, now)?;
+            let applied = apply_inverse(tx, &inverse, now, revision, new_operation_id)?;
+            let redo_post = capture_redo_post(tx, &applied.affected, now)?;
             // For undo of create/delete, use original post image as redo target when tasks vanished.
             let redo_source_post = if redo_post.tasks.is_empty() && !post.tasks.is_empty() {
                 // We deleted tasks; redo should restore post.
@@ -726,13 +777,14 @@ pub(crate) fn undo(
             } else {
                 redo_post
             };
-            let redo_inverse = redo_inverse_for(&inverse, &post, &affected);
+            let redo_inverse =
+                redo_inverse_for(&inverse, &post, &applied.affected, applied.detached);
             // Prefer using original post as the expected state after redo of this undo when
             // inverse restored prior state from post.
             let undo = undo_pair(&redo_inverse, &{
                 // After applying inverse, current state is redo_source_post for conflict checks
                 // on a subsequent undo (redo).
-                let mut current = capture_redo_post(tx, &affected, now)?;
+                let mut current = capture_redo_post(tx, &applied.affected, now)?;
                 if current.tasks.is_empty() && current.absent_task_ids.is_empty() {
                     current = redo_source_post;
                 }
@@ -742,10 +794,10 @@ pub(crate) fn undo(
             Ok(MutationEffect {
                 event_type: EventType::new(EventType::OPERATION_UNDONE),
                 primary: Some(ResourceRef::operation(source_operation_id)),
-                snapshot,
-                affected,
-                resync,
-                task_activity: activity,
+                snapshot: applied.snapshot,
+                affected: applied.affected,
+                resync: applied.resync,
+                task_activity: applied.activity,
                 summary_subject: Some(("operation".into(), source_operation_id.to_string())),
                 undo: Some(undo),
                 mark_undone: Some(source_operation_id),

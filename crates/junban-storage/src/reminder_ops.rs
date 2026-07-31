@@ -28,7 +28,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use serde::Serialize;
 
 use crate::helpers::{apply_patch, diff_task_fields, validation};
-use crate::ops_types::{Inverse, PostImage, post_from_tasks, undo_pair};
+use crate::ops_types::{PostImage, post_from_tasks, restore_tasks_inverse, undo_pair};
 use crate::rows::{
     field_activity, load_task, parse_sql, storage_error, task_exists, update_task_row,
 };
@@ -522,10 +522,7 @@ pub(crate) fn reschedule_reminder(
             let after_reminders = load_reminder_snapshot(tx, &[task_id], now)?;
             let activity = diff_task_fields(&before, &after, revision, operation_id, now, 0);
             let undo = undo_pair(
-                &Inverse::RestoreTasks {
-                    tasks: vec![before],
-                    reminders: before_reminders,
-                },
+                &restore_tasks_inverse(vec![before], before_reminders),
                 &post_with_reminders([after.clone()], after_reminders),
             )?;
             Ok(MutationEffect {
@@ -595,10 +592,7 @@ pub(crate) fn dismiss_reminder(
                 diff_task_fields(&before, &after, revision, operation_id, now, 0)
             };
             let undo = undo_pair(
-                &Inverse::RestoreTasks {
-                    tasks: vec![before],
-                    reminders: before_reminders,
-                },
+                &restore_tasks_inverse(vec![before], before_reminders),
                 &post_with_reminders([after.clone()], after_reminders),
             )?;
             Ok(MutationEffect {

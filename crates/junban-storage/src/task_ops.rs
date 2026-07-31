@@ -19,7 +19,9 @@ use serde::Serialize;
 use crate::helpers::{
     apply_patch, diff_task_fields, map_transition, validate_task_refs, validation,
 };
-use crate::ops_types::{Inverse, PostImage, TaskClosure, post_from_tasks, status_name, undo_pair};
+use crate::ops_types::{
+    Inverse, PostImage, TaskClosure, post_from_tasks, restore_tasks_inverse, status_name, undo_pair,
+};
 use crate::reminder_ops::{
     load_reminder_snapshot, post_with_reminders, reminders_into_post, sync_task_reminder_intent,
 };
@@ -171,10 +173,7 @@ pub(crate) fn patch_task(
             let after_reminders = load_reminder_snapshot(tx, &[task_id], now)?;
             let activity = diff_task_fields(&before, &after, revision, operation_id, now, 0);
             let undo = undo_pair(
-                &Inverse::RestoreTasks {
-                    tasks: vec![before],
-                    reminders: before_reminders,
-                },
+                &restore_tasks_inverse(vec![before], before_reminders),
                 &post_with_reminders([after.clone()], after_reminders),
             )?;
             Ok(single(EventType::TASK_UPDATED, after, activity, undo))
@@ -434,10 +433,7 @@ fn change_status(
                 now,
             )];
             let undo = undo_pair(
-                &Inverse::RestoreTasks {
-                    tasks: vec![before],
-                    reminders: before_reminders,
-                },
+                &restore_tasks_inverse(vec![before], before_reminders),
                 &post_with_reminders([after.clone()], after_reminders),
             )?;
             Ok(MutationEffect {
@@ -535,8 +531,7 @@ pub(crate) fn uncomplete_task(
         {
             match validate_post_image(tx, &post) {
                 Ok(()) => {
-                    let (affected, activity, _, _) =
-                        apply_inverse(tx, &inverse, now, revision, op)?;
+                    let applied = apply_inverse(tx, &inverse, now, revision, op)?;
                     // Capture redo material: completed post-image must be restorable.
                     let redo_tasks: Vec<Task> = post.tasks.values().cloned().collect();
                     let redo_reminders: Vec<_> = post.reminders.values().cloned().collect();
@@ -549,7 +544,7 @@ pub(crate) fn uncomplete_task(
                         },
                         ..PostImage::default()
                     };
-                    for task_id in &affected.task_ids {
+                    for task_id in &applied.affected.task_ids {
                         if let Ok(task) = load_task(tx, *task_id) {
                             uncomplete_post
                                 .orders
@@ -557,18 +552,16 @@ pub(crate) fn uncomplete_task(
                             uncomplete_post.tasks.insert(task.id.to_string(), task);
                         }
                     }
-                    let current_reminders = load_reminder_snapshot(tx, &affected.task_ids, now)?;
+                    let current_reminders =
+                        load_reminder_snapshot(tx, &applied.affected.task_ids, now)?;
                     reminders_into_post(&mut uncomplete_post, current_reminders);
                     let undo = undo_pair(
-                        &Inverse::RestoreTasks {
-                            tasks: redo_tasks,
-                            reminders: redo_reminders,
-                        },
+                        &restore_tasks_inverse(redo_tasks, redo_reminders),
                         &uncomplete_post,
                     )?;
                     // Keep single-task uncomplete snapshots for the existing HTTP surface.
-                    let multi =
-                        affected.task_ids.len() > 1 || !uncomplete_post.absent_task_ids.is_empty();
+                    let multi = applied.affected.task_ids.len() > 1
+                        || !uncomplete_post.absent_task_ids.is_empty();
                     let primary_task = load_task(tx, id)?;
                     return Ok(MutationEffect {
                         event_type: EventType::new(EventType::TASK_UNCOMPLETED),
@@ -578,13 +571,13 @@ pub(crate) fn uncomplete_task(
                         } else {
                             Some(ResourceSnapshot::task(primary_task))
                         },
-                        affected,
+                        affected: applied.affected,
                         resync: if multi {
                             ResyncScope::TASKS
                         } else {
                             ResyncScope::NONE
                         },
-                        task_activity: activity,
+                        task_activity: applied.activity,
                         summary_subject: Some(("task".into(), id.to_string())),
                         undo: Some(undo),
                         mark_undone: None,
@@ -619,10 +612,7 @@ pub(crate) fn uncomplete_task(
             now,
         )];
         let undo = undo_pair(
-            &Inverse::RestoreTasks {
-                tasks: vec![before],
-                reminders: before_reminders,
-            },
+            &restore_tasks_inverse(vec![before], before_reminders),
             &post_with_reminders([after.clone()], after_reminders),
         )?;
         Ok(MutationEffect {
@@ -921,10 +911,7 @@ pub(crate) fn move_task(
         let before_reminders = load_reminder_snapshot(tx, &before_ids, now)?;
         let after_reminders = load_reminder_snapshot(tx, &affected_ids, now)?;
         let undo = undo_pair(
-            &Inverse::RestoreTasks {
-                tasks: restored,
-                reminders: before_reminders,
-            },
+            &restore_tasks_inverse(restored, before_reminders),
             &post_with_reminders(post_tasks, after_reminders),
         )?;
         Ok(MutationEffect {
@@ -1007,10 +994,7 @@ pub(crate) fn reorder_tasks(
         let before_reminders = load_reminder_snapshot(tx, &before_ids, now)?;
         let after_reminders = load_reminder_snapshot(tx, &ordered_ids, now)?;
         let undo = undo_pair(
-            &Inverse::RestoreTasks {
-                tasks: before_tasks,
-                reminders: before_reminders,
-            },
+            &restore_tasks_inverse(before_tasks, before_reminders),
             &post_with_reminders(after_tasks, after_reminders),
         )?;
         Ok(MutationEffect {
@@ -1258,17 +1242,16 @@ pub(crate) fn bulk_tasks(
                 if let Inverse::ReverseCompletion { generated_ids, .. } = &inverse {
                     absent_generated.extend(generated_ids.iter().copied());
                 }
-                let (part_affected, part_activity, _, _) =
-                    apply_inverse(tx, &inverse, now, revision, op)?;
+                let applied = apply_inverse(tx, &inverse, now, revision, op)?;
                 // Re-sequence activity entries into this bulk operation.
-                for mut entry in part_activity {
+                for mut entry in applied.activity {
                     entry.sequence = seq;
                     entry.operation_id = op;
                     entry.revision = revision;
                     seq = seq.saturating_add(1);
                     activity.push(entry);
                 }
-                affected.extend(part_affected.task_ids);
+                affected.extend(applied.affected.task_ids);
             }
 
             for task_id in source_only_ids {
@@ -1296,13 +1279,7 @@ pub(crate) fn bulk_tasks(
             post.absent_task_ids = absent_generated;
             let current_reminders = load_reminder_snapshot(tx, &affected, now)?;
             reminders_into_post(&mut post, current_reminders);
-            let undo = undo_pair(
-                &Inverse::RestoreTasks {
-                    tasks: redo_tasks,
-                    reminders: redo_reminders,
-                },
-                &post,
-            )?;
+            let undo = undo_pair(&restore_tasks_inverse(redo_tasks, redo_reminders), &post)?;
             affected.sort_by_key(|id| id.as_uuid());
             affected.dedup();
             return Ok(MutationEffect {
@@ -1418,10 +1395,7 @@ pub(crate) fn bulk_tasks(
         }
         let after_reminders = load_reminder_snapshot(tx, &task_ids, now)?;
         let undo = undo_pair(
-            &Inverse::RestoreTasks {
-                tasks: before_tasks,
-                reminders: before_reminders,
-            },
+            &restore_tasks_inverse(before_tasks, before_reminders),
             &post_with_reminders(after_tasks, after_reminders),
         )?;
         Ok(MutationEffect {

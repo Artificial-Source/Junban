@@ -26,6 +26,12 @@ pub(crate) enum Inverse {
         /// Full occurrence snapshot for the restored tasks (exact undo/retry).
         #[serde(default)]
         reminders: Vec<ReminderOccurrence>,
+        /// Exact slot memberships detached by the paired delete inverse (redo undo).
+        #[serde(default)]
+        slot_memberships: Vec<ClosureSlotMembership>,
+        /// Exact block task links detached by the paired delete inverse (redo undo).
+        #[serde(default)]
+        block_links: Vec<ClosureBlockLink>,
     },
     /// Undo a completion that may have generated next occurrences.
     ReverseCompletion {
@@ -142,6 +148,34 @@ pub(crate) fn undo_pair(
         inverse_json: serde_json::to_string(inverse).map_err(storage_error)?,
         post_image_json: serde_json::to_string(post).map_err(storage_error)?,
     })
+}
+
+/// Build a task-row restore inverse without planning-link material.
+pub(crate) fn restore_tasks_inverse(
+    tasks: Vec<Task>,
+    reminders: Vec<ReminderOccurrence>,
+) -> Inverse {
+    Inverse::RestoreTasks {
+        tasks,
+        reminders,
+        slot_memberships: Vec::new(),
+        block_links: Vec::new(),
+    }
+}
+
+/// Build a restore inverse that also reattaches receipt-owned planning links.
+pub(crate) fn restore_tasks_with_planning(
+    tasks: Vec<Task>,
+    reminders: Vec<ReminderOccurrence>,
+    slot_memberships: Vec<ClosureSlotMembership>,
+    block_links: Vec<ClosureBlockLink>,
+) -> Inverse {
+    Inverse::RestoreTasks {
+        tasks,
+        reminders,
+        slot_memberships,
+        block_links,
+    }
 }
 
 pub(crate) fn status_name(status: junban_domain::TaskStatus) -> &'static str {

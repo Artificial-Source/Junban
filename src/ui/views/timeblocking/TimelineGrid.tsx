@@ -41,6 +41,7 @@ interface TimelineGridProps {
   defaultDuration?: number;
   selectedKey: string | null;
   mutationPending?: boolean;
+  phase3VisualFixture?: boolean;
   onSelect: (occurrenceKey: string | null) => void;
   onOpenBlockEditor: (occurrenceKey: string) => void;
   onOpenSlotEditor: (occurrenceKey: string) => void;
@@ -103,6 +104,7 @@ export function TimelineGrid({
   defaultDuration = DEFAULT_BLOCK_DURATION_MINUTES,
   selectedKey,
   mutationPending = false,
+  phase3VisualFixture = false,
   onSelect,
   onOpenBlockEditor,
   onOpenSlotEditor,
@@ -314,7 +316,7 @@ export function TimelineGrid({
             const isToday = date === today;
             const weekend = local ? local.getDay() === 0 || local.getDay() === 6 : false;
             const label = local
-              ? local.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })
+              ? `${local.toLocaleDateString("en-US", { weekday: "short" })} ${local.getDate()}`
               : date;
             return (
               <div
@@ -455,6 +457,7 @@ export function TimelineGrid({
                       color={slotColor(slot)}
                       selected={selectedKey === slot.occurrence_key}
                       mutationPending={mutationPending}
+                      phase3VisualFixture={phase3VisualFixture}
                       onSelect={onSelect}
                       onOpenEditor={onOpenSlotEditor}
                       onToggleTask={onToggleTask}

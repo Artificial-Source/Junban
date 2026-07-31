@@ -62,6 +62,7 @@ const MOBILE_DRAWER_ID = "junban-mobile-nav-drawer";
 
 export function AppLayout() {
   const phase2VisualFixture = isVisualFixture(window.location.search, "phase-2");
+  const phase3VisualFixture = isVisualFixture(window.location.search, "phase-3");
   const visualFixtureParams = new URLSearchParams(window.location.search);
   const phase2TaskDetailVisualFixture =
     phase2VisualFixture && visualFixtureParams.get("phase2-detail-fixture") === "1";
@@ -586,6 +587,7 @@ export function AppLayout() {
               catalog={catalog}
               onOpenProjectModal={() => setProjectModalOpen(true)}
               phase2VisualFixture={phase2VisualFixture}
+              phase3VisualFixture={phase3VisualFixture}
             />
           </ErrorBoundary>
         </div>
@@ -764,6 +766,7 @@ export function AppLayout() {
                 setProjectModalOpen(true);
               }}
               phase2VisualFixture={phase2VisualFixture}
+              phase3VisualFixture={phase3VisualFixture}
             />
           </MobileDrawer>
         </div>
@@ -800,6 +803,7 @@ export function AppLayout() {
               onOpenFullPage={handleOpenFullPage}
               returnFocusTo={taskDetailOpenerRef.current}
               onEnterFocusMode={(taskId) => handleEnterFocusMode(taskId)}
+              phase3VisualFixture={phase3VisualFixture}
             />
           ))}
         {selectedTaskId && detailLoading && (!detailTask || detailTask.id !== selectedTaskId) && (

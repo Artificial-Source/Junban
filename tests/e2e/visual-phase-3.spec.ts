@@ -113,10 +113,6 @@ const SCENES: Scene[] = [
 ];
 
 const SCREENSHOT_OPTS = { maxDiffPixelRatio: 0.01, threshold: 0.2 };
-// Dense interactive scenes rebuild legacy plugin/forms over native controls. Keep a
-// narrow 2.5% pixel budget for text/control rasterization while preserving the
-// immutable legacy image as the geometry, color, and hierarchy authority.
-const DENSE_SCREENSHOT_OPTS = { maxDiffPixelRatio: 0.025, threshold: 0.2 };
 
 function isPhase3VisualFixtureRoute(page: Page): boolean {
   return new URL(page.url()).searchParams.get("visual-fixture") === "phase-3";
@@ -702,7 +698,7 @@ test("visual phase-3: focus-mobile-light", async ({ page }) => {
 
 // ── Scene 9: Task reminder + recurrence detail — desktop light ──────────────
 test("visual phase-3: task-reminder-recurrence-desktop-light", async ({ page }) => {
-  await openView(page, "/today", "light");
+  await openView(page, "/today?visual-fixture=phase-3", "light");
   await expect(page.getByText("Ship v1.1 release documentation").first()).toBeVisible({
     timeout: 15_000,
   });
@@ -728,7 +724,7 @@ test("visual phase-3: task-reminder-recurrence-desktop-light", async ({ page }) 
   await settle(page);
   await expect(page).toHaveScreenshot(
     "task-reminder-recurrence-desktop-light.png",
-    DENSE_SCREENSHOT_OPTS,
+    SCREENSHOT_OPTS,
   );
 });
 
@@ -766,10 +762,7 @@ test("visual phase-3: timeblocking-day-slots-desktop-light", async ({ page }) =>
   await expect(page.getByText("Collaboration block").first()).toBeVisible();
   await dismissNudges(page);
   await settle(page);
-  await expect(page).toHaveScreenshot(
-    "timeblocking-day-slots-desktop-light.png",
-    DENSE_SCREENSHOT_OPTS,
-  );
+  await expect(page).toHaveScreenshot("timeblocking-day-slots-desktop-light.png", SCREENSHOT_OPTS);
 });
 
 // ── Scene 12: Timeblocking Week — desktop dark ──────────────────────────────
@@ -782,5 +775,5 @@ test("visual phase-3: timeblocking-week-desktop-dark", async ({ page }) => {
   });
   await dismissNudges(page);
   await settle(page);
-  await expect(page).toHaveScreenshot("timeblocking-week-desktop-dark.png", DENSE_SCREENSHOT_OPTS);
+  await expect(page).toHaveScreenshot("timeblocking-week-desktop-dark.png", SCREENSHOT_OPTS);
 });

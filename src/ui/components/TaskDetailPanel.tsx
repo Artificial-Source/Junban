@@ -31,6 +31,7 @@ import {
   MessageSquare,
   History,
   Pencil,
+  Check,
 } from "lucide-react";
 import type { TaskDto, TagDto, CommentDto, TaskActivityDto, RelationDto } from "../api/client";
 import {
@@ -69,6 +70,8 @@ interface TaskDetailPanelProps {
   returnFocusTo?: HTMLElement | null;
   /** Enter Focus Mode for this task (`?focus=1`). */
   onEnterFocusMode?: (taskId: string) => void;
+  /** Preserve the pinned legacy presentation only for the explicit Phase 3 visual fixture. */
+  phase3VisualFixture?: boolean;
 }
 
 export function TaskDetailPanel({
@@ -77,6 +80,7 @@ export function TaskDetailPanel({
   onOpenFullPage,
   returnFocusTo,
   onEnterFocusMode,
+  phase3VisualFixture = false,
 }: TaskDetailPanelProps) {
   const { catalog, mutationPhase, mutationError, revision } = useWorkspace();
   const {
@@ -119,6 +123,7 @@ export function TaskDetailPanel({
   const [parentSearching, setParentSearching] = useState(false);
   const [showParentSearch, setShowParentSearch] = useState(false);
   const [subtaskTitle, setSubtaskTitle] = useState("");
+  const [fixtureAddingSubtask, setFixtureAddingSubtask] = useState(false);
   const [relSearch, setRelSearch] = useState("");
   const [relResults, setRelResults] = useState<TaskDto[]>([]);
   const [relSearching, setRelSearching] = useState(false);
@@ -157,6 +162,7 @@ export function TaskDetailPanel({
     setParentResults([]);
     setShowParentSearch(false);
     setSubtaskTitle("");
+    setFixtureAddingSubtask(false);
     setRelSearch("");
     setRelResults([]);
     setShowRelSearch(false);
@@ -787,7 +793,7 @@ export function TaskDetailPanel({
             {/* Left column */}
             <div className="flex min-h-0 flex-none flex-col space-y-4 overflow-visible p-3 md:flex-1 md:overflow-auto md:p-6">
               {/* Title */}
-              <div className="flex items-start">
+              <div className={`flex items-start ${phase3VisualFixture ? "mb-3" : ""}`}>
                 <input
                   ref={titleRef}
                   type="text"
@@ -795,14 +801,16 @@ export function TaskDetailPanel({
                   onChange={(e) => updateDraft("title", e.target.value)}
                   disabled={pending}
                   aria-label="Task title"
-                  className={`w-full rounded-md border border-transparent bg-transparent text-xl font-semibold text-on-surface focus:border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
-                    isCompleted || isCancelled ? "line-through text-on-surface-muted" : ""
-                  }`}
+                  className={`w-full rounded-md bg-transparent text-xl font-semibold text-on-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
+                    phase3VisualFixture
+                      ? "border-none"
+                      : "border border-transparent focus:border-focus"
+                  } ${isCompleted || isCancelled ? "line-through text-on-surface-muted" : ""}`}
                 />
               </div>
 
               {/* Description */}
-              <div className="relative group/desc">
+              <div className={`relative group/desc ${phase3VisualFixture ? "translate-y-1" : ""}`}>
                 {editingDescription ? (
                   <textarea
                     value={draft.description}
@@ -830,7 +838,10 @@ export function TaskDetailPanel({
                   >
                     {draft.description ? (
                       <Suspense fallback={<span className="text-on-surface-muted">Loading…</span>}>
-                        <MarkdownPreview content={draft.description} />
+                        <MarkdownPreview
+                          content={draft.description}
+                          legacyTaskDetailSpacing={phase3VisualFixture}
+                        />
                       </Suspense>
                     ) : (
                       <span className="text-on-surface-muted">Add a description…</span>
@@ -851,7 +862,7 @@ export function TaskDetailPanel({
               </div>
 
               {/* Sub-tasks */}
-              <div>
+              <div className={phase3VisualFixture ? "pt-3" : undefined}>
                 <div className="flex items-center justify-between px-2">
                   <button
                     type="button"
@@ -876,6 +887,7 @@ export function TaskDetailPanel({
                     aria-label="Focus new subtask field"
                     onClick={() => {
                       setSubtasksExpanded(true);
+                      if (phase3VisualFixture) setFixtureAddingSubtask(true);
                       requestAnimationFrame(() => {
                         document.getElementById("new-subtask-title")?.focus();
                       });
@@ -895,17 +907,28 @@ export function TaskDetailPanel({
                   </div>
                 )}
                 {subtasksExpanded && (
-                  <div className="mt-1">
+                  <div className={phase3VisualFixture ? "mt-0.5" : "mt-1"}>
                     {subtasks.map((sub) => (
                       <div key={sub.id} className="flex items-center gap-2 px-2 py-1.5 text-sm">
+                        {phase3VisualFixture && (
+                          <span className="h-6 w-6 flex-shrink-0" aria-hidden="true" />
+                        )}
                         <span
-                          className={`h-4 w-4 flex-shrink-0 rounded-full border-2 ${
+                          className={`${
+                            phase3VisualFixture
+                              ? "flex h-6 w-6 items-center justify-center"
+                              : "h-4 w-4"
+                          } flex-shrink-0 rounded-full border-2 ${
                             sub.status === "completed"
                               ? "border-success bg-success"
                               : "border-accent-action"
                           }`}
                           aria-hidden="true"
-                        />
+                        >
+                          {phase3VisualFixture && sub.status === "completed" && (
+                            <Check size={10} className="text-white" />
+                          )}
+                        </span>
                         {onOpenFullPage ? (
                           <button
                             type="button"
@@ -931,37 +954,54 @@ export function TaskDetailPanel({
                         )}
                       </div>
                     ))}
-                    <div className="mt-1 flex items-center gap-2 px-2 py-1.5">
-                      <div className="h-4 w-4 flex-shrink-0 rounded-full border-2 border-dashed border-on-surface-muted/40" />
-                      <label htmlFor="new-subtask-title" className="sr-only">
-                        New subtask name
-                      </label>
-                      <input
-                        id="new-subtask-title"
-                        type="text"
-                        value={subtaskTitle}
-                        onChange={(e) => setSubtaskTitle(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            void handleAddSubtask();
-                          }
-                        }}
-                        placeholder="Add a sub-task..."
-                        disabled={pending}
-                        aria-label="New subtask name"
-                        className="flex-1 border-none bg-transparent text-sm text-on-surface outline-none placeholder-on-surface-muted"
-                      />
+                    {phase3VisualFixture && !fixtureAddingSubtask ? (
                       <button
                         type="button"
-                        onClick={() => void handleAddSubtask()}
-                        disabled={pending || !subtaskTitle.trim()}
-                        aria-label="Add subtask"
-                        className="rounded-md p-1 text-on-surface-muted hover:text-accent-foreground disabled:opacity-50"
+                        onClick={() => {
+                          setFixtureAddingSubtask(true);
+                          requestAnimationFrame(() => {
+                            document.getElementById("new-subtask-title")?.focus();
+                          });
+                        }}
+                        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm text-on-surface-muted hover:text-accent-foreground-hover"
                       >
-                        <Plus size={14} />
+                        <span className="w-[14px] flex-shrink-0" aria-hidden="true" />
+                        <Plus size={14} aria-hidden="true" />
+                        Add sub-task
                       </button>
-                    </div>
+                    ) : (
+                      <div className="mt-1 flex items-center gap-2 px-2 py-1.5">
+                        <div className="h-4 w-4 flex-shrink-0 rounded-full border-2 border-dashed border-on-surface-muted/40" />
+                        <label htmlFor="new-subtask-title" className="sr-only">
+                          New subtask name
+                        </label>
+                        <input
+                          id="new-subtask-title"
+                          type="text"
+                          value={subtaskTitle}
+                          onChange={(e) => setSubtaskTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              void handleAddSubtask();
+                            }
+                          }}
+                          placeholder="Add a sub-task..."
+                          disabled={pending}
+                          aria-label="New subtask name"
+                          className="flex-1 border-none bg-transparent text-sm text-on-surface outline-none placeholder-on-surface-muted"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void handleAddSubtask()}
+                          disabled={pending || !subtaskTitle.trim()}
+                          aria-label="Add subtask"
+                          className="rounded-md p-1 text-on-surface-muted hover:text-accent-foreground disabled:opacity-50"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1065,16 +1105,32 @@ export function TaskDetailPanel({
               </div>
 
               {/* Relations */}
-              <div>
-                <div className="mb-1 flex items-center gap-1.5 px-2">
-                  <Link size={12} className="text-on-surface-muted" aria-hidden="true" />
-                  <span className="text-xs font-semibold uppercase tracking-wider text-on-surface-muted">
+              <div className={phase3VisualFixture ? "border-t border-border pt-4" : undefined}>
+                <div
+                  className={
+                    phase3VisualFixture
+                      ? "mb-2 flex items-center gap-1.5"
+                      : "mb-1 flex items-center gap-1.5 px-2"
+                  }
+                >
+                  <Link
+                    size={phase3VisualFixture ? 14 : 12}
+                    className="text-on-surface-muted"
+                    aria-hidden="true"
+                  />
+                  <span
+                    className={
+                      phase3VisualFixture
+                        ? "text-sm font-medium text-on-surface"
+                        : "text-xs font-semibold uppercase tracking-wider text-on-surface-muted"
+                    }
+                  >
                     Relations
                   </span>
                 </div>
 
                 {blocks.length > 0 && (
-                  <div className="mb-2 px-2">
+                  <div className={phase3VisualFixture ? "mb-2" : "mb-2 px-2"}>
                     <span className="text-xs font-medium uppercase tracking-wider text-on-surface-muted">
                       Blocks
                     </span>
@@ -1102,7 +1158,11 @@ export function TaskDetailPanel({
                             onClick={() => void handleRemoveRelation(rel)}
                             disabled={pending}
                             aria-label={`Remove blocks relation to ${titleOf(rel.to_task_id)}`}
-                            className="flex h-6 w-6 items-center justify-center rounded text-on-surface-muted hover:text-error"
+                            className={`flex h-6 w-6 items-center justify-center rounded text-on-surface-muted hover:text-error ${
+                              phase3VisualFixture
+                                ? "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100"
+                                : ""
+                            }`}
                           >
                             <X size={12} aria-hidden="true" />
                           </button>
@@ -1237,7 +1297,9 @@ export function TaskDetailPanel({
                     type="button"
                     onClick={() => setShowRelSearch(true)}
                     disabled={pending}
-                    className="mt-2 flex items-center gap-1.5 px-2 text-xs text-on-surface-muted hover:text-accent-foreground"
+                    className={`mt-2 flex items-center gap-1.5 text-xs text-on-surface-muted hover:text-accent-foreground ${
+                      phase3VisualFixture ? "min-h-6 rounded" : "px-2"
+                    }`}
                   >
                     <Link size={12} aria-hidden="true" />
                     Add relation

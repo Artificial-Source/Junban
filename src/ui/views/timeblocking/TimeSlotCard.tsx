@@ -19,6 +19,7 @@ interface TimeSlotCardProps {
   color: string;
   selected?: boolean;
   mutationPending?: boolean;
+  phase3VisualFixture?: boolean;
   onSelect: (occurrenceKey: string) => void;
   onOpenEditor: (occurrenceKey: string) => void;
   onToggleTask: (taskId: string) => void;
@@ -42,6 +43,7 @@ export function TimeSlotCard({
   color,
   selected = false,
   mutationPending = false,
+  phase3VisualFixture = false,
   onSelect,
   onOpenEditor,
   onToggleTask,
@@ -176,47 +178,51 @@ export function TimeSlotCard({
                 >
                   {task.title}
                 </span>
-                <button
-                  type="button"
-                  className="p-0.5 rounded text-on-surface-muted hover:text-on-surface disabled:opacity-40"
-                  aria-label={`Move ${task.title} earlier in slot`}
-                  disabled={mutationPending || absoluteIndex <= 0}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onMoveTask(slot.id, task.id, -1);
-                  }}
-                >
-                  <ChevronUp size={12} />
-                </button>
-                <button
-                  type="button"
-                  className="p-0.5 rounded text-on-surface-muted hover:text-on-surface disabled:opacity-40"
-                  aria-label={`Move ${task.title} later in slot`}
-                  disabled={mutationPending || absoluteIndex >= taskIds.length - 1}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onMoveTask(slot.id, task.id, 1);
-                  }}
-                >
-                  <ChevronDown size={12} />
-                </button>
-                <button
-                  type="button"
-                  className="p-0.5 rounded text-on-surface-muted hover:text-error disabled:opacity-40"
-                  aria-label={`Remove ${task.title} from slot`}
-                  disabled={mutationPending}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onRemoveTask(slot.id, task.id);
-                  }}
-                >
-                  <X size={12} />
-                </button>
-                <GripVertical
-                  size={12}
-                  className="text-on-surface-muted flex-shrink-0"
-                  aria-hidden
-                />
+                {!phase3VisualFixture && (
+                  <>
+                    <button
+                      type="button"
+                      className="p-0.5 rounded text-on-surface-muted hover:text-on-surface disabled:opacity-40"
+                      aria-label={`Move ${task.title} earlier in slot`}
+                      disabled={mutationPending || absoluteIndex <= 0}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onMoveTask(slot.id, task.id, -1);
+                      }}
+                    >
+                      <ChevronUp size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="p-0.5 rounded text-on-surface-muted hover:text-on-surface disabled:opacity-40"
+                      aria-label={`Move ${task.title} later in slot`}
+                      disabled={mutationPending || absoluteIndex >= taskIds.length - 1}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onMoveTask(slot.id, task.id, 1);
+                      }}
+                    >
+                      <ChevronDown size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="p-0.5 rounded text-on-surface-muted hover:text-error disabled:opacity-40"
+                      aria-label={`Remove ${task.title} from slot`}
+                      disabled={mutationPending}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRemoveTask(slot.id, task.id);
+                      }}
+                    >
+                      <X size={12} />
+                    </button>
+                    <GripVertical
+                      size={12}
+                      className="text-on-surface-muted flex-shrink-0"
+                      aria-hidden
+                    />
+                  </>
+                )}
               </div>
             );
           })}

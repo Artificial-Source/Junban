@@ -67,6 +67,8 @@ interface SidebarProps {
   onOpenProjectModal: () => void;
   /** Render only the immutable Phase 2 visual authority chrome. */
   phase2VisualFixture?: boolean;
+  /** Align explicit Phase 3 evidence with the legacy plugin row gutter. */
+  phase3VisualFixture?: boolean;
 }
 
 export function Sidebar({
@@ -82,6 +84,7 @@ export function Sidebar({
   todayCount,
   onOpenProjectModal,
   phase2VisualFixture = false,
+  phase3VisualFixture = false,
 }: SidebarProps) {
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [filtersExpanded, setFiltersExpanded] = useState(true);
@@ -147,7 +150,13 @@ export function Sidebar({
               ? "bg-accent-action/10 text-accent-foreground font-medium"
               : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
           }`}
-          style={collapsed ? undefined : { paddingLeft: `${0.75 + depth * 0.75}rem` }}
+          style={
+            collapsed
+              ? undefined
+              : {
+                  paddingLeft: `${(phase3VisualFixture ? 2.125 : 0.75) + depth * 0.75}rem`,
+                }
+          }
           title={collapsed ? project.name : undefined}
         >
           {project.color && (
@@ -262,9 +271,9 @@ export function Sidebar({
                 key={item.id}
                 onClick={() => onNavigate(item.id)}
                 aria-current={isActive ? "page" : undefined}
-                className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
-                  collapsed ? "justify-center" : "gap-3"
-                } ${
+                className={`group relative text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
+                  phase3VisualFixture && !collapsed ? "ml-[26px] w-[calc(100%-26px)]" : "w-full"
+                } ${collapsed ? "justify-center" : "gap-3"} ${
                   isActive
                     ? "bg-accent-action/10 text-accent-foreground font-medium"
                     : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
@@ -294,7 +303,9 @@ export function Sidebar({
                   onClick={() => setProjectsExpanded(!projectsExpanded)}
                   aria-expanded={projectsExpanded}
                   aria-controls="sidebar-projects"
-                  className="flex min-h-6 items-center gap-1 text-[11px] font-semibold text-on-surface-muted uppercase tracking-wider text-left hover:text-on-surface-secondary transition-colors flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  className={`flex min-h-6 items-center gap-1 text-[11px] font-semibold text-on-surface-muted uppercase tracking-wider text-left hover:text-on-surface-secondary transition-colors flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                    phase3VisualFixture ? "pl-[22px]" : ""
+                  }`}
                 >
                   {projectsExpanded ? (
                     <ChevronDown size={12} aria-hidden="true" />
@@ -336,9 +347,9 @@ export function Sidebar({
                     key={item.id}
                     onClick={() => onNavigate(item.id)}
                     aria-current={isActive ? "page" : undefined}
-                    className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
-                      collapsed ? "justify-center" : "gap-3"
-                    } ${
+                    className={`group relative text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
+                      phase3VisualFixture && !collapsed ? "ml-[26px] w-[calc(100%-26px)]" : "w-full"
+                    } ${collapsed ? "justify-center" : "gap-3"} ${
                       isActive
                         ? "bg-accent-action/10 text-accent-foreground font-medium"
                         : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"

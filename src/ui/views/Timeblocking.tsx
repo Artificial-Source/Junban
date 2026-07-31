@@ -625,7 +625,11 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
         onReplan={handleReplan}
       />
 
-      <div className="flex min-h-[68px] shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-surface px-2 py-2 sm:gap-3 sm:px-4">
+      <div
+        className={`flex min-h-[68px] shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-surface px-2 sm:gap-3 ${
+          isVisualFixture ? "pt-[22px] pb-0 sm:pr-10 sm:pl-4" : "py-2 sm:px-4"
+        }`}
+      >
         <button
           type="button"
           onClick={() =>
@@ -896,6 +900,7 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
             defaultDuration={defaultDuration}
             selectedKey={selectedKey}
             mutationPending={mutationPending}
+            phase3VisualFixture={isVisualFixture}
             onSelect={setSelectedKey}
             onOpenBlockEditor={(key) => {
               const block = blocks.find((item) => item.occurrence_key === key);

@@ -28,8 +28,19 @@ pub use invariants::{
     validate_reorder_permutation, validate_task_tags, validate_unique_bulk_ids,
 };
 pub use planning::{
-    CapacitySettings, DailyCapacityMinutes, MAX_NUDGE_TASKS_COMBINED, MAX_NUDGE_TASKS_PER_RULE,
-    NudgeFacts, NudgeRuleFacts, NudgeRuleKind, NudgeRuleSettings, WeekStart, WorkHours,
+    CapacitySettings, CompletionTimeBucket, CompletionTimeBuckets, DailyCapacityMinutes,
+    DailyPlanSummary, DailyStatBucket, EndOfDaySummary, MAX_NUDGE_TASKS_COMBINED,
+    MAX_NUDGE_TASKS_PER_RULE, MAX_STATS_RANGE_DAYS, MAX_WEEKLY_ACCOMPLISHMENTS,
+    MAX_WEEKLY_NEGLECTED_PROJECTS, MAX_WEEKLY_OVERDUE, MAX_WEEKLY_STREAK_DAYS,
+    MAX_WEEKLY_SUGGESTIONS, MatrixDropResult, MatrixGrouping, MatrixQuadrant, NeglectedProjectFact,
+    NeglectedProjectReason, NudgeFacts, NudgeRuleFacts, NudgeRuleKind, NudgeRuleSettings,
+    StatsSummary, WeekStart, WeeklyDayStats, WeeklyReviewSummary, WeeklySuggestion, WorkHours,
+    civil_date_in_zone, civil_hour_in_zone, classify_matrix_quadrant, current_completion_streak,
+    daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary, end_of_day_summary_with,
+    estimate_accuracy, evaluate_nudges, evaluate_nudges_with, group_matrix_task_ids,
+    matrix_drop_result, prior_complete_week, select_eat_the_frog, stats_summary,
+    stats_summary_with, task_jar_candidates, validate_stats_date_range, weekly_review_summary,
+    weekly_review_summary_with,
 };
 pub use query::{
     MAX_FILTER_INPUT_CHARS, TaskCursor, TaskFilter, TaskQuery, TaskSort, TaskViewPreset,

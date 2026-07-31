@@ -109,6 +109,9 @@ pub trait Repository: Send + Sync + 'static {
         as_of: TaskListAsOf,
     ) -> RepositoryFuture<'_, TaskListPage>;
 
+    /// One bounded, consistent task snapshot for server-side temporal analysis.
+    fn list_analysis_tasks(&self, as_of: TaskListAsOf) -> RepositoryFuture<'_, TaskListPage>;
+
     fn list_catalog(&self) -> RepositoryFuture<'_, CatalogSnapshot>;
 
     fn create_project(

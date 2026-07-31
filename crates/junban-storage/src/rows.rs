@@ -76,7 +76,7 @@ pub(crate) fn load_task_tag_ids(
     rows.collect::<Result<Vec<_>, _>>().map_err(storage_error)
 }
 
-fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
+pub(crate) fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let id: String = row.get(0)?;
     let title: String = row.get(1)?;
     let description: String = row.get(2)?;

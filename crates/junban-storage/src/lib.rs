@@ -429,6 +429,9 @@ impl Repository for SqliteRepository {
     ) -> RepositoryFuture<'_, TaskListPage> {
         mut_cmd!(self, ListTasks { query, as_of })
     }
+    fn list_analysis_tasks(&self, as_of: TaskListAsOf) -> RepositoryFuture<'_, TaskListPage> {
+        mut_cmd!(self, ListAnalysisTasks { as_of })
+    }
     fn list_catalog(&self) -> RepositoryFuture<'_, CatalogSnapshot> {
         self.request(Command::ListCatalog)
     }
@@ -1240,6 +1243,10 @@ enum Command {
         as_of: TaskListAsOf,
         reply: oneshot::Sender<Result<TaskListPage, RepositoryError>>,
     },
+    ListAnalysisTasks {
+        as_of: TaskListAsOf,
+        reply: oneshot::Sender<Result<TaskListPage, RepositoryError>>,
+    },
     ListCatalog(oneshot::Sender<Result<CatalogSnapshot, RepositoryError>>),
     CreateProject {
         operation_id: OperationId,
@@ -1724,6 +1731,9 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                 reply,
             } => {
                 let _ = reply.send(query_ops::list_tasks(connection, query, as_of));
+            }
+            Command::ListAnalysisTasks { as_of, reply } => {
+                let _ = reply.send(query_ops::list_analysis_tasks(connection, as_of));
             }
             Command::ListCatalog(reply) => {
                 let _ = reply.send(catalog_ops::list_catalog(connection));

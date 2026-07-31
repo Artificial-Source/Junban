@@ -14,10 +14,11 @@ use junban_app::{
     TemporalContext,
 };
 use junban_domain::{
-    CommentBody, CommentId, DEFAULT_REMINDER_LEASE_SECS, EntityName, HexColor, MAX_BULK_IDS,
-    MAX_REMINDER_CLAIM_LIMIT, MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel,
-    ReminderFailureCode, ReminderOccurrenceState, SortOrder, TagId, TagName, TaskCursor, TaskDraft,
-    TaskId, TaskQuery, TaskSort, TaskStatus, TaskTitle, TaskViewPreset, TemplateId,
+    CommentBody, CommentId, DEFAULT_REMINDER_LEASE_SECS, EntityName, HexColor,
+    MAX_ANALYSIS_TASK_READ, MAX_BULK_IDS, MAX_REMINDER_CLAIM_LIMIT, MarkdownText, OperationId,
+    ProjectId, RelationKind, ReminderChannel, ReminderFailureCode, ReminderOccurrenceState,
+    SortOrder, TagId, TagName, TaskCursor, TaskDraft, TaskId, TaskQuery, TaskSort, TaskStatus,
+    TaskTitle, TaskViewPreset, TemplateId,
 };
 use uuid::Uuid;
 
@@ -105,6 +106,80 @@ async fn view_titles(
         .collect::<Vec<_>>();
     titles.sort();
     titles
+}
+
+#[tokio::test]
+async fn analysis_snapshot_hydrates_tasks_tags_and_current_revision() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repository = owner.repository();
+    let first_tag = TagId::new();
+    let second_tag = TagId::new();
+    for (id, name) in [(first_tag, "first"), (second_tag, "second")] {
+        repository
+            .create_tag(
+                operation(),
+                id,
+                TagDraft {
+                    name: TagName::new(name).unwrap(),
+                    color: HexColor::new("#123456").unwrap(),
+                },
+                now(),
+            )
+            .await
+            .unwrap();
+    }
+
+    let mut rich = draft("rich");
+    rich.description = MarkdownText::new("description").unwrap();
+    rich.due_date = Some("2026-07-30".parse().unwrap());
+    rich.deadline = Some("2026-07-31T12:00:00Z".parse().unwrap());
+    rich.someday = true;
+    rich.tag_ids = vec![second_tag, first_tag];
+    let rich_id = create_draft(&repository, rich).await;
+    let plain_id = create_simple(&repository, "plain").await.task().unwrap().id;
+    let expected_revision = repository.diagnostics().await.unwrap().revision;
+    let expected = vec![
+        repository.get_task(rich_id).await.unwrap(),
+        repository.get_task(plain_id).await.unwrap(),
+    ];
+
+    let snapshot = repository
+        .list_analysis_tasks(list_as_of_str("2026-07-28"))
+        .await
+        .unwrap();
+
+    assert_eq!(snapshot.revision, expected_revision as u64);
+    assert_eq!(snapshot.tasks, expected);
+    assert_eq!(snapshot.tasks[0].tag_ids, vec![second_tag, first_tag]);
+}
+
+#[tokio::test]
+async fn analysis_snapshot_rejects_more_than_the_task_read_limit() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repository = owner.repository();
+    repository
+        .execute_batch(
+            "WITH digits(value) AS (VALUES(0),(1),(2),(3),(4),(5),(6),(7),(8),(9))
+             INSERT INTO tasks(id, title, status, created_at, updated_at, revision)
+             SELECT printf('00000000-0000-4000-8000-%012d',
+                           a.value * 10000 + b.value * 1000 + c.value * 100 + d.value * 10 + e.value),
+                    'task', 'pending', '2026-07-28T12:00:00Z', '2026-07-28T12:00:00Z', 1
+             FROM digits a CROSS JOIN digits b CROSS JOIN digits c CROSS JOIN digits d CROSS JOIN digits e
+             LIMIT 20001;"
+                .into(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        repository
+            .list_analysis_tasks(list_as_of_str("2026-07-28"))
+            .await,
+        Err(RepositoryError::OperationTooLarge)
+    );
+    assert_eq!(MAX_ANALYSIS_TASK_READ, 20_000);
 }
 
 #[tokio::test]

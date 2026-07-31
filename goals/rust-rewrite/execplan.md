@@ -709,7 +709,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 2 parser and transactional schema waves.
 - [x] Phase 2 application, HTTP, React, scale, dogfood, review and delivery waves.
 - [x] Phase 3 context, temporal authority, migration recovery, reminder fencing, timeblock/slot, bounds and visual-evidence plan approved.
-- [x] Phase 3 temporal benchmark harness and five-sample release evidence recorded; `P3-FINAL-007` remains open because the frozen Stats and Nudge p95 budgets failed closed.
+- [x] Phase 3 temporal benchmark harness and five-sample release evidence recorded; `P3-FINAL-007` is fixed after the bounded analysis snapshot rerun passed every frozen latency and memory budget.
 - [ ] Phase 3 implementation (active).
 - [ ] Phase 4 implementation.
 - [ ] Phase 5 implementation.
@@ -741,7 +741,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 2 final review — **approved after fixes**. Frontend, accessibility, database and API findings plus six dogfood issues are fixed with focused regressions. Targeted closure re-review confirmed `P2-CLOSE-001`–`P2-CLOSE-003` fixed with no material finding remaining; the full ledger is `evidence/phase-2-review-ledger.md`.
 - `P3-REC-001`, `P3-REM-001`, `P3-MIG-001`, `P3-TIME-001`, `P3-BOUND-001`, `P3-UI-001` — **fixed and approved**. Phase 3 now freezes recurrence/uncomplete transitions, fenced reminder control-plane semantics and shutdown, verified pre-migration recovery, durable blocks/slots and ordered membership, numeric API/performance limits, and twelve independent legacy-rendered visual authorities.
 - `P3-FINAL-003` — **fixed**. Matrix consumes the existing authoritative task-list civil date; daily and weekly planning/review reads expose their sampled civil date, and ritual reschedules derive today/tomorrow from that response rather than browser time. Rust API and non-default-browser-timezone frontend regressions cover the contract.
-- `P3-FINAL-007` — **open**. The new five-sample 10,000-task temporal harness passed the frozen 24/32 MiB memory ceiling (17.9453 MiB median / 18.6680 MiB maximum warm; 20.1758 MiB maximum peak) and all scheduler lifecycle checks, but failed closed on Stats p95 304.074 ms (150 ms budget) and Nudges p95 292.476 ms (100 ms budget). Raw evidence: `evidence/phase-3-temporal-bench.json`.
+- `P3-FINAL-007` — **fixed**. A one-shot, bounded SQLite analysis snapshot replaces 100 paged task-list reads and per-task tag hydration. The five-sample 10,000-task rerun passed the frozen 24/32 MiB memory ceiling (16.1523 MiB median / 16.5586 MiB maximum warm; 18.1953 MiB maximum peak), Stats p95 24.995 ms (150 ms budget), Nudges p95 24.868 ms (100 ms budget), and all scheduler lifecycle checks. Raw evidence: `evidence/phase-3-temporal-bench.json`.
 
 ## Decision log
 
@@ -787,7 +787,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 2 persistence: one schema-v2 migration and one dedicated SQLite worker were sufficient for complete task organization; no pool, FTS dependency or event-sourcing layer was required. A 250-page WAL auto-checkpoint removed periodic write-tail outliers while retaining full durability.
 - Phase 2 client correctness: view membership, own-response convergence, undo/redo identity and blocking-layer isolation needed explicit authority; focused pure helpers and component regressions closed those races without a state-management dependency.
 - Phase 2 scale: the final deterministic 10,000-task run stayed below 15.36 MiB peak and all p95 budgets by wide margins, so the simple indexed SQL query path remains authoritative.
-- Phase 3 temporal benchmark: memory and reminder scheduler lifecycle passed (all five samples observed idle → due wake → 20 claims/settlements → empty claim), but the server-side full-task analysis path missed the frozen 150 ms Stats and 100 ms Nudge p95 budgets at 304.074 ms and 292.476 ms. This is a blocking performance finding, not a reason to relax the predeclared limits.
+- Phase 3 temporal benchmark: paged full-task analysis made 100 repository calls and hydrated each task and tags individually. One bounded read transaction now loads task rows and tags in two batched queries; the five-sample rerun passed Stats at 24.995 ms p95 and Nudges at 24.868 ms p95 without relaxing frozen limits.
 
 ## Outcome and retrospective
 

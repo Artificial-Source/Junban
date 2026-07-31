@@ -1,16 +1,18 @@
 //! Task list queries with typed filters and keyset pagination.
 
+use std::collections::HashMap;
+
 use jiff::{Timestamp, civil::Date};
 use junban_app::{RepositoryError, TaskListAsOf, TaskListPage};
 use junban_domain::{
-    MAX_QUERY_PAGE_LIMIT, MAX_TASK_TITLE_CHARS, Priority, ProjectId, TaskCursor, TaskId, TaskQuery,
-    TaskSort, TaskViewPreset, ValidationError,
+    MAX_ANALYSIS_TASK_READ, MAX_QUERY_PAGE_LIMIT, MAX_TASK_TITLE_CHARS, Priority, ProjectId, TagId,
+    TaskCursor, TaskId, TaskQuery, TaskSort, TaskViewPreset, ValidationError,
 };
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::helpers::validation;
 use crate::ops_types::status_name;
-use crate::rows::{load_task, parse_sql, resolve_tag_names, storage_error};
+use crate::rows::{load_task, parse_sql, resolve_tag_names, storage_error, task_from_row};
 use crate::tx::global_revision;
 
 fn escape_like(raw: &str) -> String {
@@ -54,6 +56,72 @@ fn resolve_query_names(
         query.filter.tag_names.clear();
     }
     Ok(())
+}
+
+pub(crate) fn list_analysis_tasks(
+    connection: &Connection,
+    as_of: TaskListAsOf,
+) -> Result<TaskListPage, RepositoryError> {
+    let tx = connection.unchecked_transaction().map_err(storage_error)?;
+    let revision: i64 = tx
+        .query_row(
+            "SELECT global_revision FROM app_state WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    let revision = u64::try_from(revision).map_err(storage_error)?;
+
+    // The extra row detects an oversized analysis read without allocating or hydrating it.
+    let limit = i64::try_from(MAX_ANALYSIS_TASK_READ + 1).map_err(storage_error)?;
+    let mut statement = tx
+        .prepare(
+            "SELECT id, title, description, due_date, due_time, due_timezone, deadline,
+                    status, priority, dread, estimated_minutes, actual_minutes,
+                    project_id, section_id, parent_id, sort_order, recurrence_rule, someday,
+                    completed_at, created_at, updated_at, revision,
+                    remind_at, recurrence_anchor_day, recurrence_source_id, completion_operation_id
+             FROM tasks
+             ORDER BY sort_order ASC, id ASC
+             LIMIT ?1",
+        )
+        .map_err(storage_error)?;
+    let rows = statement
+        .query_map([limit], task_from_row)
+        .map_err(storage_error)?;
+    let mut tasks = rows.collect::<Result<Vec<_>, _>>().map_err(storage_error)?;
+    if tasks.len() > MAX_ANALYSIS_TASK_READ {
+        return Err(RepositoryError::OperationTooLarge);
+    }
+
+    let mut statement = tx
+        .prepare("SELECT task_id, tag_id FROM task_tags ORDER BY task_id ASC, rowid ASC")
+        .map_err(storage_error)?;
+    let rows = statement
+        .query_map([], |row| {
+            let task_id: String = row.get(0)?;
+            let tag_id: String = row.get(1)?;
+            Ok((
+                parse_sql(task_id, TaskId::parse)?,
+                parse_sql(tag_id, TagId::parse)?,
+            ))
+        })
+        .map_err(storage_error)?;
+    let mut tags = HashMap::<TaskId, Vec<TagId>>::new();
+    for row in rows {
+        let (task_id, tag_id) = row.map_err(storage_error)?;
+        tags.entry(task_id).or_default().push(tag_id);
+    }
+    for task in &mut tasks {
+        task.tag_ids = tags.remove(&task.id).unwrap_or_default();
+    }
+
+    Ok(TaskListPage {
+        tasks,
+        revision,
+        as_of_date: as_of.as_of_date,
+        next_cursor: None,
+    })
 }
 
 fn validate_cursor(sort: TaskSort, cursor: &TaskCursor) -> Result<(), ValidationError> {

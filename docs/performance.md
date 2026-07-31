@@ -151,7 +151,7 @@ python3 scripts/bench-hosted-server.py \
   --output goals/rust-rewrite/evidence/phase-3-temporal-bench.json
 ```
 
-Or use `pnpm bench:temporal -- --output goals/rust-rewrite/evidence/phase-3-temporal-bench.json`.
+Or use `pnpm bench:temporal --output goals/rust-rewrite/evidence/phase-3-temporal-bench.json`.
 
 Each of five fresh profiles records raw startup, idle/warm cgroup current/peak, RSS/PSS, SQLite size, every HTTP latency, response count, user-event revision delta, and scheduler observations. The workload uses Calendar (42 days), block/slot reads, daily/weekly planning, 366-day Stats, Nudges, exact recurring complete/uncomplete, a 250-source recurring bulk completion plus exact reversal (500 affected tasks, the frozen ceiling), and the reminder lifecycle: idle scheduler → SSE due wake → fenced lease → 20 claims → settlements → empty claim/idle.
 
@@ -166,7 +166,7 @@ pnpm bench:temporal:quick
 
 Quick mode uses one 500-task profile, 25 recurring sources (50 affected tasks), and five reminder claims. It enforces the same ceilings but is not authoritative evidence.
 
-The 2026-07-31 authoritative result recorded 17.9453 MiB median / 18.6680 MiB maximum warm cgroup memory and a 20.1758 MiB maximum peak, so memory passed. It failed closed on the frozen Stats (304.074 ms vs 150 ms) and Nudge (292.476 ms vs 100 ms) p95 budgets; see the protocol for the complete result and scheduler evidence.
+The 2026-07-31 authoritative rerun recorded 16.1523 MiB median / 16.5586 MiB maximum warm cgroup memory and an 18.1953 MiB maximum peak. It passed every frozen budget, including Stats p95 24.995 ms (150 ms budget) and Nudges p95 24.868 ms (100 ms budget); see the protocol for the complete result and scheduler evidence.
 
 ## Measurement rules
 

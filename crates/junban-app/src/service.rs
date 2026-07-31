@@ -6,17 +6,16 @@ use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
     CivilTimeRange, ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
     DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName,
-    FilterQuery, HexColor, MAX_ANALYSIS_TASK_READ, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT,
-    MAX_TIMEBLOCK_RANGE_ITEMS, MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel,
-    ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence,
-    SavedFilterId, SectionId, TagId, TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery,
-    TaskRelation, TaskSort, TaskStatus, TaskTitle, TemplateId, TimeBlock, TimeBlockDraft,
-    TimeBlockId, TimeSlot, TimeSlotDraft, TimeSlotId, ValidationError, WeekStart,
-    civil_occurrences_in_range, daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary,
-    evaluate_nudges, select_eat_the_frog, stats_summary, task_jar_candidates,
-    validate_calendar_date_range, validate_owner_lost_mark_limit, validate_reminder_claim_limit,
-    validate_reminder_lease_secs, validate_stats_date_range, validate_timeblock_date_range,
-    weekly_review_summary,
+    FilterQuery, HexColor, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS,
+    MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
+    ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId, TagId,
+    TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort, TaskStatus,
+    TaskTitle, TemplateId, TimeBlock, TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft,
+    TimeSlotId, ValidationError, WeekStart, civil_occurrences_in_range, daily_plan_summary,
+    dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges, select_eat_the_frog,
+    stats_summary, task_jar_candidates, validate_calendar_date_range,
+    validate_owner_lost_mark_limit, validate_reminder_claim_limit, validate_reminder_lease_secs,
+    validate_stats_date_range, validate_timeblock_date_range, weekly_review_summary,
 };
 
 use crate::{
@@ -1125,10 +1124,19 @@ where
     }
 
     async fn load_analysis_tasks(&self, as_of: TaskListAsOf) -> Result<CollectedTasks, AppError> {
-        let mut query = TaskQuery::new();
-        query.sort = TaskSort::SortOrderAsc;
-        self.collect_task_query_pages(query, as_of, MAX_ANALYSIS_TASK_READ)
-            .await
+        let page =
+            self.repository
+                .list_analysis_tasks(as_of)
+                .await
+                .map_err(|error| match error {
+                    RepositoryError::OperationTooLarge => AppError::ResultLimitExceeded,
+                    error => AppError::from(error),
+                })?;
+        Ok(CollectedTasks {
+            tasks: page.tasks,
+            revision: page.revision,
+            as_of_date: as_of.as_of_date,
+        })
     }
 
     /// Calendar range: tasks with civil `due_date` inside `[from, to]`.
@@ -1556,6 +1564,28 @@ mod tests {
             _: TaskListAsOf,
         ) -> crate::RepositoryFuture<'_, TaskListPage> {
             self.calls.lock().unwrap().push("list");
+            let page = {
+                let mut pages = self.list_pages.lock().unwrap();
+                if pages.is_empty() {
+                    None
+                } else {
+                    Some(pages.remove(0))
+                }
+            };
+            Box::pin(async move {
+                Ok(page.unwrap_or(TaskListPage {
+                    tasks: Vec::new(),
+                    revision: 0,
+                    as_of_date: "2026-07-28".parse().unwrap(),
+                    next_cursor: None,
+                }))
+            })
+        }
+        fn list_analysis_tasks(
+            &self,
+            _: TaskListAsOf,
+        ) -> crate::RepositoryFuture<'_, TaskListPage> {
+            self.calls.lock().unwrap().push("analysis");
             let page = {
                 let mut pages = self.list_pages.lock().unwrap();
                 if pages.is_empty() {
@@ -2189,6 +2219,83 @@ mod tests {
 
     fn as_of() -> TaskListAsOf {
         TaskListAsOf::for_local_date("2026-07-28".parse().unwrap(), &TimeZone::UTC).unwrap()
+    }
+
+    #[tokio::test]
+    async fn analysis_snapshot_preserves_stats_with_one_repository_call() {
+        let today = "2026-07-28".parse().unwrap();
+        let mut overdue = sample_task("overdue", 9);
+        overdue.due_date = Some("2026-07-26".parse().unwrap());
+        let mut completed = sample_task("completed", 8);
+        completed.status = TaskStatus::Completed;
+        completed.completed_at = Some("2026-07-27T12:00:00Z".parse().unwrap());
+
+        let tasks = vec![completed, overdue];
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![list_page(
+            tasks.clone(),
+            9,
+            None,
+        )]));
+        let service = JunbanService::new(repository.clone(), Arc::new(RecordingSink::default()));
+
+        let page = service
+            .stats("2026-07-26".parse().unwrap(), today, today, &TimeZone::UTC)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            page.summary,
+            stats_summary(
+                &tasks,
+                "2026-07-26".parse().unwrap(),
+                today,
+                today,
+                &TimeZone::UTC
+            )
+            .unwrap()
+        );
+        assert_eq!(page.revision, 9);
+        assert_eq!(*repository.calls.lock().unwrap(), vec!["analysis"]);
+    }
+
+    #[tokio::test]
+    async fn analysis_snapshot_preserves_nudge_order_and_tags_with_one_repository_call() {
+        let tag_a = TagId::new();
+        let tag_b = TagId::new();
+        let mut earlier = sample_task("earlier", 9);
+        earlier.due_date = Some("2026-07-26".parse().unwrap());
+        earlier.tag_ids = vec![tag_a];
+        let mut later = sample_task("later", 9);
+        later.due_date = Some("2026-07-27".parse().unwrap());
+        later.tag_ids = vec![tag_b];
+        let tasks = vec![later.clone(), earlier.clone()];
+        let expected_facts = evaluate_nudges(
+            &tasks,
+            "2026-07-28".parse().unwrap(),
+            DailyCapacityMinutes::DEFAULT,
+            &TimeZone::UTC,
+            &[],
+            None,
+        );
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![list_page(
+            tasks, 9, None,
+        )]));
+        let service = JunbanService::new(repository.clone(), Arc::new(RecordingSink::default()));
+
+        let page = service
+            .nudges("2026-07-28".parse().unwrap(), None, &TimeZone::UTC)
+            .await
+            .unwrap();
+
+        assert_eq!(page.revision, 9);
+        assert_eq!(page.facts, expected_facts);
+        assert_eq!(
+            page.tasks.iter().map(|task| task.id).collect::<Vec<_>>(),
+            vec![earlier.id, later.id]
+        );
+        assert_eq!(page.tasks[0].tag_ids, vec![tag_a]);
+        assert_eq!(page.tasks[1].tag_ids, vec![tag_b]);
+        assert_eq!(*repository.calls.lock().unwrap(), vec!["analysis"]);
     }
 
     #[tokio::test]

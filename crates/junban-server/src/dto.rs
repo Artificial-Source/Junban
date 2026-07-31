@@ -6,7 +6,7 @@ use junban_app::{
     CommittedMutation, MoveTarget, OrderAnchor, ProjectDraft, ProjectPatch, ReorderScope,
     ResourceRef, ResourceSnapshot, ResourceType, ResyncScope, SavedFilterDraft, SavedFilterPatch,
     SectionDraft, SectionPatch, TagDraft, TagPatch, TaskListPage, TaskPatch, TemplateApply,
-    TemplateDraft, TemplatePatch, TimeBlockPatch, TimeSlotPatch,
+    TemplateDraft, TemplatePatch, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
 };
 use junban_domain::{
     ActualMinutes, CivilTimeRange, Comment, CompletionTimeBucket, CompletionTimeBuckets,
@@ -1619,7 +1619,7 @@ impl PatchTimeBlockRequest {
     pub fn into_patch(self, request_id: &RequestId) -> Result<TimeBlockPatch, ApiError> {
         Ok(TimeBlockPatch {
             title: map_opt(self.title, EntityName::new, request_id)?,
-            range: parse_optional_civil_range(
+            range: parse_time_block_range_patch(
                 self.date,
                 self.start.as_deref(),
                 self.end.as_deref(),
@@ -1638,8 +1638,9 @@ impl PatchTimeBlockRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MoveTimeBlockRequest {
-    #[schema(value_type = String, format = Date)]
-    pub date: Date,
+    #[schema(value_type = Option<String>, format = Date)]
+    #[serde(default)]
+    pub date: Option<Date>,
     pub start: String,
     pub end: String,
     #[serde(default)]
@@ -1647,22 +1648,24 @@ pub struct MoveTimeBlockRequest {
 }
 
 impl MoveTimeBlockRequest {
-    pub fn into_range(self, request_id: &RequestId) -> Result<CivilTimeRange, ApiError> {
-        parse_civil_range(
+    pub fn into_range(self, request_id: &RequestId) -> Result<TimeBlockRangePatch, ApiError> {
+        parse_time_block_range_patch(
             self.date,
-            &self.start,
-            &self.end,
+            Some(&self.start),
+            Some(&self.end),
             self.time_zone.as_deref(),
             request_id,
-        )
+        )?
+        .ok_or_else(|| invalid_time_block_range(request_id))
     }
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResizeTimeBlockRequest {
-    #[schema(value_type = String, format = Date)]
-    pub date: Date,
+    #[schema(value_type = Option<String>, format = Date)]
+    #[serde(default)]
+    pub date: Option<Date>,
     pub start: String,
     pub end: String,
     #[serde(default)]
@@ -1670,14 +1673,15 @@ pub struct ResizeTimeBlockRequest {
 }
 
 impl ResizeTimeBlockRequest {
-    pub fn into_range(self, request_id: &RequestId) -> Result<CivilTimeRange, ApiError> {
-        parse_civil_range(
+    pub fn into_range(self, request_id: &RequestId) -> Result<TimeBlockRangePatch, ApiError> {
+        parse_time_block_range_patch(
             self.date,
-            &self.start,
-            &self.end,
+            Some(&self.start),
+            Some(&self.end),
             self.time_zone.as_deref(),
             request_id,
-        )
+        )?
+        .ok_or_else(|| invalid_time_block_range(request_id))
     }
 }
 
@@ -2866,6 +2870,43 @@ fn parse_civil_range(
         None => default_time_zone_name(request_id)?,
     };
     CivilTimeRange::new(date, start, end, time_zone).map_err(|e| validation_error(e, request_id))
+}
+
+fn invalid_time_block_range(request_id: &RequestId) -> ApiError {
+    validation_error(
+        ValidationError::Invalid {
+            field: "range",
+            reason: "at least one range field must be provided",
+        },
+        request_id,
+    )
+}
+
+fn parse_time_block_range_patch(
+    date: Option<Date>,
+    start: Option<&str>,
+    end: Option<&str>,
+    time_zone: Option<&str>,
+    request_id: &RequestId,
+) -> Result<Option<TimeBlockRangePatch>, ApiError> {
+    if date.is_none() && start.is_none() && end.is_none() && time_zone.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(TimeBlockRangePatch {
+        date,
+        start: start
+            .map(|value| parse_civil_time(value, "start", request_id))
+            .transpose()?,
+        end: end
+            .map(|value| parse_civil_time(value, "end", request_id))
+            .transpose()?,
+        time_zone: time_zone
+            .map(|value| {
+                TimeZoneName::new(value.to_owned())
+                    .map_err(|error| validation_error(error, request_id))
+            })
+            .transpose()?,
+    }))
 }
 
 fn parse_optional_civil_range(

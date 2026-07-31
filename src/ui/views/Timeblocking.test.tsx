@@ -295,6 +295,7 @@ beforeEach(() => {
           title: "Series instance",
           start: "11:00:00",
           end: "12:00:00",
+          time_zone: "America/New_York",
           recurrence_rule: "daily",
           recurrence_parent_id: "block-series",
           occurrence_key: "block-series:2026-07-24",
@@ -465,8 +466,11 @@ describe("Timeblocking view", () => {
       await Promise.resolve();
     });
     await flush();
-    expect(moveTimeBlock).toHaveBeenCalled();
-    expect(moveTimeBlock.mock.calls.at(-1)![0]).toBe("block-1");
+    expect(moveTimeBlock).toHaveBeenCalledWith(
+      "block-1",
+      { start: "09:15", end: "10:45" },
+      "op-test",
+    );
 
     const endLater = Array.from(container.querySelectorAll("button")).find((btn) =>
       btn.textContent?.includes("End later"),
@@ -476,7 +480,11 @@ describe("Timeblocking view", () => {
       await Promise.resolve();
     });
     await flush();
-    expect(resizeTimeBlock).toHaveBeenCalled();
+    expect(resizeTimeBlock).toHaveBeenCalledWith(
+      "block-1",
+      { start: "09:00", end: "10:45" },
+      "op-test",
+    );
 
     const del = Array.from(container.querySelectorAll("button")).find(
       (btn) => btn.textContent === "Delete",
@@ -526,7 +534,36 @@ describe("Timeblocking view", () => {
     });
     await flush();
     expect(patchTimeBlock).toHaveBeenCalled();
-    expect(patchTimeBlock.mock.calls.at(-1)![0]).toBe("block-series");
+    const [ownerId, payload] = patchTimeBlock.mock.calls.at(-1)!;
+    expect(ownerId).toBe("block-series");
+    expect(payload).toMatchObject({ title: "Series renamed" });
+    expect(payload).not.toHaveProperty("date");
+    expect(payload).not.toHaveProperty("start");
+    expect(payload).not.toHaveProperty("end");
+    expect(payload).not.toHaveProperty("time_zone");
+
+    const reloadedSeriesCard = container.querySelector(
+      '[data-testid="time-block-block-series:2026-07-24"]',
+    ) as HTMLElement;
+    await act(async () => {
+      reloadedSeriesCard.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    });
+    const start = container.querySelector('[data-testid="editor-start"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(start, "11:30");
+      start.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      (container.querySelector('[data-testid="editor-save"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    await flush();
+    const temporalPayload = patchTimeBlock.mock.calls.at(-1)![1];
+    expect(temporalPayload).toMatchObject({ start: "11:30" });
+    expect(temporalPayload).not.toHaveProperty("date");
+    expect(temporalPayload).not.toHaveProperty("end");
+    expect(temporalPayload).not.toHaveProperty("time_zone");
   });
 
   it("keeps the schedule usable when the bounded replan preview overflows", async () => {

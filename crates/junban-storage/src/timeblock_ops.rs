@@ -6,7 +6,7 @@ use jiff::{Timestamp, ToSpan, civil::Date, civil::Time};
 use junban_app::{
     AffectedIds, CommittedMutation, EventType, ReplanPastBlocksAction, ReplanPastBlocksPreview,
     RepositoryError, ResourceRef, ResourceSnapshot, ResyncScope, TemporalContext, TimeBlockPatch,
-    TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
+    TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
 };
 use junban_domain::{
     CivilTimeRange, EntityName, HexColor, MAX_BULK_IDS, MAX_TIMEBLOCK_RANGE_ITEMS, OperationId,
@@ -60,7 +60,7 @@ enum Req<'a> {
     },
     SetTimeBlockRange {
         block_id: String,
-        range: &'a CivilTimeRange,
+        range: &'a TimeBlockRangePatch,
     },
     ReplanPastBlocks {
         action: ReplanPastBlocksAction,
@@ -433,7 +433,7 @@ pub(crate) fn set_time_block_range(
     c: &mut Connection,
     op: OperationId,
     block_id: TimeBlockId,
-    range: CivilTimeRange,
+    range: TimeBlockRangePatch,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
     let request = canonical_json(&Req::SetTimeBlockRange {
@@ -441,9 +441,8 @@ pub(crate) fn set_time_block_range(
         range: &range,
     })?;
     mutate(c, op, request, now, move |tx, revision| {
-        ensure_civil_range(&range)?;
         let mut block = load_time_block(tx, block_id)?;
-        block.range = range;
+        apply_range_patch(&mut block.range, &range)?;
         block.updated_at = now;
         block.revision = revision;
         update_time_block_row(tx, &block)?;
@@ -638,12 +637,29 @@ fn ensure_slot_exists(tx: &Transaction<'_>, slot_id: TimeSlotId) -> Result<(), R
     Ok(())
 }
 
+fn apply_range_patch(
+    range: &mut CivilTimeRange,
+    patch: &TimeBlockRangePatch,
+) -> Result<(), RepositoryError> {
+    *range = CivilTimeRange::new(
+        patch.date.unwrap_or(range.date),
+        patch.start.unwrap_or(range.start),
+        patch.end.unwrap_or(range.end),
+        patch
+            .time_zone
+            .clone()
+            .unwrap_or_else(|| range.time_zone.clone()),
+    )
+    .map_err(validation)?;
+    Ok(())
+}
+
 fn apply_block_patch(block: &mut TimeBlock, patch: &TimeBlockPatch) -> Result<(), RepositoryError> {
     if let Some(title) = &patch.title {
         block.title = title.clone();
     }
     if let Some(range) = &patch.range {
-        block.range = range.clone();
+        apply_range_patch(&mut block.range, range)?;
     }
     if let Some(color) = &patch.color {
         block.color = color.clone();

@@ -2362,6 +2362,130 @@ async fn time_block_list_expands_recurring_owners_with_stable_occurrence_keys() 
 }
 
 #[tokio::test]
+async fn recurring_time_block_series_edits_preserve_owner_range_and_time_zone() {
+    let context = TestContext::new();
+    let (_, settings) = get_json(&context, "/api/v1/settings/temporal").await;
+    let server_zone = settings["time_zone"].as_str().unwrap();
+    let owner_zone = if server_zone == "Pacific/Auckland" {
+        "America/New_York"
+    } else {
+        "Pacific/Auckland"
+    };
+    let created = create_block(
+        &context,
+        json!({
+            "title": "Daily focus",
+            "date": "2026-03-01",
+            "start": "09:00:00",
+            "end": "10:00:00",
+            "time_zone": owner_zone,
+            "recurrence_rule": "daily"
+        }),
+    )
+    .await;
+    let owner_id = block_id_from(&created).to_owned();
+
+    let (_, later_page) = get_json(
+        &context,
+        "/api/v1/time-blocks?from=2026-03-08&to=2026-03-08",
+    )
+    .await;
+    let later = &later_page["time_blocks"][0];
+    assert_eq!(later["id"], owner_id);
+    assert_eq!(later["date"], "2026-03-08");
+    assert_eq!(later["time_zone"], owner_zone);
+
+    // The browser edits the durable owner id from the virtual row and omits all
+    // unchanged temporal fields.
+    let renamed = mutate_json(
+        &context,
+        Method::PATCH,
+        &format!("/api/v1/time-blocks/{owner_id}"),
+        json!({ "title": "Renamed series" }),
+        None,
+    )
+    .await;
+    assert_eq!(renamed.status(), StatusCode::OK);
+    let renamed = json(renamed).await;
+    let renamed_owner = &renamed["event"]["snapshot"]["time_block"];
+    assert_eq!(renamed_owner["title"], "Renamed series");
+    assert_eq!(renamed_owner["date"], "2026-03-01");
+    assert_eq!(renamed_owner["start"], "09:00:00");
+    assert_eq!(renamed_owner["end"], "10:00:00");
+    assert_eq!(renamed_owner["time_zone"], owner_zone);
+
+    let retimed = mutate_json(
+        &context,
+        Method::PATCH,
+        &format!("/api/v1/time-blocks/{owner_id}"),
+        json!({ "start": "09:30:00" }),
+        None,
+    )
+    .await;
+    assert_eq!(retimed.status(), StatusCode::OK);
+    let retimed = json(retimed).await;
+    let retimed_owner = &retimed["event"]["snapshot"]["time_block"];
+    assert_eq!(retimed_owner["date"], "2026-03-01");
+    assert_eq!(retimed_owner["start"], "09:30:00");
+    assert_eq!(retimed_owner["end"], "10:00:00");
+    assert_eq!(retimed_owner["time_zone"], owner_zone);
+
+    // Move/resize update only the supported civil fields and retain the durable
+    // owner's anchor date and timezone when those values are omitted.
+    let moved = mutate_json(
+        &context,
+        Method::POST,
+        &format!("/api/v1/time-blocks/{owner_id}/move"),
+        json!({ "start": "10:00:00", "end": "11:00:00" }),
+        None,
+    )
+    .await;
+    assert_eq!(moved.status(), StatusCode::OK);
+    let moved = json(moved).await;
+    let moved_owner = &moved["event"]["snapshot"]["time_block"];
+    assert_eq!(moved_owner["date"], "2026-03-01");
+    assert_eq!(moved_owner["start"], "10:00:00");
+    assert_eq!(moved_owner["end"], "11:00:00");
+    assert_eq!(moved_owner["time_zone"], owner_zone);
+
+    let resized = mutate_json(
+        &context,
+        Method::POST,
+        &format!("/api/v1/time-blocks/{owner_id}/resize"),
+        json!({ "start": "10:00:00", "end": "11:30:00" }),
+        None,
+    )
+    .await;
+    assert_eq!(resized.status(), StatusCode::OK);
+    let resized = json(resized).await;
+    let resized_owner = &resized["event"]["snapshot"]["time_block"];
+    assert_eq!(resized_owner["date"], "2026-03-01");
+    assert_eq!(resized_owner["end"], "11:30:00");
+    assert_eq!(resized_owner["time_zone"], owner_zone);
+
+    let (_, reloaded) = get_json(
+        &context,
+        "/api/v1/time-blocks?from=2026-03-01&to=2026-03-08",
+    )
+    .await;
+    let blocks = reloaded["time_blocks"].as_array().unwrap();
+    let durable_owner = blocks
+        .iter()
+        .find(|block| block["date"] == "2026-03-01")
+        .unwrap();
+    let later_occurrence = blocks
+        .iter()
+        .find(|block| block["date"] == "2026-03-08")
+        .unwrap();
+    for block in [durable_owner, later_occurrence] {
+        assert_eq!(block["title"], "Renamed series");
+        assert_eq!(block["start"], "10:00:00");
+        assert_eq!(block["end"], "11:30:00");
+        assert_eq!(block["time_zone"], owner_zone);
+    }
+}
+
+#[tokio::test]
 async fn time_block_replan_is_idempotent_and_supports_actions() {
     let context = TestContext::new();
 

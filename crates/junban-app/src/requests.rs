@@ -1,12 +1,16 @@
 //! Explicit request and result shapes for Phase 2 use cases.
 
-use jiff::{Timestamp, ToSpan, Zoned, civil::Date, tz::TimeZone};
+use jiff::{
+    Timestamp, ToSpan, Zoned,
+    civil::{Date, Time},
+    tz::TimeZone,
+};
 use junban_domain::{
     ActualMinutes, CivilTimeRange, CommentBody, DailyPlanSummary, DreadLevel, EndOfDaySummary,
     EntityName, EstimatedMinutes, FilterQuery, HexColor, IconText, LocalDueTime, MarkdownText,
     NudgeFacts, Priority, Project, ProjectId, ProjectView, RecurrenceRule, SavedFilter, Section,
     SectionId, SortOrder, StatsSummary, Tag, TagId, TagName, Task, TaskCursor, TaskId, TaskTitle,
-    Template, TemplateId, TimeBlock, TimeBlockId, TimeSlot, TimeSlotId, WeekStart,
+    Template, TemplateId, TimeBlock, TimeBlockId, TimeSlot, TimeSlotId, TimeZoneName, WeekStart,
     WeeklyReviewSummary,
 };
 use serde::{Deserialize, Serialize};
@@ -513,13 +517,29 @@ pub struct MarkOwnerLostReminders {
     pub limit: Option<u32>,
 }
 
+/// Partial civil range update for an existing time block.
+///
+/// Omitted values retain durable owner state; in particular, an omitted timezone
+/// must never be replaced with the server timezone.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeBlockRangePatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<Date>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Time>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Time>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<TimeZoneName>,
+}
+
 /// Partial time-block update. `None` leaves a field unchanged; `Some(None)` clears nullable fields.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeBlockPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<EntityName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub range: Option<CivilTimeRange>,
+    pub range: Option<TimeBlockRangePatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<Option<HexColor>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -730,7 +750,12 @@ impl TimeBlockPatch {
     #[must_use]
     pub fn range_only(range: CivilTimeRange) -> Self {
         Self {
-            range: Some(range),
+            range: Some(TimeBlockRangePatch {
+                date: Some(range.date),
+                start: Some(range.start),
+                end: Some(range.end),
+                time_zone: Some(range.time_zone),
+            }),
             ..Self::default()
         }
     }

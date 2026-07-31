@@ -25,8 +25,8 @@ pub use requests::{
     RescheduleReminder, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch,
     SettleReminderDelivered, SettleReminderFailed, StatsPage, TagDraft, TagPatch, TaskJarPage,
     TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext, TemporalSettings, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage,
-    TimeblockingRangeQuery, WeeklyReviewPage,
+    TemporalContext, TemporalSettings, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
+    TimeblockingRangePage, TimeblockingRangeQuery, WeeklyReviewPage,
 };
 pub use service::{EventSink, JunbanService, default_temporal_settings};
 

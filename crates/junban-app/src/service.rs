@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
-    CivilTimeRange, ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
+    ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
     DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName,
     FilterQuery, HexColor, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS,
     MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
@@ -25,8 +25,8 @@ use crate::{
     ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError, SavedFilterDraft,
     SavedFilterPatch, SectionDraft, SectionPatch, StatsPage, TagDraft, TagPatch, TaskJarPage,
     TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext, TemporalSettings, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage,
-    TimeblockingRangeQuery, WeeklyReviewPage,
+    TemporalContext, TemporalSettings, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
+    TimeblockingRangePage, TimeblockingRangeQuery, WeeklyReviewPage,
 };
 
 /// Cursor page size used when collecting multi-page task reads.
@@ -1003,7 +1003,7 @@ where
         &self,
         operation_id: OperationId,
         block_id: TimeBlockId,
-        range: CivilTimeRange,
+        range: TimeBlockRangePatch,
     ) -> Result<CommittedMutation, AppError> {
         self.commit(
             self.repository
@@ -1016,7 +1016,7 @@ where
         &self,
         operation_id: OperationId,
         block_id: TimeBlockId,
-        range: CivilTimeRange,
+        range: TimeBlockRangePatch,
     ) -> Result<CommittedMutation, AppError> {
         // Move and resize share one range-write implementation.
         self.move_time_block(operation_id, block_id, range).await
@@ -1444,7 +1444,7 @@ mod tests {
 
     use super::*;
     use crate::{AffectedIds, EventCatchUp, EventType, ResourceRef, ResourceSnapshot, ResyncScope};
-    use junban_domain::TaskStatus;
+    use junban_domain::{CivilTimeRange, TaskStatus};
     use uuid::Uuid;
 
     struct FakeRepository {
@@ -2039,7 +2039,7 @@ mod tests {
             &self,
             _: OperationId,
             _: TimeBlockId,
-            _: CivilTimeRange,
+            _: TimeBlockRangePatch,
             _: Timestamp,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("set_time_block_range")

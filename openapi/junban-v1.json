@@ -8832,10 +8832,10 @@
       },
       "MoveTimeBlockRequest": {
         "type": "object",
-        "required": ["date", "start", "end"],
+        "required": ["start", "end"],
         "properties": {
           "date": {
-            "type": "string",
+            "type": ["string", "null"],
             "format": "date"
           },
           "end": {
@@ -9711,10 +9711,10 @@
       },
       "ResizeTimeBlockRequest": {
         "type": "object",
-        "required": ["date", "start", "end"],
+        "required": ["start", "end"],
         "properties": {
           "date": {
-            "type": "string",
+            "type": ["string", "null"],
             "format": "date"
           },
           "end": {

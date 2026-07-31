@@ -4,8 +4,8 @@ use std::{future::Future, pin::Pin};
 
 use jiff::Timestamp;
 use junban_domain::{
-    CivilTimeRange, ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId,
-    RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
+    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
     ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
     TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId,
 };
@@ -15,7 +15,8 @@ use crate::{
     ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
     RepositoryError, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft,
     TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
+    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
+    TimeblockingRangeQuery,
 };
 
 pub type RepositoryFuture<'a, T> =
@@ -469,7 +470,7 @@ pub trait Repository: Send + Sync + 'static {
         &self,
         operation_id: OperationId,
         block_id: TimeBlockId,
-        range: CivilTimeRange,
+        range: TimeBlockRangePatch,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation>;
 

@@ -4219,7 +4219,12 @@ async fn timeblock_crud_event_receipt_and_exact_retry() {
         .set_time_block_range(
             operation(),
             block_id,
-            civil_range("2026-03-09", 10, 11),
+            junban_app::TimeBlockRangePatch {
+                date: Some("2026-03-09".parse().unwrap()),
+                start: Some(Time::constant(10, 0, 0, 0)),
+                end: Some(Time::constant(11, 0, 0, 0)),
+                ..Default::default()
+            },
             now(),
         )
         .await
@@ -5366,10 +5371,7 @@ async fn p3_tb_004_invalid_civil_ranges_are_rejected_without_durable_rows() {
             repo.patch_time_block(
                 operation(),
                 block_id,
-                junban_app::TimeBlockPatch {
-                    range: Some(inverted_civil_range("2026-03-08")),
-                    ..Default::default()
-                },
+                junban_app::TimeBlockPatch::range_only(inverted_civil_range("2026-03-08")),
                 now(),
             )
             .await
@@ -5383,7 +5385,9 @@ async fn p3_tb_004_invalid_civil_ranges_are_rejected_without_durable_rows() {
             repo.set_time_block_range(
                 operation(),
                 block_id,
-                inverted_civil_range("2026-03-09"),
+                junban_app::TimeBlockPatch::range_only(inverted_civil_range("2026-03-09"))
+                    .range
+                    .unwrap(),
                 now(),
             )
             .await

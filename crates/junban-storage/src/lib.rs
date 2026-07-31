@@ -31,12 +31,12 @@ use junban_app::{
     ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
     Repository, RepositoryError, RepositoryFuture, SavedFilterDraft, SavedFilterPatch,
     SectionDraft, SectionPatch, TagDraft, TagPatch, TaskListAsOf, TaskListPage, TaskPatch,
-    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TimeBlockPatch, TimeSlotPatch,
-    TimeblockingRangePage, TimeblockingRangeQuery,
+    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TimeBlockPatch,
+    TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
 };
 use junban_domain::{
-    CivilTimeRange, ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId,
-    RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
+    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
     ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
     TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId,
 };
@@ -1133,7 +1133,7 @@ impl Repository for SqliteRepository {
         &self,
         operation_id: OperationId,
         block_id: TimeBlockId,
-        range: CivilTimeRange,
+        range: TimeBlockRangePatch,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation> {
         mut_cmd!(
@@ -1564,7 +1564,7 @@ enum Command {
     SetTimeBlockRange {
         operation_id: OperationId,
         block_id: TimeBlockId,
-        range: CivilTimeRange,
+        range: TimeBlockRangePatch,
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },

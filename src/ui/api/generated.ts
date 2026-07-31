@@ -1406,7 +1406,7 @@ export interface components {
     };
     MoveTimeBlockRequest: {
       /** Format: date */
-      date: string;
+      date?: string | null;
       end: string;
       start: string;
       time_zone?: string | null;
@@ -1716,7 +1716,7 @@ export interface components {
     };
     ResizeTimeBlockRequest: {
       /** Format: date */
-      date: string;
+      date?: string | null;
       end: string;
       start: string;
       time_zone?: string | null;

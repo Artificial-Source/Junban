@@ -32,6 +32,7 @@ import {
   replanTimeBlocks,
   resizeTimeBlock,
   type MutationResponse,
+  type PatchTimeBlockRequest,
   type ProjectDto,
   type ReplanTimeBlocksActionDto,
   type ReplanTimeBlocksPreviewResponse,
@@ -287,21 +288,18 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
           );
         }
         if (values.ownerId) {
-          return patchTimeBlock(
-            values.ownerId,
-            {
-              title: values.title,
-              date: values.date,
-              start: values.start,
-              end: values.end,
-              color: values.color,
-              locked: values.locked,
-              task_id: values.taskId,
-              slot_id: values.slotId,
-              recurrence_rule: values.recurrenceRule,
-            },
-            operationId,
-          );
+          const patch: PatchTimeBlockRequest = {
+            title: values.title,
+            color: values.color,
+            locked: values.locked,
+            task_id: values.taskId,
+            slot_id: values.slotId,
+            recurrence_rule: values.recurrenceRule,
+          };
+          if (!editor || values.date !== editor.date) patch.date = values.date;
+          if (!editor || values.start !== editor.start) patch.start = values.start;
+          if (!editor || values.end !== editor.end) patch.end = values.end;
+          return patchTimeBlock(values.ownerId, patch, operationId);
         }
         return createTimeBlock(
           {
@@ -321,7 +319,7 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
       if (ok) setEditor(null);
       return ok;
     },
-    [runTbMutation],
+    [runTbMutation, editor],
   );
 
   const handleDeleteEditor = useCallback(
@@ -344,18 +342,18 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
   );
 
   const handleMoveBlock = useCallback(
-    (ownerId: string, date: string, start: string, end: string) => {
+    (ownerId: string, _date: string, start: string, end: string) => {
       void runTbMutation("Move time block", (operationId) =>
-        moveTimeBlock(ownerId, { date, start, end }, operationId),
+        moveTimeBlock(ownerId, { start, end }, operationId),
       );
     },
     [runTbMutation],
   );
 
   const handleResizeBlock = useCallback(
-    (ownerId: string, date: string, start: string, end: string) => {
+    (ownerId: string, _date: string, start: string, end: string) => {
       void runTbMutation("Resize time block", (operationId) =>
-        resizeTimeBlock(ownerId, { date, start, end }, operationId),
+        resizeTimeBlock(ownerId, { start, end }, operationId),
       );
     },
     [runTbMutation],

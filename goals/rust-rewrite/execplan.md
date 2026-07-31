@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 2 are complete. Phase 3 is active.
+**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 3 are complete. Phase 4 is next.
 
 ## Purpose and user-visible outcome
 
@@ -710,7 +710,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 2 application, HTTP, React, scale, dogfood, review and delivery waves.
 - [x] Phase 3 context, temporal authority, migration recovery, reminder fencing, timeblock/slot, bounds and visual-evidence plan approved.
 - [x] Phase 3 temporal benchmark harness and five-sample release evidence recorded; `P3-FINAL-007` is fixed after the bounded analysis snapshot rerun passed every frozen latency and memory budget.
-- [ ] Phase 3 implementation (active).
+- [x] Phase 3 recurrence, reminder, planning, timeblocking, visual, accessibility, performance, review and delivery implementation.
 - [ ] Phase 4 implementation.
 - [ ] Phase 5 implementation.
 - [ ] Phase 6 implementation.
@@ -744,6 +744,8 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - `P3-FINAL-007` — **fixed**. A one-shot, bounded SQLite analysis snapshot replaces 100 paged task-list reads and per-task tag hydration. The five-sample 10,000-task rerun passed the frozen 24/32 MiB memory ceiling (16.1523 MiB median / 16.5586 MiB maximum warm; 18.1953 MiB maximum peak), Stats p95 24.995 ms (150 ms budget), Nudges p95 24.868 ms (100 ms budget), and all scheduler lifecycle checks. Raw evidence: `evidence/phase-3-temporal-bench.json`.
 - `P3-FINAL-008` — **fixed**. Replan preview and mutation now share Rust server-local civil-date authority and an exact bounded candidate-ID expectation; SQLite rejects date or candidate drift atomically, and the browser refreshes rather than selecting destructive candidates from its own clock.
 - `P3-FINAL-009` — **fixed**. Timeblocking mutations no longer advertise or push unsupported Undo entries, preserving earlier valid task undo history.
+- `P3-FINAL-010` — **fixed**. Calendar planning controls now await authoritative task mutations and keep the selected task on failure instead of reporting success and clearing selection optimistically.
+- Phase 3 final review — **approved after fixes**. All reminder/storage findings and `P3-FINAL-001`–`P3-FINAL-010` are closed with focused regressions. Narrow final re-review confirmed replan preview overflow no longer hides ordinary schedule data; no material finding remains. Full ledger: `evidence/phase-3-review-ledger.md`.
 
 ## Decision log
 
@@ -762,6 +764,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-07-30: completed Phase 2 without adding crates or runtime owners. Recurrence remains validated rule storage only; Phase 3 owns occurrence generation, reminders and planning semantics. Final release-binary evidence passed at 6.96 MiB median warm for the frozen workload and 15.18 MiB maximum warm for deterministic 10,000-task scale.
 - 2026-07-30: Phase 3 keeps the four-crate architecture and adds no scheduler/recurrence framework. One dormant Tokio wake loop, fenced browser/native delivery ownership, verified v2 backup before schema v3 migration, bounded virtual time recurrence, and independent legacy visual authority are required.
 - 2026-07-31: the Phase 3 temporal benchmark extends the existing hosted cgroup harness and existing development-only scale seeder rather than adding a runner or dependency. Its recurring bulk covers 250 sources plus 250 generated children because the frozen 500 affected-task ceiling includes generated occurrences.
+- 2026-07-31: completed Phase 3 over the existing four crates with no scheduler/recurrence framework. One dormant reminder coordinator, server-civil-date planning authority, exact replan candidate binding, and immutable Phase 3 visual authorities preserve correctness while keeping the optimized 10,000-task workload below 18.20 MiB peak.
 
 ## Discoveries and risks
 
@@ -790,6 +793,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 2 client correctness: view membership, own-response convergence, undo/redo identity and blocking-layer isolation needed explicit authority; focused pure helpers and component regressions closed those races without a state-management dependency.
 - Phase 2 scale: the final deterministic 10,000-task run stayed below 15.36 MiB peak and all p95 budgets by wide margins, so the simple indexed SQL query path remains authoritative.
 - Phase 3 temporal benchmark: paged full-task analysis made 100 repository calls and hydrated each task and tags individually. One bounded read transaction now loads task rows and tags in two batched queries; the five-sample rerun passed Stats at 24.995 ms p95 and Nudges at 24.868 ms p95 without relaxing frozen limits.
+- Phase 3 closure: coupling ordinary timeblocking loads to destructive replan preview made a bounded preview overflow hide valid schedule data. Preview failure is now isolated, keeps blocks/slots visible, and explains why replan is unavailable.
 
 ## Outcome and retrospective
 
@@ -820,3 +824,12 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - **Validation:** 150 Rust tests, 225 frontend tests and 38 Playwright scenarios passed alongside format, Clippy, type, contract, docs, runtime-boundary, npm/Rust audit, benchmark cleanup and no-Node checks.
 - **Dogfood and review:** six browser findings plus all API, database, frontend, accessibility and final closure findings are fixed with focused regressions. Targeted re-review confirmed `P2-CLOSE-001`–`P2-CLOSE-003` fixed with no material finding remaining.
 - **Follow-up:** Phase 3 activates recurrence occurrence generation, reminders and the planning/time surfaces over the same single worker and SQLite authority.
+
+### Phase 3
+
+- **Outcome:** recurrence, reminders, Calendar, Matrix, planning/review rituals, Focus Mode, motivation features, Stats, Smart Nudges, and first-party timeblocking now run through the Rust authority while preserving the approved React interface.
+- **Evidence:** `goals/rust-rewrite/evidence/phase-3-outcome.md`; `phase-3-temporal-bench.json`; `phase-3-review-ledger.md`; twelve visual authorities under `phase-3-visual-baseline/`.
+- **Memory and temporal scale:** five fresh 10,000-task samples passed at 16.1523 MiB median / 16.5586 MiB maximum warm and 18.1953 MiB maximum peak. Calendar, timeblocking, Stats, Nudges, recurrence, 500-affected recurrence reversal, and reminder lease/claim p95 budgets all passed.
+- **Validation:** 300 Rust tests, 292 frontend tests, and 77 Playwright scenarios passed alongside release build, format, Clippy, type, contract, docs, runtime-boundary, npm/Rust audit, visual, accessibility, and cleanup checks.
+- **Review:** all reminder/storage findings and `P3-FINAL-001`–`P3-FINAL-010` are fixed with focused regressions; narrow final re-review found no material issue remaining.
+- **Follow-up:** Phase 4 adds data portability, complete backup/restore, settings, hosted controls, token rotation, diagnostics, and maintenance barriers without creating a second live store.

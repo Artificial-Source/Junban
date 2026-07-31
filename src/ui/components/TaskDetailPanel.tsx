@@ -738,15 +738,19 @@ export function TaskDetailPanel({
               )}
               <button
                 type="button"
+                disabled
                 aria-label="Previous task"
-                className="min-h-7 min-w-7 rounded-md p-1.5 text-on-surface-muted transition-colors hover:bg-surface-tertiary hover:text-on-surface"
+                title="Previous task navigation is unavailable"
+                className="min-h-7 min-w-7 rounded-md p-1.5 text-on-surface-muted"
               >
                 <ChevronUp size={16} aria-hidden="true" />
               </button>
               <button
                 type="button"
+                disabled
                 aria-label="Next task"
-                className="min-h-7 min-w-7 rounded-md p-1.5 text-on-surface-muted transition-colors hover:bg-surface-tertiary hover:text-on-surface"
+                title="Next task navigation is unavailable"
+                className="min-h-7 min-w-7 rounded-md p-1.5 text-on-surface-muted"
               >
                 <ChevronDown size={16} aria-hidden="true" />
               </button>

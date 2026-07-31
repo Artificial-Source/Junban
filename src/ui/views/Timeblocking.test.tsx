@@ -372,6 +372,18 @@ describe("Timeblocking view", () => {
     expect(container.querySelector('[data-testid="tb-setting-end"]')?.textContent).toMatch(/5:00/);
   });
 
+  it("labels manual block creation truthfully outside the visual-fixture route", async () => {
+    render(createElement(Timeblocking, {}));
+    await flush();
+
+    const addBlock = container.querySelector(
+      '[data-testid="auto-schedule-btn"]',
+    ) as HTMLButtonElement;
+    expect(addBlock.getAttribute("aria-label")).toBe("Add block");
+    expect(addBlock.textContent).toContain("Add block");
+    expect(addBlock.textContent).not.toContain("Auto-schedule");
+  });
+
   it("switches to week range serialization", async () => {
     render(createElement(Timeblocking, {}));
     await flush();

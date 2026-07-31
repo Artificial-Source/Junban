@@ -118,6 +118,84 @@ const SCREENSHOT_OPTS = { maxDiffPixelRatio: 0.01, threshold: 0.2 };
 // immutable legacy image as the geometry, color, and hierarchy authority.
 const DENSE_SCREENSHOT_OPTS = { maxDiffPixelRatio: 0.025, threshold: 0.2 };
 
+function isPhase3VisualFixtureRoute(page: Page): boolean {
+  return new URL(page.url()).searchParams.get("visual-fixture") === "phase-3";
+}
+
+function visualFixture(pathname: string): Record<string, unknown> | null {
+  if (pathname.endsWith("/planning/weekly")) {
+    return {
+      week_start: "2026-07-20",
+      week_end: "2026-07-26",
+      created_count: 0,
+      completed_count: 9,
+      cancelled_count: 0,
+      completion_rate_percent: 100,
+      streak_days: 7,
+      daily: [1, 3, 2, 3, 0, 0, 0].map((completed, index) => ({
+        date: frozenDateOffset(index - 3),
+        completed,
+        created: 0,
+      })),
+      busiest_day: "2026-07-21",
+      dominant_completion_bucket: "morning",
+      completion_time_buckets: { morning: 9, afternoon: 0, evening: 0, night: 0 },
+      overdue_task_ids: ["visual-overdue-1", "visual-overdue-2"],
+      overdue_tasks: [
+        { id: "visual-overdue-1", title: "Merge dark mode tokens pull request", priority: 2 },
+        { id: "visual-overdue-2", title: "Update onboarding copy", priority: 3 },
+      ],
+      neglected_projects: [seed.projects.website, seed.projects.docs].map((projectId) => ({
+        project_id: projectId,
+        reason: "overdue",
+        overdue_count: 1,
+      })),
+      suggestions: [],
+      top_accomplishment_ids: [
+        "visual-accomplishment-1",
+        "visual-accomplishment-2",
+        "visual-accomplishment-3",
+        "visual-accomplishment-4",
+        "visual-accomplishment-5",
+      ],
+      top_accomplishment_tasks: [
+        {
+          id: "visual-accomplishment-1",
+          title: "Document the completion API contract",
+          priority: 2,
+        },
+        { id: "visual-accomplishment-2", title: "Add voice activity detection", priority: null },
+        { id: "visual-accomplishment-3", title: "Migrate to Drizzle ORM", priority: null },
+        { id: "visual-accomplishment-4", title: "Build command palette", priority: null },
+        { id: "visual-accomplishment-5", title: "Write setup guide", priority: null },
+      ],
+      revision: 1,
+    };
+  }
+  if (pathname.endsWith("/stats")) {
+    return {
+      days: [2, 1, 3, 1, 3, 2, 3].map((completions, index) => ({
+        date: frozenDateOffset(index - 6),
+        completions,
+        creations: completions,
+        completion_minutes: completions * 100,
+      })),
+      total_completions: 15,
+      total_creations: 15,
+      total_completion_minutes: 1500,
+      current_streak_days: 7,
+      estimate_accuracy_percent: 88,
+      estimate_accuracy_samples: 14,
+      average_estimated_minutes: 108,
+      average_actual_minutes: 108,
+      from: "2026-07-17",
+      to: "2026-07-23",
+      revision: 1,
+    };
+  }
+  return null;
+}
+
 test.beforeAll(async () => {
   mkdirSync(SNAPSHOT_DIR, { recursive: true });
   for (const scene of SCENES) {
@@ -171,6 +249,12 @@ test.beforeEach(async ({ page }) => {
       await route.continue();
       return;
     }
+    const fixture = isPhase3VisualFixtureRoute(page) ? visualFixture(originalUrl.pathname) : null;
+    if (fixture) {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(fixture) });
+      return;
+    }
+
     const serverUrl = new URL(originalUrl);
     for (const key of ["date", "from", "to"]) {
       const value = serverUrl.searchParams.get(key);
@@ -192,7 +276,7 @@ test.beforeEach(async ({ page }) => {
       await route.fulfill({ status: response.status(), contentType, body: text });
       return;
     }
-    normalizeVisualPayload(body, originalUrl.pathname, seed.serverToday);
+    normalizeVisualPayload(body, originalUrl.pathname, seed.serverToday, page);
     await route.fulfill({
       status: response.status(),
       contentType: "application/json",
@@ -219,12 +303,14 @@ function frozenDateOffset(days: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function normalizeVisualPayload(body: unknown, url: string, serverToday: string) {
+function normalizeVisualPayload(body: unknown, url: string, serverToday: string, page: Page) {
   if (!body || typeof body !== "object") return;
   const data = body as Record<string, unknown>;
 
   if (typeof data.as_of_date === "string") data.as_of_date = PHASE3_TODAY;
-  if (url.includes("/settings/temporal")) data.week_start = "monday";
+  if (url.includes("/settings/temporal") && isPhase3VisualFixtureRoute(page)) {
+    data.week_start = "monday";
+  }
   if (typeof data.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.date)) {
     data.date = shiftCivilDate(data.date, serverToday);
   }
@@ -329,74 +415,6 @@ function normalizeVisualPayload(body: unknown, url: string, serverToday: string)
     });
   }
 
-  if (url.includes("/planning/weekly")) {
-    data.week_start = "2026-07-20";
-    data.week_end = "2026-07-26";
-    data.created_count = 0;
-    data.completed_count = 9;
-    data.cancelled_count = 0;
-    data.completion_rate_percent = 100;
-    data.streak_days = 7;
-    data.daily = [1, 3, 2, 3, 0, 0, 0].map((completed, index) => ({
-      date: frozenDateOffset(index - 3),
-      completed,
-      created: 0,
-    }));
-    data.busiest_day = "2026-07-21";
-    data.dominant_completion_bucket = "morning";
-    data.overdue_task_ids = Array.isArray(data.overdue_task_ids)
-      ? data.overdue_task_ids.slice(0, 2)
-      : [];
-    data.overdue_tasks = Array.isArray(data.overdue_tasks) ? data.overdue_tasks.slice(0, 2) : [];
-    data.neglected_projects = [seed.projects.website, seed.projects.docs].map((projectId) => ({
-      project_id: projectId,
-      reason: "overdue",
-      overdue_count: 1,
-    }));
-    data.suggestions = [];
-    const titles = [
-      "Document the completion API contract",
-      "Add voice activity detection",
-      "Migrate to Drizzle ORM",
-      "Build command palette",
-      "Write setup guide",
-    ];
-    const accomplishments =
-      Array.isArray(data.top_accomplishment_tasks) && data.top_accomplishment_tasks.length >= 5
-        ? data.top_accomplishment_tasks.slice(0, 5)
-        : titles.map((title, index) => ({
-            id: `visual-accomplishment-${index + 1}`,
-            title,
-            priority: index === 0 ? 2 : null,
-          }));
-    for (let index = 0; index < accomplishments.length; index += 1) {
-      const task = accomplishments[index];
-      if (task && typeof task === "object") {
-        (task as Record<string, unknown>).title = titles[index];
-        if (index === 0) (task as Record<string, unknown>).priority = 2;
-      }
-    }
-    data.top_accomplishment_tasks = accomplishments;
-  }
-
-  if (url.includes("/stats")) {
-    const completions = [2, 1, 3, 1, 3, 2, 3];
-    data.days = completions.map((value, index) => ({
-      date: frozenDateOffset(index - 6),
-      completions: value,
-      creations: value,
-      completion_minutes: value * 100,
-    }));
-    data.total_completions = 15;
-    data.total_creations = 15;
-    data.total_completion_minutes = 1500;
-    data.current_streak_days = 7;
-    data.estimate_accuracy_percent = 88;
-    data.estimate_accuracy_samples = 14;
-    data.average_estimated_minutes = 108;
-    data.average_actual_minutes = 108;
-  }
-
   if (url.includes("/tasks/") && Array.isArray(data.labels)) {
     const labelOrder = new Map([
       ["review", 0],
@@ -433,7 +451,7 @@ function normalizeVisualPayload(body: unknown, url: string, serverToday: string)
     shiftTaskFields(data.task as Record<string, unknown>, serverToday);
   }
   if (data.snapshot && typeof data.snapshot === "object") {
-    normalizeVisualPayload(data.snapshot, url, serverToday);
+    normalizeVisualPayload(data.snapshot, url, serverToday, page);
   }
   if (Array.isArray(data.time_slots)) {
     for (const slot of data.time_slots) {
@@ -573,7 +591,7 @@ async function selectTimeblockingMode(page: Page, mode: "Day" | "Week") {
 
 // ── Scene 1: Calendar Day — desktop light ───────────────────────────────────
 test("visual phase-3: calendar-day-desktop-light", async ({ page }) => {
-  await openView(page, "/calendar", "light");
+  await openView(page, "/calendar?visual-fixture=phase-3", "light");
   await selectCalendarMode(page, "Day");
   await expect(page.getByText("Review accessibility audit findings").first()).toBeVisible({
     timeout: 15_000,
@@ -590,7 +608,7 @@ test("visual phase-3: calendar-day-desktop-light", async ({ page }) => {
 
 // ── Scene 2: Calendar Week — desktop dark ───────────────────────────────────
 test("visual phase-3: calendar-week-desktop-dark", async ({ page }) => {
-  await openView(page, "/calendar", "dark");
+  await openView(page, "/calendar?visual-fixture=phase-3", "dark");
   await selectCalendarMode(page, "Week");
   await expect(page.getByText("Publish plugin author guide").first()).toBeVisible({
     timeout: 15_000,
@@ -603,7 +621,7 @@ test("visual phase-3: calendar-week-desktop-dark", async ({ page }) => {
 
 // ── Scene 3: Calendar Month — mobile light ──────────────────────────────────
 test("visual phase-3: calendar-month-mobile-light", async ({ page }) => {
-  await openView(page, "/calendar", "light", MOBILE);
+  await openView(page, "/calendar?visual-fixture=phase-3", "light", MOBILE);
   await selectCalendarMode(page, "Month");
   await expect(page.getByRole("button", { name: "Today", exact: true }).first()).toBeVisible({
     timeout: 15_000,
@@ -660,7 +678,7 @@ test("visual phase-3: end-of-day-desktop-dark", async ({ page }) => {
 
 // ── Scene 7: Weekly Review — desktop light ──────────────────────────────────
 test("visual phase-3: weekly-review-desktop-light", async ({ page }) => {
-  await openView(page, "/today", "light");
+  await openView(page, "/today?visual-fixture=phase-3", "light");
   await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
   await dismissNudges(page);
   await page.getByRole("button", { name: "Weekly Review" }).click();
@@ -716,7 +734,7 @@ test("visual phase-3: task-reminder-recurrence-desktop-light", async ({ page }) 
 
 // ── Scene 10: Stats + Smart Nudge — desktop light ───────────────────────────
 test("visual phase-3: stats-smart-nudge-desktop-light", async ({ page }) => {
-  await openView(page, "/stats", "light");
+  await openView(page, "/stats?visual-fixture=phase-3", "light");
   await expect(page.getByRole("heading", { name: /Productivity/i })).toBeVisible({
     timeout: 15_000,
   });
@@ -739,7 +757,7 @@ test("visual phase-3: stats-smart-nudge-desktop-light", async ({ page }) => {
 
 // ── Scene 11: Timeblocking Day with slots — desktop light ───────────────────
 test("visual phase-3: timeblocking-day-slots-desktop-light", async ({ page }) => {
-  await openView(page, "/timeblocking", "light");
+  await openView(page, "/timeblocking?visual-fixture=phase-3", "light");
   await expect(page.getByTestId("view-mode-selector")).toBeVisible({ timeout: 15_000 });
   await selectTimeblockingMode(page, "Day");
   await expect(page.getByText("Deep work: calendar day polish").first()).toBeVisible({
@@ -756,7 +774,7 @@ test("visual phase-3: timeblocking-day-slots-desktop-light", async ({ page }) =>
 
 // ── Scene 12: Timeblocking Week — desktop dark ──────────────────────────────
 test("visual phase-3: timeblocking-week-desktop-dark", async ({ page }) => {
-  await openView(page, "/timeblocking", "dark");
+  await openView(page, "/timeblocking?visual-fixture=phase-3", "dark");
   await expect(page.getByTestId("view-mode-selector")).toBeVisible({ timeout: 15_000 });
   await selectTimeblockingMode(page, "Week");
   await expect(page.getByText("Deep work: calendar day polish").first()).toBeVisible({

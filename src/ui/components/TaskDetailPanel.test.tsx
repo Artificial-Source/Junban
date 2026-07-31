@@ -491,6 +491,14 @@ describe("TaskDetailPanel", () => {
     expect(container.textContent).toMatch(/Weekly/);
     expect(container.textContent).toMatch(/2h/);
 
+    // The retained legacy chevrons are visibly present but truthfully unavailable.
+    expect(
+      (container.querySelector('button[aria-label="Previous task"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (container.querySelector('button[aria-label="Next task"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
+
     // Close control retained
     expect(container.querySelector('button[aria-label="Close task details"]')).toBeTruthy();
   });

@@ -19,6 +19,7 @@ import {
   getDopamineMenu,
   getDailyPlan,
   getStats,
+  getWeeklyReview,
   getStoredToken,
   getTemporalSettings,
   hasStoredToken,
@@ -803,6 +804,16 @@ describe("Phase 3 endpoint request shapes", () => {
     });
     expect(result).toHaveProperty("current_streak_days", 7);
     expect(result).toHaveProperty("total_completions", 15);
+  });
+
+  it("uses Rust's default Sunday week start for weekly review", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { revision: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getWeeklyReview();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/v1/planning/weekly");
   });
 
   it("reads planning, temporal settings, stats, and dopamine menu", async () => {

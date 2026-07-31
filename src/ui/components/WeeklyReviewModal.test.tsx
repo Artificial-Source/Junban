@@ -47,8 +47,9 @@ describe("WeeklyReviewModal", () => {
     root = createRoot(container);
     getWeeklyReview.mockReset();
     getWeeklyReview.mockResolvedValue({
-      week_start: "2026-07-12",
-      week_end: "2026-07-18",
+      // The normal API call omits week_start, so this Sunday-based range is Rust's default.
+      week_start: "2026-07-19",
+      week_end: "2026-07-25",
       completed_count: 9,
       created_count: 0,
       cancelled_count: 1,
@@ -58,13 +59,13 @@ describe("WeeklyReviewModal", () => {
       dominant_completion_bucket: "morning",
       completion_time_buckets: { morning: 4, afternoon: 3, evening: 2, night: 0 },
       daily: [
-        { date: "2026-07-12", completed: 1, created: 0 },
-        { date: "2026-07-13", completed: 3, created: 0 },
-        { date: "2026-07-14", completed: 2, created: 0 },
-        { date: "2026-07-15", completed: 3, created: 0 },
-        { date: "2026-07-16", completed: 0, created: 0 },
-        { date: "2026-07-17", completed: 0, created: 0 },
-        { date: "2026-07-18", completed: 0, created: 0 },
+        { date: "2026-07-19", completed: 1, created: 0 },
+        { date: "2026-07-20", completed: 3, created: 0 },
+        { date: "2026-07-21", completed: 2, created: 0 },
+        { date: "2026-07-22", completed: 3, created: 0 },
+        { date: "2026-07-23", completed: 0, created: 0 },
+        { date: "2026-07-24", completed: 0, created: 0 },
+        { date: "2026-07-25", completed: 0, created: 0 },
       ],
       top_accomplishment_ids: [],
       top_accomplishment_tasks: [],
@@ -81,7 +82,7 @@ describe("WeeklyReviewModal", () => {
     container.remove();
   });
 
-  it("renders the server week range and neglected/cancelled reflection sections", async () => {
+  it("renders the Rust default Sunday week range and aggregate facts", async () => {
     await act(async () => {
       root.render(createElement(Host));
     });
@@ -90,7 +91,8 @@ describe("WeeklyReviewModal", () => {
     });
 
     expect(getWeeklyReview).toHaveBeenCalledTimes(1);
-    expect(document.body.textContent).toMatch(/Jul 12 - 18|Jul 12 - Jul 18/);
+    expect(getWeeklyReview).toHaveBeenCalledWith();
+    expect(document.body.textContent).toMatch(/Jul 19 - 25|Jul 19 - Jul 25/);
     expect(document.body.textContent).toContain("Weekly Review");
     expect(document.body.textContent).toContain("Neglected Projects");
     expect(document.body.textContent).toContain("Website Redesign");

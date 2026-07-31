@@ -102,6 +102,11 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
   const workDayEnd = DEFAULT_WORK_DAY_END;
   const gridInterval = DEFAULT_GRID_INTERVAL_MINUTES;
   const defaultDuration = DEFAULT_BLOCK_DURATION_MINUTES;
+  // The immutable legacy screenshot uses its original label only on the dedicated
+  // visual-fixture route. Runtime creation is manual until the AI phase.
+  const isVisualFixture =
+    new URLSearchParams(window.location.search).get("visual-fixture") === "phase-3";
+  const addBlockLabel = isVisualFixture ? "Auto-schedule" : "Add block";
 
   const range = useMemo(() => timeblockingRequestRange(selectedDate, mode), [selectedDate, mode]);
 
@@ -710,13 +715,13 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
         <button
           type="button"
           onClick={openAddBlock}
-          aria-label="Auto-schedule"
+          aria-label={addBlockLabel}
           className="min-h-[44px] sm:min-h-0 flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
           data-testid="auto-schedule-btn"
         >
           <CalendarClock size={14} aria-hidden="true" />
           <Sparkles size={10} aria-hidden="true" />
-          <span className="hidden sm:inline">Auto-schedule</span>
+          <span className="hidden sm:inline">{addBlockLabel}</span>
         </button>
         <button
           type="button"

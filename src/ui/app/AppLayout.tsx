@@ -63,7 +63,9 @@ export function AppLayout() {
   const phase2VisualFixture = isVisualFixture(window.location.search, "phase-2");
   const phase2DetailVisualFixture =
     phase2VisualFixture &&
-    new URLSearchParams(window.location.search).get("phase2-detail-fixture") === "1";
+    ["phase2-detail-fixture", "phase2-legacy-today-fixture"].some(
+      (key) => new URLSearchParams(window.location.search).get(key) === "1",
+    );
   const { route, view, navigate, focusModeOpen, setFocusModeOpen } = useRouting();
   const {
     catalog,

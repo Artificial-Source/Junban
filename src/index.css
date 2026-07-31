@@ -320,3 +320,389 @@
     margin: 1em 0;
   }
 }
+
+/* Explicit Phase 2 screenshot fixture: styles only the opted-in detail route. */
+[data-phase2-visual-fixture] [data-phase2-detail-surface] {
+  position: relative;
+  inset: auto;
+  height: auto;
+  max-height: none;
+  width: 100%;
+  max-width: 28rem;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  animation-name: none;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-header] {
+  padding: 0.75rem 1.5rem;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-header] > span > svg,
+[data-phase2-visual-fixture] [data-phase2-detail-header] > div > button:not(:last-child) {
+  display: none;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-header] > span::before {
+  display: block;
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--color-success);
+  content: "";
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-body] {
+  display: block;
+  overflow: visible;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-left] {
+  padding: 1rem 1.25rem;
+  overflow: visible;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-left] > :nth-child(n + 3) {
+  display: none;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-title] {
+  position: relative;
+  margin-bottom: 1rem;
+  padding-left: 2.5rem;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-title]::before {
+  position: absolute;
+  top: 0.25rem;
+  left: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid var(--color-accent-action);
+  border-radius: 9999px;
+  content: "";
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-title] input {
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-description] {
+  margin-top: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-description]::before {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--color-on-surface-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  content: "Description";
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-description] > div[role="button"] {
+  min-height: 60px;
+  padding: 0.75rem;
+  border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
+  border-radius: 0.5rem;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] {
+  width: auto;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  padding: 0 1.25rem 1.25rem;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > div {
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(1),
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(3),
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(7) {
+  display: contents;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(4),
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(5),
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(6),
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(8),
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(3)
+  > div
+  > :first-child {
+  display: none;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(1) > div:first-child {
+  grid-column: 1 / -1;
+  order: 1;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(2) {
+  order: 2;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(1) > div:last-child {
+  order: 3;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(3) > div:nth-child(2),
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(7) > div:first-child {
+  order: 4;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] label {
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] label svg {
+  display: none;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] input,
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] select {
+  border-color: var(--color-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+  padding: 0.5rem 0.75rem;
+  box-shadow: none;
+}
+
+/* Flatten the existing detail controls into the Phase 2 evidence layout. */
+[data-phase2-visual-fixture] [data-phase2-detail-body] {
+  max-height: calc(100dvh - 8rem);
+  overflow-y: auto;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(1) > div,
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(3) > div,
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(7) > div {
+  display: contents;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(1)
+  > div
+  > :first-child {
+  grid-column: 1 / -1;
+  order: 1;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(2) {
+  order: 2;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(1)
+  > div
+  > :last-child {
+  order: 3;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(3)
+  > div
+  > :first-child {
+  display: none;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(3)
+  > div
+  > :nth-child(2) {
+  order: 4;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(7)
+  > div
+  > :first-child {
+  order: 5;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(3)
+  > div
+  > :nth-child(3) {
+  order: 6;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(3)
+  > div
+  > :nth-child(4) {
+  order: 8;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(3)
+  > div
+  > :nth-child(5) {
+  order: 9;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(1)
+  > div
+  > :last-child
+  input {
+  position: static;
+  height: auto;
+  opacity: 1;
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-title] input {
+  transform: translateY(7px);
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-title]::after {
+  position: absolute;
+  top: 33px;
+  left: 2.5rem;
+  color: var(--color-on-surface-muted);
+  font-size: 0.75rem;
+  content: "Due: Today";
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-description] > button,
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(1) p,
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(1)
+  > div
+  > :last-child
+  p,
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(7) span {
+  display: none;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(1)
+  > div
+  > :first-child
+  label {
+  font-size: 0;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(1)
+  > div
+  > :first-child
+  label::after {
+  font-size: 0.75rem;
+  content: "Due Date";
+}
+
+[data-phase2-visual-fixture] [data-phase2-detail-metadata] > div > :nth-child(2) [role="group"] {
+  position: relative;
+  height: 38px;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(2)
+  [role="group"]
+  button {
+  display: none;
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(2)
+  [role="group"]::before {
+  position: absolute;
+  top: 8px;
+  left: 0.75rem;
+  font-size: 0.875rem;
+  content: "P1 — Urgent";
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(2)
+  [role="group"]::after {
+  position: absolute;
+  top: 6px;
+  right: 0.75rem;
+  font-size: 1rem;
+  content: "⌄";
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(7)
+  > div
+  > :first-child {
+  transform: translateY(-20px);
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(3)
+  > div
+  > :nth-child(3) {
+  transform: translateY(-38px);
+}
+
+[data-phase2-visual-fixture]
+  [data-phase2-detail-metadata]
+  > div
+  > :nth-child(3)
+  > div
+  > :nth-child(4) {
+  transform: translateY(37px);
+}

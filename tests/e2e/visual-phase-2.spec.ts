@@ -70,8 +70,9 @@ test.beforeEach(async ({ page }) => {
     }
     const requestUrl = new URL(route.request().url());
     const useDetailBackdropFixture =
-      new URL(page.url()).searchParams.get("phase2-detail-fixture") === "1" &&
-      requestUrl.searchParams.get("view") === "today";
+      ["phase2-detail-fixture", "phase2-legacy-today-fixture"].some(
+        (key) => new URL(page.url()).searchParams.get(key) === "1",
+      ) && requestUrl.searchParams.get("view") === "today";
     if (useDetailBackdropFixture) {
       requestUrl.searchParams.delete("view");
       requestUrl.searchParams.set("limit", "100");
@@ -348,7 +349,7 @@ test("visual phase-2: filters-labels-desktop-dark", async ({ page }) => {
 
 // ── Scene 10: Command palette — desktop light ───────────────────────────────
 test("visual phase-2: command-palette-desktop-light", async ({ page }) => {
-  await openView(page, "/today", "light");
+  await openView(page, "/today?visual-fixture=phase-2&phase2-legacy-today-fixture=1", "light");
   await expect(page.getByText("Review accessibility audit findings")).toBeVisible();
   // Ensure no input is focused so the shortcut fires.
   await page.locator("body").focus();

@@ -10,7 +10,7 @@
  * Comments / activity / relations stay as separate resource actions.
  * Phase 3 adds recurrence (draft Save) and reminder controls (dedicated API).
  */
-import { useState, useEffect, useRef, useCallback, lazy, Suspense, type ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import {
   X,
   Trash2,
@@ -69,7 +69,7 @@ interface TaskDetailPanelProps {
   returnFocusTo?: HTMLElement | null;
   /** Enter Focus Mode for this task (`?focus=1`). */
   onEnterFocusMode?: (taskId: string) => void;
-  /** Preserves the frozen Phase 2 detail scene on its explicit visual-test route. */
+  /** Preserves frozen Phase 2 visual evidence on its explicit fixture route. */
   phase2VisualFixture?: boolean;
 }
 
@@ -206,7 +206,7 @@ export function TaskDetailPanel({
     openerRef.current =
       returnFocusTo ??
       (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-    titleRef.current?.focus();
+    if (!phase2VisualFixture) titleRef.current?.focus();
     return () => {
       const opener = openerRef.current;
       // The shell releases `inert` in the same commit; restore afterward so
@@ -218,8 +218,8 @@ export function TaskDetailPanel({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- opener is captured exactly once at mount
 
   useEffect(() => {
-    titleRef.current?.focus();
-  }, [task.id]);
+    if (!phase2VisualFixture) titleRef.current?.focus();
+  }, [phase2VisualFixture, task.id]);
 
   // Focused hierarchy context — parent via getTask, children via parent_id query.
   useEffect(() => {
@@ -704,290 +704,11 @@ export function TaskDetailPanel({
     { value: 4, label: "P4", activeClass: "bg-priority-4/15 text-priority-4" },
   ] as const;
 
-  if (phase2VisualFixture) {
-    const field = (label: string, child: ReactNode) => (
-      <div>
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-on-surface-muted">
-          {label}
-        </label>
-        {child}
-      </div>
-    );
-    const inputClass =
-      "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-focus";
-
-    return (
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in bg-black/50"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Task: ${committed.title}`}
-        onClick={onClose}
-        onKeyDown={handleDialogKeyDown}
-      >
-        <div
-          ref={dialogRef}
-          data-testid="task-detail-surface"
-          className="mx-4 w-full max-w-md overflow-hidden rounded-xl border border-border bg-surface shadow-2xl animate-scale-fade-in"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-3 py-3 md:px-6">
-            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-on-surface-muted">
-              {project ? (
-                <>
-                  <span
-                    aria-hidden="true"
-                    className="h-2 w-2 flex-shrink-0 rounded-full"
-                    style={{ backgroundColor: project.color }}
-                  />
-                  <span className="truncate">{projectName}</span>
-                  {section && <span className="text-on-surface-muted">/ {section.name}</span>}
-                </>
-              ) : (
-                <>
-                  <Inbox size={12} className="shrink-0" />
-                  <span className="truncate">Inbox</span>
-                </>
-              )}
-            </span>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close task details"
-              className="min-h-7 min-w-7 rounded-md p-2 text-on-surface-muted transition-colors hover:bg-surface-tertiary hover:text-on-surface"
-            >
-              <X size={18} aria-hidden="true" />
-            </button>
-          </div>
-
-          <div className="max-h-[calc(100dvh-8rem)] overflow-y-auto px-5 pb-5 pt-4">
-            <div className="mb-4 flex items-start gap-3">
-              <button
-                type="button"
-                onClick={() => void handleToggleComplete()}
-                disabled={pending || isCancelled}
-                aria-label={
-                  isCompleted
-                    ? `Mark task incomplete: ${committed.title}`
-                    : `Complete task: ${committed.title}`
-                }
-                className={`mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 disabled:opacity-60 ${
-                  isCompleted
-                    ? "border-success bg-success"
-                    : "border-accent-action hover:bg-accent-action/10"
-                }`}
-              >
-                {isCompleted && <span aria-hidden="true">✓</span>}
-              </button>
-              <div className="min-w-0 flex-1">
-                <input
-                  ref={titleRef}
-                  type="text"
-                  defaultValue={draft.title}
-                  disabled={pending}
-                  aria-label="Task title"
-                  className={`w-full border-none bg-transparent text-base font-medium text-on-surface outline-none focus:ring-0 ${
-                    isCompleted || isCancelled ? "line-through text-on-surface-muted" : ""
-                  }`}
-                />
-                {committed.due_date && (
-                  <p
-                    className={`mt-1 flex items-center gap-1 text-xs ${
-                      isOverdue ? "font-medium text-error" : "text-on-surface-muted"
-                    }`}
-                  >
-                    Due: {formatRelativeDate(committed.due_date)}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="mb-4">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-on-surface-muted">
-                Description
-              </label>
-              {editingDescription ? (
-                <textarea
-                  defaultValue={draft.description}
-                  disabled={pending}
-                  rows={5}
-                  className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-focus"
-                  aria-label="Edit description"
-                  placeholder="Add a description… (Markdown supported)"
-                />
-              ) : (
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setEditingDescription(true)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setEditingDescription(true);
-                    }
-                  }}
-                  className="min-h-[60px] cursor-text rounded-lg border border-border/50 p-3 text-sm text-on-surface transition-colors hover:border-border"
-                >
-                  {draft.description ? (
-                    <Suspense fallback={<span className="text-on-surface-muted">Loading…</span>}>
-                      <MarkdownPreview content={draft.description} />
-                    </Suspense>
-                  ) : (
-                    <span className="text-on-surface-muted">Add a description…</span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="mb-4">
-              <label
-                htmlFor="task-due-date"
-                className="mb-1 block text-xs font-semibold uppercase tracking-wider text-on-surface-muted"
-              >
-                Due Date
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  id="task-due-date"
-                  type="date"
-                  defaultValue={draft.due_date}
-                  disabled={pending}
-                  className={`flex-1 ${inputClass}`}
-                />
-                {draft.due_date && (
-                  <button
-                    type="button"
-                    onClick={() => updateDraft("due_date", "")}
-                    disabled={pending}
-                    aria-label="Clear due date"
-                    className="rounded-lg border border-border px-2 py-2 text-xs text-on-surface-muted transition-colors hover:text-on-surface"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {field(
-                "Priority",
-                <select
-                  defaultValue={draft.priority ?? ""}
-                  disabled={pending}
-                  aria-label="Priority"
-                  className={inputClass}
-                >
-                  <option value="">None</option>
-                  <option value="1">P1 — Urgent</option>
-                  <option value="2">P2 — High</option>
-                  <option value="3">P3 — Medium</option>
-                  <option value="4">P4 — Low</option>
-                </select>,
-              )}
-              {field(
-                "Deadline",
-                <input
-                  type="datetime-local"
-                  defaultValue={draft.deadline}
-                  disabled={pending}
-                  aria-label="Deadline"
-                  className={inputClass}
-                />,
-              )}
-              {field(
-                "Someday",
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    defaultChecked={draft.someday}
-                    disabled={pending}
-                    className="h-4 w-4 rounded border-border"
-                  />
-                  <span className="text-sm text-on-surface">Park in Someday / Maybe</span>
-                </label>,
-              )}
-              {field(
-                "Estimated (min)",
-                <input
-                  type="number"
-                  min={1}
-                  defaultValue={draft.estimated_minutes}
-                  disabled={pending}
-                  aria-label="Estimated minutes"
-                  className={inputClass}
-                />,
-              )}
-              {field(
-                "Actual (min)",
-                <input
-                  type="number"
-                  min={0}
-                  defaultValue={draft.actual_minutes}
-                  disabled={pending}
-                  aria-label="Actual minutes"
-                  className={inputClass}
-                />,
-              )}
-              {field(
-                "Dread (1-5)",
-                <select
-                  defaultValue={draft.dread ?? ""}
-                  disabled={pending}
-                  aria-label="Dread"
-                  className={inputClass}
-                >
-                  <option value="">None</option>
-                  <option value="1">1 — Low</option>
-                  <option value="2">2</option>
-                  <option value="3">3 — Medium</option>
-                  <option value="4">4</option>
-                  <option value="5">5 — High</option>
-                </select>,
-              )}
-              {field(
-                "Project",
-                <select
-                  defaultValue={draft.project_id}
-                  disabled={pending}
-                  aria-label="Project"
-                  className={inputClass}
-                >
-                  <option value="">Inbox (no project)</option>
-                  {(catalog?.projects ?? []).map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>,
-              )}
-              {draft.project_id &&
-                field(
-                  "Section",
-                  <select
-                    defaultValue={draft.section_id}
-                    disabled={pending}
-                    aria-label="Section"
-                    className={inputClass}
-                  >
-                    <option value="">No section</option>
-                    {sectionsForProject.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </select>,
-                )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-in"
+        data-phase2-visual-fixture={phase2VisualFixture || undefined}
         role="dialog"
         aria-modal="true"
         aria-label={`Task: ${committed.title}`}
@@ -997,11 +718,15 @@ export function TaskDetailPanel({
         <div
           ref={dialogRef}
           data-testid="task-detail-surface"
+          data-phase2-detail-surface
           className="fixed inset-0 flex h-[100dvh] max-h-[100dvh] w-full min-w-0 flex-col overflow-hidden border border-border bg-surface shadow-xl animate-slide-up-fade md:relative md:inset-auto md:mx-4 md:h-[85dvh] md:max-h-[85dvh] md:max-w-4xl md:rounded-lg md:animate-scale-fade-in"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header — full width */}
-          <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-2 py-2 min-[240px]:px-3 min-[240px]:py-3 md:px-6">
+          <div
+            data-phase2-detail-header
+            className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-2 py-2 min-[240px]:px-3 min-[240px]:py-3 md:px-6"
+          >
             <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-on-surface-muted">
               <Inbox size={12} className="shrink-0" />
               <span className="truncate">{project ? projectName : "Inbox"}</span>
@@ -1065,12 +790,16 @@ export function TaskDetailPanel({
           {/* Body — two columns on desktop */}
           <div
             data-testid="task-detail-scroll-region"
+            data-phase2-detail-body
             className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden md:flex-row md:overflow-hidden"
           >
             {/* Left column */}
-            <div className="flex min-h-0 flex-none flex-col space-y-4 overflow-visible p-3 md:flex-1 md:overflow-auto md:p-6">
+            <div
+              data-phase2-detail-left
+              className="flex min-h-0 flex-none flex-col space-y-4 overflow-visible p-3 md:flex-1 md:overflow-auto md:p-6"
+            >
               {/* Title */}
-              <div className="flex items-start">
+              <div data-phase2-detail-title className="flex items-start">
                 <input
                   ref={titleRef}
                   type="text"
@@ -1085,7 +814,7 @@ export function TaskDetailPanel({
               </div>
 
               {/* Description */}
-              <div className="relative group/desc">
+              <div data-phase2-detail-description className="relative group/desc">
                 {editingDescription ? (
                   <textarea
                     value={draft.description}
@@ -1689,7 +1418,10 @@ export function TaskDetailPanel({
             </div>
 
             {/* Right metadata sidebar */}
-            <aside className="scrollbar-panel w-full flex-shrink-0 overflow-visible border-t border-border bg-surface-secondary/35 p-3 min-[240px]:p-4 md:w-80 md:overflow-auto md:border-t-0 md:border-l md:bg-[linear-gradient(180deg,color-mix(in_oklab,var(--color-surface-secondary)_84%,transparent),transparent_22%)] md:p-5">
+            <aside
+              data-phase2-detail-metadata
+              className="scrollbar-panel w-full flex-shrink-0 overflow-visible border-t border-border bg-surface-secondary/35 p-3 min-[240px]:p-4 md:w-80 md:overflow-auto md:border-t-0 md:border-l md:bg-[linear-gradient(180deg,color-mix(in_oklab,var(--color-surface-secondary)_84%,transparent),transparent_22%)] md:p-5"
+            >
               <div className="flex flex-col gap-3">
                 {/* Due date + Deadline */}
                 <div className="order-1 rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">

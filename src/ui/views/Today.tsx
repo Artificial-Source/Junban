@@ -51,7 +51,7 @@ export function Today({
   // Use server as_of_date if available, otherwise browser local date
   const effectiveToday = asOfDate ?? today;
 
-  const showingPhase2DetailFixture = phase2DetailVisualFixture && selectedTaskId !== null;
+  const showingPhase2DetailFixture = phase2DetailVisualFixture;
   const overdueTasks = useMemo(
     () =>
       showingPhase2DetailFixture

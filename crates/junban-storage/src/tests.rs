@@ -4488,3 +4488,239 @@ async fn timeblock_missing_task_and_project_refs_are_not_found() {
         RepositoryError::NotFound
     );
 }
+
+fn inverted_civil_range(date: &str) -> junban_domain::CivilTimeRange {
+    use jiff::civil::Time;
+    // Public field construction bypasses CivilTimeRange::new.
+    junban_domain::CivilTimeRange {
+        date: date.parse().unwrap(),
+        start: Time::constant(11, 0, 0, 0),
+        end: Time::constant(10, 0, 0, 0),
+        time_zone: junban_domain::TimeZoneName::new("UTC").unwrap(),
+    }
+}
+
+#[tokio::test]
+async fn p3_tb_002_delete_time_slot_bumps_linked_block_revision_and_affected_ids() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let slot_id = junban_domain::TimeSlotId::new();
+    repo.create_time_slot(
+        operation(),
+        slot_id,
+        slot_draft("Capacity", "2026-03-08"),
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let block_id = junban_domain::TimeBlockId::new();
+    let mut draft = block_draft("Linked", "2026-03-08");
+    draft.slot_id = Some(slot_id);
+    let created = repo
+        .create_time_block(operation(), block_id, draft, now())
+        .await
+        .unwrap();
+    let created_revision = created.time_block().unwrap().revision;
+
+    let deleted = repo
+        .delete_time_slot(operation(), slot_id, now())
+        .await
+        .unwrap();
+    assert_eq!(deleted.event.event_type.as_str(), "time_slot.deleted");
+    assert_eq!(deleted.event.affected.time_slot_ids, vec![slot_id]);
+    assert_eq!(deleted.event.affected.time_block_ids, vec![block_id]);
+    assert!(deleted.newly_committed);
+
+    let page = repo
+        .list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-08".parse().unwrap(),
+            to: "2026-03-08".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    assert!(page.slots.is_empty());
+    assert_eq!(page.blocks.len(), 1);
+    let block = &page.blocks[0];
+    assert_eq!(block.id, block_id);
+    assert!(block.slot_id.is_none());
+    assert_eq!(block.revision, deleted.event.revision);
+    assert_ne!(block.revision, created_revision);
+    assert_eq!(block.updated_at, now());
+}
+
+#[tokio::test]
+async fn p3_tb_003_delete_project_clears_time_slot_project_with_mutation_revision() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let project_id = ProjectId::new();
+    repo.create_project(operation(), project_id, project_draft("Planning"), now())
+        .await
+        .unwrap();
+
+    let slot_id = junban_domain::TimeSlotId::new();
+    let mut draft = slot_draft("Project slot", "2026-03-08");
+    draft.project_id = Some(project_id);
+    let created = repo
+        .create_time_slot(operation(), slot_id, draft, now())
+        .await
+        .unwrap();
+    let created_revision = created.time_slot().unwrap().revision;
+
+    let deleted = repo
+        .delete_project(operation(), project_id, now())
+        .await
+        .unwrap();
+    assert_eq!(deleted.event.event_type.as_str(), "project.deleted");
+    assert_eq!(deleted.event.affected.project_ids, vec![project_id]);
+    assert_eq!(deleted.event.affected.time_slot_ids, vec![slot_id]);
+
+    let page = repo
+        .list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-08".parse().unwrap(),
+            to: "2026-03-08".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.slots.len(), 1);
+    let slot = &page.slots[0];
+    assert_eq!(slot.id, slot_id);
+    assert!(slot.project_id.is_none());
+    assert_eq!(slot.revision, deleted.event.revision);
+    assert_ne!(slot.revision, created_revision);
+    assert_eq!(slot.updated_at, now());
+}
+
+#[tokio::test]
+async fn p3_tb_004_invalid_civil_ranges_are_rejected_without_durable_rows() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let before = repo.diagnostics().await.unwrap().revision;
+
+    let mut bad_block = block_draft("Bad block", "2026-03-08");
+    bad_block.range = inverted_civil_range("2026-03-08");
+    assert!(
+        matches!(
+            repo.create_time_block(
+                operation(),
+                junban_domain::TimeBlockId::new(),
+                bad_block,
+                now()
+            )
+            .await
+            .unwrap_err(),
+            RepositoryError::Validation(_)
+        ),
+        "create_time_block must reject inverted ranges"
+    );
+
+    let mut bad_slot = slot_draft("Bad slot", "2026-03-08");
+    bad_slot.range = inverted_civil_range("2026-03-08");
+    assert!(
+        matches!(
+            repo.create_time_slot(
+                operation(),
+                junban_domain::TimeSlotId::new(),
+                bad_slot,
+                now()
+            )
+            .await
+            .unwrap_err(),
+            RepositoryError::Validation(_)
+        ),
+        "create_time_slot must reject inverted ranges"
+    );
+
+    // Seed valid rows, then prove patch/set-range reject inverted ranges without writes.
+    let block_id = junban_domain::TimeBlockId::new();
+    repo.create_time_block(
+        operation(),
+        block_id,
+        block_draft("Keep", "2026-03-08"),
+        now(),
+    )
+    .await
+    .unwrap();
+    let slot_id = junban_domain::TimeSlotId::new();
+    repo.create_time_slot(
+        operation(),
+        slot_id,
+        slot_draft("Keep slot", "2026-03-08"),
+        now(),
+    )
+    .await
+    .unwrap();
+    let after_seed = repo.diagnostics().await.unwrap().revision;
+
+    assert!(
+        matches!(
+            repo.patch_time_block(
+                operation(),
+                block_id,
+                junban_app::TimeBlockPatch {
+                    range: Some(inverted_civil_range("2026-03-08")),
+                    ..Default::default()
+                },
+                now(),
+            )
+            .await
+            .unwrap_err(),
+            RepositoryError::Validation(_)
+        ),
+        "patch_time_block must reject inverted ranges"
+    );
+    assert!(
+        matches!(
+            repo.set_time_block_range(
+                operation(),
+                block_id,
+                inverted_civil_range("2026-03-09"),
+                now(),
+            )
+            .await
+            .unwrap_err(),
+            RepositoryError::Validation(_)
+        ),
+        "set_time_block_range must reject inverted ranges"
+    );
+    assert!(
+        matches!(
+            repo.patch_time_slot(
+                operation(),
+                slot_id,
+                junban_app::TimeSlotPatch {
+                    range: Some(inverted_civil_range("2026-03-08")),
+                    ..Default::default()
+                },
+                now(),
+            )
+            .await
+            .unwrap_err(),
+            RepositoryError::Validation(_)
+        ),
+        "patch_time_slot must reject inverted ranges"
+    );
+
+    assert_eq!(repo.diagnostics().await.unwrap().revision, after_seed);
+    assert!(after_seed > before);
+
+    let page = repo
+        .list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-08".parse().unwrap(),
+            to: "2026-03-09".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.blocks.len(), 1);
+    assert_eq!(page.slots.len(), 1);
+    assert_eq!(page.blocks[0].range.date.to_string(), "2026-03-08");
+    assert_eq!(page.blocks[0].range.start.to_string(), "09:00:00");
+    assert_eq!(page.blocks[0].range.end.to_string(), "10:00:00");
+    assert_eq!(page.slots[0].range.start.to_string(), "09:00:00");
+    assert_eq!(page.slots[0].range.end.to_string(), "12:00:00");
+}

@@ -790,6 +790,7 @@ CREATE TABLE time_slots (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     revision INTEGER NOT NULL CHECK (revision > 0),
+    CHECK (start_time < end_time),
     CHECK (recurrence_parent_id IS NULL OR recurrence_parent_id != id)
 );
 CREATE INDEX idx_time_slots_date ON time_slots(civil_date, start_time, id);
@@ -812,6 +813,7 @@ CREATE TABLE time_blocks (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     revision INTEGER NOT NULL CHECK (revision > 0),
+    CHECK (start_time < end_time),
     CHECK (recurrence_parent_id IS NULL OR recurrence_parent_id != id)
 );
 CREATE INDEX idx_time_blocks_date ON time_blocks(civil_date, start_time, id);
@@ -1448,6 +1450,72 @@ mod tests {
                 "missing time_slot_tasks column {required}"
             );
         }
+
+        for table in ["time_blocks", "time_slots"] {
+            let sql: String = connection
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(
+                sql.contains("CHECK (start_time < end_time)"),
+                "{table} missing start_time < end_time check: {sql}"
+            );
+        }
+
+        // Defense-in-depth: inverted civil times cannot land even via raw SQL.
+        let err = connection
+            .execute(
+                "INSERT INTO time_blocks(
+                    id, title, civil_date, start_time, end_time, timezone, locked,
+                    created_at, updated_at, revision
+                 ) VALUES (
+                    'bad-block', 'x', '2026-03-08', '10:00:00', '10:00:00', 'UTC', 0,
+                    '2026-07-28T12:00:00Z', '2026-07-28T12:00:00Z', 1
+                 )",
+                [],
+            )
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error {
+                        code: rusqlite::ErrorCode::ConstraintViolation,
+                        ..
+                    },
+                    _
+                )
+            ),
+            "expected time_blocks range check, got {err:?}"
+        );
+        let err = connection
+            .execute(
+                "INSERT INTO time_slots(
+                    id, title, civil_date, start_time, end_time, timezone,
+                    created_at, updated_at, revision
+                 ) VALUES (
+                    'bad-slot', 'x', '2026-03-08', '11:00:00', '09:00:00', 'UTC',
+                    '2026-07-28T12:00:00Z', '2026-07-28T12:00:00Z', 1
+                 )",
+                [],
+            )
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error {
+                        code: rusqlite::ErrorCode::ConstraintViolation,
+                        ..
+                    },
+                    _
+                )
+            ),
+            "expected time_slots range check, got {err:?}"
+        );
     }
 
     #[test]

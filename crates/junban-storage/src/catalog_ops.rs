@@ -10,7 +10,7 @@ use junban_app::{
 use junban_domain::{
     MAX_BULK_IDS, MarkdownText, OperationId, Project, ProjectId, SavedFilter, SavedFilterId,
     Section, SectionId, Tag, TagId, TagName, Task, TaskActivityAction, TaskId, TaskTitle, Template,
-    TemplateId, ValidationError, validate_project_parent_chain,
+    TemplateId, TimeSlotId, ValidationError, validate_project_parent_chain,
 };
 use rusqlite::{Connection, params};
 use serde::Serialize;
@@ -387,6 +387,7 @@ pub(crate) fn delete_project(
     mutate(c, op, request, now, move |tx, revision| {
         let project = load_project(tx, project_id)?;
         let task_ids = load_task_ids_for_project(tx, project_id)?;
+        let time_slot_ids = load_time_slot_ids_for_project(tx, project_id)?;
         let mut section_ids = Vec::new();
         {
             let mut statement = tx
@@ -443,6 +444,20 @@ pub(crate) fn delete_project(
             }
         }
 
+        // Explicitly clear linked slots so project_id/updated_at/revision land on
+        // this mutation (do not rely on FK ON DELETE SET NULL alone).
+        let revision_i64 =
+            i64::try_from(revision).map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        for slot_id in &time_slot_ids {
+            tx.execute(
+                "UPDATE time_slots
+                 SET project_id = NULL, updated_at = ?1, revision = ?2
+                 WHERE id = ?3",
+                params![now.to_string(), revision_i64, slot_id.to_string()],
+            )
+            .map_err(storage_error)?;
+        }
+
         // Child projects become roots under the deleted project's former parent.
         tx.execute(
             "UPDATE projects SET parent_id = ?1, updated_at = ?2 WHERE parent_id = ?3",
@@ -466,6 +481,7 @@ pub(crate) fn delete_project(
                 project_ids: vec![project_id],
                 section_ids,
                 task_ids,
+                time_slot_ids,
                 ..AffectedIds::default()
             },
             resync: ResyncScope::BOTH,
@@ -476,6 +492,29 @@ pub(crate) fn delete_project(
             uncomplete_outcome: None,
         })
     })
+}
+
+fn load_time_slot_ids_for_project(
+    tx: &rusqlite::Transaction<'_>,
+    project_id: ProjectId,
+) -> Result<Vec<TimeSlotId>, RepositoryError> {
+    let mut statement = tx
+        .prepare("SELECT id FROM time_slots WHERE project_id = ?1 ORDER BY id")
+        .map_err(storage_error)?;
+    let rows = statement
+        .query_map([project_id.to_string()], |row| {
+            let id: String = row.get(0)?;
+            parse_sql(id, TimeSlotId::parse)
+        })
+        .map_err(storage_error)?;
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row.map_err(storage_error)?);
+        if ids.len() > MAX_BULK_IDS {
+            return Err(RepositoryError::OperationTooLarge);
+        }
+    }
+    Ok(ids)
 }
 
 pub(crate) fn create_section(

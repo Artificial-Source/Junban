@@ -36,18 +36,28 @@ impl CivilTimeRange {
         end: Time,
         time_zone: TimeZoneName,
     ) -> Result<Self, ValidationError> {
-        if end <= start {
+        let range = Self {
+            date,
+            start,
+            end,
+            time_zone,
+        };
+        range.validate()?;
+        Ok(range)
+    }
+
+    /// Rejects same-day ranges where end is not strictly after start.
+    ///
+    /// Public/serde construction can bypass [`Self::new`]; call this before any
+    /// durable block/slot write that accepts a caller-supplied range.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if self.end <= self.start {
             return Err(ValidationError::Invalid {
                 field: "time_range",
                 reason: "end must be after start on the same civil date",
             });
         }
-        Ok(Self {
-            date,
-            start,
-            end,
-            time_zone,
-        })
+        Ok(())
     }
 }
 
@@ -368,6 +378,33 @@ mod tests {
             .is_err()
         );
         assert!(range(9, 10).start < range(9, 10).end);
+    }
+
+    #[test]
+    fn civil_time_range_validate_rejects_public_and_serde_bypasses() {
+        let zone = TimeZoneName::new("UTC").unwrap();
+        // Direct field construction bypasses `new`.
+        let inverted = CivilTimeRange {
+            date: date(2026, 3, 8),
+            start: Time::constant(11, 0, 0, 0),
+            end: Time::constant(10, 0, 0, 0),
+            time_zone: zone.clone(),
+        };
+        assert_eq!(
+            inverted.validate().unwrap_err(),
+            ValidationError::Invalid {
+                field: "time_range",
+                reason: "end must be after start on the same civil date",
+            }
+        );
+
+        // Serde public shape also bypasses `new`.
+        let deserialized: CivilTimeRange = serde_json::from_str(
+            r#"{"date":"2026-03-08","start":"10:00:00","end":"10:00:00","time_zone":"UTC"}"#,
+        )
+        .unwrap();
+        assert!(deserialized.validate().is_err());
+        assert!(range(9, 17).validate().is_ok());
     }
 
     #[test]

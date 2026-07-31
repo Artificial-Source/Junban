@@ -191,6 +191,7 @@ pub(crate) fn create_time_block(
 ) -> Result<CommittedMutation, RepositoryError> {
     let request = canonical_json(&Req::CreateTimeBlock { draft: &draft })?;
     mutate(c, op, request, now, move |tx, revision| {
+        ensure_civil_range(&draft.range)?;
         validate_block_refs(tx, draft.task_id, draft.slot_id)?;
         let block = TimeBlock::from_draft(block_id, draft, now, revision);
         insert_time_block(tx, &block)?;
@@ -212,6 +213,7 @@ pub(crate) fn patch_time_block(
     mutate(c, op, request, now, move |tx, revision| {
         let mut block = load_time_block(tx, block_id)?;
         apply_block_patch(&mut block, &patch)?;
+        ensure_civil_range(&block.range)?;
         validate_block_refs(tx, block.task_id, block.slot_id)?;
         block.updated_at = now;
         block.revision = revision;
@@ -263,6 +265,7 @@ pub(crate) fn create_time_slot(
 ) -> Result<CommittedMutation, RepositoryError> {
     let request = canonical_json(&Req::CreateTimeSlot { draft: &draft })?;
     mutate(c, op, request, now, move |tx, revision| {
+        ensure_civil_range(&draft.range)?;
         if let Some(project_id) = draft.project_id {
             ensure_project_exists(tx, project_id)?;
         }
@@ -286,6 +289,7 @@ pub(crate) fn patch_time_slot(
     mutate(c, op, request, now, move |tx, revision| {
         let mut slot = load_time_slot(tx, slot_id)?;
         apply_slot_patch(&mut slot, &patch)?;
+        ensure_civil_range(&slot.range)?;
         if let Some(project_id) = slot.project_id {
             ensure_project_exists(tx, project_id)?;
         }
@@ -305,9 +309,23 @@ pub(crate) fn delete_time_slot(
     let request = canonical_json(&Req::DeleteTimeSlot {
         slot_id: slot_id.to_string(),
     })?;
-    mutate(c, op, request, now, move |tx, _| {
+    mutate(c, op, request, now, move |tx, revision| {
         let _ = load_time_slot(tx, slot_id)?;
-        // ON DELETE SET NULL clears block.slot_id; membership rows cascade.
+        // Explicitly clear linked blocks so slot_id, updated_at, and revision
+        // all land on this mutation (do not rely on FK ON DELETE SET NULL alone).
+        let time_block_ids = load_block_ids_for_slot(tx, slot_id)?;
+        let revision_i64 =
+            i64::try_from(revision).map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        for block_id in &time_block_ids {
+            tx.execute(
+                "UPDATE time_blocks
+                 SET slot_id = NULL, updated_at = ?1, revision = ?2
+                 WHERE id = ?3",
+                params![now.to_string(), revision_i64, block_id.to_string()],
+            )
+            .map_err(storage_error)?;
+        }
+        // Membership rows still cascade with the slot row.
         tx.execute(
             "DELETE FROM time_slots WHERE id = ?1",
             [slot_id.to_string()],
@@ -319,6 +337,7 @@ pub(crate) fn delete_time_slot(
             snapshot: None,
             affected: AffectedIds {
                 time_slot_ids: vec![slot_id],
+                time_block_ids,
                 ..AffectedIds::default()
             },
             resync: ResyncScope::NONE,
@@ -413,6 +432,7 @@ pub(crate) fn set_time_block_range(
         range: &range,
     })?;
     mutate(c, op, request, now, move |tx, revision| {
+        ensure_civil_range(&range)?;
         let mut block = load_time_block(tx, block_id)?;
         block.range = range;
         block.updated_at = now;
@@ -514,6 +534,33 @@ fn load_replan_eligible_ids(
         )
         .map_err(storage_error)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(storage_error)
+}
+
+fn ensure_civil_range(range: &CivilTimeRange) -> Result<(), RepositoryError> {
+    range.validate().map_err(validation)
+}
+
+fn load_block_ids_for_slot(
+    tx: &Transaction<'_>,
+    slot_id: TimeSlotId,
+) -> Result<Vec<TimeBlockId>, RepositoryError> {
+    let mut statement = tx
+        .prepare("SELECT id FROM time_blocks WHERE slot_id = ?1 ORDER BY id")
+        .map_err(storage_error)?;
+    let rows = statement
+        .query_map([slot_id.to_string()], |row| {
+            let raw: String = row.get(0)?;
+            parse_sql(raw, TimeBlockId::parse)
+        })
+        .map_err(storage_error)?;
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row.map_err(storage_error)?);
+        if ids.len() > MAX_BULK_IDS {
+            return Err(RepositoryError::OperationTooLarge);
+        }
+    }
+    Ok(ids)
 }
 
 fn validate_block_refs(

@@ -4,11 +4,12 @@
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  MutationResponse,
-  TemporalSettingsResponse,
-  TimeBlockDto,
-  TimeSlotDto,
+import {
+  ApiError,
+  type MutationResponse,
+  type TemporalSettingsResponse,
+  type TimeBlockDto,
+  type TimeSlotDto,
 } from "../api/client";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -526,6 +527,27 @@ describe("Timeblocking view", () => {
     await flush();
     expect(patchTimeBlock).toHaveBeenCalled();
     expect(patchTimeBlock.mock.calls.at(-1)![0]).toBe("block-series");
+  });
+
+  it("keeps the schedule usable when the bounded replan preview overflows", async () => {
+    previewReplanTimeBlocks.mockRejectedValueOnce(
+      new ApiError("Too many replan candidates", {
+        status: 413,
+        code: "payload_too_large",
+        retryable: false,
+        requestId: "req-overflow",
+      }),
+    );
+
+    render(createElement(Timeblocking, {}));
+    await flush();
+
+    expect(container.querySelector('[data-testid="time-block-block-1:2026-07-23"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="time-slot-slot-1:2026-07-23"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="replan-banner"]')).toBeNull();
+    expect(container.querySelector('[data-testid="replan-unavailable"]')?.textContent).toContain(
+      "more than 500 past blocks",
+    );
   });
 
   it("surfaces locked replan semantics and awaits replan failures", async () => {

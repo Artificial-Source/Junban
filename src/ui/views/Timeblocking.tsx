@@ -86,6 +86,7 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
   const [blocks, setBlocks] = useState<TimeBlockDto[]>([]);
   const [slots, setSlots] = useState<TimeSlotDto[]>([]);
   const [replanPreview, setReplanPreview] = useState<ReplanTimeBlocksPreviewResponse | null>(null);
+  const [replanUnavailable, setReplanUnavailable] = useState<string | null>(null);
   const [settings, setSettings] = useState<TemporalSettingsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -143,11 +144,10 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
       // Blocks support inclusive from/to. Slots are single-date in the typed API,
       // so fan out one request per civil day in the visible window.
       const slotDates = civilDatesInRange(range.from, range.to);
-      const [blockPage, slotPages, temporal, preview] = await Promise.all([
+      const [blockPage, slotPages, temporal] = await Promise.all([
         listTimeBlocks({ from: range.from, to: range.to }),
         Promise.all(slotDates.map((date) => listTimeSlots({ date }))),
         getTemporalSettings(),
-        previewReplanTimeBlocks(),
       ]);
       if (seq !== requestSeq.current) return;
       const mergedSlots = new Map<string, TimeSlotDto>();
@@ -157,13 +157,28 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
       setBlocks(blockPage.time_blocks);
       setSlots([...mergedSlots.values()]);
       setSettings(temporal);
-      setReplanPreview(preview);
+
+      try {
+        const preview = await previewReplanTimeBlocks();
+        if (seq !== requestSeq.current) return;
+        setReplanPreview(preview);
+        setReplanUnavailable(null);
+      } catch (caught) {
+        if (seq !== requestSeq.current) return;
+        setReplanPreview(null);
+        setReplanUnavailable(
+          caught instanceof ApiError && caught.status === 413
+            ? "Automatic replan is unavailable because more than 500 past blocks need attention. Review or remove some blocks first."
+            : "Automatic replan is temporarily unavailable. Your schedule is still available.",
+        );
+      }
     } catch (caught) {
       if (seq !== requestSeq.current) return;
       setError(caught instanceof ApiError ? caught.message : "Could not load timeblocking.");
       setBlocks([]);
       setSlots([]);
       setReplanPreview(null);
+      setReplanUnavailable(null);
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
@@ -618,6 +633,15 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
       aria-busy={loading || mutationPending || undefined}
       data-testid="timeblocking-view"
     >
+      {replanUnavailable && (
+        <div
+          className="border-b border-warning/30 bg-warning/10 px-4 py-2 text-sm text-on-surface"
+          role="status"
+          data-testid="replan-unavailable"
+        >
+          {replanUnavailable}
+        </div>
+      )}
       <ReplanBanner
         staleBlocks={replanPreview?.time_blocks ?? []}
         pending={mutationPending}

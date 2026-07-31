@@ -69,8 +69,6 @@ interface TaskDetailPanelProps {
   returnFocusTo?: HTMLElement | null;
   /** Enter Focus Mode for this task (`?focus=1`). */
   onEnterFocusMode?: (taskId: string) => void;
-  /** Preserves frozen Phase 2 visual evidence on its explicit fixture route. */
-  phase2VisualFixture?: boolean;
 }
 
 export function TaskDetailPanel({
@@ -79,7 +77,6 @@ export function TaskDetailPanel({
   onOpenFullPage,
   returnFocusTo,
   onEnterFocusMode,
-  phase2VisualFixture = false,
 }: TaskDetailPanelProps) {
   const { catalog, mutationPhase, mutationError, revision } = useWorkspace();
   const {
@@ -206,7 +203,7 @@ export function TaskDetailPanel({
     openerRef.current =
       returnFocusTo ??
       (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-    if (!phase2VisualFixture) titleRef.current?.focus();
+    titleRef.current?.focus();
     return () => {
       const opener = openerRef.current;
       // The shell releases `inert` in the same commit; restore afterward so
@@ -218,8 +215,8 @@ export function TaskDetailPanel({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- opener is captured exactly once at mount
 
   useEffect(() => {
-    if (!phase2VisualFixture) titleRef.current?.focus();
-  }, [phase2VisualFixture, task.id]);
+    titleRef.current?.focus();
+  }, [task.id]);
 
   // Focused hierarchy context — parent via getTask, children via parent_id query.
   useEffect(() => {
@@ -708,7 +705,6 @@ export function TaskDetailPanel({
     <>
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-in"
-        data-phase2-visual-fixture={phase2VisualFixture || undefined}
         role="dialog"
         aria-modal="true"
         aria-label={`Task: ${committed.title}`}
@@ -718,15 +714,11 @@ export function TaskDetailPanel({
         <div
           ref={dialogRef}
           data-testid="task-detail-surface"
-          data-phase2-detail-surface
           className="fixed inset-0 flex h-[100dvh] max-h-[100dvh] w-full min-w-0 flex-col overflow-hidden border border-border bg-surface shadow-xl animate-slide-up-fade md:relative md:inset-auto md:mx-4 md:h-[85dvh] md:max-h-[85dvh] md:max-w-4xl md:rounded-lg md:animate-scale-fade-in"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header — full width */}
-          <div
-            data-phase2-detail-header
-            className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-2 py-2 min-[240px]:px-3 min-[240px]:py-3 md:px-6"
-          >
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-2 py-2 min-[240px]:px-3 min-[240px]:py-3 md:px-6">
             <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-on-surface-muted">
               <Inbox size={12} className="shrink-0" />
               <span className="truncate">{project ? projectName : "Inbox"}</span>
@@ -790,16 +782,12 @@ export function TaskDetailPanel({
           {/* Body — two columns on desktop */}
           <div
             data-testid="task-detail-scroll-region"
-            data-phase2-detail-body
             className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden md:flex-row md:overflow-hidden"
           >
             {/* Left column */}
-            <div
-              data-phase2-detail-left
-              className="flex min-h-0 flex-none flex-col space-y-4 overflow-visible p-3 md:flex-1 md:overflow-auto md:p-6"
-            >
+            <div className="flex min-h-0 flex-none flex-col space-y-4 overflow-visible p-3 md:flex-1 md:overflow-auto md:p-6">
               {/* Title */}
-              <div data-phase2-detail-title className="flex items-start">
+              <div className="flex items-start">
                 <input
                   ref={titleRef}
                   type="text"
@@ -814,7 +802,7 @@ export function TaskDetailPanel({
               </div>
 
               {/* Description */}
-              <div data-phase2-detail-description className="relative group/desc">
+              <div className="relative group/desc">
                 {editingDescription ? (
                   <textarea
                     value={draft.description}
@@ -1418,10 +1406,7 @@ export function TaskDetailPanel({
             </div>
 
             {/* Right metadata sidebar */}
-            <aside
-              data-phase2-detail-metadata
-              className="scrollbar-panel w-full flex-shrink-0 overflow-visible border-t border-border bg-surface-secondary/35 p-3 min-[240px]:p-4 md:w-80 md:overflow-auto md:border-t-0 md:border-l md:bg-[linear-gradient(180deg,color-mix(in_oklab,var(--color-surface-secondary)_84%,transparent),transparent_22%)] md:p-5"
-            >
+            <aside className="scrollbar-panel w-full flex-shrink-0 overflow-visible border-t border-border bg-surface-secondary/35 p-3 min-[240px]:p-4 md:w-80 md:overflow-auto md:border-t-0 md:border-l md:bg-[linear-gradient(180deg,color-mix(in_oklab,var(--color-surface-secondary)_84%,transparent),transparent_22%)] md:p-5">
               <div className="flex flex-col gap-3">
                 {/* Due date + Deadline */}
                 <div className="order-1 rounded-2xl border border-border/70 bg-surface/72 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">

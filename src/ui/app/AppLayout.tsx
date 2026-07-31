@@ -27,6 +27,7 @@ import { ToastContainer } from "../components/Toast";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { ViewSkeleton } from "../components/Skeleton";
 import { TaskDetailPanel } from "../components/TaskDetailPanel";
+import { Phase2TaskDetailVisualFixture } from "../components/Phase2TaskDetailVisualFixture";
 import { CommandPalette, type Command } from "../components/CommandPalette";
 import { SearchModal } from "../components/SearchModal";
 import { QuickAddModal } from "../components/QuickAddModal";
@@ -61,11 +62,13 @@ const MOBILE_DRAWER_ID = "junban-mobile-nav-drawer";
 
 export function AppLayout() {
   const phase2VisualFixture = isVisualFixture(window.location.search, "phase-2");
+  const visualFixtureParams = new URLSearchParams(window.location.search);
+  const phase2TaskDetailVisualFixture =
+    phase2VisualFixture && visualFixtureParams.get("phase2-detail-fixture") === "1";
   const phase2DetailVisualFixture =
     phase2VisualFixture &&
-    ["phase2-detail-fixture", "phase2-legacy-today-fixture"].some(
-      (key) => new URLSearchParams(window.location.search).get(key) === "1",
-    );
+    (phase2TaskDetailVisualFixture ||
+      visualFixtureParams.get("phase2-legacy-today-fixture") === "1");
   const { route, view, navigate, focusModeOpen, setFocusModeOpen } = useRouting();
   const {
     catalog,
@@ -782,16 +785,23 @@ export function AppLayout() {
 
       {/* Task detail panel — stays mounted across background refreshes so drafts survive. */}
       <div className="contents" data-app-overlay>
-        {selectedTaskId && detailTask && detailTask.id === selectedTaskId && (
-          <TaskDetailPanel
-            task={detailTask}
-            onClose={() => setSelectedTaskId(null)}
-            onOpenFullPage={handleOpenFullPage}
-            returnFocusTo={taskDetailOpenerRef.current}
-            onEnterFocusMode={(taskId) => handleEnterFocusMode(taskId)}
-            phase2VisualFixture={phase2VisualFixture}
-          />
-        )}
+        {selectedTaskId &&
+          detailTask &&
+          detailTask.id === selectedTaskId &&
+          (phase2TaskDetailVisualFixture ? (
+            <Phase2TaskDetailVisualFixture
+              task={detailTask}
+              onClose={() => setSelectedTaskId(null)}
+            />
+          ) : (
+            <TaskDetailPanel
+              task={detailTask}
+              onClose={() => setSelectedTaskId(null)}
+              onOpenFullPage={handleOpenFullPage}
+              returnFocusTo={taskDetailOpenerRef.current}
+              onEnterFocusMode={(taskId) => handleEnterFocusMode(taskId)}
+            />
+          ))}
         {selectedTaskId && detailLoading && (!detailTask || detailTask.id !== selectedTaskId) && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"

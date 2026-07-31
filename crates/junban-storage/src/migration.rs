@@ -886,24 +886,43 @@ WHERE status = 'cancelled';
 /// by the snapshot. Rewriting the undo row in the v4 transaction keeps live rows
 /// and their conflict-validation material atomic across migration retries.
 fn reconcile_v3_undo_task_snapshots(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
-    let mut rows = Vec::new();
-    {
-        let mut statement = transaction.prepare(
-            "SELECT source_operation_id, inverse_json, post_image_json FROM operation_undo",
-        )?;
-        let mapped = statement.query_map([], |row| {
+    let mut last_source_operation_id: Option<String> = None;
+    loop {
+        let read_payload = |row: &rusqlite::Row<'_>| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
             ))
-        })?;
-        for row in mapped {
-            rows.push(row?);
-        }
-    }
+        };
+        let row = if let Some(last_source_operation_id) = last_source_operation_id.as_deref() {
+            transaction
+                .query_row(
+                    "SELECT source_operation_id, inverse_json, post_image_json
+                     FROM operation_undo
+                     WHERE source_operation_id > ?1
+                     ORDER BY source_operation_id
+                     LIMIT 1",
+                    [last_source_operation_id],
+                    read_payload,
+                )
+                .optional()?
+        } else {
+            transaction
+                .query_row(
+                    "SELECT source_operation_id, inverse_json, post_image_json
+                     FROM operation_undo
+                     ORDER BY source_operation_id
+                     LIMIT 1",
+                    [],
+                    read_payload,
+                )
+                .optional()?
+        };
+        let Some((source_operation_id, inverse_json, post_image_json)) = row else {
+            break;
+        };
 
-    for (source_operation_id, inverse_json, post_image_json) in rows {
         let mut inverse: Inverse = serde_json::from_str(&inverse_json).map_err(|error| {
             migration_err(format!(
                 "invalid inverse_json for operation {source_operation_id}: {error}"
@@ -920,6 +939,7 @@ fn reconcile_v3_undo_task_snapshots(transaction: &Transaction<'_>) -> rusqlite::
             changed |= reconcile_task_snapshot(transaction, task)?;
         }
         if !changed {
+            last_source_operation_id = Some(source_operation_id);
             continue;
         }
 
@@ -938,6 +958,7 @@ fn reconcile_v3_undo_task_snapshots(transaction: &Transaction<'_>) -> rusqlite::
              WHERE source_operation_id = ?3",
             rusqlite::params![inverse_json, post_image_json, source_operation_id],
         )?;
+        last_source_operation_id = Some(source_operation_id);
     }
 
     Ok(())
@@ -2278,13 +2299,16 @@ INSERT INTO task_activity(
     }
 
     #[test]
-    fn failed_v4_undo_reconciliation_rolls_back_and_retry_succeeds() {
+    fn multiple_v3_undo_rows_reconcile_across_rollback_retry_and_rerun() {
         let db = TestDb::new();
         let mut connection = db.open();
         seed_v3_with_sample_rows(&mut connection);
         let task_id = TaskId::parse("55555555-5555-7555-8555-555555555555").unwrap();
-        let source_operation_id =
-            OperationId::parse("33333333-3333-7333-8333-333333333333").unwrap();
+        let source_operation_ids = [
+            OperationId::parse("20000000-0000-7000-8000-000000000001").unwrap(),
+            OperationId::parse("30000000-0000-7000-8000-000000000002").unwrap(),
+            OperationId::parse("40000000-0000-7000-8000-000000000003").unwrap(),
+        ];
         let cancelled = v3_task_snapshot(
             &task_id.to_string(),
             "Cancelled task",
@@ -2298,71 +2322,108 @@ INSERT INTO task_activity(
                 "INSERT INTO task_activity(
                     revision, sequence, operation_id, task_id, action, field,
                     old_value, new_value, created_at
-                 ) VALUES (2, 0, '{source_operation_id}', '{task_id}',
+                 ) VALUES (2, 0, '{}', '{task_id}',
                            'cancelled', 'status', 'pending', 'cancelled',
                            '2026-03-08T12:00:00Z');
-                 UPDATE app_state SET global_revision = 2 WHERE singleton = 1;"
+                 UPDATE app_state SET global_revision = 4 WHERE singleton = 1;",
+                source_operation_ids[0]
             ))
             .unwrap();
-        let inverse = restore_tasks_inverse(
-            vec![v3_task_snapshot(
-                &task_id.to_string(),
-                "Cancelled task",
-                TaskStatus::Pending,
-                "2026-03-01T12:00:00Z",
-                1,
-            )],
-            Vec::new(),
-        );
-        let post = post_from_tasks([cancelled]);
-        let (original_inverse, original_post) =
-            insert_v3_undo(&connection, source_operation_id, 2, &inverse, &post);
+
+        let mut original_payloads = Vec::new();
+        for (index, source_operation_id) in source_operation_ids.iter().copied().enumerate() {
+            let revision = u64::try_from(index).unwrap() + 2;
+            let inverse = restore_tasks_inverse(
+                vec![v3_task_snapshot(
+                    &task_id.to_string(),
+                    "Cancelled task",
+                    TaskStatus::Pending,
+                    "2026-03-01T12:00:00Z",
+                    revision - 1,
+                )],
+                Vec::new(),
+            );
+            let mut post_task = cancelled.clone();
+            post_task.revision = revision;
+            let post = post_from_tasks([post_task]);
+            let payloads =
+                insert_v3_undo(&connection, source_operation_id, revision, &inverse, &post);
+            original_payloads.push((source_operation_id.to_string(), payloads));
+        }
         connection
-            .execute_batch(
-                "CREATE TRIGGER fail_undo_reconciliation BEFORE UPDATE ON operation_undo
+            .execute_batch(&format!(
+                "CREATE TRIGGER fail_last_undo_reconciliation
+                 BEFORE UPDATE ON operation_undo
+                 WHEN OLD.source_operation_id = '{}'
                  BEGIN
-                     SELECT RAISE(ABORT, 'injected undo reconciliation failure');
+                     SELECT RAISE(ABORT, 'injected final undo reconciliation failure');
                  END;",
-            )
+                source_operation_ids[2]
+            ))
             .unwrap();
 
         let error = db.migrate(&mut connection).unwrap_err().to_string();
-        assert!(error.contains("injected undo reconciliation failure"));
+        assert!(error.contains("injected final undo reconciliation failure"));
         assert_eq!(current_version(&connection).unwrap(), 3);
         assert!(!task_columns(&connection).contains(&"cancelled_at".to_owned()));
-        let rolled_back: (String, String) = connection
-            .query_row(
-                "SELECT inverse_json, post_image_json FROM operation_undo
-                 WHERE source_operation_id = ?1",
-                [source_operation_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(rolled_back, (original_inverse, original_post));
+        for (source_operation_id, original) in &original_payloads {
+            let rolled_back: (String, String) = connection
+                .query_row(
+                    "SELECT inverse_json, post_image_json FROM operation_undo
+                     WHERE source_operation_id = ?1",
+                    [source_operation_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(&rolled_back, original);
+        }
 
         connection
-            .execute_batch("DROP TRIGGER fail_undo_reconciliation;")
+            .execute_batch("DROP TRIGGER fail_last_undo_reconciliation;")
             .unwrap();
         db.migrate(&mut connection).unwrap();
         assert_eq!(current_version(&connection).unwrap(), 4);
-        let migrated_post: String = connection
-            .query_row(
-                "SELECT post_image_json FROM operation_undo WHERE source_operation_id = ?1",
-                [source_operation_id.to_string()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_ne!(migrated_post, rolled_back.1);
+
+        let mut migrated_rows = Vec::new();
+        for (source_operation_id, original) in &original_payloads {
+            let migrated: (String, String, String, String) = connection
+                .query_row(
+                    "SELECT r.request_json, r.response_json, u.inverse_json, u.post_image_json
+                     FROM operation_receipts r
+                     JOIN operation_undo u ON u.source_operation_id = r.operation_id
+                     WHERE r.operation_id = ?1",
+                    [source_operation_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .unwrap();
+            assert_eq!(migrated.0, "{\"op\":\"legacy\"}");
+            assert_eq!(migrated.1, "{\"legacy\":true}");
+            assert_ne!(migrated.3, original.1);
+            let post: PostImage = serde_json::from_str(&migrated.3).unwrap();
+            assert_eq!(
+                post.tasks[&task_id.to_string()]
+                    .cancelled_at
+                    .unwrap()
+                    .to_string(),
+                "2026-03-08T12:00:00Z"
+            );
+            migrated_rows.push(migrated);
+        }
 
         db.migrate(&mut connection).unwrap();
-        let retried_post: String = connection
-            .query_row(
-                "SELECT post_image_json FROM operation_undo WHERE source_operation_id = ?1",
-                [source_operation_id.to_string()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(retried_post, migrated_post);
+        for ((source_operation_id, _), migrated) in original_payloads.iter().zip(migrated_rows) {
+            let rerun: (String, String, String, String) = connection
+                .query_row(
+                    "SELECT r.request_json, r.response_json, u.inverse_json, u.post_image_json
+                     FROM operation_receipts r
+                     JOIN operation_undo u ON u.source_operation_id = r.operation_id
+                     WHERE r.operation_id = ?1",
+                    [source_operation_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .unwrap();
+            assert_eq!(rerun, migrated);
+        }
     }
 
     #[test]

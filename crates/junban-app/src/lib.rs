@@ -21,11 +21,12 @@ pub use requests::{
     CalendarTasksPage, CatalogSnapshot, ClaimRemindersRequest, CollectedTasks, CommentPatch,
     DailyPlanPage, DismissReminder, DopamineMenuPage, EatTheFrogPage, EndOfDayPage,
     MarkOwnerLostReminders, MoveTarget, NudgesPage, OrderAnchor, ProjectDraft, ProjectPatch,
-    ReminderLeaseRequest, ReorderScope, ReplanPastBlocksAction, RescheduleReminder,
-    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, SettleReminderDelivered,
-    SettleReminderFailed, StatsPage, TagDraft, TagPatch, TaskJarPage, TaskListAsOf, TaskListPage,
-    TaskPatch, TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TemporalSettings,
-    TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery, WeeklyReviewPage,
+    ReminderLeaseRequest, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    RescheduleReminder, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch,
+    SettleReminderDelivered, SettleReminderFailed, StatsPage, TagDraft, TagPatch, TaskJarPage,
+    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TemporalSettings, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage,
+    TimeblockingRangeQuery, WeeklyReviewPage,
 };
 pub use service::{EventSink, JunbanService, default_temporal_settings};
 

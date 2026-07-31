@@ -25,13 +25,14 @@ use std::{
 };
 
 use fs4::FileExt;
-use jiff::Timestamp;
+use jiff::{Timestamp, civil::Date};
 use junban_app::{
     BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, MoveTarget,
-    ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction, Repository, RepositoryError,
-    RepositoryFuture, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft,
-    TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
+    ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    Repository, RepositoryError, RepositoryFuture, SavedFilterDraft, SavedFilterPatch,
+    SectionDraft, SectionPatch, TagDraft, TagPatch, TaskListAsOf, TaskListPage, TaskPatch,
+    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TimeBlockPatch, TimeSlotPatch,
+    TimeblockingRangePage, TimeblockingRangeQuery,
 };
 use junban_domain::{
     CivilTimeRange, ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId,
@@ -1145,10 +1146,18 @@ impl Repository for SqliteRepository {
             }
         )
     }
+    fn preview_replan_past_blocks(
+        &self,
+        temporal: TemporalContext,
+    ) -> RepositoryFuture<'_, ReplanPastBlocksPreview> {
+        mut_cmd!(self, PreviewReplanPastBlocks { temporal })
+    }
     fn replan_past_blocks(
         &self,
         operation_id: OperationId,
         action: ReplanPastBlocksAction,
+        expected_as_of_date: Date,
+        expected_candidate_ids: Vec<TimeBlockId>,
         now: Timestamp,
         temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation> {
@@ -1157,6 +1166,8 @@ impl Repository for SqliteRepository {
             ReplanPastBlocks {
                 operation_id,
                 action,
+                expected_as_of_date,
+                expected_candidate_ids,
                 now,
                 temporal
             }
@@ -1557,9 +1568,15 @@ enum Command {
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
+    PreviewReplanPastBlocks {
+        temporal: TemporalContext,
+        reply: oneshot::Sender<Result<ReplanPastBlocksPreview, RepositoryError>>,
+    },
     ReplanPastBlocks {
         operation_id: OperationId,
         action: ReplanPastBlocksAction,
+        expected_as_of_date: Date,
+        expected_candidate_ids: Vec<TimeBlockId>,
         now: Timestamp,
         temporal: TemporalContext,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
@@ -2358,9 +2375,16 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     now,
                 ));
             }
+            Command::PreviewReplanPastBlocks { temporal, reply } => {
+                let _ = reply.send(timeblock_ops::preview_replan_past_blocks(
+                    connection, temporal,
+                ));
+            }
             Command::ReplanPastBlocks {
                 operation_id,
                 action,
+                expected_as_of_date,
+                expected_candidate_ids,
                 now,
                 temporal,
                 reply,
@@ -2369,6 +2393,8 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     connection,
                     operation_id,
                     action,
+                    expected_as_of_date,
+                    expected_candidate_ids,
                     now,
                     temporal,
                 ));

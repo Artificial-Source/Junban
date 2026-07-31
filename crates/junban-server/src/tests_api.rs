@@ -2166,6 +2166,23 @@ fn slot_payload(title: &str, date: &str, start: &str, end: &str) -> Value {
     })
 }
 
+async fn replan_payload(context: &TestContext, action: &str) -> Value {
+    let response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/time-blocks/replan/preview")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let preview = json(response).await;
+    json!({
+        "action": action,
+        "expected_as_of_date": preview["as_of_date"],
+        "expected_candidate_ids": preview["candidate_ids"]
+    })
+}
+
 async fn create_block(context: &TestContext, payload: Value) -> Value {
     let response = mutate_json(context, Method::POST, "/api/v1/time-blocks", payload, None).await;
     assert_eq!(response.status(), StatusCode::CREATED);
@@ -2384,11 +2401,17 @@ async fn time_block_replan_is_idempotent_and_supports_actions() {
     let locked_id = block_id_from(&json(locked).await).to_owned();
 
     let key = Uuid::new_v4().to_string();
+    let move_today_payload = replan_payload(&context, "move_to_today").await;
+    assert_eq!(move_today_payload["expected_as_of_date"], today.to_string());
+    assert_eq!(
+        move_today_payload["expected_candidate_ids"],
+        json!([unlocked_id])
+    );
     let first = mutate_json(
         &context,
         Method::POST,
         "/api/v1/time-blocks/replan",
-        json!({ "action": "move_to_today" }),
+        move_today_payload.clone(),
         Some(&key),
     )
     .await;
@@ -2405,7 +2428,7 @@ async fn time_block_replan_is_idempotent_and_supports_actions() {
         &context,
         Method::POST,
         "/api/v1/time-blocks/replan",
-        json!({ "action": "move_to_today" }),
+        move_today_payload,
         Some(&key),
     )
     .await;
@@ -2473,7 +2496,7 @@ async fn time_block_replan_is_idempotent_and_supports_actions() {
         &context,
         Method::POST,
         "/api/v1/time-blocks/replan",
-        json!({ "action": "move_to_tomorrow" }),
+        replan_payload(&context, "move_to_tomorrow").await,
         None,
     )
     .await;
@@ -2512,7 +2535,7 @@ async fn time_block_replan_is_idempotent_and_supports_actions() {
         &context,
         Method::POST,
         "/api/v1/time-blocks/replan",
-        json!({ "action": "delete" }),
+        replan_payload(&context, "delete").await,
         None,
     )
     .await;
@@ -2552,6 +2575,51 @@ async fn time_block_replan_is_idempotent_and_supports_actions() {
     )
     .await;
     assert_eq!(bad_action.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn time_block_replan_rejects_a_stale_server_preview() {
+    let context = TestContext::new();
+    let today = jiff::Zoned::now().date();
+    let yesterday = today.checked_sub(1.day()).unwrap();
+
+    create_block(
+        &context,
+        block_payload(
+            "Initially eligible",
+            &yesterday.to_string(),
+            "09:00:00",
+            "10:00:00",
+        ),
+    )
+    .await;
+    let stale_payload = replan_payload(&context, "delete").await;
+
+    create_block(
+        &context,
+        block_payload(
+            "New candidate",
+            &yesterday.to_string(),
+            "11:00:00",
+            "12:00:00",
+        ),
+    )
+    .await;
+    let response = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-blocks/replan",
+        stale_payload,
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+
+    let current = replan_payload(&context, "delete").await;
+    assert_eq!(
+        current["expected_candidate_ids"].as_array().unwrap().len(),
+        2
+    );
 }
 
 #[tokio::test]

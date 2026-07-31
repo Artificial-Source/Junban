@@ -123,6 +123,7 @@ export type CreateTimeBlockRequest = Schemas["CreateTimeBlockRequest"];
 export type PatchTimeBlockRequest = Schemas["PatchTimeBlockRequest"];
 export type MoveTimeBlockRequest = Schemas["MoveTimeBlockRequest"];
 export type ResizeTimeBlockRequest = Schemas["ResizeTimeBlockRequest"];
+export type ReplanTimeBlocksPreviewResponse = Schemas["ReplanTimeBlocksPreviewResponse"];
 export type ReplanTimeBlocksRequest = Schemas["ReplanTimeBlocksRequest"];
 export type ReplanTimeBlocksActionDto = Schemas["ReplanTimeBlocksActionDto"];
 export type CreateTimeSlotRequest = Schemas["CreateTimeSlotRequest"];

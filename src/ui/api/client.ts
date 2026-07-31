@@ -60,6 +60,7 @@ import type {
   RenewReminderLeaseRequest,
   ReorderTasksRequest,
   ReplaceTimeSlotTasksRequest,
+  ReplanTimeBlocksPreviewResponse,
   ReplanTimeBlocksRequest,
   RescheduleReminderRequest,
   ResizeTimeBlockRequest,
@@ -944,6 +945,10 @@ export async function resizeTimeBlock(
     operationId,
     body,
   });
+}
+
+export async function previewReplanTimeBlocks(): Promise<ReplanTimeBlocksPreviewResponse> {
+  return getJson<ReplanTimeBlocksPreviewResponse>("/api/v1/time-blocks/replan/preview");
 }
 
 export async function replanTimeBlocks(

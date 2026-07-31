@@ -1524,6 +1524,15 @@ pub struct TimeBlockListResponse {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+pub struct ReplanTimeBlocksPreviewResponse {
+    #[schema(value_type = String, format = Date)]
+    pub as_of_date: Date,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub candidate_ids: Vec<String>,
+    pub time_blocks: Vec<TimeBlockDto>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TimeSlotListResponse {
     pub time_slots: Vec<TimeSlotDto>,
     pub revision: u64,
@@ -1677,6 +1686,10 @@ impl ResizeTimeBlockRequest {
 #[serde(deny_unknown_fields)]
 pub struct ReplanTimeBlocksRequest {
     pub action: ReplanTimeBlocksActionDto,
+    #[schema(value_type = String, format = Date)]
+    pub expected_as_of_date: Date,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub expected_candidate_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]

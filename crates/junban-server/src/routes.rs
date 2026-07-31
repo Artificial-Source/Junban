@@ -32,11 +32,12 @@ use crate::dto::{
     PatchTimeBlockRequest, PatchTimeSlotRequest, ProfileResponse, QuickEntryDto, RelationDto,
     RelationListResponse, ReleaseReminderLeaseRequest, ReminderDeliveryLeaseDto,
     ReminderListResponse, ReminderOccurrenceDto, RenewReminderLeaseRequest, ReorderTasksRequest,
-    ReplaceTimeSlotTasksRequest, ReplanTimeBlocksRequest, RescheduleReminderRequest,
-    ResizeTimeBlockRequest, SettleReminderDeliveredRequest, SettleReminderFailedRequest,
-    StatsResponse, TaskActivityDto, TaskActivityResponse, TaskDto, TaskJarResponse,
-    TaskListResponse, TaskSortDto, TaskViewPresetDto, TemporalSettingsResponse, TextImportDraftDto,
-    TextImportResponse, TimeBlockListResponse, TimeSlotListResponse, WeeklyReviewResponse,
+    ReplaceTimeSlotTasksRequest, ReplanTimeBlocksPreviewResponse, ReplanTimeBlocksRequest,
+    RescheduleReminderRequest, ResizeTimeBlockRequest, SettleReminderDeliveredRequest,
+    SettleReminderFailedRequest, StatsResponse, TaskActivityDto, TaskActivityResponse, TaskDto,
+    TaskJarResponse, TaskListResponse, TaskSortDto, TaskViewPresetDto, TemporalSettingsResponse,
+    TextImportDraftDto, TextImportResponse, TimeBlockListResponse, TimeSlotListResponse,
+    WeeklyReviewResponse,
 };
 use crate::error::{ApiError, extract_json, operation_id, parse_path_id, validation_error};
 use crate::reminder_wake::open_reminder_sse_stream;
@@ -2093,6 +2094,38 @@ pub async fn resize_time_block(
 }
 
 #[utoipa::path(
+    get,
+    path = "/api/v1/time-blocks/replan/preview",
+    operation_id = "preview_replan_time_blocks",
+    responses(
+        (status = 200, body = ReplanTimeBlocksPreviewResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn preview_replan_time_blocks(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+) -> Result<Json<ReplanTimeBlocksPreviewResponse>, ApiError> {
+    let preview = state
+        .service
+        .preview_replan_past_blocks()
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(ReplanTimeBlocksPreviewResponse {
+        as_of_date: preview.as_of_date,
+        candidate_ids: preview
+            .candidate_ids
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect(),
+        time_blocks: preview.blocks.into_iter().map(Into::into).collect(),
+    }))
+}
+
+#[utoipa::path(
     post,
     path = "/api/v1/time-blocks/replan",
     operation_id = "replan_time_blocks",
@@ -2117,9 +2150,19 @@ pub async fn replan_time_blocks(
 ) -> Result<Json<MutationResponse>, ApiError> {
     let operation_id = operation_id(&headers, &request_id)?;
     let payload = extract_json(payload, &request_id)?;
+    let expected_candidate_ids = payload
+        .expected_candidate_ids
+        .iter()
+        .map(|id| parse_path_id(id, TimeBlockId::parse, &request_id))
+        .collect::<Result<Vec<_>, _>>()?;
     let mutation = state
         .service
-        .replan_past_blocks(operation_id, payload.action.into())
+        .replan_past_blocks(
+            operation_id,
+            payload.action.into(),
+            payload.expected_as_of_date,
+            expected_candidate_ids,
+        )
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
     Ok(Json(mutation.into()))

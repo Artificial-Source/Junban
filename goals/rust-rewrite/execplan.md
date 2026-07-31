@@ -742,6 +742,8 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - `P3-REC-001`, `P3-REM-001`, `P3-MIG-001`, `P3-TIME-001`, `P3-BOUND-001`, `P3-UI-001` — **fixed and approved**. Phase 3 now freezes recurrence/uncomplete transitions, fenced reminder control-plane semantics and shutdown, verified pre-migration recovery, durable blocks/slots and ordered membership, numeric API/performance limits, and twelve independent legacy-rendered visual authorities.
 - `P3-FINAL-003` — **fixed**. Matrix consumes the existing authoritative task-list civil date; daily and weekly planning/review reads expose their sampled civil date, and ritual reschedules derive today/tomorrow from that response rather than browser time. Rust API and non-default-browser-timezone frontend regressions cover the contract.
 - `P3-FINAL-007` — **fixed**. A one-shot, bounded SQLite analysis snapshot replaces 100 paged task-list reads and per-task tag hydration. The five-sample 10,000-task rerun passed the frozen 24/32 MiB memory ceiling (16.1523 MiB median / 16.5586 MiB maximum warm; 18.1953 MiB maximum peak), Stats p95 24.995 ms (150 ms budget), Nudges p95 24.868 ms (100 ms budget), and all scheduler lifecycle checks. Raw evidence: `evidence/phase-3-temporal-bench.json`.
+- `P3-FINAL-008` — **fixed**. Replan preview and mutation now share Rust server-local civil-date authority and an exact bounded candidate-ID expectation; SQLite rejects date or candidate drift atomically, and the browser refreshes rather than selecting destructive candidates from its own clock.
+- `P3-FINAL-009` — **fixed**. Timeblocking mutations no longer advertise or push unsupported Undo entries, preserving earlier valid task undo history.
 
 ## Decision log
 

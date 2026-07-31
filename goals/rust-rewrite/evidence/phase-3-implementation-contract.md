@@ -90,7 +90,7 @@ Time slots and blocks are first-party SQLite resources. CRUD, move, resize, task
 - Task-to-timeline drop creates a block using estimate or the documented default and clamps to workday end.
 - Move and resize use the visual snap grid; end always remains after start.
 - Locked blocks are skipped by automatic replan.
-- Replan examines the prior seven civil days through yesterday. It can move eligible past blocks to today/tomorrow or delete them, including a bounded all-to-today operation.
+- Replan examines the prior seven civil days through yesterday. A typed Rust preview returns the sampled server-local date plus the sorted, bounded eligible owner IDs and blocks. Mutation carries that exact date and ID set; storage compares both atomically against its freshly sampled date and current candidates before moving to today/tomorrow or deleting, and conflicts without writes when stale.
 - Recurrence expands virtual read instances inside the requested range. Edits target the series owner; Phase 3 has no exception rows.
 - AI auto-scheduling waits for the AI phase.
 

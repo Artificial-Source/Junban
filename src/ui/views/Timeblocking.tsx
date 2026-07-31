@@ -26,6 +26,7 @@ import {
   moveTimeBlock,
   patchTimeBlock,
   patchTimeSlot,
+  previewReplanTimeBlocks,
   removeTimeSlotTask,
   replaceTimeSlotTasks,
   replanTimeBlocks,
@@ -33,6 +34,7 @@ import {
   type MutationResponse,
   type ProjectDto,
   type ReplanTimeBlocksActionDto,
+  type ReplanTimeBlocksPreviewResponse,
   type TaskDto,
   type TemporalSettingsResponse,
   type TimeBlockDto,
@@ -65,7 +67,6 @@ import {
   dayCountForMode,
   formatTimeblockingRangeLabel,
   minutesToCivilTime,
-  replanLookbackRange,
   timeblockingRequestRange,
   type TimeblockingMode,
 } from "./timeblocking/timeblockingRange";
@@ -84,7 +85,7 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [blocks, setBlocks] = useState<TimeBlockDto[]>([]);
   const [slots, setSlots] = useState<TimeSlotDto[]>([]);
-  const [staleBlocks, setStaleBlocks] = useState<TimeBlockDto[]>([]);
+  const [replanPreview, setReplanPreview] = useState<ReplanTimeBlocksPreviewResponse | null>(null);
   const [settings, setSettings] = useState<TemporalSettingsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -139,15 +140,14 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
     setLoading(true);
     setError(null);
     try {
-      const lookback = replanLookbackRange(todayKey());
       // Blocks support inclusive from/to. Slots are single-date in the typed API,
       // so fan out one request per civil day in the visible window.
       const slotDates = civilDatesInRange(range.from, range.to);
-      const [blockPage, slotPages, temporal, stalePage] = await Promise.all([
+      const [blockPage, slotPages, temporal, preview] = await Promise.all([
         listTimeBlocks({ from: range.from, to: range.to }),
         Promise.all(slotDates.map((date) => listTimeSlots({ date }))),
         getTemporalSettings(),
-        listTimeBlocks({ from: lookback.from, to: lookback.to }),
+        previewReplanTimeBlocks(),
       ]);
       if (seq !== requestSeq.current) return;
       const mergedSlots = new Map<string, TimeSlotDto>();
@@ -157,12 +157,13 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
       setBlocks(blockPage.time_blocks);
       setSlots([...mergedSlots.values()]);
       setSettings(temporal);
-      setStaleBlocks(stalePage.time_blocks.filter((block) => !block.locked));
+      setReplanPreview(preview);
     } catch (caught) {
       if (seq !== requestSeq.current) return;
       setError(caught instanceof ApiError ? caught.message : "Could not load timeblocking.");
       setBlocks([]);
       setSlots([]);
+      setReplanPreview(null);
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
@@ -184,11 +185,11 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
       try {
         const result = await runMutation((operationId) => execute(operationId), {
           successToast: label,
-          undoLabel: label,
         });
         if (!result) {
-          setMutationError("The timeblocking change failed.");
-          setLiveMessage("Timeblocking change failed.");
+          setMutationError("The timeblocking change failed. Refreshed current data; try again.");
+          setLiveMessage("Timeblocking change failed. Current data refreshed.");
+          await load();
           return false;
         }
         await load();
@@ -412,11 +413,19 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
         move_to_tomorrow: "Replan blocks to tomorrow",
         delete: "Delete past unlocked blocks",
       };
+      if (!replanPreview) return false;
       return runTbMutation(labels[action], (operationId) =>
-        replanTimeBlocks({ action }, operationId),
+        replanTimeBlocks(
+          {
+            action,
+            expected_as_of_date: replanPreview.as_of_date,
+            expected_candidate_ids: replanPreview.candidate_ids,
+          },
+          operationId,
+        ),
       );
     },
-    [runTbMutation],
+    [runTbMutation, replanPreview],
   );
 
   const selectedBlock = blocks.find((block) => block.occurrence_key === selectedKey) ?? null;
@@ -610,7 +619,7 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
       data-testid="timeblocking-view"
     >
       <ReplanBanner
-        staleBlocks={staleBlocks}
+        staleBlocks={replanPreview?.time_blocks ?? []}
         pending={mutationPending}
         error={mutationError}
         onReplan={handleReplan}

@@ -6,7 +6,8 @@ use junban_domain::{
     EntityName, EstimatedMinutes, FilterQuery, HexColor, IconText, LocalDueTime, MarkdownText,
     NudgeFacts, Priority, Project, ProjectId, ProjectView, RecurrenceRule, SavedFilter, Section,
     SectionId, SortOrder, StatsSummary, Tag, TagId, TagName, Task, TaskCursor, TaskId, TaskTitle,
-    Template, TemplateId, TimeBlock, TimeSlot, TimeSlotId, WeekStart, WeeklyReviewSummary,
+    Template, TemplateId, TimeBlock, TimeBlockId, TimeSlot, TimeSlotId, WeekStart,
+    WeeklyReviewSummary,
 };
 use serde::{Deserialize, Serialize};
 
@@ -563,6 +564,14 @@ pub struct TimeblockingRangePage {
     pub blocks: Vec<TimeBlock>,
     pub slots: Vec<TimeSlot>,
     pub revision: u64,
+}
+
+/// Server-derived, bounded candidates for automatic replan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplanPastBlocksPreview {
+    pub as_of_date: Date,
+    pub candidate_ids: Vec<TimeBlockId>,
+    pub blocks: Vec<TimeBlock>,
 }
 
 /// Automatic replan action for unlocked blocks in the prior seven civil days.

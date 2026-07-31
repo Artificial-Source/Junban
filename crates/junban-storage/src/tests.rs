@@ -4545,11 +4545,28 @@ async fn replan_skips_locked_blocks_and_is_atomic() {
     .await
     .unwrap();
 
+    let preview = repo
+        .preview_replan_past_blocks(temporal.clone())
+        .await
+        .unwrap();
+    assert_eq!(preview.as_of_date, today);
+    assert_eq!(preview.candidate_ids, vec![unlocked_id]);
+    assert_eq!(
+        preview
+            .blocks
+            .iter()
+            .map(|block| block.id)
+            .collect::<Vec<_>>(),
+        vec![unlocked_id]
+    );
+
     let before = repo.diagnostics().await.unwrap().revision;
     let replan = repo
         .replan_past_blocks(
             operation(),
             junban_app::ReplanPastBlocksAction::MoveToToday,
+            preview.as_of_date,
+            preview.candidate_ids,
             now(),
             temporal.clone(),
         )
@@ -4601,10 +4618,16 @@ async fn replan_skips_locked_blocks_and_is_atomic() {
     )
     .await
     .unwrap();
+    let delete_preview = repo
+        .preview_replan_past_blocks(temporal.clone())
+        .await
+        .unwrap();
     let deleted = repo
         .replan_past_blocks(
             operation(),
             junban_app::ReplanPastBlocksAction::Delete,
+            delete_preview.as_of_date,
+            delete_preview.candidate_ids,
             now(),
             temporal,
         )
@@ -4612,6 +4635,83 @@ async fn replan_skips_locked_blocks_and_is_atomic() {
         .unwrap();
     assert!(deleted.event.affected.time_block_ids.contains(&delete_id));
     assert!(!deleted.event.affected.time_block_ids.contains(&locked_id));
+}
+
+#[tokio::test]
+async fn replan_rejects_stale_date_and_candidate_expectations_atomically() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let preview_date: jiff::civil::Date = "2026-03-15".parse().unwrap();
+    let preview_temporal = TemporalContext::new(preview_date, TimeZone::UTC);
+
+    let first_id = junban_domain::TimeBlockId::new();
+    repo.create_time_block(
+        operation(),
+        first_id,
+        block_draft("First", "2026-03-14"),
+        now(),
+    )
+    .await
+    .unwrap();
+    let preview = repo
+        .preview_replan_past_blocks(preview_temporal.clone())
+        .await
+        .unwrap();
+
+    let second_id = junban_domain::TimeBlockId::new();
+    repo.create_time_block(
+        operation(),
+        second_id,
+        block_draft("Arrived later", "2026-03-13"),
+        now(),
+    )
+    .await
+    .unwrap();
+    let revision = repo.diagnostics().await.unwrap().revision;
+    assert_eq!(
+        repo.replan_past_blocks(
+            operation(),
+            junban_app::ReplanPastBlocksAction::Delete,
+            preview.as_of_date,
+            preview.candidate_ids.clone(),
+            now(),
+            preview_temporal.clone(),
+        )
+        .await
+        .unwrap_err(),
+        RepositoryError::Conflict
+    );
+    assert_eq!(repo.diagnostics().await.unwrap().revision, revision);
+
+    let current = repo
+        .preview_replan_past_blocks(preview_temporal)
+        .await
+        .unwrap();
+    let next_day: jiff::civil::Date = "2026-03-16".parse().unwrap();
+    assert_eq!(
+        repo.replan_past_blocks(
+            operation(),
+            junban_app::ReplanPastBlocksAction::Delete,
+            current.as_of_date,
+            current.candidate_ids,
+            now(),
+            TemporalContext::new(next_day, TimeZone::UTC),
+        )
+        .await
+        .unwrap_err(),
+        RepositoryError::Conflict
+    );
+    assert_eq!(repo.diagnostics().await.unwrap().revision, revision);
+
+    let page = repo
+        .list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-13".parse().unwrap(),
+            to: "2026-03-14".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.blocks.len(), 2);
 }
 
 #[tokio::test]

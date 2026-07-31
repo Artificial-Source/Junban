@@ -900,6 +900,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/time-blocks/replan/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["preview_replan_time_blocks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/time-blocks/{time_block_id}": {
     parameters: {
       query?: never;
@@ -1681,9 +1697,18 @@ export interface components {
     };
     /** @enum {string} */
     ReplanTimeBlocksActionDto: "move_to_today" | "move_to_tomorrow" | "delete";
+    ReplanTimeBlocksPreviewResponse: {
+      /** Format: date */
+      as_of_date: string;
+      candidate_ids: string[];
+      time_blocks: components["schemas"]["TimeBlockDto"][];
+    };
     /** @description Automatic replan for unlocked blocks in the prior seven complete civil days. */
     ReplanTimeBlocksRequest: {
       action: components["schemas"]["ReplanTimeBlocksActionDto"];
+      /** Format: date */
+      expected_as_of_date: string;
+      expected_candidate_ids: string[];
     };
     RescheduleReminderRequest: {
       /** Format: date-time */
@@ -6532,6 +6557,49 @@ export interface operations {
         };
       };
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  preview_replan_time_blocks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReplanTimeBlocksPreviewResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
         headers: {
           [name: string]: unknown;
         };

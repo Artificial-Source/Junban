@@ -30,6 +30,7 @@ import {
   moveTask,
   parseQuickEntry,
   patchTask,
+  previewReplanTimeBlocks,
   replanTimeBlocks,
   rescheduleReminder,
   settleReminderDelivered,
@@ -882,7 +883,14 @@ describe("Phase 3 endpoint request shapes", () => {
       },
       "11111111-1111-4111-8111-111111111111",
     );
-    await replanTimeBlocks({ action: "move_to_today" }, "22222222-2222-4222-8222-222222222222");
+    await replanTimeBlocks(
+      {
+        action: "move_to_today",
+        expected_as_of_date: "2026-07-24",
+        expected_candidate_ids: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+      },
+      "22222222-2222-4222-8222-222222222222",
+    );
     await appendTimeSlotTask(
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       { task_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
@@ -910,6 +918,20 @@ describe("Phase 3 endpoint request shapes", () => {
     expect((fetchMock.mock.calls[2] as [string, RequestInit])[0]).toBe(
       "/api/v1/time-slots/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/tasks",
     );
+  });
+
+  it("loads the server-derived replan preview", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        as_of_date: "2026-07-24",
+        candidate_ids: [],
+        time_blocks: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await previewReplanTimeBlocks();
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/v1/time-blocks/replan/preview");
   });
 
   it("lists time blocks by civil range", async () => {

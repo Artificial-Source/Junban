@@ -12,9 +12,9 @@ use junban_domain::{
 
 use crate::{
     BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, MoveTarget,
-    ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction, RepositoryError,
-    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft, TagPatch,
-    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    RepositoryError, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft,
+    TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
     TemporalContext, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
 };
 
@@ -473,10 +473,17 @@ pub trait Repository: Send + Sync + 'static {
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation>;
 
+    fn preview_replan_past_blocks(
+        &self,
+        temporal: TemporalContext,
+    ) -> RepositoryFuture<'_, ReplanPastBlocksPreview>;
+
     fn replan_past_blocks(
         &self,
         operation_id: OperationId,
         action: ReplanPastBlocksAction,
+        expected_as_of_date: jiff::civil::Date,
+        expected_candidate_ids: Vec<TimeBlockId>,
         now: Timestamp,
         temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation>;

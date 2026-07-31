@@ -19,6 +19,7 @@ const getTemporalSettings = vi.fn();
 const createTimeBlock = vi.fn();
 const patchTimeBlock = vi.fn();
 const deleteTimeBlock = vi.fn();
+const previewReplanTimeBlocks = vi.fn();
 const moveTimeBlock = vi.fn();
 const resizeTimeBlock = vi.fn();
 const replanTimeBlocks = vi.fn();
@@ -40,6 +41,7 @@ vi.mock("../api/client", async () => {
     createTimeBlock: (...args: unknown[]) => createTimeBlock(...args),
     patchTimeBlock: (...args: unknown[]) => patchTimeBlock(...args),
     deleteTimeBlock: (...args: unknown[]) => deleteTimeBlock(...args),
+    previewReplanTimeBlocks: (...args: unknown[]) => previewReplanTimeBlocks(...args),
     moveTimeBlock: (...args: unknown[]) => moveTimeBlock(...args),
     resizeTimeBlock: (...args: unknown[]) => resizeTimeBlock(...args),
     replanTimeBlocks: (...args: unknown[]) => replanTimeBlocks(...args),
@@ -79,9 +81,9 @@ vi.mock("../context/WorkspaceContext", () => ({
     refreshCatalog: vi.fn(),
     mutationPhase: "idle",
     mutationError: null,
-    undoStack: [],
+    undoStack: [{ operationId: "earlier-task-op", label: "Complete task" }],
     redoStack: [],
-    canUndo: false,
+    canUndo: true,
     canRedo: false,
     undo: vi.fn(),
     redo: vi.fn(),
@@ -238,6 +240,7 @@ beforeEach(() => {
   createTimeBlock.mockReset();
   patchTimeBlock.mockReset();
   deleteTimeBlock.mockReset();
+  previewReplanTimeBlocks.mockReset();
   moveTimeBlock.mockReset();
   resizeTimeBlock.mockReset();
   replanTimeBlocks.mockReset();
@@ -313,6 +316,20 @@ beforeEach(() => {
     ],
   });
   getTemporalSettings.mockResolvedValue(settings);
+  previewReplanTimeBlocks.mockResolvedValue({
+    as_of_date: "2026-07-24",
+    candidate_ids: ["stale-1"],
+    time_blocks: [
+      block({
+        id: "stale-1",
+        date: "2026-07-23",
+        title: "Past unlocked",
+        locked: false,
+        start: "10:00:00",
+        end: "11:00:00",
+      }),
+    ],
+  });
   runMutation.mockImplementation(async (execute: (id: string) => Promise<MutationResponse>) => {
     return execute("op-test");
   });
@@ -469,6 +486,9 @@ describe("Timeblocking view", () => {
     });
     await flush();
     expect(deleteTimeBlock).toHaveBeenCalledWith("block-1", "op-test");
+    // Timeblocking receipts have no undo material: none of these mutations may
+    // advertise an Undo toast or displace the earlier task undo in the workspace.
+    expect(runMutation.mock.calls.every((call) => !("undoLabel" in call[1]))).toBe(true);
   });
 
   it("labels series editing and mutates the owner id for virtual occurrences", async () => {
@@ -540,7 +560,16 @@ describe("Timeblocking view", () => {
     });
     await flush();
 
-    expect(replanTimeBlocks).toHaveBeenCalledWith({ action: "move_to_today" }, "op-fail");
+    expect(replanTimeBlocks).toHaveBeenCalledWith(
+      {
+        action: "move_to_today",
+        expected_as_of_date: "2026-07-24",
+        expected_candidate_ids: ["stale-1"],
+      },
+      "op-fail",
+    );
+    expect(previewReplanTimeBlocks).toHaveBeenCalledTimes(2);
+    expect(runMutation.mock.calls[0]![1]).toEqual({ successToast: "Replan blocks to today" });
     // Failure path leaves an error visible.
     expect(
       container.querySelector('[data-testid="timeblocking-error"], [role="alert"]'),

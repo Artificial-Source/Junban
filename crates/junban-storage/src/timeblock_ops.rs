@@ -4,9 +4,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use jiff::{Timestamp, ToSpan, civil::Date, civil::Time};
 use junban_app::{
-    AffectedIds, CommittedMutation, EventType, ReplanPastBlocksAction, RepositoryError,
-    ResourceRef, ResourceSnapshot, ResyncScope, TemporalContext, TimeBlockPatch, TimeSlotPatch,
-    TimeblockingRangePage, TimeblockingRangeQuery,
+    AffectedIds, CommittedMutation, EventType, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    RepositoryError, ResourceRef, ResourceSnapshot, ResyncScope, TemporalContext, TimeBlockPatch,
+    TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
 };
 use junban_domain::{
     CivilTimeRange, EntityName, HexColor, MAX_BULK_IDS, MAX_TIMEBLOCK_RANGE_ITEMS, OperationId,
@@ -64,7 +64,8 @@ enum Req<'a> {
     },
     ReplanPastBlocks {
         action: ReplanPastBlocksAction,
-        today: String,
+        expected_as_of_date: String,
+        expected_candidate_ids: &'a [TimeBlockId],
     },
 }
 
@@ -450,23 +451,58 @@ pub(crate) fn set_time_block_range(
     })
 }
 
+pub(crate) fn preview_replan_past_blocks(
+    c: &mut Connection,
+    temporal: TemporalContext,
+) -> Result<ReplanPastBlocksPreview, RepositoryError> {
+    let as_of_date = temporal.sampled_completion_date;
+    let (window_start, window_end) = replan_window(as_of_date).map_err(validation)?;
+    let tx = c.unchecked_transaction().map_err(storage_error)?;
+    let candidate_ids = load_replan_eligible_ids(&tx, window_start, window_end)?;
+    if candidate_ids.len() > MAX_BULK_IDS {
+        return Err(RepositoryError::OperationTooLarge);
+    }
+    let blocks = candidate_ids
+        .iter()
+        .map(|id| load_time_block(&tx, *id))
+        .collect::<Result<Vec<_>, _>>()?;
+    tx.commit().map_err(storage_error)?;
+    Ok(ReplanPastBlocksPreview {
+        as_of_date,
+        candidate_ids,
+        blocks,
+    })
+}
+
 pub(crate) fn replan_past_blocks(
     c: &mut Connection,
     op: OperationId,
     action: ReplanPastBlocksAction,
+    expected_as_of_date: Date,
+    expected_candidate_ids: Vec<TimeBlockId>,
     now: Timestamp,
     temporal: TemporalContext,
 ) -> Result<CommittedMutation, RepositoryError> {
     let today = temporal.sampled_completion_date;
     let request = canonical_json(&Req::ReplanPastBlocks {
         action,
-        today: today.to_string(),
+        expected_as_of_date: expected_as_of_date.to_string(),
+        expected_candidate_ids: &expected_candidate_ids,
     })?;
     mutate(c, op, request, now, move |tx, revision| {
+        if expected_candidate_ids.len() > MAX_BULK_IDS {
+            return Err(RepositoryError::OperationTooLarge);
+        }
+        if expected_as_of_date != today {
+            return Err(RepositoryError::Conflict);
+        }
         let (window_start, window_end) = replan_window(today).map_err(validation)?;
         let eligible_ids = load_replan_eligible_ids(tx, window_start, window_end)?;
         if eligible_ids.len() > MAX_BULK_IDS {
             return Err(RepositoryError::OperationTooLarge);
+        }
+        if eligible_ids != expected_candidate_ids {
+            return Err(RepositoryError::Conflict);
         }
 
         let mut affected = Vec::with_capacity(eligible_ids.len());

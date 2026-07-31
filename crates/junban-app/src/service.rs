@@ -22,11 +22,11 @@ use crate::{
     AppError, BulkAction, CalendarTasksPage, CatalogSnapshot, CollectedTasks, CommentPatch,
     CommittedEvent, CommittedMutation, DailyPlanPage, DopamineMenuPage, EatTheFrogPage,
     EndOfDayPage, EventCatchUp, MoveTarget, NudgesPage, ProjectDraft, ProjectPatch, ReorderScope,
-    ReplanPastBlocksAction, Repository, RepositoryError, SavedFilterDraft, SavedFilterPatch,
-    SectionDraft, SectionPatch, StatsPage, TagDraft, TagPatch, TaskJarPage, TaskListAsOf,
-    TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch, TemporalContext,
-    TemporalSettings, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
-    WeeklyReviewPage,
+    ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError, SavedFilterDraft,
+    SavedFilterPatch, SectionDraft, SectionPatch, StatsPage, TagDraft, TagPatch, TaskJarPage,
+    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TemporalSettings, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage,
+    TimeblockingRangeQuery, WeeklyReviewPage,
 };
 
 /// Cursor page size used when collecting multi-page task reads.
@@ -1022,13 +1022,37 @@ where
         self.move_time_block(operation_id, block_id, range).await
     }
 
+    pub async fn preview_replan_past_blocks(&self) -> Result<ReplanPastBlocksPreview, AppError> {
+        self.preview_replan_past_blocks_with(TemporalContext::sample_now())
+            .await
+    }
+
+    /// Internal/test seam with an explicit sampled civil today.
+    pub async fn preview_replan_past_blocks_with(
+        &self,
+        temporal: TemporalContext,
+    ) -> Result<ReplanPastBlocksPreview, AppError> {
+        self.repository
+            .preview_replan_past_blocks(temporal)
+            .await
+            .map_err(Into::into)
+    }
+
     pub async fn replan_past_blocks(
         &self,
         operation_id: OperationId,
         action: ReplanPastBlocksAction,
+        expected_as_of_date: Date,
+        expected_candidate_ids: Vec<TimeBlockId>,
     ) -> Result<CommittedMutation, AppError> {
-        self.replan_past_blocks_with(operation_id, action, TemporalContext::sample_now())
-            .await
+        self.replan_past_blocks_with(
+            operation_id,
+            action,
+            expected_as_of_date,
+            expected_candidate_ids,
+            TemporalContext::sample_now(),
+        )
+        .await
     }
 
     /// Internal/test seam with an explicit sampled civil today.
@@ -1036,11 +1060,20 @@ where
         &self,
         operation_id: OperationId,
         action: ReplanPastBlocksAction,
+        expected_as_of_date: Date,
+        expected_candidate_ids: Vec<TimeBlockId>,
         temporal: TemporalContext,
     ) -> Result<CommittedMutation, AppError> {
         self.commit(
             self.repository
-                .replan_past_blocks(operation_id, action, Timestamp::now(), temporal)
+                .replan_past_blocks(
+                    operation_id,
+                    action,
+                    expected_as_of_date,
+                    expected_candidate_ids,
+                    Timestamp::now(),
+                    temporal,
+                )
                 .await,
         )
     }
@@ -2011,10 +2044,24 @@ mod tests {
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("set_time_block_range")
         }
+        fn preview_replan_past_blocks(
+            &self,
+            temporal: TemporalContext,
+        ) -> crate::RepositoryFuture<'_, ReplanPastBlocksPreview> {
+            Box::pin(async move {
+                Ok(ReplanPastBlocksPreview {
+                    as_of_date: temporal.sampled_completion_date,
+                    candidate_ids: Vec::new(),
+                    blocks: Vec::new(),
+                })
+            })
+        }
         fn replan_past_blocks(
             &self,
             _: OperationId,
             _: ReplanPastBlocksAction,
+            _: Date,
+            _: Vec<TimeBlockId>,
             _: Timestamp,
             _: TemporalContext,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {

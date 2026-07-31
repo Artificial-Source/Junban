@@ -6399,6 +6399,59 @@
         ]
       }
     },
+    "/api/v1/time-blocks/replan/preview": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "preview_replan_time_blocks",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplanTimeBlocksPreviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/time-blocks/{time_block_id}": {
       "delete": {
         "tags": ["routes"],
@@ -9600,13 +9653,47 @@
         "type": "string",
         "enum": ["move_to_today", "move_to_tomorrow", "delete"]
       },
+      "ReplanTimeBlocksPreviewResponse": {
+        "type": "object",
+        "required": ["as_of_date", "candidate_ids", "time_blocks"],
+        "properties": {
+          "as_of_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "candidate_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "time_blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimeBlockDto"
+            }
+          }
+        }
+      },
       "ReplanTimeBlocksRequest": {
         "type": "object",
         "description": "Automatic replan for unlocked blocks in the prior seven complete civil days.",
-        "required": ["action"],
+        "required": ["action", "expected_as_of_date", "expected_candidate_ids"],
         "properties": {
           "action": {
             "$ref": "#/components/schemas/ReplanTimeBlocksActionDto"
+          },
+          "expected_as_of_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "expected_candidate_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         },
         "additionalProperties": false

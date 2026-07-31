@@ -56,7 +56,7 @@ function tagIdFromMutation(result: MutationResponse): string | null {
 }
 
 export function useTaskMutations() {
-  const { runMutation, catalog, refreshCatalog } = useWorkspace();
+  const { runMutation, catalog, refreshCatalog, showToast } = useWorkspace();
 
   const createTask = useCallback(
     async (body: CreateTaskRequest, undoLabel?: string) =>
@@ -182,12 +182,20 @@ export function useTaskMutations() {
   );
 
   const uncompleteTask = useCallback(
-    async (taskId: string) =>
-      runMutation((opId) => uncompleteTaskApi(taskId, opId), {
+    async (taskId: string) => {
+      const result = await runMutation((opId) => uncompleteTaskApi(taskId, opId), {
         undoLabel: "Uncomplete task",
-        successToast: "Task reopened",
-      }),
-    [runMutation],
+      });
+      if (result) {
+        const sourceOnly = result.uncomplete_outcome === "source_only";
+        showToast(
+          sourceOnly ? "info" : "success",
+          sourceOnly ? "Task reopened. Recurring changes were kept." : "Task reopened",
+        );
+      }
+      return result;
+    },
+    [runMutation, showToast],
   );
 
   const cancelTask = useCallback(

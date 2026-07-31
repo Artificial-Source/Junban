@@ -17,8 +17,8 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use jiff::{Timestamp, ToSpan};
-use junban_app::{EventType, Repository, ResourceRef, ResyncScope};
-use junban_domain::{OperationId, TaskId};
+use junban_app::{CommittedMutation, EventType, Repository, ResourceRef, ResyncScope};
+use junban_domain::{OperationId, TaskId, UncompleteOutcome};
 use junban_storage::ProfileOwner;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -421,6 +421,72 @@ async fn task_crud_status_and_list_filters() {
         )
         .await;
     assert_eq!(json(deleted).await["event"]["event_type"], "task.deleted");
+}
+
+#[tokio::test]
+async fn p3_final_002_uncomplete_outcomes_are_serialized_and_replayed_exactly() {
+    let context = TestContext::new();
+    let recurring = create_task_payload(
+        &context,
+        json!({ "title": "Recurring exact", "due_date": "2026-07-28", "recurrence_rule": "daily" }),
+    )
+    .await;
+    let recurring_id = task_id_from(&recurring).to_owned();
+
+    let completed = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                &format!("/api/v1/tasks/{recurring_id}/complete"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    let completed = json(completed).await;
+    assert!(completed.get("uncomplete_outcome").is_none());
+
+    let exact_key = Uuid::new_v4().to_string();
+    let exact_path = format!("/api/v1/tasks/{recurring_id}/uncomplete");
+    let exact = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &exact_path), &exact_key)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(exact.status(), StatusCode::OK);
+    let exact = response_bytes(exact).await;
+    assert_eq!(
+        serde_json::from_slice::<Value>(&exact).unwrap()["uncomplete_outcome"],
+        "exact"
+    );
+    let exact_replay = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &exact_path), &exact_key)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(exact_replay.status(), StatusCode::OK);
+    assert_eq!(response_bytes(exact_replay).await, exact);
+
+    let source_only = crate::dto::MutationResponse::from(CommittedMutation {
+        event: CommittedEvent {
+            revision: 3,
+            operation_id: OperationId::parse(&Uuid::new_v4().to_string()).unwrap(),
+            event_type: EventType::new(EventType::TASK_UNCOMPLETED),
+            occurred_at: Timestamp::now(),
+            primary: None,
+            snapshot: None,
+            affected: Default::default(),
+            resync: ResyncScope::NONE,
+        },
+        uncomplete_outcome: Some(UncompleteOutcome::SourceOnly),
+        newly_committed: false,
+    });
+    let source_only = serde_json::to_value(source_only).unwrap();
+    assert_eq!(source_only["uncomplete_outcome"], "source_only");
 }
 
 #[tokio::test]

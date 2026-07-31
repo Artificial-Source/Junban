@@ -13,6 +13,8 @@ const createTaskApi = vi.fn();
 const createTagApi = vi.fn();
 const getCatalog = vi.fn();
 const parseQuickEntryApi = vi.fn();
+const uncompleteTaskApi = vi.fn();
+const showToast = vi.fn();
 
 let catalogState: CatalogResponse | null = null;
 
@@ -21,6 +23,7 @@ vi.mock("../context/WorkspaceContext", () => ({
     runMutation: (...args: unknown[]) => runMutation(...args),
     catalog: catalogState,
     refreshCatalog: () => refreshCatalog(),
+    showToast: (...args: unknown[]) => showToast(...args),
   }),
 }));
 
@@ -32,6 +35,7 @@ vi.mock("../api/client", async () => {
     createTag: (...args: unknown[]) => createTagApi(...args),
     getCatalog: (...args: unknown[]) => getCatalog(...args),
     parseQuickEntry: (...args: unknown[]) => parseQuickEntryApi(...args),
+    uncompleteTask: (...args: unknown[]) => uncompleteTaskApi(...args),
   };
 });
 
@@ -108,7 +112,7 @@ function taskMutation(): MutationResponse {
   };
 }
 
-describe("useTaskMutations createFromQuickEntry", () => {
+describe("useTaskMutations", () => {
   let container: HTMLDivElement;
   let root: Root;
   let api: ReturnType<typeof useTaskMutations>;
@@ -123,6 +127,8 @@ describe("useTaskMutations createFromQuickEntry", () => {
     createTaskApi.mockReset();
     createTagApi.mockReset();
     getCatalog.mockReset();
+    uncompleteTaskApi.mockReset();
+    showToast.mockReset();
     catalogState = makeCatalog();
     api = undefined as unknown as ReturnType<typeof useTaskMutations>;
 
@@ -140,6 +146,22 @@ describe("useTaskMutations createFromQuickEntry", () => {
       root.unmount();
     });
     container.remove();
+  });
+
+  it("reports source-only recurrence reversal without claiming an exact undo", async () => {
+    runMutation.mockImplementation(async (execute: (opId: string) => Promise<MutationResponse>) =>
+      execute("op-uncomplete"),
+    );
+    uncompleteTaskApi.mockResolvedValue({
+      ...taskMutation(),
+      uncomplete_outcome: "source_only",
+    } satisfies MutationResponse);
+
+    await act(async () => {
+      await api.uncompleteTask("task-1");
+    });
+
+    expect(showToast).toHaveBeenCalledWith("info", "Task reopened. Recurring changes were kept.");
   });
 
   it("includes resolved existing tag and project IDs and preserves scalars", async () => {

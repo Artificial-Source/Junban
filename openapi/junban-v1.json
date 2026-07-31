@@ -8792,6 +8792,17 @@
         "properties": {
           "event": {
             "$ref": "#/components/schemas/CommittedEventDto"
+          },
+          "uncomplete_outcome": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UncompleteOutcomeDto",
+                "description": "Present only for ordinary uncomplete so clients can distinguish an exact reversal."
+              }
+            ]
           }
         }
       },
@@ -10604,6 +10615,11 @@
             }
           }
         }
+      },
+      "UncompleteOutcomeDto": {
+        "type": "string",
+        "description": "How an ordinary uncomplete handled recurring work.",
+        "enum": ["exact", "source_only"]
       },
       "WeekStartDto": {
         "type": "string",

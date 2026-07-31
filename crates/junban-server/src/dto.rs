@@ -17,7 +17,8 @@ use junban_domain::{
     TagId, TagName, Task, TaskActivity, TaskActivityAction, TaskDraft, TaskId, TaskQuery,
     TaskRelation, TaskSort, TaskStatus, TaskTitle, TaskViewPreset, Template, TemplateId,
     TextImportDraft, TimeBlock, TimeBlockDraft, TimeSlot, TimeSlotDraft, TimeSlotId, TimeZoneName,
-    ValidationError, WeekStart, WeeklyDayStats, WeeklyReviewSummary, WeeklySuggestion,
+    UncompleteOutcome, ValidationError, WeekStart, WeeklyDayStats, WeeklyReviewSummary,
+    WeeklySuggestion,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -52,6 +53,23 @@ impl From<TaskStatusDto> for TaskStatus {
             TaskStatusDto::Pending => Self::Pending,
             TaskStatusDto::Completed => Self::Completed,
             TaskStatusDto::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+/// How an ordinary uncomplete handled recurring work.
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UncompleteOutcomeDto {
+    Exact,
+    SourceOnly,
+}
+
+impl From<UncompleteOutcome> for UncompleteOutcomeDto {
+    fn from(value: UncompleteOutcome) -> Self {
+        match value {
+            UncompleteOutcome::Exact => Self::Exact,
+            UncompleteOutcome::SourceOnly => Self::SourceOnly,
         }
     }
 }
@@ -1892,12 +1910,16 @@ impl From<CommittedEvent> for CommittedEventDto {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MutationResponse {
     pub event: CommittedEventDto,
+    /// Present only for ordinary uncomplete so clients can distinguish an exact reversal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uncomplete_outcome: Option<UncompleteOutcomeDto>,
 }
 
 impl From<CommittedMutation> for MutationResponse {
     fn from(mutation: CommittedMutation) -> Self {
         Self {
             event: mutation.event.into(),
+            uncomplete_outcome: mutation.uncomplete_outcome.map(Into::into),
         }
     }
 }

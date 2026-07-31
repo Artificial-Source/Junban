@@ -1388,6 +1388,7 @@ export interface components {
     /** @description Mutation responses carry exactly one committed event. `newly_committed` is never exposed. */
     MutationResponse: {
       event: components["schemas"]["CommittedEventDto"];
+      uncomplete_outcome?: null | components["schemas"]["UncompleteOutcomeDto"];
     };
     NeglectedProjectFactDto: {
       /** Format: int32 */
@@ -2047,6 +2048,11 @@ export interface components {
       revision: number;
       time_slots: components["schemas"]["TimeSlotDto"][];
     };
+    /**
+     * @description How an ordinary uncomplete handled recurring work.
+     * @enum {string}
+     */
+    UncompleteOutcomeDto: "exact" | "source_only";
     /** @enum {string} */
     WeekStartDto: "sunday" | "monday";
     WeeklyDayStatsDto: {

@@ -649,6 +649,7 @@ impl Modify for SecurityAddon {
         dto::HealthResponse,
         dto::ProfileResponse,
         dto::TaskStatusDto,
+        dto::UncompleteOutcomeDto,
         dto::TaskSortDto,
         dto::TaskViewPresetDto,
         dto::ProjectViewDto,

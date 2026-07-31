@@ -53,9 +53,9 @@ use crate::routes::{
     patch_project, patch_saved_filter, patch_section, patch_tag, patch_task, patch_template,
     patch_time_block, patch_time_slot, planning_daily, planning_end_of_day, planning_weekly,
     release_reminder_lease, reminder_events, remove_relation, remove_time_slot_task,
-    renew_reminder_lease, reopen_task, reorder_tasks, replace_time_slot_tasks, reschedule_reminder,
-    resize_time_block, settle_reminder_delivered, settle_reminder_failed, stats, uncomplete_task,
-    undo_operation,
+    renew_reminder_lease, reopen_task, reorder_tasks, replace_time_slot_tasks, replan_time_blocks,
+    reschedule_reminder, resize_time_block, settle_reminder_delivered, settle_reminder_failed,
+    stats, uncomplete_task, undo_operation,
 };
 use crate::sse::{AppService, SseConnectionPermit};
 
@@ -302,6 +302,7 @@ pub fn router(state: ServerState, web_dir: impl Into<PathBuf>) -> Router {
             "/api/v1/time-blocks",
             get(list_time_blocks).post(create_time_block),
         )
+        .route("/api/v1/time-blocks/replan", post(replan_time_blocks))
         .route(
             "/api/v1/time-blocks/{time_block_id}",
             patch(patch_time_block).delete(delete_time_block),
@@ -623,6 +624,7 @@ impl Modify for SecurityAddon {
         routes::delete_time_block,
         routes::move_time_block,
         routes::resize_time_block,
+        routes::replan_time_blocks,
         routes::list_time_slots,
         routes::create_time_slot,
         routes::patch_time_slot,
@@ -700,6 +702,8 @@ impl Modify for SecurityAddon {
         dto::PatchTimeBlockRequest,
         dto::MoveTimeBlockRequest,
         dto::ResizeTimeBlockRequest,
+        dto::ReplanTimeBlocksRequest,
+        dto::ReplanTimeBlocksActionDto,
         dto::CreateTimeSlotRequest,
         dto::PatchTimeSlotRequest,
         dto::AppendTimeSlotTaskRequest,

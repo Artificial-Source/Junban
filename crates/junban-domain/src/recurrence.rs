@@ -169,6 +169,50 @@ fn shift_absolute(
         })
 }
 
+/// Expand a civil recurrence series into occurrence dates inside an inclusive `[from, to]` window.
+///
+/// `series_start` is the durable owner date and is always the first occurrence of the series.
+/// Expansion only moves forward from that owner. Invalid rules fail closed. Generation jumps
+/// toward `from` for day/week intervals so arbitrarily old owners cannot spin the evaluator.
+pub fn civil_occurrences_in_range(
+    rule: &RecurrenceRule,
+    series_start: Date,
+    from: Date,
+    to: Date,
+) -> Result<Vec<Date>, ValidationError> {
+    if to < from {
+        return Err(ValidationError::Invalid {
+            field: "range",
+            reason: "to must be on or after from",
+        });
+    }
+    if series_start > to {
+        return Ok(Vec::new());
+    }
+
+    let kind = parse_rule(rule.as_str())?;
+    let mut anchor = initial_series_anchor(kind, series_start);
+    let mut cursor = fast_forward_to_range(kind, series_start, from, &mut anchor)?;
+
+    let mut out = Vec::new();
+    while cursor <= to {
+        if cursor >= from {
+            out.push(cursor);
+        }
+        let previous = cursor;
+        let (next, next_anchor) = advance_date(kind, cursor, anchor)?;
+        if next <= previous {
+            return Err(ValidationError::Invalid {
+                field: "recurrence_rule",
+                reason: "recurrence did not advance",
+            });
+        }
+        cursor = next;
+        anchor = next_anchor;
+    }
+    Ok(out)
+}
+
 /// Advance exactly one interval from the source due value (or sampled completion date
 /// when the source has no due date). Overdue sources do not skip intervals.
 pub fn next_occurrence(request: &NextOccurrenceRequest) -> Result<NextOccurrence, ValidationError> {
@@ -233,6 +277,206 @@ enum RuleKind {
     Weekdays,
     EveryDays(u32),
     EveryWeeks(u32),
+}
+
+fn initial_series_anchor(kind: RuleKind, series_start: Date) -> Option<MonthlyAnchorDay> {
+    match kind {
+        RuleKind::Monthly => Some(MonthlyAnchorDay::from_date(series_start)),
+        RuleKind::Yearly => yearly_series_anchor(series_start, None),
+        RuleKind::Daily
+        | RuleKind::Weekly
+        | RuleKind::Weekdays
+        | RuleKind::EveryDays(_)
+        | RuleKind::EveryWeeks(_) => None,
+    }
+}
+
+fn days_between(start: Date, end: Date) -> Result<i64, ValidationError> {
+    if end < start {
+        return Ok(0);
+    }
+    let span = start.until(end).map_err(|_| ValidationError::Invalid {
+        field: "due_date",
+        reason: "date range is not representable",
+    })?;
+    Ok(i64::from(span.get_days()))
+}
+
+fn ceil_div_nonneg(numerator: i64, denominator: i64) -> i64 {
+    debug_assert!(numerator >= 0);
+    debug_assert!(denominator > 0);
+    // Portable ceil-division for non-negative inputs (avoids relying on newer int helpers).
+    if numerator == 0 {
+        0
+    } else {
+        (numerator - 1) / denominator + 1
+    }
+}
+
+fn fast_forward_to_range(
+    kind: RuleKind,
+    series_start: Date,
+    from: Date,
+    anchor: &mut Option<MonthlyAnchorDay>,
+) -> Result<Date, ValidationError> {
+    if series_start >= from {
+        return Ok(series_start);
+    }
+
+    match kind {
+        RuleKind::Daily => Ok(from),
+        RuleKind::EveryDays(n) => {
+            let delta = days_between(series_start, from)?;
+            let steps = ceil_div_nonneg(delta, i64::from(n));
+            add_days(series_start, steps.saturating_mul(i64::from(n)))
+        }
+        RuleKind::Weekly => {
+            let delta = days_between(series_start, from)?;
+            let steps = ceil_div_nonneg(delta, 7);
+            add_weeks(series_start, steps)
+        }
+        RuleKind::EveryWeeks(n) => {
+            let delta = days_between(series_start, from)?;
+            let step_days = i64::from(n).saturating_mul(7);
+            let steps = ceil_div_nonneg(delta, step_days);
+            add_weeks(series_start, steps.saturating_mul(i64::from(n)))
+        }
+        RuleKind::Weekdays => first_weekday_on_or_after(series_start, from),
+        RuleKind::Monthly => {
+            let retained = anchor.unwrap_or_else(|| MonthlyAnchorDay::from_date(series_start));
+            *anchor = Some(retained);
+            first_monthly_on_or_after(series_start, from, retained)
+        }
+        RuleKind::Yearly => first_yearly_on_or_after(series_start, from, anchor),
+    }
+}
+
+fn first_weekday_on_or_after(series_start: Date, from: Date) -> Result<Date, ValidationError> {
+    if series_start >= from {
+        return Ok(series_start);
+    }
+    // Owner date is always an occurrence, including weekend starts. After that, the series is
+    // the ordinary Mon–Fri chain produced by `next_weekday`.
+    let mut cursor = match series_start.weekday() {
+        Weekday::Saturday | Weekday::Sunday => next_weekday(series_start)?,
+        _ => series_start,
+    };
+    if cursor < from {
+        cursor = from;
+        match cursor.weekday() {
+            Weekday::Saturday => cursor = add_days(cursor, 2)?,
+            Weekday::Sunday => cursor = add_days(cursor, 1)?,
+            _ => {}
+        }
+    }
+    Ok(cursor)
+}
+
+fn clamp_month_day(
+    year: i16,
+    month: i8,
+    anchor: MonthlyAnchorDay,
+) -> Result<Date, ValidationError> {
+    let first = Date::new(year, month, 1).map_err(|_| ValidationError::Invalid {
+        field: "due_date",
+        reason: "invalid monthly occurrence",
+    })?;
+    let day = i8::try_from(anchor.get()).expect("anchor is 1..=31");
+    let clamped = day.min(first.days_in_month());
+    Date::new(year, month, clamped).map_err(|_| ValidationError::Invalid {
+        field: "due_date",
+        reason: "invalid monthly occurrence",
+    })
+}
+
+fn first_monthly_on_or_after(
+    series_start: Date,
+    from: Date,
+    anchor: MonthlyAnchorDay,
+) -> Result<Date, ValidationError> {
+    if series_start >= from {
+        return Ok(series_start);
+    }
+    let mut year = from.year();
+    let mut month = from.month();
+    let mut candidate = clamp_month_day(year, month, anchor)?;
+    if candidate < from {
+        if month == 12 {
+            year = year.checked_add(1).ok_or(ValidationError::Invalid {
+                field: "due_date",
+                reason: "recurrence advances outside the supported civil date range",
+            })?;
+            month = 1;
+        } else {
+            month += 1;
+        }
+        candidate = clamp_month_day(year, month, anchor)?;
+    }
+    // Series cannot start before the owner date.
+    if candidate < series_start {
+        return Ok(series_start);
+    }
+    Ok(candidate)
+}
+
+fn first_yearly_on_or_after(
+    series_start: Date,
+    from: Date,
+    anchor: &mut Option<MonthlyAnchorDay>,
+) -> Result<Date, ValidationError> {
+    if series_start >= from {
+        return Ok(series_start);
+    }
+
+    let series_anchor = *anchor;
+    let (series_month, series_day) = if series_anchor.is_some_and(|day| day.get() == 29)
+        && ((series_start.month() == 2 && series_start.day() == 29)
+            || (series_start.month() == 3 && series_start.day() == 1))
+    {
+        (2_i8, 29_i8)
+    } else {
+        (series_start.month(), series_start.day())
+    };
+
+    let mut year = from.year();
+    if year < series_start.year() {
+        year = series_start.year();
+    }
+
+    loop {
+        let candidate = if series_month == 2 && series_day == 29 {
+            if is_leap_year(year) {
+                Date::new(year, 2, 29).map_err(|_| ValidationError::Invalid {
+                    field: "due_date",
+                    reason: "invalid yearly occurrence",
+                })?
+            } else {
+                Date::new(year, 3, 1).map_err(|_| ValidationError::Invalid {
+                    field: "due_date",
+                    reason: "invalid yearly occurrence",
+                })?
+            }
+        } else {
+            let first = Date::new(year, series_month, 1).map_err(|_| ValidationError::Invalid {
+                field: "due_date",
+                reason: "invalid yearly occurrence",
+            })?;
+            let clamped = series_day.min(first.days_in_month());
+            Date::new(year, series_month, clamped).map_err(|_| ValidationError::Invalid {
+                field: "due_date",
+                reason: "invalid yearly occurrence",
+            })?
+        };
+
+        if candidate >= from && candidate >= series_start {
+            *anchor = yearly_series_anchor(candidate, series_anchor);
+            return Ok(candidate);
+        }
+        year = year.checked_add(1).ok_or(ValidationError::Invalid {
+            field: "due_date",
+            reason: "recurrence advances outside the supported civil date range",
+        })?;
+    }
 }
 
 fn parse_rule(canonical: &str) -> Result<RuleKind, ValidationError> {
@@ -732,5 +976,208 @@ mod tests {
             shifted.deadline.unwrap().to_string(),
             "2026-03-11T18:00:00Z"
         );
+    }
+
+    #[test]
+    fn civil_range_includes_owner_and_forward_daily_dates() {
+        let dates = civil_occurrences_in_range(
+            &rule("daily"),
+            date(2026, 3, 8),
+            date(2026, 3, 8),
+            date(2026, 3, 10),
+        )
+        .unwrap();
+        assert_eq!(
+            dates,
+            vec![date(2026, 3, 8), date(2026, 3, 9), date(2026, 3, 10)]
+        );
+    }
+
+    #[test]
+    fn civil_range_daily_fast_forwards_from_very_old_owner() {
+        let dates = civil_occurrences_in_range(
+            &rule("daily"),
+            date(1900, 1, 1),
+            date(2026, 3, 8),
+            date(2026, 3, 10),
+        )
+        .unwrap();
+        assert_eq!(
+            dates,
+            vec![date(2026, 3, 8), date(2026, 3, 9), date(2026, 3, 10)]
+        );
+    }
+
+    #[test]
+    fn civil_range_every_n_days_fast_forwards_from_very_old_owner() {
+        let owner = date(1900, 1, 1);
+        let from = date(2026, 3, 8);
+        let to = date(2026, 3, 14);
+        let dates = civil_occurrences_in_range(&rule("every 3 days"), owner, from, to).unwrap();
+        assert_eq!(dates, vec![date(2026, 3, 10), date(2026, 3, 13)]);
+        for day in &dates {
+            let delta = owner.until(*day).unwrap().get_days();
+            assert_eq!(delta % 3, 0);
+        }
+    }
+
+    #[test]
+    fn civil_range_weekly_fast_forwards_from_very_old_owner() {
+        let owner = date(1900, 1, 1); // Monday
+        let dates =
+            civil_occurrences_in_range(&rule("weekly"), owner, date(2026, 3, 2), date(2026, 3, 16))
+                .unwrap();
+        assert_eq!(
+            dates,
+            vec![date(2026, 3, 2), date(2026, 3, 9), date(2026, 3, 16)]
+        );
+        assert!(dates.iter().all(|day| day.weekday() == owner.weekday()));
+    }
+
+    #[test]
+    fn civil_range_weekdays_includes_weekend_owner_then_mon_fri() {
+        // Saturday owner is itself an occurrence; afterward only weekdays.
+        let dates = civil_occurrences_in_range(
+            &rule("weekdays"),
+            date(2026, 3, 7), // Saturday
+            date(2026, 3, 7),
+            date(2026, 3, 13),
+        )
+        .unwrap();
+        assert_eq!(
+            dates,
+            vec![
+                date(2026, 3, 7), // owner Saturday
+                date(2026, 3, 9), // Monday
+                date(2026, 3, 10),
+                date(2026, 3, 11),
+                date(2026, 3, 12),
+                date(2026, 3, 13),
+            ]
+        );
+
+        let jumped = civil_occurrences_in_range(
+            &rule("weekdays"),
+            date(2026, 1, 3), // Saturday
+            date(2026, 3, 7), // Saturday
+            date(2026, 3, 10),
+        )
+        .unwrap();
+        assert_eq!(
+            jumped,
+            vec![date(2026, 3, 9), date(2026, 3, 10)] // weekend start snaps forward
+        );
+    }
+
+    #[test]
+    fn civil_range_monthly_jan_31_clamps_and_restores_anchor() {
+        let dates = civil_occurrences_in_range(
+            &rule("monthly"),
+            date(2026, 1, 31),
+            date(2026, 1, 31),
+            date(2026, 4, 30),
+        )
+        .unwrap();
+        assert_eq!(
+            dates,
+            vec![
+                date(2026, 1, 31),
+                date(2026, 2, 28),
+                date(2026, 3, 31),
+                date(2026, 4, 30),
+            ]
+        );
+
+        // Fast-forward from an old Jan-31 owner into a short month still restores day 31 later.
+        let jumped = civil_occurrences_in_range(
+            &rule("monthly"),
+            date(2020, 1, 31),
+            date(2026, 2, 1),
+            date(2026, 3, 31),
+        )
+        .unwrap();
+        assert_eq!(jumped, vec![date(2026, 2, 28), date(2026, 3, 31)]);
+    }
+
+    #[test]
+    fn civil_range_yearly_feb_29_chain() {
+        let dates = civil_occurrences_in_range(
+            &rule("yearly"),
+            date(2024, 2, 29),
+            date(2025, 1, 1),
+            date(2028, 12, 31),
+        )
+        .unwrap();
+        assert_eq!(
+            dates,
+            vec![
+                date(2025, 3, 1),
+                date(2026, 3, 1),
+                date(2027, 3, 1),
+                date(2028, 2, 29),
+            ]
+        );
+    }
+
+    #[test]
+    fn civil_range_empty_before_owner() {
+        let dates = civil_occurrences_in_range(
+            &rule("daily"),
+            date(2026, 3, 10),
+            date(2026, 3, 1),
+            date(2026, 3, 9),
+        )
+        .unwrap();
+        assert!(dates.is_empty());
+    }
+
+    #[test]
+    fn civil_range_rejects_inverted_range() {
+        let err = civil_occurrences_in_range(
+            &rule("daily"),
+            date(2026, 3, 1),
+            date(2026, 3, 10),
+            date(2026, 3, 1),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            ValidationError::Invalid {
+                field: "range",
+                reason: "to must be on or after from",
+            }
+        );
+    }
+
+    #[test]
+    fn civil_range_rejects_invalid_rule() {
+        // Stored/serde bypass can carry non-canonical grammar; evaluator fails closed.
+        let bad: RecurrenceRule = serde_json::from_str("\"fortnightly\"").unwrap();
+        let err =
+            civil_occurrences_in_range(&bad, date(2026, 3, 1), date(2026, 3, 1), date(2026, 3, 7))
+                .unwrap_err();
+        assert_eq!(
+            err,
+            ValidationError::InvalidFormat {
+                field: "recurrence_rule",
+                expected: "daily|weekly|monthly|yearly|weekdays|every N day(s)|week(s)",
+            }
+        );
+    }
+
+    #[test]
+    fn civil_range_every_weeks_fast_forwards_without_spin() {
+        let dates = civil_occurrences_in_range(
+            &rule("every 2 weeks"),
+            date(1900, 1, 1),
+            date(2026, 3, 2),
+            date(2026, 3, 30),
+        )
+        .unwrap();
+        assert!(!dates.is_empty());
+        assert!(dates[0] >= date(2026, 3, 2));
+        for window in dates.windows(2) {
+            assert_eq!(window[0].until(window[1]).unwrap().get_days(), 14);
+        }
     }
 }

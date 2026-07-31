@@ -50,7 +50,8 @@ pub use query::{
 pub use quick_entry::{MAX_QUICK_ENTRY_CHARS, QuickEntry, parse_quick_entry};
 pub use recurrence::{
     MonthlyAnchorDay, NextOccurrence, NextOccurrenceRequest, OccurrenceAbsoluteOffsets,
-    RecurrenceSource, next_occurrence, resolve_due_instant, shift_occurrence_absolutes,
+    RecurrenceSource, civil_occurrences_in_range, next_occurrence, resolve_due_instant,
+    shift_occurrence_absolutes,
 };
 pub use reminder::{
     ClaimedReminder, DEFAULT_REMINDER_CLAIM_LIMIT, DEFAULT_REMINDER_CLAIM_SECS,

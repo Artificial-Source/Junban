@@ -7,14 +7,16 @@ use junban_domain::{
     CivilTimeRange, ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
     DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName,
     FilterQuery, HexColor, MAX_ANALYSIS_TASK_READ, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT,
-    MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
-    ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId, TagId,
-    TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort, TaskStatus,
-    TaskTitle, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId, ValidationError,
-    WeekStart, daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges,
-    select_eat_the_frog, stats_summary, task_jar_candidates, validate_calendar_date_range,
-    validate_owner_lost_mark_limit, validate_reminder_claim_limit, validate_reminder_lease_secs,
-    validate_stats_date_range, validate_timeblock_date_range, weekly_review_summary,
+    MAX_TIMEBLOCK_RANGE_ITEMS, MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel,
+    ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence,
+    SavedFilterId, SectionId, TagId, TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery,
+    TaskRelation, TaskSort, TaskStatus, TaskTitle, TemplateId, TimeBlock, TimeBlockDraft,
+    TimeBlockId, TimeSlot, TimeSlotDraft, TimeSlotId, ValidationError, WeekStart,
+    civil_occurrences_in_range, daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary,
+    evaluate_nudges, select_eat_the_frog, stats_summary, task_jar_candidates,
+    validate_calendar_date_range, validate_owner_lost_mark_limit, validate_reminder_claim_limit,
+    validate_reminder_lease_secs, validate_stats_date_range, validate_timeblock_date_range,
+    weekly_review_summary,
 };
 
 use crate::{
@@ -33,6 +35,105 @@ pub const TASK_COLLECT_PAGE_SIZE: u32 = 100;
 
 pub trait EventSink: Send + Sync + 'static {
     fn publish(&self, event: CommittedEvent);
+}
+
+/// Expand durable series owners into the inclusive civil window.
+///
+/// Persisted owner dates are returned once with owner metadata intact. Virtual
+/// instances keep the owner typed id (mutations target the series owner) and set
+/// `recurrence_parent_id` for stable UI identity via response `occurrence_key`.
+fn expand_timeblocking_range(
+    page: TimeblockingRangePage,
+    from: Date,
+    to: Date,
+) -> Result<TimeblockingRangePage, AppError> {
+    let blocks = expand_time_blocks(page.blocks, from, to)?;
+    let slots = expand_time_slots(page.slots, from, to)?;
+    let total = blocks.len().saturating_add(slots.len());
+    if total > MAX_TIMEBLOCK_RANGE_ITEMS {
+        return Err(AppError::ResultLimitExceeded);
+    }
+    Ok(TimeblockingRangePage {
+        blocks,
+        slots,
+        revision: page.revision,
+    })
+}
+
+fn expand_time_blocks(
+    owners: Vec<TimeBlock>,
+    from: Date,
+    to: Date,
+) -> Result<Vec<TimeBlock>, AppError> {
+    let mut out = Vec::new();
+    for owner in owners {
+        match owner.recurrence_rule.as_ref() {
+            None => {
+                if owner.range.date >= from && owner.range.date <= to {
+                    out.push(owner);
+                }
+            }
+            Some(rule) => {
+                let dates = civil_occurrences_in_range(rule, owner.range.date, from, to)?;
+                for date in dates {
+                    if date == owner.range.date {
+                        out.push(owner.clone());
+                    } else {
+                        let mut instance = owner.clone();
+                        instance.range.date = date;
+                        instance.recurrence_parent_id = Some(owner.id);
+                        out.push(instance);
+                    }
+                }
+            }
+        }
+    }
+    out.sort_by(|left, right| {
+        (left.range.date, left.range.start, left.id.as_uuid()).cmp(&(
+            right.range.date,
+            right.range.start,
+            right.id.as_uuid(),
+        ))
+    });
+    Ok(out)
+}
+
+fn expand_time_slots(
+    owners: Vec<TimeSlot>,
+    from: Date,
+    to: Date,
+) -> Result<Vec<TimeSlot>, AppError> {
+    let mut out = Vec::new();
+    for owner in owners {
+        match owner.recurrence_rule.as_ref() {
+            None => {
+                if owner.range.date >= from && owner.range.date <= to {
+                    out.push(owner);
+                }
+            }
+            Some(rule) => {
+                let dates = civil_occurrences_in_range(rule, owner.range.date, from, to)?;
+                for date in dates {
+                    if date == owner.range.date {
+                        out.push(owner.clone());
+                    } else {
+                        let mut instance = owner.clone();
+                        instance.range.date = date;
+                        instance.recurrence_parent_id = Some(owner.id);
+                        out.push(instance);
+                    }
+                }
+            }
+        }
+    }
+    out.sort_by(|left, right| {
+        (left.range.date, left.range.start, left.id.as_uuid()).cmp(&(
+            right.range.date,
+            right.range.start,
+            right.id.as_uuid(),
+        ))
+    });
+    Ok(out)
 }
 
 #[derive(Debug)]
@@ -779,10 +880,11 @@ where
         to: Date,
     ) -> Result<TimeblockingRangePage, AppError> {
         validate_timeblock_date_range(from, to)?;
-        self.repository
+        let page = self
+            .repository
             .list_timeblocking_range(TimeblockingRangeQuery { from, to })
-            .await
-            .map_err(Into::into)
+            .await?;
+        expand_timeblocking_range(page, from, to)
     }
 
     pub async fn create_time_block(
@@ -1309,6 +1411,7 @@ mod tests {
         calls: Mutex<Vec<&'static str>>,
         /// When set, `list_tasks` pops pages in order (for collect-helper tests).
         list_pages: Mutex<Vec<TaskListPage>>,
+        timeblocking_page: Mutex<TimeblockingRangePage>,
     }
 
     impl FakeRepository {
@@ -1317,6 +1420,11 @@ mod tests {
                 result: Mutex::new(result),
                 calls: Mutex::new(Vec::new()),
                 list_pages: Mutex::new(Vec::new()),
+                timeblocking_page: Mutex::new(TimeblockingRangePage {
+                    blocks: Vec::new(),
+                    slots: Vec::new(),
+                    revision: 0,
+                }),
             }
         }
 
@@ -1325,6 +1433,20 @@ mod tests {
                 result: Mutex::new(Err(RepositoryError::Storage("unused".into()))),
                 calls: Mutex::new(Vec::new()),
                 list_pages: Mutex::new(pages),
+                timeblocking_page: Mutex::new(TimeblockingRangePage {
+                    blocks: Vec::new(),
+                    slots: Vec::new(),
+                    revision: 0,
+                }),
+            }
+        }
+
+        fn with_timeblocking_page(page: TimeblockingRangePage) -> Self {
+            Self {
+                result: Mutex::new(Err(RepositoryError::Storage("unused".into()))),
+                calls: Mutex::new(Vec::new()),
+                list_pages: Mutex::new(Vec::new()),
+                timeblocking_page: Mutex::new(page),
             }
         }
 
@@ -1768,13 +1890,8 @@ mod tests {
             _: TimeblockingRangeQuery,
         ) -> crate::RepositoryFuture<'_, TimeblockingRangePage> {
             self.calls.lock().unwrap().push("list_timeblocking_range");
-            Box::pin(async {
-                Ok(TimeblockingRangePage {
-                    blocks: Vec::new(),
-                    slots: Vec::new(),
-                    revision: 0,
-                })
-            })
+            let page = self.timeblocking_page.lock().unwrap().clone();
+            Box::pin(async move { Ok(page) })
         }
         fn create_time_block(
             &self,
@@ -2176,5 +2293,140 @@ mod tests {
                 .await,
             Err(AppError::Conflict)
         );
+    }
+
+    fn sample_block(title: &str, date: Date, start_h: i8, rule: Option<&str>) -> TimeBlock {
+        let now: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
+        let mut draft = TimeBlockDraft::new(
+            EntityName::new(title).unwrap(),
+            CivilTimeRange::new(
+                date,
+                jiff::civil::Time::constant(start_h, 0, 0, 0),
+                jiff::civil::Time::constant(start_h + 1, 0, 0, 0),
+                junban_domain::TimeZoneName::new("UTC").unwrap(),
+            )
+            .unwrap(),
+        );
+        draft.recurrence_rule = rule.map(|raw| junban_domain::RecurrenceRule::new(raw).unwrap());
+        TimeBlock::from_draft(TimeBlockId::new(), draft, now, 1)
+    }
+
+    fn sample_slot(title: &str, date: Date, start_h: i8, rule: Option<&str>) -> TimeSlot {
+        let now: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
+        let mut draft = TimeSlotDraft::new(
+            EntityName::new(title).unwrap(),
+            CivilTimeRange::new(
+                date,
+                jiff::civil::Time::constant(start_h, 0, 0, 0),
+                jiff::civil::Time::constant(start_h + 2, 0, 0, 0),
+                junban_domain::TimeZoneName::new("UTC").unwrap(),
+            )
+            .unwrap(),
+        );
+        draft.recurrence_rule = rule.map(|raw| junban_domain::RecurrenceRule::new(raw).unwrap());
+        TimeSlot::from_draft(TimeSlotId::new(), draft, now, 1)
+    }
+
+    #[tokio::test]
+    async fn list_timeblocking_expands_recurring_owners_and_sorts() {
+        let ordinary = sample_block("Ordinary", date(2026, 3, 9), 11, None);
+        let ordinary_id = ordinary.id;
+        // Owner is before the window; only virtual instances should appear.
+        let early_daily = sample_block("Daily", date(2026, 3, 1), 9, Some("daily"));
+        let owner_id = early_daily.id;
+        let weekly = sample_block("Weekly", date(2026, 3, 8), 8, Some("weekly"));
+        let weekly_id = weekly.id;
+        let slot = sample_slot("Slot series", date(2026, 3, 8), 14, Some("daily"));
+        let slot_id = slot.id;
+
+        let repository = Arc::new(FakeRepository::with_timeblocking_page(
+            TimeblockingRangePage {
+                blocks: vec![early_daily, weekly, ordinary],
+                slots: vec![slot],
+                revision: 7,
+            },
+        ));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+
+        let page = service
+            .list_timeblocking_range(date(2026, 3, 8), date(2026, 3, 10))
+            .await
+            .unwrap();
+
+        assert_eq!(page.revision, 7);
+        assert_eq!(
+            page.blocks
+                .iter()
+                .map(|block| {
+                    (
+                        block.id,
+                        block.range.date,
+                        block.recurrence_parent_id,
+                        block.title.as_str().to_owned(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                (weekly_id, date(2026, 3, 8), None, "Weekly".into()),
+                (owner_id, date(2026, 3, 8), Some(owner_id), "Daily".into()),
+                (owner_id, date(2026, 3, 9), Some(owner_id), "Daily".into()),
+                (ordinary_id, date(2026, 3, 9), None, "Ordinary".into()),
+                (owner_id, date(2026, 3, 10), Some(owner_id), "Daily".into()),
+            ]
+        );
+        // Weekly owner date is inside the window and returned once without parent id.
+        assert!(page.blocks.iter().any(|block| {
+            block.id == weekly_id
+                && block.range.date == date(2026, 3, 8)
+                && block.recurrence_parent_id.is_none()
+                && block.recurrence_rule.is_some()
+        }));
+        assert_eq!(page.slots.len(), 3);
+        assert!(page.slots.iter().all(|slot| slot.id == slot_id));
+        assert_eq!(page.slots[0].range.date, date(2026, 3, 8));
+        assert!(page.slots[0].recurrence_parent_id.is_none());
+        assert_eq!(page.slots[1].recurrence_parent_id, Some(slot_id));
+        assert_eq!(page.slots[2].recurrence_parent_id, Some(slot_id));
+
+        // Sorted by date, then start, then id.
+        let block_keys: Vec<_> = page
+            .blocks
+            .iter()
+            .map(|block| (block.range.date, block.range.start, block.id.as_uuid()))
+            .collect();
+        let mut sorted = block_keys.clone();
+        sorted.sort();
+        assert_eq!(block_keys, sorted);
+    }
+
+    #[tokio::test]
+    async fn list_timeblocking_rejects_expanded_result_over_limit() {
+        let mut blocks = Vec::new();
+        for index in 0..(MAX_TIMEBLOCK_RANGE_ITEMS + 1) {
+            blocks.push(sample_block(
+                &format!("b{index}"),
+                date(2026, 3, 8),
+                9,
+                None,
+            ));
+        }
+        let repository = Arc::new(FakeRepository::with_timeblocking_page(
+            TimeblockingRangePage {
+                blocks,
+                slots: Vec::new(),
+                revision: 1,
+            },
+        ));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+        assert_eq!(
+            service
+                .list_timeblocking_range(date(2026, 3, 8), date(2026, 3, 8))
+                .await,
+            Err(AppError::ResultLimitExceeded)
+        );
+    }
+
+    fn date(year: i16, month: i8, day: i8) -> Date {
+        jiff::civil::date(year, month, day)
     }
 }

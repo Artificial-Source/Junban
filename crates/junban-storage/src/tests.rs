@@ -4361,6 +4361,81 @@ async fn timeblocking_range_bounds_and_item_ceiling() {
 }
 
 #[tokio::test]
+async fn timeblocking_range_includes_earlier_recurring_owners_in_deterministic_order() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let old_recurring_id = junban_domain::TimeBlockId::new();
+    let mut old_recurring = block_draft("Old daily", "2026-01-01");
+    old_recurring.recurrence_rule = Some(junban_domain::RecurrenceRule::new("daily").unwrap());
+    repo.create_time_block(operation(), old_recurring_id, old_recurring, now())
+        .await
+        .unwrap();
+
+    let old_plain_id = junban_domain::TimeBlockId::new();
+    repo.create_time_block(
+        operation(),
+        old_plain_id,
+        block_draft("Old plain", "2026-01-02"),
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let in_range_id = junban_domain::TimeBlockId::new();
+    repo.create_time_block(
+        operation(),
+        in_range_id,
+        block_draft("In range", "2026-03-08"),
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let future_recurring_id = junban_domain::TimeBlockId::new();
+    let mut future = block_draft("Future daily", "2026-04-01");
+    future.recurrence_rule = Some(junban_domain::RecurrenceRule::new("daily").unwrap());
+    repo.create_time_block(operation(), future_recurring_id, future, now())
+        .await
+        .unwrap();
+
+    let old_slot_id = junban_domain::TimeSlotId::new();
+    let mut old_slot = slot_draft("Old slot series", "2026-02-01");
+    old_slot.recurrence_rule = Some(junban_domain::RecurrenceRule::new("weekly").unwrap());
+    repo.create_time_slot(operation(), old_slot_id, old_slot, now())
+        .await
+        .unwrap();
+
+    let page = repo
+        .list_timeblocking_range(junban_app::TimeblockingRangeQuery {
+            from: "2026-03-08".parse().unwrap(),
+            to: "2026-03-10".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+
+    let block_ids: Vec<_> = page.blocks.iter().map(|block| block.id).collect();
+    assert_eq!(block_ids, vec![old_recurring_id, in_range_id]);
+    assert!(!block_ids.contains(&old_plain_id));
+    assert!(!block_ids.contains(&future_recurring_id));
+    assert_eq!(
+        page.slots.iter().map(|slot| slot.id).collect::<Vec<_>>(),
+        vec![old_slot_id]
+    );
+
+    // Deterministic owner order by civil_date, start_time, id.
+    let keys: Vec<_> = page
+        .blocks
+        .iter()
+        .map(|block| (block.range.date, block.range.start, block.id.as_uuid()))
+        .collect();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    assert_eq!(keys, sorted);
+}
+
+#[tokio::test]
 async fn replan_skips_locked_blocks_and_is_atomic() {
     let directory = TestDir::new();
     let owner = ProfileOwner::open(&directory.0).unwrap();

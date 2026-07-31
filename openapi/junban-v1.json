@@ -6295,6 +6295,110 @@
         ]
       }
     },
+    "/api/v1/time-blocks/replan": {
+      "post": {
+        "tags": ["routes"],
+        "operationId": "replan_time_blocks",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplanTimeBlocksRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/time-blocks/{time_block_id}": {
       "delete": {
         "tags": ["routes"],
@@ -9469,6 +9573,21 @@
         },
         "additionalProperties": false
       },
+      "ReplanTimeBlocksActionDto": {
+        "type": "string",
+        "enum": ["move_to_today", "move_to_tomorrow", "delete"]
+      },
+      "ReplanTimeBlocksRequest": {
+        "type": "object",
+        "description": "Automatic replan for unlocked blocks in the prior seven complete civil days.",
+        "required": ["action"],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ReplanTimeBlocksActionDto"
+          }
+        },
+        "additionalProperties": false
+      },
       "RescheduleReminderRequest": {
         "type": "object",
         "required": ["remind_at"],
@@ -10296,6 +10415,7 @@
         "type": "object",
         "required": [
           "id",
+          "occurrence_key",
           "title",
           "date",
           "start",
@@ -10327,6 +10447,10 @@
           },
           "locked": {
             "type": "boolean"
+          },
+          "occurrence_key": {
+            "type": "string",
+            "description": "Stable response-only UI key: `{id}:{civil_date}` (owner id for virtual rows)."
           },
           "recurrence_parent_id": {
             "type": ["string", "null"],
@@ -10384,6 +10508,7 @@
         "type": "object",
         "required": [
           "id",
+          "occurrence_key",
           "title",
           "date",
           "start",
@@ -10411,6 +10536,10 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "occurrence_key": {
+            "type": "string",
+            "description": "Stable response-only UI key: `{id}:{civil_date}` (owner id for virtual rows)."
           },
           "project_id": {
             "type": ["string", "null"],

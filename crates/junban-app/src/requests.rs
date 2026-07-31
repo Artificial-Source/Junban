@@ -553,7 +553,11 @@ pub struct TimeblockingRangeQuery {
     pub to: Date,
 }
 
-/// Bounded range read of series-owner blocks and slots (no virtual expansion).
+/// Bounded range read of series-owner blocks and slots.
+///
+/// Storage returns durable owners only (including earlier recurring owners that may
+/// expand into the window). The app service expands recurring owners into virtual
+/// instances before returning this page to HTTP callers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeblockingRangePage {
     pub blocks: Vec<TimeBlock>,

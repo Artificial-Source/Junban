@@ -1385,6 +1385,8 @@ impl From<ResourceSnapshot> for ResourceSnapshotDto {
 pub struct TimeBlockDto {
     #[schema(value_type = String, format = Uuid)]
     pub id: String,
+    /// Stable response-only UI key: `{id}:{civil_date}` (owner id for virtual rows).
+    pub occurrence_key: String,
     pub title: String,
     #[schema(value_type = String, format = Date)]
     pub date: Date,
@@ -1414,8 +1416,11 @@ pub struct TimeBlockDto {
 
 impl From<TimeBlock> for TimeBlockDto {
     fn from(block: TimeBlock) -> Self {
+        let id = block.id.to_string();
+        let occurrence_key = format!("{id}:{}", block.range.date);
         Self {
-            id: block.id.to_string(),
+            id,
+            occurrence_key,
             title: block.title.to_string(),
             date: block.range.date,
             start: block.range.start.to_string(),
@@ -1438,6 +1443,8 @@ impl From<TimeBlock> for TimeBlockDto {
 pub struct TimeSlotDto {
     #[schema(value_type = String, format = Uuid)]
     pub id: String,
+    /// Stable response-only UI key: `{id}:{civil_date}` (owner id for virtual rows).
+    pub occurrence_key: String,
     pub title: String,
     #[schema(value_type = String, format = Date)]
     pub date: Date,
@@ -1465,8 +1472,11 @@ pub struct TimeSlotDto {
 
 impl From<TimeSlot> for TimeSlotDto {
     fn from(slot: TimeSlot) -> Self {
+        let id = slot.id.to_string();
+        let occurrence_key = format!("{id}:{}", slot.range.date);
         Self {
-            id: slot.id.to_string(),
+            id,
+            occurrence_key,
             title: slot.title.to_string(),
             date: slot.range.date,
             start: slot.range.start.to_string(),
@@ -1641,6 +1651,31 @@ impl ResizeTimeBlockRequest {
             self.time_zone.as_deref(),
             request_id,
         )
+    }
+}
+
+/// Automatic replan for unlocked blocks in the prior seven complete civil days.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReplanTimeBlocksRequest {
+    pub action: ReplanTimeBlocksActionDto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplanTimeBlocksActionDto {
+    MoveToToday,
+    MoveToTomorrow,
+    Delete,
+}
+
+impl From<ReplanTimeBlocksActionDto> for junban_app::ReplanPastBlocksAction {
+    fn from(action: ReplanTimeBlocksActionDto) -> Self {
+        match action {
+            ReplanTimeBlocksActionDto::MoveToToday => Self::MoveToToday,
+            ReplanTimeBlocksActionDto::MoveToTomorrow => Self::MoveToTomorrow,
+            ReplanTimeBlocksActionDto::Delete => Self::Delete,
+        }
     }
 }
 

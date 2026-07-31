@@ -884,6 +884,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/time-blocks/replan": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["replan_time_blocks"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/time-blocks/{time_block_id}": {
     parameters: {
       query?: never;
@@ -1652,6 +1668,12 @@ export interface components {
     ReplaceTimeSlotTasksRequest: {
       task_ids: string[];
     };
+    /** @enum {string} */
+    ReplanTimeBlocksActionDto: "move_to_today" | "move_to_tomorrow" | "delete";
+    /** @description Automatic replan for unlocked blocks in the prior seven complete civil days. */
+    ReplanTimeBlocksRequest: {
+      action: components["schemas"]["ReplanTimeBlocksActionDto"];
+    };
     RescheduleReminderRequest: {
       /** Format: date-time */
       remind_at: string;
@@ -1969,6 +1991,8 @@ export interface components {
       /** Format: uuid */
       id: string;
       locked: boolean;
+      /** @description Stable response-only UI key: `{id}:{civil_date}` (owner id for virtual rows). */
+      occurrence_key: string;
       /** Format: uuid */
       recurrence_parent_id?: string | null;
       recurrence_rule?: string | null;
@@ -1998,6 +2022,8 @@ export interface components {
       end: string;
       /** Format: uuid */
       id: string;
+      /** @description Stable response-only UI key: `{id}:{civil_date}` (owner id for virtual rows). */
+      occurrence_key: string;
       /** Format: uuid */
       project_id?: string | null;
       /** Format: uuid */
@@ -6384,6 +6410,79 @@ export interface operations {
         };
       };
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  replan_time_blocks: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReplanTimeBlocksRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
         headers: {
           [name: string]: unknown;
         };

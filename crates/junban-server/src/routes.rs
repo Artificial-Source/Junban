@@ -32,11 +32,11 @@ use crate::dto::{
     PatchTimeBlockRequest, PatchTimeSlotRequest, ProfileResponse, QuickEntryDto, RelationDto,
     RelationListResponse, ReleaseReminderLeaseRequest, ReminderDeliveryLeaseDto,
     ReminderListResponse, ReminderOccurrenceDto, RenewReminderLeaseRequest, ReorderTasksRequest,
-    ReplaceTimeSlotTasksRequest, RescheduleReminderRequest, ResizeTimeBlockRequest,
-    SettleReminderDeliveredRequest, SettleReminderFailedRequest, StatsResponse, TaskActivityDto,
-    TaskActivityResponse, TaskDto, TaskJarResponse, TaskListResponse, TaskSortDto,
-    TaskViewPresetDto, TemporalSettingsResponse, TextImportDraftDto, TextImportResponse,
-    TimeBlockListResponse, TimeSlotListResponse, WeeklyReviewResponse,
+    ReplaceTimeSlotTasksRequest, ReplanTimeBlocksRequest, RescheduleReminderRequest,
+    ResizeTimeBlockRequest, SettleReminderDeliveredRequest, SettleReminderFailedRequest,
+    StatsResponse, TaskActivityDto, TaskActivityResponse, TaskDto, TaskJarResponse,
+    TaskListResponse, TaskSortDto, TaskViewPresetDto, TemporalSettingsResponse, TextImportDraftDto,
+    TextImportResponse, TimeBlockListResponse, TimeSlotListResponse, WeeklyReviewResponse,
 };
 use crate::error::{ApiError, extract_json, operation_id, parse_path_id, validation_error};
 use crate::reminder_wake::open_reminder_sse_stream;
@@ -2087,6 +2087,39 @@ pub async fn resize_time_block(
     let mutation = state
         .service
         .resize_time_block(operation_id, time_block_id, range)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-blocks/replan",
+    operation_id = "replan_time_blocks",
+    request_body = ReplanTimeBlocksRequest,
+    params(("Idempotency-Key" = String, Header, format = Uuid)),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replan_time_blocks(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    payload: Result<Json<ReplanTimeBlocksRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let mutation = state
+        .service
+        .replan_past_blocks(operation_id, payload.action.into())
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
     Ok(Json(mutation.into()))

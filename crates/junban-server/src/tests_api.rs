@@ -2093,6 +2093,12 @@ async fn time_block_list_defaults_and_rejects_invalid_windows() {
     let body = json(listed).await;
     assert_eq!(body["time_blocks"].as_array().unwrap().len(), 1);
     assert!(body["revision"].as_u64().unwrap() >= 1);
+    let listed_id = body["time_blocks"][0]["id"].as_str().unwrap();
+    let listed_date = body["time_blocks"][0]["date"].as_str().unwrap();
+    assert_eq!(
+        body["time_blocks"][0]["occurrence_key"].as_str().unwrap(),
+        format!("{listed_id}:{listed_date}")
+    );
 
     let inverted = context
         .request(
@@ -2144,6 +2150,264 @@ async fn time_block_list_defaults_and_rejects_invalid_windows() {
     )
     .await;
     assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn time_block_list_expands_recurring_owners_with_stable_occurrence_keys() {
+    let context = TestContext::new();
+    let created = create_block(
+        &context,
+        json!({
+            "title": "Daily focus",
+            "date": "2026-03-01",
+            "start": "09:00:00",
+            "end": "10:00:00",
+            "time_zone": "UTC",
+            "recurrence_rule": "daily"
+        }),
+    )
+    .await;
+    let owner_id = block_id_from(&created).to_owned();
+
+    let listed = context
+        .request(
+            authenticated(
+                Method::GET,
+                "/api/v1/time-blocks?from=2026-03-08&to=2026-03-10",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let body = json(listed).await;
+    let blocks = body["time_blocks"].as_array().unwrap();
+    assert_eq!(blocks.len(), 3);
+    for (index, date) in ["2026-03-08", "2026-03-09", "2026-03-10"]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(blocks[index]["id"], owner_id);
+        assert_eq!(blocks[index]["date"], date);
+        assert_eq!(
+            blocks[index]["occurrence_key"].as_str().unwrap(),
+            format!("{owner_id}:{date}")
+        );
+        assert_eq!(
+            blocks[index]["recurrence_parent_id"].as_str().unwrap(),
+            owner_id
+        );
+    }
+}
+
+#[tokio::test]
+async fn time_block_replan_is_idempotent_and_supports_actions() {
+    let context = TestContext::new();
+
+    // Seed unlocked past blocks relative to server-local today.
+    let today = jiff::Zoned::now().date();
+    let yesterday = today.checked_sub(1.day()).unwrap();
+    let two_days_ago = today.checked_sub(2.days()).unwrap();
+
+    let unlocked = create_block(
+        &context,
+        block_payload(
+            "Past open",
+            &two_days_ago.to_string(),
+            "09:00:00",
+            "10:00:00",
+        ),
+    )
+    .await;
+    let unlocked_id = block_id_from(&unlocked).to_owned();
+
+    let locked = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-blocks",
+        json!({
+            "title": "Past locked",
+            "date": yesterday.to_string(),
+            "start": "11:00:00",
+            "end": "12:00:00",
+            "time_zone": "UTC",
+            "locked": true
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(locked.status(), StatusCode::CREATED);
+    let locked_id = block_id_from(&json(locked).await).to_owned();
+
+    let key = Uuid::new_v4().to_string();
+    let first = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-blocks/replan",
+        json!({ "action": "move_to_today" }),
+        Some(&key),
+    )
+    .await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_bytes = response_bytes(first).await;
+    let first_json: Value = serde_json::from_slice(&first_bytes).unwrap();
+    assert_eq!(first_json["event"]["event_type"], "time_block.replanned");
+    assert_eq!(
+        first_json["event"]["affected"]["time_block_ids"],
+        json!([unlocked_id])
+    );
+
+    let replay = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-blocks/replan",
+        json!({ "action": "move_to_today" }),
+        Some(&key),
+    )
+    .await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(response_bytes(replay).await, first_bytes);
+
+    // Replay must not advance revision / emit a second event.
+    let revision_after_first = first_json["event"]["revision"].as_u64().unwrap();
+    let listed_after_replay = context
+        .request(
+            authenticated(
+                Method::GET,
+                &format!("/api/v1/time-blocks?from={}&to={}", two_days_ago, today),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(
+        json(listed_after_replay).await["revision"]
+            .as_u64()
+            .unwrap(),
+        revision_after_first
+    );
+
+    let listed = context
+        .request(
+            authenticated(
+                Method::GET,
+                &format!("/api/v1/time-blocks?from={}&to={}", two_days_ago, today),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    let body = json(listed).await;
+    let unlocked_row = body["time_blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|block| block["id"] == unlocked_id)
+        .unwrap();
+    let locked_row = body["time_blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|block| block["id"] == locked_id)
+        .unwrap();
+    assert_eq!(unlocked_row["date"], today.to_string());
+    assert_eq!(locked_row["date"], yesterday.to_string());
+
+    // move_to_tomorrow for a fresh past unlocked block.
+    let move_tomorrow = create_block(
+        &context,
+        block_payload(
+            "Move tomorrow",
+            &yesterday.to_string(),
+            "13:00:00",
+            "14:00:00",
+        ),
+    )
+    .await;
+    let move_tomorrow_id = block_id_from(&move_tomorrow).to_owned();
+    let moved = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-blocks/replan",
+        json!({ "action": "move_to_tomorrow" }),
+        None,
+    )
+    .await;
+    assert_eq!(moved.status(), StatusCode::OK);
+    assert_eq!(
+        json(moved).await["event"]["event_type"],
+        "time_block.replanned"
+    );
+    let tomorrow = today.checked_add(1.day()).unwrap();
+    let listed = context
+        .request(
+            authenticated(
+                Method::GET,
+                &format!("/api/v1/time-blocks?from={tomorrow}&to={tomorrow}"),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert!(
+        json(listed).await["time_blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|block| block["id"] == move_tomorrow_id)
+    );
+
+    // delete action removes unlocked past blocks only.
+    let delete_me = create_block(
+        &context,
+        block_payload("Delete me", &yesterday.to_string(), "15:00:00", "16:00:00"),
+    )
+    .await;
+    let delete_id = block_id_from(&delete_me).to_owned();
+    let deleted = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-blocks/replan",
+        json!({ "action": "delete" }),
+        None,
+    )
+    .await;
+    assert_eq!(deleted.status(), StatusCode::OK);
+    let deleted = json(deleted).await;
+    assert!(
+        deleted["event"]["affected"]["time_block_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &json!(delete_id))
+    );
+    assert!(
+        !deleted["event"]["affected"]["time_block_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &json!(locked_id))
+    );
+
+    let unknown = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-blocks/replan",
+        json!({ "action": "move_to_today", "extra": true }),
+        None,
+    )
+    .await;
+    assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+
+    let bad_action = mutate_json(
+        &context,
+        Method::POST,
+        "/api/v1/time-blocks/replan",
+        json!({ "action": "nope" }),
+        None,
+    )
+    .await;
+    assert_eq!(bad_action.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

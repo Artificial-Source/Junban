@@ -112,18 +112,21 @@ pub(crate) fn list_timeblocking_range(
     let revision = global_revision(connection)?;
     let tx = connection.unchecked_transaction().map_err(storage_error)?;
 
+    // In-range rows plus earlier recurring series owners that may expand into the window.
+    // App-layer expansion materializes virtual instances; this read stays owner-only.
+    const RANGE_SQL_FILTER: &str =
+        "civil_date <= ?2 AND (civil_date >= ?1 OR recurrence_rule IS NOT NULL)";
+
     let block_count: i64 = tx
         .query_row(
-            "SELECT COUNT(*) FROM time_blocks
-             WHERE civil_date >= ?1 AND civil_date <= ?2",
+            &format!("SELECT COUNT(*) FROM time_blocks WHERE {RANGE_SQL_FILTER}"),
             params![query.from.to_string(), query.to.to_string()],
             |row| row.get(0),
         )
         .map_err(storage_error)?;
     let slot_count: i64 = tx
         .query_row(
-            "SELECT COUNT(*) FROM time_slots
-             WHERE civil_date >= ?1 AND civil_date <= ?2",
+            &format!("SELECT COUNT(*) FROM time_slots WHERE {RANGE_SQL_FILTER}"),
             params![query.from.to_string(), query.to.to_string()],
             |row| row.get(0),
         )
@@ -137,11 +140,11 @@ pub(crate) fn list_timeblocking_range(
     let mut blocks = Vec::with_capacity(usize::try_from(block_count).unwrap_or(0));
     {
         let mut statement = tx
-            .prepare(
+            .prepare(&format!(
                 "SELECT id FROM time_blocks
-                 WHERE civil_date >= ?1 AND civil_date <= ?2
-                 ORDER BY civil_date, start_time, id",
-            )
+                 WHERE {RANGE_SQL_FILTER}
+                 ORDER BY civil_date, start_time, id"
+            ))
             .map_err(storage_error)?;
         let rows = statement
             .query_map(
@@ -160,11 +163,11 @@ pub(crate) fn list_timeblocking_range(
     let mut slots = Vec::with_capacity(usize::try_from(slot_count).unwrap_or(0));
     {
         let mut statement = tx
-            .prepare(
+            .prepare(&format!(
                 "SELECT id FROM time_slots
-                 WHERE civil_date >= ?1 AND civil_date <= ?2
-                 ORDER BY civil_date, start_time, id",
-            )
+                 WHERE {RANGE_SQL_FILTER}
+                 ORDER BY civil_date, start_time, id"
+            ))
             .map_err(storage_error)?;
         let rows = statement
             .query_map(

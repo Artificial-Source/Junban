@@ -9,13 +9,15 @@ use junban_app::{
     TemplateDraft, TemplatePatch, TimeBlockPatch, TimeSlotPatch,
 };
 use junban_domain::{
-    ActualMinutes, CivilTimeRange, Comment, DreadLevel, EntityName, EstimatedMinutes, FilterQuery,
-    HexColor, IconText, LocalDueTime, MarkdownText, Priority, Project, ProjectId, ProjectView,
-    QuickEntry, RecurrenceRule, RelationKind, SavedFilter, Section, SectionId, SortOrder, Tag,
+    ActualMinutes, CivilTimeRange, Comment, CompletionTimeBucket, CompletionTimeBuckets,
+    DailyStatBucket, DreadLevel, EntityName, EstimatedMinutes, FilterQuery, HexColor, IconText,
+    LocalDueTime, MarkdownText, NeglectedProjectFact, NeglectedProjectReason, NudgeFacts,
+    NudgeRuleFacts, NudgeRuleKind, Priority, Project, ProjectId, ProjectView, QuickEntry,
+    RecurrenceRule, RelationKind, SavedFilter, Section, SectionId, SortOrder, StatsSummary, Tag,
     TagId, TagName, Task, TaskActivity, TaskActivityAction, TaskDraft, TaskId, TaskQuery,
     TaskRelation, TaskSort, TaskStatus, TaskTitle, TaskViewPreset, Template, TemplateId,
     TextImportDraft, TimeBlock, TimeBlockDraft, TimeSlot, TimeSlotDraft, TimeSlotId, TimeZoneName,
-    ValidationError,
+    ValidationError, WeekStart, WeeklyDayStats, WeeklyReviewSummary, WeeklySuggestion,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -2279,6 +2281,436 @@ pub struct ClaimRemindersResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MarkOwnerLostRemindersResponse {
     pub marked: u32,
+}
+
+// ── planning / analytics reads ─────────────────────────────────────────────
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CalendarTasksResponse {
+    pub tasks: Vec<TaskDto>,
+    pub revision: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DailyPlanResponse {
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub overdue_task_ids: Vec<String>,
+    pub overdue_tasks: Vec<TaskDto>,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub focus_task_ids: Vec<String>,
+    pub focus_tasks: Vec<TaskDto>,
+    pub estimated_total_minutes: u32,
+    pub capacity_minutes: u32,
+    pub revision: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EndOfDayResponse {
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub win_task_ids: Vec<String>,
+    pub win_tasks: Vec<TaskDto>,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub carry_over_task_ids: Vec<String>,
+    pub carry_over_tasks: Vec<TaskDto>,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub tomorrow_task_ids: Vec<String>,
+    pub tomorrow_tasks: Vec<TaskDto>,
+    pub tomorrow_estimated_minutes: u32,
+    pub completion_rate_percent: u32,
+    pub capacity_minutes: u32,
+    pub revision: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WeekStartDto {
+    Sunday,
+    Monday,
+}
+
+impl From<WeekStart> for WeekStartDto {
+    fn from(value: WeekStart) -> Self {
+        match value {
+            WeekStart::Sunday => Self::Sunday,
+            WeekStart::Monday => Self::Monday,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CompletionTimeBucketDto {
+    Morning,
+    Afternoon,
+    Evening,
+    Night,
+}
+
+impl From<CompletionTimeBucket> for CompletionTimeBucketDto {
+    fn from(value: CompletionTimeBucket) -> Self {
+        match value {
+            CompletionTimeBucket::Morning => Self::Morning,
+            CompletionTimeBucket::Afternoon => Self::Afternoon,
+            CompletionTimeBucket::Evening => Self::Evening,
+            CompletionTimeBucket::Night => Self::Night,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CompletionTimeBucketsDto {
+    pub morning: u32,
+    pub afternoon: u32,
+    pub evening: u32,
+    pub night: u32,
+}
+
+impl From<CompletionTimeBuckets> for CompletionTimeBucketsDto {
+    fn from(value: CompletionTimeBuckets) -> Self {
+        Self {
+            morning: value.morning,
+            afternoon: value.afternoon,
+            evening: value.evening,
+            night: value.night,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct WeeklyDayStatsDto {
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub completed: u32,
+    pub created: u32,
+}
+
+impl From<WeeklyDayStats> for WeeklyDayStatsDto {
+    fn from(value: WeeklyDayStats) -> Self {
+        Self {
+            date: value.date,
+            completed: value.completed,
+            created: value.created,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NeglectedProjectReasonDto {
+    OverdueTasks,
+    NoActivity,
+}
+
+impl From<NeglectedProjectReason> for NeglectedProjectReasonDto {
+    fn from(value: NeglectedProjectReason) -> Self {
+        match value {
+            NeglectedProjectReason::OverdueTasks => Self::OverdueTasks,
+            NeglectedProjectReason::NoActivity => Self::NoActivity,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct NeglectedProjectFactDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub project_id: String,
+    pub overdue_count: u32,
+    pub reason: NeglectedProjectReasonDto,
+}
+
+impl From<NeglectedProjectFact> for NeglectedProjectFactDto {
+    fn from(value: NeglectedProjectFact) -> Self {
+        Self {
+            project_id: value.project_id.to_string(),
+            overdue_count: value.overdue_count,
+            reason: value.reason.into(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WeeklySuggestionDto {
+    TackleOverdue {
+        count: u32,
+    },
+    CheckNeglected {
+        #[schema(value_type = Vec<String>, format = Uuid)]
+        project_ids: Vec<String>,
+    },
+    CreatedMoreThanCompleted,
+    KeepStreak {
+        days: u32,
+    },
+}
+
+impl From<WeeklySuggestion> for WeeklySuggestionDto {
+    fn from(value: WeeklySuggestion) -> Self {
+        match value {
+            WeeklySuggestion::TackleOverdue { count } => Self::TackleOverdue { count },
+            WeeklySuggestion::CheckNeglected { project_ids } => Self::CheckNeglected {
+                project_ids: project_ids.into_iter().map(|id| id.to_string()).collect(),
+            },
+            WeeklySuggestion::CreatedMoreThanCompleted => Self::CreatedMoreThanCompleted,
+            WeeklySuggestion::KeepStreak { days } => Self::KeepStreak { days },
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct WeeklyReviewResponse {
+    #[schema(value_type = String, format = Date)]
+    pub week_start: Date,
+    #[schema(value_type = String, format = Date)]
+    pub week_end: Date,
+    pub daily: Vec<WeeklyDayStatsDto>,
+    pub created_count: u32,
+    pub completed_count: u32,
+    pub cancelled_count: u32,
+    pub completion_rate_percent: u32,
+    #[schema(value_type = Option<String>, format = Date, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub busiest_day: Option<Date>,
+    pub completion_time_buckets: CompletionTimeBucketsDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dominant_completion_bucket: Option<CompletionTimeBucketDto>,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub top_accomplishment_ids: Vec<String>,
+    pub top_accomplishment_tasks: Vec<TaskDto>,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub overdue_task_ids: Vec<String>,
+    pub overdue_tasks: Vec<TaskDto>,
+    pub neglected_projects: Vec<NeglectedProjectFactDto>,
+    pub streak_days: u32,
+    pub suggestions: Vec<WeeklySuggestionDto>,
+    pub revision: u64,
+}
+
+impl WeeklyReviewResponse {
+    pub fn from_page(page: junban_app::WeeklyReviewPage) -> Self {
+        let WeeklyReviewSummary {
+            week_start,
+            week_end,
+            daily,
+            created_count,
+            completed_count,
+            cancelled_count,
+            completion_rate_percent,
+            busiest_day,
+            completion_time_buckets,
+            dominant_completion_bucket,
+            top_accomplishment_ids,
+            overdue_task_ids,
+            neglected_projects,
+            streak_days,
+            suggestions,
+        } = page.summary;
+        Self {
+            week_start,
+            week_end,
+            daily: daily.into_iter().map(Into::into).collect(),
+            created_count,
+            completed_count,
+            cancelled_count,
+            completion_rate_percent,
+            busiest_day,
+            completion_time_buckets: completion_time_buckets.into(),
+            dominant_completion_bucket: dominant_completion_bucket.map(Into::into),
+            top_accomplishment_ids: top_accomplishment_ids
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect(),
+            top_accomplishment_tasks: page
+                .top_accomplishment_tasks
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            overdue_task_ids: overdue_task_ids
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect(),
+            overdue_tasks: page.overdue_tasks.into_iter().map(Into::into).collect(),
+            neglected_projects: neglected_projects.into_iter().map(Into::into).collect(),
+            streak_days,
+            suggestions: suggestions.into_iter().map(Into::into).collect(),
+            revision: page.revision,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DailyStatBucketDto {
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub completions: u32,
+    pub creations: u32,
+    pub completion_minutes: u32,
+}
+
+impl From<DailyStatBucket> for DailyStatBucketDto {
+    fn from(value: DailyStatBucket) -> Self {
+        Self {
+            date: value.date,
+            completions: value.completions,
+            creations: value.creations,
+            completion_minutes: value.completion_minutes,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StatsResponse {
+    #[schema(value_type = String, format = Date)]
+    pub from: Date,
+    #[schema(value_type = String, format = Date)]
+    pub to: Date,
+    pub days: Vec<DailyStatBucketDto>,
+    pub total_completions: u32,
+    pub total_creations: u32,
+    pub total_completion_minutes: u32,
+    pub current_streak_days: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimate_accuracy_percent: Option<u32>,
+    pub estimate_accuracy_samples: u32,
+    pub revision: u64,
+}
+
+impl StatsResponse {
+    pub fn from_page(page: junban_app::StatsPage) -> Self {
+        let StatsSummary {
+            from,
+            to,
+            days,
+            total_completions,
+            total_creations,
+            total_completion_minutes,
+            current_streak_days,
+            estimate_accuracy_percent,
+            estimate_accuracy_samples,
+        } = page.summary;
+        Self {
+            from,
+            to,
+            days: days.into_iter().map(Into::into).collect(),
+            total_completions,
+            total_creations,
+            total_completion_minutes,
+            current_streak_days,
+            estimate_accuracy_percent,
+            estimate_accuracy_samples,
+            revision: page.revision,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NudgeRuleKindDto {
+    Overdue,
+    ApproachingDeadline,
+    StaleTask,
+    EmptyToday,
+    OverloadedDay,
+}
+
+impl From<NudgeRuleKind> for NudgeRuleKindDto {
+    fn from(value: NudgeRuleKind) -> Self {
+        match value {
+            NudgeRuleKind::Overdue => Self::Overdue,
+            NudgeRuleKind::ApproachingDeadline => Self::ApproachingDeadline,
+            NudgeRuleKind::StaleTask => Self::StaleTask,
+            NudgeRuleKind::EmptyToday => Self::EmptyToday,
+            NudgeRuleKind::OverloadedDay => Self::OverloadedDay,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct NudgeRuleFactsDto {
+    pub kind: NudgeRuleKindDto,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub task_ids: Vec<String>,
+    pub has_more: bool,
+}
+
+impl From<NudgeRuleFacts> for NudgeRuleFactsDto {
+    fn from(value: NudgeRuleFacts) -> Self {
+        Self {
+            kind: value.kind.into(),
+            task_ids: value
+                .task_ids
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect(),
+            has_more: value.has_more,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct NudgesResponse {
+    pub rules: Vec<NudgeRuleFactsDto>,
+    pub has_more: bool,
+    pub tasks: Vec<TaskDto>,
+    pub revision: u64,
+}
+
+impl NudgesResponse {
+    pub fn from_page(page: junban_app::NudgesPage) -> Self {
+        let NudgeFacts { rules, has_more } = page.facts;
+        Self {
+            rules: rules.into_iter().map(Into::into).collect(),
+            has_more,
+            tasks: page.tasks.into_iter().map(Into::into).collect(),
+            revision: page.revision,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TemporalSettingsResponse {
+    pub time_zone: String,
+    pub capacity_minutes: u32,
+    pub week_start: WeekStartDto,
+    pub nudges_enabled: bool,
+    pub eat_the_frog_enabled: bool,
+    pub task_jar_enabled: bool,
+}
+
+impl From<junban_app::TemporalSettings> for TemporalSettingsResponse {
+    fn from(value: junban_app::TemporalSettings) -> Self {
+        Self {
+            time_zone: value.time_zone,
+            capacity_minutes: value.capacity_minutes,
+            week_start: value.week_start.into(),
+            nudges_enabled: value.nudges_enabled,
+            eat_the_frog_enabled: value.eat_the_frog_enabled,
+            task_jar_enabled: value.task_jar_enabled,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EatTheFrogResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<TaskDto>,
+    pub revision: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TaskJarResponse {
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub task_ids: Vec<String>,
+    pub tasks: Vec<TaskDto>,
+    pub revision: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DopamineMenuResponse {
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub task_ids: Vec<String>,
+    pub tasks: Vec<TaskDto>,
+    pub revision: u64,
 }
 
 // ── optional/nullable helpers ──────────────────────────────────────────────

@@ -2,10 +2,11 @@
 
 use jiff::{Timestamp, ToSpan, Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
-    ActualMinutes, CivilTimeRange, CommentBody, DreadLevel, EntityName, EstimatedMinutes,
-    FilterQuery, HexColor, IconText, LocalDueTime, MarkdownText, Priority, Project, ProjectId,
-    ProjectView, RecurrenceRule, SavedFilter, Section, SectionId, SortOrder, Tag, TagId, TagName,
-    Task, TaskCursor, TaskId, TaskTitle, Template, TemplateId, TimeBlock, TimeSlot, TimeSlotId,
+    ActualMinutes, CivilTimeRange, CommentBody, DailyPlanSummary, DreadLevel, EndOfDaySummary,
+    EntityName, EstimatedMinutes, FilterQuery, HexColor, IconText, LocalDueTime, MarkdownText,
+    NudgeFacts, Priority, Project, ProjectId, ProjectView, RecurrenceRule, SavedFilter, Section,
+    SectionId, SortOrder, StatsSummary, Tag, TagId, TagName, Task, TaskCursor, TaskId, TaskTitle,
+    Template, TemplateId, TimeBlock, TimeSlot, TimeSlotId, WeekStart, WeeklyReviewSummary,
 };
 use serde::{Deserialize, Serialize};
 
@@ -567,6 +568,148 @@ pub enum ReplanPastBlocksAction {
     MoveToToday,
     MoveToTomorrow,
     Delete,
+}
+
+/// Tasks collected across cursor pages under one sampled list context and revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CollectedTasks {
+    pub tasks: Vec<Task>,
+    pub revision: u64,
+    pub as_of_date: Date,
+}
+
+/// Bounded calendar range read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalendarTasksPage {
+    pub tasks: Vec<Task>,
+    pub revision: u64,
+}
+
+/// Plan-My-Day read model with embedded task bodies for listed IDs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DailyPlanPage {
+    pub overdue_task_ids: Vec<TaskId>,
+    pub overdue_tasks: Vec<Task>,
+    pub focus_task_ids: Vec<TaskId>,
+    pub focus_tasks: Vec<Task>,
+    pub estimated_total_minutes: u32,
+    pub capacity_minutes: u32,
+    pub revision: u64,
+}
+
+impl DailyPlanPage {
+    pub(crate) fn from_summary(summary: DailyPlanSummary, tasks: &[Task], revision: u64) -> Self {
+        Self {
+            overdue_tasks: tasks_for_ids(tasks, &summary.overdue_task_ids),
+            focus_tasks: tasks_for_ids(tasks, &summary.focus_task_ids),
+            overdue_task_ids: summary.overdue_task_ids,
+            focus_task_ids: summary.focus_task_ids,
+            estimated_total_minutes: summary.estimated_total_minutes,
+            capacity_minutes: summary.capacity_minutes,
+            revision,
+        }
+    }
+}
+
+/// End-of-Day read model with embedded task bodies for listed IDs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndOfDayPage {
+    pub win_task_ids: Vec<TaskId>,
+    pub win_tasks: Vec<Task>,
+    pub carry_over_task_ids: Vec<TaskId>,
+    pub carry_over_tasks: Vec<Task>,
+    pub tomorrow_task_ids: Vec<TaskId>,
+    pub tomorrow_tasks: Vec<Task>,
+    pub tomorrow_estimated_minutes: u32,
+    pub completion_rate_percent: u32,
+    pub capacity_minutes: u32,
+    pub revision: u64,
+}
+
+impl EndOfDayPage {
+    pub(crate) fn from_summary(
+        summary: EndOfDaySummary,
+        tasks: &[Task],
+        capacity_minutes: u32,
+        revision: u64,
+    ) -> Self {
+        Self {
+            win_tasks: tasks_for_ids(tasks, &summary.win_task_ids),
+            carry_over_tasks: tasks_for_ids(tasks, &summary.carry_over_task_ids),
+            tomorrow_tasks: tasks_for_ids(tasks, &summary.tomorrow_task_ids),
+            win_task_ids: summary.win_task_ids,
+            carry_over_task_ids: summary.carry_over_task_ids,
+            tomorrow_task_ids: summary.tomorrow_task_ids,
+            tomorrow_estimated_minutes: summary.tomorrow_estimated_minutes,
+            completion_rate_percent: summary.completion_rate_percent,
+            capacity_minutes,
+            revision,
+        }
+    }
+}
+
+/// Weekly review facts plus embedded bodies for bounded ID lists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WeeklyReviewPage {
+    pub summary: WeeklyReviewSummary,
+    pub top_accomplishment_tasks: Vec<Task>,
+    pub overdue_tasks: Vec<Task>,
+    pub revision: u64,
+}
+
+/// Stats range aggregates plus revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatsPage {
+    pub summary: StatsSummary,
+    pub revision: u64,
+}
+
+/// Nudge facts plus embedded bodies for referenced task IDs only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NudgesPage {
+    pub facts: NudgeFacts,
+    pub tasks: Vec<Task>,
+    pub revision: u64,
+}
+
+/// Phase 3 read-only temporal defaults until Phase 4 settings mutations exist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TemporalSettings {
+    pub time_zone: String,
+    pub capacity_minutes: u32,
+    pub week_start: WeekStart,
+    pub nudges_enabled: bool,
+    pub eat_the_frog_enabled: bool,
+    pub task_jar_enabled: bool,
+}
+
+/// Eat-the-Frog selection (single task or none).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EatTheFrogPage {
+    pub task: Option<Task>,
+    pub revision: u64,
+}
+
+/// Task Jar candidates in stable domain order (browser picks randomly).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskJarPage {
+    pub task_ids: Vec<TaskId>,
+    pub tasks: Vec<Task>,
+    pub revision: u64,
+}
+
+/// Dopamine Menu candidates in stable domain order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DopamineMenuPage {
+    pub task_ids: Vec<TaskId>,
+    pub tasks: Vec<Task>,
+    pub revision: u64,
+}
+
+fn tasks_for_ids(tasks: &[Task], ids: &[TaskId]) -> Vec<Task> {
+    ids.iter()
+        .filter_map(|id| tasks.iter().find(|task| task.id == *id).cloned())
+        .collect()
 }
 
 /// Helper constructors used by tests and thin service wrappers.

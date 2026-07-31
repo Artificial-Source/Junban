@@ -2,26 +2,34 @@
 
 use std::sync::Arc;
 
-use jiff::{Timestamp, Zoned, civil::Date};
+use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
     CivilTimeRange, ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
-    DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, EntityName, FilterQuery, HexColor,
+    DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName,
+    FilterQuery, HexColor, MAX_ANALYSIS_TASK_READ, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT,
     MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
     ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId, TagId,
-    TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskTitle, TemplateId,
-    TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId, ValidationError,
+    TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort, TaskStatus,
+    TaskTitle, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId, ValidationError,
+    WeekStart, daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges,
+    select_eat_the_frog, stats_summary, task_jar_candidates, validate_calendar_date_range,
     validate_owner_lost_mark_limit, validate_reminder_claim_limit, validate_reminder_lease_secs,
-    validate_timeblock_date_range,
+    validate_stats_date_range, validate_timeblock_date_range, weekly_review_summary,
 };
 
 use crate::{
-    AppError, BulkAction, CatalogSnapshot, CommentPatch, CommittedEvent, CommittedMutation,
-    EventCatchUp, MoveTarget, ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction,
-    Repository, RepositoryError, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch,
-    TagDraft, TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft,
-    TemplatePatch, TemporalContext, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage,
-    TimeblockingRangeQuery,
+    AppError, BulkAction, CalendarTasksPage, CatalogSnapshot, CollectedTasks, CommentPatch,
+    CommittedEvent, CommittedMutation, DailyPlanPage, DopamineMenuPage, EatTheFrogPage,
+    EndOfDayPage, EventCatchUp, MoveTarget, NudgesPage, ProjectDraft, ProjectPatch, ReorderScope,
+    ReplanPastBlocksAction, Repository, RepositoryError, SavedFilterDraft, SavedFilterPatch,
+    SectionDraft, SectionPatch, StatsPage, TagDraft, TagPatch, TaskJarPage, TaskListAsOf,
+    TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch, TemporalContext,
+    TemporalSettings, TimeBlockPatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
+    WeeklyReviewPage,
 };
+
+/// Cursor page size used when collecting multi-page task reads.
+pub const TASK_COLLECT_PAGE_SIZE: u32 = 100;
 
 pub trait EventSink: Send + Sync + 'static {
     fn publish(&self, event: CommittedEvent);
@@ -936,6 +944,287 @@ where
         )
     }
 
+    /// Page through `list_tasks` at [`TASK_COLLECT_PAGE_SIZE`] under one sampled `as_of`.
+    ///
+    /// Stops cleanly when the final page is short. Fails with
+    /// [`AppError::ResultLimitExceeded`] before returning when more than `cap`
+    /// tasks match. Retries the whole collection once if page revisions drift;
+    /// a second drift fails with [`AppError::Conflict`] so callers resync.
+    pub async fn collect_task_query_pages(
+        &self,
+        base_query: TaskQuery,
+        as_of: TaskListAsOf,
+        cap: usize,
+    ) -> Result<CollectedTasks, AppError> {
+        match self
+            .collect_task_query_pages_once(&base_query, as_of, cap)
+            .await
+        {
+            Ok(collected) => Ok(collected),
+            Err(AppError::Conflict) => {
+                self.collect_task_query_pages_once(&base_query, as_of, cap)
+                    .await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn collect_task_query_pages_once(
+        &self,
+        base_query: &TaskQuery,
+        as_of: TaskListAsOf,
+        cap: usize,
+    ) -> Result<CollectedTasks, AppError> {
+        let page_size = TASK_COLLECT_PAGE_SIZE.min(MAX_QUERY_PAGE_LIMIT);
+        let mut tasks = Vec::new();
+        let mut cursor = None;
+        let mut revision = None;
+
+        loop {
+            let mut query = base_query.clone();
+            query.cursor = cursor.take();
+            query.limit = Some(page_size);
+            query.validate()?;
+
+            let page = self
+                .repository
+                .list_tasks(query, as_of)
+                .await
+                .map_err(AppError::from)?;
+
+            match revision {
+                None => revision = Some(page.revision),
+                Some(expected) if expected != page.revision => {
+                    return Err(AppError::Conflict);
+                }
+                Some(_) => {}
+            }
+
+            if tasks.len().saturating_add(page.tasks.len()) > cap {
+                return Err(AppError::ResultLimitExceeded);
+            }
+            tasks.extend(page.tasks);
+
+            match page.next_cursor {
+                None => break,
+                Some(_) if tasks.len() == cap => {
+                    // A non-empty next page would push the total over the cap.
+                    return Err(AppError::ResultLimitExceeded);
+                }
+                Some(next) => cursor = Some(next),
+            }
+        }
+
+        Ok(CollectedTasks {
+            tasks,
+            revision: revision.unwrap_or(0),
+            as_of_date: as_of.as_of_date,
+        })
+    }
+
+    async fn load_analysis_tasks(&self, as_of: TaskListAsOf) -> Result<CollectedTasks, AppError> {
+        let mut query = TaskQuery::new();
+        query.sort = TaskSort::SortOrderAsc;
+        self.collect_task_query_pages(query, as_of, MAX_ANALYSIS_TASK_READ)
+            .await
+    }
+
+    /// Calendar range: tasks with civil `due_date` inside `[from, to]`.
+    pub async fn calendar_tasks(
+        &self,
+        from: Date,
+        to: Date,
+        project_id: Option<ProjectId>,
+        as_of: TaskListAsOf,
+    ) -> Result<CalendarTasksPage, AppError> {
+        validate_calendar_date_range(from, to)?;
+        let mut query = TaskQuery::new();
+        query.filter.due_after = Some(from);
+        query.filter.due_before = Some(to);
+        query.filter.statuses = vec![
+            TaskStatus::Pending,
+            TaskStatus::Completed,
+            TaskStatus::Cancelled,
+        ];
+        if let Some(project_id) = project_id {
+            query.filter.project_id = Some(Some(project_id));
+        }
+        query.sort = TaskSort::DueAsc;
+        let collected = self
+            .collect_task_query_pages(query, as_of, MAX_CALENDAR_TASKS)
+            .await?;
+        Ok(CalendarTasksPage {
+            tasks: collected.tasks,
+            revision: collected.revision,
+        })
+    }
+
+    pub async fn daily_plan(
+        &self,
+        date: Date,
+        capacity: Option<DailyCapacityMinutes>,
+        zone: &TimeZone,
+    ) -> Result<DailyPlanPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let summary = daily_plan_summary(&collected.tasks, date, capacity);
+        Ok(DailyPlanPage::from_summary(
+            summary,
+            &collected.tasks,
+            collected.revision,
+        ))
+    }
+
+    pub async fn end_of_day(
+        &self,
+        date: Date,
+        capacity: Option<DailyCapacityMinutes>,
+        zone: &TimeZone,
+    ) -> Result<EndOfDayPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let summary = end_of_day_summary(&collected.tasks, date, zone);
+        let capacity_minutes = capacity.unwrap_or(DailyCapacityMinutes::DEFAULT).get();
+        Ok(EndOfDayPage::from_summary(
+            summary,
+            &collected.tasks,
+            capacity_minutes,
+            collected.revision,
+        ))
+    }
+
+    pub async fn weekly_review(
+        &self,
+        date: Date,
+        week_start: WeekStart,
+        zone: &TimeZone,
+    ) -> Result<WeeklyReviewPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let catalog = self.list_catalog().await?;
+        if catalog.revision != collected.revision {
+            // One snapshot pair only: retry analysis+catalog once on drift.
+            let collected = self.load_analysis_tasks(as_of).await?;
+            let catalog = self.list_catalog().await?;
+            if catalog.revision != collected.revision {
+                return Err(AppError::Conflict);
+            }
+            return Self::weekly_from_parts(collected, &catalog.projects, date, week_start, zone);
+        }
+        Self::weekly_from_parts(collected, &catalog.projects, date, week_start, zone)
+    }
+
+    fn weekly_from_parts(
+        collected: CollectedTasks,
+        projects: &[junban_domain::Project],
+        date: Date,
+        week_start: WeekStart,
+        zone: &TimeZone,
+    ) -> Result<WeeklyReviewPage, AppError> {
+        let summary = weekly_review_summary(&collected.tasks, projects, date, week_start, zone)?;
+        let top_accomplishment_tasks =
+            tasks_for_ids(&collected.tasks, &summary.top_accomplishment_ids);
+        let overdue_tasks = tasks_for_ids(&collected.tasks, &summary.overdue_task_ids);
+        Ok(WeeklyReviewPage {
+            summary,
+            top_accomplishment_tasks,
+            overdue_tasks,
+            revision: collected.revision,
+        })
+    }
+
+    pub async fn stats(
+        &self,
+        from: Date,
+        to: Date,
+        today: Date,
+        zone: &TimeZone,
+    ) -> Result<StatsPage, AppError> {
+        validate_stats_date_range(from, to)?;
+        let as_of = TaskListAsOf::for_local_date(today, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let summary = stats_summary(&collected.tasks, from, to, today, zone)?;
+        Ok(StatsPage {
+            summary,
+            revision: collected.revision,
+        })
+    }
+
+    pub async fn nudges(
+        &self,
+        date: Date,
+        capacity: Option<DailyCapacityMinutes>,
+        zone: &TimeZone,
+    ) -> Result<NudgesPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let capacity = capacity.unwrap_or(DailyCapacityMinutes::DEFAULT);
+        let facts = evaluate_nudges(&collected.tasks, date, capacity, zone, &[], None);
+        let mut ids = Vec::new();
+        for rule in &facts.rules {
+            for id in &rule.task_ids {
+                if !ids.contains(id) {
+                    ids.push(*id);
+                }
+            }
+        }
+        let tasks = tasks_for_ids(&collected.tasks, &ids);
+        Ok(NudgesPage {
+            facts,
+            tasks,
+            revision: collected.revision,
+        })
+    }
+
+    /// Read-only Phase 3 temporal defaults (no durable settings mutation yet).
+    #[must_use]
+    pub fn temporal_settings(zone: &TimeZone) -> TemporalSettings {
+        default_temporal_settings(zone)
+    }
+
+    pub async fn eat_the_frog(
+        &self,
+        date: Date,
+        zone: &TimeZone,
+    ) -> Result<EatTheFrogPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let task = select_eat_the_frog(&collected.tasks)
+            .and_then(|id| collected.tasks.iter().find(|task| task.id == id).cloned());
+        Ok(EatTheFrogPage {
+            task,
+            revision: collected.revision,
+        })
+    }
+
+    pub async fn task_jar(&self, date: Date, zone: &TimeZone) -> Result<TaskJarPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let task_ids = task_jar_candidates(&collected.tasks, date);
+        let tasks = tasks_for_ids(&collected.tasks, &task_ids);
+        Ok(TaskJarPage {
+            task_ids,
+            tasks,
+            revision: collected.revision,
+        })
+    }
+
+    pub async fn dopamine_menu(
+        &self,
+        date: Date,
+        zone: &TimeZone,
+    ) -> Result<DopamineMenuPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let task_ids = dopamine_menu_task_ids(&collected.tasks);
+        let tasks = tasks_for_ids(&collected.tasks, &task_ids);
+        Ok(DopamineMenuPage {
+            task_ids,
+            tasks,
+            revision: collected.revision,
+        })
+    }
+
     fn commit(
         &self,
         result: Result<CommittedMutation, RepositoryError>,
@@ -946,6 +1235,25 @@ where
             self.events.publish(mutation.event.clone());
         }
         Ok(mutation)
+    }
+}
+
+fn tasks_for_ids(tasks: &[Task], ids: &[TaskId]) -> Vec<Task> {
+    ids.iter()
+        .filter_map(|id| tasks.iter().find(|task| task.id == *id).cloned())
+        .collect()
+}
+
+/// Phase 3 read-only temporal defaults until settings mutations land in Phase 4.
+#[must_use]
+pub fn default_temporal_settings(zone: &TimeZone) -> TemporalSettings {
+    TemporalSettings {
+        time_zone: zone.iana_name().unwrap_or("UTC").to_owned(),
+        capacity_minutes: DailyCapacityMinutes::DEFAULT.get(),
+        week_start: WeekStart::Sunday,
+        nudges_enabled: true,
+        eat_the_frog_enabled: false,
+        task_jar_enabled: false,
     }
 }
 
@@ -999,6 +1307,8 @@ mod tests {
     struct FakeRepository {
         result: Mutex<Result<CommittedMutation, RepositoryError>>,
         calls: Mutex<Vec<&'static str>>,
+        /// When set, `list_tasks` pops pages in order (for collect-helper tests).
+        list_pages: Mutex<Vec<TaskListPage>>,
     }
 
     impl FakeRepository {
@@ -1006,6 +1316,15 @@ mod tests {
             Self {
                 result: Mutex::new(result),
                 calls: Mutex::new(Vec::new()),
+                list_pages: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn with_list_pages(pages: Vec<TaskListPage>) -> Self {
+            Self {
+                result: Mutex::new(Err(RepositoryError::Storage("unused".into()))),
+                calls: Mutex::new(Vec::new()),
+                list_pages: Mutex::new(pages),
             }
         }
 
@@ -1115,13 +1434,21 @@ mod tests {
             _: TaskListAsOf,
         ) -> crate::RepositoryFuture<'_, TaskListPage> {
             self.calls.lock().unwrap().push("list");
-            Box::pin(async {
-                Ok(TaskListPage {
+            let page = {
+                let mut pages = self.list_pages.lock().unwrap();
+                if pages.is_empty() {
+                    None
+                } else {
+                    Some(pages.remove(0))
+                }
+            };
+            Box::pin(async move {
+                Ok(page.unwrap_or(TaskListPage {
                     tasks: Vec::new(),
                     revision: 0,
                     as_of_date: "2026-07-28".parse().unwrap(),
                     next_cursor: None,
-                })
+                }))
             })
         }
         fn list_catalog(&self) -> crate::RepositoryFuture<'_, CatalogSnapshot> {
@@ -1717,5 +2044,137 @@ mod tests {
     #[test]
     fn task_fixture_starts_pending() {
         assert_eq!(mutation().task().unwrap().status, TaskStatus::Pending);
+    }
+
+    fn sample_task(title: &str, revision: u64) -> Task {
+        let now: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
+        Task::new(
+            TaskId::new(),
+            TaskTitle::new(title).unwrap(),
+            None,
+            now,
+            revision,
+        )
+    }
+
+    fn list_page(
+        tasks: Vec<Task>,
+        revision: u64,
+        next_cursor: Option<junban_domain::TaskCursor>,
+    ) -> TaskListPage {
+        TaskListPage {
+            tasks,
+            revision,
+            as_of_date: "2026-07-28".parse().unwrap(),
+            next_cursor,
+        }
+    }
+
+    fn as_of() -> TaskListAsOf {
+        TaskListAsOf::for_local_date("2026-07-28".parse().unwrap(), &TimeZone::UTC).unwrap()
+    }
+
+    #[tokio::test]
+    async fn collect_pages_stops_on_short_final_page() {
+        let t1 = sample_task("a", 1);
+        let t2 = sample_task("b", 1);
+        let t3 = sample_task("c", 1);
+        let cursor = junban_domain::TaskCursor {
+            sort_value: "1".into(),
+            task_id: t1.id,
+        };
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![
+            list_page(vec![t1.clone(), t2.clone()], 3, Some(cursor)),
+            list_page(vec![t3.clone()], 3, None),
+        ]));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+
+        let collected = service
+            .collect_task_query_pages(TaskQuery::new(), as_of(), 100)
+            .await
+            .unwrap();
+
+        assert_eq!(collected.revision, 3);
+        assert_eq!(collected.tasks.len(), 3);
+        assert_eq!(
+            collected
+                .tasks
+                .iter()
+                .map(|t| t.title.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b", "c"]
+        );
+    }
+
+    #[tokio::test]
+    async fn collect_pages_rejects_when_cap_exceeded() {
+        let tasks: Vec<Task> = (0..5).map(|i| sample_task(&format!("t{i}"), 1)).collect();
+        let cursor = junban_domain::TaskCursor {
+            sort_value: "0".into(),
+            task_id: tasks[0].id,
+        };
+        // Cap 3: first page of 2 + second page of 2 => 4 > 3.
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![
+            list_page(tasks[0..2].to_vec(), 1, Some(cursor)),
+            list_page(tasks[2..4].to_vec(), 1, None),
+        ]));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+
+        assert_eq!(
+            service
+                .collect_task_query_pages(TaskQuery::new(), as_of(), 3)
+                .await,
+            Err(AppError::ResultLimitExceeded)
+        );
+    }
+
+    #[tokio::test]
+    async fn collect_pages_retries_once_on_revision_drift() {
+        let t1 = sample_task("first", 1);
+        let t2 = sample_task("stable", 5);
+        let cursor = junban_domain::TaskCursor {
+            sort_value: "1".into(),
+            task_id: t1.id,
+        };
+        // Attempt 1: page1 rev=1, page2 rev=2 => Conflict, retry.
+        // Attempt 2: single consistent page rev=5.
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![
+            list_page(vec![t1], 1, Some(cursor)),
+            list_page(vec![sample_task("drift", 2)], 2, None),
+            list_page(vec![t2.clone()], 5, None),
+        ]));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+
+        let collected = service
+            .collect_task_query_pages(TaskQuery::new(), as_of(), 100)
+            .await
+            .unwrap();
+        assert_eq!(collected.revision, 5);
+        assert_eq!(collected.tasks.len(), 1);
+        assert_eq!(collected.tasks[0].title.as_str(), "stable");
+    }
+
+    #[tokio::test]
+    async fn collect_pages_fails_when_revision_keeps_drifting() {
+        let cursor = junban_domain::TaskCursor {
+            sort_value: "1".into(),
+            task_id: TaskId::new(),
+        };
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![
+            // first attempt
+            list_page(vec![sample_task("a", 1)], 1, Some(cursor.clone())),
+            list_page(vec![sample_task("b", 2)], 2, None),
+            // retry also drifts
+            list_page(vec![sample_task("c", 3)], 3, Some(cursor)),
+            list_page(vec![sample_task("d", 4)], 4, None),
+        ]));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+
+        assert_eq!(
+            service
+                .collect_task_query_pages(TaskQuery::new(), as_of(), 100)
+                .await,
+            Err(AppError::Conflict)
+        );
     }
 }

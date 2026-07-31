@@ -21,6 +21,15 @@ pub const MAX_NUDGE_TASKS_PER_RULE: usize = 20;
 pub const MAX_NUDGE_TASKS_COMBINED: usize = 50;
 /// Inclusive civil-day window accepted by stats range reads.
 pub const MAX_STATS_RANGE_DAYS: i64 = 366;
+/// Inclusive civil-day window accepted by calendar range reads.
+pub const MAX_CALENDAR_RANGE_DAYS: i64 = 42;
+/// Maximum tasks returned by one calendar range read (never silently truncated).
+pub const MAX_CALENDAR_TASKS: usize = 2_000;
+/// Hard ceiling when paging analysis inputs (planning/stats/nudges/motivation).
+///
+/// Sized above the 10,000-task acceptance dataset so those runs succeed; callers
+/// must fail closed with a structured limit error beyond this cap.
+pub const MAX_ANALYSIS_TASK_READ: usize = 20_000;
 /// Weekly-review streak walks at most this many civil days ending today.
 pub const MAX_WEEKLY_STREAK_DAYS: i64 = 30;
 /// Top accomplishments retained by weekly review.
@@ -1002,6 +1011,19 @@ pub struct StatsSummary {
 
 /// Validate an inclusive civil date range for stats reads (max 366 days).
 pub fn validate_stats_date_range(from: Date, to: Date) -> Result<(), ValidationError> {
+    validate_inclusive_date_range(from, to, MAX_STATS_RANGE_DAYS)
+}
+
+/// Validate an inclusive civil date range for calendar reads (max 42 days).
+pub fn validate_calendar_date_range(from: Date, to: Date) -> Result<(), ValidationError> {
+    validate_inclusive_date_range(from, to, MAX_CALENDAR_RANGE_DAYS)
+}
+
+fn validate_inclusive_date_range(
+    from: Date,
+    to: Date,
+    max_inclusive_days: i64,
+) -> Result<(), ValidationError> {
     if to < from {
         return Err(ValidationError::Invalid {
             field: "range",
@@ -1016,11 +1038,11 @@ pub fn validate_stats_date_range(from: Date, to: Date) -> Result<(), ValidationE
         })?
         .get_days();
     let inclusive = i64::from(span_days).saturating_add(1);
-    if inclusive > MAX_STATS_RANGE_DAYS {
+    if inclusive > max_inclusive_days {
         return Err(ValidationError::TooMany {
             field: "range_days",
             count: usize::try_from(inclusive).unwrap_or(usize::MAX),
-            max: usize::try_from(MAX_STATS_RANGE_DAYS).unwrap_or(usize::MAX),
+            max: usize::try_from(max_inclusive_days).unwrap_or(usize::MAX),
         });
     }
     Ok(())
@@ -1344,17 +1366,15 @@ where
             }
             NudgeRuleKind::EmptyToday => {
                 let has_today = pending.iter().any(|task| task.due_date == Some(today));
-                if has_today {
-                    Vec::new()
-                } else {
+                if !has_today {
                     // Fire with no task identities.
                     rules.push(NudgeRuleFacts {
                         kind,
                         task_ids: Vec::new(),
                         has_more: false,
                     });
-                    continue;
                 }
+                continue;
             }
             NudgeRuleKind::OverloadedDay => {
                 let mut hits: Vec<&Task> = pending
@@ -1379,7 +1399,7 @@ where
             }
         };
 
-        if ids.is_empty() && !matches!(kind, NudgeRuleKind::EmptyToday) {
+        if ids.is_empty() {
             continue;
         }
 
@@ -1975,6 +1995,23 @@ mod tests {
         // Combined ceiling: 20+1+1 + overloaded truncated.
         let total: usize = facts.rules.iter().map(|r| r.task_ids.len()).sum();
         assert!(total <= MAX_NUDGE_TASKS_COMBINED);
+
+        // With a pending task due today, empty_today must not fire.
+        tasks.push(pending_due(50, "Today item", today, None));
+        let with_today = evaluate_nudges(
+            &tasks,
+            today,
+            DailyCapacityMinutes::DEFAULT,
+            &TimeZone::UTC,
+            &[],
+            None,
+        );
+        assert!(
+            !with_today
+                .rules
+                .iter()
+                .any(|r| r.kind == NudgeRuleKind::EmptyToday)
+        );
     }
 
     #[test]

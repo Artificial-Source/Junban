@@ -6,11 +6,12 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use jiff::{Zoned, civil::Date};
+use jiff::{Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
-    CommentId, MAX_QUERY_PAGE_LIMIT, MAX_TAGS_PER_TASK, OperationId, ProjectId, SavedFilterId,
-    SectionId, TagId, TaskId, TaskQuery, TaskSort, TaskStatus, TemplateId, TimeBlockId, TimeSlotId,
-    parse_filter, parse_quick_entry, parse_text_import, validate_page_limit,
+    CommentId, DailyCapacityMinutes, MAX_QUERY_PAGE_LIMIT, MAX_TAGS_PER_TASK, OperationId,
+    ProjectId, SavedFilterId, SectionId, TagId, TaskId, TaskQuery, TaskSort, TaskStatus,
+    TemplateId, TimeBlockId, TimeSlotId, WeekStart, parse_filter, parse_quick_entry,
+    parse_text_import, validate_page_limit,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -18,22 +19,24 @@ use utoipa::IntoParams;
 use crate::cursor::decode_task_cursor;
 use crate::dto::{
     AcquireReminderLeaseRequest, AddRelationRequest, AppendTimeSlotTaskRequest,
-    ApplyTemplateRequest, BulkTasksRequest, CatalogResponse, ClaimRemindersRequest,
-    ClaimRemindersResponse, CommentDto, CommentListResponse, CreateCommentRequest,
-    CreateProjectRequest, CreateSavedFilterRequest, CreateSectionRequest, CreateTagRequest,
-    CreateTaskRequest, CreateTemplateRequest, CreateTimeBlockRequest, CreateTimeSlotRequest,
-    HealthResponse, MarkOwnerLostRemindersRequest, MarkOwnerLostRemindersResponse, MoveTaskRequest,
-    MoveTimeBlockRequest, MutationResponse, ParseFilterRequest, ParseQuickEntryRequest,
-    ParseTextImportRequest, ParsedFilterResponse, PatchCommentRequest, PatchProjectRequest,
-    PatchSavedFilterRequest, PatchSectionRequest, PatchTagRequest, PatchTaskRequest,
-    PatchTemplateRequest, PatchTimeBlockRequest, PatchTimeSlotRequest, ProfileResponse,
-    QuickEntryDto, RelationDto, RelationListResponse, ReleaseReminderLeaseRequest,
-    ReminderDeliveryLeaseDto, ReminderListResponse, ReminderOccurrenceDto,
-    RenewReminderLeaseRequest, ReorderTasksRequest, ReplaceTimeSlotTasksRequest,
-    RescheduleReminderRequest, ResizeTimeBlockRequest, SettleReminderDeliveredRequest,
-    SettleReminderFailedRequest, TaskActivityDto, TaskActivityResponse, TaskDto, TaskListResponse,
-    TaskSortDto, TaskViewPresetDto, TextImportDraftDto, TextImportResponse, TimeBlockListResponse,
-    TimeSlotListResponse,
+    ApplyTemplateRequest, BulkTasksRequest, CalendarTasksResponse, CatalogResponse,
+    ClaimRemindersRequest, ClaimRemindersResponse, CommentDto, CommentListResponse,
+    CreateCommentRequest, CreateProjectRequest, CreateSavedFilterRequest, CreateSectionRequest,
+    CreateTagRequest, CreateTaskRequest, CreateTemplateRequest, CreateTimeBlockRequest,
+    CreateTimeSlotRequest, DailyPlanResponse, DopamineMenuResponse, EatTheFrogResponse,
+    EndOfDayResponse, HealthResponse, MarkOwnerLostRemindersRequest,
+    MarkOwnerLostRemindersResponse, MoveTaskRequest, MoveTimeBlockRequest, MutationResponse,
+    NudgesResponse, ParseFilterRequest, ParseQuickEntryRequest, ParseTextImportRequest,
+    ParsedFilterResponse, PatchCommentRequest, PatchProjectRequest, PatchSavedFilterRequest,
+    PatchSectionRequest, PatchTagRequest, PatchTaskRequest, PatchTemplateRequest,
+    PatchTimeBlockRequest, PatchTimeSlotRequest, ProfileResponse, QuickEntryDto, RelationDto,
+    RelationListResponse, ReleaseReminderLeaseRequest, ReminderDeliveryLeaseDto,
+    ReminderListResponse, ReminderOccurrenceDto, RenewReminderLeaseRequest, ReorderTasksRequest,
+    ReplaceTimeSlotTasksRequest, RescheduleReminderRequest, ResizeTimeBlockRequest,
+    SettleReminderDeliveredRequest, SettleReminderFailedRequest, StatsResponse, TaskActivityDto,
+    TaskActivityResponse, TaskDto, TaskJarResponse, TaskListResponse, TaskSortDto,
+    TaskViewPresetDto, TemporalSettingsResponse, TextImportDraftDto, TextImportResponse,
+    TimeBlockListResponse, TimeSlotListResponse, WeeklyReviewResponse,
 };
 use crate::error::{ApiError, extract_json, operation_id, parse_path_id, validation_error};
 use crate::reminder_wake::open_reminder_sse_stream;
@@ -51,6 +54,12 @@ pub fn server_as_of_date() -> Date {
 /// One local clock sample for task list evaluation (civil due date + recent-completion UTC bounds).
 pub fn server_list_as_of() -> Result<TaskListAsOf, junban_domain::ValidationError> {
     TaskListAsOf::from_zoned(&Zoned::now())
+}
+
+/// One system-zone sample for planning/analytics reads (civil date + zone).
+pub fn server_planning_clock() -> (Date, TimeZone) {
+    let now = Zoned::now();
+    (now.date(), now.time_zone().clone())
 }
 
 // ── health / profile ───────────────────────────────────────────────────────
@@ -2351,6 +2360,401 @@ pub async fn remove_time_slot_task(
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
     Ok(Json(mutation.into()))
+}
+
+// ── planning / analytics reads ─────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CalendarTasksQuery {
+    /// Inclusive civil start date (`YYYY-MM-DD`). Required.
+    pub from: Option<String>,
+    /// Inclusive civil end date (`YYYY-MM-DD`). Required.
+    pub to: Option<String>,
+    /// Optional exact project filter.
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct PlanningDateQuery {
+    /// Civil date (`YYYY-MM-DD`). Defaults to server-local today.
+    pub date: Option<String>,
+    /// Daily capacity in whole minutes. Defaults to 480.
+    pub capacity_minutes: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct WeeklyReviewQuery {
+    /// Civil date inside the current week (`YYYY-MM-DD`). Defaults to server-local today.
+    pub date: Option<String>,
+    /// Week start: `sunday` (default) or `monday`.
+    pub week_start: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct StatsQuery {
+    /// Inclusive civil start date (`YYYY-MM-DD`). Required.
+    pub from: Option<String>,
+    /// Inclusive civil end date (`YYYY-MM-DD`). Required.
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct MotivationDateQuery {
+    /// Civil date (`YYYY-MM-DD`). Defaults to server-local today.
+    pub date: Option<String>,
+}
+
+fn require_date_param(
+    raw: Option<&str>,
+    field: &'static str,
+    request_id: &RequestId,
+) -> Result<Date, ApiError> {
+    parse_date_param(raw, field, request_id)?.ok_or_else(|| {
+        validation_error(junban_domain::ValidationError::Empty { field }, request_id)
+    })
+}
+
+fn parse_capacity_param(
+    raw: Option<u32>,
+    request_id: &RequestId,
+) -> Result<Option<DailyCapacityMinutes>, ApiError> {
+    match raw {
+        None => Ok(None),
+        Some(value) => DailyCapacityMinutes::new(value)
+            .map(Some)
+            .map_err(|error| validation_error(error, request_id)),
+    }
+}
+
+fn parse_week_start_param(
+    raw: Option<&str>,
+    request_id: &RequestId,
+) -> Result<WeekStart, ApiError> {
+    match raw {
+        None => Ok(WeekStart::Sunday),
+        Some(value) => WeekStart::parse(value).map_err(|error| validation_error(error, request_id)),
+    }
+}
+
+fn id_strings(ids: impl IntoIterator<Item = junban_domain::TaskId>) -> Vec<String> {
+    ids.into_iter().map(|id| id.to_string()).collect()
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/calendar/tasks",
+    operation_id = "calendar_tasks",
+    params(CalendarTasksQuery),
+    responses(
+        (status = 200, body = CalendarTasksResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn calendar_tasks(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<CalendarTasksQuery>,
+) -> Result<Json<CalendarTasksResponse>, ApiError> {
+    let from = require_date_param(query.from.as_deref(), "from", &request_id)?;
+    let to = require_date_param(query.to.as_deref(), "to", &request_id)?;
+    let project_id = match query.project_id.as_deref() {
+        None => None,
+        Some(raw) => Some(ProjectId::parse(raw).map_err(|e| validation_error(e, &request_id))?),
+    };
+    let as_of = server_list_as_of().map_err(|error| validation_error(error, &request_id))?;
+    let page = state
+        .service
+        .calendar_tasks(from, to, project_id, as_of)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(CalendarTasksResponse {
+        tasks: page.tasks.into_iter().map(Into::into).collect(),
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/planning/daily",
+    operation_id = "planning_daily",
+    params(PlanningDateQuery),
+    responses(
+        (status = 200, body = DailyPlanResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn planning_daily(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<PlanningDateQuery>,
+) -> Result<Json<DailyPlanResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let capacity = parse_capacity_param(query.capacity_minutes, &request_id)?;
+    let page = state
+        .service
+        .daily_plan(date, capacity, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(DailyPlanResponse {
+        overdue_task_ids: id_strings(page.overdue_task_ids),
+        overdue_tasks: page.overdue_tasks.into_iter().map(Into::into).collect(),
+        focus_task_ids: id_strings(page.focus_task_ids),
+        focus_tasks: page.focus_tasks.into_iter().map(Into::into).collect(),
+        estimated_total_minutes: page.estimated_total_minutes,
+        capacity_minutes: page.capacity_minutes,
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/planning/end-of-day",
+    operation_id = "planning_end_of_day",
+    params(PlanningDateQuery),
+    responses(
+        (status = 200, body = EndOfDayResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn planning_end_of_day(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<PlanningDateQuery>,
+) -> Result<Json<EndOfDayResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let capacity = parse_capacity_param(query.capacity_minutes, &request_id)?;
+    let page = state
+        .service
+        .end_of_day(date, capacity, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(EndOfDayResponse {
+        win_task_ids: id_strings(page.win_task_ids),
+        win_tasks: page.win_tasks.into_iter().map(Into::into).collect(),
+        carry_over_task_ids: id_strings(page.carry_over_task_ids),
+        carry_over_tasks: page.carry_over_tasks.into_iter().map(Into::into).collect(),
+        tomorrow_task_ids: id_strings(page.tomorrow_task_ids),
+        tomorrow_tasks: page.tomorrow_tasks.into_iter().map(Into::into).collect(),
+        tomorrow_estimated_minutes: page.tomorrow_estimated_minutes,
+        completion_rate_percent: page.completion_rate_percent,
+        capacity_minutes: page.capacity_minutes,
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/planning/weekly",
+    operation_id = "planning_weekly",
+    params(WeeklyReviewQuery),
+    responses(
+        (status = 200, body = WeeklyReviewResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn planning_weekly(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<WeeklyReviewQuery>,
+) -> Result<Json<WeeklyReviewResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let week_start = parse_week_start_param(query.week_start.as_deref(), &request_id)?;
+    let page = state
+        .service
+        .weekly_review(date, week_start, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(WeeklyReviewResponse::from_page(page)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/stats",
+    operation_id = "stats",
+    params(StatsQuery),
+    responses(
+        (status = 200, body = StatsResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn stats(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<StatsQuery>,
+) -> Result<Json<StatsResponse>, ApiError> {
+    let from = require_date_param(query.from.as_deref(), "from", &request_id)?;
+    let to = require_date_param(query.to.as_deref(), "to", &request_id)?;
+    let (today, zone) = server_planning_clock();
+    let page = state
+        .service
+        .stats(from, to, today, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(StatsResponse::from_page(page)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/nudges",
+    operation_id = "nudges",
+    params(PlanningDateQuery),
+    responses(
+        (status = 200, body = NudgesResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn nudges(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<PlanningDateQuery>,
+) -> Result<Json<NudgesResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let capacity = parse_capacity_param(query.capacity_minutes, &request_id)?;
+    let page = state
+        .service
+        .nudges(date, capacity, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(NudgesResponse::from_page(page)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/temporal",
+    operation_id = "get_temporal_settings",
+    responses(
+        (status = 200, body = TemporalSettingsResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_temporal_settings() -> Json<TemporalSettingsResponse> {
+    let (_, zone) = server_planning_clock();
+    Json(junban_app::default_temporal_settings(&zone).into())
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/motivation/eat-the-frog",
+    operation_id = "motivation_eat_the_frog",
+    params(MotivationDateQuery),
+    responses(
+        (status = 200, body = EatTheFrogResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn motivation_eat_the_frog(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<MotivationDateQuery>,
+) -> Result<Json<EatTheFrogResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let page = state
+        .service
+        .eat_the_frog(date, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(EatTheFrogResponse {
+        task: page.task.map(Into::into),
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/motivation/task-jar",
+    operation_id = "motivation_task_jar",
+    params(MotivationDateQuery),
+    responses(
+        (status = 200, body = TaskJarResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn motivation_task_jar(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<MotivationDateQuery>,
+) -> Result<Json<TaskJarResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let page = state
+        .service
+        .task_jar(date, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(TaskJarResponse {
+        task_ids: id_strings(page.task_ids),
+        tasks: page.tasks.into_iter().map(Into::into).collect(),
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/motivation/dopamine-menu",
+    operation_id = "motivation_dopamine_menu",
+    params(MotivationDateQuery),
+    responses(
+        (status = 200, body = DopamineMenuResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn motivation_dopamine_menu(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<MotivationDateQuery>,
+) -> Result<Json<DopamineMenuResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let page = state
+        .service
+        .dopamine_menu(date, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(DopamineMenuResponse {
+        task_ids: id_strings(page.task_ids),
+        tasks: page.tasks.into_iter().map(Into::into).collect(),
+        revision: page.revision,
+    }))
 }
 
 pub async fn api_not_found(Extension(request_id): Extension<RequestId>) -> ApiError {

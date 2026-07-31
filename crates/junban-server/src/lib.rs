@@ -41,19 +41,21 @@ use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 use crate::reminder_wake::{ReminderWakeEventDto, ReminderWakeHub, start_reminder_coordinator};
 use crate::routes::{
     acquire_reminder_lease, add_relation, api_not_found, append_time_slot_task, apply_template,
-    bulk_tasks, cancel_task, claim_due_reminders, complete_task, create_comment, create_project,
-    create_saved_filter, create_section, create_tag, create_task, create_template,
+    bulk_tasks, calendar_tasks, cancel_task, claim_due_reminders, complete_task, create_comment,
+    create_project, create_saved_filter, create_section, create_tag, create_task, create_template,
     create_time_block, create_time_slot, delete_comment, delete_project, delete_saved_filter,
     delete_section, delete_tag, delete_task, delete_template, delete_time_block, delete_time_slot,
-    dismiss_reminder, events, get_catalog, get_profile, get_task, health, list_comments,
-    list_relations, list_task_activity, list_task_reminders, list_tasks, list_time_blocks,
-    list_time_slots, mark_owner_lost_reminders, move_task, move_time_block, parse_filter_route,
-    parse_quick_entry_route, parse_text_import_route, patch_comment, patch_project,
-    patch_saved_filter, patch_section, patch_tag, patch_task, patch_template, patch_time_block,
-    patch_time_slot, release_reminder_lease, reminder_events, remove_relation,
-    remove_time_slot_task, renew_reminder_lease, reopen_task, reorder_tasks,
-    replace_time_slot_tasks, reschedule_reminder, resize_time_block, settle_reminder_delivered,
-    settle_reminder_failed, uncomplete_task, undo_operation,
+    dismiss_reminder, events, get_catalog, get_profile, get_task, get_temporal_settings, health,
+    list_comments, list_relations, list_task_activity, list_task_reminders, list_tasks,
+    list_time_blocks, list_time_slots, mark_owner_lost_reminders, motivation_dopamine_menu,
+    motivation_eat_the_frog, motivation_task_jar, move_task, move_time_block, nudges,
+    parse_filter_route, parse_quick_entry_route, parse_text_import_route, patch_comment,
+    patch_project, patch_saved_filter, patch_section, patch_tag, patch_task, patch_template,
+    patch_time_block, patch_time_slot, planning_daily, planning_end_of_day, planning_weekly,
+    release_reminder_lease, reminder_events, remove_relation, remove_time_slot_task,
+    renew_reminder_lease, reopen_task, reorder_tasks, replace_time_slot_tasks, reschedule_reminder,
+    resize_time_block, settle_reminder_delivered, settle_reminder_failed, stats, uncomplete_task,
+    undo_operation,
 };
 use crate::sse::{AppService, SseConnectionPermit};
 
@@ -327,6 +329,22 @@ pub fn router(state: ServerState, web_dir: impl Into<PathBuf>) -> Router {
         .route(
             "/api/v1/time-slots/{time_slot_id}/tasks/{task_id}",
             delete(remove_time_slot_task),
+        )
+        .route("/api/v1/calendar/tasks", get(calendar_tasks))
+        .route("/api/v1/planning/daily", get(planning_daily))
+        .route("/api/v1/planning/end-of-day", get(planning_end_of_day))
+        .route("/api/v1/planning/weekly", get(planning_weekly))
+        .route("/api/v1/stats", get(stats))
+        .route("/api/v1/nudges", get(nudges))
+        .route("/api/v1/settings/temporal", get(get_temporal_settings))
+        .route(
+            "/api/v1/motivation/eat-the-frog",
+            get(motivation_eat_the_frog),
+        )
+        .route("/api/v1/motivation/task-jar", get(motivation_task_jar))
+        .route(
+            "/api/v1/motivation/dopamine-menu",
+            get(motivation_dopamine_menu),
         )
         .route("/api/v1/events", get(events))
         .route("/api", get(api_not_found))
@@ -611,7 +629,17 @@ impl Modify for SecurityAddon {
         routes::delete_time_slot,
         routes::append_time_slot_task,
         routes::replace_time_slot_tasks,
-        routes::remove_time_slot_task
+        routes::remove_time_slot_task,
+        routes::calendar_tasks,
+        routes::planning_daily,
+        routes::planning_end_of_day,
+        routes::planning_weekly,
+        routes::stats,
+        routes::nudges,
+        routes::get_temporal_settings,
+        routes::motivation_eat_the_frog,
+        routes::motivation_task_jar,
+        routes::motivation_dopamine_menu
     ),
     components(schemas(
         ErrorEnvelope,
@@ -705,6 +733,26 @@ impl Modify for SecurityAddon {
         dto::ClaimedReminderDto,
         dto::ClaimRemindersResponse,
         dto::MarkOwnerLostRemindersResponse,
+        dto::CalendarTasksResponse,
+        dto::DailyPlanResponse,
+        dto::EndOfDayResponse,
+        dto::WeekStartDto,
+        dto::CompletionTimeBucketDto,
+        dto::CompletionTimeBucketsDto,
+        dto::WeeklyDayStatsDto,
+        dto::NeglectedProjectReasonDto,
+        dto::NeglectedProjectFactDto,
+        dto::WeeklySuggestionDto,
+        dto::WeeklyReviewResponse,
+        dto::DailyStatBucketDto,
+        dto::StatsResponse,
+        dto::NudgeRuleKindDto,
+        dto::NudgeRuleFactsDto,
+        dto::NudgesResponse,
+        dto::TemporalSettingsResponse,
+        dto::EatTheFrogResponse,
+        dto::TaskJarResponse,
+        dto::DopamineMenuResponse,
         ReminderWakeEventDto
     )),
     modifiers(&SecurityAddon)

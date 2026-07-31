@@ -4,6 +4,22 @@
  */
 
 export interface paths {
+  "/api/v1/calendar/tasks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["calendar_tasks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/catalog": {
     parameters: {
       query?: never;
@@ -60,6 +76,70 @@ export interface paths {
       cookie?: never;
     };
     get: operations["health"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/motivation/dopamine-menu": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["motivation_dopamine_menu"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/motivation/eat-the-frog": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["motivation_eat_the_frog"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/motivation/task-jar": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["motivation_task_jar"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/nudges": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["nudges"];
     put?: never;
     post?: never;
     delete?: never;
@@ -126,6 +206,54 @@ export interface paths {
     get?: never;
     put?: never;
     post: operations["parse_text_import"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/planning/daily": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["planning_daily"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/planning/end-of-day": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["planning_end_of_day"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/planning/weekly": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["planning_weekly"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -370,6 +498,38 @@ export interface paths {
     options?: never;
     head?: never;
     patch: operations["patch_section"];
+    trace?: never;
+  };
+  "/api/v1/settings/temporal": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_temporal_settings"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/stats": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["stats"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/tags": {
@@ -932,6 +1092,11 @@ export interface components {
       action: components["schemas"]["BulkActionDto"];
       task_ids: string[];
     };
+    CalendarTasksResponse: {
+      /** Format: int64 */
+      revision: number;
+      tasks: components["schemas"]["TaskDto"][];
+    };
     CatalogResponse: {
       projects: components["schemas"]["ProjectDto"][];
       /** Format: int64 */
@@ -993,6 +1158,18 @@ export interface components {
       /** Format: int64 */
       revision: number;
       snapshot?: null | components["schemas"]["ResourceSnapshotDto"];
+    };
+    /** @enum {string} */
+    CompletionTimeBucketDto: "morning" | "afternoon" | "evening" | "night";
+    CompletionTimeBucketsDto: {
+      /** Format: int32 */
+      afternoon: number;
+      /** Format: int32 */
+      evening: number;
+      /** Format: int32 */
+      morning: number;
+      /** Format: int32 */
+      night: number;
     };
     CreateCommentRequest: {
       content: string;
@@ -1098,6 +1275,55 @@ export interface components {
       time_zone?: string | null;
       title: string;
     };
+    DailyPlanResponse: {
+      /** Format: int32 */
+      capacity_minutes: number;
+      /** Format: int32 */
+      estimated_total_minutes: number;
+      focus_task_ids: string[];
+      focus_tasks: components["schemas"]["TaskDto"][];
+      overdue_task_ids: string[];
+      overdue_tasks: components["schemas"]["TaskDto"][];
+      /** Format: int64 */
+      revision: number;
+    };
+    DailyStatBucketDto: {
+      /** Format: int32 */
+      completion_minutes: number;
+      /** Format: int32 */
+      completions: number;
+      /** Format: int32 */
+      creations: number;
+      /** Format: date */
+      date: string;
+    };
+    DopamineMenuResponse: {
+      /** Format: int64 */
+      revision: number;
+      task_ids: string[];
+      tasks: components["schemas"]["TaskDto"][];
+    };
+    EatTheFrogResponse: {
+      /** Format: int64 */
+      revision: number;
+      task?: null | components["schemas"]["TaskDto"];
+    };
+    EndOfDayResponse: {
+      /** Format: int32 */
+      capacity_minutes: number;
+      carry_over_task_ids: string[];
+      carry_over_tasks: components["schemas"]["TaskDto"][];
+      /** Format: int32 */
+      completion_rate_percent: number;
+      /** Format: int64 */
+      revision: number;
+      /** Format: int32 */
+      tomorrow_estimated_minutes: number;
+      tomorrow_task_ids: string[];
+      tomorrow_tasks: components["schemas"]["TaskDto"][];
+      win_task_ids: string[];
+      win_tasks: components["schemas"]["TaskDto"][];
+    };
     ErrorBody: {
       code: string;
       fields?: {
@@ -1146,6 +1372,30 @@ export interface components {
     /** @description Mutation responses carry exactly one committed event. `newly_committed` is never exposed. */
     MutationResponse: {
       event: components["schemas"]["CommittedEventDto"];
+    };
+    NeglectedProjectFactDto: {
+      /** Format: int32 */
+      overdue_count: number;
+      /** Format: uuid */
+      project_id: string;
+      reason: components["schemas"]["NeglectedProjectReasonDto"];
+    };
+    /** @enum {string} */
+    NeglectedProjectReasonDto: "overdue_tasks" | "no_activity";
+    NudgeRuleFactsDto: {
+      has_more: boolean;
+      kind: components["schemas"]["NudgeRuleKindDto"];
+      task_ids: string[];
+    };
+    /** @enum {string} */
+    NudgeRuleKindDto:
+      "overdue" | "approaching_deadline" | "stale_task" | "empty_today" | "overloaded_day";
+    NudgesResponse: {
+      has_more: boolean;
+      /** Format: int64 */
+      revision: number;
+      rules: components["schemas"]["NudgeRuleFactsDto"][];
+      tasks: components["schemas"]["TaskDto"][];
     };
     OrderAnchorDto:
       | "keep"
@@ -1533,6 +1783,27 @@ export interface components {
       /** Format: uuid */
       task_id: string;
     };
+    StatsResponse: {
+      /** Format: int32 */
+      current_streak_days: number;
+      days: components["schemas"]["DailyStatBucketDto"][];
+      /** Format: int32 */
+      estimate_accuracy_percent?: number | null;
+      /** Format: int32 */
+      estimate_accuracy_samples: number;
+      /** Format: date */
+      from: string;
+      /** Format: int64 */
+      revision: number;
+      /** Format: date */
+      to: string;
+      /** Format: int32 */
+      total_completion_minutes: number;
+      /** Format: int32 */
+      total_completions: number;
+      /** Format: int32 */
+      total_creations: number;
+    };
     TagDto: {
       color: string;
       /** Format: date-time */
@@ -1619,6 +1890,12 @@ export interface components {
       statuses: components["schemas"]["TaskStatusDto"][];
       tag_names: string[];
     };
+    TaskJarResponse: {
+      /** Format: int64 */
+      revision: number;
+      task_ids: string[];
+      tasks: components["schemas"]["TaskDto"][];
+    };
     TaskListResponse: {
       /** Format: date */
       as_of_date: string;
@@ -1664,6 +1941,15 @@ export interface components {
     TemplateVariableDto: {
       name: string;
       value: string;
+    };
+    TemporalSettingsResponse: {
+      /** Format: int32 */
+      capacity_minutes: number;
+      eat_the_frog_enabled: boolean;
+      nudges_enabled: boolean;
+      task_jar_enabled: boolean;
+      time_zone: string;
+      week_start: components["schemas"]["WeekStartDto"];
     };
     TextImportDraftDto: {
       completed: boolean;
@@ -1731,6 +2017,67 @@ export interface components {
       revision: number;
       time_slots: components["schemas"]["TimeSlotDto"][];
     };
+    /** @enum {string} */
+    WeekStartDto: "sunday" | "monday";
+    WeeklyDayStatsDto: {
+      /** Format: int32 */
+      completed: number;
+      /** Format: int32 */
+      created: number;
+      /** Format: date */
+      date: string;
+    };
+    WeeklyReviewResponse: {
+      /** Format: date */
+      busiest_day?: string | null;
+      /** Format: int32 */
+      cancelled_count: number;
+      /** Format: int32 */
+      completed_count: number;
+      /** Format: int32 */
+      completion_rate_percent: number;
+      completion_time_buckets: components["schemas"]["CompletionTimeBucketsDto"];
+      /** Format: int32 */
+      created_count: number;
+      daily: components["schemas"]["WeeklyDayStatsDto"][];
+      dominant_completion_bucket?: null | components["schemas"]["CompletionTimeBucketDto"];
+      neglected_projects: components["schemas"]["NeglectedProjectFactDto"][];
+      overdue_task_ids: string[];
+      overdue_tasks: components["schemas"]["TaskDto"][];
+      /** Format: int64 */
+      revision: number;
+      /** Format: int32 */
+      streak_days: number;
+      suggestions: components["schemas"]["WeeklySuggestionDto"][];
+      top_accomplishment_ids: string[];
+      top_accomplishment_tasks: components["schemas"]["TaskDto"][];
+      /** Format: date */
+      week_end: string;
+      /** Format: date */
+      week_start: string;
+    };
+    WeeklySuggestionDto:
+      | {
+          /** Format: int32 */
+          count: number;
+          /** @enum {string} */
+          kind: "tackle_overdue";
+        }
+      | {
+          /** @enum {string} */
+          kind: "check_neglected";
+          project_ids: string[];
+        }
+      | {
+          /** @enum {string} */
+          kind: "created_more_than_completed";
+        }
+      | {
+          /** Format: int32 */
+          days: number;
+          /** @enum {string} */
+          kind: "keep_streak";
+        };
   };
   responses: never;
   parameters: never;
@@ -1740,6 +2087,56 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  calendar_tasks: {
+    parameters: {
+      query?: {
+        /** @description Inclusive civil start date (`YYYY-MM-DD`). Required. */
+        from?: string;
+        /** @description Inclusive civil end date (`YYYY-MM-DD`). Required. */
+        to?: string;
+        /** @description Optional exact project filter. */
+        project_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CalendarTasksResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   get_catalog: {
     parameters: {
       query?: never;
@@ -1988,6 +2385,192 @@ export interface operations {
       };
     };
   };
+  motivation_dopamine_menu: {
+    parameters: {
+      query?: {
+        /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
+        date?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DopamineMenuResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  motivation_eat_the_frog: {
+    parameters: {
+      query?: {
+        /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
+        date?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EatTheFrogResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  motivation_task_jar: {
+    parameters: {
+      query?: {
+        /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
+        date?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskJarResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  nudges: {
+    parameters: {
+      query?: {
+        /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
+        date?: string;
+        /** @description Daily capacity in whole minutes. Defaults to 480. */
+        capacity_minutes?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NudgesResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   undo_operation: {
     parameters: {
       query?: never;
@@ -2215,6 +2798,158 @@ export interface operations {
         };
       };
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  planning_daily: {
+    parameters: {
+      query?: {
+        /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
+        date?: string;
+        /** @description Daily capacity in whole minutes. Defaults to 480. */
+        capacity_minutes?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DailyPlanResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  planning_end_of_day: {
+    parameters: {
+      query?: {
+        /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
+        date?: string;
+        /** @description Daily capacity in whole minutes. Defaults to 480. */
+        capacity_minutes?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EndOfDayResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  planning_weekly: {
+    parameters: {
+      query?: {
+        /** @description Civil date inside the current week (`YYYY-MM-DD`). Defaults to server-local today. */
+        date?: string;
+        /** @description Week start: `sunday` (default) or `monday`. */
+        week_start?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WeeklyReviewResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -3458,6 +4193,89 @@ export interface operations {
         };
       };
       413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_temporal_settings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TemporalSettingsResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  stats: {
+    parameters: {
+      query?: {
+        /** @description Inclusive civil start date (`YYYY-MM-DD`). Required. */
+        from?: string;
+        /** @description Inclusive civil end date (`YYYY-MM-DD`). Required. */
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StatsResponse"];
+        };
+      };
+      401: {
         headers: {
           [name: string]: unknown;
         };

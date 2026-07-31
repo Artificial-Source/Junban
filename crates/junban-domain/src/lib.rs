@@ -29,7 +29,8 @@ pub use invariants::{
 };
 pub use planning::{
     CapacitySettings, CompletionTimeBucket, CompletionTimeBuckets, DailyCapacityMinutes,
-    DailyPlanSummary, DailyStatBucket, EndOfDaySummary, MAX_NUDGE_TASKS_COMBINED,
+    DailyPlanSummary, DailyStatBucket, EndOfDaySummary, MAX_ANALYSIS_TASK_READ,
+    MAX_CALENDAR_RANGE_DAYS, MAX_CALENDAR_TASKS, MAX_NUDGE_TASKS_COMBINED,
     MAX_NUDGE_TASKS_PER_RULE, MAX_STATS_RANGE_DAYS, MAX_WEEKLY_ACCOMPLISHMENTS,
     MAX_WEEKLY_NEGLECTED_PROJECTS, MAX_WEEKLY_OVERDUE, MAX_WEEKLY_STREAK_DAYS,
     MAX_WEEKLY_SUGGESTIONS, MatrixDropResult, MatrixGrouping, MatrixQuadrant, NeglectedProjectFact,
@@ -39,8 +40,8 @@ pub use planning::{
     daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary, end_of_day_summary_with,
     estimate_accuracy, evaluate_nudges, evaluate_nudges_with, group_matrix_task_ids,
     matrix_drop_result, prior_complete_week, select_eat_the_frog, stats_summary,
-    stats_summary_with, task_jar_candidates, validate_stats_date_range, weekly_review_summary,
-    weekly_review_summary_with,
+    stats_summary_with, task_jar_candidates, validate_calendar_date_range,
+    validate_stats_date_range, weekly_review_summary, weekly_review_summary_with,
 };
 pub use query::{
     MAX_FILTER_INPUT_CHARS, TaskCursor, TaskFilter, TaskQuery, TaskSort, TaskViewPreset,

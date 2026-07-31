@@ -2555,3 +2555,569 @@ async fn time_slot_crud_filters_and_membership_operations() {
         "time_slot.deleted"
     );
 }
+
+// ── Phase 3 planning / analytics HTTP API ──────────────────────────────────
+
+async fn get_json(context: &TestContext, uri: &str) -> (StatusCode, Value) {
+    let response = context
+        .request(authenticated(Method::GET, uri).body(Body::empty()).unwrap())
+        .await;
+    let status = response.status();
+    (status, json(response).await)
+}
+
+async fn seed_task_with(
+    context: &TestContext,
+    title: &str,
+    due_date: Option<&str>,
+    extra: Value,
+) -> Value {
+    let mut payload = json!({ "title": title });
+    if let Some(due) = due_date {
+        payload["due_date"] = json!(due);
+    }
+    if let Some(obj) = extra.as_object() {
+        for (k, v) in obj {
+            payload[k] = v.clone();
+        }
+    }
+    create_task_payload(context, payload).await
+}
+
+#[tokio::test]
+async fn planning_routes_require_auth() {
+    // Auth limiter is per-state and counts failures; use fresh contexts in batches.
+    let uris = [
+        "/api/v1/calendar/tasks?from=2026-03-01&to=2026-03-07",
+        "/api/v1/planning/daily",
+        "/api/v1/planning/end-of-day",
+        "/api/v1/planning/weekly",
+        "/api/v1/stats?from=2026-03-01&to=2026-03-07",
+        "/api/v1/nudges",
+        "/api/v1/settings/temporal",
+        "/api/v1/motivation/eat-the-frog",
+        "/api/v1/motivation/task-jar",
+        "/api/v1/motivation/dopamine-menu",
+    ];
+    for chunk in uris.chunks(5) {
+        let context = TestContext::new();
+        for uri in chunk {
+            let denied = context
+                .request(request(Method::GET, uri).body(Body::empty()).unwrap())
+                .await;
+            assert_eq!(denied.status(), StatusCode::UNAUTHORIZED, "{uri}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn calendar_validates_bounds_filters_project_and_rejects_over_cap() {
+    let context = TestContext::new();
+
+    let missing = context
+        .request(
+            authenticated(Method::GET, "/api/v1/calendar/tasks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(missing.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let inverted = context
+        .request(
+            authenticated(
+                Method::GET,
+                "/api/v1/calendar/tasks?from=2026-03-10&to=2026-03-01",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(inverted.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let too_wide = context
+        .request(
+            authenticated(
+                Method::GET,
+                "/api/v1/calendar/tasks?from=2026-01-01&to=2026-03-01",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(too_wide.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let project = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/projects"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "name": "Roadmap", "color": "#4F46E5" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(project.status(), StatusCode::CREATED);
+    let project_body = json(project).await;
+    let project_id = project_body["event"]["snapshot"]["project"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let _in = seed_task_with(
+        &context,
+        "In project",
+        Some("2026-03-05"),
+        json!({ "project_id": project_id }),
+    )
+    .await;
+    let _out = seed_task_with(&context, "Other project", Some("2026-03-05"), json!({})).await;
+    let _done = seed_task_with(&context, "Done in range", Some("2026-03-06"), json!({})).await;
+    let done_id = task_id_from(&_done).to_owned();
+    let completed = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                &format!("/api/v1/tasks/{done_id}/complete"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(completed.status(), StatusCode::OK);
+
+    let (status, body) = get_json(
+        &context,
+        "/api/v1/calendar/tasks?from=2026-03-01&to=2026-03-07",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let titles: Vec<&str> = body["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["title"].as_str().unwrap())
+        .collect();
+    assert!(titles.contains(&"In project"));
+    assert!(titles.contains(&"Other project"));
+    assert!(titles.contains(&"Done in range"));
+    // Stable due-asc then id ordering keeps due dates non-decreasing.
+    let dues: Vec<&str> = body["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["due_date"].as_str().unwrap())
+        .collect();
+    let mut sorted = dues.clone();
+    sorted.sort();
+    assert_eq!(dues, sorted);
+
+    let (status, filtered) = get_json(
+        &context,
+        &format!("/api/v1/calendar/tasks?from=2026-03-01&to=2026-03-07&project_id={project_id}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let filtered_titles: Vec<&str> = filtered["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(filtered_titles, vec!["In project"]);
+
+    // Cap rejection at 2,001 matching tasks (seed via service to avoid HTTP overhead).
+    use junban_domain::{OperationId, TaskDraft, TaskTitle};
+    let due: jiff::civil::Date = "2026-04-01".parse().unwrap();
+    for i in 0..2001 {
+        let mut draft = TaskDraft::new(TaskTitle::new(format!("cap-{i}")).unwrap());
+        draft.due_date = Some(due);
+        context
+            .state
+            .service
+            .create_task(
+                OperationId::parse(&Uuid::now_v7().to_string()).unwrap(),
+                draft,
+            )
+            .await
+            .unwrap();
+    }
+    let over = context
+        .request(
+            authenticated(
+                Method::GET,
+                "/api/v1/calendar/tasks?from=2026-04-01&to=2026-04-01",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(over.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json(over).await["error"]["code"], "result_limit_exceeded");
+}
+
+#[tokio::test]
+async fn planning_daily_and_end_of_day_use_injected_dates() {
+    let context = TestContext::new();
+    let day = "2026-03-11";
+    let tomorrow = "2026-03-12";
+    let yesterday = "2026-03-10";
+
+    let overdue = seed_task_with(
+        &context,
+        "Overdue work",
+        Some(yesterday),
+        json!({ "estimated_minutes": 30 }),
+    )
+    .await;
+    let focus = seed_task_with(
+        &context,
+        "Focus work",
+        Some(day),
+        json!({ "estimated_minutes": 45 }),
+    )
+    .await;
+    let win = seed_task_with(&context, "Win", Some(day), json!({})).await;
+    let tomorrow_task = seed_task_with(
+        &context,
+        "Tomorrow",
+        Some(tomorrow),
+        json!({ "estimated_minutes": 20 }),
+    )
+    .await;
+
+    let win_id = task_id_from(&win).to_owned();
+    let completed = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                &format!("/api/v1/tasks/{win_id}/complete"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(completed.status(), StatusCode::OK);
+
+    // End-of-day win bucketing uses server-zone completed_at; use server-local today for wins.
+    let today = jiff::Zoned::now().date().to_string();
+    let today_focus = seed_task_with(
+        &context,
+        "Today focus",
+        Some(&today),
+        json!({ "estimated_minutes": 15 }),
+    )
+    .await;
+    let today_win = seed_task_with(&context, "Today win", Some(&today), json!({})).await;
+    let today_win_id = task_id_from(&today_win).to_owned();
+    let completed_today = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                &format!("/api/v1/tasks/{today_win_id}/complete"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(completed_today.status(), StatusCode::OK);
+
+    let (status, daily) = get_json(
+        &context,
+        &format!("/api/v1/planning/daily?date={day}&capacity_minutes=240"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(daily["capacity_minutes"], 240);
+    assert_eq!(daily["estimated_total_minutes"], 45);
+    assert!(
+        daily["overdue_task_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == task_id_from(&overdue))
+    );
+    assert!(
+        daily["focus_task_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == task_id_from(&focus))
+    );
+    assert_eq!(
+        daily["focus_tasks"].as_array().unwrap().len(),
+        daily["focus_task_ids"].as_array().unwrap().len()
+    );
+
+    let (status, eod) = get_json(
+        &context,
+        &format!("/api/v1/planning/end-of-day?date={today}&capacity_minutes=300"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(eod["capacity_minutes"], 300);
+    assert!(
+        eod["win_task_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &today_win_id)
+    );
+    assert!(
+        eod["carry_over_task_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == task_id_from(&today_focus))
+    );
+    assert!(eod["completion_rate_percent"].as_u64().unwrap() > 0);
+
+    // Injected historical end-of-day still returns tomorrow preview from due dates.
+    let (status, historical) =
+        get_json(&context, &format!("/api/v1/planning/end-of-day?date={day}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        historical["tomorrow_task_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == task_id_from(&tomorrow_task))
+    );
+    assert_eq!(historical["tomorrow_estimated_minutes"], 20);
+    assert_eq!(historical["capacity_minutes"], 480);
+}
+
+#[tokio::test]
+async fn planning_weekly_sunday_and_monday_windows() {
+    let context = TestContext::new();
+    // Anchor: Wednesday 2026-03-11. Sunday week -> prior 2026-03-01..03-07.
+    // Monday week -> prior 2026-03-02..03-08.
+    let (status, sun) = get_json(
+        &context,
+        "/api/v1/planning/weekly?date=2026-03-11&week_start=sunday",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(sun["week_start"], "2026-03-01");
+    assert_eq!(sun["week_end"], "2026-03-07");
+    assert_eq!(sun["daily"].as_array().unwrap().len(), 7);
+
+    let (status, mon) = get_json(
+        &context,
+        "/api/v1/planning/weekly?date=2026-03-11&week_start=monday",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(mon["week_start"], "2026-03-02");
+    assert_eq!(mon["week_end"], "2026-03-08");
+
+    let defaulted = get_json(&context, "/api/v1/planning/weekly?date=2026-03-11").await;
+    assert_eq!(defaulted.0, StatusCode::OK);
+    assert_eq!(defaulted.1["week_start"], "2026-03-01");
+
+    let bad = get_json(
+        &context,
+        "/api/v1/planning/weekly?date=2026-03-11&week_start=friday",
+    )
+    .await;
+    assert_eq!(bad.0, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn stats_formula_streak_and_range_bounds() {
+    let context = TestContext::new();
+    let today = jiff::Zoned::now().date();
+    let today_s = today.to_string();
+
+    let with_est = seed_task_with(
+        &context,
+        "Estimate sample",
+        Some(&today_s),
+        json!({ "estimated_minutes": 100, "actual_minutes": 80 }),
+    )
+    .await;
+    let id = task_id_from(&with_est).to_owned();
+    // actual is set on create; complete for streak/completions.
+    let completed = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                &format!("/api/v1/tasks/{id}/complete"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(completed.status(), StatusCode::OK);
+
+    let from = today.checked_sub(2.days()).unwrap().to_string();
+    let (status, body) =
+        get_json(&context, &format!("/api/v1/stats?from={from}&to={today_s}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["days"].as_array().unwrap().len(), 3);
+    assert!(body["total_completions"].as_u64().unwrap() >= 1);
+    assert_eq!(body["current_streak_days"].as_u64().unwrap(), 1);
+    // |80-100|/100 = 0.2 => accuracy 80%
+    assert_eq!(body["estimate_accuracy_percent"], 80);
+    assert_eq!(body["estimate_accuracy_samples"], 1);
+
+    let inverted = get_json(&context, "/api/v1/stats?from=2026-03-10&to=2026-03-01").await;
+    assert_eq!(inverted.0, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let too_wide = get_json(&context, "/api/v1/stats?from=2025-01-01&to=2026-12-31").await;
+    assert_eq!(too_wide.0, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn nudges_stable_order_and_truncation_flags() {
+    let context = TestContext::new();
+    let today = jiff::Zoned::now().date();
+    let today_s = today.to_string();
+    // Overdue pending.
+    let overdue_day = today.checked_sub(2.days()).unwrap().to_string();
+    let _ = seed_task_with(
+        &context,
+        "Overdue A",
+        Some(&overdue_day),
+        json!({ "estimated_minutes": 200 }),
+    )
+    .await;
+    // Seed a today task so empty_today does not fire; large estimates trip overloaded_day.
+    let _ = seed_task_with(
+        &context,
+        "Today heavy",
+        Some(&today_s),
+        json!({ "estimated_minutes": 400 }),
+    )
+    .await;
+
+    let (status, body) = get_json(
+        &context,
+        &format!("/api/v1/nudges?date={today_s}&capacity_minutes=100"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let kinds: Vec<&str> = body["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["kind"].as_str().unwrap())
+        .collect();
+    // Stable rule order subset.
+    let mut last_idx = -1_isize;
+    for kind in [
+        "overdue",
+        "approaching_deadline",
+        "stale_task",
+        "empty_today",
+        "overloaded_day",
+    ] {
+        if let Some(pos) = kinds.iter().position(|k| *k == kind) {
+            assert!(pos as isize > last_idx, "{kind} out of order in {kinds:?}");
+            last_idx = pos as isize;
+        }
+    }
+    assert!(kinds.contains(&"overdue"), "{body:?}");
+    assert!(kinds.contains(&"overloaded_day"), "{body:?}");
+    assert!(
+        !kinds.contains(&"empty_today"),
+        "unexpected empty_today in {kinds:?} body={body}"
+    );
+    // Embedded tasks only cover referenced IDs.
+    let embedded = body["tasks"].as_array().unwrap().len();
+    let referenced: usize = body["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["task_ids"].as_array().unwrap().len())
+        .sum();
+    assert!(embedded <= referenced);
+    assert!(embedded > 0);
+}
+
+#[tokio::test]
+async fn motivation_ordering_and_temporal_defaults() {
+    let context = TestContext::new();
+    let today = jiff::Zoned::now().date().to_string();
+
+    let frog = seed_task_with(
+        &context,
+        "Scary",
+        Some(&today),
+        json!({ "dread": 5, "priority": 1 }),
+    )
+    .await;
+    let mild = seed_task_with(&context, "Mild", Some(&today), json!({ "dread": 2 })).await;
+    let quick = seed_task_with(
+        &context,
+        "Quick win",
+        Some(&today),
+        json!({ "estimated_minutes": 10, "priority": 4 }),
+    )
+    .await;
+    let also_quick = seed_task_with(
+        &context,
+        "Also quick",
+        Some(&today),
+        json!({ "estimated_minutes": 5 }),
+    )
+    .await;
+
+    let (status, frog_body) = get_json(
+        &context,
+        &format!("/api/v1/motivation/eat-the-frog?date={today}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        frog_body["task"]["id"].as_str().unwrap(),
+        task_id_from(&frog)
+    );
+    let _ = mild;
+
+    let (status, jar) = get_json(
+        &context,
+        &format!("/api/v1/motivation/task-jar?date={today}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(jar["task_ids"].as_array().unwrap().len() >= 4);
+    assert_eq!(
+        jar["tasks"].as_array().unwrap().len(),
+        jar["task_ids"].as_array().unwrap().len()
+    );
+
+    let (status, menu) = get_json(
+        &context,
+        &format!("/api/v1/motivation/dopamine-menu?date={today}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let menu_titles: Vec<&str> = menu["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["title"].as_str().unwrap())
+        .collect();
+    // Shortest estimate first: Also quick (5) before Quick win (10).
+    let also_pos = menu_titles.iter().position(|t| *t == "Also quick");
+    let quick_pos = menu_titles.iter().position(|t| *t == "Quick win");
+    assert!(also_pos.is_some() && quick_pos.is_some());
+    assert!(also_pos.unwrap() < quick_pos.unwrap());
+    let _ = (quick, also_quick);
+
+    let (status, settings) = get_json(&context, "/api/v1/settings/temporal").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(settings["capacity_minutes"], 480);
+    assert_eq!(settings["week_start"], "sunday");
+    assert_eq!(settings["nudges_enabled"], true);
+    assert_eq!(settings["eat_the_frog_enabled"], false);
+    assert_eq!(settings["task_jar_enabled"], false);
+    assert!(settings["time_zone"].as_str().unwrap().len() >= 3);
+
+    // Default date smoke (wall clock only for this path).
+    let (status, _) = get_json(&context, "/api/v1/planning/daily").await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = get_json(&context, "/api/v1/nudges").await;
+    assert_eq!(status, StatusCode::OK);
+}

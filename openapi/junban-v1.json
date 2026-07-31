@@ -10,6 +10,88 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/v1/calendar/tasks": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "calendar_tasks",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive civil start date (`YYYY-MM-DD`). Required.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Inclusive civil end date (`YYYY-MM-DD`). Required.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional exact project filter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarTasksResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/catalog": {
       "get": {
         "tags": ["routes"],
@@ -356,6 +438,273 @@
         }
       }
     },
+    "/api/v1/motivation/dopamine-menu": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "motivation_dopamine_menu",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DopamineMenuResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/motivation/eat-the-frog": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "motivation_eat_the_frog",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EatTheFrogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/motivation/task-jar": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "motivation_task_jar",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskJarResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/nudges": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "nudges",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "capacity_minutes",
+            "in": "query",
+            "description": "Daily capacity in whole minutes. Defaults to 480.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NudgesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/operations/{source_operation_id}/undo": {
       "post": {
         "tags": ["routes"],
@@ -661,6 +1010,239 @@
             }
           },
           "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/planning/daily": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "planning_daily",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "capacity_minutes",
+            "in": "query",
+            "description": "Daily capacity in whole minutes. Defaults to 480.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyPlanResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/planning/end-of-day": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "planning_end_of_day",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "capacity_minutes",
+            "in": "query",
+            "description": "Daily capacity in whole minutes. Defaults to 480.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndOfDayResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/planning/weekly": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "planning_weekly",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "description": "Civil date inside the current week (`YYYY-MM-DD`). Defaults to server-local today.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "week_start",
+            "in": "query",
+            "description": "Week start: `sunday` (default) or `monday`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeeklyReviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "",
             "content": {
               "application/json": {
@@ -2361,6 +2943,122 @@
             }
           },
           "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/settings/temporal": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_temporal_settings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporalSettingsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/stats": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "stats",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive civil start date (`YYYY-MM-DD`). Required.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Inclusive civil end date (`YYYY-MM-DD`). Required.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            }
+          },
+          "401": {
             "description": "",
             "content": {
               "application/json": {
@@ -7120,6 +7818,23 @@
         },
         "additionalProperties": false
       },
+      "CalendarTasksResponse": {
+        "type": "object",
+        "required": ["tasks", "revision"],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDto"
+            }
+          }
+        }
+      },
       "CatalogResponse": {
         "type": "object",
         "required": ["projects", "sections", "tags", "templates", "saved_filters", "revision"],
@@ -7304,6 +8019,36 @@
                 "$ref": "#/components/schemas/ResourceSnapshotDto"
               }
             ]
+          }
+        }
+      },
+      "CompletionTimeBucketDto": {
+        "type": "string",
+        "enum": ["morning", "afternoon", "evening", "night"]
+      },
+      "CompletionTimeBucketsDto": {
+        "type": "object",
+        "required": ["morning", "afternoon", "evening", "night"],
+        "properties": {
+          "afternoon": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "evening": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "morning": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "night": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           }
         }
       },
@@ -7603,6 +8348,207 @@
         },
         "additionalProperties": false
       },
+      "DailyPlanResponse": {
+        "type": "object",
+        "required": [
+          "overdue_task_ids",
+          "overdue_tasks",
+          "focus_task_ids",
+          "focus_tasks",
+          "estimated_total_minutes",
+          "capacity_minutes",
+          "revision"
+        ],
+        "properties": {
+          "capacity_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "estimated_total_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "focus_task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "focus_tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDto"
+            }
+          },
+          "overdue_task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "overdue_tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDto"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DailyStatBucketDto": {
+        "type": "object",
+        "required": ["date", "completions", "creations", "completion_minutes"],
+        "properties": {
+          "completion_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "completions": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "creations": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          }
+        }
+      },
+      "DopamineMenuResponse": {
+        "type": "object",
+        "required": ["task_ids", "tasks", "revision"],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDto"
+            }
+          }
+        }
+      },
+      "EatTheFrogResponse": {
+        "type": "object",
+        "required": ["revision"],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "task": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskDto"
+              }
+            ]
+          }
+        }
+      },
+      "EndOfDayResponse": {
+        "type": "object",
+        "required": [
+          "win_task_ids",
+          "win_tasks",
+          "carry_over_task_ids",
+          "carry_over_tasks",
+          "tomorrow_task_ids",
+          "tomorrow_tasks",
+          "tomorrow_estimated_minutes",
+          "completion_rate_percent",
+          "capacity_minutes",
+          "revision"
+        ],
+        "properties": {
+          "capacity_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "carry_over_task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "carry_over_tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDto"
+            }
+          },
+          "completion_rate_percent": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "tomorrow_estimated_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tomorrow_task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "tomorrow_tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDto"
+            }
+          },
+          "win_task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "win_tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDto"
+            }
+          }
+        }
+      },
       "ErrorBody": {
         "type": "object",
         "required": ["code", "message", "retryable"],
@@ -7742,6 +8688,77 @@
         "properties": {
           "event": {
             "$ref": "#/components/schemas/CommittedEventDto"
+          }
+        }
+      },
+      "NeglectedProjectFactDto": {
+        "type": "object",
+        "required": ["project_id", "overdue_count", "reason"],
+        "properties": {
+          "overdue_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/NeglectedProjectReasonDto"
+          }
+        }
+      },
+      "NeglectedProjectReasonDto": {
+        "type": "string",
+        "enum": ["overdue_tasks", "no_activity"]
+      },
+      "NudgeRuleFactsDto": {
+        "type": "object",
+        "required": ["kind", "task_ids", "has_more"],
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NudgeRuleKindDto"
+          },
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "NudgeRuleKindDto": {
+        "type": "string",
+        "enum": ["overdue", "approaching_deadline", "stale_task", "empty_today", "overloaded_day"]
+      },
+      "NudgesResponse": {
+        "type": "object",
+        "required": ["rules", "has_more", "tasks", "revision"],
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NudgeRuleFactsDto"
+            }
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDto"
+            }
           }
         }
       },
@@ -8769,6 +9786,71 @@
         },
         "additionalProperties": false
       },
+      "StatsResponse": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "days",
+          "total_completions",
+          "total_creations",
+          "total_completion_minutes",
+          "current_streak_days",
+          "estimate_accuracy_samples",
+          "revision"
+        ],
+        "properties": {
+          "current_streak_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DailyStatBucketDto"
+            }
+          },
+          "estimate_accuracy_percent": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
+          "estimate_accuracy_samples": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "total_completion_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "total_completions": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "total_creations": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "TagDto": {
         "type": "object",
         "required": ["id", "name", "color", "created_at", "updated_at"],
@@ -9010,6 +10092,30 @@
           }
         }
       },
+      "TaskJarResponse": {
+        "type": "object",
+        "required": ["task_ids", "tasks", "revision"],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDto"
+            }
+          }
+        }
+      },
       "TaskListResponse": {
         "type": "object",
         "required": ["tasks", "revision", "as_of_date"],
@@ -9125,6 +10231,39 @@
           }
         },
         "additionalProperties": false
+      },
+      "TemporalSettingsResponse": {
+        "type": "object",
+        "required": [
+          "time_zone",
+          "capacity_minutes",
+          "week_start",
+          "nudges_enabled",
+          "eat_the_frog_enabled",
+          "task_jar_enabled"
+        ],
+        "properties": {
+          "capacity_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "eat_the_frog_enabled": {
+            "type": "boolean"
+          },
+          "nudges_enabled": {
+            "type": "boolean"
+          },
+          "task_jar_enabled": {
+            "type": "boolean"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "week_start": {
+            "$ref": "#/components/schemas/WeekStartDto"
+          }
+        }
       },
       "TextImportDraftDto": {
         "type": "object",
@@ -9326,6 +10465,213 @@
             }
           }
         }
+      },
+      "WeekStartDto": {
+        "type": "string",
+        "enum": ["sunday", "monday"]
+      },
+      "WeeklyDayStatsDto": {
+        "type": "object",
+        "required": ["date", "completed", "created"],
+        "properties": {
+          "completed": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "created": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          }
+        }
+      },
+      "WeeklyReviewResponse": {
+        "type": "object",
+        "required": [
+          "week_start",
+          "week_end",
+          "daily",
+          "created_count",
+          "completed_count",
+          "cancelled_count",
+          "completion_rate_percent",
+          "completion_time_buckets",
+          "top_accomplishment_ids",
+          "top_accomplishment_tasks",
+          "overdue_task_ids",
+          "overdue_tasks",
+          "neglected_projects",
+          "streak_days",
+          "suggestions",
+          "revision"
+        ],
+        "properties": {
+          "busiest_day": {
+            "type": ["string", "null"],
+            "format": "date"
+          },
+          "cancelled_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "completed_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "completion_rate_percent": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "completion_time_buckets": {
+            "$ref": "#/components/schemas/CompletionTimeBucketsDto"
+          },
+          "created_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "daily": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WeeklyDayStatsDto"
+            }
+          },
+          "dominant_completion_bucket": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CompletionTimeBucketDto"
+              }
+            ]
+          },
+          "neglected_projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NeglectedProjectFactDto"
+            }
+          },
+          "overdue_task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "overdue_tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDto"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "streak_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WeeklySuggestionDto"
+            }
+          },
+          "top_accomplishment_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "top_accomplishment_tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDto"
+            }
+          },
+          "week_end": {
+            "type": "string",
+            "format": "date"
+          },
+          "week_start": {
+            "type": "string",
+            "format": "date"
+          }
+        }
+      },
+      "WeeklySuggestionDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["count", "kind"],
+            "properties": {
+              "count": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["tackle_overdue"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["project_ids", "kind"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["check_neglected"]
+              },
+              "project_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["created_more_than_completed"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["days", "kind"],
+            "properties": {
+              "days": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["keep_streak"]
+              }
+            }
+          }
+        ]
       }
     },
     "securitySchemes": {

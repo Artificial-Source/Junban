@@ -10,7 +10,7 @@ use junban_domain::format_reminder_timestamp;
 use rusqlite::{Connection, MAIN_DB, OpenFlags, Transaction, TransactionBehavior};
 
 /// Highest schema version applied by this crate.
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 3;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 /// Live database file name under a profile directory.
 const DATABASE_FILE: &str = "junban.sqlite3";
@@ -78,6 +78,7 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
     )?;
 
     let starting_version = current_version(connection)?;
+    let mut pre_migration_backup = None;
     if starting_version > CURRENT_SCHEMA_VERSION {
         return Err(unsupported_schema(starting_version));
     }
@@ -101,7 +102,7 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
     if current < 3 {
         // Only profiles that opened already at v2 need a recoverable pre-v3 snapshot.
         // Fresh installs that just applied v1/v2 above skip backup creation.
-        let backup_path = if starting_version == 2 {
+        pre_migration_backup = if starting_version == 2 {
             Some(create_verified_pre_v2_backup(connection, profile_dir)?)
         } else {
             None
@@ -112,11 +113,20 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
         assert_foreign_keys_clean(&transaction)?;
         record_version(&transaction, 3)?;
         transaction.commit()?;
+    }
 
-        if let Some(backup_path) = backup_path {
-            // Prune only after the new backup and the migrated DB both reopen cleanly.
-            finalize_successful_v2_to_v3(profile_dir, &backup_path)?;
-        }
+    let current = current_version(connection)?;
+    if current < 4 {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        apply_v4(&transaction)?;
+        assert_foreign_keys_clean(&transaction)?;
+        record_version(&transaction, 4)?;
+        transaction.commit()?;
+    }
+
+    if let Some(backup_path) = pre_migration_backup {
+        // Prune only after the new backup and the fully migrated DB both reopen cleanly.
+        finalize_successful_v2_to_v3(profile_dir, &backup_path)?;
     }
 
     let applied = current_version(connection)?;
@@ -836,6 +846,33 @@ CREATE INDEX idx_time_slot_tasks_task ON time_slot_tasks(task_id);
     Ok(())
 }
 
+/// Persist the transition into the current cancelled state independently of mutable edits.
+fn apply_v4(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
+    transaction.execute_batch(
+        "
+ALTER TABLE tasks ADD COLUMN cancelled_at TEXT;
+
+-- Existing v3 task activity records status changes. Backfill only current
+-- cancellations from their latest transition; the fallback covers externally
+-- modified profiles that lack that durable activity record.
+UPDATE tasks
+SET cancelled_at = COALESCE(
+    (
+        SELECT created_at
+        FROM task_activity
+        WHERE task_id = tasks.id
+          AND field = 'status'
+          AND new_value = 'cancelled'
+        ORDER BY revision DESC, sequence DESC
+        LIMIT 1
+    ),
+    updated_at
+)
+WHERE status = 'cancelled';
+",
+    )
+}
+
 /// WAL-safe online backup of an existing v2 profile, verified before migration.
 fn create_verified_pre_v2_backup(
     connection: &Connection,
@@ -1179,6 +1216,17 @@ mod tests {
         transaction.commit().unwrap();
     }
 
+    fn seed_v3_with_sample_rows(connection: &mut Connection) {
+        seed_v2_with_sample_rows(connection);
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        apply_v3(&transaction).unwrap();
+        assert_foreign_keys_clean(&transaction).unwrap();
+        record_version(&transaction, 3).unwrap();
+        transaction.commit().unwrap();
+    }
+
     fn pre_migration_backups(profile_dir: &std::path::Path) -> Vec<PathBuf> {
         let dir = profile_dir.join(PRE_MIGRATION_BACKUP_DIR);
         if !dir.exists() {
@@ -1235,12 +1283,12 @@ mod tests {
     }
 
     #[test]
-    fn fresh_migrate_reaches_schema_v3_with_expected_tables() {
+    fn fresh_migrate_reaches_schema_v4_with_expected_tables() {
         let db = TestDb::new();
         let mut connection = db.open();
         db.migrate(&mut connection).unwrap();
 
-        assert_eq!(current_version(&connection).unwrap(), 3);
+        assert_eq!(current_version(&connection).unwrap(), 4);
         let tables = table_names(&connection);
         for name in [
             "app_state",
@@ -1338,6 +1386,7 @@ mod tests {
             "recurrence_rule",
             "someday",
             "completed_at",
+            "cancelled_at",
             "created_at",
             "updated_at",
             "revision",
@@ -1526,8 +1575,8 @@ mod tests {
             seed_v1_with_sample_rows(&mut connection);
             assert_eq!(current_version(&connection).unwrap(), 1);
             db.migrate(&mut connection).unwrap();
-            assert_eq!(current_version(&connection).unwrap(), 3);
-            // v1→v3 in one open does not create a pre-v2 backup.
+            assert_eq!(current_version(&connection).unwrap(), 4);
+            // Fresh migrations do not create a pre-v2 backup.
             assert!(pre_migration_backups(db.profile_dir()).is_empty());
 
             let title: String = connection
@@ -1674,7 +1723,7 @@ mod tests {
 
         connection.execute_batch("DROP TABLE comments;").unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 3);
+        assert_eq!(current_version(&connection).unwrap(), 4);
         assert!(table_names(&connection).contains("projects"));
         assert!(table_names(&connection).contains("operation_undo"));
         assert!(table_names(&connection).contains("app_settings"));
@@ -1697,14 +1746,14 @@ mod tests {
     }
 
     #[test]
-    fn v2_fixture_migrates_to_v3_with_verified_private_backup() {
+    fn v2_fixture_migrates_to_v4_with_verified_private_backup() {
         let db = TestDb::new();
         let mut connection = db.open();
         seed_v2_with_sample_rows(&mut connection);
         assert_eq!(current_version(&connection).unwrap(), 2);
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 3);
+        assert_eq!(current_version(&connection).unwrap(), 4);
 
         let title: String = connection
             .query_row(
@@ -1770,6 +1819,98 @@ mod tests {
     }
 
     #[test]
+    fn v3_cancellation_transition_backfills_and_migration_retries_safely() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        seed_v3_with_sample_rows(&mut connection);
+        connection
+            .execute_batch(
+                "
+INSERT INTO tasks(id, title, status, created_at, updated_at, revision)
+VALUES (
+    '33333333-3333-7333-8333-333333333333',
+    'Cancelled task',
+    'cancelled',
+    '2026-03-01T12:00:00Z',
+    '2026-03-08T12:00:00Z',
+    3
+);
+INSERT INTO task_activity(
+    revision, sequence, operation_id, task_id, action, field, old_value, new_value, created_at
+) VALUES
+    (2, 0, '22222222-2222-7222-8222-222222222222',
+     '33333333-3333-7333-8333-333333333333', 'cancelled', 'status', 'pending', 'cancelled',
+     '2026-03-07T23:59:59Z'),
+    (3, 0, '44444444-4444-7444-8444-444444444444',
+     '33333333-3333-7333-8333-333333333333', 'updated', 'title', 'Cancelled task', 'Edited',
+     '2026-03-08T12:00:00Z');
+",
+            )
+            .unwrap();
+
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 4);
+        let cancelled_at: Option<String> = connection
+            .query_row(
+                "SELECT cancelled_at FROM tasks WHERE id = '33333333-3333-7333-8333-333333333333'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cancelled_at.as_deref(), Some("2026-03-07T23:59:59Z"));
+
+        // An exact open/retry must leave the already-backfilled value intact.
+        db.migrate(&mut connection).unwrap();
+        let retried: Option<String> = connection
+            .query_row(
+                "SELECT cancelled_at FROM tasks WHERE id = '33333333-3333-7333-8333-333333333333'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retried, cancelled_at);
+    }
+
+    #[test]
+    fn failed_v4_rolls_back_and_retry_succeeds() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        seed_v3_with_sample_rows(&mut connection);
+        connection
+            .execute_batch(
+                "
+UPDATE tasks
+SET status = 'cancelled', updated_at = '2026-03-08T12:00:00Z'
+WHERE id = '11111111-1111-7111-8111-111111111111';
+CREATE TRIGGER fail_cancel_backfill BEFORE UPDATE ON tasks
+BEGIN
+    SELECT RAISE(ABORT, 'injected cancellation backfill failure');
+END;
+",
+            )
+            .unwrap();
+
+        let error = db.migrate(&mut connection).unwrap_err().to_string();
+        assert!(error.contains("injected cancellation backfill failure"));
+        assert_eq!(current_version(&connection).unwrap(), 3);
+        assert!(!task_columns(&connection).contains(&"cancelled_at".to_owned()));
+
+        connection
+            .execute_batch("DROP TRIGGER fail_cancel_backfill;")
+            .unwrap();
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 4);
+        let cancelled_at: Option<String> = connection
+            .query_row(
+                "SELECT cancelled_at FROM tasks WHERE id = '11111111-1111-7111-8111-111111111111'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cancelled_at.as_deref(), Some("2026-03-08T12:00:00Z"));
+    }
+
+    #[test]
     fn failed_v3_rolls_back_keeps_backup_and_retry_succeeds() {
         let db = TestDb::new();
         let mut connection = db.open();
@@ -1810,7 +1951,7 @@ mod tests {
             .execute_batch("DROP TABLE app_settings;")
             .unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 3);
+        assert_eq!(current_version(&connection).unwrap(), 4);
         assert!(table_names(&connection).contains("app_settings"));
         assert!(table_names(&connection).contains("time_slot_tasks"));
         assert!(task_columns(&connection).contains(&"completion_operation_id".to_owned()));
@@ -1851,7 +1992,7 @@ mod tests {
         assert_eq!(pre_migration_backups(db.profile_dir()).len(), 4);
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 3);
+        assert_eq!(current_version(&connection).unwrap(), 4);
 
         let mut remaining = pre_migration_backups(db.profile_dir());
         remaining.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
@@ -1882,7 +2023,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_v3_enforces_lineage_settings_and_membership_uniqueness() {
+    fn schema_v4_enforces_lineage_settings_and_membership_uniqueness() {
         let db = TestDb::new();
         let mut connection = db.open();
         db.migrate(&mut connection).unwrap();

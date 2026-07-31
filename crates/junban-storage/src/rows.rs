@@ -49,7 +49,7 @@ pub(crate) fn load_task(tx: &Transaction<'_>, id: TaskId) -> Result<Task, Reposi
             "SELECT id, title, description, due_date, due_time, due_timezone, deadline,
                     status, priority, dread, estimated_minutes, actual_minutes,
                     project_id, section_id, parent_id, sort_order, recurrence_rule, someday,
-                    completed_at, created_at, updated_at, revision,
+                    completed_at, cancelled_at, created_at, updated_at, revision,
                     remind_at, recurrence_anchor_day, recurrence_source_id, completion_operation_id
              FROM tasks WHERE id = ?1",
             [id.to_string()],
@@ -96,13 +96,14 @@ pub(crate) fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let recurrence_rule: Option<String> = row.get(16)?;
     let someday: i64 = row.get(17)?;
     let completed_at: Option<String> = row.get(18)?;
-    let created_at: String = row.get(19)?;
-    let updated_at: String = row.get(20)?;
-    let revision: i64 = row.get(21)?;
-    let remind_at: Option<String> = row.get(22)?;
-    let recurrence_anchor_day: Option<i64> = row.get(23)?;
-    let recurrence_source_id: Option<String> = row.get(24)?;
-    let completion_operation_id: Option<String> = row.get(25)?;
+    let cancelled_at: Option<String> = row.get(19)?;
+    let created_at: String = row.get(20)?;
+    let updated_at: String = row.get(21)?;
+    let revision: i64 = row.get(22)?;
+    let remind_at: Option<String> = row.get(23)?;
+    let recurrence_anchor_day: Option<i64> = row.get(24)?;
+    let recurrence_source_id: Option<String> = row.get(25)?;
+    let completion_operation_id: Option<String> = row.get(26)?;
 
     let created_at = parse_sql(created_at, |raw| raw.parse::<Timestamp>())?;
     let mut task = Task::new(
@@ -179,6 +180,9 @@ pub(crate) fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     task.completed_at = completed_at
         .map(|value| parse_sql(value, |raw| raw.parse::<Timestamp>()))
         .transpose()?;
+    task.cancelled_at = cancelled_at
+        .map(|value| parse_sql(value, |raw| raw.parse::<Timestamp>()))
+        .transpose()?;
     task.updated_at = parse_sql(updated_at, |raw| raw.parse::<Timestamp>())?;
     task.remind_at = remind_at
         .map(|value| parse_sql(value, |raw| raw.parse::<Timestamp>()))
@@ -204,14 +208,14 @@ pub(crate) fn insert_task(tx: &Transaction<'_>, task: &Task) -> Result<(), Repos
             id, title, description, due_date, due_time, due_timezone, deadline,
             status, priority, dread, estimated_minutes, actual_minutes,
             project_id, section_id, parent_id, sort_order, recurrence_rule, someday,
-            completed_at, created_at, updated_at, revision,
+            completed_at, cancelled_at, created_at, updated_at, revision,
             remind_at, recurrence_anchor_day, recurrence_source_id, completion_operation_id
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7,
             ?8, ?9, ?10, ?11, ?12,
             ?13, ?14, ?15, ?16, ?17, ?18,
-            ?19, ?20, ?21, ?22,
-            ?23, ?24, ?25, ?26
+            ?19, ?20, ?21, ?22, ?23,
+            ?24, ?25, ?26, ?27
          )",
         params![
             task.id.to_string(),
@@ -235,6 +239,7 @@ pub(crate) fn insert_task(tx: &Transaction<'_>, task: &Task) -> Result<(), Repos
             task.recurrence_rule.as_ref().map(RecurrenceRule::as_str),
             i64::from(task.someday),
             task.completed_at.map(|t| t.to_string()),
+            task.cancelled_at.map(|t| t.to_string()),
             task.created_at.to_string(),
             task.updated_at.to_string(),
             revision_to_i64(task.revision)?,
@@ -257,11 +262,11 @@ pub(crate) fn update_task_row(tx: &Transaction<'_>, task: &Task) -> Result<(), R
                 deadline = ?6, status = ?7, priority = ?8, dread = ?9,
                 estimated_minutes = ?10, actual_minutes = ?11,
                 project_id = ?12, section_id = ?13, parent_id = ?14, sort_order = ?15,
-                recurrence_rule = ?16, someday = ?17, completed_at = ?18,
-                updated_at = ?19, revision = ?20,
-                remind_at = ?21, recurrence_anchor_day = ?22,
-                recurrence_source_id = ?23, completion_operation_id = ?24
-             WHERE id = ?25",
+                recurrence_rule = ?16, someday = ?17, completed_at = ?18, cancelled_at = ?19,
+                updated_at = ?20, revision = ?21,
+                remind_at = ?22, recurrence_anchor_day = ?23,
+                recurrence_source_id = ?24, completion_operation_id = ?25
+             WHERE id = ?26",
             params![
                 task.title.as_str(),
                 task.description.as_str(),
@@ -283,6 +288,7 @@ pub(crate) fn update_task_row(tx: &Transaction<'_>, task: &Task) -> Result<(), R
                 task.recurrence_rule.as_ref().map(RecurrenceRule::as_str),
                 i64::from(task.someday),
                 task.completed_at.map(|t| t.to_string()),
+                task.cancelled_at.map(|t| t.to_string()),
                 task.updated_at.to_string(),
                 revision_to_i64(task.revision)?,
                 task.remind_at.map(junban_domain::format_reminder_timestamp),

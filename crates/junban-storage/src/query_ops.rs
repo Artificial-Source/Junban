@@ -79,7 +79,7 @@ pub(crate) fn list_analysis_tasks(
             "SELECT id, title, description, due_date, due_time, due_timezone, deadline,
                     status, priority, dread, estimated_minutes, actual_minutes,
                     project_id, section_id, parent_id, sort_order, recurrence_rule, someday,
-                    completed_at, created_at, updated_at, revision,
+                    completed_at, cancelled_at, created_at, updated_at, revision,
                     remind_at, recurrence_anchor_day, recurrence_source_id, completion_operation_id
              FROM tasks
              ORDER BY sort_order ASC, id ASC

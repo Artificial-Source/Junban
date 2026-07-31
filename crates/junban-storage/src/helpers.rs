@@ -290,6 +290,11 @@ pub(crate) fn diff_task_fields(
         after.completion_operation_id.map(|id| id.to_string()),
     );
     push(
+        "cancelled_at",
+        before.cancelled_at.map(|value| value.to_string()),
+        after.cancelled_at.map(|value| value.to_string()),
+    );
+    push(
         "status",
         Some(status_name(before.status).to_owned()),
         Some(status_name(after.status).to_owned()),

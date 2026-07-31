@@ -767,9 +767,11 @@ where
                 }
             }
             TaskStatus::Cancelled => {
-                let day = civil_date_of(task.updated_at);
-                if in_week(day) {
-                    cancelled_in_week.push(task);
+                if let Some(cancelled_at) = task.cancelled_at {
+                    let day = civil_date_of(cancelled_at);
+                    if in_week(day) {
+                        cancelled_in_week.push(task);
+                    }
                 }
             }
             TaskStatus::Pending => {}
@@ -1849,7 +1851,7 @@ mod tests {
 
         let mut cancelled = base_task(task_id(3), "Cancel", ts("2026-03-05T10:00:00Z"));
         cancelled.status = TaskStatus::Cancelled;
-        cancelled.updated_at = ts("2026-03-05T12:00:00Z");
+        cancelled.cancelled_at = Some(ts("2026-03-05T12:00:00Z"));
 
         let mut overdue = pending_due(4, "Over", date(2026, 3, 1), Some(1));
         overdue.project_id = Some(project.id);
@@ -1888,6 +1890,46 @@ mod tests {
             summary.suggestions[0],
             WeeklySuggestion::TackleOverdue { count: 1 }
         ));
+    }
+
+    #[test]
+    fn weekly_review_uses_the_current_cancellation_transition() {
+        let zone = TimeZone::UTC;
+        let mut task = base_task(task_id(1), "Cancelled", ts("2026-02-28T12:00:00Z"));
+        task.status = TaskStatus::Cancelled;
+        task.cancelled_at = Some(ts("2026-03-07T23:59:59Z"));
+        // An unrelated edit after the week boundary must not move the cancellation.
+        task.updated_at = ts("2026-03-08T00:00:00Z");
+
+        let prior_week = |task: &Task, today| {
+            weekly_review_summary(
+                std::slice::from_ref(task),
+                &[],
+                today,
+                WeekStart::Sunday,
+                &zone,
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            prior_week(&task, date(2026, 3, 11)).cancelled_count,
+            1,
+            "the March 1-7 review includes the actual cancellation"
+        );
+        assert_eq!(
+            prior_week(&task, date(2026, 3, 18)).cancelled_count,
+            0,
+            "the later edit does not move it into March 8-14"
+        );
+
+        task.status = TaskStatus::Pending;
+        task.cancelled_at = None;
+        assert_eq!(prior_week(&task, date(2026, 3, 11)).cancelled_count, 0);
+
+        task.status = TaskStatus::Cancelled;
+        task.cancelled_at = Some(ts("2026-03-12T12:00:00Z"));
+        task.updated_at = ts("2026-03-13T12:00:00Z");
+        assert_eq!(prior_week(&task, date(2026, 3, 18)).cancelled_count, 1);
     }
 
     #[test]

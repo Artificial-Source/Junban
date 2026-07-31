@@ -18,7 +18,7 @@ use junban_domain::{
     MAX_ANALYSIS_TASK_READ, MAX_BULK_IDS, MAX_REMINDER_CLAIM_LIMIT, MarkdownText, OperationId,
     ProjectId, RelationKind, ReminderChannel, ReminderFailureCode, ReminderOccurrenceState,
     SortOrder, TagId, TagName, TaskCursor, TaskDraft, TaskId, TaskQuery, TaskSort, TaskStatus,
-    TaskTitle, TaskViewPreset, TemplateId,
+    TaskTitle, TaskViewPreset, TemplateId, WeekStart, weekly_review_summary,
 };
 use uuid::Uuid;
 
@@ -152,6 +152,140 @@ async fn analysis_snapshot_hydrates_tasks_tags_and_current_revision() {
     assert_eq!(snapshot.revision, expected_revision as u64);
     assert_eq!(snapshot.tasks, expected);
     assert_eq!(snapshot.tasks[0].tag_ids, vec![second_tag, first_tag]);
+}
+
+#[tokio::test]
+async fn weekly_cancellation_transition_survives_edits_reopen_recancel_and_replay() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repository = owner.repository();
+    let task_id = repository
+        .create_task(
+            operation(),
+            TaskId::new(),
+            draft("Cancelled task"),
+            "2026-02-28T12:00:00Z".parse().unwrap(),
+        )
+        .await
+        .unwrap()
+        .task()
+        .unwrap()
+        .id;
+    let done_id = repository
+        .create_task(
+            operation(),
+            TaskId::new(),
+            draft("Completed task"),
+            "2026-02-28T12:00:00Z".parse().unwrap(),
+        )
+        .await
+        .unwrap()
+        .task()
+        .unwrap()
+        .id;
+    repository
+        .complete_task(
+            operation(),
+            done_id,
+            "2026-03-04T12:00:00Z".parse().unwrap(),
+            temporal(),
+        )
+        .await
+        .unwrap();
+
+    let cancellation_op = operation();
+    let cancelled = repository
+        .cancel_task(
+            cancellation_op,
+            task_id,
+            "2026-03-07T23:59:59Z".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+    let replay = repository
+        .cancel_task(
+            cancellation_op,
+            task_id,
+            "2026-03-08T00:00:00Z".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        replay, cancelled,
+        "exact retry must replay the original transition"
+    );
+
+    repository
+        .patch_task(
+            operation(),
+            task_id,
+            TaskPatch {
+                title: Some(TaskTitle::new("Edited after cancellation").unwrap()),
+                ..TaskPatch::default()
+            },
+            "2026-03-08T00:00:00Z".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let weekly = |today: &'static str| {
+        let repository = repository.clone();
+        async move {
+            let tasks = repository
+                .list_analysis_tasks(list_as_of_str(today))
+                .await
+                .unwrap()
+                .tasks;
+            weekly_review_summary(
+                &tasks,
+                &[],
+                today.parse().unwrap(),
+                WeekStart::Sunday,
+                &TimeZone::UTC,
+            )
+            .unwrap()
+        }
+    };
+    let first_week = weekly("2026-03-11").await;
+    assert_eq!(first_week.cancelled_count, 1);
+    assert_eq!(first_week.completion_rate_percent, 50);
+    let second_week = weekly("2026-03-18").await;
+    assert_eq!(
+        second_week.cancelled_count, 0,
+        "the edit does not move weeks"
+    );
+
+    repository
+        .reopen_task(
+            operation(),
+            task_id,
+            "2026-03-10T12:00:00Z".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(weekly("2026-03-11").await.cancelled_count, 0);
+
+    let recancellation_op = operation();
+    let recancelled = repository
+        .cancel_task(
+            recancellation_op,
+            task_id,
+            "2026-03-12T12:00:00Z".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+    let replay = repository
+        .cancel_task(
+            recancellation_op,
+            task_id,
+            "2026-03-13T12:00:00Z".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay, recancelled);
+    let second_week = weekly("2026-03-18").await;
+    assert_eq!(second_week.cancelled_count, 1);
+    assert_eq!(second_week.completion_rate_percent, 0);
 }
 
 #[tokio::test]

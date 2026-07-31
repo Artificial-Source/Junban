@@ -161,6 +161,9 @@ pub struct Task {
     pub completion_operation_id: Option<OperationId>,
     pub status: TaskStatus,
     pub completed_at: Option<Timestamp>,
+    /// Instant of the current transition into cancelled; cleared when reopened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancelled_at: Option<Timestamp>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     pub revision: u64,
@@ -200,6 +203,7 @@ impl Task {
             completion_operation_id: None,
             status: TaskStatus::Pending,
             completed_at: None,
+            cancelled_at: None,
             created_at: now,
             updated_at: now,
             revision,
@@ -242,6 +246,7 @@ impl Task {
             completion_operation_id: None,
             status: TaskStatus::Pending,
             completed_at: None,
+            cancelled_at: None,
             created_at: now,
             updated_at: now,
             revision,
@@ -290,6 +295,7 @@ impl Task {
     pub fn complete(&mut self, now: Timestamp) {
         self.status = TaskStatus::Completed;
         self.completed_at = Some(now);
+        self.cancelled_at = None;
         self.updated_at = now;
     }
 
@@ -310,6 +316,7 @@ impl Task {
     pub fn uncomplete(&mut self, now: Timestamp) {
         self.status = TaskStatus::Pending;
         self.completed_at = None;
+        self.cancelled_at = None;
         self.updated_at = now;
     }
 
@@ -330,6 +337,7 @@ impl Task {
     pub fn cancel(&mut self, now: Timestamp) {
         self.status = TaskStatus::Cancelled;
         self.completed_at = None;
+        self.cancelled_at = Some(now);
         self.updated_at = now;
     }
 
@@ -351,6 +359,7 @@ impl Task {
     pub fn reopen(&mut self, now: Timestamp) {
         self.status = TaskStatus::Pending;
         self.completed_at = None;
+        self.cancelled_at = None;
         self.updated_at = now;
     }
 

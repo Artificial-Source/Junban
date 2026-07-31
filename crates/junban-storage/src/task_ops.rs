@@ -234,6 +234,7 @@ fn build_generated_child(
         completion_operation_id: None,
         status: TaskStatus::Pending,
         completed_at: None,
+        cancelled_at: None,
         created_at: now,
         updated_at: now,
         revision,

@@ -739,6 +739,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - `DBPLAN2-001`–`DBPLAN2-006` — **fixed and approved**. Phase 2 freezes a generalized one-event-per-revision envelope, SQLite table rebuild, bounded cascade/receipt/event payloads, complete delete-undo closure, pending-only completion cascade, and explicit section deletion. Focused database recheck approved implementation.
 - Phase 2 final review — **approved after fixes**. Frontend, accessibility, database and API findings plus six dogfood issues are fixed with focused regressions. Targeted closure re-review confirmed `P2-CLOSE-001`–`P2-CLOSE-003` fixed with no material finding remaining; the full ledger is `evidence/phase-2-review-ledger.md`.
 - `P3-REC-001`, `P3-REM-001`, `P3-MIG-001`, `P3-TIME-001`, `P3-BOUND-001`, `P3-UI-001` — **fixed and approved**. Phase 3 now freezes recurrence/uncomplete transitions, fenced reminder control-plane semantics and shutdown, verified pre-migration recovery, durable blocks/slots and ordered membership, numeric API/performance limits, and twelve independent legacy-rendered visual authorities.
+- `P3-FINAL-003` — **fixed**. Matrix consumes the existing authoritative task-list civil date; daily and weekly planning/review reads expose their sampled civil date, and ritual reschedules derive today/tomorrow from that response rather than browser time. Rust API and non-default-browser-timezone frontend regressions cover the contract.
 
 ## Decision log
 

@@ -1292,6 +1292,11 @@ export interface components {
       title: string;
     };
     DailyPlanResponse: {
+      /**
+       * Format: date
+       * @description Server-local civil date used to derive this plan.
+       */
+      as_of_date: string;
       /** Format: int32 */
       capacity_minutes: number;
       /** Format: int32 */
@@ -1325,6 +1330,11 @@ export interface components {
       task?: null | components["schemas"]["TaskDto"];
     };
     EndOfDayResponse: {
+      /**
+       * Format: date
+       * @description Server-local civil date used to derive this review.
+       */
+      as_of_date: string;
       /** Format: int32 */
       capacity_minutes: number;
       carry_over_task_ids: string[];
@@ -2064,6 +2074,11 @@ export interface components {
       date: string;
     };
     WeeklyReviewResponse: {
+      /**
+       * Format: date
+       * @description Server-local civil date used to derive this review.
+       */
+      as_of_date: string;
       /** Format: date */
       busiest_day?: string | null;
       /** Format: int32 */

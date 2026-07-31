@@ -9,7 +9,6 @@ import { AlertTriangle, ListChecks, Clock, Rocket } from "lucide-react";
 import { ApiError, getDailyPlan, type DailyPlanResponse, type TaskDto } from "../api/client";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { useTaskMutations } from "../hooks/useTaskMutations";
-import { useToday } from "../hooks/useToday";
 import { formatDurationMinutes } from "../lib/planningLabels";
 import { useWorkspace } from "../context/WorkspaceContext";
 
@@ -30,7 +29,6 @@ interface DailyPlanningModalProps {
 }
 
 export function DailyPlanningModal({ open, onClose }: DailyPlanningModalProps) {
-  const today = useToday();
   const { catalog } = useWorkspace();
   const { patchTask } = useTaskMutations();
   const [step, setStep] = useState(0);
@@ -147,13 +145,14 @@ export function DailyPlanningModal({ open, onClose }: DailyPlanningModalProps) {
 
   const handleReschedule = useCallback(
     async (taskId: string) => {
+      if (!plan) return;
       const ok = await runMutation(
-        () => patchTask(taskId, { due_date: today }, "Reschedule to today"),
+        () => patchTask(taskId, { due_date: plan.as_of_date }, "Reschedule to today"),
         "The task could not be rescheduled.",
       );
       if (ok) await load();
     },
-    [load, patchTask, runMutation, today],
+    [load, patchTask, plan, runMutation],
   );
 
   const handleSetAside = useCallback((taskId: string) => {

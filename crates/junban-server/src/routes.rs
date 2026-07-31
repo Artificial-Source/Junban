@@ -2541,6 +2541,7 @@ pub async fn planning_daily(
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
     Ok(Json(DailyPlanResponse {
+        as_of_date: date,
         overdue_task_ids: id_strings(page.overdue_task_ids),
         overdue_tasks: page.overdue_tasks.into_iter().map(Into::into).collect(),
         focus_task_ids: id_strings(page.focus_task_ids),
@@ -2578,6 +2579,7 @@ pub async fn planning_end_of_day(
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
     Ok(Json(EndOfDayResponse {
+        as_of_date: date,
         win_task_ids: id_strings(page.win_task_ids),
         win_tasks: page.win_tasks.into_iter().map(Into::into).collect(),
         carry_over_task_ids: id_strings(page.carry_over_task_ids),
@@ -2618,7 +2620,7 @@ pub async fn planning_weekly(
         .weekly_review(date, week_start, &zone)
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
-    Ok(Json(WeeklyReviewResponse::from_page(page)))
+    Ok(Json(WeeklyReviewResponse::from_page(page, date)))
 }
 
 #[utoipa::path(

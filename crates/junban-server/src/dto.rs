@@ -2350,6 +2350,9 @@ pub struct CalendarTasksResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct DailyPlanResponse {
+    /// Server-local civil date used to derive this plan.
+    #[schema(value_type = String, format = Date)]
+    pub as_of_date: Date,
     #[schema(value_type = Vec<String>, format = Uuid)]
     pub overdue_task_ids: Vec<String>,
     pub overdue_tasks: Vec<TaskDto>,
@@ -2363,6 +2366,9 @@ pub struct DailyPlanResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct EndOfDayResponse {
+    /// Server-local civil date used to derive this review.
+    #[schema(value_type = String, format = Date)]
+    pub as_of_date: Date,
     #[schema(value_type = Vec<String>, format = Uuid)]
     pub win_task_ids: Vec<String>,
     pub win_tasks: Vec<TaskDto>,
@@ -2516,6 +2522,9 @@ impl From<WeeklySuggestion> for WeeklySuggestionDto {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct WeeklyReviewResponse {
+    /// Server-local civil date used to derive this review.
+    #[schema(value_type = String, format = Date)]
+    pub as_of_date: Date,
     #[schema(value_type = String, format = Date)]
     pub week_start: Date,
     #[schema(value_type = String, format = Date)]
@@ -2544,7 +2553,7 @@ pub struct WeeklyReviewResponse {
 }
 
 impl WeeklyReviewResponse {
-    pub fn from_page(page: junban_app::WeeklyReviewPage) -> Self {
+    pub fn from_page(page: junban_app::WeeklyReviewPage, as_of_date: Date) -> Self {
         let WeeklyReviewSummary {
             week_start,
             week_end,
@@ -2563,6 +2572,7 @@ impl WeeklyReviewResponse {
             suggestions,
         } = page.summary;
         Self {
+            as_of_date,
             week_start,
             week_end,
             daily: daily.into_iter().map(Into::into).collect(),

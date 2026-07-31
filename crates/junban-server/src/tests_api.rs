@@ -490,6 +490,17 @@ async fn p3_final_002_uncomplete_outcomes_are_serialized_and_replayed_exactly() 
 }
 
 #[tokio::test]
+async fn task_list_response_exposes_the_server_civil_date_used_for_views() {
+    let context = TestContext::new();
+    let expected = crate::routes::server_as_of_date().to_string();
+
+    let (status, response) = get_json(&context, "/api/v1/tasks?view=today").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response["as_of_date"], expected);
+}
+
+#[tokio::test]
 async fn p2_api_003_view_presets_use_exact_server_date_semantics_and_filters() {
     let context = TestContext::new();
     let today = crate::routes::server_as_of_date();
@@ -3225,6 +3236,7 @@ async fn planning_daily_and_end_of_day_use_injected_dates() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(daily["as_of_date"], day);
     assert_eq!(daily["capacity_minutes"], 240);
     assert_eq!(daily["estimated_total_minutes"], 45);
     assert!(
@@ -3252,6 +3264,7 @@ async fn planning_daily_and_end_of_day_use_injected_dates() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(eod["as_of_date"], today);
     assert_eq!(eod["capacity_minutes"], 300);
     assert!(
         eod["win_task_ids"]
@@ -3280,6 +3293,7 @@ async fn planning_daily_and_end_of_day_use_injected_dates() {
             .iter()
             .any(|id| id == task_id_from(&tomorrow_task))
     );
+    assert_eq!(historical["as_of_date"], day);
     assert_eq!(historical["tomorrow_estimated_minutes"], 20);
     assert_eq!(historical["capacity_minutes"], 480);
 }
@@ -3295,6 +3309,7 @@ async fn planning_weekly_sunday_and_monday_windows() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(sun["as_of_date"], "2026-03-11");
     assert_eq!(sun["week_start"], "2026-03-01");
     assert_eq!(sun["week_end"], "2026-03-07");
     assert_eq!(sun["daily"].as_array().unwrap().len(), 7);

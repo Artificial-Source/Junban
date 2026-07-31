@@ -1,13 +1,13 @@
 /**
  * Eisenhower Matrix with native pointer drag and keyboard-equivalent moves.
- * One awaited task PATCH applies each quadrant change using civil today.
+ * One awaited task PATCH applies each quadrant change using the list response's
+ * server-local civil date.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { GripVertical } from "lucide-react";
 import type { TaskDto } from "../api/client";
 import { useViewTasks } from "../hooks/useViewTasks";
 import { useTaskMutations } from "../hooks/useTaskMutations";
-import { useToday } from "../hooks/useToday";
 import { ViewSkeleton } from "../components/Skeleton";
 import {
   MATRIX_QUADRANTS,
@@ -25,8 +25,11 @@ interface MatrixProps {
 }
 
 export function Matrix({ onToggleTask, onSelectTask, selectedTaskId }: MatrixProps) {
-  const today = useToday();
-  const { tasks, loading, error, reload } = useViewTasks({ status: "pending", limit: 100 });
+  const { tasks, loading, error, reload, asOfDate } = useViewTasks({
+    status: "pending",
+    limit: 100,
+  });
+  const today = asOfDate ?? "";
   const { patchTask } = useTaskMutations();
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [movePending, setMovePending] = useState(false);
@@ -84,7 +87,7 @@ export function Matrix({ onToggleTask, onSelectTask, selectedTaskId }: MatrixPro
     [draggingId, applyQuadrantMove],
   );
 
-  if (loading && tasks.length === 0) return <ViewSkeleton />;
+  if ((loading && tasks.length === 0) || !today) return <ViewSkeleton />;
 
   return (
     <div className="flex h-full flex-col" aria-busy={movePending || undefined}>

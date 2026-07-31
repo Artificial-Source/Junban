@@ -5,10 +5,16 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskDto } from "../api/client";
+import { todayKey } from "../lib/dates";
 import { Matrix } from "./Matrix";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const testEnvironment = (
+  globalThis as unknown as {
+    process: { env: Record<string, string | undefined> };
+  }
+).process.env;
 const patchTask = vi.fn();
 const reload = vi.fn();
 
@@ -24,7 +30,7 @@ vi.mock("../hooks/useViewTasks", () => ({
         sort_order: 0,
         status: "pending",
         priority: 1,
-        due_date: "2026-07-23",
+        due_date: "2026-07-24",
         created_at: "2026-07-23T00:00:00Z",
         updated_at: "2026-07-23T00:00:00Z",
         revision: 1,
@@ -34,7 +40,8 @@ vi.mock("../hooks/useViewTasks", () => ({
     error: null,
     reload,
     revision: 1,
-    asOfDate: "2026-07-23",
+    // The browser is one day behind the server in this test.
+    asOfDate: "2026-07-24",
     nextCursor: null,
     loadingMore: false,
     loadMore: vi.fn(),
@@ -45,12 +52,9 @@ vi.mock("../hooks/useTaskMutations", () => ({
   useTaskMutations: () => ({ patchTask }),
 }));
 
-vi.mock("../hooks/useToday", () => ({
-  useToday: () => "2026-07-23",
-}));
-
 let container: HTMLDivElement;
 let root: Root;
+let originalTimeZone: string | undefined;
 
 function render(ui: ReactElement) {
   act(() => {
@@ -59,6 +63,10 @@ function render(ui: ReactElement) {
 }
 
 beforeEach(() => {
+  originalTimeZone = testEnvironment.TZ;
+  testEnvironment.TZ = "America/Los_Angeles";
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-24T00:30:00Z"));
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -72,6 +80,9 @@ afterEach(() => {
     root.unmount();
   });
   container.remove();
+  vi.useRealTimers();
+  if (originalTimeZone === undefined) delete testEnvironment.TZ;
+  else testEnvironment.TZ = originalTimeZone;
 });
 
 describe("Matrix keyboard move", () => {
@@ -108,6 +119,37 @@ describe("Matrix keyboard move", () => {
       "Move matrix task",
     );
     expect(reload).toHaveBeenCalled();
+  });
+
+  it("uses the server list date when the browser timezone is one day behind", async () => {
+    expect(todayKey()).toBe("2026-07-23");
+
+    render(
+      createElement(Matrix, {
+        onToggleTask: async () => true,
+        onSelectTask: () => {},
+        selectedTaskId: null,
+      }),
+    );
+
+    const moveBtn = container.querySelector(
+      'button[aria-label="Move task Urgent important"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      moveBtn.click();
+    });
+    const delegate = Array.from(container.querySelectorAll('[role="menuitem"]')).find((el) =>
+      el.textContent?.includes("Delegate"),
+    ) as HTMLButtonElement;
+    await act(async () => {
+      delegate.click();
+    });
+
+    expect(patchTask).toHaveBeenCalledWith(
+      "task-1",
+      { priority: 3, due_date: "2026-07-24" },
+      "Move matrix task",
+    );
   });
 
   it("surfaces an accessible error when the awaited move fails", async () => {

@@ -7,7 +7,6 @@ import { Trophy, ArrowRight, CalendarCheck, PartyPopper } from "lucide-react";
 import { ApiError, getEndOfDayPlan, type EndOfDayResponse } from "../api/client";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { useTaskMutations } from "../hooks/useTaskMutations";
-import { useToday } from "../hooks/useToday";
 import { addCivilDays, formatDurationMinutes } from "../lib/planningLabels";
 
 const PENDING_DISMISS_MESSAGE =
@@ -26,8 +25,6 @@ interface DailyReviewModalProps {
 }
 
 export function DailyReviewModal({ open, onClose }: DailyReviewModalProps) {
-  const today = useToday();
-  const tomorrow = addCivilDays(today, 1);
   const { patchTask } = useTaskMutations();
   const [step, setStep] = useState(0);
   const [plan, setPlan] = useState<EndOfDayResponse | null>(null);
@@ -202,9 +199,14 @@ export function DailyReviewModal({ open, onClose }: DailyReviewModalProps) {
                     <button
                       type="button"
                       disabled={pending}
-                      onClick={() =>
-                        void updateCarry(task.id, { due_date: tomorrow }, "Move to tomorrow")
-                      }
+                      onClick={() => {
+                        if (!plan) return;
+                        void updateCarry(
+                          task.id,
+                          { due_date: addCivilDays(plan.as_of_date, 1) },
+                          "Move to tomorrow",
+                        );
+                      }}
                       className="min-h-6 break-words rounded bg-accent-action/10 px-2 py-1 text-xs font-medium text-accent-foreground transition-colors hover:bg-accent-action/20 [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                     >
                       Move to Tomorrow

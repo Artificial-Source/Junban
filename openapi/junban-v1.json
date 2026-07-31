@@ -8455,6 +8455,7 @@
       "DailyPlanResponse": {
         "type": "object",
         "required": [
+          "as_of_date",
           "overdue_task_ids",
           "overdue_tasks",
           "focus_task_ids",
@@ -8464,6 +8465,11 @@
           "revision"
         ],
         "properties": {
+          "as_of_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Server-local civil date used to derive this plan."
+          },
           "capacity_minutes": {
             "type": "integer",
             "format": "int32",
@@ -8580,6 +8586,7 @@
       "EndOfDayResponse": {
         "type": "object",
         "required": [
+          "as_of_date",
           "win_task_ids",
           "win_tasks",
           "carry_over_task_ids",
@@ -8592,6 +8599,11 @@
           "revision"
         ],
         "properties": {
+          "as_of_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Server-local civil date used to derive this review."
+          },
           "capacity_minutes": {
             "type": "integer",
             "format": "int32",
@@ -10648,6 +10660,7 @@
       "WeeklyReviewResponse": {
         "type": "object",
         "required": [
+          "as_of_date",
           "week_start",
           "week_end",
           "daily",
@@ -10666,6 +10679,11 @@
           "revision"
         ],
         "properties": {
+          "as_of_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Server-local civil date used to derive this review."
+          },
           "busiest_day": {
             "type": ["string", "null"],
             "format": "date"

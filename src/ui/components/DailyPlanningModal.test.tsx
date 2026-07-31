@@ -5,9 +5,15 @@
 import { act, createElement, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { todayKey } from "../lib/dates";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const testEnvironment = (
+  globalThis as unknown as {
+    process: { env: Record<string, string | undefined> };
+  }
+).process.env;
 const getDailyPlan = vi.fn();
 const patchTask = vi.fn();
 
@@ -39,10 +45,6 @@ vi.mock("../context/WorkspaceContext", () => ({
   }),
 }));
 
-vi.mock("../hooks/useToday", () => ({
-  useToday: () => "2026-07-23",
-}));
-
 import { DailyPlanningModal } from "./DailyPlanningModal";
 
 function Host({ onClose = () => undefined }: { onClose?: () => void }): ReactElement {
@@ -67,6 +69,7 @@ describe("DailyPlanningModal", () => {
     getDailyPlan.mockReset();
     patchTask.mockReset();
     getDailyPlan.mockResolvedValue({
+      as_of_date: "2026-07-24",
       capacity_minutes: 480,
       estimated_total_minutes: 90,
       revision: 1,
@@ -135,6 +138,35 @@ describe("DailyPlanningModal", () => {
     expect(
       document.querySelector('[role="dialog"][aria-labelledby="daily-planning-title"]'),
     ).toBeNull();
+  });
+
+  it("reschedules with the server plan date when the browser timezone is one day behind", async () => {
+    const originalTimeZone = testEnvironment.TZ;
+    try {
+      testEnvironment.TZ = "America/Los_Angeles";
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-24T00:30:00Z"));
+      expect(todayKey()).toBe("2026-07-23");
+
+      await renderOpen();
+      const reschedule = Array.from(document.querySelectorAll("button")).find(
+        (button) => button.textContent === "Reschedule to today",
+      );
+      expect(reschedule).toBeTruthy();
+      await act(async () => {
+        reschedule!.click();
+      });
+
+      expect(patchTask).toHaveBeenCalledWith(
+        "o1",
+        { due_date: "2026-07-24" },
+        "Reschedule to today",
+      );
+    } finally {
+      vi.useRealTimers();
+      if (originalTimeZone === undefined) delete testEnvironment.TZ;
+      else testEnvironment.TZ = originalTimeZone;
+    }
   });
 
   it("enforces max 3 focus selection and session Set Aside exclusions", async () => {

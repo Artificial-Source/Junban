@@ -18,13 +18,16 @@ import argparse
 import hashlib
 import json
 import os
+import queue
 import re
 import shutil
 import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from datetime import date, datetime, timedelta, timezone
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -54,6 +57,26 @@ SCALE_BULK_BATCHES = 20
 SCALE_BULK_BATCH_SIZE = 25
 SCALE_REORDER_BATCHES = 20
 SCALE_REORDER_BATCH_SIZE = 25
+
+# ── Phase 3 temporal protocol ───────────────────────────────────────────────
+TEMPORAL_PROTOCOL_NAME = "junban-phase3-temporal-v1"
+TEMPORAL_PROTOCOL_VERSION = 1
+TEMPORAL_SAMPLES, TEMPORAL_TASK_COUNT = 5, 10_000
+TEMPORAL_QUICK_SAMPLES, TEMPORAL_QUICK_TASK_COUNT = 1, 500
+TEMPORAL_BULK_SOURCES = 250
+TEMPORAL_QUICK_BULK_SOURCES = 25
+TEMPORAL_REMINDER_CLAIMS = 20
+TEMPORAL_QUICK_REMINDER_CLAIMS = 5
+TEMPORAL_BUDGETS_MS = {
+    "calendar_42_day": 100.0,
+    "timeblocking_42_day": 100.0,
+    "stats_366_day": 150.0,
+    "recurrence_complete": 100.0,
+    "bulk_recurrence_complete": 1_000.0,
+    "bulk_recurrence_uncomplete": 1_000.0,
+    "nudges": 100.0,
+    "reminder_lease_claim_20": 50.0,
+}
 
 # Only intentional fixed sleep; readiness/shutdown are condition-polled.
 SETTLE_SECONDS = 2.0
@@ -98,6 +121,28 @@ SCALE_LATENCY_OPS = (
     + SCALE_SINGLE_MUTATION_OPS
     + SCALE_BULK_REORDER_OPS
     + SCALE_NEAR_CAP_OPS
+)
+TEMPORAL_LATENCY_OPS = (
+    "calendar_42_day",
+    "timeblock_create",
+    "timeblock_range_42_day",
+    "timeslot_create",
+    "timeslot_range",
+    "planning_daily",
+    "planning_weekly",
+    "stats_366_day",
+    "nudges",
+    "recurrence_complete",
+    "recurrence_uncomplete",
+    "bulk_recurrence_complete",
+    "bulk_recurrence_uncomplete",
+    "reminder_schedule",
+    "reminder_lease_acquire",
+    "reminder_claim_20",
+    "reminder_lease_claim_20",
+    "reminder_settle_delivered",
+    "reminder_claim_empty",
+    "reminder_lease_release",
 )
 WARM_MEMORY_CEILING_MIB = 24.0
 PEAK_MEMORY_CEILING_MIB = 32.0
@@ -715,16 +760,18 @@ def scale_protocol_config(quick: bool) -> dict[str, Any]:
     }
 
 
-def run_seeder(seeder: Path, profile_dir: Path, task_count: int) -> dict[str, Any]:
+def run_seeder(
+    seeder: Path, profile_dir: Path, task_count: int, *, temporal_fixture: bool = False,
+) -> dict[str, Any]:
+    command = [
+        str(seeder),
+        "--data-dir", str(profile_dir),
+        "--task-count", str(task_count),
+    ]
+    if temporal_fixture:
+        command.append("--temporal-fixture")
     started = time.perf_counter()
-    result = run_cmd(
-        [
-            str(seeder),
-            "--data-dir", str(profile_dir),
-            "--task-count", str(task_count),
-        ],
-        check=False,
-    )
+    result = run_cmd(command, check=False)
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or f"exit {result.returncode}").strip()
@@ -739,6 +786,10 @@ def run_seeder(seeder: Path, profile_dir: Path, task_count: int) -> dict[str, An
     if int(manifest.get("task_count", -1)) != task_count:
         raise BenchError(
             f"seed manifest task_count {manifest.get('task_count')!r} != expected {task_count}"
+        )
+    if bool(manifest.get("temporal_fixture")) != temporal_fixture:
+        raise BenchError(
+            "seed manifest temporal_fixture does not match benchmark mode"
         )
     seed_ms = float(manifest.get("seed_duration_ms") or elapsed_ms)
     return {
@@ -1243,6 +1294,514 @@ def run_scale_sample(
             shutil.rmtree(profile_dir, ignore_errors=True)
 
 
+class ReminderWakeObserver:
+    """Captures the scheduler's authenticated, content-free SSE wake."""
+
+    def __init__(self, base_url: str, headers: dict[str, str]) -> None:
+        self._base_url = base_url
+        self._headers = headers
+        self._events: queue.Queue[dict[str, Any]] = queue.Queue()
+        self._failure: str | None = None
+        self._response: Any = None
+        self._thread = threading.Thread(target=self._read, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def _read(self) -> None:
+        event_type: str | None = None
+        data_lines: list[str] = []
+        try:
+            request = urllib.request.Request(
+                f"{self._base_url}/api/v1/reminders/events", headers=self._headers,
+            )
+            with urllib.request.urlopen(request, timeout=10) as response:
+                self._response = response
+                while True:
+                    raw = response.readline()
+                    if not raw:
+                        return
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if not line:
+                        if event_type == "reminders_due" and data_lines:
+                            self._events.put(json.loads("\n".join(data_lines)))
+                        event_type, data_lines = None, []
+                    elif line.startswith("event:"):
+                        event_type = line.partition(":")[2].strip()
+                    elif line.startswith("data:"):
+                        data_lines.append(line.partition(":")[2].strip())
+        except Exception as error:  # surfaced by wait_for_sequence
+            self._failure = str(error)
+
+    def wait_for_sequence(self, after: int, timeout: float) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._failure:
+                raise BenchError(f"reminder SSE observer failed: {self._failure}")
+            try:
+                wake = self._events.get(timeout=min(0.1, deadline - time.monotonic()))
+            except queue.Empty:
+                continue
+            sequence = wake.get("sequence")
+            if isinstance(sequence, int) and sequence > after:
+                return wake
+        raise BenchError(f"timed out waiting for reminder wake after sequence {after}")
+
+    def close(self) -> None:
+        response = self._response
+        if response is not None:
+            response.close()
+        self._thread.join(timeout=1)
+
+
+def temporal_protocol_config(quick: bool) -> dict[str, Any]:
+    if quick:
+        samples, tasks = TEMPORAL_QUICK_SAMPLES, TEMPORAL_QUICK_TASK_COUNT
+        bulk_sources, reminder_claims = (
+            TEMPORAL_QUICK_BULK_SOURCES,
+            TEMPORAL_QUICK_REMINDER_CLAIMS,
+        )
+    else:
+        samples, tasks = TEMPORAL_SAMPLES, TEMPORAL_TASK_COUNT
+        bulk_sources, reminder_claims = TEMPORAL_BULK_SOURCES, TEMPORAL_REMINDER_CLAIMS
+    return {
+        "name": TEMPORAL_PROTOCOL_NAME,
+        "version": TEMPORAL_PROTOCOL_VERSION,
+        "mode": "temporal",
+        "authoritative": not quick,
+        "quick": quick,
+        "samples": samples,
+        "task_count": tasks,
+        "bulk_recurrence_sources": bulk_sources,
+        "bulk_recurrence_affected_tasks": bulk_sources * 2,
+        "reminder_claims": reminder_claims,
+        "settle_seconds": SETTLE_SECONDS,
+        "bind": "127.0.0.1:0",
+        "profile_mode": "0700",
+        "token": "deterministic per sample, pre-written owner-only access-token",
+        "cgroup": "transient systemd --user service with MemoryAccounting=yes",
+        "driver_outside_cgroup": True,
+        "seeder_outside_cgroup": True,
+        "seeder": "junban-scale-seed --temporal-fixture (scale-bench feature)",
+        "budgets_p95_ms": TEMPORAL_BUDGETS_MS,
+        "warm_memory_ceiling_mib": WARM_MEMORY_CEILING_MIB,
+        "peak_memory_ceiling_mib": PEAK_MEMORY_CEILING_MIB,
+        "variance_rule": VARIANCE_RULE,
+        "regression_rule": REGRESSION_RULE,
+        "notes": [
+            "The existing dev-only seeder writes 10,000 deterministic tasks before server startup.",
+            "One recurring bulk mutation has 250 sources + 250 generated children, the frozen 500 affected-task ceiling.",
+            "The scheduler observation subscribes to its authenticated content-free SSE wake after the idle memory snapshot.",
+            "Quick mode validates the harness only and is not authoritative evidence.",
+        ],
+    }
+
+
+def _temporal_mutation(
+    base_url: str, host: str, origin: str, token: str, method: str, path: str,
+    body: dict[str, Any] | None, *, op: str, statuses: set[int] | None = None,
+) -> tuple[Any, dict[str, Any], float]:
+    headers = auth_headers(token, host, origin, mutation=True)
+    idem = headers["Idempotency-Key"]
+    expect = statuses or {200}
+    payload, ms = http_request(
+        method, f"{base_url}{path}", headers=headers, body=body,
+        expect_statuses=expect, as_json=True,
+    )
+    event = _mutation_event(payload, op=op)
+    replay_headers = auth_headers(token, host, origin, mutation=True)
+    replay_headers["Idempotency-Key"] = idem
+    replay, _ = http_request(
+        method, f"{base_url}{path}", headers=replay_headers, body=body,
+        expect_statuses=expect, as_json=True,
+    )
+    replay_event = _mutation_event(replay, op=f"{op}_replay")
+    for key in ("revision", "operation_id", "event_type"):
+        if replay_event.get(key) != event.get(key):
+            raise BenchError(f"{op}: receipt replay mismatch on {key}")
+    return payload, event, ms
+
+
+def run_temporal_workload(
+    base_url: str, host: str, origin: str, token: str, manifest: dict[str, Any],
+    protocol: dict[str, Any],
+) -> dict[str, Any]:
+    source_ids = list(manifest.get("temporal_recurrence_source_ids") or [])
+    source_count = int(protocol["bulk_recurrence_sources"])
+    reminder_count = int(protocol["reminder_claims"])
+    if manifest.get("protocol") != TEMPORAL_PROTOCOL_NAME or not manifest.get("temporal_fixture"):
+        raise BenchError("temporal run requires the temporal seeder fixture")
+    if len(source_ids) < source_count or source_count < reminder_count:
+        raise BenchError(
+            f"temporal fixture has {len(source_ids)} recurring sources; need {source_count}"
+        )
+    as_of = date.fromisoformat(str(manifest["as_of_date"]))
+    # The deterministic fixture concentrates ordinary due dates near today;
+    # this still-42-day future window remains nonempty below the 2,000 result cap.
+    calendar_from = as_of + timedelta(days=10)
+    calendar_to = calendar_from + timedelta(days=41)
+    stats_from = as_of - timedelta(days=365)
+    block_date = as_of + timedelta(days=14)
+    buckets: dict[str, list[float]] = {name: [] for name in TEMPORAL_LATENCY_OPS}
+    response_counts: dict[str, int] = {}
+    mutation_events = 0
+
+    def record(op: str, ms: float, count: int) -> None:
+        buckets[op].append(ms)
+        response_counts[op] = response_counts.get(op, 0) + count
+
+    def authenticated_get(path: str, op: str, expected_key: str) -> tuple[Any, float]:
+        payload, ms = http_request(
+            "GET", f"{base_url}{path}",
+            headers=auth_headers(token, host, origin, mutation=False),
+            expect_statuses={200}, as_json=True,
+        )
+        if not isinstance(payload, dict) or expected_key not in payload:
+            raise BenchError(f"{op}: malformed response: {payload!r}")
+        return payload, ms
+
+    start_profile, _ = authenticated_get("/api/v1/profile", "profile_start", "revision")
+    start_revision = start_profile["revision"]
+
+    calendar, ms = authenticated_get(
+        f"/api/v1/calendar/tasks?from={calendar_from}&to={calendar_to}",
+        "calendar_42_day", "tasks",
+    )
+    calendar_tasks = calendar["tasks"]
+    if not isinstance(calendar_tasks, list) or not 0 < len(calendar_tasks) <= 2_000:
+        raise BenchError(f"calendar_42_day returned invalid task count: {len(calendar_tasks)}")
+    record("calendar_42_day", ms, len(calendar_tasks))
+
+    block_payload, block_event, ms = _temporal_mutation(
+        base_url, host, origin, token, "POST", "/api/v1/time-blocks",
+        {
+            "title": "Temporal benchmark block", "date": str(block_date),
+            "start": "09:00", "end": "09:30", "time_zone": "Etc/UTC",
+        }, op="timeblock_create", statuses={201},
+    )
+    mutation_events += 1
+    block_id = block_event.get("primary", {}).get("id")
+    if not isinstance(block_id, str):
+        raise BenchError(f"timeblock_create missing primary id: {block_payload!r}")
+    record("timeblock_create", ms, 1)
+    blocks, ms = authenticated_get(
+        f"/api/v1/time-blocks?from={calendar_from}&to={calendar_to}",
+        "timeblock_range_42_day", "time_blocks",
+    )
+    if not isinstance(blocks["time_blocks"], list) or not any(
+        row.get("id") == block_id for row in blocks["time_blocks"]
+    ):
+        raise BenchError("timeblock_range_42_day omitted the created block")
+    record("timeblock_range_42_day", ms, len(blocks["time_blocks"]))
+
+    _, _, ms = _temporal_mutation(
+        base_url, host, origin, token, "POST", "/api/v1/time-slots",
+        {
+            "title": "Temporal benchmark slot", "date": str(block_date),
+            "start": "10:00", "end": "10:30", "time_zone": "Etc/UTC",
+        }, op="timeslot_create", statuses={201},
+    )
+    mutation_events += 1
+    record("timeslot_create", ms, 1)
+    slots, ms = authenticated_get(
+        f"/api/v1/time-slots?date={block_date}", "timeslot_range", "time_slots",
+    )
+    if not isinstance(slots["time_slots"], list) or not slots["time_slots"]:
+        raise BenchError("timeslot_range returned no created slot")
+    record("timeslot_range", ms, len(slots["time_slots"]))
+
+    daily, ms = authenticated_get(f"/api/v1/planning/daily?date={as_of}", "planning_daily", "focus_tasks")
+    record("planning_daily", ms, len(daily["focus_tasks"]))
+    weekly, ms = authenticated_get(f"/api/v1/planning/weekly?date={as_of}", "planning_weekly", "daily")
+    record("planning_weekly", ms, len(weekly["daily"]))
+    stats, ms = authenticated_get(
+        f"/api/v1/stats?from={stats_from}&to={as_of}", "stats_366_day", "days",
+    )
+    if not isinstance(stats["days"], list) or len(stats["days"]) != 366:
+        raise BenchError(f"stats_366_day returned {len(stats['days'])} buckets, expected 366")
+    record("stats_366_day", ms, len(stats["days"]))
+    nudge_payload, ms = authenticated_get(
+        f"/api/v1/nudges?date={as_of}&capacity_minutes=60", "nudges", "rules",
+    )
+    nudge_rules = nudge_payload["rules"]
+    if not isinstance(nudge_rules, list) or not nudge_rules:
+        raise BenchError("nudges returned no firing rules for the temporal fixture")
+    kinds = [rule.get("kind") for rule in nudge_rules if isinstance(rule, dict)]
+    allowed_kinds = {
+        "overdue", "approaching_deadline", "stale_task", "empty_today", "overloaded_day",
+    }
+    if len(kinds) != len(nudge_rules) or len(set(kinds)) != len(kinds) or not set(kinds) <= allowed_kinds:
+        raise BenchError(f"nudges returned invalid rule facts: {nudge_rules!r}")
+    record("nudges", ms, len(nudge_rules))
+
+    _, event, ms = _temporal_mutation(
+        base_url, host, origin, token, "POST", f"/api/v1/tasks/{source_ids[0]}/complete", None,
+        op="recurrence_complete",
+    )
+    if len(event.get("affected", {}).get("task_ids", [])) != 2:
+        raise BenchError("recurrence_complete did not affect source plus generated child")
+    mutation_events += 1
+    record("recurrence_complete", ms, 2)
+    payload, event, ms = _temporal_mutation(
+        base_url, host, origin, token, "POST", f"/api/v1/tasks/{source_ids[0]}/uncomplete", None,
+        op="recurrence_uncomplete",
+    )
+    if payload.get("uncomplete_outcome") != "exact" or len(event.get("affected", {}).get("task_ids", [])) != 2:
+        raise BenchError("recurrence_uncomplete did not perform the exact reversal")
+    mutation_events += 1
+    record("recurrence_uncomplete", ms, 2)
+
+    bulk_sources = source_ids[:source_count]
+    _, event, ms = _temporal_mutation(
+        base_url, host, origin, token, "POST", "/api/v1/tasks/actions",
+        {"task_ids": bulk_sources, "action": {"type": "complete"}},
+        op="bulk_recurrence_complete",
+    )
+    expected_affected = source_count * 2
+    if len(event.get("affected", {}).get("task_ids", [])) != expected_affected:
+        raise BenchError("bulk_recurrence_complete did not stay at its affected-task target")
+    mutation_events += 1
+    record("bulk_recurrence_complete", ms, expected_affected)
+    _, event, ms = _temporal_mutation(
+        base_url, host, origin, token, "POST", "/api/v1/tasks/actions",
+        {"task_ids": bulk_sources, "action": {"type": "uncomplete"}},
+        op="bulk_recurrence_uncomplete",
+    )
+    if len(event.get("affected", {}).get("task_ids", [])) != expected_affected:
+        raise BenchError("bulk_recurrence_uncomplete did not exactly restore the bulk sources")
+    mutation_events += 1
+    record("bulk_recurrence_uncomplete", ms, expected_affected)
+
+    observer = ReminderWakeObserver(
+        base_url, auth_headers(token, host, origin, mutation=False),
+    )
+    observer.start()
+    initial_wake = observer.wait_for_sequence(-1, 5)
+    initial_sequence = initial_wake["sequence"]
+    try:
+        wake_started = time.perf_counter()
+        due_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        for task_id in bulk_sources[:reminder_count]:
+            _, _, ms = _temporal_mutation(
+                base_url, host, origin, token, "POST",
+                f"/api/v1/tasks/{task_id}/reminders/reschedule", {"remind_at": due_at},
+                op="reminder_schedule",
+            )
+            mutation_events += 1
+            record("reminder_schedule", ms, 1)
+        due_wake = observer.wait_for_sequence(initial_sequence, 5)
+        wake_wait_ms = (time.perf_counter() - wake_started) * 1000.0
+    finally:
+        observer.close()
+
+    lease_payload, lease_ms = http_request(
+        "POST", f"{base_url}/api/v1/reminders/lease",
+        headers=auth_headers(token, host, origin, mutation=True), body={},
+        expect_statuses={200}, as_json=True,
+    )
+    if not isinstance(lease_payload, dict) or not isinstance(lease_payload.get("fence_term"), str):
+        raise BenchError(f"reminder_lease_acquire malformed: {lease_payload!r}")
+    fence_term = lease_payload["fence_term"]
+    record("reminder_lease_acquire", lease_ms, 1)
+    claim_payload, claim_ms = http_request(
+        "POST", f"{base_url}/api/v1/reminders/claim",
+        headers=auth_headers(token, host, origin, mutation=True),
+        body={"fence_term": fence_term, "limit": reminder_count},
+        expect_statuses={200}, as_json=True,
+    )
+    reminders = claim_payload.get("reminders") if isinstance(claim_payload, dict) else None
+    if not isinstance(reminders, list) or len(reminders) != reminder_count:
+        raise BenchError(f"reminder_claim expected {reminder_count}, got {reminders!r}")
+    record("reminder_claim_20", claim_ms, len(reminders))
+    record("reminder_lease_claim_20", lease_ms + claim_ms, len(reminders))
+    settle_latencies: list[float] = []
+    for reminder in reminders:
+        if not isinstance(reminder, dict):
+            raise BenchError(f"malformed claimed reminder: {reminder!r}")
+        _, ms = http_request(
+            "POST", f"{base_url}/api/v1/reminders/settle/delivered",
+            headers=auth_headers(token, host, origin, mutation=True),
+            body={
+                "fence_term": fence_term, "task_id": reminder["task_id"],
+                "remind_at": reminder["remind_at"], "claim_attempt": reminder["claim_attempt"],
+                "channel": "in_app",
+            }, expect_statuses={204}, as_json=True,
+        )
+        settle_latencies.append(ms)
+    buckets["reminder_settle_delivered"].extend(settle_latencies)
+    response_counts["reminder_settle_delivered"] = len(settle_latencies)
+    empty_claim, ms = http_request(
+        "POST", f"{base_url}/api/v1/reminders/claim",
+        headers=auth_headers(token, host, origin, mutation=True),
+        body={"fence_term": fence_term, "limit": reminder_count},
+        expect_statuses={200}, as_json=True,
+    )
+    if not isinstance(empty_claim, dict) or empty_claim.get("reminders") != []:
+        raise BenchError("reminder scheduler did not return to idle after settlement")
+    record("reminder_claim_empty", ms, 0)
+    _, ms = http_request(
+        "POST", f"{base_url}/api/v1/reminders/lease/release",
+        headers=auth_headers(token, host, origin, mutation=True), body={"fence_term": fence_term},
+        expect_statuses={204}, as_json=True,
+    )
+    record("reminder_lease_release", ms, 1)
+
+    end_profile, _ = authenticated_get("/api/v1/profile", "profile_end", "revision")
+    end_revision = end_profile["revision"]
+    if end_revision - start_revision != mutation_events:
+        raise BenchError(
+            f"temporal revision delta {end_revision - start_revision} != mutation events {mutation_events}"
+        )
+    return {
+        "task_count": int(manifest["task_count"]),
+        "response_counts": response_counts,
+        "latencies": {name: latency_summary(values) for name, values in buckets.items() if values},
+        "event_revision_start": start_revision,
+        "event_revision_end": end_revision,
+        "event_revision_delta": end_revision - start_revision,
+        "mutation_event_count": mutation_events,
+        "scheduler": {
+            "idle_before_due": True,
+            "initial_wake_sequence": initial_sequence,
+            "due_wake_sequence": due_wake["sequence"],
+            "due_wake_wait_ms": wake_wait_ms,
+            "due_intents_scheduled": reminder_count,
+            "claimed": len(reminders),
+            "settled": len(settle_latencies),
+            "post_settle_claimed": 0,
+            "idle_after_settlement": True,
+        },
+    }
+
+
+def build_temporal_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    def collect(path: tuple[str, ...]) -> list[float]:
+        values: list[float] = []
+        for sample in samples:
+            cursor: Any = sample
+            for key in path:
+                cursor = cursor[key]
+            values.append(float(cursor))
+        return values
+
+    latencies: dict[str, Any] = {}
+    for name in TEMPORAL_LATENCY_OPS:
+        pooled: list[float] = []
+        p50s: list[float] = []
+        p95s: list[float] = []
+        for sample in samples:
+            metric = sample["workload"]["latencies"].get(name)
+            if metric is None:
+                continue
+            pooled.extend(metric["values_ms"])
+            p50s.append(metric["p50_ms"])
+            p95s.append(metric["p95_ms"])
+        if not pooled:
+            continue
+        latencies[name] = {
+            "pooled_p50_ms": percentile(sorted(pooled), 50),
+            "pooled_p95_ms": percentile(sorted(pooled), 95),
+            "per_sample_p50_ms": series_summary(p50s),
+            "per_sample_p95_ms": series_summary(p95s),
+            "count": len(pooled),
+        }
+
+    def metric(name: str) -> float:
+        try:
+            return float(latencies[name]["pooled_p95_ms"])
+        except KeyError as error:
+            raise BenchError(f"missing temporal latency metric {name}") from error
+
+    checks = {
+        "calendar_42_day_p95_ms": (metric("calendar_42_day"), TEMPORAL_BUDGETS_MS["calendar_42_day"]),
+        "timeblocking_42_day_p95_ms": (
+            max(metric("timeblock_range_42_day"), metric("timeslot_range")),
+            TEMPORAL_BUDGETS_MS["timeblocking_42_day"],
+        ),
+        "stats_366_day_p95_ms": (metric("stats_366_day"), TEMPORAL_BUDGETS_MS["stats_366_day"]),
+        "recurrence_complete_p95_ms": (metric("recurrence_complete"), TEMPORAL_BUDGETS_MS["recurrence_complete"]),
+        "bulk_recurrence_complete_p95_ms": (metric("bulk_recurrence_complete"), TEMPORAL_BUDGETS_MS["bulk_recurrence_complete"]),
+        "bulk_recurrence_uncomplete_p95_ms": (metric("bulk_recurrence_uncomplete"), TEMPORAL_BUDGETS_MS["bulk_recurrence_uncomplete"]),
+        "nudges_p95_ms": (metric("nudges"), TEMPORAL_BUDGETS_MS["nudges"]),
+        "reminder_lease_claim_20_p95_ms": (metric("reminder_lease_claim_20"), TEMPORAL_BUDGETS_MS["reminder_lease_claim_20"]),
+    }
+    budget_checks = {
+        name: {"value": value, "limit_ms": limit, "passed": value <= limit}
+        for name, (value, limit) in checks.items()
+    }
+    summary: dict[str, Any] = {k: series_summary(collect(p)) for k, p in SUMMARY_PATHS.items()}
+    summary.update({
+        "sample_count": len(samples),
+        "seed_duration_ms": series_summary([float(s["seed"]["duration_ms"]) for s in samples]),
+        "sqlite_total_bytes": series_summary([float(s["sqlite"]["total_bytes"]) for s in samples]),
+        "latencies_ms": latencies,
+        "scheduler_due_wake_wait_ms": series_summary([
+            float(s["workload"]["scheduler"]["due_wake_wait_ms"]) for s in samples
+        ]),
+        "budget_checks": budget_checks,
+        "warm_memory_ceiling_mib": WARM_MEMORY_CEILING_MIB,
+        "peak_memory_ceiling_mib": PEAK_MEMORY_CEILING_MIB,
+        "variance_rule": VARIANCE_RULE,
+        "regression_rule": REGRESSION_RULE,
+    })
+    summary["latency_budget_passed"] = all(check["passed"] for check in budget_checks.values())
+    summary["memory_budget_passed"] = (
+        summary["warm_cgroup_mib"]["max"] <= WARM_MEMORY_CEILING_MIB
+        and summary["warm_cgroup_peak_mib"]["max"] <= PEAK_MEMORY_CEILING_MIB
+    )
+    summary["budget_passed"] = summary["latency_budget_passed"] and summary["memory_budget_passed"]
+    return summary
+
+
+def run_temporal_sample(
+    sample_index: int, run_id: str, repo_root: Path, server: Path, seeder: Path,
+    web_dir: Path, work_root: Path, protocol: dict[str, Any],
+) -> dict[str, Any]:
+    profile_dir = work_root / f"profile-{sample_index:02d}"
+    digest = hashlib.sha256(
+        f"{TEMPORAL_PROTOCOL_NAME}:{run_id}:{sample_index}".encode()
+    ).hexdigest()
+    token = digest + hashlib.sha256(digest.encode()).hexdigest()[:16]
+    prepare_profile(profile_dir, token)
+    unit_name = f"junban-temporal-{run_id}-s{sample_index:02d}"[:180]
+    started = cleanup_ok = False
+    try:
+        seed = run_seeder(seeder, profile_dir, int(protocol["task_count"]), temporal_fixture=True)
+        base_url, host, startup_ms = start_server(unit_name, server, profile_dir, web_dir, repo_root)
+        started = True
+        time.sleep(SETTLE_SECONDS)
+        idle = memory_snapshot(unit_name, server, "idle")
+        workload = run_temporal_workload(base_url, host, base_url, token, seed["manifest"], protocol)
+        warm = memory_snapshot(unit_name, server, "warm")
+        db_sizes = sqlite_size_bytes(profile_dir)
+        stop_server(unit_name, profile_dir)
+        started = False
+        shutil.rmtree(profile_dir)
+        cleanup_ok = True
+        return {
+            "sample_index": sample_index, "startup_to_health_ms": startup_ms,
+            "settle_seconds": SETTLE_SECONDS,
+            "seed": {
+                "duration_ms": seed["duration_ms"], "wall_ms": seed["wall_ms"],
+                "task_count": seed["manifest"]["task_count"],
+                "as_of_date": seed["manifest"]["as_of_date"],
+                "temporal_recurrence_source_count": len(seed["manifest"]["temporal_recurrence_source_ids"]),
+            },
+            "idle": idle, "warm": warm, "workload": workload, "sqlite": db_sizes,
+            "cleanup_success": cleanup_ok, "unit": f"{unit_name}.service",
+        }
+    except Exception:
+        if started:
+            try:
+                stop_server(unit_name, profile_dir)
+            except BenchError:
+                pass
+        raise
+    finally:
+        if not cleanup_ok and profile_dir.exists():
+            shutil.rmtree(profile_dir, ignore_errors=True)
+
+
 def self_check_protocol() -> None:
     """Focused argument/protocol assertions for CI-friendly validation."""
     phase1 = protocol_config(False)
@@ -1266,6 +1825,20 @@ def self_check_protocol() -> None:
     assert scale["warm_memory_ceiling_mib"] == 24.0
     assert scale["peak_memory_ceiling_mib"] == 32.0
 
+    temporal = temporal_protocol_config(False)
+    temporal_q = temporal_protocol_config(True)
+    assert temporal["name"] == TEMPORAL_PROTOCOL_NAME
+    assert temporal["samples"] == 5 and temporal["task_count"] == 10_000
+    assert temporal["bulk_recurrence_sources"] == 250
+    assert temporal["bulk_recurrence_affected_tasks"] == 500
+    assert temporal["reminder_claims"] == 20
+    assert temporal_q["samples"] == 1 and temporal_q["task_count"] == 500
+    assert temporal_q["bulk_recurrence_sources"] == 25
+    assert temporal["seeder_outside_cgroup"] is True
+    assert temporal["budgets_p95_ms"]["calendar_42_day"] == 100.0
+    assert temporal["budgets_p95_ms"]["stats_366_day"] == 150.0
+    assert temporal["budgets_p95_ms"]["reminder_lease_claim_20"] == 50.0
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
@@ -1273,21 +1846,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--mode",
-        choices=("phase1", "scale"),
+        choices=("phase1", "scale", "temporal"),
         default="phase1",
-        help="phase1 = frozen 100-task memory protocol; scale = Phase 2 10k-task protocol",
+        help="phase1 = frozen 100-task memory; scale = Phase 2 10k; temporal = Phase 3 10k",
     )
     parser.add_argument("--server", type=Path, default=Path("target/release/junban-server"))
     parser.add_argument(
         "--seeder",
         type=Path,
         default=Path("target/release/junban-scale-seed"),
-        help="Path to junban-scale-seed (scale mode only)",
+        help="Path to junban-scale-seed (scale and temporal modes)",
     )
     parser.add_argument("--web-dir", type=Path, default=Path("dist"))
     parser.add_argument(
         "--quick", action="store_true",
-        help="Non-authoritative dry run (phase1: 10 tasks; scale: 500 tasks)",
+        help="Non-authoritative dry run (phase1: 10; scale/temporal: 500 tasks)",
     )
     parser.add_argument(
         "--self-check",
@@ -1316,19 +1889,27 @@ def main(argv: list[str] | None = None) -> int:
             raise BenchError(f"server binary missing or not executable: {server}")
         if not web_dir.is_dir() or not (web_dir / "index.html").is_file():
             raise BenchError(f"web-dir missing or lacks index.html: {web_dir}")
-        if args.mode == "scale":
+        if args.mode in {"scale", "temporal"}:
             if not seeder.is_file() or not os.access(seeder, os.X_OK):
                 raise BenchError(
                     f"seeder binary missing or not executable: {seeder} "
                     "(build with: cargo build --locked --release -p junban-storage "
                     "--features scale-bench --bin junban-scale-seed)"
                 )
-            protocol = scale_protocol_config(bool(args.quick))
+            protocol = (
+                scale_protocol_config(bool(args.quick))
+                if args.mode == "scale"
+                else temporal_protocol_config(bool(args.quick))
+            )
         else:
             protocol = protocol_config(bool(args.quick))
 
         run_id = uuid.uuid4().hex[:12]
-        prefix = "junban-scale-" if args.mode == "scale" else "junban-bench-"
+        prefix = (
+            "junban-scale-" if args.mode == "scale"
+            else "junban-temporal-" if args.mode == "temporal"
+            else "junban-bench-"
+        )
         work_root = Path(tempfile.mkdtemp(prefix=f"{prefix}{run_id}-", dir="/tmp"))
         os.chmod(work_root, 0o700)
         samples: list[dict[str, Any]] = []
@@ -1338,13 +1919,17 @@ def main(argv: list[str] | None = None) -> int:
                     sample = run_scale_sample(
                         i, run_id, repo_root, server, seeder, web_dir, work_root, protocol,
                     )
+                elif args.mode == "temporal":
+                    sample = run_temporal_sample(
+                        i, run_id, repo_root, server, seeder, web_dir, work_root, protocol,
+                    )
                 else:
                     sample = run_sample(
                         i, run_id, repo_root, server, web_dir, work_root, protocol,
                     )
                 samples.append(sample)
                 seed_bit = ""
-                if args.mode == "scale":
+                if args.mode in {"scale", "temporal"}:
                     seed_bit = f" seed={sample['seed']['duration_ms']:.1f}ms"
                 print(
                     f"sample {i}: startup={sample['startup_to_health_ms']:.1f}ms"
@@ -1359,6 +1944,8 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.mode == "scale":
             summary = build_scale_summary(samples)
+        elif args.mode == "temporal":
+            summary = build_temporal_summary(samples)
         else:
             summary = build_summary(samples)
 
@@ -1376,7 +1963,7 @@ def main(argv: list[str] | None = None) -> int:
             "command": {"argv": [Path(__file__).name, *map(str, sys.argv[1:])], "cwd": str(Path.cwd())},
             "samples": samples, "summary": summary, "evidence_status": status,
         }
-        if args.mode == "scale":
+        if args.mode in {"scale", "temporal"}:
             report["seeder"] = binary_metadata(seeder)
         text = json.dumps(report, indent=2, sort_keys=True) + "\n"
         if args.output:

@@ -23,6 +23,10 @@ export type ShellBlockingFlags = {
   paletteOpen: boolean;
   projectModalOpen: boolean;
   taskDetailActive: boolean;
+  planMyDayOpen?: boolean;
+  endOfDayOpen?: boolean;
+  weeklyReviewOpen?: boolean;
+  focusModeOpen?: boolean;
 };
 
 export function isShellBlocking(flags: ShellBlockingFlags): boolean {
@@ -32,7 +36,11 @@ export function isShellBlocking(flags: ShellBlockingFlags): boolean {
     flags.searchOpen ||
     flags.paletteOpen ||
     flags.projectModalOpen ||
-    flags.taskDetailActive
+    flags.taskDetailActive ||
+    Boolean(flags.planMyDayOpen) ||
+    Boolean(flags.endOfDayOpen) ||
+    Boolean(flags.weeklyReviewOpen) ||
+    Boolean(flags.focusModeOpen)
   );
 }
 

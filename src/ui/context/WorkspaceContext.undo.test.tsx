@@ -230,6 +230,35 @@ describe("WorkspaceContext undo/redo (P2-FINAL-002, P2-FINAL-003)", () => {
     ]);
   });
 
+  it("a non-undo mutation leaves an earlier valid task undo available", async () => {
+    const ws = captureWorkspace();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const taskOp = "op-task-1111-4111-8111-111111111111";
+    const timeblockOp = "op-timeblock-2222-4222-8222-222222222222";
+    await act(async () => {
+      await ws.current!.runMutation(
+        async () =>
+          mutationResponse(taskOp, makeTask("11111111-1111-4111-8111-111111111111", "Task", 2), 2),
+        { undoLabel: "Complete task", successToast: "Completed" },
+      );
+      await ws.current!.runMutation(
+        async () =>
+          mutationResponse(
+            timeblockOp,
+            makeTask("11111111-1111-4111-8111-111111111111", "Task", 3),
+            3,
+          ),
+        { successToast: "Delete time block" },
+      );
+    });
+
+    expect(ws.current!.undoStack).toEqual([{ operationId: taskOp, label: "Complete task" }]);
+    expect(ws.current!.canUndo).toBe(true);
+  });
+
   it("clears the redo stack after a new user mutation", async () => {
     const ws = captureWorkspace();
     await act(async () => {

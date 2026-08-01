@@ -18,11 +18,17 @@ pub use event::{
 pub use ports::{Repository, RepositoryFuture};
 pub use requests::{
     ACTIVITY_PAGE_DEFAULT, ACTIVITY_PAGE_MAX, BulkAction, BulkSchedule, BulkTagChange,
-    CatalogSnapshot, CommentPatch, MoveTarget, OrderAnchor, ProjectDraft, ProjectPatch,
-    ReorderScope, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft,
-    TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    CalendarTasksPage, CatalogSnapshot, ClaimRemindersRequest, CollectedTasks, CommentPatch,
+    DailyPlanPage, DismissReminder, DopamineMenuPage, EatTheFrogPage, EndOfDayPage,
+    MarkOwnerLostReminders, MoveTarget, NudgesPage, OrderAnchor, ProjectDraft, ProjectPatch,
+    ReminderLeaseRequest, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    RescheduleReminder, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch,
+    SettleReminderDelivered, SettleReminderFailed, StatsPage, TagDraft, TagPatch, TaskJarPage,
+    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TemporalSettings, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
+    TimeblockingRangePage, TimeblockingRangeQuery, WeeklyReviewPage,
 };
-pub use service::{EventSink, JunbanService};
+pub use service::{EventSink, JunbanService, default_temporal_settings};
 
 /// Backward-compatible alias used by the Phase 1 server surface during Phase 2 cutover.
 pub type TaskService<R, E> = JunbanService<R, E>;

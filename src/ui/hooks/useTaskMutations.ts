@@ -34,6 +34,8 @@ import {
   applyTemplate as applyTemplateApi,
   addRelation as addRelationApi,
   removeRelation as removeRelationApi,
+  rescheduleReminder as rescheduleReminderApi,
+  dismissReminder as dismissReminderApi,
 } from "../api/client";
 import { useWorkspace } from "../context/WorkspaceContext";
 import {
@@ -54,7 +56,7 @@ function tagIdFromMutation(result: MutationResponse): string | null {
 }
 
 export function useTaskMutations() {
-  const { runMutation, catalog, refreshCatalog } = useWorkspace();
+  const { runMutation, catalog, refreshCatalog, showToast } = useWorkspace();
 
   const createTask = useCallback(
     async (body: CreateTaskRequest, undoLabel?: string) =>
@@ -180,12 +182,20 @@ export function useTaskMutations() {
   );
 
   const uncompleteTask = useCallback(
-    async (taskId: string) =>
-      runMutation((opId) => uncompleteTaskApi(taskId, opId), {
+    async (taskId: string) => {
+      const result = await runMutation((opId) => uncompleteTaskApi(taskId, opId), {
         undoLabel: "Uncomplete task",
-        successToast: "Task reopened",
-      }),
-    [runMutation],
+      });
+      if (result) {
+        const sourceOnly = result.uncomplete_outcome === "source_only";
+        showToast(
+          sourceOnly ? "info" : "success",
+          sourceOnly ? "Task reopened. Recurring changes were kept." : "Task reopened",
+        );
+      }
+      return result;
+    },
+    [runMutation, showToast],
   );
 
   const cancelTask = useCallback(
@@ -261,6 +271,24 @@ export function useTaskMutations() {
     [runMutation],
   );
 
+  const rescheduleReminder = useCallback(
+    async (taskId: string, remindAt: string, undoLabel?: string) =>
+      runMutation((opId) => rescheduleReminderApi(taskId, { remind_at: remindAt }, opId), {
+        undoLabel: undoLabel ?? "Schedule reminder",
+        successToast: "Reminder scheduled",
+      }),
+    [runMutation],
+  );
+
+  const dismissReminder = useCallback(
+    async (taskId: string) =>
+      runMutation((opId) => dismissReminderApi(taskId, opId), {
+        undoLabel: "Clear reminder",
+        successToast: "Reminder cleared",
+      }),
+    [runMutation],
+  );
+
   return {
     createTask,
     createFromQuickEntry,
@@ -270,6 +298,8 @@ export function useTaskMutations() {
     uncompleteTask,
     cancelTask,
     reopenTask,
+    rescheduleReminder,
+    dismissReminder,
     moveTask,
     reorderTasks,
     bulkTasks,

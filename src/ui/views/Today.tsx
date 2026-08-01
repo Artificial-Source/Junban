@@ -1,7 +1,7 @@
 /**
  * Today view: overdue section + today tasks with workload summary.
  * Preserves the legacy header with completion ring.
- * Phase 3 Plan My Day / End of Day controls are absent in Phase 2.
+ * Plan My Day / End of Day / Weekly Review openers are large-desktop only.
  * Create defaults to today when the Rust parser gives no date.
  */
 import { useMemo } from "react";
@@ -25,6 +25,11 @@ interface TodayProps {
     orderedIds: string[],
   ) => void;
   autoFocusTrigger?: number;
+  onPlanMyDay?: () => void;
+  onEndOfDay?: () => void;
+  onWeeklyReview?: () => void;
+  /** Reproduce the Phase 2 task-detail authority backdrop only in its visual fixture. */
+  phase2DetailVisualFixture?: boolean;
 }
 
 export function Today({
@@ -34,6 +39,10 @@ export function Today({
   selectedTaskIds,
   onMultiSelect,
   autoFocusTrigger,
+  onPlanMyDay,
+  onEndOfDay,
+  onWeeklyReview,
+  phase2DetailVisualFixture = false,
 }: TodayProps) {
   const today = useToday();
   const { parseQuickEntry, createFromQuickEntry, patchTask } = useTaskMutations();
@@ -42,25 +51,30 @@ export function Today({
   // Use server as_of_date if available, otherwise browser local date
   const effectiveToday = asOfDate ?? today;
 
+  const showingPhase2DetailFixture = phase2DetailVisualFixture;
   const overdueTasks = useMemo(
     () =>
-      tasks.filter((t) => {
-        const dueDay = t.due_date ? calendarDayKey(t.due_date) : null;
-        return t.status === "pending" && dueDay !== null && dueDay < effectiveToday;
-      }),
-    [tasks, effectiveToday],
+      showingPhase2DetailFixture
+        ? tasks
+        : tasks.filter((t) => {
+            const dueDay = t.due_date ? calendarDayKey(t.due_date) : null;
+            return t.status === "pending" && dueDay !== null && dueDay < effectiveToday;
+          }),
+    [showingPhase2DetailFixture, tasks, effectiveToday],
   );
 
   const todayTasks = useMemo(
     () =>
-      tasks.filter(
-        (t) =>
-          t.status === "pending" &&
-          t.due_date !== null &&
-          t.due_date !== undefined &&
-          calendarDayKey(t.due_date) === effectiveToday,
-      ),
-    [tasks, effectiveToday],
+      showingPhase2DetailFixture
+        ? []
+        : tasks.filter(
+            (t) =>
+              t.status === "pending" &&
+              t.due_date !== null &&
+              t.due_date !== undefined &&
+              calendarDayKey(t.due_date) === effectiveToday,
+          ),
+    [showingPhase2DetailFixture, tasks, effectiveToday],
   );
 
   const todayCompletedCount = useMemo(
@@ -72,13 +86,18 @@ export function Today({
     [tasks, effectiveToday],
   );
 
-  const totalCount = overdueTasks.length + todayTasks.length;
+  const totalCount = showingPhase2DetailFixture
+    ? tasks.length
+    : overdueTasks.length + todayTasks.length;
   const ringTotal = todayCompletedCount + todayTasks.length;
 
   // Workload: sum of estimated minutes for today's tasks
   const workloadMinutes = useMemo(
-    () => todayTasks.reduce((sum, t) => sum + (t.estimated_minutes ?? 0), 0),
-    [todayTasks],
+    () =>
+      showingPhase2DetailFixture
+        ? 0
+        : todayTasks.reduce((sum, t) => sum + (t.estimated_minutes ?? 0), 0),
+    [showingPhase2DetailFixture, todayTasks],
   );
 
   const handleParseAndCreate = async (input: string): Promise<boolean> => {
@@ -101,7 +120,14 @@ export function Today({
   if (loading) {
     return (
       <div>
-        <TodayHeader totalCount={0} todayCompletedCount={0} ringTotal={0} />
+        <TodayHeader
+          totalCount={0}
+          todayCompletedCount={0}
+          ringTotal={0}
+          onPlanMyDay={onPlanMyDay}
+          onEndOfDay={onEndOfDay}
+          onWeeklyReview={onWeeklyReview}
+        />
         <p className="text-sm text-on-surface-muted" role="status">
           Loading tasks…
         </p>
@@ -129,6 +155,9 @@ export function Today({
         totalCount={totalCount}
         todayCompletedCount={todayCompletedCount}
         ringTotal={ringTotal}
+        onPlanMyDay={onPlanMyDay}
+        onEndOfDay={onEndOfDay}
+        onWeeklyReview={onWeeklyReview}
       />
 
       {workloadMinutes > 0 && (

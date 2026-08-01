@@ -6,10 +6,12 @@ mod helpers;
 mod migration;
 mod ops_types;
 mod query_ops;
+mod reminder_ops;
 mod rows;
 #[cfg(feature = "scale-bench")]
 pub mod scale_seed;
 mod task_ops;
+mod timeblock_ops;
 mod tx;
 mod undo_ops;
 
@@ -23,16 +25,20 @@ use std::{
 };
 
 use fs4::FileExt;
-use jiff::Timestamp;
+use jiff::{Timestamp, civil::Date};
 use junban_app::{
     BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, MoveTarget,
-    ProjectDraft, ProjectPatch, ReorderScope, Repository, RepositoryError, RepositoryFuture,
-    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft, TagPatch,
-    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    Repository, RepositoryError, RepositoryFuture, SavedFilterDraft, SavedFilterPatch,
+    SectionDraft, SectionPatch, TagDraft, TagPatch, TaskListAsOf, TaskListPage, TaskPatch,
+    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TimeBlockPatch,
+    TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
 };
 use junban_domain::{
-    Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind, SavedFilterId,
-    SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId,
+    ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
+    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
+    TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId,
 };
 use rusqlite::Connection;
 use thiserror::Error;
@@ -132,7 +138,7 @@ fn open_private_file(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-fn set_private_file_permissions(path: &Path) -> io::Result<()> {
+pub(crate) fn set_private_file_permissions(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -290,13 +296,15 @@ impl Repository for SqliteRepository {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
+        temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation> {
         mut_cmd!(
             self,
             CompleteTask {
                 operation_id,
                 task_id,
-                now
+                now,
+                temporal
             }
         )
     }
@@ -305,13 +313,15 @@ impl Repository for SqliteRepository {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
+        temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation> {
         mut_cmd!(
             self,
             UncompleteTask {
                 operation_id,
                 task_id,
-                now
+                now,
+                temporal
             }
         )
     }
@@ -400,6 +410,7 @@ impl Repository for SqliteRepository {
         task_ids: Vec<TaskId>,
         action: BulkAction,
         now: Timestamp,
+        temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation> {
         mut_cmd!(
             self,
@@ -407,7 +418,8 @@ impl Repository for SqliteRepository {
                 operation_id,
                 task_ids,
                 action,
-                now
+                now,
+                temporal
             }
         )
     }
@@ -417,6 +429,9 @@ impl Repository for SqliteRepository {
         as_of: TaskListAsOf,
     ) -> RepositoryFuture<'_, TaskListPage> {
         mut_cmd!(self, ListTasks { query, as_of })
+    }
+    fn list_analysis_tasks(&self, as_of: TaskListAsOf) -> RepositoryFuture<'_, TaskListPage> {
+        mut_cmd!(self, ListAnalysisTasks { as_of })
     }
     fn list_catalog(&self) -> RepositoryFuture<'_, CatalogSnapshot> {
         self.request(Command::ListCatalog)
@@ -813,6 +828,351 @@ impl Repository for SqliteRepository {
             }
         )
     }
+    fn list_task_reminders(
+        &self,
+        task_id: TaskId,
+    ) -> RepositoryFuture<'_, Vec<ReminderOccurrence>> {
+        // Compaction uses a sampled instant; list remains control-plane bookkeeping.
+        let now = Timestamp::now();
+        mut_cmd!(self, ListTaskReminders { task_id, now })
+    }
+    fn reschedule_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            RescheduleReminder {
+                operation_id,
+                task_id,
+                remind_at,
+                now
+            }
+        )
+    }
+    fn dismiss_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DismissReminder {
+                operation_id,
+                task_id,
+                now
+            }
+        )
+    }
+    fn acquire_reminder_lease(
+        &self,
+        now: Timestamp,
+        lease_secs: u64,
+    ) -> RepositoryFuture<'_, ReminderDeliveryLease> {
+        mut_cmd!(self, AcquireReminderLease { now, lease_secs })
+    }
+    fn renew_reminder_lease(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        lease_secs: u64,
+    ) -> RepositoryFuture<'_, ReminderDeliveryLease> {
+        mut_cmd!(
+            self,
+            RenewReminderLease {
+                fence_term,
+                now,
+                lease_secs
+            }
+        )
+    }
+    fn release_reminder_lease(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, ()> {
+        mut_cmd!(self, ReleaseReminderLease { fence_term, now })
+    }
+    fn claim_due_reminders(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        limit: u32,
+        claim_secs: u64,
+    ) -> RepositoryFuture<'_, Vec<ClaimedReminder>> {
+        mut_cmd!(
+            self,
+            ClaimDueReminders {
+                fence_term,
+                now,
+                limit,
+                claim_secs
+            }
+        )
+    }
+    fn settle_reminder_delivered(
+        &self,
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        claim_attempt: u32,
+        channel: ReminderChannel,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, ()> {
+        mut_cmd!(
+            self,
+            SettleReminderDelivered {
+                fence_term,
+                task_id,
+                remind_at,
+                claim_attempt,
+                channel,
+                now
+            }
+        )
+    }
+    fn settle_reminder_failed(
+        &self,
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        claim_attempt: u32,
+        error: ReminderFailureCode,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, ()> {
+        mut_cmd!(
+            self,
+            SettleReminderFailed {
+                fence_term,
+                task_id,
+                remind_at,
+                claim_attempt,
+                error,
+                now
+            }
+        )
+    }
+    fn mark_owner_lost_reminders(
+        &self,
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        limit: u32,
+    ) -> RepositoryFuture<'_, u32> {
+        mut_cmd!(
+            self,
+            MarkOwnerLostReminders {
+                fence_term,
+                now,
+                limit
+            }
+        )
+    }
+    fn next_reminder_wake_at(&self) -> RepositoryFuture<'_, Option<Timestamp>> {
+        mut_cmd!(self, NextReminderWakeAt {})
+    }
+    fn list_timeblocking_range(
+        &self,
+        query: TimeblockingRangeQuery,
+    ) -> RepositoryFuture<'_, TimeblockingRangePage> {
+        mut_cmd!(self, ListTimeblockingRange { query })
+    }
+    fn create_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        draft: TimeBlockDraft,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateTimeBlock {
+                operation_id,
+                block_id,
+                draft,
+                now
+            }
+        )
+    }
+    fn patch_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        patch: TimeBlockPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            PatchTimeBlock {
+                operation_id,
+                block_id,
+                patch,
+                now
+            }
+        )
+    }
+    fn delete_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteTimeBlock {
+                operation_id,
+                block_id,
+                now
+            }
+        )
+    }
+    fn create_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        draft: TimeSlotDraft,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateTimeSlot {
+                operation_id,
+                slot_id,
+                draft,
+                now
+            }
+        )
+    }
+    fn patch_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        patch: TimeSlotPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            PatchTimeSlot {
+                operation_id,
+                slot_id,
+                patch,
+                now
+            }
+        )
+    }
+    fn delete_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteTimeSlot {
+                operation_id,
+                slot_id,
+                now
+            }
+        )
+    }
+    fn append_slot_task(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            AppendSlotTask {
+                operation_id,
+                slot_id,
+                task_id,
+                now
+            }
+        )
+    }
+    fn remove_slot_task(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            RemoveSlotTask {
+                operation_id,
+                slot_id,
+                task_id,
+                now
+            }
+        )
+    }
+    fn reorder_slot_tasks(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        ordered_ids: Vec<TaskId>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            ReorderSlotTasks {
+                operation_id,
+                slot_id,
+                ordered_ids,
+                now
+            }
+        )
+    }
+    fn set_time_block_range(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        range: TimeBlockRangePatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            SetTimeBlockRange {
+                operation_id,
+                block_id,
+                range,
+                now
+            }
+        )
+    }
+    fn preview_replan_past_blocks(
+        &self,
+        temporal: TemporalContext,
+    ) -> RepositoryFuture<'_, ReplanPastBlocksPreview> {
+        mut_cmd!(self, PreviewReplanPastBlocks { temporal })
+    }
+    fn replan_past_blocks(
+        &self,
+        operation_id: OperationId,
+        action: ReplanPastBlocksAction,
+        expected_as_of_date: Date,
+        expected_candidate_ids: Vec<TimeBlockId>,
+        now: Timestamp,
+        temporal: TemporalContext,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            ReplanPastBlocks {
+                operation_id,
+                action,
+                expected_as_of_date,
+                expected_candidate_ids,
+                now,
+                temporal
+            }
+        )
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -839,12 +1199,14 @@ enum Command {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
+        temporal: TemporalContext,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
     UncompleteTask {
         operation_id: OperationId,
         task_id: TaskId,
         now: Timestamp,
+        temporal: TemporalContext,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
     CancelTask {
@@ -884,10 +1246,15 @@ enum Command {
         task_ids: Vec<TaskId>,
         action: BulkAction,
         now: Timestamp,
+        temporal: TemporalContext,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
     ListTasks {
         query: TaskQuery,
+        as_of: TaskListAsOf,
+        reply: oneshot::Sender<Result<TaskListPage, RepositoryError>>,
+    },
+    ListAnalysisTasks {
         as_of: TaskListAsOf,
         reply: oneshot::Sender<Result<TaskListPage, RepositoryError>>,
     },
@@ -1061,6 +1428,159 @@ enum Command {
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
+    ListTaskReminders {
+        task_id: TaskId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<Vec<ReminderOccurrence>, RepositoryError>>,
+    },
+    RescheduleReminder {
+        operation_id: OperationId,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DismissReminder {
+        operation_id: OperationId,
+        task_id: TaskId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    AcquireReminderLease {
+        now: Timestamp,
+        lease_secs: u64,
+        reply: oneshot::Sender<Result<ReminderDeliveryLease, RepositoryError>>,
+    },
+    RenewReminderLease {
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        lease_secs: u64,
+        reply: oneshot::Sender<Result<ReminderDeliveryLease, RepositoryError>>,
+    },
+    ReleaseReminderLease {
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<(), RepositoryError>>,
+    },
+    ClaimDueReminders {
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        limit: u32,
+        claim_secs: u64,
+        reply: oneshot::Sender<Result<Vec<ClaimedReminder>, RepositoryError>>,
+    },
+    SettleReminderDelivered {
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        claim_attempt: u32,
+        channel: ReminderChannel,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<(), RepositoryError>>,
+    },
+    SettleReminderFailed {
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        claim_attempt: u32,
+        error: ReminderFailureCode,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<(), RepositoryError>>,
+    },
+    MarkOwnerLostReminders {
+        fence_term: ReminderFenceTerm,
+        now: Timestamp,
+        limit: u32,
+        reply: oneshot::Sender<Result<u32, RepositoryError>>,
+    },
+    NextReminderWakeAt {
+        reply: oneshot::Sender<Result<Option<Timestamp>, RepositoryError>>,
+    },
+    ListTimeblockingRange {
+        query: TimeblockingRangeQuery,
+        reply: oneshot::Sender<Result<TimeblockingRangePage, RepositoryError>>,
+    },
+    CreateTimeBlock {
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        draft: TimeBlockDraft,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PatchTimeBlock {
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        patch: TimeBlockPatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteTimeBlock {
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    CreateTimeSlot {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        draft: TimeSlotDraft,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PatchTimeSlot {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        patch: TimeSlotPatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteTimeSlot {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    AppendSlotTask {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    RemoveSlotTask {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ReorderSlotTasks {
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        ordered_ids: Vec<TaskId>,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    SetTimeBlockRange {
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        range: TimeBlockRangePatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PreviewReplanPastBlocks {
+        temporal: TemporalContext,
+        reply: oneshot::Sender<Result<ReplanPastBlocksPreview, RepositoryError>>,
+    },
+    ReplanPastBlocks {
+        operation_id: OperationId,
+        action: ReplanPastBlocksAction,
+        expected_as_of_date: Date,
+        expected_candidate_ids: Vec<TimeBlockId>,
+        now: Timestamp,
+        temporal: TemporalContext,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
     #[cfg(test)]
     Diagnostics(oneshot::Sender<Result<Diagnostics, RepositoryError>>),
     #[cfg(test)]
@@ -1110,6 +1630,7 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                 operation_id,
                 task_id,
                 now,
+                temporal,
                 reply,
             } => {
                 let _ = reply.send(task_ops::complete_task(
@@ -1117,12 +1638,14 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     operation_id,
                     task_id,
                     now,
+                    temporal,
                 ));
             }
             Command::UncompleteTask {
                 operation_id,
                 task_id,
                 now,
+                temporal,
                 reply,
             } => {
                 let _ = reply.send(task_ops::uncomplete_task(
@@ -1130,6 +1653,7 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     operation_id,
                     task_id,
                     now,
+                    temporal,
                 ));
             }
             Command::CancelTask {
@@ -1206,6 +1730,7 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                 task_ids,
                 action,
                 now,
+                temporal,
                 reply,
             } => {
                 let _ = reply.send(task_ops::bulk_tasks(
@@ -1214,6 +1739,7 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     task_ids,
                     action,
                     now,
+                    temporal,
                 ));
             }
             Command::ListTasks {
@@ -1222,6 +1748,9 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                 reply,
             } => {
                 let _ = reply.send(query_ops::list_tasks(connection, query, as_of));
+            }
+            Command::ListAnalysisTasks { as_of, reply } => {
+                let _ = reply.send(query_ops::list_analysis_tasks(connection, as_of));
             }
             Command::ListCatalog(reply) => {
                 let _ = reply.send(catalog_ops::list_catalog(connection));
@@ -1572,6 +2101,304 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     now,
                 ));
             }
+            Command::ListTaskReminders {
+                task_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::list_task_reminders(connection, task_id, now));
+            }
+            Command::RescheduleReminder {
+                operation_id,
+                task_id,
+                remind_at,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::reschedule_reminder(
+                    connection,
+                    operation_id,
+                    task_id,
+                    remind_at,
+                    now,
+                ));
+            }
+            Command::DismissReminder {
+                operation_id,
+                task_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::dismiss_reminder(
+                    connection,
+                    operation_id,
+                    task_id,
+                    now,
+                ));
+            }
+            Command::AcquireReminderLease {
+                now,
+                lease_secs,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::acquire_reminder_lease(
+                    connection, now, lease_secs,
+                ));
+            }
+            Command::RenewReminderLease {
+                fence_term,
+                now,
+                lease_secs,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::renew_reminder_lease(
+                    connection, fence_term, now, lease_secs,
+                ));
+            }
+            Command::ReleaseReminderLease {
+                fence_term,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::release_reminder_lease(
+                    connection, fence_term, now,
+                ));
+            }
+            Command::ClaimDueReminders {
+                fence_term,
+                now,
+                limit,
+                claim_secs,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::claim_due_reminders(
+                    connection, fence_term, now, limit, claim_secs,
+                ));
+            }
+            Command::SettleReminderDelivered {
+                fence_term,
+                task_id,
+                remind_at,
+                claim_attempt,
+                channel,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::settle_reminder_delivered(
+                    connection,
+                    fence_term,
+                    task_id,
+                    remind_at,
+                    claim_attempt,
+                    channel,
+                    now,
+                ));
+            }
+            Command::SettleReminderFailed {
+                fence_term,
+                task_id,
+                remind_at,
+                claim_attempt,
+                error,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::settle_reminder_failed(
+                    connection,
+                    fence_term,
+                    task_id,
+                    remind_at,
+                    claim_attempt,
+                    error,
+                    now,
+                ));
+            }
+            Command::MarkOwnerLostReminders {
+                fence_term,
+                now,
+                limit,
+                reply,
+            } => {
+                let _ = reply.send(reminder_ops::mark_owner_lost_reminders(
+                    connection, fence_term, now, limit,
+                ));
+            }
+            Command::NextReminderWakeAt { reply } => {
+                let _ = reply.send(reminder_ops::next_reminder_wake_at(connection));
+            }
+            Command::ListTimeblockingRange { query, reply } => {
+                let _ = reply.send(timeblock_ops::list_timeblocking_range(connection, query));
+            }
+            Command::CreateTimeBlock {
+                operation_id,
+                block_id,
+                draft,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::create_time_block(
+                    connection,
+                    operation_id,
+                    block_id,
+                    draft,
+                    now,
+                ));
+            }
+            Command::PatchTimeBlock {
+                operation_id,
+                block_id,
+                patch,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::patch_time_block(
+                    connection,
+                    operation_id,
+                    block_id,
+                    patch,
+                    now,
+                ));
+            }
+            Command::DeleteTimeBlock {
+                operation_id,
+                block_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::delete_time_block(
+                    connection,
+                    operation_id,
+                    block_id,
+                    now,
+                ));
+            }
+            Command::CreateTimeSlot {
+                operation_id,
+                slot_id,
+                draft,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::create_time_slot(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    draft,
+                    now,
+                ));
+            }
+            Command::PatchTimeSlot {
+                operation_id,
+                slot_id,
+                patch,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::patch_time_slot(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    patch,
+                    now,
+                ));
+            }
+            Command::DeleteTimeSlot {
+                operation_id,
+                slot_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::delete_time_slot(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    now,
+                ));
+            }
+            Command::AppendSlotTask {
+                operation_id,
+                slot_id,
+                task_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::append_slot_task(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    task_id,
+                    now,
+                ));
+            }
+            Command::RemoveSlotTask {
+                operation_id,
+                slot_id,
+                task_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::remove_slot_task(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    task_id,
+                    now,
+                ));
+            }
+            Command::ReorderSlotTasks {
+                operation_id,
+                slot_id,
+                ordered_ids,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::reorder_slot_tasks(
+                    connection,
+                    operation_id,
+                    slot_id,
+                    ordered_ids,
+                    now,
+                ));
+            }
+            Command::SetTimeBlockRange {
+                operation_id,
+                block_id,
+                range,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::set_time_block_range(
+                    connection,
+                    operation_id,
+                    block_id,
+                    range,
+                    now,
+                ));
+            }
+            Command::PreviewReplanPastBlocks { temporal, reply } => {
+                let _ = reply.send(timeblock_ops::preview_replan_past_blocks(
+                    connection, temporal,
+                ));
+            }
+            Command::ReplanPastBlocks {
+                operation_id,
+                action,
+                expected_as_of_date,
+                expected_candidate_ids,
+                now,
+                temporal,
+                reply,
+            } => {
+                let _ = reply.send(timeblock_ops::replan_past_blocks(
+                    connection,
+                    operation_id,
+                    action,
+                    expected_as_of_date,
+                    expected_candidate_ids,
+                    now,
+                    temporal,
+                ));
+            }
             #[cfg(test)]
             Command::Diagnostics(reply) => {
                 let _ = reply.send(read_diagnostics(connection));
@@ -1595,7 +2422,22 @@ fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
     connection.pragma_update(None, "synchronous", "NORMAL")?;
     connection.pragma_update(None, "wal_autocheckpoint", WAL_AUTOCHECKPOINT_PAGES)?;
     connection.pragma_update(None, "journal_size_limit", WAL_JOURNAL_SIZE_LIMIT_BYTES)?;
-    migration::migrate(&mut connection)?;
+    // Profile ownership is held by ProfileOwner before this runs. migrate needs the
+    // profile directory so an existing v2 database can write a verified pre-v3 backup
+    // beside the live DB under backups/pre-migration/.
+    let profile_dir = path.parent().ok_or_else(|| {
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::Unknown,
+                extended_code: 1,
+            },
+            Some(format!(
+                "database path '{}' has no parent profile directory",
+                path.display()
+            )),
+        )
+    })?;
+    migration::migrate(&mut connection, profile_dir)?;
     Ok(connection)
 }
 

@@ -3,8 +3,8 @@
 use jiff::Timestamp;
 use junban_app::{RepositoryError, TaskPatch};
 use junban_domain::{
-    OperationId, Task, TaskActivity, TaskActivityAction, ValidationError, validate_parent_chain,
-    validate_task_tags,
+    OperationId, Task, TaskActivity, TaskActivityAction, ValidationError,
+    resolve_recurrence_anchor, validate_parent_chain, validate_task_tags,
 };
 use rusqlite::Transaction;
 
@@ -44,6 +44,9 @@ pub(crate) fn map_transition(error: ValidationError) -> RepositoryError {
 }
 
 pub(crate) fn apply_patch(task: &mut Task, patch: &TaskPatch) -> Result<(), RepositoryError> {
+    let before_due_date = task.due_date;
+    let before_due_time = task.due_time.clone();
+    let before_rule = task.recurrence_rule.clone();
     if let Some(title) = &patch.title {
         task.title = title.clone();
     }
@@ -92,6 +95,18 @@ pub(crate) fn apply_patch(task: &mut Task, patch: &TaskPatch) -> Result<(), Repo
     }
     if let Some(rule) = &patch.recurrence_rule {
         task.recurrence_rule = rule.clone();
+    }
+    if let Some(remind_at) = &patch.remind_at {
+        task.remind_at = *remind_at;
+    }
+    let due_changed = task.due_date != before_due_date || task.due_time != before_due_time;
+    let rule_changed = task.recurrence_rule != before_rule;
+    if due_changed || rule_changed {
+        // Manual due/representation/rule changes reset monthly/yearly anchors.
+        task.recurrence_anchor_day =
+            resolve_recurrence_anchor(task.recurrence_rule.as_ref(), task.due_date, None);
+    } else if let Some(anchor) = &patch.recurrence_anchor_day {
+        task.recurrence_anchor_day = *anchor;
     }
     if task.section_id.is_some() && task.project_id.is_none() {
         return Err(validation(ValidationError::Invalid {
@@ -251,6 +266,33 @@ pub(crate) fn diff_task_fields(
             .recurrence_rule
             .as_ref()
             .map(|rule| rule.as_str().to_owned()),
+    );
+    push(
+        "remind_at",
+        before.remind_at.map(|value| value.to_string()),
+        after.remind_at.map(|value| value.to_string()),
+    );
+    push(
+        "recurrence_anchor_day",
+        before
+            .recurrence_anchor_day
+            .map(|day| day.get().to_string()),
+        after.recurrence_anchor_day.map(|day| day.get().to_string()),
+    );
+    push(
+        "recurrence_source_id",
+        before.recurrence_source_id.map(|id| id.to_string()),
+        after.recurrence_source_id.map(|id| id.to_string()),
+    );
+    push(
+        "completion_operation_id",
+        before.completion_operation_id.map(|id| id.to_string()),
+        after.completion_operation_id.map(|id| id.to_string()),
+    );
+    push(
+        "cancelled_at",
+        before.cancelled_at.map(|value| value.to_string()),
+        after.cancelled_at.map(|value| value.to_string()),
     );
     push(
         "status",

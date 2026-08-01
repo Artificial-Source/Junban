@@ -5,10 +5,16 @@
 
 import { isCommittedEvent, isKnownEventType, isResyncRequired } from "./events";
 import type {
+  AcquireReminderLeaseRequest,
   AddRelationRequest,
+  AppendTimeSlotTaskRequest,
   ApplyTemplateRequest,
   BulkTasksRequest,
+  CalendarTasksParams,
+  CalendarTasksResponse,
   CatalogResponse,
+  ClaimRemindersRequest,
+  ClaimRemindersResponse,
   CommentListResponse,
   CommittedEventDto,
   CreateCommentRequest,
@@ -18,10 +24,20 @@ import type {
   CreateTagRequest,
   CreateTaskRequest,
   CreateTemplateRequest,
+  CreateTimeBlockRequest,
+  CreateTimeSlotRequest,
+  DailyPlanResponse,
+  DopamineMenuResponse,
+  EatTheFrogResponse,
+  EndOfDayResponse,
   ErrorEnvelope,
   HealthResponse,
+  MarkOwnerLostRemindersRequest,
+  MarkOwnerLostRemindersResponse,
   MoveTaskRequest,
+  MoveTimeBlockRequest,
   MutationResponse,
+  NudgesResponse,
   ParseFilterRequest,
   ParseQuickEntryRequest,
   ParseTextImportRequest,
@@ -33,14 +49,36 @@ import type {
   PatchTagRequest,
   PatchTaskRequest,
   PatchTemplateRequest,
+  PatchTimeBlockRequest,
+  PatchTimeSlotRequest,
   ProfileResponse,
   QuickEntryDto,
   RelationListResponse,
+  ReleaseReminderLeaseRequest,
+  ReminderDeliveryLeaseDto,
+  ReminderListResponse,
+  RenewReminderLeaseRequest,
   ReorderTasksRequest,
+  ReplaceTimeSlotTasksRequest,
+  ReplanTimeBlocksPreviewResponse,
+  ReplanTimeBlocksRequest,
+  RescheduleReminderRequest,
+  ResizeTimeBlockRequest,
+  SettleReminderDeliveredRequest,
+  SettleReminderFailedRequest,
+  StatsParams,
+  StatsResponse,
   TaskActivityResponse,
+  TaskJarResponse,
   TaskListParams,
   TaskListResponse,
+  TemporalSettingsResponse,
   TextImportResponse,
+  TimeBlockListResponse,
+  TimeBlockRangeParams,
+  TimeSlotListResponse,
+  TimeSlotRangeParams,
+  WeeklyReviewResponse,
 } from "./types";
 
 export type * from "./types";
@@ -419,6 +457,41 @@ function toQuery(params: TaskListParams | undefined): string {
   return qs ? `?${qs}` : "";
 }
 
+function toSimpleQuery(
+  params: Record<string, string | number | boolean | null | undefined> | undefined,
+): string {
+  if (!params) return "";
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    search.set(key, String(value));
+  }
+  const qs = search.toString();
+  return qs ? `?${qs}` : "";
+}
+
+/** Authenticated JSON POST/PUT without an idempotency key (control-plane). */
+async function sendJsonNoIdempotency<T>(
+  path: string,
+  options: {
+    method: "POST" | "PUT" | "PATCH" | "DELETE";
+    body?: unknown;
+  },
+): Promise<T> {
+  return withNetworkRetry(async () => {
+    const headers =
+      options.body === undefined
+        ? authHeaders()
+        : { ...authHeaders(), "Content-Type": "application/json" };
+    const response = await rawFetch(path, {
+      method: options.method,
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+    return parseResponse<T>(response);
+  });
+}
+
 async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await rawFetch(path, {
     ...init,
@@ -431,7 +504,7 @@ async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
 async function sendMutation<T>(
   path: string,
   options: {
-    method: "POST" | "PATCH" | "DELETE";
+    method: "POST" | "PUT" | "PATCH" | "DELETE";
     operationId: string;
     body?: unknown;
     json?: boolean;
@@ -764,6 +837,264 @@ export async function parseTextImport(body: ParseTextImportRequest): Promise<Tex
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3: calendar / planning / stats / motivation / nudges / settings
+// ---------------------------------------------------------------------------
+
+/** Bounded calendar range read. Civil `from`/`to` are required by the server. */
+export async function listCalendarTasks(
+  params: CalendarTasksParams,
+): Promise<CalendarTasksResponse> {
+  return getJson<CalendarTasksResponse>(`/api/v1/calendar/tasks${toSimpleQuery(params)}`);
+}
+
+export async function getDailyPlan(): Promise<DailyPlanResponse> {
+  return getJson<DailyPlanResponse>("/api/v1/planning/daily");
+}
+
+export async function getEndOfDayPlan(): Promise<EndOfDayResponse> {
+  return getJson<EndOfDayResponse>("/api/v1/planning/end-of-day");
+}
+
+export async function getWeeklyReview(): Promise<WeeklyReviewResponse> {
+  return getJson<WeeklyReviewResponse>("/api/v1/planning/weekly");
+}
+
+export async function getTemporalSettings(): Promise<TemporalSettingsResponse> {
+  return getJson<TemporalSettingsResponse>("/api/v1/settings/temporal");
+}
+
+/** Server-authoritative stats aggregates for an inclusive civil range. */
+export async function getStats(params: StatsParams): Promise<StatsResponse> {
+  return getJson<StatsResponse>(`/api/v1/stats${toSimpleQuery(params)}`);
+}
+
+export async function getNudges(): Promise<NudgesResponse> {
+  return getJson<NudgesResponse>("/api/v1/nudges");
+}
+
+export async function getDopamineMenu(): Promise<DopamineMenuResponse> {
+  return getJson<DopamineMenuResponse>("/api/v1/motivation/dopamine-menu");
+}
+
+export async function getEatTheFrog(): Promise<EatTheFrogResponse> {
+  return getJson<EatTheFrogResponse>("/api/v1/motivation/eat-the-frog");
+}
+
+export async function getTaskJar(): Promise<TaskJarResponse> {
+  return getJson<TaskJarResponse>("/api/v1/motivation/task-jar");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: time blocks / slots
+// ---------------------------------------------------------------------------
+
+export async function listTimeBlocks(
+  params?: TimeBlockRangeParams,
+): Promise<TimeBlockListResponse> {
+  return getJson<TimeBlockListResponse>(`/api/v1/time-blocks${toSimpleQuery(params)}`);
+}
+
+export async function createTimeBlock(
+  body: CreateTimeBlockRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation("/api/v1/time-blocks", { method: "POST", operationId, body });
+}
+
+export async function patchTimeBlock(
+  timeBlockId: string,
+  body: PatchTimeBlockRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation(`/api/v1/time-blocks/${timeBlockId}`, {
+    method: "PATCH",
+    operationId,
+    body,
+  });
+}
+
+export async function deleteTimeBlock(
+  timeBlockId: string,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation(`/api/v1/time-blocks/${timeBlockId}`, {
+    method: "DELETE",
+    operationId,
+  });
+}
+
+export async function moveTimeBlock(
+  timeBlockId: string,
+  body: MoveTimeBlockRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation(`/api/v1/time-blocks/${timeBlockId}/move`, {
+    method: "POST",
+    operationId,
+    body,
+  });
+}
+
+export async function resizeTimeBlock(
+  timeBlockId: string,
+  body: ResizeTimeBlockRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation(`/api/v1/time-blocks/${timeBlockId}/resize`, {
+    method: "POST",
+    operationId,
+    body,
+  });
+}
+
+export async function previewReplanTimeBlocks(): Promise<ReplanTimeBlocksPreviewResponse> {
+  return getJson<ReplanTimeBlocksPreviewResponse>("/api/v1/time-blocks/replan/preview");
+}
+
+export async function replanTimeBlocks(
+  body: ReplanTimeBlocksRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation("/api/v1/time-blocks/replan", { method: "POST", operationId, body });
+}
+
+export async function listTimeSlots(params?: TimeSlotRangeParams): Promise<TimeSlotListResponse> {
+  return getJson<TimeSlotListResponse>(`/api/v1/time-slots${toSimpleQuery(params)}`);
+}
+
+export async function createTimeSlot(
+  body: CreateTimeSlotRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation("/api/v1/time-slots", { method: "POST", operationId, body });
+}
+
+export async function patchTimeSlot(
+  timeSlotId: string,
+  body: PatchTimeSlotRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation(`/api/v1/time-slots/${timeSlotId}`, {
+    method: "PATCH",
+    operationId,
+    body,
+  });
+}
+
+export async function deleteTimeSlot(
+  timeSlotId: string,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation(`/api/v1/time-slots/${timeSlotId}`, {
+    method: "DELETE",
+    operationId,
+  });
+}
+
+export async function replaceTimeSlotTasks(
+  timeSlotId: string,
+  body: ReplaceTimeSlotTasksRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation(`/api/v1/time-slots/${timeSlotId}/tasks`, {
+    method: "PUT",
+    operationId,
+    body,
+    json: true,
+  });
+}
+
+export async function appendTimeSlotTask(
+  timeSlotId: string,
+  body: AppendTimeSlotTaskRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation(`/api/v1/time-slots/${timeSlotId}/tasks`, {
+    method: "POST",
+    operationId,
+    body,
+  });
+}
+
+export async function removeTimeSlotTask(
+  timeSlotId: string,
+  taskId: string,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation(`/api/v1/time-slots/${timeSlotId}/tasks/${taskId}`, {
+    method: "DELETE",
+    operationId,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: reminders (user mutations + control-plane delivery)
+// ---------------------------------------------------------------------------
+
+export async function listTaskReminders(taskId: string): Promise<ReminderListResponse> {
+  return getJson<ReminderListResponse>(`/api/v1/tasks/${taskId}/reminders`);
+}
+
+export async function rescheduleReminder(
+  taskId: string,
+  body: RescheduleReminderRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation(`/api/v1/tasks/${taskId}/reminders/reschedule`, {
+    method: "POST",
+    operationId,
+    body,
+  });
+}
+
+export async function dismissReminder(
+  taskId: string,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation(`/api/v1/tasks/${taskId}/reminders/dismiss`, {
+    method: "POST",
+    operationId,
+  });
+}
+
+/** Control-plane lease acquire — no user revision / idempotency key. */
+export async function acquireReminderLease(
+  body: AcquireReminderLeaseRequest = {},
+): Promise<ReminderDeliveryLeaseDto> {
+  return sendJsonNoIdempotency("/api/v1/reminders/lease", { method: "POST", body });
+}
+
+export async function renewReminderLease(
+  body: RenewReminderLeaseRequest,
+): Promise<ReminderDeliveryLeaseDto> {
+  return sendJsonNoIdempotency("/api/v1/reminders/lease/renew", { method: "POST", body });
+}
+
+export async function releaseReminderLease(body: ReleaseReminderLeaseRequest): Promise<void> {
+  return sendJsonNoIdempotency("/api/v1/reminders/lease/release", { method: "POST", body });
+}
+
+export async function claimDueReminders(
+  body: ClaimRemindersRequest,
+): Promise<ClaimRemindersResponse> {
+  return sendJsonNoIdempotency("/api/v1/reminders/claim", { method: "POST", body });
+}
+
+export async function settleReminderDelivered(body: SettleReminderDeliveredRequest): Promise<void> {
+  return sendJsonNoIdempotency("/api/v1/reminders/settle/delivered", { method: "POST", body });
+}
+
+export async function settleReminderFailed(body: SettleReminderFailedRequest): Promise<void> {
+  return sendJsonNoIdempotency("/api/v1/reminders/settle/failed", { method: "POST", body });
+}
+
+export async function markOwnerLostReminders(
+  body: MarkOwnerLostRemindersRequest,
+): Promise<MarkOwnerLostRemindersResponse> {
+  return sendJsonNoIdempotency("/api/v1/reminders/owner-lost", { method: "POST", body });
+}
+
+// ---------------------------------------------------------------------------
 // Undo
 // ---------------------------------------------------------------------------
 
@@ -983,6 +1314,100 @@ export function subscribeToEvents(
 
   void connect();
 
+  return () => {
+    stopped = true;
+    controller.abort();
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Reminder wake SSE (control-plane, not revisioned)
+// ---------------------------------------------------------------------------
+
+export type ReminderWakeHandler = (payload: { sequence: number; server_now: string }) => void;
+
+/**
+ * Subscribe to content-free `reminders_due` wakes.
+ * Authenticated fetch stream — no EventSource (Authorization header required).
+ * No polling; the caller claims work only on wake or after lease acquire.
+ */
+export function subscribeReminderWakes(onWake: ReminderWakeHandler): () => void {
+  const controller = new AbortController();
+  let stopped = false;
+  let backoffMs = DEFAULT_SSE_BACKOFF_MS;
+
+  const connect = async () => {
+    while (!stopped) {
+      try {
+        const response = await rawFetch(
+          "/api/v1/reminders/events",
+          {
+            headers: { ...authHeaders() },
+            signal: controller.signal,
+          },
+          { timeoutMs: null },
+        );
+        if (response.status === 401 || response.status === 403) return;
+        if (
+          !response.ok ||
+          !response.body ||
+          !response.headers.get("content-type")?.includes("text/event-stream")
+        ) {
+          await reconnectDelay(backoffMs, controller.signal);
+          backoffMs = nextBackoff(backoffMs);
+          continue;
+        }
+        backoffMs = DEFAULT_SSE_BACKOFF_MS;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let currentData = "";
+        while (!stopped) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const rawLine of lines) {
+            const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+            if (line.startsWith("data:")) {
+              const dataValue = line.slice(5).startsWith(" ") ? line.slice(6) : line.slice(5);
+              currentData += (currentData ? "\n" : "") + dataValue;
+            } else if (line === "" && currentData) {
+              try {
+                const payload = JSON.parse(currentData) as {
+                  sequence?: number;
+                  server_now?: string;
+                };
+                if (
+                  typeof payload.sequence === "number" &&
+                  typeof payload.server_now === "string"
+                ) {
+                  onWake({ sequence: payload.sequence, server_now: payload.server_now });
+                } else {
+                  // Content-free wakes may still arrive as empty/minimal frames.
+                  onWake({ sequence: 0, server_now: new Date().toISOString() });
+                }
+              } catch {
+                onWake({ sequence: 0, server_now: new Date().toISOString() });
+              }
+              currentData = "";
+            }
+          }
+        }
+        if (!stopped) {
+          await reconnectDelay(backoffMs, controller.signal);
+          backoffMs = nextBackoff(backoffMs);
+        }
+      } catch {
+        if (stopped || controller.signal.aborted) break;
+        await reconnectDelay(backoffMs, controller.signal);
+        backoffMs = nextBackoff(backoffMs);
+      }
+    }
+  };
+
+  void connect();
   return () => {
     stopped = true;
     controller.abort();

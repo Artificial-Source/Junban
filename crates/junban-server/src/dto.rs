@@ -1,19 +1,24 @@
 //! Explicit transport DTOs. Domain and repository types are never leaked by accident.
 
-use jiff::{Timestamp, civil::Date};
+use jiff::{Timestamp, civil::Date, civil::Time};
 use junban_app::{
     AffectedIds, BulkAction, BulkSchedule, BulkTagChange, CatalogSnapshot, CommittedEvent,
     CommittedMutation, MoveTarget, OrderAnchor, ProjectDraft, ProjectPatch, ReorderScope,
     ResourceRef, ResourceSnapshot, ResourceType, ResyncScope, SavedFilterDraft, SavedFilterPatch,
     SectionDraft, SectionPatch, TagDraft, TagPatch, TaskListPage, TaskPatch, TemplateApply,
-    TemplateDraft, TemplatePatch,
+    TemplateDraft, TemplatePatch, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
 };
 use junban_domain::{
-    ActualMinutes, Comment, DreadLevel, EntityName, EstimatedMinutes, FilterQuery, HexColor,
-    IconText, LocalDueTime, MarkdownText, Priority, Project, ProjectId, ProjectView, QuickEntry,
-    RecurrenceRule, RelationKind, SavedFilter, Section, SectionId, SortOrder, Tag, TagId, TagName,
-    Task, TaskActivity, TaskActivityAction, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort,
-    TaskStatus, TaskTitle, TaskViewPreset, Template, TemplateId, TextImportDraft, ValidationError,
+    ActualMinutes, CivilTimeRange, Comment, CompletionTimeBucket, CompletionTimeBuckets,
+    DailyStatBucket, DreadLevel, EntityName, EstimatedMinutes, FilterQuery, HexColor, IconText,
+    LocalDueTime, MarkdownText, NeglectedProjectFact, NeglectedProjectReason, NudgeFacts,
+    NudgeRuleFacts, NudgeRuleKind, Priority, Project, ProjectId, ProjectView, QuickEntry,
+    RecurrenceRule, RelationKind, SavedFilter, Section, SectionId, SortOrder, StatsSummary, Tag,
+    TagId, TagName, Task, TaskActivity, TaskActivityAction, TaskDraft, TaskId, TaskQuery,
+    TaskRelation, TaskSort, TaskStatus, TaskTitle, TaskViewPreset, Template, TemplateId,
+    TextImportDraft, TimeBlock, TimeBlockDraft, TimeSlot, TimeSlotDraft, TimeSlotId, TimeZoneName,
+    UncompleteOutcome, ValidationError, WeekStart, WeeklyDayStats, WeeklyReviewSummary,
+    WeeklySuggestion,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -48,6 +53,23 @@ impl From<TaskStatusDto> for TaskStatus {
             TaskStatusDto::Pending => Self::Pending,
             TaskStatusDto::Completed => Self::Completed,
             TaskStatusDto::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+/// How an ordinary uncomplete handled recurring work.
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UncompleteOutcomeDto {
+    Exact,
+    SourceOnly,
+}
+
+impl From<UncompleteOutcome> for UncompleteOutcomeDto {
+    fn from(value: UncompleteOutcome) -> Self {
+        match value {
+            UncompleteOutcome::Exact => Self::Exact,
+            UncompleteOutcome::SourceOnly => Self::SourceOnly,
         }
     }
 }
@@ -189,6 +211,9 @@ pub struct TaskDto {
     #[schema(value_type = Option<String>, format = DateTime, nullable = true)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deadline: Option<Timestamp>,
+    #[schema(value_type = Option<String>, format = DateTime, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remind_at: Option<Timestamp>,
     pub someday: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimated_minutes: Option<u32>,
@@ -231,6 +256,7 @@ impl From<Task> for TaskDto {
             due_date: task.due_date,
             due_time: task.due_time.as_ref().map(Into::into),
             deadline: task.deadline,
+            remind_at: task.remind_at,
             someday: task.someday,
             estimated_minutes: task.estimated_minutes.map(EstimatedMinutes::get),
             actual_minutes: task.actual_minutes.map(ActualMinutes::get),
@@ -395,6 +421,8 @@ impl PatchTaskRequest {
             },
             sort_order: self.sort_order.map(SortOrder::new),
             recurrence_rule: map_opt_null(self.recurrence_rule, RecurrenceRule::new, request_id)?,
+            // Phase 3 remind/anchor fields are owned by a later server wave.
+            ..TaskPatch::default()
         })
     }
 }
@@ -1290,6 +1318,8 @@ pub enum ResourceTypeDto {
     Comment,
     Relation,
     Operation,
+    TimeBlock,
+    TimeSlot,
 }
 
 impl From<ResourceType> for ResourceTypeDto {
@@ -1304,6 +1334,8 @@ impl From<ResourceType> for ResourceTypeDto {
             ResourceType::Comment => Self::Comment,
             ResourceType::Relation => Self::Relation,
             ResourceType::Operation => Self::Operation,
+            ResourceType::TimeBlock => Self::TimeBlock,
+            ResourceType::TimeSlot => Self::TimeSlot,
         }
     }
 }
@@ -1333,6 +1365,8 @@ pub enum ResourceSnapshotDto {
     Template { template: TemplateDto },
     SavedFilter { saved_filter: SavedFilterDto },
     Comment { comment: CommentDto },
+    TimeBlock { time_block: TimeBlockDto },
+    TimeSlot { time_slot: TimeSlotDto },
 }
 
 impl From<ResourceSnapshot> for ResourceSnapshotDto {
@@ -1355,7 +1389,439 @@ impl From<ResourceSnapshot> for ResourceSnapshotDto {
             ResourceSnapshot::Comment { comment } => Self::Comment {
                 comment: comment.into(),
             },
+            ResourceSnapshot::TimeBlock { time_block } => Self::TimeBlock {
+                time_block: time_block.into(),
+            },
+            ResourceSnapshot::TimeSlot { time_slot } => Self::TimeSlot {
+                time_slot: time_slot.into(),
+            },
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TimeBlockDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub id: String,
+    /// Stable response-only UI key: `{id}:{civil_date}` (owner id for virtual rows).
+    pub occurrence_key: String,
+    pub title: String,
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub start: String,
+    pub end: String,
+    pub time_zone: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    pub locked: bool,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence_rule: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence_parent_id: Option<String>,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: Timestamp,
+    pub revision: u64,
+}
+
+impl From<TimeBlock> for TimeBlockDto {
+    fn from(block: TimeBlock) -> Self {
+        let id = block.id.to_string();
+        let occurrence_key = format!("{id}:{}", block.range.date);
+        Self {
+            id,
+            occurrence_key,
+            title: block.title.to_string(),
+            date: block.range.date,
+            start: block.range.start.to_string(),
+            end: block.range.end.to_string(),
+            time_zone: block.range.time_zone.to_string(),
+            color: block.color.map(|color| color.to_string()),
+            locked: block.locked,
+            task_id: block.task_id.map(|id| id.to_string()),
+            slot_id: block.slot_id.map(|id| id.to_string()),
+            recurrence_rule: block.recurrence_rule.map(|rule| rule.to_string()),
+            recurrence_parent_id: block.recurrence_parent_id.map(|id| id.to_string()),
+            created_at: block.created_at,
+            updated_at: block.updated_at,
+            revision: block.revision,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TimeSlotDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub id: String,
+    /// Stable response-only UI key: `{id}:{civil_date}` (owner id for virtual rows).
+    pub occurrence_key: String,
+    pub title: String,
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub start: String,
+    pub end: String,
+    pub time_zone: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence_rule: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence_parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_ids: Vec<String>,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: Timestamp,
+    pub revision: u64,
+}
+
+impl From<TimeSlot> for TimeSlotDto {
+    fn from(slot: TimeSlot) -> Self {
+        let id = slot.id.to_string();
+        let occurrence_key = format!("{id}:{}", slot.range.date);
+        Self {
+            id,
+            occurrence_key,
+            title: slot.title.to_string(),
+            date: slot.range.date,
+            start: slot.range.start.to_string(),
+            end: slot.range.end.to_string(),
+            time_zone: slot.range.time_zone.to_string(),
+            color: slot.color.map(|color| color.to_string()),
+            project_id: slot.project_id.map(|id| id.to_string()),
+            recurrence_rule: slot.recurrence_rule.map(|rule| rule.to_string()),
+            recurrence_parent_id: slot.recurrence_parent_id.map(|id| id.to_string()),
+            task_ids: slot
+                .task_ids
+                .as_slice()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            created_at: slot.created_at,
+            updated_at: slot.updated_at,
+            revision: slot.revision,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TimeBlockListResponse {
+    pub time_blocks: Vec<TimeBlockDto>,
+    pub revision: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReplanTimeBlocksPreviewResponse {
+    #[schema(value_type = String, format = Date)]
+    pub as_of_date: Date,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub candidate_ids: Vec<String>,
+    pub time_blocks: Vec<TimeBlockDto>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TimeSlotListResponse {
+    pub time_slots: Vec<TimeSlotDto>,
+    pub revision: u64,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateTimeBlockRequest {
+    pub title: String,
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    /// Civil wall-clock time `HH:MM[:SS]`.
+    pub start: String,
+    /// Civil wall-clock time `HH:MM[:SS]`.
+    pub end: String,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub locked: bool,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(default)]
+    pub slot_id: Option<String>,
+    #[serde(default)]
+    pub recurrence_rule: Option<String>,
+}
+
+impl CreateTimeBlockRequest {
+    pub fn into_draft(self, request_id: &RequestId) -> Result<TimeBlockDraft, ApiError> {
+        let range = parse_civil_range(
+            self.date,
+            &self.start,
+            &self.end,
+            self.time_zone.as_deref(),
+            request_id,
+        )?;
+        Ok(TimeBlockDraft {
+            title: EntityName::new(self.title).map_err(|e| validation_error(e, request_id))?,
+            range,
+            color: map_opt(self.color, HexColor::new, request_id)?,
+            locked: self.locked,
+            task_id: map_opt(self.task_id, |s| TaskId::parse(&s), request_id)?,
+            slot_id: map_opt(self.slot_id, |s| TimeSlotId::parse(&s), request_id)?,
+            recurrence_rule: map_opt(self.recurrence_rule, RecurrenceRule::new, request_id)?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PatchTimeBlockRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[schema(value_type = Option<String>, format = Date)]
+    #[serde(default)]
+    pub date: Option<Date>,
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default)]
+    pub end: Option<String>,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(nullable = true)]
+    pub color: Option<Option<String>>,
+    #[serde(default)]
+    pub locked: Option<bool>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(value_type = Option<Option<String>>, format = Uuid, nullable = true)]
+    pub task_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(value_type = Option<Option<String>>, format = Uuid, nullable = true)]
+    pub slot_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(nullable = true)]
+    pub recurrence_rule: Option<Option<String>>,
+}
+
+impl PatchTimeBlockRequest {
+    pub fn into_patch(self, request_id: &RequestId) -> Result<TimeBlockPatch, ApiError> {
+        Ok(TimeBlockPatch {
+            title: map_opt(self.title, EntityName::new, request_id)?,
+            range: parse_time_block_range_patch(
+                self.date,
+                self.start.as_deref(),
+                self.end.as_deref(),
+                self.time_zone.as_deref(),
+                request_id,
+            )?,
+            color: map_opt_null(self.color, HexColor::new, request_id)?,
+            locked: self.locked,
+            task_id: map_opt_null(self.task_id, |s| TaskId::parse(&s), request_id)?,
+            slot_id: map_opt_null(self.slot_id, |s| TimeSlotId::parse(&s), request_id)?,
+            recurrence_rule: map_opt_null(self.recurrence_rule, RecurrenceRule::new, request_id)?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveTimeBlockRequest {
+    #[schema(value_type = Option<String>, format = Date)]
+    #[serde(default)]
+    pub date: Option<Date>,
+    pub start: String,
+    pub end: String,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+}
+
+impl MoveTimeBlockRequest {
+    pub fn into_range(self, request_id: &RequestId) -> Result<TimeBlockRangePatch, ApiError> {
+        parse_time_block_range_patch(
+            self.date,
+            Some(&self.start),
+            Some(&self.end),
+            self.time_zone.as_deref(),
+            request_id,
+        )?
+        .ok_or_else(|| invalid_time_block_range(request_id))
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResizeTimeBlockRequest {
+    #[schema(value_type = Option<String>, format = Date)]
+    #[serde(default)]
+    pub date: Option<Date>,
+    pub start: String,
+    pub end: String,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+}
+
+impl ResizeTimeBlockRequest {
+    pub fn into_range(self, request_id: &RequestId) -> Result<TimeBlockRangePatch, ApiError> {
+        parse_time_block_range_patch(
+            self.date,
+            Some(&self.start),
+            Some(&self.end),
+            self.time_zone.as_deref(),
+            request_id,
+        )?
+        .ok_or_else(|| invalid_time_block_range(request_id))
+    }
+}
+
+/// Automatic replan for unlocked blocks in the prior seven complete civil days.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReplanTimeBlocksRequest {
+    pub action: ReplanTimeBlocksActionDto,
+    #[schema(value_type = String, format = Date)]
+    pub expected_as_of_date: Date,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub expected_candidate_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplanTimeBlocksActionDto {
+    MoveToToday,
+    MoveToTomorrow,
+    Delete,
+}
+
+impl From<ReplanTimeBlocksActionDto> for junban_app::ReplanPastBlocksAction {
+    fn from(action: ReplanTimeBlocksActionDto) -> Self {
+        match action {
+            ReplanTimeBlocksActionDto::MoveToToday => Self::MoveToToday,
+            ReplanTimeBlocksActionDto::MoveToTomorrow => Self::MoveToTomorrow,
+            ReplanTimeBlocksActionDto::Delete => Self::Delete,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateTimeSlotRequest {
+    pub title: String,
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub start: String,
+    pub end: String,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[schema(value_type = Option<String>, format = Uuid, nullable = true)]
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub recurrence_rule: Option<String>,
+}
+
+impl CreateTimeSlotRequest {
+    pub fn into_draft(self, request_id: &RequestId) -> Result<TimeSlotDraft, ApiError> {
+        let range = parse_civil_range(
+            self.date,
+            &self.start,
+            &self.end,
+            self.time_zone.as_deref(),
+            request_id,
+        )?;
+        Ok(TimeSlotDraft {
+            title: EntityName::new(self.title).map_err(|e| validation_error(e, request_id))?,
+            range,
+            color: map_opt(self.color, HexColor::new, request_id)?,
+            project_id: map_opt(self.project_id, |s| ProjectId::parse(&s), request_id)?,
+            recurrence_rule: map_opt(self.recurrence_rule, RecurrenceRule::new, request_id)?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PatchTimeSlotRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[schema(value_type = Option<String>, format = Date)]
+    #[serde(default)]
+    pub date: Option<Date>,
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default)]
+    pub end: Option<String>,
+    #[serde(default)]
+    pub time_zone: Option<String>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(nullable = true)]
+    pub color: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(value_type = Option<Option<String>>, format = Uuid, nullable = true)]
+    pub project_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[schema(nullable = true)]
+    pub recurrence_rule: Option<Option<String>>,
+}
+
+impl PatchTimeSlotRequest {
+    pub fn into_patch(self, request_id: &RequestId) -> Result<TimeSlotPatch, ApiError> {
+        Ok(TimeSlotPatch {
+            title: map_opt(self.title, EntityName::new, request_id)?,
+            range: parse_optional_civil_range(
+                self.date,
+                self.start.as_deref(),
+                self.end.as_deref(),
+                self.time_zone.as_deref(),
+                request_id,
+            )?,
+            color: map_opt_null(self.color, HexColor::new, request_id)?,
+            project_id: map_opt_null(self.project_id, |s| ProjectId::parse(&s), request_id)?,
+            recurrence_rule: map_opt_null(self.recurrence_rule, RecurrenceRule::new, request_id)?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AppendTimeSlotTaskRequest {
+    #[schema(value_type = String, format = Uuid)]
+    pub task_id: String,
+}
+
+impl AppendTimeSlotTaskRequest {
+    pub fn into_task_id(self, request_id: &RequestId) -> Result<TaskId, ApiError> {
+        TaskId::parse(&self.task_id).map_err(|e| validation_error(e, request_id))
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceTimeSlotTasksRequest {
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub task_ids: Vec<String>,
+}
+
+impl ReplaceTimeSlotTasksRequest {
+    pub fn into_task_ids(self, request_id: &RequestId) -> Result<Vec<TaskId>, ApiError> {
+        self.task_ids
+            .into_iter()
+            .map(|id| TaskId::parse(&id))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| validation_error(e, request_id))
     }
 }
 
@@ -1375,6 +1841,10 @@ pub struct AffectedIdsDto {
     pub saved_filter_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comment_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_block_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_slot_ids: Vec<String>,
 }
 
 impl From<AffectedIds> for AffectedIdsDto {
@@ -1391,6 +1861,16 @@ impl From<AffectedIds> for AffectedIdsDto {
                 .map(ToString::to_string)
                 .collect(),
             comment_ids: value.comment_ids.iter().map(ToString::to_string).collect(),
+            time_block_ids: value
+                .time_block_ids
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            time_slot_ids: value
+                .time_slot_ids
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
         }
     }
 }
@@ -1447,12 +1927,16 @@ impl From<CommittedEvent> for CommittedEventDto {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MutationResponse {
     pub event: CommittedEventDto,
+    /// Present only for ordinary uncomplete so clients can distinguish an exact reversal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uncomplete_outcome: Option<UncompleteOutcomeDto>,
 }
 
 impl From<CommittedMutation> for MutationResponse {
     fn from(mutation: CommittedMutation) -> Self {
         Self {
             event: mutation.event.into(),
+            uncomplete_outcome: mutation.uncomplete_outcome.map(Into::into),
         }
     }
 }
@@ -1609,6 +2093,718 @@ pub struct TextImportResponse {
     pub drafts: Vec<TextImportDraftDto>,
 }
 
+// ── reminders ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderChannelDto {
+    InApp,
+    WebNotification,
+    Sound,
+    Native,
+}
+
+impl From<junban_domain::ReminderChannel> for ReminderChannelDto {
+    fn from(value: junban_domain::ReminderChannel) -> Self {
+        match value {
+            junban_domain::ReminderChannel::InApp => Self::InApp,
+            junban_domain::ReminderChannel::WebNotification => Self::WebNotification,
+            junban_domain::ReminderChannel::Sound => Self::Sound,
+            junban_domain::ReminderChannel::Native => Self::Native,
+        }
+    }
+}
+
+impl From<ReminderChannelDto> for junban_domain::ReminderChannel {
+    fn from(value: ReminderChannelDto) -> Self {
+        match value {
+            ReminderChannelDto::InApp => Self::InApp,
+            ReminderChannelDto::WebNotification => Self::WebNotification,
+            ReminderChannelDto::Sound => Self::Sound,
+            ReminderChannelDto::Native => Self::Native,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderOccurrenceStateDto {
+    Pending,
+    Claimed,
+    Delivered,
+    Failed,
+    Cancelled,
+}
+
+impl From<junban_domain::ReminderOccurrenceState> for ReminderOccurrenceStateDto {
+    fn from(value: junban_domain::ReminderOccurrenceState) -> Self {
+        match value {
+            junban_domain::ReminderOccurrenceState::Pending => Self::Pending,
+            junban_domain::ReminderOccurrenceState::Claimed => Self::Claimed,
+            junban_domain::ReminderOccurrenceState::Delivered => Self::Delivered,
+            junban_domain::ReminderOccurrenceState::Failed => Self::Failed,
+            junban_domain::ReminderOccurrenceState::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderFailureCodeDto {
+    PermissionDenied,
+    TemporarilyUnavailable,
+    ChannelFailed,
+    OwnerLost,
+}
+
+impl From<ReminderFailureCodeDto> for junban_domain::ReminderFailureCode {
+    fn from(value: ReminderFailureCodeDto) -> Self {
+        match value {
+            ReminderFailureCodeDto::PermissionDenied => Self::PermissionDenied,
+            ReminderFailureCodeDto::TemporarilyUnavailable => Self::TemporarilyUnavailable,
+            ReminderFailureCodeDto::ChannelFailed => Self::ChannelFailed,
+            ReminderFailureCodeDto::OwnerLost => Self::OwnerLost,
+        }
+    }
+}
+
+impl From<junban_domain::ReminderFailureCode> for ReminderFailureCodeDto {
+    fn from(value: junban_domain::ReminderFailureCode) -> Self {
+        match value {
+            junban_domain::ReminderFailureCode::PermissionDenied => Self::PermissionDenied,
+            junban_domain::ReminderFailureCode::TemporarilyUnavailable => {
+                Self::TemporarilyUnavailable
+            }
+            junban_domain::ReminderFailureCode::ChannelFailed => Self::ChannelFailed,
+            junban_domain::ReminderFailureCode::OwnerLost => Self::OwnerLost,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ReminderOccurrenceDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub task_id: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub remind_at: Timestamp,
+    pub state: ReminderOccurrenceStateDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_term: Option<String>,
+    #[schema(value_type = Option<String>, format = DateTime, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_expires_at: Option<Timestamp>,
+    pub attempts: u32,
+    #[schema(value_type = Option<String>, format = DateTime, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_attempt_at: Option<Timestamp>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_channel: Option<ReminderChannelDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_error_code: Option<ReminderFailureCodeDto>,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: Timestamp,
+}
+
+impl From<junban_domain::ReminderOccurrence> for ReminderOccurrenceDto {
+    fn from(value: junban_domain::ReminderOccurrence) -> Self {
+        Self {
+            task_id: value.task_id.to_string(),
+            remind_at: value.remind_at,
+            state: value.state.into(),
+            claim_term: value.claim_term.map(|term| term.as_str().to_owned()),
+            claim_expires_at: value.claim_expires_at,
+            attempts: value.attempts,
+            next_attempt_at: value.next_attempt_at,
+            terminal_channel: value.terminal_channel.map(Into::into),
+            terminal_error_code: value.terminal_error_code.map(Into::into),
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReminderListResponse {
+    pub reminders: Vec<ReminderOccurrenceDto>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RescheduleReminderRequest {
+    #[schema(value_type = String, format = DateTime)]
+    pub remind_at: Timestamp,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AcquireReminderLeaseRequest {
+    /// Positive bounded TTL in seconds. Omitted uses the service default (90).
+    #[serde(default)]
+    pub lease_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenewReminderLeaseRequest {
+    pub fence_term: String,
+    #[serde(default)]
+    pub lease_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReleaseReminderLeaseRequest {
+    pub fence_term: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClaimRemindersRequest {
+    pub fence_term: String,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub claim_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SettleReminderDeliveredRequest {
+    pub fence_term: String,
+    #[schema(value_type = String, format = Uuid)]
+    pub task_id: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub remind_at: Timestamp,
+    /// Exact `claim_attempt` from the claim response for this occurrence.
+    pub claim_attempt: u32,
+    pub channel: ReminderChannelDto,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SettleReminderFailedRequest {
+    pub fence_term: String,
+    #[schema(value_type = String, format = Uuid)]
+    pub task_id: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub remind_at: Timestamp,
+    /// Exact `claim_attempt` from the claim response for this occurrence.
+    pub claim_attempt: u32,
+    pub error: ReminderFailureCodeDto,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MarkOwnerLostRemindersRequest {
+    pub fence_term: String,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ReminderDeliveryLeaseDto {
+    pub fence_term: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub expires_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: Timestamp,
+}
+
+impl From<junban_domain::ReminderDeliveryLease> for ReminderDeliveryLeaseDto {
+    fn from(value: junban_domain::ReminderDeliveryLease) -> Self {
+        Self {
+            fence_term: value.fence_term.as_str().to_owned(),
+            expires_at: value.expires_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ClaimedReminderDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub task_id: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub remind_at: Timestamp,
+    pub claim_term: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub claim_expires_at: Timestamp,
+    /// Durable attempt generation that settle must echo exactly.
+    pub claim_attempt: u32,
+}
+
+impl From<junban_domain::ClaimedReminder> for ClaimedReminderDto {
+    fn from(value: junban_domain::ClaimedReminder) -> Self {
+        Self {
+            task_id: value.task_id.to_string(),
+            remind_at: value.remind_at,
+            claim_term: value.claim_term.as_str().to_owned(),
+            claim_expires_at: value.claim_expires_at,
+            claim_attempt: value.claim_attempt,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ClaimRemindersResponse {
+    pub reminders: Vec<ClaimedReminderDto>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MarkOwnerLostRemindersResponse {
+    pub marked: u32,
+}
+
+// ── planning / analytics reads ─────────────────────────────────────────────
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CalendarTasksResponse {
+    pub tasks: Vec<TaskDto>,
+    pub revision: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DailyPlanResponse {
+    /// Server-local civil date used to derive this plan.
+    #[schema(value_type = String, format = Date)]
+    pub as_of_date: Date,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub overdue_task_ids: Vec<String>,
+    pub overdue_tasks: Vec<TaskDto>,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub focus_task_ids: Vec<String>,
+    pub focus_tasks: Vec<TaskDto>,
+    pub estimated_total_minutes: u32,
+    pub capacity_minutes: u32,
+    pub revision: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EndOfDayResponse {
+    /// Server-local civil date used to derive this review.
+    #[schema(value_type = String, format = Date)]
+    pub as_of_date: Date,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub win_task_ids: Vec<String>,
+    pub win_tasks: Vec<TaskDto>,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub carry_over_task_ids: Vec<String>,
+    pub carry_over_tasks: Vec<TaskDto>,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub tomorrow_task_ids: Vec<String>,
+    pub tomorrow_tasks: Vec<TaskDto>,
+    pub tomorrow_estimated_minutes: u32,
+    pub completion_rate_percent: u32,
+    pub capacity_minutes: u32,
+    pub revision: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WeekStartDto {
+    Sunday,
+    Monday,
+}
+
+impl From<WeekStart> for WeekStartDto {
+    fn from(value: WeekStart) -> Self {
+        match value {
+            WeekStart::Sunday => Self::Sunday,
+            WeekStart::Monday => Self::Monday,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CompletionTimeBucketDto {
+    Morning,
+    Afternoon,
+    Evening,
+    Night,
+}
+
+impl From<CompletionTimeBucket> for CompletionTimeBucketDto {
+    fn from(value: CompletionTimeBucket) -> Self {
+        match value {
+            CompletionTimeBucket::Morning => Self::Morning,
+            CompletionTimeBucket::Afternoon => Self::Afternoon,
+            CompletionTimeBucket::Evening => Self::Evening,
+            CompletionTimeBucket::Night => Self::Night,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CompletionTimeBucketsDto {
+    pub morning: u32,
+    pub afternoon: u32,
+    pub evening: u32,
+    pub night: u32,
+}
+
+impl From<CompletionTimeBuckets> for CompletionTimeBucketsDto {
+    fn from(value: CompletionTimeBuckets) -> Self {
+        Self {
+            morning: value.morning,
+            afternoon: value.afternoon,
+            evening: value.evening,
+            night: value.night,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct WeeklyDayStatsDto {
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub completed: u32,
+    pub created: u32,
+}
+
+impl From<WeeklyDayStats> for WeeklyDayStatsDto {
+    fn from(value: WeeklyDayStats) -> Self {
+        Self {
+            date: value.date,
+            completed: value.completed,
+            created: value.created,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NeglectedProjectReasonDto {
+    OverdueTasks,
+    NoActivity,
+}
+
+impl From<NeglectedProjectReason> for NeglectedProjectReasonDto {
+    fn from(value: NeglectedProjectReason) -> Self {
+        match value {
+            NeglectedProjectReason::OverdueTasks => Self::OverdueTasks,
+            NeglectedProjectReason::NoActivity => Self::NoActivity,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct NeglectedProjectFactDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub project_id: String,
+    pub overdue_count: u32,
+    pub reason: NeglectedProjectReasonDto,
+}
+
+impl From<NeglectedProjectFact> for NeglectedProjectFactDto {
+    fn from(value: NeglectedProjectFact) -> Self {
+        Self {
+            project_id: value.project_id.to_string(),
+            overdue_count: value.overdue_count,
+            reason: value.reason.into(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WeeklySuggestionDto {
+    TackleOverdue {
+        count: u32,
+    },
+    CheckNeglected {
+        #[schema(value_type = Vec<String>, format = Uuid)]
+        project_ids: Vec<String>,
+    },
+    CreatedMoreThanCompleted,
+    KeepStreak {
+        days: u32,
+    },
+}
+
+impl From<WeeklySuggestion> for WeeklySuggestionDto {
+    fn from(value: WeeklySuggestion) -> Self {
+        match value {
+            WeeklySuggestion::TackleOverdue { count } => Self::TackleOverdue { count },
+            WeeklySuggestion::CheckNeglected { project_ids } => Self::CheckNeglected {
+                project_ids: project_ids.into_iter().map(|id| id.to_string()).collect(),
+            },
+            WeeklySuggestion::CreatedMoreThanCompleted => Self::CreatedMoreThanCompleted,
+            WeeklySuggestion::KeepStreak { days } => Self::KeepStreak { days },
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct WeeklyReviewResponse {
+    /// Server-local civil date used to derive this review.
+    #[schema(value_type = String, format = Date)]
+    pub as_of_date: Date,
+    #[schema(value_type = String, format = Date)]
+    pub week_start: Date,
+    #[schema(value_type = String, format = Date)]
+    pub week_end: Date,
+    pub daily: Vec<WeeklyDayStatsDto>,
+    pub created_count: u32,
+    pub completed_count: u32,
+    pub cancelled_count: u32,
+    pub completion_rate_percent: u32,
+    #[schema(value_type = Option<String>, format = Date, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub busiest_day: Option<Date>,
+    pub completion_time_buckets: CompletionTimeBucketsDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dominant_completion_bucket: Option<CompletionTimeBucketDto>,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub top_accomplishment_ids: Vec<String>,
+    pub top_accomplishment_tasks: Vec<TaskDto>,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub overdue_task_ids: Vec<String>,
+    pub overdue_tasks: Vec<TaskDto>,
+    pub neglected_projects: Vec<NeglectedProjectFactDto>,
+    pub streak_days: u32,
+    pub suggestions: Vec<WeeklySuggestionDto>,
+    pub revision: u64,
+}
+
+impl WeeklyReviewResponse {
+    pub fn from_page(page: junban_app::WeeklyReviewPage, as_of_date: Date) -> Self {
+        let WeeklyReviewSummary {
+            week_start,
+            week_end,
+            daily,
+            created_count,
+            completed_count,
+            cancelled_count,
+            completion_rate_percent,
+            busiest_day,
+            completion_time_buckets,
+            dominant_completion_bucket,
+            top_accomplishment_ids,
+            overdue_task_ids,
+            neglected_projects,
+            streak_days,
+            suggestions,
+        } = page.summary;
+        Self {
+            as_of_date,
+            week_start,
+            week_end,
+            daily: daily.into_iter().map(Into::into).collect(),
+            created_count,
+            completed_count,
+            cancelled_count,
+            completion_rate_percent,
+            busiest_day,
+            completion_time_buckets: completion_time_buckets.into(),
+            dominant_completion_bucket: dominant_completion_bucket.map(Into::into),
+            top_accomplishment_ids: top_accomplishment_ids
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect(),
+            top_accomplishment_tasks: page
+                .top_accomplishment_tasks
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            overdue_task_ids: overdue_task_ids
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect(),
+            overdue_tasks: page.overdue_tasks.into_iter().map(Into::into).collect(),
+            neglected_projects: neglected_projects.into_iter().map(Into::into).collect(),
+            streak_days,
+            suggestions: suggestions.into_iter().map(Into::into).collect(),
+            revision: page.revision,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DailyStatBucketDto {
+    #[schema(value_type = String, format = Date)]
+    pub date: Date,
+    pub completions: u32,
+    pub creations: u32,
+    pub completion_minutes: u32,
+}
+
+impl From<DailyStatBucket> for DailyStatBucketDto {
+    fn from(value: DailyStatBucket) -> Self {
+        Self {
+            date: value.date,
+            completions: value.completions,
+            creations: value.creations,
+            completion_minutes: value.completion_minutes,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StatsResponse {
+    #[schema(value_type = String, format = Date)]
+    pub from: Date,
+    #[schema(value_type = String, format = Date)]
+    pub to: Date,
+    pub days: Vec<DailyStatBucketDto>,
+    pub total_completions: u32,
+    pub total_creations: u32,
+    pub total_completion_minutes: u32,
+    pub current_streak_days: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimate_accuracy_percent: Option<u32>,
+    pub estimate_accuracy_samples: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub average_estimated_minutes: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub average_actual_minutes: Option<u32>,
+    pub revision: u64,
+}
+
+impl StatsResponse {
+    pub fn from_page(page: junban_app::StatsPage) -> Self {
+        let StatsSummary {
+            from,
+            to,
+            days,
+            total_completions,
+            total_creations,
+            total_completion_minutes,
+            current_streak_days,
+            estimate_accuracy_percent,
+            estimate_accuracy_samples,
+            average_estimated_minutes,
+            average_actual_minutes,
+        } = page.summary;
+        Self {
+            from,
+            to,
+            days: days.into_iter().map(Into::into).collect(),
+            total_completions,
+            total_creations,
+            total_completion_minutes,
+            current_streak_days,
+            estimate_accuracy_percent,
+            estimate_accuracy_samples,
+            average_estimated_minutes,
+            average_actual_minutes,
+            revision: page.revision,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NudgeRuleKindDto {
+    Overdue,
+    ApproachingDeadline,
+    StaleTask,
+    EmptyToday,
+    OverloadedDay,
+}
+
+impl From<NudgeRuleKind> for NudgeRuleKindDto {
+    fn from(value: NudgeRuleKind) -> Self {
+        match value {
+            NudgeRuleKind::Overdue => Self::Overdue,
+            NudgeRuleKind::ApproachingDeadline => Self::ApproachingDeadline,
+            NudgeRuleKind::StaleTask => Self::StaleTask,
+            NudgeRuleKind::EmptyToday => Self::EmptyToday,
+            NudgeRuleKind::OverloadedDay => Self::OverloadedDay,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct NudgeRuleFactsDto {
+    pub kind: NudgeRuleKindDto,
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub task_ids: Vec<String>,
+    pub has_more: bool,
+}
+
+impl From<NudgeRuleFacts> for NudgeRuleFactsDto {
+    fn from(value: NudgeRuleFacts) -> Self {
+        Self {
+            kind: value.kind.into(),
+            task_ids: value
+                .task_ids
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect(),
+            has_more: value.has_more,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct NudgesResponse {
+    pub rules: Vec<NudgeRuleFactsDto>,
+    pub has_more: bool,
+    pub tasks: Vec<TaskDto>,
+    pub revision: u64,
+}
+
+impl NudgesResponse {
+    pub fn from_page(page: junban_app::NudgesPage) -> Self {
+        let NudgeFacts { rules, has_more } = page.facts;
+        Self {
+            rules: rules.into_iter().map(Into::into).collect(),
+            has_more,
+            tasks: page.tasks.into_iter().map(Into::into).collect(),
+            revision: page.revision,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TemporalSettingsResponse {
+    pub time_zone: String,
+    pub capacity_minutes: u32,
+    pub week_start: WeekStartDto,
+    pub nudges_enabled: bool,
+    pub eat_the_frog_enabled: bool,
+    pub task_jar_enabled: bool,
+}
+
+impl From<junban_app::TemporalSettings> for TemporalSettingsResponse {
+    fn from(value: junban_app::TemporalSettings) -> Self {
+        Self {
+            time_zone: value.time_zone,
+            capacity_minutes: value.capacity_minutes,
+            week_start: value.week_start.into(),
+            nudges_enabled: value.nudges_enabled,
+            eat_the_frog_enabled: value.eat_the_frog_enabled,
+            task_jar_enabled: value.task_jar_enabled,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EatTheFrogResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<TaskDto>,
+    pub revision: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TaskJarResponse {
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub task_ids: Vec<String>,
+    pub tasks: Vec<TaskDto>,
+    pub revision: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DopamineMenuResponse {
+    #[schema(value_type = Vec<String>, format = Uuid)]
+    pub task_ids: Vec<String>,
+    pub tasks: Vec<TaskDto>,
+    pub revision: u64,
+}
+
 // ── optional/nullable helpers ──────────────────────────────────────────────
 
 /// Serde helper: missing → None, null → Some(None), value → Some(Some(value)).
@@ -1632,6 +2828,105 @@ where
         None => Ok(None),
         Some(value) => Ok(Some(
             map(value).map_err(|e| validation_error(e, request_id))?,
+        )),
+    }
+}
+
+fn default_time_zone_name(request_id: &RequestId) -> Result<TimeZoneName, ApiError> {
+    let now = jiff::Zoned::now();
+    let name = now.time_zone().iana_name().unwrap_or("UTC");
+    TimeZoneName::new(name.to_owned()).map_err(|e| validation_error(e, request_id))
+}
+
+fn parse_civil_time(
+    raw: &str,
+    field: &'static str,
+    request_id: &RequestId,
+) -> Result<Time, ApiError> {
+    raw.parse::<Time>().map_err(|_| {
+        validation_error(
+            ValidationError::InvalidFormat {
+                field,
+                expected: "civil time HH:MM[:SS]",
+            },
+            request_id,
+        )
+    })
+}
+
+fn parse_civil_range(
+    date: Date,
+    start: &str,
+    end: &str,
+    time_zone: Option<&str>,
+    request_id: &RequestId,
+) -> Result<CivilTimeRange, ApiError> {
+    let start = parse_civil_time(start, "start", request_id)?;
+    let end = parse_civil_time(end, "end", request_id)?;
+    let time_zone = match time_zone {
+        Some(value) => {
+            TimeZoneName::new(value.to_owned()).map_err(|e| validation_error(e, request_id))?
+        }
+        None => default_time_zone_name(request_id)?,
+    };
+    CivilTimeRange::new(date, start, end, time_zone).map_err(|e| validation_error(e, request_id))
+}
+
+fn invalid_time_block_range(request_id: &RequestId) -> ApiError {
+    validation_error(
+        ValidationError::Invalid {
+            field: "range",
+            reason: "at least one range field must be provided",
+        },
+        request_id,
+    )
+}
+
+fn parse_time_block_range_patch(
+    date: Option<Date>,
+    start: Option<&str>,
+    end: Option<&str>,
+    time_zone: Option<&str>,
+    request_id: &RequestId,
+) -> Result<Option<TimeBlockRangePatch>, ApiError> {
+    if date.is_none() && start.is_none() && end.is_none() && time_zone.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(TimeBlockRangePatch {
+        date,
+        start: start
+            .map(|value| parse_civil_time(value, "start", request_id))
+            .transpose()?,
+        end: end
+            .map(|value| parse_civil_time(value, "end", request_id))
+            .transpose()?,
+        time_zone: time_zone
+            .map(|value| {
+                TimeZoneName::new(value.to_owned())
+                    .map_err(|error| validation_error(error, request_id))
+            })
+            .transpose()?,
+    }))
+}
+
+fn parse_optional_civil_range(
+    date: Option<Date>,
+    start: Option<&str>,
+    end: Option<&str>,
+    time_zone: Option<&str>,
+    request_id: &RequestId,
+) -> Result<Option<CivilTimeRange>, ApiError> {
+    match (date, start, end, time_zone) {
+        (None, None, None, None) => Ok(None),
+        (Some(date), Some(start), Some(end), time_zone) => Ok(Some(parse_civil_range(
+            date, start, end, time_zone, request_id,
+        )?)),
+        _ => Err(validation_error(
+            ValidationError::Invalid {
+                field: "range",
+                reason: "date, start, and end must be provided together",
+            },
+            request_id,
         )),
     }
 }

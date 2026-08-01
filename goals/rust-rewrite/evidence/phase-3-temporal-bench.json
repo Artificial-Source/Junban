@@ -1,0 +1,2506 @@
+{
+  "binary": {
+    "path": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server",
+    "sha256": "c8b51af2433374f16f3c7a118f2d64ebfe6046f8a8515af8e9b0ca4e36679e02",
+    "size_bytes": 9078904
+  },
+  "command": {
+    "argv": [
+      "bench-hosted-server.py",
+      "--mode",
+      "temporal",
+      "--output",
+      "goals/rust-rewrite/evidence/phase-3-temporal-bench.json"
+    ],
+    "cwd": "/home/xn3/Projects/Personal/ASF/Junban"
+  },
+  "evidence_status": "authoritative_passed",
+  "host": {
+    "cpu_count": 20,
+    "cpu_model": "Intel(R) Core(TM) i9-10850K CPU @ 3.60GHz",
+    "git_commit": "84e239150e5f4a88e0e35701e5b0dd885a7622c1",
+    "git_dirty": true,
+    "hostname": "xn3-main-desktop",
+    "kernel": "7.0.0-28-generic",
+    "machine": "x86_64",
+    "os": "Linux 7.0.0-28-generic x86_64",
+    "rustc_version": "rustc 1.93.0 (254b59607 2026-01-19)"
+  },
+  "protocol": {
+    "authoritative": true,
+    "bind": "127.0.0.1:0",
+    "budgets_p95_ms": {
+      "bulk_recurrence_complete": 1000.0,
+      "bulk_recurrence_uncomplete": 1000.0,
+      "calendar_42_day": 100.0,
+      "nudges": 100.0,
+      "recurrence_complete": 100.0,
+      "reminder_lease_claim_20": 50.0,
+      "stats_366_day": 150.0,
+      "timeblocking_42_day": 100.0
+    },
+    "bulk_recurrence_affected_tasks": 500,
+    "bulk_recurrence_sources": 250,
+    "cgroup": "transient systemd --user service with MemoryAccounting=yes",
+    "driver_outside_cgroup": true,
+    "mode": "temporal",
+    "name": "junban-phase3-temporal-v1",
+    "notes": [
+      "The existing dev-only seeder writes 10,000 deterministic tasks before server startup.",
+      "One recurring bulk mutation has 250 sources + 250 generated children, the frozen 500 affected-task ceiling.",
+      "The scheduler observation subscribes to its authenticated content-free SSE wake after the idle memory snapshot.",
+      "Quick mode validates the harness only and is not authoritative evidence."
+    ],
+    "peak_memory_ceiling_mib": 32.0,
+    "profile_mode": "0700",
+    "quick": false,
+    "regression_rule": "a per-phase warm-median increase above the larger of 20% or 2 MiB requires measured explanation and explicit acceptance; final 24/32 MiB ceilings cannot be waived",
+    "reminder_claims": 20,
+    "samples": 5,
+    "seeder": "junban-scale-seed --temporal-fixture (scale-bench feature)",
+    "seeder_outside_cgroup": true,
+    "settle_seconds": 2.0,
+    "task_count": 10000,
+    "token": "deterministic per sample, pre-written owner-only access-token",
+    "variance_rule": "same-commit warm median must remain within the larger of 15% or 1 MiB; otherwise repeat on an idle host and retain both reports",
+    "version": 1,
+    "warm_memory_ceiling_mib": 24.0
+  },
+  "run_id": "b917b8c6a663",
+  "samples": [
+    {
+      "cleanup_success": true,
+      "idle": {
+        "cgroup_current_bytes": 13905920,
+        "cgroup_current_mib": 13.2617,
+        "cgroup_peak_bytes": 14913536,
+        "cgroup_peak_mib": 14.2227,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-temporal-b917b8c6a663-3t5q9mi3/profile-00 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "idle",
+        "pid": 1565140,
+        "process_count": 1,
+        "pss_bytes": 8770560,
+        "pss_mib": 8.3643,
+        "rss_bytes": 11198464,
+        "rss_mib": 10.6797
+      },
+      "sample_index": 0,
+      "seed": {
+        "as_of_date": "2026-07-31",
+        "duration_ms": 632.97032,
+        "task_count": 10000,
+        "temporal_recurrence_source_count": 250,
+        "wall_ms": 649.179241998354
+      },
+      "settle_seconds": 2.0,
+      "sqlite": {
+        "junban.sqlite3": 8585216,
+        "junban.sqlite3-shm": 32768,
+        "junban.sqlite3-wal": 1024000,
+        "total_bytes": 9641984
+      },
+      "startup_to_health_ms": 105.13962700497359,
+      "unit": "junban-temporal-b917b8c6a663-s00.service",
+      "warm": {
+        "cgroup_current_bytes": 24961024,
+        "cgroup_current_mib": 23.8047,
+        "cgroup_peak_bytes": 26877952,
+        "cgroup_peak_mib": 25.6328,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-temporal-b917b8c6a663-3t5q9mi3/profile-00 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "warm",
+        "pid": 1565140,
+        "process_count": 1,
+        "pss_bytes": 19682304,
+        "pss_mib": 18.7705,
+        "rss_bytes": 22110208,
+        "rss_mib": 21.0859
+      },
+      "workload": {
+        "event_revision_delta": 26,
+        "event_revision_end": 26,
+        "event_revision_start": 0,
+        "latencies": {
+          "bulk_recurrence_complete": {
+            "count": 1,
+            "max_ms": 79.98621500155423,
+            "min_ms": 79.98621500155423,
+            "p50_ms": 79.98621500155423,
+            "p95_ms": 79.98621500155423,
+            "values_ms": [
+              79.98621500155423
+            ]
+          },
+          "bulk_recurrence_uncomplete": {
+            "count": 1,
+            "max_ms": 162.4902019975707,
+            "min_ms": 162.4902019975707,
+            "p50_ms": 162.4902019975707,
+            "p95_ms": 162.4902019975707,
+            "values_ms": [
+              162.4902019975707
+            ]
+          },
+          "calendar_42_day": {
+            "count": 1,
+            "max_ms": 53.20870199648198,
+            "min_ms": 53.20870199648198,
+            "p50_ms": 53.20870199648198,
+            "p95_ms": 53.20870199648198,
+            "values_ms": [
+              53.20870199648198
+            ]
+          },
+          "nudges": {
+            "count": 1,
+            "max_ms": 25.09763000125531,
+            "min_ms": 25.09763000125531,
+            "p50_ms": 25.09763000125531,
+            "p95_ms": 25.09763000125531,
+            "values_ms": [
+              25.09763000125531
+            ]
+          },
+          "planning_daily": {
+            "count": 1,
+            "max_ms": 45.019071010756306,
+            "min_ms": 45.019071010756306,
+            "p50_ms": 45.019071010756306,
+            "p95_ms": 45.019071010756306,
+            "values_ms": [
+              45.019071010756306
+            ]
+          },
+          "planning_weekly": {
+            "count": 1,
+            "max_ms": 30.75671500118915,
+            "min_ms": 30.75671500118915,
+            "p50_ms": 30.75671500118915,
+            "p95_ms": 30.75671500118915,
+            "values_ms": [
+              30.75671500118915
+            ]
+          },
+          "recurrence_complete": {
+            "count": 1,
+            "max_ms": 2.5681300030555576,
+            "min_ms": 2.5681300030555576,
+            "p50_ms": 2.5681300030555576,
+            "p95_ms": 2.5681300030555576,
+            "values_ms": [
+              2.5681300030555576
+            ]
+          },
+          "recurrence_uncomplete": {
+            "count": 1,
+            "max_ms": 2.0807419932680205,
+            "min_ms": 2.0807419932680205,
+            "p50_ms": 2.0807419932680205,
+            "p95_ms": 2.0807419932680205,
+            "values_ms": [
+              2.0807419932680205
+            ]
+          },
+          "reminder_claim_20": {
+            "count": 1,
+            "max_ms": 1.4787499967496842,
+            "min_ms": 1.4787499967496842,
+            "p50_ms": 1.4787499967496842,
+            "p95_ms": 1.4787499967496842,
+            "values_ms": [
+              1.4787499967496842
+            ]
+          },
+          "reminder_claim_empty": {
+            "count": 1,
+            "max_ms": 0.35373801074456424,
+            "min_ms": 0.35373801074456424,
+            "p50_ms": 0.35373801074456424,
+            "p95_ms": 0.35373801074456424,
+            "values_ms": [
+              0.35373801074456424
+            ]
+          },
+          "reminder_lease_acquire": {
+            "count": 1,
+            "max_ms": 0.7672520005144179,
+            "min_ms": 0.7672520005144179,
+            "p50_ms": 0.7672520005144179,
+            "p95_ms": 0.7672520005144179,
+            "values_ms": [
+              0.7672520005144179
+            ]
+          },
+          "reminder_lease_claim_20": {
+            "count": 1,
+            "max_ms": 2.246001997264102,
+            "min_ms": 2.246001997264102,
+            "p50_ms": 2.246001997264102,
+            "p95_ms": 2.246001997264102,
+            "values_ms": [
+              2.246001997264102
+            ]
+          },
+          "reminder_lease_release": {
+            "count": 1,
+            "max_ms": 0.30708700069226325,
+            "min_ms": 0.30708700069226325,
+            "p50_ms": 0.30708700069226325,
+            "p95_ms": 0.30708700069226325,
+            "values_ms": [
+              0.30708700069226325
+            ]
+          },
+          "reminder_schedule": {
+            "count": 20,
+            "max_ms": 5.870146007509902,
+            "min_ms": 0.7468469993909821,
+            "p50_ms": 0.8944865039666183,
+            "p95_ms": 5.326680448342814,
+            "values_ms": [
+              0.7468469993909821,
+              0.7726559997536242,
+              0.7885920058470219,
+              0.7930859865155071,
+              0.797022003098391,
+              0.7999579975148663,
+              0.8066309965215623,
+              0.819294000393711,
+              0.8484060090268031,
+              0.8785249956417829,
+              0.9104480122914538,
+              0.9295929921790957,
+              0.9755710052559152,
+              1.0002810013247654,
+              1.0750349902082235,
+              1.7584159941179678,
+              1.8193129944847897,
+              2.7015649975510314,
+              5.298076997860335,
+              5.870146007509902
+            ]
+          },
+          "reminder_settle_delivered": {
+            "count": 20,
+            "max_ms": 1.1193179961992428,
+            "min_ms": 0.3596019960241392,
+            "p50_ms": 0.40939600148703903,
+            "p95_ms": 0.6739475407812282,
+            "values_ms": [
+              0.3596019960241392,
+              0.36068201006855816,
+              0.36448100581765175,
+              0.3814699884969741,
+              0.3916239948011935,
+              0.39707199903205037,
+              0.40307900053448975,
+              0.4051850119139999,
+              0.40599600470159203,
+              0.4080479993717745,
+              0.41074400360230356,
+              0.41563498962204903,
+              0.4337819991633296,
+              0.4359039885457605,
+              0.4566610004985705,
+              0.4978380020475015,
+              0.5010040040360764,
+              0.6014540122123435,
+              0.6505069904960692,
+              1.1193179961992428
+            ]
+          },
+          "stats_366_day": {
+            "count": 1,
+            "max_ms": 25.28904400242027,
+            "min_ms": 25.28904400242027,
+            "p50_ms": 25.28904400242027,
+            "p95_ms": 25.28904400242027,
+            "values_ms": [
+              25.28904400242027
+            ]
+          },
+          "timeblock_create": {
+            "count": 1,
+            "max_ms": 4.488948005018756,
+            "min_ms": 4.488948005018756,
+            "p50_ms": 4.488948005018756,
+            "p95_ms": 4.488948005018756,
+            "values_ms": [
+              4.488948005018756
+            ]
+          },
+          "timeblock_range_42_day": {
+            "count": 1,
+            "max_ms": 1.4385229878826067,
+            "min_ms": 1.4385229878826067,
+            "p50_ms": 1.4385229878826067,
+            "p95_ms": 1.4385229878826067,
+            "values_ms": [
+              1.4385229878826067
+            ]
+          },
+          "timeslot_create": {
+            "count": 1,
+            "max_ms": 0.8292359998449683,
+            "min_ms": 0.8292359998449683,
+            "p50_ms": 0.8292359998449683,
+            "p95_ms": 0.8292359998449683,
+            "values_ms": [
+              0.8292359998449683
+            ]
+          },
+          "timeslot_range": {
+            "count": 1,
+            "max_ms": 0.6806290039094165,
+            "min_ms": 0.6806290039094165,
+            "p50_ms": 0.6806290039094165,
+            "p95_ms": 0.6806290039094165,
+            "values_ms": [
+              0.6806290039094165
+            ]
+          }
+        },
+        "mutation_event_count": 26,
+        "response_counts": {
+          "bulk_recurrence_complete": 500,
+          "bulk_recurrence_uncomplete": 500,
+          "calendar_42_day": 873,
+          "nudges": 2,
+          "planning_daily": 1729,
+          "planning_weekly": 7,
+          "recurrence_complete": 2,
+          "recurrence_uncomplete": 2,
+          "reminder_claim_20": 20,
+          "reminder_claim_empty": 0,
+          "reminder_lease_acquire": 1,
+          "reminder_lease_claim_20": 20,
+          "reminder_lease_release": 1,
+          "reminder_schedule": 20,
+          "reminder_settle_delivered": 20,
+          "stats_366_day": 366,
+          "timeblock_create": 1,
+          "timeblock_range_42_day": 1,
+          "timeslot_create": 1,
+          "timeslot_range": 1
+        },
+        "scheduler": {
+          "claimed": 20,
+          "due_intents_scheduled": 20,
+          "due_wake_sequence": 1,
+          "due_wake_wait_ms": 44.055220001609996,
+          "idle_after_settlement": true,
+          "idle_before_due": true,
+          "initial_wake_sequence": 0,
+          "post_settle_claimed": 0,
+          "settled": 20
+        },
+        "task_count": 10000
+      }
+    },
+    {
+      "cleanup_success": true,
+      "idle": {
+        "cgroup_current_bytes": 7516160,
+        "cgroup_current_mib": 7.168,
+        "cgroup_peak_bytes": 8642560,
+        "cgroup_peak_mib": 8.2422,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-temporal-b917b8c6a663-3t5q9mi3/profile-01 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "idle",
+        "pid": 1565219,
+        "process_count": 1,
+        "pss_bytes": 9183232,
+        "pss_mib": 8.7578,
+        "rss_bytes": 11706368,
+        "rss_mib": 11.1641
+      },
+      "sample_index": 1,
+      "seed": {
+        "as_of_date": "2026-07-31",
+        "duration_ms": 335.741356,
+        "task_count": 10000,
+        "temporal_recurrence_source_count": 250,
+        "wall_ms": 338.649514989811
+      },
+      "settle_seconds": 2.0,
+      "sqlite": {
+        "junban.sqlite3": 8585216,
+        "junban.sqlite3-shm": 32768,
+        "junban.sqlite3-wal": 1024000,
+        "total_bytes": 9641984
+      },
+      "startup_to_health_ms": 46.63023000466637,
+      "unit": "junban-temporal-b917b8c6a663-s01.service",
+      "warm": {
+        "cgroup_current_bytes": 16842752,
+        "cgroup_current_mib": 16.0625,
+        "cgroup_peak_bytes": 19095552,
+        "cgroup_peak_mib": 18.2109,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-temporal-b917b8c6a663-3t5q9mi3/profile-01 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "warm",
+        "pid": 1565219,
+        "process_count": 1,
+        "pss_bytes": 19909632,
+        "pss_mib": 18.9873,
+        "rss_bytes": 22433792,
+        "rss_mib": 21.3945
+      },
+      "workload": {
+        "event_revision_delta": 26,
+        "event_revision_end": 26,
+        "event_revision_start": 0,
+        "latencies": {
+          "bulk_recurrence_complete": {
+            "count": 1,
+            "max_ms": 81.8667469866341,
+            "min_ms": 81.8667469866341,
+            "p50_ms": 81.8667469866341,
+            "p95_ms": 81.8667469866341,
+            "values_ms": [
+              81.8667469866341
+            ]
+          },
+          "bulk_recurrence_uncomplete": {
+            "count": 1,
+            "max_ms": 165.01512299873866,
+            "min_ms": 165.01512299873866,
+            "p50_ms": 165.01512299873866,
+            "p95_ms": 165.01512299873866,
+            "values_ms": [
+              165.01512299873866
+            ]
+          },
+          "calendar_42_day": {
+            "count": 1,
+            "max_ms": 48.83602500194684,
+            "min_ms": 48.83602500194684,
+            "p50_ms": 48.83602500194684,
+            "p95_ms": 48.83602500194684,
+            "values_ms": [
+              48.83602500194684
+            ]
+          },
+          "nudges": {
+            "count": 1,
+            "max_ms": 25.7336830109125,
+            "min_ms": 25.7336830109125,
+            "p50_ms": 25.7336830109125,
+            "p95_ms": 25.7336830109125,
+            "values_ms": [
+              25.7336830109125
+            ]
+          },
+          "planning_daily": {
+            "count": 1,
+            "max_ms": 43.8048619980691,
+            "min_ms": 43.8048619980691,
+            "p50_ms": 43.8048619980691,
+            "p95_ms": 43.8048619980691,
+            "values_ms": [
+              43.8048619980691
+            ]
+          },
+          "planning_weekly": {
+            "count": 1,
+            "max_ms": 28.96382100880146,
+            "min_ms": 28.96382100880146,
+            "p50_ms": 28.96382100880146,
+            "p95_ms": 28.96382100880146,
+            "values_ms": [
+              28.96382100880146
+            ]
+          },
+          "recurrence_complete": {
+            "count": 1,
+            "max_ms": 1.2843650038121268,
+            "min_ms": 1.2843650038121268,
+            "p50_ms": 1.2843650038121268,
+            "p95_ms": 1.2843650038121268,
+            "values_ms": [
+              1.2843650038121268
+            ]
+          },
+          "recurrence_uncomplete": {
+            "count": 1,
+            "max_ms": 1.3839869934599847,
+            "min_ms": 1.3839869934599847,
+            "p50_ms": 1.3839869934599847,
+            "p95_ms": 1.3839869934599847,
+            "values_ms": [
+              1.3839869934599847
+            ]
+          },
+          "reminder_claim_20": {
+            "count": 1,
+            "max_ms": 1.1735300067812204,
+            "min_ms": 1.1735300067812204,
+            "p50_ms": 1.1735300067812204,
+            "p95_ms": 1.1735300067812204,
+            "values_ms": [
+              1.1735300067812204
+            ]
+          },
+          "reminder_claim_empty": {
+            "count": 1,
+            "max_ms": 0.40233900654129684,
+            "min_ms": 0.40233900654129684,
+            "p50_ms": 0.40233900654129684,
+            "p95_ms": 0.40233900654129684,
+            "values_ms": [
+              0.40233900654129684
+            ]
+          },
+          "reminder_lease_acquire": {
+            "count": 1,
+            "max_ms": 0.8424120023846626,
+            "min_ms": 0.8424120023846626,
+            "p50_ms": 0.8424120023846626,
+            "p95_ms": 0.8424120023846626,
+            "values_ms": [
+              0.8424120023846626
+            ]
+          },
+          "reminder_lease_claim_20": {
+            "count": 1,
+            "max_ms": 2.015942009165883,
+            "min_ms": 2.015942009165883,
+            "p50_ms": 2.015942009165883,
+            "p95_ms": 2.015942009165883,
+            "values_ms": [
+              2.015942009165883
+            ]
+          },
+          "reminder_lease_release": {
+            "count": 1,
+            "max_ms": 0.36198699672240764,
+            "min_ms": 0.36198699672240764,
+            "p50_ms": 0.36198699672240764,
+            "p95_ms": 0.36198699672240764,
+            "values_ms": [
+              0.36198699672240764
+            ]
+          },
+          "reminder_schedule": {
+            "count": 20,
+            "max_ms": 4.646347995731048,
+            "min_ms": 0.7043499936116859,
+            "p50_ms": 0.9642635050113313,
+            "p95_ms": 4.524775547906756,
+            "values_ms": [
+              0.7043499936116859,
+              0.751883999328129,
+              0.7612260087626055,
+              0.7750980003038421,
+              0.8049589960137382,
+              0.8331419958267361,
+              0.8660449966555461,
+              0.9012189984787256,
+              0.9071859967662022,
+              0.9398810070706531,
+              0.9886460029520094,
+              0.9921550081344321,
+              1.033893000567332,
+              1.2664500100072473,
+              1.53852000948973,
+              2.0596210088115185,
+              2.099040008033626,
+              2.7555849956115708,
+              4.518376998021267,
+              4.646347995731048
+            ]
+          },
+          "reminder_settle_delivered": {
+            "count": 20,
+            "max_ms": 0.6098020094214007,
+            "min_ms": 0.3678009961731732,
+            "p50_ms": 0.42393749754410237,
+            "p95_ms": 0.45602361133205715,
+            "values_ms": [
+              0.3678009961731732,
+              0.3860180004267022,
+              0.39420499524567276,
+              0.3956200089305639,
+              0.4025040107080713,
+              0.4138569929637015,
+              0.4140530072618276,
+              0.4147220024606213,
+              0.4181580006843433,
+              0.4224739968776703,
+              0.42540099821053445,
+              0.42630601092241704,
+              0.4285160102881491,
+              0.43469099909998477,
+              0.4365299973869696,
+              0.43781500426121056,
+              0.43815399112645537,
+              0.4447210085345432,
+              0.4479300114326179,
+              0.6098020094214007
+            ]
+          },
+          "stats_366_day": {
+            "count": 1,
+            "max_ms": 24.37082299729809,
+            "min_ms": 24.37082299729809,
+            "p50_ms": 24.37082299729809,
+            "p95_ms": 24.37082299729809,
+            "values_ms": [
+              24.37082299729809
+            ]
+          },
+          "timeblock_create": {
+            "count": 1,
+            "max_ms": 2.403710997896269,
+            "min_ms": 2.403710997896269,
+            "p50_ms": 2.403710997896269,
+            "p95_ms": 2.403710997896269,
+            "values_ms": [
+              2.403710997896269
+            ]
+          },
+          "timeblock_range_42_day": {
+            "count": 1,
+            "max_ms": 0.42859600216615945,
+            "min_ms": 0.42859600216615945,
+            "p50_ms": 0.42859600216615945,
+            "p95_ms": 0.42859600216615945,
+            "values_ms": [
+              0.42859600216615945
+            ]
+          },
+          "timeslot_create": {
+            "count": 1,
+            "max_ms": 0.4709150089183822,
+            "min_ms": 0.4709150089183822,
+            "p50_ms": 0.4709150089183822,
+            "p95_ms": 0.4709150089183822,
+            "values_ms": [
+              0.4709150089183822
+            ]
+          },
+          "timeslot_range": {
+            "count": 1,
+            "max_ms": 0.3617850015871227,
+            "min_ms": 0.3617850015871227,
+            "p50_ms": 0.3617850015871227,
+            "p95_ms": 0.3617850015871227,
+            "values_ms": [
+              0.3617850015871227
+            ]
+          }
+        },
+        "mutation_event_count": 26,
+        "response_counts": {
+          "bulk_recurrence_complete": 500,
+          "bulk_recurrence_uncomplete": 500,
+          "calendar_42_day": 873,
+          "nudges": 2,
+          "planning_daily": 1729,
+          "planning_weekly": 7,
+          "recurrence_complete": 2,
+          "recurrence_uncomplete": 2,
+          "reminder_claim_20": 20,
+          "reminder_claim_empty": 0,
+          "reminder_lease_acquire": 1,
+          "reminder_lease_claim_20": 20,
+          "reminder_lease_release": 1,
+          "reminder_schedule": 20,
+          "reminder_settle_delivered": 20,
+          "stats_366_day": 366,
+          "timeblock_create": 1,
+          "timeblock_range_42_day": 1,
+          "timeslot_create": 1,
+          "timeslot_range": 1
+        },
+        "scheduler": {
+          "claimed": 20,
+          "due_intents_scheduled": 20,
+          "due_wake_sequence": 1,
+          "due_wake_wait_ms": 45.880794001277536,
+          "idle_after_settlement": true,
+          "idle_before_due": true,
+          "initial_wake_sequence": 0,
+          "post_settle_claimed": 0,
+          "settled": 20
+        },
+        "task_count": 10000
+      }
+    },
+    {
+      "cleanup_success": true,
+      "idle": {
+        "cgroup_current_bytes": 7090176,
+        "cgroup_current_mib": 6.7617,
+        "cgroup_peak_bytes": 8126464,
+        "cgroup_peak_mib": 7.75,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-temporal-b917b8c6a663-3t5q9mi3/profile-02 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "idle",
+        "pid": 1565342,
+        "process_count": 1,
+        "pss_bytes": 9134080,
+        "pss_mib": 8.7109,
+        "rss_bytes": 11538432,
+        "rss_mib": 11.0039
+      },
+      "sample_index": 2,
+      "seed": {
+        "as_of_date": "2026-07-31",
+        "duration_ms": 285.249486,
+        "task_count": 10000,
+        "temporal_recurrence_source_count": 250,
+        "wall_ms": 288.7037530017551
+      },
+      "settle_seconds": 2.0,
+      "sqlite": {
+        "junban.sqlite3": 8585216,
+        "junban.sqlite3-shm": 32768,
+        "junban.sqlite3-wal": 1024000,
+        "total_bytes": 9641984
+      },
+      "startup_to_health_ms": 51.08807299984619,
+      "unit": "junban-temporal-b917b8c6a663-s02.service",
+      "warm": {
+        "cgroup_current_bytes": 18096128,
+        "cgroup_current_mib": 17.2578,
+        "cgroup_peak_bytes": 19423232,
+        "cgroup_peak_mib": 18.5234,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-temporal-b917b8c6a663-3t5q9mi3/profile-02 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "warm",
+        "pid": 1565342,
+        "process_count": 1,
+        "pss_bytes": 19731456,
+        "pss_mib": 18.8174,
+        "rss_bytes": 22134784,
+        "rss_mib": 21.1094
+      },
+      "workload": {
+        "event_revision_delta": 26,
+        "event_revision_end": 26,
+        "event_revision_start": 0,
+        "latencies": {
+          "bulk_recurrence_complete": {
+            "count": 1,
+            "max_ms": 99.18294100498315,
+            "min_ms": 99.18294100498315,
+            "p50_ms": 99.18294100498315,
+            "p95_ms": 99.18294100498315,
+            "values_ms": [
+              99.18294100498315
+            ]
+          },
+          "bulk_recurrence_uncomplete": {
+            "count": 1,
+            "max_ms": 166.80781600007322,
+            "min_ms": 166.80781600007322,
+            "p50_ms": 166.80781600007322,
+            "p95_ms": 166.80781600007322,
+            "values_ms": [
+              166.80781600007322
+            ]
+          },
+          "calendar_42_day": {
+            "count": 1,
+            "max_ms": 63.716364005813375,
+            "min_ms": 63.716364005813375,
+            "p50_ms": 63.716364005813375,
+            "p95_ms": 63.716364005813375,
+            "values_ms": [
+              63.716364005813375
+            ]
+          },
+          "nudges": {
+            "count": 1,
+            "max_ms": 24.164255999494344,
+            "min_ms": 24.164255999494344,
+            "p50_ms": 24.164255999494344,
+            "p95_ms": 24.164255999494344,
+            "values_ms": [
+              24.164255999494344
+            ]
+          },
+          "planning_daily": {
+            "count": 1,
+            "max_ms": 46.53309501009062,
+            "min_ms": 46.53309501009062,
+            "p50_ms": 46.53309501009062,
+            "p95_ms": 46.53309501009062,
+            "values_ms": [
+              46.53309501009062
+            ]
+          },
+          "planning_weekly": {
+            "count": 1,
+            "max_ms": 25.71367500058841,
+            "min_ms": 25.71367500058841,
+            "p50_ms": 25.71367500058841,
+            "p95_ms": 25.71367500058841,
+            "values_ms": [
+              25.71367500058841
+            ]
+          },
+          "recurrence_complete": {
+            "count": 1,
+            "max_ms": 2.294588994118385,
+            "min_ms": 2.294588994118385,
+            "p50_ms": 2.294588994118385,
+            "p95_ms": 2.294588994118385,
+            "values_ms": [
+              2.294588994118385
+            ]
+          },
+          "recurrence_uncomplete": {
+            "count": 1,
+            "max_ms": 1.8976880091940984,
+            "min_ms": 1.8976880091940984,
+            "p50_ms": 1.8976880091940984,
+            "p95_ms": 1.8976880091940984,
+            "values_ms": [
+              1.8976880091940984
+            ]
+          },
+          "reminder_claim_20": {
+            "count": 1,
+            "max_ms": 1.816322997910902,
+            "min_ms": 1.816322997910902,
+            "p50_ms": 1.816322997910902,
+            "p95_ms": 1.816322997910902,
+            "values_ms": [
+              1.816322997910902
+            ]
+          },
+          "reminder_claim_empty": {
+            "count": 1,
+            "max_ms": 0.3616879985202104,
+            "min_ms": 0.3616879985202104,
+            "p50_ms": 0.3616879985202104,
+            "p95_ms": 0.3616879985202104,
+            "values_ms": [
+              0.3616879985202104
+            ]
+          },
+          "reminder_lease_acquire": {
+            "count": 1,
+            "max_ms": 1.2469429930206388,
+            "min_ms": 1.2469429930206388,
+            "p50_ms": 1.2469429930206388,
+            "p95_ms": 1.2469429930206388,
+            "values_ms": [
+              1.2469429930206388
+            ]
+          },
+          "reminder_lease_claim_20": {
+            "count": 1,
+            "max_ms": 3.0632659909315407,
+            "min_ms": 3.0632659909315407,
+            "p50_ms": 3.0632659909315407,
+            "p95_ms": 3.0632659909315407,
+            "values_ms": [
+              3.0632659909315407
+            ]
+          },
+          "reminder_lease_release": {
+            "count": 1,
+            "max_ms": 0.3799919941229746,
+            "min_ms": 0.3799919941229746,
+            "p50_ms": 0.3799919941229746,
+            "p95_ms": 0.3799919941229746,
+            "values_ms": [
+              0.3799919941229746
+            ]
+          },
+          "reminder_schedule": {
+            "count": 20,
+            "max_ms": 5.800750004709698,
+            "min_ms": 0.975924005615525,
+            "p50_ms": 1.3242559944046661,
+            "p95_ms": 5.667392794566695,
+            "values_ms": [
+              0.975924005615525,
+              0.9846619941527024,
+              1.0296389955328777,
+              1.0297599947080016,
+              1.0452340065967292,
+              1.1018119985237718,
+              1.1596460099099204,
+              1.1749130062526092,
+              1.181104002171196,
+              1.2983880005776882,
+              1.350123988231644,
+              1.365877003991045,
+              1.5825930022401735,
+              1.6129849973367527,
+              1.7188789934152737,
+              2.582007000455633,
+              3.2196000101976097,
+              3.977009007940069,
+              5.660373994032852,
+              5.800750004709698
+            ]
+          },
+          "reminder_settle_delivered": {
+            "count": 20,
+            "max_ms": 0.5926989979343489,
+            "min_ms": 0.34685400896705687,
+            "p50_ms": 0.4224024960421957,
+            "p95_ms": 0.5012643545342145,
+            "values_ms": [
+              0.34685400896705687,
+              0.35188898618798703,
+              0.3641709918156266,
+              0.3727919975062832,
+              0.37795699608977884,
+              0.3785169974435121,
+              0.3847129992209375,
+              0.4011529963463545,
+              0.40228699799627066,
+              0.4154740017838776,
+              0.4293309903005138,
+              0.43451698729768395,
+              0.4355440032668412,
+              0.45410700840875506,
+              0.45453201164491475,
+              0.4598240047926083,
+              0.46637500054202974,
+              0.471382008981891,
+              0.4964520048815757,
+              0.5926989979343489
+            ]
+          },
+          "stats_366_day": {
+            "count": 1,
+            "max_ms": 22.793868003645912,
+            "min_ms": 22.793868003645912,
+            "p50_ms": 22.793868003645912,
+            "p95_ms": 22.793868003645912,
+            "values_ms": [
+              22.793868003645912
+            ]
+          },
+          "timeblock_create": {
+            "count": 1,
+            "max_ms": 7.423444985761307,
+            "min_ms": 7.423444985761307,
+            "p50_ms": 7.423444985761307,
+            "p95_ms": 7.423444985761307,
+            "values_ms": [
+              7.423444985761307
+            ]
+          },
+          "timeblock_range_42_day": {
+            "count": 1,
+            "max_ms": 1.1271770054008812,
+            "min_ms": 1.1271770054008812,
+            "p50_ms": 1.1271770054008812,
+            "p95_ms": 1.1271770054008812,
+            "values_ms": [
+              1.1271770054008812
+            ]
+          },
+          "timeslot_create": {
+            "count": 1,
+            "max_ms": 1.4466759894276038,
+            "min_ms": 1.4466759894276038,
+            "p50_ms": 1.4466759894276038,
+            "p95_ms": 1.4466759894276038,
+            "values_ms": [
+              1.4466759894276038
+            ]
+          },
+          "timeslot_range": {
+            "count": 1,
+            "max_ms": 0.5496980011230335,
+            "min_ms": 0.5496980011230335,
+            "p50_ms": 0.5496980011230335,
+            "p95_ms": 0.5496980011230335,
+            "values_ms": [
+              0.5496980011230335
+            ]
+          }
+        },
+        "mutation_event_count": 26,
+        "response_counts": {
+          "bulk_recurrence_complete": 500,
+          "bulk_recurrence_uncomplete": 500,
+          "calendar_42_day": 873,
+          "nudges": 2,
+          "planning_daily": 1729,
+          "planning_weekly": 7,
+          "recurrence_complete": 2,
+          "recurrence_uncomplete": 2,
+          "reminder_claim_20": 20,
+          "reminder_claim_empty": 0,
+          "reminder_lease_acquire": 1,
+          "reminder_lease_claim_20": 20,
+          "reminder_lease_release": 1,
+          "reminder_schedule": 20,
+          "reminder_settle_delivered": 20,
+          "stats_366_day": 366,
+          "timeblock_create": 1,
+          "timeblock_range_42_day": 1,
+          "timeslot_create": 1,
+          "timeslot_range": 1
+        },
+        "scheduler": {
+          "claimed": 20,
+          "due_intents_scheduled": 20,
+          "due_wake_sequence": 1,
+          "due_wake_wait_ms": 57.58513401087839,
+          "idle_after_settlement": true,
+          "idle_before_due": true,
+          "initial_wake_sequence": 0,
+          "post_settle_claimed": 0,
+          "settled": 20
+        },
+        "task_count": 10000
+      }
+    },
+    {
+      "cleanup_success": true,
+      "idle": {
+        "cgroup_current_bytes": 7319552,
+        "cgroup_current_mib": 6.9805,
+        "cgroup_peak_bytes": 8192000,
+        "cgroup_peak_mib": 7.8125,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-temporal-b917b8c6a663-3t5q9mi3/profile-03 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "idle",
+        "pid": 1565415,
+        "process_count": 1,
+        "pss_bytes": 9167872,
+        "pss_mib": 8.7432,
+        "rss_bytes": 11591680,
+        "rss_mib": 11.0547
+      },
+      "sample_index": 3,
+      "seed": {
+        "as_of_date": "2026-07-31",
+        "duration_ms": 401.25518,
+        "task_count": 10000,
+        "temporal_recurrence_source_count": 250,
+        "wall_ms": 404.36194599897135
+      },
+      "settle_seconds": 2.0,
+      "sqlite": {
+        "junban.sqlite3": 8585216,
+        "junban.sqlite3-shm": 32768,
+        "junban.sqlite3-wal": 1024000,
+        "total_bytes": 9641984
+      },
+      "startup_to_health_ms": 46.67434300063178,
+      "unit": "junban-temporal-b917b8c6a663-s03.service",
+      "warm": {
+        "cgroup_current_bytes": 17596416,
+        "cgroup_current_mib": 16.7812,
+        "cgroup_peak_bytes": 18628608,
+        "cgroup_peak_mib": 17.7656,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-temporal-b917b8c6a663-3t5q9mi3/profile-03 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "warm",
+        "pid": 1565415,
+        "process_count": 1,
+        "pss_bytes": 19833856,
+        "pss_mib": 18.915,
+        "rss_bytes": 22257664,
+        "rss_mib": 21.2266
+      },
+      "workload": {
+        "event_revision_delta": 26,
+        "event_revision_end": 26,
+        "event_revision_start": 0,
+        "latencies": {
+          "bulk_recurrence_complete": {
+            "count": 1,
+            "max_ms": 80.47990799241234,
+            "min_ms": 80.47990799241234,
+            "p50_ms": 80.47990799241234,
+            "p95_ms": 80.47990799241234,
+            "values_ms": [
+              80.47990799241234
+            ]
+          },
+          "bulk_recurrence_uncomplete": {
+            "count": 1,
+            "max_ms": 174.25253000692464,
+            "min_ms": 174.25253000692464,
+            "p50_ms": 174.25253000692464,
+            "p95_ms": 174.25253000692464,
+            "values_ms": [
+              174.25253000692464
+            ]
+          },
+          "calendar_42_day": {
+            "count": 1,
+            "max_ms": 55.069589987397194,
+            "min_ms": 55.069589987397194,
+            "p50_ms": 55.069589987397194,
+            "p95_ms": 55.069589987397194,
+            "values_ms": [
+              55.069589987397194
+            ]
+          },
+          "nudges": {
+            "count": 1,
+            "max_ms": 30.350019995239563,
+            "min_ms": 30.350019995239563,
+            "p50_ms": 30.350019995239563,
+            "p95_ms": 30.350019995239563,
+            "values_ms": [
+              30.350019995239563
+            ]
+          },
+          "planning_daily": {
+            "count": 1,
+            "max_ms": 49.400607007555664,
+            "min_ms": 49.400607007555664,
+            "p50_ms": 49.400607007555664,
+            "p95_ms": 49.400607007555664,
+            "values_ms": [
+              49.400607007555664
+            ]
+          },
+          "planning_weekly": {
+            "count": 1,
+            "max_ms": 33.36714900797233,
+            "min_ms": 33.36714900797233,
+            "p50_ms": 33.36714900797233,
+            "p95_ms": 33.36714900797233,
+            "values_ms": [
+              33.36714900797233
+            ]
+          },
+          "recurrence_complete": {
+            "count": 1,
+            "max_ms": 1.3484800001606345,
+            "min_ms": 1.3484800001606345,
+            "p50_ms": 1.3484800001606345,
+            "p95_ms": 1.3484800001606345,
+            "values_ms": [
+              1.3484800001606345
+            ]
+          },
+          "recurrence_uncomplete": {
+            "count": 1,
+            "max_ms": 2.057593999779783,
+            "min_ms": 2.057593999779783,
+            "p50_ms": 2.057593999779783,
+            "p95_ms": 2.057593999779783,
+            "values_ms": [
+              2.057593999779783
+            ]
+          },
+          "reminder_claim_20": {
+            "count": 1,
+            "max_ms": 1.245791994733736,
+            "min_ms": 1.245791994733736,
+            "p50_ms": 1.245791994733736,
+            "p95_ms": 1.245791994733736,
+            "values_ms": [
+              1.245791994733736
+            ]
+          },
+          "reminder_claim_empty": {
+            "count": 1,
+            "max_ms": 0.4906690010102466,
+            "min_ms": 0.4906690010102466,
+            "p50_ms": 0.4906690010102466,
+            "p95_ms": 0.4906690010102466,
+            "values_ms": [
+              0.4906690010102466
+            ]
+          },
+          "reminder_lease_acquire": {
+            "count": 1,
+            "max_ms": 2.2901479969732463,
+            "min_ms": 2.2901479969732463,
+            "p50_ms": 2.2901479969732463,
+            "p95_ms": 2.2901479969732463,
+            "values_ms": [
+              2.2901479969732463
+            ]
+          },
+          "reminder_lease_claim_20": {
+            "count": 1,
+            "max_ms": 3.5359399917069823,
+            "min_ms": 3.5359399917069823,
+            "p50_ms": 3.5359399917069823,
+            "p95_ms": 3.5359399917069823,
+            "values_ms": [
+              3.5359399917069823
+            ]
+          },
+          "reminder_lease_release": {
+            "count": 1,
+            "max_ms": 0.4007120005553588,
+            "min_ms": 0.4007120005553588,
+            "p50_ms": 0.4007120005553588,
+            "p95_ms": 0.4007120005553588,
+            "values_ms": [
+              0.4007120005553588
+            ]
+          },
+          "reminder_schedule": {
+            "count": 20,
+            "max_ms": 5.205096007557586,
+            "min_ms": 0.8322369976667687,
+            "p50_ms": 1.1583030063775368,
+            "p95_ms": 4.368132694798988,
+            "values_ms": [
+              0.8322369976667687,
+              0.8672280091559514,
+              0.8762110082898289,
+              0.9381709969602525,
+              0.9765840077307075,
+              0.9837029938353226,
+              0.9970590035663918,
+              1.049800994223915,
+              1.070517988409847,
+              1.1367960105417296,
+              1.179810002213344,
+              1.291652995860204,
+              1.3335850089788437,
+              1.6560040094191208,
+              1.9119820062769577,
+              1.937331006047316,
+              2.062100000330247,
+              3.130536002572626,
+              4.324081994127482,
+              5.205096007557586
+            ]
+          },
+          "reminder_settle_delivered": {
+            "count": 20,
+            "max_ms": 3.3178330049850047,
+            "min_ms": 0.4380890022730455,
+            "p50_ms": 0.48901700210990384,
+            "p95_ms": 0.9717747409013118,
+            "values_ms": [
+              0.4380890022730455,
+              0.4445209924597293,
+              0.4639209946617484,
+              0.4646059969672933,
+              0.47182998969219625,
+              0.47604599967598915,
+              0.47667400212958455,
+              0.478425994515419,
+              0.4843920032726601,
+              0.4855089937336743,
+              0.4925250104861334,
+              0.4964969994034618,
+              0.5130520003149286,
+              0.5140959983691573,
+              0.5931350024184212,
+              0.6020769942551851,
+              0.6949529924895614,
+              0.790354999480769,
+              0.8482979901600629,
+              3.3178330049850047
+            ]
+          },
+          "stats_366_day": {
+            "count": 1,
+            "max_ms": 27.87220799655188,
+            "min_ms": 27.87220799655188,
+            "p50_ms": 27.87220799655188,
+            "p95_ms": 27.87220799655188,
+            "values_ms": [
+              27.87220799655188
+            ]
+          },
+          "timeblock_create": {
+            "count": 1,
+            "max_ms": 2.7926550101256,
+            "min_ms": 2.7926550101256,
+            "p50_ms": 2.7926550101256,
+            "p95_ms": 2.7926550101256,
+            "values_ms": [
+              2.7926550101256
+            ]
+          },
+          "timeblock_range_42_day": {
+            "count": 1,
+            "max_ms": 0.4338269936852157,
+            "min_ms": 0.4338269936852157,
+            "p50_ms": 0.4338269936852157,
+            "p95_ms": 0.4338269936852157,
+            "values_ms": [
+              0.4338269936852157
+            ]
+          },
+          "timeslot_create": {
+            "count": 1,
+            "max_ms": 0.48534599773120135,
+            "min_ms": 0.48534599773120135,
+            "p50_ms": 0.48534599773120135,
+            "p95_ms": 0.48534599773120135,
+            "values_ms": [
+              0.48534599773120135
+            ]
+          },
+          "timeslot_range": {
+            "count": 1,
+            "max_ms": 0.38355700962711126,
+            "min_ms": 0.38355700962711126,
+            "p50_ms": 0.38355700962711126,
+            "p95_ms": 0.38355700962711126,
+            "values_ms": [
+              0.38355700962711126
+            ]
+          }
+        },
+        "mutation_event_count": 26,
+        "response_counts": {
+          "bulk_recurrence_complete": 500,
+          "bulk_recurrence_uncomplete": 500,
+          "calendar_42_day": 873,
+          "nudges": 2,
+          "planning_daily": 1729,
+          "planning_weekly": 7,
+          "recurrence_complete": 2,
+          "recurrence_uncomplete": 2,
+          "reminder_claim_20": 20,
+          "reminder_claim_empty": 0,
+          "reminder_lease_acquire": 1,
+          "reminder_lease_claim_20": 20,
+          "reminder_lease_release": 1,
+          "reminder_schedule": 20,
+          "reminder_settle_delivered": 20,
+          "stats_366_day": 366,
+          "timeblock_create": 1,
+          "timeblock_range_42_day": 1,
+          "timeslot_create": 1,
+          "timeslot_range": 1
+        },
+        "scheduler": {
+          "claimed": 20,
+          "due_intents_scheduled": 20,
+          "due_wake_sequence": 1,
+          "due_wake_wait_ms": 49.626913998508826,
+          "idle_after_settlement": true,
+          "idle_before_due": true,
+          "initial_wake_sequence": 0,
+          "post_settle_claimed": 0,
+          "settled": 20
+        },
+        "task_count": 10000
+      }
+    },
+    {
+      "cleanup_success": true,
+      "idle": {
+        "cgroup_current_bytes": 7434240,
+        "cgroup_current_mib": 7.0898,
+        "cgroup_peak_bytes": 9166848,
+        "cgroup_peak_mib": 8.7422,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-temporal-b917b8c6a663-3t5q9mi3/profile-04 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "idle",
+        "pid": 1565480,
+        "process_count": 1,
+        "pss_bytes": 8988672,
+        "pss_mib": 8.5723,
+        "rss_bytes": 11472896,
+        "rss_mib": 10.9414
+      },
+      "sample_index": 4,
+      "seed": {
+        "as_of_date": "2026-07-31",
+        "duration_ms": 286.267926,
+        "task_count": 10000,
+        "temporal_recurrence_source_count": 250,
+        "wall_ms": 289.1622069873847
+      },
+      "settle_seconds": 2.0,
+      "sqlite": {
+        "junban.sqlite3": 8585216,
+        "junban.sqlite3-shm": 32768,
+        "junban.sqlite3-wal": 1024000,
+        "total_bytes": 9641984
+      },
+      "startup_to_health_ms": 40.82399499020539,
+      "unit": "junban-temporal-b917b8c6a663-s04.service",
+      "warm": {
+        "cgroup_current_bytes": 16855040,
+        "cgroup_current_mib": 16.0742,
+        "cgroup_peak_bytes": 18800640,
+        "cgroup_peak_mib": 17.9297,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-temporal-b917b8c6a663-3t5q9mi3/profile-04 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "warm",
+        "pid": 1565480,
+        "process_count": 1,
+        "pss_bytes": 19675136,
+        "pss_mib": 18.7637,
+        "rss_bytes": 22159360,
+        "rss_mib": 21.1328
+      },
+      "workload": {
+        "event_revision_delta": 26,
+        "event_revision_end": 26,
+        "event_revision_start": 0,
+        "latencies": {
+          "bulk_recurrence_complete": {
+            "count": 1,
+            "max_ms": 109.7509159881156,
+            "min_ms": 109.7509159881156,
+            "p50_ms": 109.7509159881156,
+            "p95_ms": 109.7509159881156,
+            "values_ms": [
+              109.7509159881156
+            ]
+          },
+          "bulk_recurrence_uncomplete": {
+            "count": 1,
+            "max_ms": 222.40829300426412,
+            "min_ms": 222.40829300426412,
+            "p50_ms": 222.40829300426412,
+            "p95_ms": 222.40829300426412,
+            "values_ms": [
+              222.40829300426412
+            ]
+          },
+          "calendar_42_day": {
+            "count": 1,
+            "max_ms": 49.442066985648125,
+            "min_ms": 49.442066985648125,
+            "p50_ms": 49.442066985648125,
+            "p95_ms": 49.442066985648125,
+            "values_ms": [
+              49.442066985648125
+            ]
+          },
+          "nudges": {
+            "count": 1,
+            "max_ms": 26.238937003654428,
+            "min_ms": 26.238937003654428,
+            "p50_ms": 26.238937003654428,
+            "p95_ms": 26.238937003654428,
+            "values_ms": [
+              26.238937003654428
+            ]
+          },
+          "planning_daily": {
+            "count": 1,
+            "max_ms": 41.85877999407239,
+            "min_ms": 41.85877999407239,
+            "p50_ms": 41.85877999407239,
+            "p95_ms": 41.85877999407239,
+            "values_ms": [
+              41.85877999407239
+            ]
+          },
+          "planning_weekly": {
+            "count": 1,
+            "max_ms": 28.249101000255905,
+            "min_ms": 28.249101000255905,
+            "p50_ms": 28.249101000255905,
+            "p95_ms": 28.249101000255905,
+            "values_ms": [
+              28.249101000255905
+            ]
+          },
+          "recurrence_complete": {
+            "count": 1,
+            "max_ms": 1.3750740035902709,
+            "min_ms": 1.3750740035902709,
+            "p50_ms": 1.3750740035902709,
+            "p95_ms": 1.3750740035902709,
+            "values_ms": [
+              1.3750740035902709
+            ]
+          },
+          "recurrence_uncomplete": {
+            "count": 1,
+            "max_ms": 1.6593489999650046,
+            "min_ms": 1.6593489999650046,
+            "p50_ms": 1.6593489999650046,
+            "p95_ms": 1.6593489999650046,
+            "values_ms": [
+              1.6593489999650046
+            ]
+          },
+          "reminder_claim_20": {
+            "count": 1,
+            "max_ms": 2.0626240002457052,
+            "min_ms": 2.0626240002457052,
+            "p50_ms": 2.0626240002457052,
+            "p95_ms": 2.0626240002457052,
+            "values_ms": [
+              2.0626240002457052
+            ]
+          },
+          "reminder_claim_empty": {
+            "count": 1,
+            "max_ms": 0.41415399755351245,
+            "min_ms": 0.41415399755351245,
+            "p50_ms": 0.41415399755351245,
+            "p95_ms": 0.41415399755351245,
+            "values_ms": [
+              0.41415399755351245
+            ]
+          },
+          "reminder_lease_acquire": {
+            "count": 1,
+            "max_ms": 1.1136300017824396,
+            "min_ms": 1.1136300017824396,
+            "p50_ms": 1.1136300017824396,
+            "p95_ms": 1.1136300017824396,
+            "values_ms": [
+              1.1136300017824396
+            ]
+          },
+          "reminder_lease_claim_20": {
+            "count": 1,
+            "max_ms": 3.176254002028145,
+            "min_ms": 3.176254002028145,
+            "p50_ms": 3.176254002028145,
+            "p95_ms": 3.176254002028145,
+            "values_ms": [
+              3.176254002028145
+            ]
+          },
+          "reminder_lease_release": {
+            "count": 1,
+            "max_ms": 0.3425359900575131,
+            "min_ms": 0.3425359900575131,
+            "p50_ms": 0.3425359900575131,
+            "p95_ms": 0.3425359900575131,
+            "values_ms": [
+              0.3425359900575131
+            ]
+          },
+          "reminder_schedule": {
+            "count": 20,
+            "max_ms": 5.5399789998773485,
+            "min_ms": 0.9199380001518875,
+            "p50_ms": 1.1797779952757992,
+            "p95_ms": 4.631774254812626,
+            "values_ms": [
+              0.9199380001518875,
+              0.9396679961355403,
+              0.9562269988236949,
+              0.9701149974716827,
+              1.0048469994217157,
+              1.0107819980476052,
+              1.0229520121356472,
+              1.0233420034637675,
+              1.1095420049969107,
+              1.164796994999051,
+              1.1947589955525473,
+              1.2025040050502867,
+              1.2854950036853552,
+              1.3283619919093326,
+              1.4954409998608753,
+              2.1216580062173307,
+              2.3998429969651625,
+              2.9734490090049803,
+              4.583974005072378,
+              5.5399789998773485
+            ]
+          },
+          "reminder_settle_delivered": {
+            "count": 20,
+            "max_ms": 0.8354599995072931,
+            "min_ms": 0.3498540027067065,
+            "p50_ms": 0.4423065038281493,
+            "p95_ms": 0.7545617962023243,
+            "values_ms": [
+              0.3498540027067065,
+              0.3567160019883886,
+              0.3706699935719371,
+              0.38892800512257963,
+              0.39659100002609193,
+              0.4030010022688657,
+              0.4072459996677935,
+              0.4087609995622188,
+              0.42598599975463003,
+              0.43714800267480314,
+              0.44746500498149544,
+              0.4480640054680407,
+              0.4883130022790283,
+              0.5824779946124181,
+              0.6072100077290088,
+              0.6319600070128217,
+              0.638407000224106,
+              0.680634009768255,
+              0.7503039960283786,
+              0.8354599995072931
+            ]
+          },
+          "stats_366_day": {
+            "count": 1,
+            "max_ms": 24.976956003229134,
+            "min_ms": 24.976956003229134,
+            "p50_ms": 24.976956003229134,
+            "p95_ms": 24.976956003229134,
+            "values_ms": [
+              24.976956003229134
+            ]
+          },
+          "timeblock_create": {
+            "count": 1,
+            "max_ms": 2.3258349974639714,
+            "min_ms": 2.3258349974639714,
+            "p50_ms": 2.3258349974639714,
+            "p95_ms": 2.3258349974639714,
+            "values_ms": [
+              2.3258349974639714
+            ]
+          },
+          "timeblock_range_42_day": {
+            "count": 1,
+            "max_ms": 0.38971299363765866,
+            "min_ms": 0.38971299363765866,
+            "p50_ms": 0.38971299363765866,
+            "p95_ms": 0.38971299363765866,
+            "values_ms": [
+              0.38971299363765866
+            ]
+          },
+          "timeslot_create": {
+            "count": 1,
+            "max_ms": 0.45099499402567744,
+            "min_ms": 0.45099499402567744,
+            "p50_ms": 0.45099499402567744,
+            "p95_ms": 0.45099499402567744,
+            "values_ms": [
+              0.45099499402567744
+            ]
+          },
+          "timeslot_range": {
+            "count": 1,
+            "max_ms": 0.3633940068539232,
+            "min_ms": 0.3633940068539232,
+            "p50_ms": 0.3633940068539232,
+            "p95_ms": 0.3633940068539232,
+            "values_ms": [
+              0.3633940068539232
+            ]
+          }
+        },
+        "mutation_event_count": 26,
+        "response_counts": {
+          "bulk_recurrence_complete": 500,
+          "bulk_recurrence_uncomplete": 500,
+          "calendar_42_day": 873,
+          "nudges": 2,
+          "planning_daily": 1729,
+          "planning_weekly": 7,
+          "recurrence_complete": 2,
+          "recurrence_uncomplete": 2,
+          "reminder_claim_20": 20,
+          "reminder_claim_empty": 0,
+          "reminder_lease_acquire": 1,
+          "reminder_lease_claim_20": 20,
+          "reminder_lease_release": 1,
+          "reminder_schedule": 20,
+          "reminder_settle_delivered": 20,
+          "stats_366_day": 366,
+          "timeblock_create": 1,
+          "timeblock_range_42_day": 1,
+          "timeslot_create": 1,
+          "timeslot_range": 1
+        },
+        "scheduler": {
+          "claimed": 20,
+          "due_intents_scheduled": 20,
+          "due_wake_sequence": 1,
+          "due_wake_wait_ms": 53.54131398780737,
+          "idle_after_settlement": true,
+          "idle_before_due": true,
+          "initial_wake_sequence": 0,
+          "post_settle_claimed": 0,
+          "settled": 20
+        },
+        "task_count": 10000
+      }
+    }
+  ],
+  "seeder": {
+    "path": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-scale-seed",
+    "sha256": "5c7cb2f64fee8a1cafb0457a6e0207039ff33991a9cec1e7fc0794b0f8adf3ef",
+    "size_bytes": 2915032
+  },
+  "summary": {
+    "budget_checks": {
+      "bulk_recurrence_complete_p95_ms": {
+        "limit_ms": 1000.0,
+        "passed": true,
+        "value": 107.6373209914891
+      },
+      "bulk_recurrence_uncomplete_p95_ms": {
+        "limit_ms": 1000.0,
+        "passed": true,
+        "value": 212.77714040479623
+      },
+      "calendar_42_day_p95_ms": {
+        "limit_ms": 100.0,
+        "passed": true,
+        "value": 61.98700920213014
+      },
+      "nudges_p95_ms": {
+        "limit_ms": 100.0,
+        "passed": true,
+        "value": 29.527803396922533
+      },
+      "recurrence_complete_p95_ms": {
+        "limit_ms": 100.0,
+        "passed": true,
+        "value": 2.513421801268123
+      },
+      "reminder_lease_claim_20_p95_ms": {
+        "limit_ms": 50.0,
+        "passed": true,
+        "value": 3.464002793771215
+      },
+      "stats_366_day_p95_ms": {
+        "limit_ms": 150.0,
+        "passed": true,
+        "value": 27.355575197725557
+      },
+      "timeblocking_42_day_p95_ms": {
+        "limit_ms": 100.0,
+        "passed": true,
+        "value": 1.3762537913862616
+      }
+    },
+    "budget_passed": true,
+    "idle_cgroup_mib": {
+      "max": 13.2617,
+      "median": 7.0898,
+      "min": 6.7617,
+      "values": [
+        13.2617,
+        7.168,
+        6.7617,
+        6.9805,
+        7.0898
+      ]
+    },
+    "idle_cgroup_peak_mib": {
+      "max": 14.2227,
+      "median": 8.2422,
+      "min": 7.75,
+      "values": [
+        14.2227,
+        8.2422,
+        7.75,
+        7.8125,
+        8.7422
+      ]
+    },
+    "idle_pss_mib": {
+      "max": 8.7578,
+      "median": 8.7109,
+      "min": 8.3643,
+      "values": [
+        8.3643,
+        8.7578,
+        8.7109,
+        8.7432,
+        8.5723
+      ]
+    },
+    "idle_rss_mib": {
+      "max": 11.1641,
+      "median": 11.0039,
+      "min": 10.6797,
+      "values": [
+        10.6797,
+        11.1641,
+        11.0039,
+        11.0547,
+        10.9414
+      ]
+    },
+    "latencies_ms": {
+      "bulk_recurrence_complete": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 109.7509159881156,
+          "median": 81.8667469866341,
+          "min": 79.98621500155423,
+          "values": [
+            79.98621500155423,
+            81.8667469866341,
+            99.18294100498315,
+            80.47990799241234,
+            109.7509159881156
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 109.7509159881156,
+          "median": 81.8667469866341,
+          "min": 79.98621500155423,
+          "values": [
+            79.98621500155423,
+            81.8667469866341,
+            99.18294100498315,
+            80.47990799241234,
+            109.7509159881156
+          ]
+        },
+        "pooled_p50_ms": 81.8667469866341,
+        "pooled_p95_ms": 107.6373209914891
+      },
+      "bulk_recurrence_uncomplete": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 222.40829300426412,
+          "median": 166.80781600007322,
+          "min": 162.4902019975707,
+          "values": [
+            162.4902019975707,
+            165.01512299873866,
+            166.80781600007322,
+            174.25253000692464,
+            222.40829300426412
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 222.40829300426412,
+          "median": 166.80781600007322,
+          "min": 162.4902019975707,
+          "values": [
+            162.4902019975707,
+            165.01512299873866,
+            166.80781600007322,
+            174.25253000692464,
+            222.40829300426412
+          ]
+        },
+        "pooled_p50_ms": 166.80781600007322,
+        "pooled_p95_ms": 212.77714040479623
+      },
+      "calendar_42_day": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 63.716364005813375,
+          "median": 53.20870199648198,
+          "min": 48.83602500194684,
+          "values": [
+            53.20870199648198,
+            48.83602500194684,
+            63.716364005813375,
+            55.069589987397194,
+            49.442066985648125
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 63.716364005813375,
+          "median": 53.20870199648198,
+          "min": 48.83602500194684,
+          "values": [
+            53.20870199648198,
+            48.83602500194684,
+            63.716364005813375,
+            55.069589987397194,
+            49.442066985648125
+          ]
+        },
+        "pooled_p50_ms": 53.20870199648198,
+        "pooled_p95_ms": 61.98700920213014
+      },
+      "nudges": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 30.350019995239563,
+          "median": 25.7336830109125,
+          "min": 24.164255999494344,
+          "values": [
+            25.09763000125531,
+            25.7336830109125,
+            24.164255999494344,
+            30.350019995239563,
+            26.238937003654428
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 30.350019995239563,
+          "median": 25.7336830109125,
+          "min": 24.164255999494344,
+          "values": [
+            25.09763000125531,
+            25.7336830109125,
+            24.164255999494344,
+            30.350019995239563,
+            26.238937003654428
+          ]
+        },
+        "pooled_p50_ms": 25.7336830109125,
+        "pooled_p95_ms": 29.527803396922533
+      },
+      "planning_daily": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 49.400607007555664,
+          "median": 45.019071010756306,
+          "min": 41.85877999407239,
+          "values": [
+            45.019071010756306,
+            43.8048619980691,
+            46.53309501009062,
+            49.400607007555664,
+            41.85877999407239
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 49.400607007555664,
+          "median": 45.019071010756306,
+          "min": 41.85877999407239,
+          "values": [
+            45.019071010756306,
+            43.8048619980691,
+            46.53309501009062,
+            49.400607007555664,
+            41.85877999407239
+          ]
+        },
+        "pooled_p50_ms": 45.019071010756306,
+        "pooled_p95_ms": 48.827104608062655
+      },
+      "planning_weekly": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 33.36714900797233,
+          "median": 28.96382100880146,
+          "min": 25.71367500058841,
+          "values": [
+            30.75671500118915,
+            28.96382100880146,
+            25.71367500058841,
+            33.36714900797233,
+            28.249101000255905
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 33.36714900797233,
+          "median": 28.96382100880146,
+          "min": 25.71367500058841,
+          "values": [
+            30.75671500118915,
+            28.96382100880146,
+            25.71367500058841,
+            33.36714900797233,
+            28.249101000255905
+          ]
+        },
+        "pooled_p50_ms": 28.96382100880146,
+        "pooled_p95_ms": 32.845062206615694
+      },
+      "recurrence_complete": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 2.5681300030555576,
+          "median": 1.3750740035902709,
+          "min": 1.2843650038121268,
+          "values": [
+            2.5681300030555576,
+            1.2843650038121268,
+            2.294588994118385,
+            1.3484800001606345,
+            1.3750740035902709
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 2.5681300030555576,
+          "median": 1.3750740035902709,
+          "min": 1.2843650038121268,
+          "values": [
+            2.5681300030555576,
+            1.2843650038121268,
+            2.294588994118385,
+            1.3484800001606345,
+            1.3750740035902709
+          ]
+        },
+        "pooled_p50_ms": 1.3750740035902709,
+        "pooled_p95_ms": 2.513421801268123
+      },
+      "recurrence_uncomplete": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 2.0807419932680205,
+          "median": 1.8976880091940984,
+          "min": 1.3839869934599847,
+          "values": [
+            2.0807419932680205,
+            1.3839869934599847,
+            1.8976880091940984,
+            2.057593999779783,
+            1.6593489999650046
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 2.0807419932680205,
+          "median": 1.8976880091940984,
+          "min": 1.3839869934599847,
+          "values": [
+            2.0807419932680205,
+            1.3839869934599847,
+            1.8976880091940984,
+            2.057593999779783,
+            1.6593489999650046
+          ]
+        },
+        "pooled_p50_ms": 1.8976880091940984,
+        "pooled_p95_ms": 2.076112394570373
+      },
+      "reminder_claim_20": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 2.0626240002457052,
+          "median": 1.4787499967496842,
+          "min": 1.1735300067812204,
+          "values": [
+            1.4787499967496842,
+            1.1735300067812204,
+            1.816322997910902,
+            1.245791994733736,
+            2.0626240002457052
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 2.0626240002457052,
+          "median": 1.4787499967496842,
+          "min": 1.1735300067812204,
+          "values": [
+            1.4787499967496842,
+            1.1735300067812204,
+            1.816322997910902,
+            1.245791994733736,
+            2.0626240002457052
+          ]
+        },
+        "pooled_p50_ms": 1.4787499967496842,
+        "pooled_p95_ms": 2.0133637997787446
+      },
+      "reminder_claim_empty": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 0.4906690010102466,
+          "median": 0.40233900654129684,
+          "min": 0.35373801074456424,
+          "values": [
+            0.35373801074456424,
+            0.40233900654129684,
+            0.3616879985202104,
+            0.4906690010102466,
+            0.41415399755351245
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 0.4906690010102466,
+          "median": 0.40233900654129684,
+          "min": 0.35373801074456424,
+          "values": [
+            0.35373801074456424,
+            0.40233900654129684,
+            0.3616879985202104,
+            0.4906690010102466,
+            0.41415399755351245
+          ]
+        },
+        "pooled_p50_ms": 0.40233900654129684,
+        "pooled_p95_ms": 0.4753660003188997
+      },
+      "reminder_lease_acquire": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 2.2901479969732463,
+          "median": 1.1136300017824396,
+          "min": 0.7672520005144179,
+          "values": [
+            0.7672520005144179,
+            0.8424120023846626,
+            1.2469429930206388,
+            2.2901479969732463,
+            1.1136300017824396
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 2.2901479969732463,
+          "median": 1.1136300017824396,
+          "min": 0.7672520005144179,
+          "values": [
+            0.7672520005144179,
+            0.8424120023846626,
+            1.2469429930206388,
+            2.2901479969732463,
+            1.1136300017824396
+          ]
+        },
+        "pooled_p50_ms": 1.1136300017824396,
+        "pooled_p95_ms": 2.081506996182725
+      },
+      "reminder_lease_claim_20": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 3.5359399917069823,
+          "median": 3.0632659909315407,
+          "min": 2.015942009165883,
+          "values": [
+            2.246001997264102,
+            2.015942009165883,
+            3.0632659909315407,
+            3.5359399917069823,
+            3.176254002028145
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 3.5359399917069823,
+          "median": 3.0632659909315407,
+          "min": 2.015942009165883,
+          "values": [
+            2.246001997264102,
+            2.015942009165883,
+            3.0632659909315407,
+            3.5359399917069823,
+            3.176254002028145
+          ]
+        },
+        "pooled_p50_ms": 3.0632659909315407,
+        "pooled_p95_ms": 3.464002793771215
+      },
+      "reminder_lease_release": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 0.4007120005553588,
+          "median": 0.36198699672240764,
+          "min": 0.30708700069226325,
+          "values": [
+            0.30708700069226325,
+            0.36198699672240764,
+            0.3799919941229746,
+            0.4007120005553588,
+            0.3425359900575131
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 0.4007120005553588,
+          "median": 0.36198699672240764,
+          "min": 0.30708700069226325,
+          "values": [
+            0.30708700069226325,
+            0.36198699672240764,
+            0.3799919941229746,
+            0.4007120005553588,
+            0.3425359900575131
+          ]
+        },
+        "pooled_p50_ms": 0.36198699672240764,
+        "pooled_p95_ms": 0.396567999268882
+      },
+      "reminder_schedule": {
+        "count": 100,
+        "per_sample_p50_ms": {
+          "max": 1.3242559944046661,
+          "median": 1.1583030063775368,
+          "min": 0.8944865039666183,
+          "values": [
+            0.8944865039666183,
+            0.9642635050113313,
+            1.3242559944046661,
+            1.1583030063775368,
+            1.1797779952757992
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 5.667392794566695,
+          "median": 4.631774254812626,
+          "min": 4.368132694798988,
+          "values": [
+            5.326680448342814,
+            4.524775547906756,
+            5.667392794566695,
+            4.368132694798988,
+            4.631774254812626
+          ]
+        },
+        "pooled_p50_ms": 1.0884234943659976,
+        "pooled_p95_ms": 5.209745057072723
+      },
+      "reminder_settle_delivered": {
+        "count": 100,
+        "per_sample_p50_ms": {
+          "max": 0.48901700210990384,
+          "median": 0.42393749754410237,
+          "min": 0.40939600148703903,
+          "values": [
+            0.40939600148703903,
+            0.42393749754410237,
+            0.4224024960421957,
+            0.48901700210990384,
+            0.4423065038281493
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 0.9717747409013118,
+          "median": 0.6739475407812282,
+          "min": 0.45602361133205715,
+          "values": [
+            0.6739475407812282,
+            0.45602361133205715,
+            0.5012643545342145,
+            0.9717747409013118,
+            0.7545617962023243
+          ]
+        },
+        "pooled_p50_ms": 0.43621699296636507,
+        "pooled_p95_ms": 0.752306546200998
+      },
+      "stats_366_day": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 27.87220799655188,
+          "median": 24.976956003229134,
+          "min": 22.793868003645912,
+          "values": [
+            25.28904400242027,
+            24.37082299729809,
+            22.793868003645912,
+            27.87220799655188,
+            24.976956003229134
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 27.87220799655188,
+          "median": 24.976956003229134,
+          "min": 22.793868003645912,
+          "values": [
+            25.28904400242027,
+            24.37082299729809,
+            22.793868003645912,
+            27.87220799655188,
+            24.976956003229134
+          ]
+        },
+        "pooled_p50_ms": 24.976956003229134,
+        "pooled_p95_ms": 27.355575197725557
+      },
+      "timeblock_create": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 7.423444985761307,
+          "median": 2.7926550101256,
+          "min": 2.3258349974639714,
+          "values": [
+            4.488948005018756,
+            2.403710997896269,
+            7.423444985761307,
+            2.7926550101256,
+            2.3258349974639714
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 7.423444985761307,
+          "median": 2.7926550101256,
+          "min": 2.3258349974639714,
+          "values": [
+            4.488948005018756,
+            2.403710997896269,
+            7.423444985761307,
+            2.7926550101256,
+            2.3258349974639714
+          ]
+        },
+        "pooled_p50_ms": 2.7926550101256,
+        "pooled_p95_ms": 6.836545589612797
+      },
+      "timeblock_range_42_day": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 1.4385229878826067,
+          "median": 0.4338269936852157,
+          "min": 0.38971299363765866,
+          "values": [
+            1.4385229878826067,
+            0.42859600216615945,
+            1.1271770054008812,
+            0.4338269936852157,
+            0.38971299363765866
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 1.4385229878826067,
+          "median": 0.4338269936852157,
+          "min": 0.38971299363765866,
+          "values": [
+            1.4385229878826067,
+            0.42859600216615945,
+            1.1271770054008812,
+            0.4338269936852157,
+            0.38971299363765866
+          ]
+        },
+        "pooled_p50_ms": 0.4338269936852157,
+        "pooled_p95_ms": 1.3762537913862616
+      },
+      "timeslot_create": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 1.4466759894276038,
+          "median": 0.48534599773120135,
+          "min": 0.45099499402567744,
+          "values": [
+            0.8292359998449683,
+            0.4709150089183822,
+            1.4466759894276038,
+            0.48534599773120135,
+            0.45099499402567744
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 1.4466759894276038,
+          "median": 0.48534599773120135,
+          "min": 0.45099499402567744,
+          "values": [
+            0.8292359998449683,
+            0.4709150089183822,
+            1.4466759894276038,
+            0.48534599773120135,
+            0.45099499402567744
+          ]
+        },
+        "pooled_p50_ms": 0.48534599773120135,
+        "pooled_p95_ms": 1.3231879915110767
+      },
+      "timeslot_range": {
+        "count": 5,
+        "per_sample_p50_ms": {
+          "max": 0.6806290039094165,
+          "median": 0.38355700962711126,
+          "min": 0.3617850015871227,
+          "values": [
+            0.6806290039094165,
+            0.3617850015871227,
+            0.5496980011230335,
+            0.38355700962711126,
+            0.3633940068539232
+          ]
+        },
+        "per_sample_p95_ms": {
+          "max": 0.6806290039094165,
+          "median": 0.38355700962711126,
+          "min": 0.3617850015871227,
+          "values": [
+            0.6806290039094165,
+            0.3617850015871227,
+            0.5496980011230335,
+            0.38355700962711126,
+            0.3633940068539232
+          ]
+        },
+        "pooled_p50_ms": 0.38355700962711126,
+        "pooled_p95_ms": 0.6544428033521399
+      }
+    },
+    "latency_budget_passed": true,
+    "memory_budget_passed": true,
+    "peak_memory_ceiling_mib": 32.0,
+    "regression_rule": "a per-phase warm-median increase above the larger of 20% or 2 MiB requires measured explanation and explicit acceptance; final 24/32 MiB ceilings cannot be waived",
+    "sample_count": 5,
+    "scheduler_due_wake_wait_ms": {
+      "max": 57.58513401087839,
+      "median": 49.626913998508826,
+      "min": 44.055220001609996,
+      "values": [
+        44.055220001609996,
+        45.880794001277536,
+        57.58513401087839,
+        49.626913998508826,
+        53.54131398780737
+      ]
+    },
+    "seed_duration_ms": {
+      "max": 632.97032,
+      "median": 335.741356,
+      "min": 285.249486,
+      "values": [
+        632.97032,
+        335.741356,
+        285.249486,
+        401.25518,
+        286.267926
+      ]
+    },
+    "sqlite_total_bytes": {
+      "max": 9641984.0,
+      "median": 9641984.0,
+      "min": 9641984.0,
+      "values": [
+        9641984.0,
+        9641984.0,
+        9641984.0,
+        9641984.0,
+        9641984.0
+      ]
+    },
+    "startup_to_health_ms": {
+      "max": 105.13962700497359,
+      "median": 46.67434300063178,
+      "min": 40.82399499020539,
+      "values": [
+        105.13962700497359,
+        46.63023000466637,
+        51.08807299984619,
+        46.67434300063178,
+        40.82399499020539
+      ]
+    },
+    "variance_rule": "same-commit warm median must remain within the larger of 15% or 1 MiB; otherwise repeat on an idle host and retain both reports",
+    "warm_cgroup_mib": {
+      "max": 23.8047,
+      "median": 16.7812,
+      "min": 16.0625,
+      "values": [
+        23.8047,
+        16.0625,
+        17.2578,
+        16.7812,
+        16.0742
+      ]
+    },
+    "warm_cgroup_peak_mib": {
+      "max": 25.6328,
+      "median": 18.2109,
+      "min": 17.7656,
+      "values": [
+        25.6328,
+        18.2109,
+        18.5234,
+        17.7656,
+        17.9297
+      ]
+    },
+    "warm_memory_ceiling_mib": 24.0,
+    "warm_pss_mib": {
+      "max": 18.9873,
+      "median": 18.8174,
+      "min": 18.7637,
+      "values": [
+        18.7705,
+        18.9873,
+        18.8174,
+        18.915,
+        18.7637
+      ]
+    },
+    "warm_rss_mib": {
+      "max": 21.3945,
+      "median": 21.1328,
+      "min": 21.0859,
+      "values": [
+        21.0859,
+        21.3945,
+        21.1094,
+        21.2266,
+        21.1328
+      ]
+    }
+  },
+  "web_dir": "/home/xn3/Projects/Personal/ASF/Junban/dist"
+}

@@ -3,6 +3,7 @@
 mod cursor;
 mod dto;
 mod error;
+mod reminder_wake;
 mod routes;
 mod sse;
 
@@ -37,17 +38,28 @@ use utoipa::{
 use uuid::Uuid;
 
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
+use crate::reminder_wake::{ReminderWakeEventDto, ReminderWakeHub, start_reminder_coordinator};
 use crate::routes::{
-    add_relation, api_not_found, apply_template, bulk_tasks, cancel_task, complete_task,
-    create_comment, create_project, create_saved_filter, create_section, create_tag, create_task,
-    create_template, delete_comment, delete_project, delete_saved_filter, delete_section,
-    delete_tag, delete_task, delete_template, events, get_catalog, get_profile, get_task, health,
-    list_comments, list_relations, list_task_activity, list_tasks, move_task, parse_filter_route,
-    parse_quick_entry_route, parse_text_import_route, patch_comment, patch_project,
-    patch_saved_filter, patch_section, patch_tag, patch_task, patch_template, remove_relation,
-    reopen_task, reorder_tasks, uncomplete_task, undo_operation,
+    acquire_reminder_lease, add_relation, api_not_found, append_time_slot_task, apply_template,
+    bulk_tasks, calendar_tasks, cancel_task, claim_due_reminders, complete_task, create_comment,
+    create_project, create_saved_filter, create_section, create_tag, create_task, create_template,
+    create_time_block, create_time_slot, delete_comment, delete_project, delete_saved_filter,
+    delete_section, delete_tag, delete_task, delete_template, delete_time_block, delete_time_slot,
+    dismiss_reminder, events, get_catalog, get_profile, get_task, get_temporal_settings, health,
+    list_comments, list_relations, list_task_activity, list_task_reminders, list_tasks,
+    list_time_blocks, list_time_slots, mark_owner_lost_reminders, motivation_dopamine_menu,
+    motivation_eat_the_frog, motivation_task_jar, move_task, move_time_block, nudges,
+    parse_filter_route, parse_quick_entry_route, parse_text_import_route, patch_comment,
+    patch_project, patch_saved_filter, patch_section, patch_tag, patch_task, patch_template,
+    patch_time_block, patch_time_slot, planning_daily, planning_end_of_day, planning_weekly,
+    preview_replan_time_blocks, release_reminder_lease, reminder_events, remove_relation,
+    remove_time_slot_task, renew_reminder_lease, reopen_task, reorder_tasks,
+    replace_time_slot_tasks, replan_time_blocks, reschedule_reminder, resize_time_block,
+    settle_reminder_delivered, settle_reminder_failed, stats, uncomplete_task, undo_operation,
 };
 use crate::sse::{AppService, SseConnectionPermit};
+
+pub use crate::reminder_wake::{REMINDER_OVERDUE_WAKE_THROTTLE, REMINDER_WAKE_EVENT_TYPE};
 
 /// Phase 2 HTTP body ceiling (matches frozen transport plan).
 pub const MAX_BODY_BYTES: usize = 512 * 1024;
@@ -59,13 +71,17 @@ pub const RUNTIME_FILE: &str = "runtime.json";
 #[derive(Clone)]
 pub struct BroadcastEventSink {
     sender: broadcast::Sender<CommittedEvent>,
+    reminder_wakes: Arc<ReminderWakeHub>,
 }
 
 impl BroadcastEventSink {
     #[must_use]
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, reminder_wakes: Arc<ReminderWakeHub>) -> Self {
         let (sender, _) = broadcast::channel(capacity);
-        Self { sender }
+        Self {
+            sender,
+            reminder_wakes,
+        }
     }
 
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<CommittedEvent> {
@@ -77,6 +93,8 @@ impl EventSink for BroadcastEventSink {
     fn publish(&self, event: CommittedEvent) {
         // No active SSE client is a normal state; durability lives in SQLite.
         let _ = self.sender.send(event);
+        // Every committed user mutation may affect reminder eligibility.
+        self.reminder_wakes.notify_recompute();
     }
 }
 
@@ -84,27 +102,35 @@ impl EventSink for BroadcastEventSink {
 pub struct ServerState {
     pub(crate) service: AppService,
     pub(crate) events: Arc<BroadcastEventSink>,
+    pub(crate) reminder_wakes: Arc<ReminderWakeHub>,
     bearer_token: Arc<str>,
     allowed_hosts: Arc<HashSet<String>>,
     auth_limiter: Arc<AuthLimiter>,
     shutdown: CancellationToken,
     sse_connections: Arc<AtomicUsize>,
-    /// Live `forward_events` tasks; test-observable only.
+    /// Live SSE forwarder tasks (revisioned events + reminder wakes); test-observable.
     pub(crate) active_forwarders: Arc<AtomicUsize>,
 }
 
 impl ServerState {
+    /// Build server state without starting the reminder coordinator.
+    ///
+    /// Router/unit tests use this path so they never accidentally spawn the
+    /// process-global wake loop. Production `main` must call
+    /// [`ServerState::start_reminder_coordinator`] exactly once after construction.
     #[must_use]
     pub fn new(
         repository: SqliteRepository,
         bearer_token: String,
         allowed_hosts: impl IntoIterator<Item = String>,
     ) -> Self {
-        let events = Arc::new(BroadcastEventSink::new(128));
+        let reminder_wakes = Arc::new(ReminderWakeHub::new());
+        let events = Arc::new(BroadcastEventSink::new(128, Arc::clone(&reminder_wakes)));
         let service = TaskService::new(Arc::new(repository), Arc::clone(&events));
         Self {
             service,
             events,
+            reminder_wakes,
             bearer_token: Arc::from(bearer_token),
             allowed_hosts: Arc::new(allowed_hosts.into_iter().collect()),
             auth_limiter: Arc::new(AuthLimiter::new()),
@@ -120,8 +146,25 @@ impl ServerState {
         self.shutdown.clone()
     }
 
+    /// Start the single process-global reminder wake coordinator.
+    ///
+    /// Cancelled by [`Self::shutdown_token`]. Await the join handle after Axum
+    /// returns so the task cannot outlive storage/profile teardown.
+    #[must_use]
+    pub fn start_reminder_coordinator(&self) -> tokio::task::JoinHandle<()> {
+        start_reminder_coordinator(
+            self.service.clone(),
+            Arc::clone(&self.reminder_wakes),
+            self.shutdown_token(),
+        )
+    }
+
     pub(crate) fn try_acquire_sse(&self) -> Option<SseConnectionPermit> {
         SseConnectionPermit::try_acquire(&self.sse_connections)
+    }
+
+    pub(crate) fn notify_reminder_wake(&self) {
+        self.reminder_wakes.notify_recompute();
     }
 }
 
@@ -188,6 +231,38 @@ pub fn router(state: ServerState, web_dir: impl Into<PathBuf>) -> Router {
             delete(remove_relation),
         )
         .route("/api/v1/tasks/{task_id}/activity", get(list_task_activity))
+        .route(
+            "/api/v1/tasks/{task_id}/reminders",
+            get(list_task_reminders),
+        )
+        .route(
+            "/api/v1/tasks/{task_id}/reminders/reschedule",
+            post(reschedule_reminder),
+        )
+        .route(
+            "/api/v1/tasks/{task_id}/reminders/dismiss",
+            post(dismiss_reminder),
+        )
+        .route("/api/v1/reminders/lease", post(acquire_reminder_lease))
+        .route("/api/v1/reminders/lease/renew", post(renew_reminder_lease))
+        .route(
+            "/api/v1/reminders/lease/release",
+            post(release_reminder_lease),
+        )
+        .route("/api/v1/reminders/claim", post(claim_due_reminders))
+        .route(
+            "/api/v1/reminders/settle/delivered",
+            post(settle_reminder_delivered),
+        )
+        .route(
+            "/api/v1/reminders/settle/failed",
+            post(settle_reminder_failed),
+        )
+        .route(
+            "/api/v1/reminders/owner-lost",
+            post(mark_owner_lost_reminders),
+        )
+        .route("/api/v1/reminders/events", get(reminder_events))
         .route("/api/v1/catalog", get(get_catalog))
         .route("/api/v1/projects", post(create_project))
         .route(
@@ -223,6 +298,59 @@ pub fn router(state: ServerState, web_dir: impl Into<PathBuf>) -> Router {
         .route("/api/v1/parse/quick-entry", post(parse_quick_entry_route))
         .route("/api/v1/parse/filter", post(parse_filter_route))
         .route("/api/v1/parse/text-import", post(parse_text_import_route))
+        .route(
+            "/api/v1/time-blocks",
+            get(list_time_blocks).post(create_time_block),
+        )
+        .route("/api/v1/time-blocks/replan", post(replan_time_blocks))
+        .route(
+            "/api/v1/time-blocks/replan/preview",
+            get(preview_replan_time_blocks),
+        )
+        .route(
+            "/api/v1/time-blocks/{time_block_id}",
+            patch(patch_time_block).delete(delete_time_block),
+        )
+        .route(
+            "/api/v1/time-blocks/{time_block_id}/move",
+            post(move_time_block),
+        )
+        .route(
+            "/api/v1/time-blocks/{time_block_id}/resize",
+            post(resize_time_block),
+        )
+        .route(
+            "/api/v1/time-slots",
+            get(list_time_slots).post(create_time_slot),
+        )
+        .route(
+            "/api/v1/time-slots/{time_slot_id}",
+            patch(patch_time_slot).delete(delete_time_slot),
+        )
+        .route(
+            "/api/v1/time-slots/{time_slot_id}/tasks",
+            post(append_time_slot_task).put(replace_time_slot_tasks),
+        )
+        .route(
+            "/api/v1/time-slots/{time_slot_id}/tasks/{task_id}",
+            delete(remove_time_slot_task),
+        )
+        .route("/api/v1/calendar/tasks", get(calendar_tasks))
+        .route("/api/v1/planning/daily", get(planning_daily))
+        .route("/api/v1/planning/end-of-day", get(planning_end_of_day))
+        .route("/api/v1/planning/weekly", get(planning_weekly))
+        .route("/api/v1/stats", get(stats))
+        .route("/api/v1/nudges", get(nudges))
+        .route("/api/v1/settings/temporal", get(get_temporal_settings))
+        .route(
+            "/api/v1/motivation/eat-the-frog",
+            get(motivation_eat_the_frog),
+        )
+        .route("/api/v1/motivation/task-jar", get(motivation_task_jar))
+        .route(
+            "/api/v1/motivation/dopamine-menu",
+            get(motivation_dopamine_menu),
+        )
         .route("/api/v1/events", get(events))
         .route("/api", get(api_not_found))
         .route("/api/{*path}", get(api_not_found).fallback(api_not_found))
@@ -482,7 +610,43 @@ impl Modify for SecurityAddon {
         routes::parse_quick_entry_route,
         routes::parse_filter_route,
         routes::parse_text_import_route,
-        routes::events
+        routes::events,
+        routes::list_task_reminders,
+        routes::reschedule_reminder,
+        routes::dismiss_reminder,
+        routes::acquire_reminder_lease,
+        routes::renew_reminder_lease,
+        routes::release_reminder_lease,
+        routes::claim_due_reminders,
+        routes::settle_reminder_delivered,
+        routes::settle_reminder_failed,
+        routes::mark_owner_lost_reminders,
+        routes::reminder_events,
+        routes::list_time_blocks,
+        routes::create_time_block,
+        routes::patch_time_block,
+        routes::delete_time_block,
+        routes::move_time_block,
+        routes::resize_time_block,
+        routes::preview_replan_time_blocks,
+        routes::replan_time_blocks,
+        routes::list_time_slots,
+        routes::create_time_slot,
+        routes::patch_time_slot,
+        routes::delete_time_slot,
+        routes::append_time_slot_task,
+        routes::replace_time_slot_tasks,
+        routes::remove_time_slot_task,
+        routes::calendar_tasks,
+        routes::planning_daily,
+        routes::planning_end_of_day,
+        routes::planning_weekly,
+        routes::stats,
+        routes::nudges,
+        routes::get_temporal_settings,
+        routes::motivation_eat_the_frog,
+        routes::motivation_task_jar,
+        routes::motivation_dopamine_menu
     ),
     components(schemas(
         ErrorEnvelope,
@@ -490,6 +654,7 @@ impl Modify for SecurityAddon {
         dto::HealthResponse,
         dto::ProfileResponse,
         dto::TaskStatusDto,
+        dto::UncompleteOutcomeDto,
         dto::TaskSortDto,
         dto::TaskViewPresetDto,
         dto::ProjectViewDto,
@@ -535,6 +700,20 @@ impl Modify for SecurityAddon {
         dto::ResourceTypeDto,
         dto::ResourceRefDto,
         dto::ResourceSnapshotDto,
+        dto::TimeBlockDto,
+        dto::TimeSlotDto,
+        dto::TimeBlockListResponse,
+        dto::TimeSlotListResponse,
+        dto::CreateTimeBlockRequest,
+        dto::PatchTimeBlockRequest,
+        dto::MoveTimeBlockRequest,
+        dto::ResizeTimeBlockRequest,
+        dto::ReplanTimeBlocksRequest,
+        dto::ReplanTimeBlocksActionDto,
+        dto::CreateTimeSlotRequest,
+        dto::PatchTimeSlotRequest,
+        dto::AppendTimeSlotTaskRequest,
+        dto::ReplaceTimeSlotTasksRequest,
         dto::AffectedIdsDto,
         dto::ResyncScopeDto,
         dto::CommittedEventDto,
@@ -546,7 +725,45 @@ impl Modify for SecurityAddon {
         dto::TaskFilterDto,
         dto::ParseTextImportRequest,
         dto::TextImportDraftDto,
-        dto::TextImportResponse
+        dto::TextImportResponse,
+        dto::ReminderChannelDto,
+        dto::ReminderOccurrenceStateDto,
+        dto::ReminderFailureCodeDto,
+        dto::ReminderOccurrenceDto,
+        dto::ReminderListResponse,
+        dto::RescheduleReminderRequest,
+        dto::AcquireReminderLeaseRequest,
+        dto::RenewReminderLeaseRequest,
+        dto::ReleaseReminderLeaseRequest,
+        dto::ClaimRemindersRequest,
+        dto::SettleReminderDeliveredRequest,
+        dto::SettleReminderFailedRequest,
+        dto::MarkOwnerLostRemindersRequest,
+        dto::ReminderDeliveryLeaseDto,
+        dto::ClaimedReminderDto,
+        dto::ClaimRemindersResponse,
+        dto::MarkOwnerLostRemindersResponse,
+        dto::CalendarTasksResponse,
+        dto::DailyPlanResponse,
+        dto::EndOfDayResponse,
+        dto::WeekStartDto,
+        dto::CompletionTimeBucketDto,
+        dto::CompletionTimeBucketsDto,
+        dto::WeeklyDayStatsDto,
+        dto::NeglectedProjectReasonDto,
+        dto::NeglectedProjectFactDto,
+        dto::WeeklySuggestionDto,
+        dto::WeeklyReviewResponse,
+        dto::DailyStatBucketDto,
+        dto::StatsResponse,
+        dto::NudgeRuleKindDto,
+        dto::NudgeRuleFactsDto,
+        dto::NudgesResponse,
+        dto::TemporalSettingsResponse,
+        dto::EatTheFrogResponse,
+        dto::TaskJarResponse,
+        dto::DopamineMenuResponse,
+        ReminderWakeEventDto
     )),
     modifiers(&SecurityAddon)
 )]

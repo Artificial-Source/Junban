@@ -14,6 +14,7 @@ export interface TaskDraft {
   section_id: string;
   parent_id: string;
   tag_ids: string[];
+  recurrence_rule: string;
 }
 
 export function draftFromTask(task: TaskDto): TaskDraft {
@@ -37,6 +38,7 @@ export function draftFromTask(task: TaskDto): TaskDraft {
     section_id: task.section_id ?? "",
     parent_id: task.parent_id ?? "",
     tag_ids: [...task.tag_ids],
+    recurrence_rule: task.recurrence_rule ?? "",
   };
 }
 
@@ -92,6 +94,9 @@ export function buildTaskPatch(task: TaskDto, draft: TaskDraft): PatchTaskReques
     draft.tag_ids.length !== prevTags.length ||
     draft.tag_ids.some((id, index) => id !== prevTags[index]);
   if (tagsChanged) patch.tag_ids = draft.tag_ids;
+
+  const nextRecurrence = draft.recurrence_rule.trim() || null;
+  if (nextRecurrence !== (task.recurrence_rule ?? null)) patch.recurrence_rule = nextRecurrence;
 
   return Object.keys(patch).length > 0 ? patch : null;
 }

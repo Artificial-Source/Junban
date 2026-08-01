@@ -2,22 +2,137 @@
 
 use std::sync::Arc;
 
-use jiff::{Timestamp, Zoned, civil::Date};
+use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
-    Comment, CommentBody, CommentId, EntityName, FilterQuery, HexColor, MarkdownText, OperationId,
-    ProjectId, RelationKind, SavedFilterId, SectionId, TagId, TagName, Task, TaskActivity,
-    TaskDraft, TaskId, TaskQuery, TaskRelation, TaskTitle, TemplateId, ValidationError,
+    ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
+    DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName,
+    FilterQuery, HexColor, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS,
+    MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
+    ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId, TagId,
+    TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort, TaskStatus,
+    TaskTitle, TemplateId, TimeBlock, TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft,
+    TimeSlotId, ValidationError, WeekStart, civil_occurrences_in_range, daily_plan_summary,
+    dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges, select_eat_the_frog,
+    stats_summary, task_jar_candidates, validate_calendar_date_range,
+    validate_owner_lost_mark_limit, validate_reminder_claim_limit, validate_reminder_lease_secs,
+    validate_stats_date_range, validate_timeblock_date_range, weekly_review_summary,
 };
 
 use crate::{
-    AppError, BulkAction, CatalogSnapshot, CommentPatch, CommittedEvent, CommittedMutation,
-    EventCatchUp, MoveTarget, ProjectDraft, ProjectPatch, ReorderScope, Repository,
-    RepositoryError, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft,
-    TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    AppError, BulkAction, CalendarTasksPage, CatalogSnapshot, CollectedTasks, CommentPatch,
+    CommittedEvent, CommittedMutation, DailyPlanPage, DopamineMenuPage, EatTheFrogPage,
+    EndOfDayPage, EventCatchUp, MoveTarget, NudgesPage, ProjectDraft, ProjectPatch, ReorderScope,
+    ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError, SavedFilterDraft,
+    SavedFilterPatch, SectionDraft, SectionPatch, StatsPage, TagDraft, TagPatch, TaskJarPage,
+    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TemporalSettings, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
+    TimeblockingRangePage, TimeblockingRangeQuery, WeeklyReviewPage,
 };
+
+/// Cursor page size used when collecting multi-page task reads.
+pub const TASK_COLLECT_PAGE_SIZE: u32 = 100;
 
 pub trait EventSink: Send + Sync + 'static {
     fn publish(&self, event: CommittedEvent);
+}
+
+/// Expand durable series owners into the inclusive civil window.
+///
+/// Persisted owner dates are returned once with owner metadata intact. Virtual
+/// instances keep the owner typed id (mutations target the series owner) and set
+/// `recurrence_parent_id` for stable UI identity via response `occurrence_key`.
+fn expand_timeblocking_range(
+    page: TimeblockingRangePage,
+    from: Date,
+    to: Date,
+) -> Result<TimeblockingRangePage, AppError> {
+    let blocks = expand_time_blocks(page.blocks, from, to)?;
+    let slots = expand_time_slots(page.slots, from, to)?;
+    let total = blocks.len().saturating_add(slots.len());
+    if total > MAX_TIMEBLOCK_RANGE_ITEMS {
+        return Err(AppError::ResultLimitExceeded);
+    }
+    Ok(TimeblockingRangePage {
+        blocks,
+        slots,
+        revision: page.revision,
+    })
+}
+
+fn expand_time_blocks(
+    owners: Vec<TimeBlock>,
+    from: Date,
+    to: Date,
+) -> Result<Vec<TimeBlock>, AppError> {
+    let mut out = Vec::new();
+    for owner in owners {
+        match owner.recurrence_rule.as_ref() {
+            None => {
+                if owner.range.date >= from && owner.range.date <= to {
+                    out.push(owner);
+                }
+            }
+            Some(rule) => {
+                let dates = civil_occurrences_in_range(rule, owner.range.date, from, to)?;
+                for date in dates {
+                    if date == owner.range.date {
+                        out.push(owner.clone());
+                    } else {
+                        let mut instance = owner.clone();
+                        instance.range.date = date;
+                        instance.recurrence_parent_id = Some(owner.id);
+                        out.push(instance);
+                    }
+                }
+            }
+        }
+    }
+    out.sort_by(|left, right| {
+        (left.range.date, left.range.start, left.id.as_uuid()).cmp(&(
+            right.range.date,
+            right.range.start,
+            right.id.as_uuid(),
+        ))
+    });
+    Ok(out)
+}
+
+fn expand_time_slots(
+    owners: Vec<TimeSlot>,
+    from: Date,
+    to: Date,
+) -> Result<Vec<TimeSlot>, AppError> {
+    let mut out = Vec::new();
+    for owner in owners {
+        match owner.recurrence_rule.as_ref() {
+            None => {
+                if owner.range.date >= from && owner.range.date <= to {
+                    out.push(owner);
+                }
+            }
+            Some(rule) => {
+                let dates = civil_occurrences_in_range(rule, owner.range.date, from, to)?;
+                for date in dates {
+                    if date == owner.range.date {
+                        out.push(owner.clone());
+                    } else {
+                        let mut instance = owner.clone();
+                        instance.range.date = date;
+                        instance.recurrence_parent_id = Some(owner.id);
+                        out.push(instance);
+                    }
+                }
+            }
+        }
+    }
+    out.sort_by(|left, right| {
+        (left.range.date, left.range.start, left.id.as_uuid()).cmp(&(
+            right.range.date,
+            right.range.start,
+            right.id.as_uuid(),
+        ))
+    });
+    Ok(out)
 }
 
 #[derive(Debug)]
@@ -108,9 +223,20 @@ where
         operation_id: OperationId,
         task_id: TaskId,
     ) -> Result<CommittedMutation, AppError> {
+        self.complete_task_with(operation_id, task_id, TemporalContext::sample_now())
+            .await
+    }
+
+    /// Internal/test seam with an explicit sampled civil date/zone.
+    pub async fn complete_task_with(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        temporal: TemporalContext,
+    ) -> Result<CommittedMutation, AppError> {
         self.commit(
             self.repository
-                .complete_task(operation_id, task_id, Timestamp::now())
+                .complete_task(operation_id, task_id, Timestamp::now(), temporal)
                 .await,
         )
     }
@@ -120,9 +246,20 @@ where
         operation_id: OperationId,
         task_id: TaskId,
     ) -> Result<CommittedMutation, AppError> {
+        self.uncomplete_task_with(operation_id, task_id, TemporalContext::sample_now())
+            .await
+    }
+
+    /// Internal/test seam with an explicit sampled civil date/zone.
+    pub async fn uncomplete_task_with(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        temporal: TemporalContext,
+    ) -> Result<CommittedMutation, AppError> {
         self.commit(
             self.repository
-                .uncomplete_task(operation_id, task_id, Timestamp::now())
+                .uncomplete_task(operation_id, task_id, Timestamp::now(), temporal)
                 .await,
         )
     }
@@ -195,9 +332,26 @@ where
         task_ids: Vec<TaskId>,
         action: BulkAction,
     ) -> Result<CommittedMutation, AppError> {
+        self.bulk_tasks_with(
+            operation_id,
+            task_ids,
+            action,
+            TemporalContext::sample_now(),
+        )
+        .await
+    }
+
+    /// Internal/test seam with an explicit sampled civil date/zone.
+    pub async fn bulk_tasks_with(
+        &self,
+        operation_id: OperationId,
+        task_ids: Vec<TaskId>,
+        action: BulkAction,
+        temporal: TemporalContext,
+    ) -> Result<CommittedMutation, AppError> {
         self.commit(
             self.repository
-                .bulk_tasks(operation_id, task_ids, action, Timestamp::now())
+                .bulk_tasks(operation_id, task_ids, action, Timestamp::now(), temporal)
                 .await,
         )
     }
@@ -558,6 +712,662 @@ where
         )
     }
 
+    pub async fn list_task_reminders(
+        &self,
+        task_id: TaskId,
+    ) -> Result<Vec<ReminderOccurrence>, AppError> {
+        self.repository
+            .list_task_reminders(task_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Set or replace the task reminder schedule (user mutation).
+    pub async fn reschedule_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        remind_at: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .reschedule_reminder(operation_id, task_id, remind_at, Timestamp::now())
+                .await,
+        )
+    }
+
+    /// Alias for reschedule — snooze is the same durable schedule write.
+    pub async fn snooze_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        remind_at: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        self.reschedule_reminder(operation_id, task_id, remind_at)
+            .await
+    }
+
+    /// Clear the task reminder schedule and cancel still-pending occurrences.
+    pub async fn dismiss_reminder(
+        &self,
+        operation_id: OperationId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .dismiss_reminder(operation_id, task_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    /// Control-plane lease acquire. No user revision/event is published.
+    pub async fn acquire_reminder_lease(
+        &self,
+        lease_secs: Option<u64>,
+    ) -> Result<ReminderDeliveryLease, AppError> {
+        let lease_secs =
+            validate_reminder_lease_secs(lease_secs.unwrap_or(DEFAULT_REMINDER_LEASE_SECS))?;
+        self.repository
+            .acquire_reminder_lease(Timestamp::now(), lease_secs)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn renew_reminder_lease(
+        &self,
+        fence_term: ReminderFenceTerm,
+        lease_secs: Option<u64>,
+    ) -> Result<ReminderDeliveryLease, AppError> {
+        let lease_secs =
+            validate_reminder_lease_secs(lease_secs.unwrap_or(DEFAULT_REMINDER_LEASE_SECS))?;
+        self.repository
+            .renew_reminder_lease(fence_term, Timestamp::now(), lease_secs)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn release_reminder_lease(
+        &self,
+        fence_term: ReminderFenceTerm,
+    ) -> Result<(), AppError> {
+        self.repository
+            .release_reminder_lease(fence_term, Timestamp::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn claim_due_reminders(
+        &self,
+        fence_term: ReminderFenceTerm,
+        limit: Option<u32>,
+        claim_secs: Option<u64>,
+    ) -> Result<Vec<ClaimedReminder>, AppError> {
+        let limit = validate_reminder_claim_limit(limit.unwrap_or(DEFAULT_REMINDER_CLAIM_LIMIT))?;
+        let claim_secs =
+            validate_reminder_lease_secs(claim_secs.unwrap_or(DEFAULT_REMINDER_CLAIM_SECS))?;
+        self.repository
+            .claim_due_reminders(fence_term, Timestamp::now(), limit, claim_secs)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn settle_reminder_delivered(
+        &self,
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        claim_attempt: u32,
+        channel: ReminderChannel,
+    ) -> Result<(), AppError> {
+        self.repository
+            .settle_reminder_delivered(
+                fence_term,
+                task_id,
+                remind_at,
+                claim_attempt,
+                channel,
+                Timestamp::now(),
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn settle_reminder_failed(
+        &self,
+        fence_term: ReminderFenceTerm,
+        task_id: TaskId,
+        remind_at: Timestamp,
+        claim_attempt: u32,
+        error: ReminderFailureCode,
+    ) -> Result<(), AppError> {
+        self.repository
+            .settle_reminder_failed(
+                fence_term,
+                task_id,
+                remind_at,
+                claim_attempt,
+                error,
+                Timestamp::now(),
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn mark_owner_lost_reminders(
+        &self,
+        fence_term: ReminderFenceTerm,
+        limit: Option<u32>,
+    ) -> Result<u32, AppError> {
+        let limit = validate_owner_lost_mark_limit(limit.unwrap_or(DEFAULT_REMINDER_CLAIM_LIMIT))?;
+        self.repository
+            .mark_owner_lost_reminders(fence_term, Timestamp::now(), limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Control-plane wake query for the later reminder coordinator. No fan-out.
+    pub async fn next_reminder_wake_at(&self) -> Result<Option<Timestamp>, AppError> {
+        self.repository
+            .next_reminder_wake_at()
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn list_timeblocking_range(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> Result<TimeblockingRangePage, AppError> {
+        validate_timeblock_date_range(from, to)?;
+        let page = self
+            .repository
+            .list_timeblocking_range(TimeblockingRangeQuery { from, to })
+            .await?;
+        expand_timeblocking_range(page, from, to)
+    }
+
+    pub async fn create_time_block(
+        &self,
+        operation_id: OperationId,
+        draft: TimeBlockDraft,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .create_time_block(operation_id, TimeBlockId::new(), draft, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn patch_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        patch: TimeBlockPatch,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .patch_time_block(operation_id, block_id, patch, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn delete_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .delete_time_block(operation_id, block_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn create_time_slot(
+        &self,
+        operation_id: OperationId,
+        draft: TimeSlotDraft,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .create_time_slot(operation_id, TimeSlotId::new(), draft, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn patch_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        patch: TimeSlotPatch,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .patch_time_slot(operation_id, slot_id, patch, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn delete_time_slot(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .delete_time_slot(operation_id, slot_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn append_slot_task(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .append_slot_task(operation_id, slot_id, task_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn remove_slot_task(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .remove_slot_task(operation_id, slot_id, task_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn reorder_slot_tasks(
+        &self,
+        operation_id: OperationId,
+        slot_id: TimeSlotId,
+        ordered_ids: Vec<TaskId>,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .reorder_slot_tasks(operation_id, slot_id, ordered_ids, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn move_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        range: TimeBlockRangePatch,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .set_time_block_range(operation_id, block_id, range, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn resize_time_block(
+        &self,
+        operation_id: OperationId,
+        block_id: TimeBlockId,
+        range: TimeBlockRangePatch,
+    ) -> Result<CommittedMutation, AppError> {
+        // Move and resize share one range-write implementation.
+        self.move_time_block(operation_id, block_id, range).await
+    }
+
+    pub async fn preview_replan_past_blocks(&self) -> Result<ReplanPastBlocksPreview, AppError> {
+        self.preview_replan_past_blocks_with(TemporalContext::sample_now())
+            .await
+    }
+
+    /// Internal/test seam with an explicit sampled civil today.
+    pub async fn preview_replan_past_blocks_with(
+        &self,
+        temporal: TemporalContext,
+    ) -> Result<ReplanPastBlocksPreview, AppError> {
+        self.repository
+            .preview_replan_past_blocks(temporal)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn replan_past_blocks(
+        &self,
+        operation_id: OperationId,
+        action: ReplanPastBlocksAction,
+        expected_as_of_date: Date,
+        expected_candidate_ids: Vec<TimeBlockId>,
+    ) -> Result<CommittedMutation, AppError> {
+        self.replan_past_blocks_with(
+            operation_id,
+            action,
+            expected_as_of_date,
+            expected_candidate_ids,
+            TemporalContext::sample_now(),
+        )
+        .await
+    }
+
+    /// Internal/test seam with an explicit sampled civil today.
+    pub async fn replan_past_blocks_with(
+        &self,
+        operation_id: OperationId,
+        action: ReplanPastBlocksAction,
+        expected_as_of_date: Date,
+        expected_candidate_ids: Vec<TimeBlockId>,
+        temporal: TemporalContext,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .replan_past_blocks(
+                    operation_id,
+                    action,
+                    expected_as_of_date,
+                    expected_candidate_ids,
+                    Timestamp::now(),
+                    temporal,
+                )
+                .await,
+        )
+    }
+
+    /// Page through `list_tasks` at [`TASK_COLLECT_PAGE_SIZE`] under one sampled `as_of`.
+    ///
+    /// Stops cleanly when the final page is short. Fails with
+    /// [`AppError::ResultLimitExceeded`] before returning when more than `cap`
+    /// tasks match. Retries the whole collection once if page revisions drift;
+    /// a second drift fails with [`AppError::Conflict`] so callers resync.
+    pub async fn collect_task_query_pages(
+        &self,
+        base_query: TaskQuery,
+        as_of: TaskListAsOf,
+        cap: usize,
+    ) -> Result<CollectedTasks, AppError> {
+        match self
+            .collect_task_query_pages_once(&base_query, as_of, cap)
+            .await
+        {
+            Ok(collected) => Ok(collected),
+            Err(AppError::Conflict) => {
+                self.collect_task_query_pages_once(&base_query, as_of, cap)
+                    .await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn collect_task_query_pages_once(
+        &self,
+        base_query: &TaskQuery,
+        as_of: TaskListAsOf,
+        cap: usize,
+    ) -> Result<CollectedTasks, AppError> {
+        let page_size = TASK_COLLECT_PAGE_SIZE.min(MAX_QUERY_PAGE_LIMIT);
+        let mut tasks = Vec::new();
+        let mut cursor = None;
+        let mut revision = None;
+
+        loop {
+            let mut query = base_query.clone();
+            query.cursor = cursor.take();
+            query.limit = Some(page_size);
+            query.validate()?;
+
+            let page = self
+                .repository
+                .list_tasks(query, as_of)
+                .await
+                .map_err(AppError::from)?;
+
+            match revision {
+                None => revision = Some(page.revision),
+                Some(expected) if expected != page.revision => {
+                    return Err(AppError::Conflict);
+                }
+                Some(_) => {}
+            }
+
+            if tasks.len().saturating_add(page.tasks.len()) > cap {
+                return Err(AppError::ResultLimitExceeded);
+            }
+            tasks.extend(page.tasks);
+
+            match page.next_cursor {
+                None => break,
+                Some(_) if tasks.len() == cap => {
+                    // A non-empty next page would push the total over the cap.
+                    return Err(AppError::ResultLimitExceeded);
+                }
+                Some(next) => cursor = Some(next),
+            }
+        }
+
+        Ok(CollectedTasks {
+            tasks,
+            revision: revision.unwrap_or(0),
+            as_of_date: as_of.as_of_date,
+        })
+    }
+
+    async fn load_analysis_tasks(&self, as_of: TaskListAsOf) -> Result<CollectedTasks, AppError> {
+        let page =
+            self.repository
+                .list_analysis_tasks(as_of)
+                .await
+                .map_err(|error| match error {
+                    RepositoryError::OperationTooLarge => AppError::ResultLimitExceeded,
+                    error => AppError::from(error),
+                })?;
+        Ok(CollectedTasks {
+            tasks: page.tasks,
+            revision: page.revision,
+            as_of_date: as_of.as_of_date,
+        })
+    }
+
+    /// Calendar range: tasks with civil `due_date` inside `[from, to]`.
+    pub async fn calendar_tasks(
+        &self,
+        from: Date,
+        to: Date,
+        project_id: Option<ProjectId>,
+        as_of: TaskListAsOf,
+    ) -> Result<CalendarTasksPage, AppError> {
+        validate_calendar_date_range(from, to)?;
+        let mut query = TaskQuery::new();
+        query.filter.due_after = Some(from);
+        query.filter.due_before = Some(to);
+        query.filter.statuses = vec![
+            TaskStatus::Pending,
+            TaskStatus::Completed,
+            TaskStatus::Cancelled,
+        ];
+        if let Some(project_id) = project_id {
+            query.filter.project_id = Some(Some(project_id));
+        }
+        query.sort = TaskSort::DueAsc;
+        let collected = self
+            .collect_task_query_pages(query, as_of, MAX_CALENDAR_TASKS)
+            .await?;
+        Ok(CalendarTasksPage {
+            tasks: collected.tasks,
+            revision: collected.revision,
+        })
+    }
+
+    pub async fn daily_plan(
+        &self,
+        date: Date,
+        capacity: Option<DailyCapacityMinutes>,
+        zone: &TimeZone,
+    ) -> Result<DailyPlanPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let summary = daily_plan_summary(&collected.tasks, date, capacity);
+        Ok(DailyPlanPage::from_summary(
+            summary,
+            &collected.tasks,
+            collected.revision,
+        ))
+    }
+
+    pub async fn end_of_day(
+        &self,
+        date: Date,
+        capacity: Option<DailyCapacityMinutes>,
+        zone: &TimeZone,
+    ) -> Result<EndOfDayPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let summary = end_of_day_summary(&collected.tasks, date, zone);
+        let capacity_minutes = capacity.unwrap_or(DailyCapacityMinutes::DEFAULT).get();
+        Ok(EndOfDayPage::from_summary(
+            summary,
+            &collected.tasks,
+            capacity_minutes,
+            collected.revision,
+        ))
+    }
+
+    pub async fn weekly_review(
+        &self,
+        date: Date,
+        week_start: WeekStart,
+        zone: &TimeZone,
+    ) -> Result<WeeklyReviewPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let catalog = self.list_catalog().await?;
+        if catalog.revision != collected.revision {
+            // One snapshot pair only: retry analysis+catalog once on drift.
+            let collected = self.load_analysis_tasks(as_of).await?;
+            let catalog = self.list_catalog().await?;
+            if catalog.revision != collected.revision {
+                return Err(AppError::Conflict);
+            }
+            return Self::weekly_from_parts(collected, &catalog.projects, date, week_start, zone);
+        }
+        Self::weekly_from_parts(collected, &catalog.projects, date, week_start, zone)
+    }
+
+    fn weekly_from_parts(
+        collected: CollectedTasks,
+        projects: &[junban_domain::Project],
+        date: Date,
+        week_start: WeekStart,
+        zone: &TimeZone,
+    ) -> Result<WeeklyReviewPage, AppError> {
+        let summary = weekly_review_summary(&collected.tasks, projects, date, week_start, zone)?;
+        let top_accomplishment_tasks =
+            tasks_for_ids(&collected.tasks, &summary.top_accomplishment_ids);
+        let overdue_tasks = tasks_for_ids(&collected.tasks, &summary.overdue_task_ids);
+        Ok(WeeklyReviewPage {
+            summary,
+            top_accomplishment_tasks,
+            overdue_tasks,
+            revision: collected.revision,
+        })
+    }
+
+    pub async fn stats(
+        &self,
+        from: Date,
+        to: Date,
+        today: Date,
+        zone: &TimeZone,
+    ) -> Result<StatsPage, AppError> {
+        validate_stats_date_range(from, to)?;
+        let as_of = TaskListAsOf::for_local_date(today, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let summary = stats_summary(&collected.tasks, from, to, today, zone)?;
+        Ok(StatsPage {
+            summary,
+            revision: collected.revision,
+        })
+    }
+
+    pub async fn nudges(
+        &self,
+        date: Date,
+        capacity: Option<DailyCapacityMinutes>,
+        zone: &TimeZone,
+    ) -> Result<NudgesPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let capacity = capacity.unwrap_or(DailyCapacityMinutes::DEFAULT);
+        let facts = evaluate_nudges(&collected.tasks, date, capacity, zone, &[], None);
+        let mut ids = Vec::new();
+        for rule in &facts.rules {
+            for id in &rule.task_ids {
+                if !ids.contains(id) {
+                    ids.push(*id);
+                }
+            }
+        }
+        let tasks = tasks_for_ids(&collected.tasks, &ids);
+        Ok(NudgesPage {
+            facts,
+            tasks,
+            revision: collected.revision,
+        })
+    }
+
+    /// Read-only Phase 3 temporal defaults (no durable settings mutation yet).
+    #[must_use]
+    pub fn temporal_settings(zone: &TimeZone) -> TemporalSettings {
+        default_temporal_settings(zone)
+    }
+
+    pub async fn eat_the_frog(
+        &self,
+        date: Date,
+        zone: &TimeZone,
+    ) -> Result<EatTheFrogPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let task = select_eat_the_frog(&collected.tasks)
+            .and_then(|id| collected.tasks.iter().find(|task| task.id == id).cloned());
+        Ok(EatTheFrogPage {
+            task,
+            revision: collected.revision,
+        })
+    }
+
+    pub async fn task_jar(&self, date: Date, zone: &TimeZone) -> Result<TaskJarPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let task_ids = task_jar_candidates(&collected.tasks, date);
+        let tasks = tasks_for_ids(&collected.tasks, &task_ids);
+        Ok(TaskJarPage {
+            task_ids,
+            tasks,
+            revision: collected.revision,
+        })
+    }
+
+    pub async fn dopamine_menu(
+        &self,
+        date: Date,
+        zone: &TimeZone,
+    ) -> Result<DopamineMenuPage, AppError> {
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let task_ids = dopamine_menu_task_ids(&collected.tasks);
+        let tasks = tasks_for_ids(&collected.tasks, &task_ids);
+        Ok(DopamineMenuPage {
+            task_ids,
+            tasks,
+            revision: collected.revision,
+        })
+    }
+
     fn commit(
         &self,
         result: Result<CommittedMutation, RepositoryError>,
@@ -568,6 +1378,25 @@ where
             self.events.publish(mutation.event.clone());
         }
         Ok(mutation)
+    }
+}
+
+fn tasks_for_ids(tasks: &[Task], ids: &[TaskId]) -> Vec<Task> {
+    ids.iter()
+        .filter_map(|id| tasks.iter().find(|task| task.id == *id).cloned())
+        .collect()
+}
+
+/// Phase 3 read-only temporal defaults until settings mutations land in Phase 4.
+#[must_use]
+pub fn default_temporal_settings(zone: &TimeZone) -> TemporalSettings {
+    TemporalSettings {
+        time_zone: zone.iana_name().unwrap_or("UTC").to_owned(),
+        capacity_minutes: DailyCapacityMinutes::DEFAULT.get(),
+        week_start: WeekStart::Sunday,
+        nudges_enabled: true,
+        eat_the_frog_enabled: false,
+        task_jar_enabled: false,
     }
 }
 
@@ -615,12 +1444,15 @@ mod tests {
 
     use super::*;
     use crate::{AffectedIds, EventCatchUp, EventType, ResourceRef, ResourceSnapshot, ResyncScope};
-    use junban_domain::TaskStatus;
+    use junban_domain::{CivilTimeRange, TaskStatus};
     use uuid::Uuid;
 
     struct FakeRepository {
         result: Mutex<Result<CommittedMutation, RepositoryError>>,
         calls: Mutex<Vec<&'static str>>,
+        /// When set, `list_tasks` pops pages in order (for collect-helper tests).
+        list_pages: Mutex<Vec<TaskListPage>>,
+        timeblocking_page: Mutex<TimeblockingRangePage>,
     }
 
     impl FakeRepository {
@@ -628,6 +1460,34 @@ mod tests {
             Self {
                 result: Mutex::new(result),
                 calls: Mutex::new(Vec::new()),
+                list_pages: Mutex::new(Vec::new()),
+                timeblocking_page: Mutex::new(TimeblockingRangePage {
+                    blocks: Vec::new(),
+                    slots: Vec::new(),
+                    revision: 0,
+                }),
+            }
+        }
+
+        fn with_list_pages(pages: Vec<TaskListPage>) -> Self {
+            Self {
+                result: Mutex::new(Err(RepositoryError::Storage("unused".into()))),
+                calls: Mutex::new(Vec::new()),
+                list_pages: Mutex::new(pages),
+                timeblocking_page: Mutex::new(TimeblockingRangePage {
+                    blocks: Vec::new(),
+                    slots: Vec::new(),
+                    revision: 0,
+                }),
+            }
+        }
+
+        fn with_timeblocking_page(page: TimeblockingRangePage) -> Self {
+            Self {
+                result: Mutex::new(Err(RepositoryError::Storage("unused".into()))),
+                calls: Mutex::new(Vec::new()),
+                list_pages: Mutex::new(Vec::new()),
+                timeblocking_page: Mutex::new(page),
             }
         }
 
@@ -666,6 +1526,7 @@ mod tests {
             _: OperationId,
             _: TaskId,
             _: Timestamp,
+            _: TemporalContext,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("complete")
         }
@@ -674,6 +1535,7 @@ mod tests {
             _: OperationId,
             _: TaskId,
             _: Timestamp,
+            _: TemporalContext,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("uncomplete")
         }
@@ -725,6 +1587,7 @@ mod tests {
             _: Vec<TaskId>,
             _: BulkAction,
             _: Timestamp,
+            _: TemporalContext,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("bulk")
         }
@@ -734,13 +1597,43 @@ mod tests {
             _: TaskListAsOf,
         ) -> crate::RepositoryFuture<'_, TaskListPage> {
             self.calls.lock().unwrap().push("list");
-            Box::pin(async {
-                Ok(TaskListPage {
+            let page = {
+                let mut pages = self.list_pages.lock().unwrap();
+                if pages.is_empty() {
+                    None
+                } else {
+                    Some(pages.remove(0))
+                }
+            };
+            Box::pin(async move {
+                Ok(page.unwrap_or(TaskListPage {
                     tasks: Vec::new(),
                     revision: 0,
                     as_of_date: "2026-07-28".parse().unwrap(),
                     next_cursor: None,
-                })
+                }))
+            })
+        }
+        fn list_analysis_tasks(
+            &self,
+            _: TaskListAsOf,
+        ) -> crate::RepositoryFuture<'_, TaskListPage> {
+            self.calls.lock().unwrap().push("analysis");
+            let page = {
+                let mut pages = self.list_pages.lock().unwrap();
+                if pages.is_empty() {
+                    None
+                } else {
+                    Some(pages.remove(0))
+                }
+            };
+            Box::pin(async move {
+                Ok(page.unwrap_or(TaskListPage {
+                    tasks: Vec::new(),
+                    revision: 0,
+                    as_of_date: "2026-07-28".parse().unwrap(),
+                    next_cursor: None,
+                }))
             })
         }
         fn list_catalog(&self) -> crate::RepositoryFuture<'_, CatalogSnapshot> {
@@ -965,6 +1858,215 @@ mod tests {
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("undo")
         }
+        fn list_task_reminders(
+            &self,
+            _: TaskId,
+        ) -> crate::RepositoryFuture<'_, Vec<ReminderOccurrence>> {
+            self.calls.lock().unwrap().push("list_task_reminders");
+            Box::pin(async { Ok(Vec::new()) })
+        }
+        fn reschedule_reminder(
+            &self,
+            _: OperationId,
+            _: TaskId,
+            _: Timestamp,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("reschedule_reminder")
+        }
+        fn dismiss_reminder(
+            &self,
+            _: OperationId,
+            _: TaskId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("dismiss_reminder")
+        }
+        fn acquire_reminder_lease(
+            &self,
+            _: Timestamp,
+            _: u64,
+        ) -> crate::RepositoryFuture<'_, ReminderDeliveryLease> {
+            self.calls.lock().unwrap().push("acquire_reminder_lease");
+            Box::pin(async { Err(RepositoryError::Storage("fake lease".into())) })
+        }
+        fn renew_reminder_lease(
+            &self,
+            _: ReminderFenceTerm,
+            _: Timestamp,
+            _: u64,
+        ) -> crate::RepositoryFuture<'_, ReminderDeliveryLease> {
+            unimplemented!()
+        }
+        fn release_reminder_lease(
+            &self,
+            _: ReminderFenceTerm,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, ()> {
+            unimplemented!()
+        }
+        fn claim_due_reminders(
+            &self,
+            _: ReminderFenceTerm,
+            _: Timestamp,
+            _: u32,
+            _: u64,
+        ) -> crate::RepositoryFuture<'_, Vec<ClaimedReminder>> {
+            unimplemented!()
+        }
+        fn settle_reminder_delivered(
+            &self,
+            _: ReminderFenceTerm,
+            _: TaskId,
+            _: Timestamp,
+            _: u32,
+            _: ReminderChannel,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, ()> {
+            unimplemented!()
+        }
+        fn settle_reminder_failed(
+            &self,
+            _: ReminderFenceTerm,
+            _: TaskId,
+            _: Timestamp,
+            _: u32,
+            _: ReminderFailureCode,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, ()> {
+            unimplemented!()
+        }
+        fn mark_owner_lost_reminders(
+            &self,
+            _: ReminderFenceTerm,
+            _: Timestamp,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, u32> {
+            unimplemented!()
+        }
+        fn next_reminder_wake_at(&self) -> crate::RepositoryFuture<'_, Option<Timestamp>> {
+            self.calls.lock().unwrap().push("next_reminder_wake_at");
+            Box::pin(async { Ok(None) })
+        }
+        fn list_timeblocking_range(
+            &self,
+            _: TimeblockingRangeQuery,
+        ) -> crate::RepositoryFuture<'_, TimeblockingRangePage> {
+            self.calls.lock().unwrap().push("list_timeblocking_range");
+            let page = self.timeblocking_page.lock().unwrap().clone();
+            Box::pin(async move { Ok(page) })
+        }
+        fn create_time_block(
+            &self,
+            _: OperationId,
+            _: TimeBlockId,
+            _: TimeBlockDraft,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("create_time_block")
+        }
+        fn patch_time_block(
+            &self,
+            _: OperationId,
+            _: TimeBlockId,
+            _: TimeBlockPatch,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("patch_time_block")
+        }
+        fn delete_time_block(
+            &self,
+            _: OperationId,
+            _: TimeBlockId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("delete_time_block")
+        }
+        fn create_time_slot(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: TimeSlotDraft,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("create_time_slot")
+        }
+        fn patch_time_slot(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: TimeSlotPatch,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("patch_time_slot")
+        }
+        fn delete_time_slot(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("delete_time_slot")
+        }
+        fn append_slot_task(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: TaskId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("append_slot_task")
+        }
+        fn remove_slot_task(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: TaskId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("remove_slot_task")
+        }
+        fn reorder_slot_tasks(
+            &self,
+            _: OperationId,
+            _: TimeSlotId,
+            _: Vec<TaskId>,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("reorder_slot_tasks")
+        }
+        fn set_time_block_range(
+            &self,
+            _: OperationId,
+            _: TimeBlockId,
+            _: TimeBlockRangePatch,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("set_time_block_range")
+        }
+        fn preview_replan_past_blocks(
+            &self,
+            temporal: TemporalContext,
+        ) -> crate::RepositoryFuture<'_, ReplanPastBlocksPreview> {
+            Box::pin(async move {
+                Ok(ReplanPastBlocksPreview {
+                    as_of_date: temporal.sampled_completion_date,
+                    candidate_ids: Vec::new(),
+                    blocks: Vec::new(),
+                })
+            })
+        }
+        fn replan_past_blocks(
+            &self,
+            _: OperationId,
+            _: ReplanPastBlocksAction,
+            _: Date,
+            _: Vec<TimeBlockId>,
+            _: Timestamp,
+            _: TemporalContext,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("replan_past_blocks")
+        }
     }
 
     #[derive(Default)]
@@ -998,6 +2100,7 @@ mod tests {
                 affected: AffectedIds::default(),
                 resync: ResyncScope::NONE,
             },
+            uncomplete_outcome: None,
             newly_committed,
         }
     }
@@ -1135,5 +2238,349 @@ mod tests {
     #[test]
     fn task_fixture_starts_pending() {
         assert_eq!(mutation().task().unwrap().status, TaskStatus::Pending);
+    }
+
+    fn sample_task(title: &str, revision: u64) -> Task {
+        let now: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
+        Task::new(
+            TaskId::new(),
+            TaskTitle::new(title).unwrap(),
+            None,
+            now,
+            revision,
+        )
+    }
+
+    fn list_page(
+        tasks: Vec<Task>,
+        revision: u64,
+        next_cursor: Option<junban_domain::TaskCursor>,
+    ) -> TaskListPage {
+        TaskListPage {
+            tasks,
+            revision,
+            as_of_date: "2026-07-28".parse().unwrap(),
+            next_cursor,
+        }
+    }
+
+    fn as_of() -> TaskListAsOf {
+        TaskListAsOf::for_local_date("2026-07-28".parse().unwrap(), &TimeZone::UTC).unwrap()
+    }
+
+    #[tokio::test]
+    async fn analysis_snapshot_preserves_stats_with_one_repository_call() {
+        let today = "2026-07-28".parse().unwrap();
+        let mut overdue = sample_task("overdue", 9);
+        overdue.due_date = Some("2026-07-26".parse().unwrap());
+        let mut completed = sample_task("completed", 8);
+        completed.status = TaskStatus::Completed;
+        completed.completed_at = Some("2026-07-27T12:00:00Z".parse().unwrap());
+
+        let tasks = vec![completed, overdue];
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![list_page(
+            tasks.clone(),
+            9,
+            None,
+        )]));
+        let service = JunbanService::new(repository.clone(), Arc::new(RecordingSink::default()));
+
+        let page = service
+            .stats("2026-07-26".parse().unwrap(), today, today, &TimeZone::UTC)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            page.summary,
+            stats_summary(
+                &tasks,
+                "2026-07-26".parse().unwrap(),
+                today,
+                today,
+                &TimeZone::UTC
+            )
+            .unwrap()
+        );
+        assert_eq!(page.revision, 9);
+        assert_eq!(*repository.calls.lock().unwrap(), vec!["analysis"]);
+    }
+
+    #[tokio::test]
+    async fn analysis_snapshot_preserves_nudge_order_and_tags_with_one_repository_call() {
+        let tag_a = TagId::new();
+        let tag_b = TagId::new();
+        let mut earlier = sample_task("earlier", 9);
+        earlier.due_date = Some("2026-07-26".parse().unwrap());
+        earlier.tag_ids = vec![tag_a];
+        let mut later = sample_task("later", 9);
+        later.due_date = Some("2026-07-27".parse().unwrap());
+        later.tag_ids = vec![tag_b];
+        let tasks = vec![later.clone(), earlier.clone()];
+        let expected_facts = evaluate_nudges(
+            &tasks,
+            "2026-07-28".parse().unwrap(),
+            DailyCapacityMinutes::DEFAULT,
+            &TimeZone::UTC,
+            &[],
+            None,
+        );
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![list_page(
+            tasks, 9, None,
+        )]));
+        let service = JunbanService::new(repository.clone(), Arc::new(RecordingSink::default()));
+
+        let page = service
+            .nudges("2026-07-28".parse().unwrap(), None, &TimeZone::UTC)
+            .await
+            .unwrap();
+
+        assert_eq!(page.revision, 9);
+        assert_eq!(page.facts, expected_facts);
+        assert_eq!(
+            page.tasks.iter().map(|task| task.id).collect::<Vec<_>>(),
+            vec![earlier.id, later.id]
+        );
+        assert_eq!(page.tasks[0].tag_ids, vec![tag_a]);
+        assert_eq!(page.tasks[1].tag_ids, vec![tag_b]);
+        assert_eq!(*repository.calls.lock().unwrap(), vec!["analysis"]);
+    }
+
+    #[tokio::test]
+    async fn collect_pages_stops_on_short_final_page() {
+        let t1 = sample_task("a", 1);
+        let t2 = sample_task("b", 1);
+        let t3 = sample_task("c", 1);
+        let cursor = junban_domain::TaskCursor {
+            sort_value: "1".into(),
+            task_id: t1.id,
+        };
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![
+            list_page(vec![t1.clone(), t2.clone()], 3, Some(cursor)),
+            list_page(vec![t3.clone()], 3, None),
+        ]));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+
+        let collected = service
+            .collect_task_query_pages(TaskQuery::new(), as_of(), 100)
+            .await
+            .unwrap();
+
+        assert_eq!(collected.revision, 3);
+        assert_eq!(collected.tasks.len(), 3);
+        assert_eq!(
+            collected
+                .tasks
+                .iter()
+                .map(|t| t.title.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b", "c"]
+        );
+    }
+
+    #[tokio::test]
+    async fn collect_pages_rejects_when_cap_exceeded() {
+        let tasks: Vec<Task> = (0..5).map(|i| sample_task(&format!("t{i}"), 1)).collect();
+        let cursor = junban_domain::TaskCursor {
+            sort_value: "0".into(),
+            task_id: tasks[0].id,
+        };
+        // Cap 3: first page of 2 + second page of 2 => 4 > 3.
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![
+            list_page(tasks[0..2].to_vec(), 1, Some(cursor)),
+            list_page(tasks[2..4].to_vec(), 1, None),
+        ]));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+
+        assert_eq!(
+            service
+                .collect_task_query_pages(TaskQuery::new(), as_of(), 3)
+                .await,
+            Err(AppError::ResultLimitExceeded)
+        );
+    }
+
+    #[tokio::test]
+    async fn collect_pages_retries_once_on_revision_drift() {
+        let t1 = sample_task("first", 1);
+        let t2 = sample_task("stable", 5);
+        let cursor = junban_domain::TaskCursor {
+            sort_value: "1".into(),
+            task_id: t1.id,
+        };
+        // Attempt 1: page1 rev=1, page2 rev=2 => Conflict, retry.
+        // Attempt 2: single consistent page rev=5.
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![
+            list_page(vec![t1], 1, Some(cursor)),
+            list_page(vec![sample_task("drift", 2)], 2, None),
+            list_page(vec![t2.clone()], 5, None),
+        ]));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+
+        let collected = service
+            .collect_task_query_pages(TaskQuery::new(), as_of(), 100)
+            .await
+            .unwrap();
+        assert_eq!(collected.revision, 5);
+        assert_eq!(collected.tasks.len(), 1);
+        assert_eq!(collected.tasks[0].title.as_str(), "stable");
+    }
+
+    #[tokio::test]
+    async fn collect_pages_fails_when_revision_keeps_drifting() {
+        let cursor = junban_domain::TaskCursor {
+            sort_value: "1".into(),
+            task_id: TaskId::new(),
+        };
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![
+            // first attempt
+            list_page(vec![sample_task("a", 1)], 1, Some(cursor.clone())),
+            list_page(vec![sample_task("b", 2)], 2, None),
+            // retry also drifts
+            list_page(vec![sample_task("c", 3)], 3, Some(cursor)),
+            list_page(vec![sample_task("d", 4)], 4, None),
+        ]));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+
+        assert_eq!(
+            service
+                .collect_task_query_pages(TaskQuery::new(), as_of(), 100)
+                .await,
+            Err(AppError::Conflict)
+        );
+    }
+
+    fn sample_block(title: &str, date: Date, start_h: i8, rule: Option<&str>) -> TimeBlock {
+        let now: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
+        let mut draft = TimeBlockDraft::new(
+            EntityName::new(title).unwrap(),
+            CivilTimeRange::new(
+                date,
+                jiff::civil::Time::constant(start_h, 0, 0, 0),
+                jiff::civil::Time::constant(start_h + 1, 0, 0, 0),
+                junban_domain::TimeZoneName::new("UTC").unwrap(),
+            )
+            .unwrap(),
+        );
+        draft.recurrence_rule = rule.map(|raw| junban_domain::RecurrenceRule::new(raw).unwrap());
+        TimeBlock::from_draft(TimeBlockId::new(), draft, now, 1)
+    }
+
+    fn sample_slot(title: &str, date: Date, start_h: i8, rule: Option<&str>) -> TimeSlot {
+        let now: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
+        let mut draft = TimeSlotDraft::new(
+            EntityName::new(title).unwrap(),
+            CivilTimeRange::new(
+                date,
+                jiff::civil::Time::constant(start_h, 0, 0, 0),
+                jiff::civil::Time::constant(start_h + 2, 0, 0, 0),
+                junban_domain::TimeZoneName::new("UTC").unwrap(),
+            )
+            .unwrap(),
+        );
+        draft.recurrence_rule = rule.map(|raw| junban_domain::RecurrenceRule::new(raw).unwrap());
+        TimeSlot::from_draft(TimeSlotId::new(), draft, now, 1)
+    }
+
+    #[tokio::test]
+    async fn list_timeblocking_expands_recurring_owners_and_sorts() {
+        let ordinary = sample_block("Ordinary", date(2026, 3, 9), 11, None);
+        let ordinary_id = ordinary.id;
+        // Owner is before the window; only virtual instances should appear.
+        let early_daily = sample_block("Daily", date(2026, 3, 1), 9, Some("daily"));
+        let owner_id = early_daily.id;
+        let weekly = sample_block("Weekly", date(2026, 3, 8), 8, Some("weekly"));
+        let weekly_id = weekly.id;
+        let slot = sample_slot("Slot series", date(2026, 3, 8), 14, Some("daily"));
+        let slot_id = slot.id;
+
+        let repository = Arc::new(FakeRepository::with_timeblocking_page(
+            TimeblockingRangePage {
+                blocks: vec![early_daily, weekly, ordinary],
+                slots: vec![slot],
+                revision: 7,
+            },
+        ));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+
+        let page = service
+            .list_timeblocking_range(date(2026, 3, 8), date(2026, 3, 10))
+            .await
+            .unwrap();
+
+        assert_eq!(page.revision, 7);
+        assert_eq!(
+            page.blocks
+                .iter()
+                .map(|block| {
+                    (
+                        block.id,
+                        block.range.date,
+                        block.recurrence_parent_id,
+                        block.title.as_str().to_owned(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                (weekly_id, date(2026, 3, 8), None, "Weekly".into()),
+                (owner_id, date(2026, 3, 8), Some(owner_id), "Daily".into()),
+                (owner_id, date(2026, 3, 9), Some(owner_id), "Daily".into()),
+                (ordinary_id, date(2026, 3, 9), None, "Ordinary".into()),
+                (owner_id, date(2026, 3, 10), Some(owner_id), "Daily".into()),
+            ]
+        );
+        // Weekly owner date is inside the window and returned once without parent id.
+        assert!(page.blocks.iter().any(|block| {
+            block.id == weekly_id
+                && block.range.date == date(2026, 3, 8)
+                && block.recurrence_parent_id.is_none()
+                && block.recurrence_rule.is_some()
+        }));
+        assert_eq!(page.slots.len(), 3);
+        assert!(page.slots.iter().all(|slot| slot.id == slot_id));
+        assert_eq!(page.slots[0].range.date, date(2026, 3, 8));
+        assert!(page.slots[0].recurrence_parent_id.is_none());
+        assert_eq!(page.slots[1].recurrence_parent_id, Some(slot_id));
+        assert_eq!(page.slots[2].recurrence_parent_id, Some(slot_id));
+
+        // Sorted by date, then start, then id.
+        let block_keys: Vec<_> = page
+            .blocks
+            .iter()
+            .map(|block| (block.range.date, block.range.start, block.id.as_uuid()))
+            .collect();
+        let mut sorted = block_keys.clone();
+        sorted.sort();
+        assert_eq!(block_keys, sorted);
+    }
+
+    #[tokio::test]
+    async fn list_timeblocking_rejects_expanded_result_over_limit() {
+        let mut blocks = Vec::new();
+        for index in 0..(MAX_TIMEBLOCK_RANGE_ITEMS + 1) {
+            blocks.push(sample_block(
+                &format!("b{index}"),
+                date(2026, 3, 8),
+                9,
+                None,
+            ));
+        }
+        let repository = Arc::new(FakeRepository::with_timeblocking_page(
+            TimeblockingRangePage {
+                blocks,
+                slots: Vec::new(),
+                revision: 1,
+            },
+        ));
+        let service = JunbanService::new(repository, Arc::new(RecordingSink::default()));
+        assert_eq!(
+            service
+                .list_timeblocking_range(date(2026, 3, 8), date(2026, 3, 8))
+                .await,
+            Err(AppError::ResultLimitExceeded)
+        );
+    }
+
+    fn date(year: i16, month: i8, day: i8) -> Date {
+        jiff::civil::date(year, month, day)
     }
 }

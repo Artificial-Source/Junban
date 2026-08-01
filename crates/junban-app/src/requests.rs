@@ -1,11 +1,17 @@
 //! Explicit request and result shapes for Phase 2 use cases.
 
-use jiff::{Timestamp, ToSpan, Zoned, civil::Date, tz::TimeZone};
+use jiff::{
+    Timestamp, ToSpan, Zoned,
+    civil::{Date, Time},
+    tz::TimeZone,
+};
 use junban_domain::{
-    ActualMinutes, CommentBody, DreadLevel, EntityName, EstimatedMinutes, FilterQuery, HexColor,
-    IconText, LocalDueTime, MarkdownText, Priority, Project, ProjectId, ProjectView,
-    RecurrenceRule, SavedFilter, Section, SectionId, SortOrder, Tag, TagId, TagName, Task,
-    TaskCursor, TaskId, TaskTitle, Template, TemplateId,
+    ActualMinutes, CivilTimeRange, CommentBody, DailyPlanSummary, DreadLevel, EndOfDaySummary,
+    EntityName, EstimatedMinutes, FilterQuery, HexColor, IconText, LocalDueTime, MarkdownText,
+    NudgeFacts, Priority, Project, ProjectId, ProjectView, RecurrenceRule, SavedFilter, Section,
+    SectionId, SortOrder, StatsSummary, Tag, TagId, TagName, Task, TaskCursor, TaskId, TaskTitle,
+    Template, TemplateId, TimeBlock, TimeBlockId, TimeSlot, TimeSlotId, TimeZoneName, WeekStart,
+    WeeklyReviewSummary,
 };
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +53,41 @@ pub struct TaskPatch {
     pub sort_order: Option<SortOrder>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recurrence_rule: Option<Option<RecurrenceRule>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remind_at: Option<Option<Timestamp>>,
+    /// When set with a due/rule change, callers usually leave this `None` so storage resets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence_anchor_day: Option<Option<junban_domain::MonthlyAnchorDay>>,
+}
+
+/// One sampled server-local civil day and zone for temporal mutations.
+///
+/// Constructed at the use-case boundary (or with an explicit test sample). Domain and
+/// storage code never read the system clock independently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemporalContext {
+    pub sampled_completion_date: Date,
+    pub server_time_zone: TimeZone,
+}
+
+impl TemporalContext {
+    /// Sample once from the host zone via Jiff `tz-system`.
+    pub fn sample_now() -> Self {
+        let now = Zoned::now();
+        Self {
+            sampled_completion_date: now.date(),
+            server_time_zone: now.time_zone().clone(),
+        }
+    }
+
+    /// Deterministic internal/test seam.
+    #[must_use]
+    pub fn new(sampled_completion_date: Date, server_time_zone: TimeZone) -> Self {
+        Self {
+            sampled_completion_date,
+            server_time_zone,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -413,4 +454,309 @@ pub struct SavedFilterPatch {
 pub struct CommentPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<CommentBody>,
+}
+
+/// User-facing reminder schedule change. Reuses `Task.remind_at` as the intent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RescheduleReminder {
+    pub task_id: TaskId,
+    pub remind_at: Timestamp,
+}
+
+/// Clear the task reminder schedule and cancel any still-pending occurrence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DismissReminder {
+    pub task_id: TaskId,
+}
+
+/// Acquire or renew parameters for the single global delivery lease.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReminderLeaseRequest {
+    /// Positive bounded TTL in seconds. Defaults are applied by the service when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_secs: Option<u64>,
+}
+
+/// Claim due pending occurrences under the caller's current fence term.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimRemindersRequest {
+    pub fence_term: junban_domain::ReminderFenceTerm,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_secs: Option<u64>,
+}
+
+/// Settle one claimed occurrence as delivered on an allowlisted channel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettleReminderDelivered {
+    pub fence_term: junban_domain::ReminderFenceTerm,
+    pub task_id: TaskId,
+    pub remind_at: Timestamp,
+    /// Exact generation returned by the successful claim for this occurrence.
+    pub claim_attempt: u32,
+    pub channel: junban_domain::ReminderChannel,
+}
+
+/// Settle one claimed occurrence as failed with a bounded error code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettleReminderFailed {
+    pub fence_term: junban_domain::ReminderFenceTerm,
+    pub task_id: TaskId,
+    pub remind_at: Timestamp,
+    /// Exact generation returned by the successful claim for this occurrence.
+    pub claim_attempt: u32,
+    pub error: junban_domain::ReminderFailureCode,
+}
+
+/// Mark expired claimed rows `failed/owner_lost` under the new valid owner term.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkOwnerLostReminders {
+    pub fence_term: junban_domain::ReminderFenceTerm,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// Partial civil range update for an existing time block.
+///
+/// Omitted values retain durable owner state; in particular, an omitted timezone
+/// must never be replaced with the server timezone.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeBlockRangePatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<Date>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Time>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Time>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<TimeZoneName>,
+}
+
+/// Partial time-block update. `None` leaves a field unchanged; `Some(None)` clears nullable fields.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeBlockPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<EntityName>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<TimeBlockRangePatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<Option<HexColor>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Option<TaskId>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot_id: Option<Option<TimeSlotId>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence_rule: Option<Option<RecurrenceRule>>,
+}
+
+/// Partial time-slot update.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeSlotPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<EntityName>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<CivilTimeRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<Option<HexColor>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<Option<ProjectId>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence_rule: Option<Option<RecurrenceRule>>,
+}
+
+/// Inclusive civil-date range for first-party blocks and slots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeblockingRangeQuery {
+    pub from: Date,
+    pub to: Date,
+}
+
+/// Bounded range read of series-owner blocks and slots.
+///
+/// Storage returns durable owners only (including earlier recurring owners that may
+/// expand into the window). The app service expands recurring owners into virtual
+/// instances before returning this page to HTTP callers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeblockingRangePage {
+    pub blocks: Vec<TimeBlock>,
+    pub slots: Vec<TimeSlot>,
+    pub revision: u64,
+}
+
+/// Server-derived, bounded candidates for automatic replan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplanPastBlocksPreview {
+    pub as_of_date: Date,
+    pub candidate_ids: Vec<TimeBlockId>,
+    pub blocks: Vec<TimeBlock>,
+}
+
+/// Automatic replan action for unlocked blocks in the prior seven civil days.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplanPastBlocksAction {
+    MoveToToday,
+    MoveToTomorrow,
+    Delete,
+}
+
+/// Tasks collected across cursor pages under one sampled list context and revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CollectedTasks {
+    pub tasks: Vec<Task>,
+    pub revision: u64,
+    pub as_of_date: Date,
+}
+
+/// Bounded calendar range read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalendarTasksPage {
+    pub tasks: Vec<Task>,
+    pub revision: u64,
+}
+
+/// Plan-My-Day read model with embedded task bodies for listed IDs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DailyPlanPage {
+    pub overdue_task_ids: Vec<TaskId>,
+    pub overdue_tasks: Vec<Task>,
+    pub focus_task_ids: Vec<TaskId>,
+    pub focus_tasks: Vec<Task>,
+    pub estimated_total_minutes: u32,
+    pub capacity_minutes: u32,
+    pub revision: u64,
+}
+
+impl DailyPlanPage {
+    pub(crate) fn from_summary(summary: DailyPlanSummary, tasks: &[Task], revision: u64) -> Self {
+        Self {
+            overdue_tasks: tasks_for_ids(tasks, &summary.overdue_task_ids),
+            focus_tasks: tasks_for_ids(tasks, &summary.focus_task_ids),
+            overdue_task_ids: summary.overdue_task_ids,
+            focus_task_ids: summary.focus_task_ids,
+            estimated_total_minutes: summary.estimated_total_minutes,
+            capacity_minutes: summary.capacity_minutes,
+            revision,
+        }
+    }
+}
+
+/// End-of-Day read model with embedded task bodies for listed IDs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndOfDayPage {
+    pub win_task_ids: Vec<TaskId>,
+    pub win_tasks: Vec<Task>,
+    pub carry_over_task_ids: Vec<TaskId>,
+    pub carry_over_tasks: Vec<Task>,
+    pub tomorrow_task_ids: Vec<TaskId>,
+    pub tomorrow_tasks: Vec<Task>,
+    pub tomorrow_estimated_minutes: u32,
+    pub completion_rate_percent: u32,
+    pub capacity_minutes: u32,
+    pub revision: u64,
+}
+
+impl EndOfDayPage {
+    pub(crate) fn from_summary(
+        summary: EndOfDaySummary,
+        tasks: &[Task],
+        capacity_minutes: u32,
+        revision: u64,
+    ) -> Self {
+        Self {
+            win_tasks: tasks_for_ids(tasks, &summary.win_task_ids),
+            carry_over_tasks: tasks_for_ids(tasks, &summary.carry_over_task_ids),
+            tomorrow_tasks: tasks_for_ids(tasks, &summary.tomorrow_task_ids),
+            win_task_ids: summary.win_task_ids,
+            carry_over_task_ids: summary.carry_over_task_ids,
+            tomorrow_task_ids: summary.tomorrow_task_ids,
+            tomorrow_estimated_minutes: summary.tomorrow_estimated_minutes,
+            completion_rate_percent: summary.completion_rate_percent,
+            capacity_minutes,
+            revision,
+        }
+    }
+}
+
+/// Weekly review facts plus embedded bodies for bounded ID lists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WeeklyReviewPage {
+    pub summary: WeeklyReviewSummary,
+    pub top_accomplishment_tasks: Vec<Task>,
+    pub overdue_tasks: Vec<Task>,
+    pub revision: u64,
+}
+
+/// Stats range aggregates plus revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatsPage {
+    pub summary: StatsSummary,
+    pub revision: u64,
+}
+
+/// Nudge facts plus embedded bodies for referenced task IDs only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NudgesPage {
+    pub facts: NudgeFacts,
+    pub tasks: Vec<Task>,
+    pub revision: u64,
+}
+
+/// Phase 3 read-only temporal defaults until Phase 4 settings mutations exist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TemporalSettings {
+    pub time_zone: String,
+    pub capacity_minutes: u32,
+    pub week_start: WeekStart,
+    pub nudges_enabled: bool,
+    pub eat_the_frog_enabled: bool,
+    pub task_jar_enabled: bool,
+}
+
+/// Eat-the-Frog selection (single task or none).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EatTheFrogPage {
+    pub task: Option<Task>,
+    pub revision: u64,
+}
+
+/// Task Jar candidates in stable domain order (browser picks randomly).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskJarPage {
+    pub task_ids: Vec<TaskId>,
+    pub tasks: Vec<Task>,
+    pub revision: u64,
+}
+
+/// Dopamine Menu candidates in stable domain order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DopamineMenuPage {
+    pub task_ids: Vec<TaskId>,
+    pub tasks: Vec<Task>,
+    pub revision: u64,
+}
+
+fn tasks_for_ids(tasks: &[Task], ids: &[TaskId]) -> Vec<Task> {
+    ids.iter()
+        .filter_map(|id| tasks.iter().find(|task| task.id == *id).cloned())
+        .collect()
+}
+
+/// Helper constructors used by tests and thin service wrappers.
+impl TimeBlockPatch {
+    #[must_use]
+    pub fn range_only(range: CivilTimeRange) -> Self {
+        Self {
+            range: Some(TimeBlockRangePatch {
+                date: Some(range.date),
+                start: Some(range.start),
+                end: Some(range.end),
+                time_zone: Some(range.time_zone),
+            }),
+            ..Self::default()
+        }
+    }
 }

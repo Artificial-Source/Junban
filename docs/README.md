@@ -20,6 +20,10 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-2-review-ledger.md`](../goals/rust-rewrite/evidence/phase-2-review-ledger.md): material Phase 2 findings and their regression evidence
 - [`../goals/rust-rewrite/evidence/phase-2-hosted-memory.json`](../goals/rust-rewrite/evidence/phase-2-hosted-memory.json): authoritative five-sample hosted-memory result
 - [`../goals/rust-rewrite/evidence/phase-2-scale-bench.json`](../goals/rust-rewrite/evidence/phase-2-scale-bench.json): authoritative 10,000-task performance result
+- [`../goals/rust-rewrite/evidence/phase-3-outcome.md`](../goals/rust-rewrite/evidence/phase-3-outcome.md): Phase 3 recurrence, reminders, planning, validation, and performance outcome
+- [`../goals/rust-rewrite/evidence/phase-3-review-ledger.md`](../goals/rust-rewrite/evidence/phase-3-review-ledger.md): material Phase 3 findings and their regression evidence
+- [`../goals/rust-rewrite/evidence/phase-3-temporal-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-3-temporal-benchmark-protocol.md): Phase 3 temporal workload protocol and result
+- [`../goals/rust-rewrite/evidence/phase-3-temporal-bench.json`](../goals/rust-rewrite/evidence/phase-3-temporal-bench.json): authoritative temporal memory, latency, and scheduler result
 - [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings
 - [`performance.md`](performance.md): hosted memory and scale harness commands
 

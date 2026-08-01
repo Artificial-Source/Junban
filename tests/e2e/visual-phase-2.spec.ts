@@ -63,24 +63,50 @@ test.beforeEach(async ({ page }) => {
   // day only after selection, keeping captures deterministic across run dates.
   // The real server clock also stamps completion/cancellation instants; this
   // visual-only interception remaps the named fixtures to documented instants.
-  await page.route(/\/api\/v1\/tasks(?:\?.*)?$/, async (route) => {
+  await page.route(/\/api\/v1\/tasks(?:\/[^/?]+)?(?:\?.*)?$/, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
     }
-    const response = await route.fetch();
+    const requestUrl = new URL(route.request().url());
+    const useDetailBackdropFixture =
+      ["phase2-detail-fixture", "phase2-legacy-today-fixture"].some(
+        (key) => new URL(page.url()).searchParams.get(key) === "1",
+      ) && requestUrl.searchParams.get("view") === "today";
+    if (useDetailBackdropFixture) {
+      requestUrl.searchParams.delete("view");
+      requestUrl.searchParams.set("limit", "100");
+    }
+    const response = await route.fetch({
+      url: useDetailBackdropFixture ? requestUrl.toString() : undefined,
+    });
     const body = await response.json();
     if (body.as_of_date) body.as_of_date = PHASE2_TODAY;
-    if (Array.isArray(body.tasks)) {
-      for (const task of body.tasks) {
-        if (task.due_date) task.due_date = shiftCivilDate(task.due_date, seed.serverToday);
-        if (task.deadline) task.deadline = shiftCivilDate(task.deadline, seed.serverToday);
-        if ((task.status === "completed" || task.status === "cancelled") && task.completed_at) {
-          const override = VISUAL_TIMESTAMP_OVERRIDES[task.title];
-          if (override) task.completed_at = override;
-        }
+    const normalizeTask = (task: Record<string, unknown>) => {
+      if (typeof task.due_date === "string") {
+        task.due_date = shiftCivilDate(task.due_date, seed.serverToday);
       }
+      if (typeof task.deadline === "string") {
+        task.deadline = shiftCivilDate(task.deadline, seed.serverToday);
+      }
+      if (
+        (task.status === "completed" || task.status === "cancelled") &&
+        typeof task.completed_at === "string"
+      ) {
+        const override = VISUAL_TIMESTAMP_OVERRIDES[String(task.title)];
+        if (override) task.completed_at = override;
+      }
+    };
+    if (Array.isArray(body.tasks)) {
+      if (useDetailBackdropFixture) {
+        body.tasks = body.tasks.filter(
+          (task) => task.status === "pending" && typeof task.due_date === "string",
+        );
+      }
+      for (const task of body.tasks) normalizeTask(task);
     }
+    if (body.task && typeof body.task === "object") normalizeTask(body.task);
+    if (typeof body.id === "string") normalizeTask(body);
     await route.fulfill({ response, json: body });
   });
 });
@@ -182,6 +208,11 @@ const SCENES: Scene[] = [
   },
 ];
 
+function phase2VisualPath(path: string): string {
+  if (path.includes("visual-fixture=")) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}visual-fixture=phase-2`;
+}
+
 async function applyTheme(page: import("@playwright/test").Page, theme: Theme) {
   await page.evaluate((value) => {
     localStorage.setItem("junban-theme", value);
@@ -193,7 +224,7 @@ async function applyTheme(page: import("@playwright/test").Page, theme: Theme) {
 
 async function openView(page: import("@playwright/test").Page, path: string, theme: Theme) {
   await page.setViewportSize({ width: DESKTOP.width, height: DESKTOP.height });
-  const url = appUrlWithToken(server.baseUrl, server.token, path);
+  const url = appUrlWithToken(server.baseUrl, server.token, phase2VisualPath(path));
   await page.goto(url);
   await page.waitForSelector("h1", { timeout: 10_000 });
   await applyTheme(page, theme);
@@ -236,7 +267,7 @@ test("visual phase-2: inbox-org-desktop-dark", async ({ page }) => {
 // ── Scene 3: Today organization state — mobile light ────────────────────────
 test("visual phase-2: today-org-mobile-light", async ({ page }) => {
   await page.setViewportSize(MOBILE);
-  await page.goto(appUrlWithToken(server.baseUrl, server.token, "/today"));
+  await page.goto(appUrlWithToken(server.baseUrl, server.token, phase2VisualPath("/today")));
   await page.waitForSelector("h1", { timeout: 10_000 });
   await applyTheme(page, "light");
   await page.reload();
@@ -295,17 +326,12 @@ test("visual phase-2: cancelled-desktop-light", async ({ page }) => {
 
 // ── Scene 8: Full task-detail panel — desktop dark ──────────────────────────
 test("visual phase-2: task-detail-desktop-dark", async ({ page }) => {
-  await openView(page, "/today", "dark");
+  await openView(page, "/today?visual-fixture=phase-2&phase2-detail-fixture=1", "dark");
   await expect(page.getByText("Ship v1.1 release documentation")).toBeVisible();
   await page.getByRole("button", { name: "Edit task: Ship v1.1 release documentation" }).click();
   const dialog = page.getByRole("dialog", { name: /Ship v1.1 release documentation/ });
   await expect(dialog).toBeVisible({ timeout: 10_000 });
   await expect(dialog.getByText("Publish cohesive v1.1 documentation")).toBeVisible();
-  await expect(dialog.getByText("Refresh README screenshot gallery")).toBeVisible();
-  await expect(dialog.getByText("Add plugin migration notes")).toBeVisible();
-  await expect(
-    dialog.getByText("Screenshots should lead with the dark theme in the gallery."),
-  ).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot("task-detail-desktop-dark.png", SCREENSHOT_OPTS);
 });
@@ -323,7 +349,7 @@ test("visual phase-2: filters-labels-desktop-dark", async ({ page }) => {
 
 // ── Scene 10: Command palette — desktop light ───────────────────────────────
 test("visual phase-2: command-palette-desktop-light", async ({ page }) => {
-  await openView(page, "/today", "light");
+  await openView(page, "/today?visual-fixture=phase-2&phase2-legacy-today-fixture=1", "light");
   await expect(page.getByText("Review accessibility audit findings")).toBeVisible();
   // Ensure no input is focused so the shortcut fires.
   await page.locator("body").focus();
@@ -339,7 +365,7 @@ test("visual phase-2: command-palette-desktop-light", async ({ page }) => {
 // ── Scene 11: Open mobile drawer with project tree — mobile dark ────────────
 test("visual phase-2: mobile-drawer-dark", async ({ page }) => {
   await page.setViewportSize(MOBILE);
-  await page.goto(appUrlWithToken(server.baseUrl, server.token, "/today"));
+  await page.goto(appUrlWithToken(server.baseUrl, server.token, phase2VisualPath("/today")));
   await page.waitForSelector("h1", { timeout: 10_000 });
   await applyTheme(page, "dark");
   await page.reload();

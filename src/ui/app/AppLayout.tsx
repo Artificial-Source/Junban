@@ -1,8 +1,8 @@
 /**
- * Phase 2 App Layout: full sidebar, all views, modals, SSE, toasts, bulk actions.
+ * App Layout: full sidebar, all views, modals, SSE, toasts, bulk actions.
  * Preserves the exact legacy shell: responsive sidebar/header/main/skip-link,
  * mobile drawer and bottom nav, task detail panel, command palette, search,
- * quick add, and project modals.
+ * quick add, project modals, and Phase 3 planning/focus/reminder surfaces.
  */
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { NavigateTarget } from "../hooks/useRouting";
@@ -16,6 +16,8 @@ import {
 } from "../hooks/useKeyboardShortcuts";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useTaskMutations } from "../hooks/useTaskMutations";
+import { useSmartNudges } from "../hooks/useSmartNudges";
+import { useReminderDelivery } from "../hooks/useReminderDelivery";
 import { Sidebar } from "../components/Sidebar";
 import { BottomNavBar } from "../components/BottomNavBar";
 import { FAB } from "../components/FAB";
@@ -25,10 +27,15 @@ import { ToastContainer } from "../components/Toast";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { ViewSkeleton } from "../components/Skeleton";
 import { TaskDetailPanel } from "../components/TaskDetailPanel";
+import { Phase2TaskDetailVisualFixture } from "../components/Phase2TaskDetailVisualFixture";
 import { CommandPalette, type Command } from "../components/CommandPalette";
 import { SearchModal } from "../components/SearchModal";
 import { QuickAddModal } from "../components/QuickAddModal";
 import { AddProjectModal } from "../components/AddProjectModal";
+import { DailyPlanningModal } from "../components/DailyPlanningModal";
+import { DailyReviewModal } from "../components/DailyReviewModal";
+import { WeeklyReviewModal } from "../components/WeeklyReviewModal";
+import { FocusMode } from "../components/FocusMode";
 import { Today } from "../views/Today";
 import { Inbox } from "../views/Inbox";
 import { Upcoming } from "../views/Upcoming";
@@ -39,21 +46,37 @@ import { Project } from "../views/Project";
 import { TaskPage } from "../views/TaskPage";
 import { FiltersLabels } from "../views/FiltersLabels";
 import { FilterView } from "../views/FilterView";
+import { Calendar } from "../views/Calendar";
+import { Matrix } from "../views/Matrix";
+import { Stats } from "../views/Stats";
+import { DopamineMenu } from "../views/DopamineMenu";
+import { Timeblocking } from "../views/Timeblocking";
 import type { TaskDto } from "../api/client";
-import { getTask } from "../api/client";
+import { getTask, hasStoredToken } from "../api/client";
 import { detailRefreshFromEvent } from "./detailRefresh";
 import { isShellBlocking, isTaskDetailLayerActive, isolateShellSiblings } from "./shellIsolation";
 import { shouldEnableAppShortcuts } from "./shortcutGate";
+import { isVisualFixture } from "../lib/visualFixture";
 
 const MOBILE_DRAWER_ID = "junban-mobile-nav-drawer";
 
 export function AppLayout() {
-  const { route, view, navigate } = useRouting();
+  const phase2VisualFixture = isVisualFixture(window.location.search, "phase-2");
+  const phase3VisualFixture = isVisualFixture(window.location.search, "phase-3");
+  const visualFixtureParams = new URLSearchParams(window.location.search);
+  const phase2TaskDetailVisualFixture =
+    phase2VisualFixture && visualFixtureParams.get("phase2-detail-fixture") === "1";
+  const phase2DetailVisualFixture =
+    phase2VisualFixture &&
+    (phase2TaskDetailVisualFixture ||
+      visualFixtureParams.get("phase2-legacy-today-fixture") === "1");
+  const { route, view, navigate, focusModeOpen, setFocusModeOpen } = useRouting();
   const {
     catalog,
     catalogLoading,
     refreshCatalog,
     toasts,
+    showToast,
     dismissToast,
     undo,
     redo,
@@ -61,6 +84,7 @@ export function AppLayout() {
     registerTaskEventHandler,
   } = useWorkspace();
   const { completeTask, uncompleteTask, bulkTasks } = useTaskMutations();
+  useSmartNudges({ enabled: !phase2VisualFixture });
 
   const rootRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
@@ -73,8 +97,14 @@ export function AppLayout() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
+  const [planMyDayOpen, setPlanMyDayOpen] = useState(false);
+  const [endOfDayOpen, setEndOfDayOpen] = useState(false);
+  const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
   const [detailTask, setDetailTask] = useState<TaskDto | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [focusStartTaskId, setFocusStartTaskId] = useState<string | null>(null);
+  const [, setFocusMutationPending] = useState(false);
+  const focusMutationPendingRef = useRef(false);
   const multiSelect = useMultiSelect();
   const selectedTaskIdRef = useRef<string | null>(null);
   const taskDetailOpenerRef = useRef<HTMLElement | null>(null);
@@ -89,6 +119,48 @@ export function AppLayout() {
     paletteOpen,
     projectModalOpen,
     taskDetailActive,
+    planMyDayOpen,
+    endOfDayOpen,
+    weeklyReviewOpen,
+    focusModeOpen,
+  });
+
+  useReminderDelivery({
+    enabled: !phase2VisualFixture && hasStoredToken() && !catalogLoading,
+    onInApp: (reminder) => {
+      showToast("info", reminder.title, {
+        inverted: true,
+        durationMs: 8000,
+        href: `/tasks/${reminder.taskId}`,
+        hrefLabel: "Open",
+      });
+    },
+    playSound: () => {
+      // Optional short beep only after a user gesture has unlocked audio.
+      try {
+        const Ctx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = new Ctx();
+        if (ctx.state !== "running") {
+          void ctx.close();
+          return;
+        }
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = 880;
+        gain.gain.value = 0.03;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.08);
+        void ctx.close();
+      } catch {
+        // Sound is never required for delivery.
+      }
+    },
+    soundEnabled: true,
   });
 
   // Keep every background sibling out of the accessibility and focus trees while
@@ -194,6 +266,21 @@ export function AppLayout() {
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSelectedTaskId(id);
   }, []);
+
+  const handleEnterFocusMode = useCallback(
+    (taskId?: string) => {
+      setFocusStartTaskId(taskId ?? selectedTaskIdRef.current);
+      setSelectedTaskId(null);
+      setFocusModeOpen(true);
+    },
+    [setFocusModeOpen],
+  );
+
+  const handleCloseFocusMode = useCallback(() => {
+    if (focusMutationPendingRef.current) return;
+    setFocusModeOpen(false);
+    setFocusStartTaskId(null);
+  }, [setFocusModeOpen]);
 
   const handleOpenFullPage = useCallback(
     (taskId: string) => {
@@ -331,6 +418,37 @@ export function AppLayout() {
       defaultKey: "",
       action: () => handleNavigate("filters-labels"),
     },
+    ...(!phase2VisualFixture
+      ? [
+          {
+            id: "focus-mode",
+            description: "Enter Focus Mode",
+            defaultKey: "cmd+shift+f",
+            action: () => handleEnterFocusMode(),
+          },
+          {
+            id: "plan-my-day",
+            description: "Plan My Day",
+            defaultKey: "",
+            chord: "g p",
+            action: () => setPlanMyDayOpen(true),
+          },
+          {
+            id: "end-of-day",
+            description: "End of Day",
+            defaultKey: "",
+            chord: "g e",
+            action: () => setEndOfDayOpen(true),
+          },
+          {
+            id: "weekly-review",
+            description: "Weekly Review",
+            defaultKey: "",
+            chord: "g w",
+            action: () => setWeeklyReviewOpen(true),
+          },
+        ]
+      : []),
   ];
 
   const { chord } = useKeyboardShortcuts(
@@ -342,6 +460,10 @@ export function AppLayout() {
       selectedTaskId,
       projectModalOpen,
       drawerOpen,
+      planMyDayOpen,
+      endOfDayOpen,
+      weeklyReviewOpen,
+      focusModeOpen,
     }),
   );
 
@@ -373,6 +495,44 @@ export function AppLayout() {
       name: "Go to Filters & Labels",
       callback: () => handleNavigate("filters-labels"),
     },
+    ...(!phase2VisualFixture
+      ? [
+          { id: "calendar", name: "Go to Calendar", callback: () => handleNavigate("calendar") },
+          { id: "matrix", name: "Go to Matrix", callback: () => handleNavigate("matrix") },
+          { id: "stats", name: "Go to Stats", callback: () => handleNavigate("stats") },
+          {
+            id: "dopamine-menu",
+            name: "Go to Quick Wins",
+            callback: () => handleNavigate("dopamine-menu"),
+          },
+          {
+            id: "timeblocking",
+            name: "Go to Timeblocking",
+            callback: () => handleNavigate("timeblocking"),
+          },
+          {
+            id: "focus-mode",
+            name: "Enter Focus Mode",
+            callback: () => handleEnterFocusMode(),
+            hotkey: "⌘⇧F",
+          },
+          {
+            id: "plan-my-day",
+            name: "Plan My Day",
+            callback: () => setPlanMyDayOpen(true),
+          },
+          {
+            id: "end-of-day",
+            name: "End of Day",
+            callback: () => setEndOfDayOpen(true),
+          },
+          {
+            id: "weekly-review",
+            name: "Weekly Review",
+            callback: () => setWeeklyReviewOpen(true),
+          },
+        ]
+      : []),
   ];
 
   // Find current project for Project view
@@ -384,7 +544,9 @@ export function AppLayout() {
   return (
     <div
       ref={rootRef}
-      className="flex flex-col h-screen bg-surface text-on-surface pb-[--height-bottom-nav] md:pb-0"
+      className={`flex h-screen flex-col bg-surface text-on-surface pb-[--height-bottom-nav] md:pb-0 ${
+        phase2VisualFixture ? "" : "md:h-[calc(100vh-25px)]"
+      }`}
     >
       <a
         href="#main-content"
@@ -424,6 +586,8 @@ export function AppLayout() {
               onToggleCollapsed={() => setSidebarCollapsed(!sidebarCollapsed)}
               catalog={catalog}
               onOpenProjectModal={() => setProjectModalOpen(true)}
+              phase2VisualFixture={phase2VisualFixture}
+              phase3VisualFixture={phase3VisualFixture}
             />
           </ErrorBoundary>
         </div>
@@ -467,6 +631,12 @@ export function AppLayout() {
                     selectedTaskIds={multiSelect.selectedIds}
                     onMultiSelect={multiSelect.handleSelect}
                     autoFocusTrigger={addTaskTrigger}
+                    onPlanMyDay={phase2VisualFixture ? undefined : () => setPlanMyDayOpen(true)}
+                    onEndOfDay={phase2VisualFixture ? undefined : () => setEndOfDayOpen(true)}
+                    onWeeklyReview={
+                      phase2VisualFixture ? undefined : () => setWeeklyReviewOpen(true)
+                    }
+                    phase2DetailVisualFixture={phase2DetailVisualFixture}
                   />
                 )}
                 {route.name === "inbox" && (
@@ -512,7 +682,15 @@ export function AppLayout() {
                     onToggleTask={handleToggleTask}
                   />
                 )}
-                {route.name === "project" && currentProject && (
+                {route.name === "project" && currentProject && route.layout === "calendar" && (
+                  <Calendar
+                    projectId={currentProject.id}
+                    project={currentProject}
+                    onSelectTask={handleSelectTask}
+                    onToggleTask={handleToggleTask}
+                  />
+                )}
+                {route.name === "project" && currentProject && route.layout !== "calendar" && (
                   <Project
                     project={currentProject}
                     onSelectTask={handleSelectTask}
@@ -530,6 +708,29 @@ export function AppLayout() {
                 )}
                 {route.name === "project" && catalogLoading && <ViewSkeleton />}
                 {route.name === "task" && <TaskPage />}
+                {route.name === "calendar" && (
+                  <Calendar onSelectTask={handleSelectTask} onToggleTask={handleToggleTask} />
+                )}
+                {route.name === "matrix" && (
+                  <Matrix
+                    onSelectTask={handleSelectTask}
+                    onToggleTask={handleToggleTask}
+                    selectedTaskId={selectedTaskId}
+                  />
+                )}
+                {route.name === "stats" && <Stats />}
+                {route.name === "dopamine-menu" && (
+                  <DopamineMenu
+                    onSelectTask={handleSelectTask}
+                    onToggleTask={handleToggleTask}
+                    selectedTaskId={selectedTaskId}
+                    selectedTaskIds={multiSelect.selectedIds}
+                    onMultiSelect={multiSelect.handleSelect}
+                  />
+                )}
+                {route.name === "timeblocking" && (
+                  <Timeblocking onSelectTask={handleSelectTask} onToggleTask={handleToggleTask} />
+                )}
               </div>
             </ErrorBoundary>
           </div>
@@ -564,6 +765,8 @@ export function AppLayout() {
                 setDrawerOpen(false);
                 setProjectModalOpen(true);
               }}
+              phase2VisualFixture={phase2VisualFixture}
+              phase3VisualFixture={phase3VisualFixture}
             />
           </MobileDrawer>
         </div>
@@ -585,14 +788,24 @@ export function AppLayout() {
 
       {/* Task detail panel — stays mounted across background refreshes so drafts survive. */}
       <div className="contents" data-app-overlay>
-        {selectedTaskId && detailTask && detailTask.id === selectedTaskId && (
-          <TaskDetailPanel
-            task={detailTask}
-            onClose={() => setSelectedTaskId(null)}
-            onOpenFullPage={handleOpenFullPage}
-            returnFocusTo={taskDetailOpenerRef.current}
-          />
-        )}
+        {selectedTaskId &&
+          detailTask &&
+          detailTask.id === selectedTaskId &&
+          (phase2TaskDetailVisualFixture ? (
+            <Phase2TaskDetailVisualFixture
+              task={detailTask}
+              onClose={() => setSelectedTaskId(null)}
+            />
+          ) : (
+            <TaskDetailPanel
+              task={detailTask}
+              onClose={() => setSelectedTaskId(null)}
+              onOpenFullPage={handleOpenFullPage}
+              returnFocusTo={taskDetailOpenerRef.current}
+              onEnterFocusMode={(taskId) => handleEnterFocusMode(taskId)}
+              phase3VisualFixture={phase3VisualFixture}
+            />
+          ))}
         {selectedTaskId && detailLoading && (!detailTask || detailTask.id !== selectedTaskId) && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -624,6 +837,18 @@ export function AppLayout() {
           onClose={() => setPaletteOpen(false)}
         />
         <AddProjectModal open={projectModalOpen} onClose={() => setProjectModalOpen(false)} />
+        <DailyPlanningModal open={planMyDayOpen} onClose={() => setPlanMyDayOpen(false)} />
+        <DailyReviewModal open={endOfDayOpen} onClose={() => setEndOfDayOpen(false)} />
+        <WeeklyReviewModal open={weeklyReviewOpen} onClose={() => setWeeklyReviewOpen(false)} />
+        <FocusMode
+          open={focusModeOpen}
+          startTaskId={focusStartTaskId}
+          onClose={handleCloseFocusMode}
+          onPendingChange={(pending) => {
+            focusMutationPendingRef.current = pending;
+            setFocusMutationPending(pending);
+          }}
+        />
       </div>
 
       {/* Toasts stay outside shell isolation so Undo remains usable over detail/modals. */}

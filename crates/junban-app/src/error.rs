@@ -31,6 +31,8 @@ pub enum AppError {
     IdempotencyMismatch,
     #[error("operation exceeds size or row limits")]
     OperationTooLarge,
+    #[error("query result exceeds the allowed limit")]
+    ResultLimitExceeded,
     #[error("storage failed")]
     Storage,
 }

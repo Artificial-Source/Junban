@@ -125,6 +125,11 @@ fn phase_one_task_json_deserializes_with_phase_two_defaults() {
     assert!(task.tag_ids.is_empty());
     assert!(!task.someday);
     assert_eq!(task.sort_order, SortOrder::default());
+    // Phase 3 fields remain compatible defaults for Phase 1/2 payloads.
+    assert_eq!(task.remind_at, None);
+    assert_eq!(task.recurrence_anchor_day, None);
+    assert_eq!(task.recurrence_source_id, None);
+    assert_eq!(task.completion_operation_id, None);
 }
 
 #[test]

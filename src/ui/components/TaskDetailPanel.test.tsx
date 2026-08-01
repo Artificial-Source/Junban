@@ -8,17 +8,18 @@ import { buildTaskPatch } from "./taskDraft";
 // React 19 act() requires this flag outside @testing-library.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const testEnvironment = (
+  globalThis as unknown as {
+    process: { env: Record<string, string | undefined> };
+  }
+).process.env;
+
 function setInputValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   const proto =
     el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
   descriptor?.set?.call(el, value);
   el.dispatchEvent(new Event("input", { bubbles: true }));
-  el.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
-function setSelectValue(el: HTMLSelectElement, value: string) {
-  el.value = value;
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
@@ -40,6 +41,9 @@ const reloadActivity = vi.fn();
 const createComment = vi.fn();
 const patchComment = vi.fn();
 const deleteComment = vi.fn();
+const rescheduleReminder = vi.fn();
+const dismissReminder = vi.fn();
+const listTaskReminders = vi.fn();
 
 vi.mock("../hooks/useTaskMutations", () => ({
   useTaskMutations: () => ({
@@ -53,6 +57,8 @@ vi.mock("../hooks/useTaskMutations", () => ({
     moveTask: (...args: unknown[]) => moveTask(...args),
     addRelation: (...args: unknown[]) => addRelation(...args),
     removeRelation: (...args: unknown[]) => removeRelation(...args),
+    rescheduleReminder: (...args: unknown[]) => rescheduleReminder(...args),
+    dismissReminder: (...args: unknown[]) => dismissReminder(...args),
   }),
 }));
 
@@ -106,6 +112,7 @@ vi.mock("../api/client", async () => {
     createComment: (...args: unknown[]) => createComment(...args),
     patchComment: (...args: unknown[]) => patchComment(...args),
     deleteComment: (...args: unknown[]) => deleteComment(...args),
+    listTaskReminders: (...args: unknown[]) => listTaskReminders(...args),
     generateOperationId: () => "op-test",
   };
 });
@@ -197,6 +204,9 @@ beforeEach(() => {
     as_of_date: "2026-07-23",
     next_cursor: null,
   });
+  listTaskReminders.mockReset().mockResolvedValue({ reminders: [] });
+  rescheduleReminder.mockReset().mockResolvedValue(mutationOk());
+  dismissReminder.mockReset().mockResolvedValue(mutationOk());
 });
 
 afterEach(() => {
@@ -223,6 +233,7 @@ describe("buildTaskPatch", () => {
       section_id: "",
       parent_id: "",
       tag_ids: [] as string[],
+      recurrence_rule: "",
     };
     expect(buildTaskPatch(task, draft)).toEqual({
       description: "new body",
@@ -246,6 +257,7 @@ describe("buildTaskPatch", () => {
       section_id: "",
       parent_id: "",
       tag_ids: [] as string[],
+      recurrence_rule: "",
     };
     expect(buildTaskPatch(task, draft)).toBeNull();
   });
@@ -367,15 +379,17 @@ describe("TaskDetailPanel", () => {
 
     const title = container.querySelector('input[aria-label="Task title"]') as HTMLInputElement;
     const due = container.querySelector("#task-due-date") as HTMLInputElement;
-    const priority = container.querySelector('select[aria-label="Priority"]') as HTMLSelectElement;
+    const priorityP1 = container.querySelector(
+      'button[aria-label="Priority P1"]',
+    ) as HTMLButtonElement;
     const save = Array.from(container.querySelectorAll("button")).find(
-      (btn) => btn.textContent?.trim() === "Save",
+      (btn) => btn.textContent?.trim() === "Save changes",
     ) as HTMLButtonElement;
 
     await act(async () => {
       setInputValue(title, "Renamed task");
       setInputValue(due, "2026-08-01");
-      setSelectValue(priority, "1");
+      priorityP1.click();
     });
 
     expect(patchTask).not.toHaveBeenCalled();
@@ -399,7 +413,7 @@ describe("TaskDetailPanel", () => {
       'button[aria-label="Clear due date"]',
     ) as HTMLButtonElement;
     const save = Array.from(container.querySelectorAll("button")).find(
-      (btn) => btn.textContent?.trim() === "Save",
+      (btn) => btn.textContent?.trim() === "Save changes",
     ) as HTMLButtonElement;
 
     await act(async () => {
@@ -438,11 +452,133 @@ describe("TaskDetailPanel", () => {
     opener.remove();
   });
 
-  it("does not expose recurrence_rule controls", () => {
-    render(createElement(Host, { task: makeTask({ recurrence_rule: "FREQ=DAILY" }) }));
-    const text = container.textContent ?? "";
-    expect(text.toLowerCase()).not.toContain("recurrence");
-    expect(container.querySelector('input[placeholder*="FREQ"]')).toBeNull();
+  it("exposes recurrence controls with canonical labels", async () => {
+    await act(async () => {
+      root.render(createElement(Host, { task: makeTask({ recurrence_rule: "weekly" }) }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.textContent).toMatch(/Recurrence/i);
+    expect(container.textContent).toMatch(/Weekly/);
+    expect(container.textContent).toMatch(/Reminder/i);
+  });
+
+  it("displays and round-trips a UTC reminder in browser-local time", async () => {
+    const originalTimeZone = testEnvironment.TZ;
+    try {
+      testEnvironment.TZ = "America/Los_Angeles";
+      const task = makeTask({ remind_at: "2026-07-15T18:45:00.000Z" });
+      getTask.mockResolvedValue(task);
+      render(createElement(Host, { task }));
+
+      await act(async () => {
+        (
+          container.querySelector('button[aria-label="Edit reminder"]') as HTMLButtonElement
+        ).click();
+      });
+      const input = container.querySelector(
+        'input[aria-label="Edit reminder time"]',
+      ) as HTMLInputElement;
+      expect(input.value).toBe("2026-07-15T11:45");
+
+      await act(async () => {
+        const schedule = Array.from(container.querySelectorAll("button")).find(
+          (button) => button.textContent?.trim() === "Schedule",
+        ) as HTMLButtonElement;
+        schedule.click();
+        await Promise.resolve();
+      });
+
+      expect(rescheduleReminder).toHaveBeenCalledWith(
+        "11111111-1111-4111-8111-111111111111",
+        "2026-07-15T18:45:00.000Z",
+      );
+    } finally {
+      if (originalTimeZone === undefined) delete testEnvironment.TZ;
+      else testEnvironment.TZ = originalTimeZone;
+    }
+  });
+
+  it("round-trips an offset reminder during the repeated DST hour", async () => {
+    const originalTimeZone = testEnvironment.TZ;
+    try {
+      testEnvironment.TZ = "America/Los_Angeles";
+      const task = makeTask({ remind_at: "2026-11-01T01:30:00-08:00" });
+      getTask.mockResolvedValue(task);
+      render(createElement(Host, { task }));
+
+      await act(async () => {
+        (
+          container.querySelector('button[aria-label="Edit reminder"]') as HTMLButtonElement
+        ).click();
+      });
+      const input = container.querySelector(
+        'input[aria-label="Edit reminder time"]',
+      ) as HTMLInputElement;
+      expect(input.value).toBe("2026-11-01T01:30");
+
+      await act(async () => {
+        const schedule = Array.from(container.querySelectorAll("button")).find(
+          (button) => button.textContent?.trim() === "Schedule",
+        ) as HTMLButtonElement;
+        schedule.click();
+        await Promise.resolve();
+      });
+
+      expect(rescheduleReminder).toHaveBeenCalledWith(
+        "11111111-1111-4111-8111-111111111111",
+        "2026-11-01T09:30:00.000Z",
+      );
+    } finally {
+      if (originalTimeZone === undefined) delete testEnvironment.TZ;
+      else testEnvironment.TZ = originalTimeZone;
+    }
+  });
+
+  it("uses the wide two-column desktop detail structure with accessible naming", async () => {
+    render(
+      createElement(Host, {
+        task: makeTask({
+          title: "Ship docs",
+          recurrence_rule: "weekly",
+          remind_at: "2026-12-15T15:00:00.000Z",
+          estimated_minutes: 120,
+        }),
+      }),
+    );
+
+    const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.getAttribute("aria-label")).toBe("Task: Ship docs");
+    expect(container.querySelector('[data-testid="task-detail-surface"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="task-detail-scroll-region"]')).toBeTruthy();
+    expect(container.querySelector("aside.scrollbar-panel")).toBeTruthy();
+
+    // Right-rail cards present
+    expect(container.textContent).toMatch(/Deadline/i);
+    expect(container.textContent).toMatch(/Priority/i);
+    expect(container.textContent).toMatch(/Labels/i);
+    expect(container.textContent).toMatch(/Estimated time/i);
+    expect(container.textContent).toMatch(/Delete task/);
+    expect(container.textContent).toMatch(/Sub-tasks/i);
+    expect(container.textContent).toMatch(/Relations/i);
+    expect(container.textContent).toMatch(/Comments/);
+
+    // Reminder display value (legacy card presentation)
+    expect(container.querySelector('button[aria-label="Edit reminder"]')).toBeTruthy();
+    expect(container.textContent).toMatch(/Weekly/);
+    expect(container.textContent).toMatch(/2h/);
+
+    // The retained legacy chevrons are visibly present but truthfully unavailable.
+    expect(
+      (container.querySelector('button[aria-label="Previous task"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (container.querySelector('button[aria-label="Next task"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    // Close control retained
+    expect(container.querySelector('button[aria-label="Close task details"]')).toBeTruthy();
   });
 
   it("asks for in-product confirmation before deleting", async () => {

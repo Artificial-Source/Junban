@@ -3,20 +3,37 @@ import {
   ApiError,
   DEFAULT_REQUEST_TIMEOUT_MS,
   NetworkError,
+  acquireReminderLease,
   addRelation,
+  appendTimeSlotTask,
   bootstrapFragmentToken,
   bulkTasks,
+  claimDueReminders,
   clearStoredToken,
   createComment,
   createProject,
   createTask,
+  createTimeBlock,
+  dismissReminder,
   generateOperationId,
+  getDopamineMenu,
+  getDailyPlan,
+  getStats,
+  getWeeklyReview,
   getStoredToken,
+  getTemporalSettings,
   hasStoredToken,
+  listCalendarTasks,
+  listTaskReminders,
   listTasks,
+  listTimeBlocks,
   moveTask,
   parseQuickEntry,
   patchTask,
+  previewReplanTimeBlocks,
+  replanTimeBlocks,
+  rescheduleReminder,
+  settleReminderDelivered,
   storeToken,
   subscribeToEvents,
   undoOperation,
@@ -705,5 +722,301 @@ describe("event stream lifecycle", () => {
     expect(onEvent).not.toHaveBeenCalled();
     expect(onTerminal).not.toHaveBeenCalled();
     cleanup();
+  });
+});
+
+describe("Phase 3 endpoint request shapes", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    storeToken("test-token");
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("lists calendar tasks with civil range and optional project filter", async () => {
+    const body = { revision: 3, tasks: [] };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, body));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await listCalendarTasks({
+      from: "2026-07-01",
+      to: "2026-07-31",
+      project_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    });
+
+    expect(result).toEqual(body);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "/api/v1/calendar/tasks?from=2026-07-01&to=2026-07-31&project_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
+    expect(init.method).toBe("GET");
+    expect(init.headers).toMatchObject({ Authorization: "Bearer test-token" });
+  });
+
+  it("surfaces calendar range errors through ApiError without retrying", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(422, {
+        request_id: "req-cal",
+        error: {
+          code: "RESULT_LIMIT_EXCEEDED",
+          message: "Calendar range exceeds 42 days.",
+          retryable: false,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listCalendarTasks({ from: "2026-07-01", to: "2026-09-01" })).rejects.toMatchObject(
+      {
+        name: "ApiError",
+        code: "RESULT_LIMIT_EXCEEDED",
+        status: 422,
+        retryable: false,
+        requestId: "req-cal",
+      } satisfies Partial<ApiError>,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires a full stats payload shape from the server", async () => {
+    const body = {
+      revision: 2,
+      from: "2026-07-17",
+      to: "2026-07-23",
+      days: [{ date: "2026-07-23", completions: 3, creations: 1, completion_minutes: 90 }],
+      current_streak_days: 7,
+      estimate_accuracy_percent: 88,
+      estimate_accuracy_samples: 14,
+      total_completion_minutes: 1500,
+      total_completions: 15,
+      total_creations: 4,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, body));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getStats({ from: "2026-07-17", to: "2026-07-23" });
+    expect(result).toEqual(body);
+    expect(Array.isArray(result.days)).toBe(true);
+    expect(result.days[0]).toMatchObject({
+      date: "2026-07-23",
+      completions: 3,
+      creations: 1,
+      completion_minutes: 90,
+    });
+    expect(result).toHaveProperty("current_streak_days", 7);
+    expect(result).toHaveProperty("total_completions", 15);
+  });
+
+  it("uses Rust's default Sunday week start for weekly review", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { revision: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getWeeklyReview();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/v1/planning/weekly");
+  });
+
+  it("reads planning, temporal settings, stats, and dopamine menu", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          revision: 1,
+          capacity_minutes: 480,
+          estimated_total_minutes: 0,
+          focus_task_ids: [],
+          focus_tasks: [],
+          overdue_task_ids: [],
+          overdue_tasks: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          capacity_minutes: 480,
+          eat_the_frog_enabled: false,
+          nudges_enabled: true,
+          task_jar_enabled: false,
+          time_zone: "UTC",
+          week_start: "sunday",
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          revision: 2,
+          from: "2026-07-17",
+          to: "2026-07-23",
+          days: [],
+          current_streak_days: 0,
+          estimate_accuracy_samples: 0,
+          total_completion_minutes: 0,
+          total_completions: 0,
+          total_creations: 0,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { revision: 1, task_ids: [], tasks: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getDailyPlan();
+    await getTemporalSettings();
+    await getStats({ from: "2026-07-17", to: "2026-07-23" });
+    await getDopamineMenu();
+
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/v1/planning/daily");
+    expect(fetchMock.mock.calls[1]![0]).toBe("/api/v1/settings/temporal");
+    expect(fetchMock.mock.calls[2]![0]).toBe("/api/v1/stats?from=2026-07-17&to=2026-07-23");
+    expect(fetchMock.mock.calls[3]![0]).toBe("/api/v1/motivation/dopamine-menu");
+  });
+
+  it("creates time blocks and replans with idempotency keys", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(jsonResponse(201, mutationEvent())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createTimeBlock(
+      {
+        title: "Deep work",
+        date: "2026-07-23",
+        start: "09:00",
+        end: "10:00",
+      },
+      "11111111-1111-4111-8111-111111111111",
+    );
+    await replanTimeBlocks(
+      {
+        action: "move_to_today",
+        expected_as_of_date: "2026-07-24",
+        expected_candidate_ids: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+      },
+      "22222222-2222-4222-8222-222222222222",
+    );
+    await appendTimeSlotTask(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      { task_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+      "33333333-3333-4333-8333-333333333333",
+    );
+
+    const createCall = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(createCall[0]).toBe("/api/v1/time-blocks");
+    expect(createCall[1].method).toBe("POST");
+    expect(createCall[1].headers).toMatchObject({
+      Authorization: "Bearer test-token",
+      "Idempotency-Key": "11111111-1111-4111-8111-111111111111",
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(String(createCall[1].body))).toEqual({
+      title: "Deep work",
+      date: "2026-07-23",
+      start: "09:00",
+      end: "10:00",
+    });
+
+    expect((fetchMock.mock.calls[1] as [string, RequestInit])[0]).toBe(
+      "/api/v1/time-blocks/replan",
+    );
+    expect((fetchMock.mock.calls[2] as [string, RequestInit])[0]).toBe(
+      "/api/v1/time-slots/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/tasks",
+    );
+  });
+
+  it("loads the server-derived replan preview", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        as_of_date: "2026-07-24",
+        candidate_ids: [],
+        time_blocks: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await previewReplanTimeBlocks();
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/v1/time-blocks/replan/preview");
+  });
+
+  it("lists time blocks by civil range", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { revision: 1, time_blocks: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listTimeBlocks({ from: "2026-07-20", to: "2026-07-26" });
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/v1/time-blocks?from=2026-07-20&to=2026-07-26");
+  });
+
+  it("reschedules and dismisses task reminders with idempotency keys", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(jsonResponse(200, mutationEvent())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await rescheduleReminder(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      { remind_at: "2026-12-15T15:00:00.000Z" },
+      "11111111-1111-4111-8111-111111111111",
+    );
+    await dismissReminder(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "22222222-2222-4222-8222-222222222222",
+    );
+
+    const [rescheduleUrl, rescheduleInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(rescheduleUrl).toBe(
+      "/api/v1/tasks/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/reminders/reschedule",
+    );
+    expect(rescheduleInit.headers).toMatchObject({
+      "Idempotency-Key": "11111111-1111-4111-8111-111111111111",
+    });
+    expect(JSON.parse(String(rescheduleInit.body))).toEqual({
+      remind_at: "2026-12-15T15:00:00.000Z",
+    });
+
+    const [dismissUrl, dismissInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(dismissUrl).toBe("/api/v1/tasks/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/reminders/dismiss");
+    expect(dismissInit.headers).toMatchObject({
+      "Idempotency-Key": "22222222-2222-4222-8222-222222222222",
+    });
+  });
+
+  it("lists reminders and runs control-plane lease/claim/settle without idempotency keys", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { reminders: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          fence_term: "fence-1",
+          expires_at: "2026-07-23T10:31:30Z",
+          updated_at: "2026-07-23T10:30:00Z",
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { reminders: [] }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listTaskReminders("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    await acquireReminderLease({ lease_secs: 90 });
+    await claimDueReminders({ fence_term: "fence-1", limit: 20 });
+    await settleReminderDelivered({
+      fence_term: "fence-1",
+      claim_attempt: 1,
+      channel: "in_app",
+      remind_at: "2026-07-23T10:30:00Z",
+      task_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    });
+
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      "/api/v1/tasks/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/reminders",
+    );
+
+    const [, leaseInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(leaseInit.headers).not.toHaveProperty("Idempotency-Key");
+    expect(JSON.parse(String(leaseInit.body))).toEqual({ lease_secs: 90 });
+
+    const [, claimInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(claimInit.headers).not.toHaveProperty("Idempotency-Key");
+
+    const [settleUrl, settleInit] = fetchMock.mock.calls[3] as [string, RequestInit];
+    expect(settleUrl).toBe("/api/v1/reminders/settle/delivered");
+    expect(settleInit.headers).not.toHaveProperty("Idempotency-Key");
   });
 });

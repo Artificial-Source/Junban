@@ -84,3 +84,72 @@ export type TaskListParams = NonNullable<operations["list_tasks"]["parameters"][
 
 /** Opaque scope token: omitted = any, "-" = null, UUID = exact match. */
 export type ScopeFilter = string;
+
+// ---------------------------------------------------------------------------
+// Phase 3 planning / time DTOs
+// ---------------------------------------------------------------------------
+
+export type CalendarTasksResponse = Schemas["CalendarTasksResponse"];
+export type CalendarTasksParams = NonNullable<operations["calendar_tasks"]["parameters"]["query"]>;
+
+export type DailyPlanResponse = Schemas["DailyPlanResponse"];
+export type EndOfDayResponse = Schemas["EndOfDayResponse"];
+export type WeeklyReviewResponse = Schemas["WeeklyReviewResponse"];
+export type WeeklySuggestionDto = Schemas["WeeklySuggestionDto"];
+export type NeglectedProjectFactDto = Schemas["NeglectedProjectFactDto"];
+export type NeglectedProjectReasonDto = Schemas["NeglectedProjectReasonDto"];
+export type CompletionTimeBucketDto = Schemas["CompletionTimeBucketDto"];
+export type CompletionTimeBucketsDto = Schemas["CompletionTimeBucketsDto"];
+export type TemporalSettingsResponse = Schemas["TemporalSettingsResponse"];
+export type WeekStartDto = Schemas["WeekStartDto"];
+
+export type StatsResponse = Schemas["StatsResponse"];
+export type DailyStatBucketDto = Schemas["DailyStatBucketDto"];
+export type StatsParams = NonNullable<operations["stats"]["parameters"]["query"]>;
+
+export type NudgesResponse = Schemas["NudgesResponse"];
+export type NudgeRuleFactsDto = Schemas["NudgeRuleFactsDto"];
+export type NudgeRuleKindDto = Schemas["NudgeRuleKindDto"];
+
+export type DopamineMenuResponse = Schemas["DopamineMenuResponse"];
+export type EatTheFrogResponse = Schemas["EatTheFrogResponse"];
+export type TaskJarResponse = Schemas["TaskJarResponse"];
+
+export type TimeBlockDto = Schemas["TimeBlockDto"];
+export type TimeBlockListResponse = Schemas["TimeBlockListResponse"];
+export type TimeSlotDto = Schemas["TimeSlotDto"];
+export type TimeSlotListResponse = Schemas["TimeSlotListResponse"];
+export type CreateTimeBlockRequest = Schemas["CreateTimeBlockRequest"];
+export type PatchTimeBlockRequest = Schemas["PatchTimeBlockRequest"];
+export type MoveTimeBlockRequest = Schemas["MoveTimeBlockRequest"];
+export type ResizeTimeBlockRequest = Schemas["ResizeTimeBlockRequest"];
+export type ReplanTimeBlocksPreviewResponse = Schemas["ReplanTimeBlocksPreviewResponse"];
+export type ReplanTimeBlocksRequest = Schemas["ReplanTimeBlocksRequest"];
+export type ReplanTimeBlocksActionDto = Schemas["ReplanTimeBlocksActionDto"];
+export type CreateTimeSlotRequest = Schemas["CreateTimeSlotRequest"];
+export type PatchTimeSlotRequest = Schemas["PatchTimeSlotRequest"];
+export type AppendTimeSlotTaskRequest = Schemas["AppendTimeSlotTaskRequest"];
+export type ReplaceTimeSlotTasksRequest = Schemas["ReplaceTimeSlotTasksRequest"];
+export type TimeBlockRangeParams = NonNullable<
+  operations["list_time_blocks"]["parameters"]["query"]
+>;
+export type TimeSlotRangeParams = NonNullable<operations["list_time_slots"]["parameters"]["query"]>;
+
+export type ReminderListResponse = Schemas["ReminderListResponse"];
+export type ReminderOccurrenceDto = Schemas["ReminderOccurrenceDto"];
+export type ReminderOccurrenceStateDto = Schemas["ReminderOccurrenceStateDto"];
+export type ReminderChannelDto = Schemas["ReminderChannelDto"];
+export type ReminderFailureCodeDto = Schemas["ReminderFailureCodeDto"];
+export type ReminderDeliveryLeaseDto = Schemas["ReminderDeliveryLeaseDto"];
+export type ReminderWakeEventDto = Schemas["ReminderWakeEventDto"];
+export type ClaimedReminderDto = Schemas["ClaimedReminderDto"];
+export type ClaimRemindersRequest = Schemas["ClaimRemindersRequest"];
+export type ClaimRemindersResponse = Schemas["ClaimRemindersResponse"];
+export type AcquireReminderLeaseRequest = Schemas["AcquireReminderLeaseRequest"];
+export type RenewReminderLeaseRequest = Schemas["RenewReminderLeaseRequest"];
+export type ReleaseReminderLeaseRequest = Schemas["ReleaseReminderLeaseRequest"];
+export type MarkOwnerLostRemindersRequest = Schemas["MarkOwnerLostRemindersRequest"];
+export type MarkOwnerLostRemindersResponse = Schemas["MarkOwnerLostRemindersResponse"];
+export type SettleReminderDeliveredRequest = Schemas["SettleReminderDeliveredRequest"];
+export type SettleReminderFailedRequest = Schemas["SettleReminderFailedRequest"];
+export type RescheduleReminderRequest = Schemas["RescheduleReminderRequest"];

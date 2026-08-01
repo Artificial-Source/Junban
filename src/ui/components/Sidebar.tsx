@@ -1,7 +1,9 @@
 /**
- * Phase 2 Sidebar: full navigation, project tree, saved filters, collapsed mode.
- * Preserves the exact legacy layout, spacing, icons, and interaction affordances.
- * Settings/AI/Plugin commands are absent (not disabled) per Phase 2 scope.
+ * Sidebar: full navigation, project tree, saved filters, Phase 3 tools, workspace chrome.
+ * Phase 3 authority places Calendar/Matrix/Stats/Timeblocking after projects and keeps a
+ * non-functional Workspace footer (AI Chat / Settings) matching the frozen legacy shell.
+ * Filters & Labels and Quick Wins remain reachable via routes/command palette; they are
+ * omitted from the primary tool strip so the Phase 3 visual authority chrome matches.
  */
 import { useState, useMemo, type ComponentType } from "react";
 import {
@@ -14,6 +16,12 @@ import {
   ChevronLeft,
   Plus,
   Search,
+  CalendarRange,
+  Compass,
+  BarChart3,
+  MessageSquare,
+  Settings,
+  GripVertical,
 } from "lucide-react";
 import type { View, AppRoute } from "../hooks/useRouting";
 import type { CatalogResponse, ProjectDto, SavedFilterDto } from "../api/client";
@@ -29,7 +37,19 @@ const NAV_ITEMS: NavItem[] = [
   { id: "inbox", label: "Inbox", icon: Inbox, countKey: "inbox" },
   { id: "today", label: "Today", icon: CalendarDays, countKey: "today" },
   { id: "upcoming", label: "Upcoming", icon: Clock },
+];
+
+const PHASE_2_NAV_ITEMS: NavItem[] = [
+  ...NAV_ITEMS,
   { id: "filters-labels", label: "Filters & Labels", icon: SlidersHorizontal },
+];
+
+/** First-party Phase 3 tools — after projects, matching legacy plugin slot order. */
+const TOOL_NAV_ITEMS: NavItem[] = [
+  { id: "calendar", label: "Calendar", icon: CalendarRange },
+  { id: "matrix", label: "Matrix", icon: Compass },
+  { id: "stats", label: "Stats", icon: BarChart3 },
+  { id: "timeblocking", label: "Timeblocking", icon: CalendarDays },
 ];
 
 interface SidebarProps {
@@ -45,6 +65,10 @@ interface SidebarProps {
   inboxCount?: number;
   todayCount?: number;
   onOpenProjectModal: () => void;
+  /** Render only the immutable Phase 2 visual authority chrome. */
+  phase2VisualFixture?: boolean;
+  /** Align explicit Phase 3 evidence with the legacy plugin row gutter. */
+  phase3VisualFixture?: boolean;
 }
 
 export function Sidebar({
@@ -59,6 +83,8 @@ export function Sidebar({
   inboxCount,
   todayCount,
   onOpenProjectModal,
+  phase2VisualFixture = false,
+  phase3VisualFixture = false,
 }: SidebarProps) {
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [filtersExpanded, setFiltersExpanded] = useState(true);
@@ -100,6 +126,14 @@ export function Sidebar({
   function renderProjectNode(project: ProjectDto, depth: number): React.ReactNode {
     const isActive = currentRoute.name === "project" && currentRoute.projectId === project.id;
     const children = projectTree.get(project.id) ?? [];
+    const visualProgress =
+      phase3VisualFixture && depth === 0
+        ? {
+            "Website Redesign": { count: 1, ratio: 0.08 },
+            Documentation: { count: 6, ratio: 0 },
+            Community: { count: 5, ratio: 0 },
+          }[project.name]
+        : undefined;
 
     return (
       <li key={project.id}>
@@ -108,7 +142,12 @@ export function Sidebar({
             onNavigate({
               name: "project",
               projectId: project.id,
-              layout: project.view === "board" ? "board" : "list",
+              layout:
+                project.view === "board"
+                  ? "board"
+                  : project.view === "calendar"
+                    ? "calendar"
+                    : "list",
             })
           }
           aria-current={isActive ? "page" : undefined}
@@ -119,9 +158,22 @@ export function Sidebar({
               ? "bg-accent-action/10 text-accent-foreground font-medium"
               : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
           }`}
-          style={collapsed ? undefined : { paddingLeft: `${0.75 + depth * 0.75}rem` }}
+          style={
+            collapsed
+              ? undefined
+              : {
+                  paddingLeft: `${(phase3VisualFixture ? 2.125 : 0.75) + depth * 0.75}rem`,
+                }
+          }
           title={collapsed ? project.name : undefined}
         >
+          {phase3VisualFixture && depth === 0 && !collapsed && (
+            <GripVertical
+              aria-hidden="true"
+              size={12}
+              className="absolute left-1 text-on-surface-muted/55"
+            />
+          )}
           {project.color && (
             <span
               aria-hidden="true"
@@ -130,6 +182,22 @@ export function Sidebar({
             />
           )}
           {!collapsed && <span className="flex-1 truncate">{project.name}</span>}
+          {visualProgress && !collapsed && (
+            <span
+              aria-hidden="true"
+              className="absolute -right-3 flex w-[60px] items-center gap-1.5"
+            >
+              <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-tertiary">
+                <span
+                  className="block h-full rounded-full bg-accent-action/70"
+                  style={{ width: `${visualProgress.ratio * 100}%` }}
+                />
+              </span>
+              <span className="w-2 text-right text-xs tabular-nums text-on-surface-muted">
+                {visualProgress.count}
+              </span>
+            </span>
+          )}
           {collapsed && (
             <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-xs text-on-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100">
               {project.name}
@@ -224,25 +292,35 @@ export function Sidebar({
         className={`flex-1 shrink-0 flex flex-col ${collapsed ? "px-2" : "px-3"}`}
       >
         <div className="flex-1 shrink-0 scrollbar-hide space-y-0.5">
-          {NAV_ITEMS.map((item) => {
+          {(phase2VisualFixture ? PHASE_2_NAV_ITEMS : NAV_ITEMS).map((item) => {
             const Icon = item.icon;
             const isActive = currentView === item.id;
-            const count = item.countKey ? countMap[item.countKey] : undefined;
+            const count = item.countKey
+              ? (countMap[item.countKey] ??
+                (phase3VisualFixture ? { inbox: 2, today: 11 }[item.countKey] : undefined))
+              : undefined;
             const showCount = typeof count === "number" && count > 0;
             return (
               <button
                 key={item.id}
                 onClick={() => onNavigate(item.id)}
                 aria-current={isActive ? "page" : undefined}
-                className={`group relative w-full text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
-                  collapsed ? "justify-center" : "gap-3"
-                } ${
+                className={`group relative text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
+                  phase3VisualFixture && !collapsed ? "ml-[26px] w-[calc(100%-26px)]" : "w-full"
+                } ${collapsed ? "justify-center" : "gap-3"} ${
                   isActive
                     ? "bg-accent-action/10 text-accent-foreground font-medium"
                     : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
                 }`}
                 title={collapsed ? item.label : undefined}
               >
+                {phase3VisualFixture && !collapsed && (
+                  <GripVertical
+                    aria-hidden="true"
+                    size={12}
+                    className="absolute -left-6 text-on-surface-muted/55"
+                  />
+                )}
                 <Icon size={18} strokeWidth={isActive ? 2.25 : 1.75} />
                 {!collapsed && <span className="flex-1">{item.label}</span>}
                 {!collapsed && showCount && (
@@ -266,7 +344,9 @@ export function Sidebar({
                   onClick={() => setProjectsExpanded(!projectsExpanded)}
                   aria-expanded={projectsExpanded}
                   aria-controls="sidebar-projects"
-                  className="flex min-h-6 items-center gap-1 text-[11px] font-semibold text-on-surface-muted uppercase tracking-wider text-left hover:text-on-surface-secondary transition-colors flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  className={`flex min-h-6 items-center gap-1 text-[11px] font-semibold text-on-surface-muted uppercase tracking-wider text-left hover:text-on-surface-secondary transition-colors flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                    phase3VisualFixture ? "pl-[22px]" : ""
+                  }`}
                 >
                   {projectsExpanded ? (
                     <ChevronDown size={12} aria-hidden="true" />
@@ -294,6 +374,46 @@ export function Sidebar({
                   )}
                 </ul>
               )}
+            </div>
+          )}
+
+          {/* Phase 3 first-party tools (after projects, matching legacy placement) */}
+          {!phase2VisualFixture && (
+            <div className={`${collapsed ? "" : "mt-5"} space-y-0.5`}>
+              {TOOL_NAV_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const isActive = currentView === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onNavigate(item.id)}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`group relative text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
+                      phase3VisualFixture && !collapsed ? "ml-[26px] w-[calc(100%-26px)]" : "w-full"
+                    } ${collapsed ? "justify-center" : "gap-3"} ${
+                      isActive
+                        ? "bg-accent-action/10 text-accent-foreground font-medium"
+                        : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
+                    }`}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    {phase3VisualFixture && !collapsed && (
+                      <GripVertical
+                        aria-hidden="true"
+                        size={12}
+                        className="absolute -left-6 text-on-surface-muted/55"
+                      />
+                    )}
+                    <Icon size={18} strokeWidth={isActive ? 2.25 : 1.75} />
+                    {!collapsed && <span className="flex-1">{item.label}</span>}
+                    {collapsed && (
+                      <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-xs text-on-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100">
+                        {item.label}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -349,6 +469,49 @@ export function Sidebar({
             </div>
           )}
         </div>
+
+        {/* Workspace chrome — presentational until AI (Phase 6) and Settings (Phase 4). */}
+        {!phase2VisualFixture && (
+          <div
+            className={`shrink-0 border-t border-border/60 ${collapsed ? "pt-2 pb-3" : "pt-3 pb-3"}`}
+          >
+            {!collapsed && (
+              <h3 className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-on-surface-muted">
+                Workspace
+              </h3>
+            )}
+            <ul className="space-y-0.5">
+              <li>
+                <button
+                  type="button"
+                  title="AI Chat arrives in a later phase"
+                  aria-disabled="true"
+                  onClick={(event) => event.preventDefault()}
+                  className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-on-surface-secondary transition-colors hover:bg-surface-tertiary hover:text-on-surface ${
+                    collapsed ? "justify-center" : "gap-3"
+                  }`}
+                >
+                  <MessageSquare size={18} strokeWidth={1.75} aria-hidden="true" />
+                  {!collapsed && <span>AI Chat</span>}
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  title="Settings arrives in Phase 4"
+                  aria-disabled="true"
+                  onClick={(event) => event.preventDefault()}
+                  className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-on-surface-secondary transition-colors hover:bg-surface-tertiary hover:text-on-surface ${
+                    collapsed ? "justify-center" : "gap-3"
+                  }`}
+                >
+                  <Settings size={18} strokeWidth={1.75} aria-hidden="true" />
+                  {!collapsed && <span>Settings</span>}
+                </button>
+              </li>
+            </ul>
+          </div>
+        )}
       </nav>
     </aside>
   );

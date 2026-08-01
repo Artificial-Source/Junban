@@ -60,6 +60,8 @@ entity_id!(SectionId, "section_id");
 entity_id!(TemplateId, "template_id");
 entity_id!(CommentId, "comment_id");
 entity_id!(SavedFilterId, "saved_filter_id");
+entity_id!(TimeBlockId, "time_block_id");
+entity_id!(TimeSlotId, "time_slot_id");
 
 /// Client-generated mutation identity. Accepts any UUID version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

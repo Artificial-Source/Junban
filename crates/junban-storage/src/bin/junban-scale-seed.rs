@@ -11,9 +11,10 @@ use junban_storage::scale_seed::{SeedConfig, host_as_of_date, seed_phase2_scale}
 
 fn print_usage() {
     eprintln!(
-        "Usage: junban-scale-seed --data-dir <path> [--task-count <n>] [--as-of-date YYYY-MM-DD]\n\
+        "Usage: junban-scale-seed --data-dir <path> [--task-count <n>] [--as-of-date YYYY-MM-DD] [--temporal-fixture]\n\
          \n\
-         Development-only Phase 2 scale fixture. Writes junban.sqlite3 and\n\
+         Development-only scale fixture. --temporal-fixture adds the bounded\n\
+         Phase 3 recurrence workload. Writes junban.sqlite3 and\n\
          scale-seed-manifest.json under --data-dir. Not part of release artifacts."
     );
 }
@@ -22,6 +23,7 @@ fn main() -> ExitCode {
     let mut data_dir: Option<PathBuf> = None;
     let mut task_count: u32 = 10_000;
     let mut as_of_raw: Option<String> = None;
+    let mut temporal_fixture = false;
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -58,6 +60,7 @@ fn main() -> ExitCode {
                 };
                 as_of_raw = Some(value);
             }
+            "--temporal-fixture" => temporal_fixture = true,
             other => {
                 eprintln!("unknown argument: {other}");
                 print_usage();
@@ -90,6 +93,7 @@ fn main() -> ExitCode {
     };
 
     let config = match SeedConfig::new(task_count, as_of) {
+        Ok(config) if temporal_fixture => config.with_temporal_fixture(),
         Ok(config) => config,
         Err(error) => {
             eprintln!("invalid seed configuration: {error}");

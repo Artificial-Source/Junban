@@ -96,6 +96,13 @@ impl ApiError {
                 false,
                 request_id,
             ),
+            AppError::ResultLimitExceeded => Self::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "result_limit_exceeded",
+                "query result exceeds the allowed limit",
+                false,
+                request_id,
+            ),
             AppError::Storage => Self::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "storage_unavailable",

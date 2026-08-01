@@ -6,28 +6,41 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use jiff::{Zoned, civil::Date};
+use jiff::{Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
-    CommentId, MAX_QUERY_PAGE_LIMIT, MAX_TAGS_PER_TASK, OperationId, ProjectId, SavedFilterId,
-    SectionId, TagId, TaskId, TaskQuery, TaskSort, TaskStatus, TemplateId, parse_filter,
-    parse_quick_entry, parse_text_import, validate_page_limit,
+    CommentId, DailyCapacityMinutes, MAX_QUERY_PAGE_LIMIT, MAX_TAGS_PER_TASK, OperationId,
+    ProjectId, SavedFilterId, SectionId, TagId, TaskId, TaskQuery, TaskSort, TaskStatus,
+    TemplateId, TimeBlockId, TimeSlotId, WeekStart, parse_filter, parse_quick_entry,
+    parse_text_import, validate_page_limit,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
 
 use crate::cursor::decode_task_cursor;
 use crate::dto::{
-    AddRelationRequest, ApplyTemplateRequest, BulkTasksRequest, CatalogResponse, CommentDto,
-    CommentListResponse, CreateCommentRequest, CreateProjectRequest, CreateSavedFilterRequest,
-    CreateSectionRequest, CreateTagRequest, CreateTaskRequest, CreateTemplateRequest,
-    HealthResponse, MoveTaskRequest, MutationResponse, ParseFilterRequest, ParseQuickEntryRequest,
-    ParseTextImportRequest, ParsedFilterResponse, PatchCommentRequest, PatchProjectRequest,
-    PatchSavedFilterRequest, PatchSectionRequest, PatchTagRequest, PatchTaskRequest,
-    PatchTemplateRequest, ProfileResponse, QuickEntryDto, RelationDto, RelationListResponse,
-    ReorderTasksRequest, TaskActivityDto, TaskActivityResponse, TaskDto, TaskListResponse,
-    TaskSortDto, TaskViewPresetDto, TextImportDraftDto, TextImportResponse,
+    AcquireReminderLeaseRequest, AddRelationRequest, AppendTimeSlotTaskRequest,
+    ApplyTemplateRequest, BulkTasksRequest, CalendarTasksResponse, CatalogResponse,
+    ClaimRemindersRequest, ClaimRemindersResponse, CommentDto, CommentListResponse,
+    CreateCommentRequest, CreateProjectRequest, CreateSavedFilterRequest, CreateSectionRequest,
+    CreateTagRequest, CreateTaskRequest, CreateTemplateRequest, CreateTimeBlockRequest,
+    CreateTimeSlotRequest, DailyPlanResponse, DopamineMenuResponse, EatTheFrogResponse,
+    EndOfDayResponse, HealthResponse, MarkOwnerLostRemindersRequest,
+    MarkOwnerLostRemindersResponse, MoveTaskRequest, MoveTimeBlockRequest, MutationResponse,
+    NudgesResponse, ParseFilterRequest, ParseQuickEntryRequest, ParseTextImportRequest,
+    ParsedFilterResponse, PatchCommentRequest, PatchProjectRequest, PatchSavedFilterRequest,
+    PatchSectionRequest, PatchTagRequest, PatchTaskRequest, PatchTemplateRequest,
+    PatchTimeBlockRequest, PatchTimeSlotRequest, ProfileResponse, QuickEntryDto, RelationDto,
+    RelationListResponse, ReleaseReminderLeaseRequest, ReminderDeliveryLeaseDto,
+    ReminderListResponse, ReminderOccurrenceDto, RenewReminderLeaseRequest, ReorderTasksRequest,
+    ReplaceTimeSlotTasksRequest, ReplanTimeBlocksPreviewResponse, ReplanTimeBlocksRequest,
+    RescheduleReminderRequest, ResizeTimeBlockRequest, SettleReminderDeliveredRequest,
+    SettleReminderFailedRequest, StatsResponse, TaskActivityDto, TaskActivityResponse, TaskDto,
+    TaskJarResponse, TaskListResponse, TaskSortDto, TaskViewPresetDto, TemporalSettingsResponse,
+    TextImportDraftDto, TextImportResponse, TimeBlockListResponse, TimeSlotListResponse,
+    WeeklyReviewResponse,
 };
 use crate::error::{ApiError, extract_json, operation_id, parse_path_id, validation_error};
+use crate::reminder_wake::open_reminder_sse_stream;
 use crate::sse::{MAX_SSE_CONNECTIONS, open_sse_stream};
 use crate::{RequestId, ServerState};
 
@@ -42,6 +55,12 @@ pub fn server_as_of_date() -> Date {
 /// One local clock sample for task list evaluation (civil due date + recent-completion UTC bounds).
 pub fn server_list_as_of() -> Result<TaskListAsOf, junban_domain::ValidationError> {
     TaskListAsOf::from_zoned(&Zoned::now())
+}
+
+/// One system-zone sample for planning/analytics reads (civil date + zone).
+pub fn server_planning_clock() -> (Date, TimeZone) {
+    let now = Zoned::now();
+    (now.date(), now.time_zone().clone())
 }
 
 // ── health / profile ───────────────────────────────────────────────────────
@@ -1434,6 +1453,1388 @@ pub async fn events(
     ))
 }
 
+// ── reminders ──────────────────────────────────────────────────────────────
+
+fn parse_fence_term(
+    raw: &str,
+    request_id: &RequestId,
+) -> Result<junban_domain::ReminderFenceTerm, ApiError> {
+    junban_domain::ReminderFenceTerm::parse(raw).map_err(|e| validation_error(e, request_id))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/tasks/{task_id}/reminders",
+    operation_id = "list_task_reminders",
+    params(("task_id" = String, Path, format = Uuid)),
+    responses(
+        (status = 200, body = ReminderListResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_task_reminders(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(task_id): AxumPath<String>,
+) -> Result<Json<ReminderListResponse>, ApiError> {
+    let task_id = parse_path_id(&task_id, TaskId::parse, &request_id)?;
+    let reminders = state
+        .service
+        .list_task_reminders(task_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(ReminderListResponse {
+        reminders: reminders
+            .into_iter()
+            .map(ReminderOccurrenceDto::from)
+            .collect(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/tasks/{task_id}/reminders/reschedule",
+    operation_id = "reschedule_reminder",
+    request_body = RescheduleReminderRequest,
+    params(
+        ("task_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn reschedule_reminder(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(task_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<RescheduleReminderRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let task_id = parse_path_id(&task_id, TaskId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let mutation = state
+        .service
+        .reschedule_reminder(operation_id, task_id, payload.remind_at)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/tasks/{task_id}/reminders/dismiss",
+    operation_id = "dismiss_reminder",
+    params(
+        ("task_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn dismiss_reminder(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(task_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let task_id = parse_path_id(&task_id, TaskId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let mutation = state
+        .service
+        .dismiss_reminder(operation_id, task_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/lease",
+    operation_id = "acquire_reminder_lease",
+    request_body = AcquireReminderLeaseRequest,
+    responses(
+        (status = 200, body = ReminderDeliveryLeaseDto),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn acquire_reminder_lease(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<AcquireReminderLeaseRequest>, JsonRejection>,
+) -> Result<Json<ReminderDeliveryLeaseDto>, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let lease = state
+        .service
+        .acquire_reminder_lease(payload.lease_secs)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
+    Ok(Json(lease.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/lease/renew",
+    operation_id = "renew_reminder_lease",
+    request_body = RenewReminderLeaseRequest,
+    responses(
+        (status = 200, body = ReminderDeliveryLeaseDto),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn renew_reminder_lease(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<RenewReminderLeaseRequest>, JsonRejection>,
+) -> Result<Json<ReminderDeliveryLeaseDto>, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    let lease = state
+        .service
+        .renew_reminder_lease(fence_term, payload.lease_secs)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
+    Ok(Json(lease.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/lease/release",
+    operation_id = "release_reminder_lease",
+    request_body = ReleaseReminderLeaseRequest,
+    responses(
+        (status = 204),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn release_reminder_lease(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<ReleaseReminderLeaseRequest>, JsonRejection>,
+) -> Result<StatusCode, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    state
+        .service
+        .release_reminder_lease(fence_term)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/claim",
+    operation_id = "claim_due_reminders",
+    request_body = ClaimRemindersRequest,
+    responses(
+        (status = 200, body = ClaimRemindersResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn claim_due_reminders(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<ClaimRemindersRequest>, JsonRejection>,
+) -> Result<Json<ClaimRemindersResponse>, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    let reminders = state
+        .service
+        .claim_due_reminders(fence_term, payload.limit, payload.claim_secs)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
+    Ok(Json(ClaimRemindersResponse {
+        reminders: reminders.into_iter().map(Into::into).collect(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/settle/delivered",
+    operation_id = "settle_reminder_delivered",
+    request_body = SettleReminderDeliveredRequest,
+    responses(
+        (status = 204),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn settle_reminder_delivered(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<SettleReminderDeliveredRequest>, JsonRejection>,
+) -> Result<StatusCode, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    let task_id = TaskId::parse(&payload.task_id).map_err(|e| validation_error(e, &request_id))?;
+    state
+        .service
+        .settle_reminder_delivered(
+            fence_term,
+            task_id,
+            payload.remind_at,
+            payload.claim_attempt,
+            payload.channel.into(),
+        )
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/settle/failed",
+    operation_id = "settle_reminder_failed",
+    request_body = SettleReminderFailedRequest,
+    responses(
+        (status = 204),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn settle_reminder_failed(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<SettleReminderFailedRequest>, JsonRejection>,
+) -> Result<StatusCode, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    let task_id = TaskId::parse(&payload.task_id).map_err(|e| validation_error(e, &request_id))?;
+    state
+        .service
+        .settle_reminder_failed(
+            fence_term,
+            task_id,
+            payload.remind_at,
+            payload.claim_attempt,
+            payload.error.into(),
+        )
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/reminders/owner-lost",
+    operation_id = "mark_owner_lost_reminders",
+    request_body = MarkOwnerLostRemindersRequest,
+    responses(
+        (status = 200, body = MarkOwnerLostRemindersResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn mark_owner_lost_reminders(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<MarkOwnerLostRemindersRequest>, JsonRejection>,
+) -> Result<Json<MarkOwnerLostRemindersResponse>, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let fence_term = parse_fence_term(&payload.fence_term, &request_id)?;
+    let marked = state
+        .service
+        .mark_owner_lost_reminders(fence_term, payload.limit)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    state.notify_reminder_wake();
+    Ok(Json(MarkOwnerLostRemindersResponse { marked }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/reminders/events",
+    operation_id = "reminder_events",
+    responses(
+        (
+            status = 200,
+            description = "Ephemeral reminder wake stream (not revisioned task events)",
+            content_type = "text/event-stream",
+            body = crate::reminder_wake::ReminderWakeEventDto
+        ),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn reminder_events(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+) -> Result<impl IntoResponse, ApiError> {
+    let permit = state.try_acquire_sse().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "sse_connection_limit",
+            "too many concurrent event streams",
+            true,
+            &request_id,
+        )
+    })?;
+
+    // Subscribe before the immediate snapshot so live wakes stay queued.
+    let receiver = state.reminder_wakes.subscribe();
+    Ok(open_reminder_sse_stream(
+        std::sync::Arc::clone(&state.reminder_wakes),
+        receiver,
+        state.shutdown_token(),
+        permit,
+        std::sync::Arc::clone(&state.active_forwarders),
+    ))
+}
+
+// ── time blocks / time slots ───────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListTimeBlocksQuery {
+    /// Inclusive civil start date (`YYYY-MM-DD`). Defaults to server-local today.
+    pub from: Option<String>,
+    /// Inclusive civil end date (`YYYY-MM-DD`). Defaults to `from`.
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListTimeSlotsQuery {
+    /// Civil date filter (`YYYY-MM-DD`). Defaults to server-local today.
+    pub date: Option<String>,
+    /// Optional project filter. Use `-` for unscoped slots.
+    pub project_id: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/time-blocks",
+    operation_id = "list_time_blocks",
+    params(ListTimeBlocksQuery),
+    responses(
+        (status = 200, body = TimeBlockListResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_time_blocks(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<ListTimeBlocksQuery>,
+) -> Result<Json<TimeBlockListResponse>, ApiError> {
+    let today = server_as_of_date();
+    let from = parse_date_param(query.from.as_deref(), "from", &request_id)?.unwrap_or(today);
+    let to = parse_date_param(query.to.as_deref(), "to", &request_id)?.unwrap_or(from);
+    let page = state
+        .service
+        .list_timeblocking_range(from, to)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(TimeBlockListResponse {
+        time_blocks: page.blocks.into_iter().map(Into::into).collect(),
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-blocks",
+    operation_id = "create_time_block",
+    request_body = CreateTimeBlockRequest,
+    params(("Idempotency-Key" = String, Header, format = Uuid)),
+    responses(
+        (status = 201, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_time_block(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    payload: Result<Json<CreateTimeBlockRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<MutationResponse>), ApiError> {
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let draft = payload.into_draft(&request_id)?;
+    let mutation = state
+        .service
+        .create_time_block(operation_id, draft)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok((StatusCode::CREATED, Json(mutation.into())))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/time-blocks/{time_block_id}",
+    operation_id = "patch_time_block",
+    request_body = PatchTimeBlockRequest,
+    params(
+        ("time_block_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn patch_time_block(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_block_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<PatchTimeBlockRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_block_id = parse_path_id(&time_block_id, TimeBlockId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let patch = payload.into_patch(&request_id)?;
+    let mutation = state
+        .service
+        .patch_time_block(operation_id, time_block_id, patch)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/time-blocks/{time_block_id}",
+    operation_id = "delete_time_block",
+    params(
+        ("time_block_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_time_block(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_block_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_block_id = parse_path_id(&time_block_id, TimeBlockId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let mutation = state
+        .service
+        .delete_time_block(operation_id, time_block_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-blocks/{time_block_id}/move",
+    operation_id = "move_time_block",
+    request_body = MoveTimeBlockRequest,
+    params(
+        ("time_block_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn move_time_block(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_block_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<MoveTimeBlockRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_block_id = parse_path_id(&time_block_id, TimeBlockId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let range = payload.into_range(&request_id)?;
+    let mutation = state
+        .service
+        .move_time_block(operation_id, time_block_id, range)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-blocks/{time_block_id}/resize",
+    operation_id = "resize_time_block",
+    request_body = ResizeTimeBlockRequest,
+    params(
+        ("time_block_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn resize_time_block(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_block_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<ResizeTimeBlockRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_block_id = parse_path_id(&time_block_id, TimeBlockId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let range = payload.into_range(&request_id)?;
+    let mutation = state
+        .service
+        .resize_time_block(operation_id, time_block_id, range)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/time-blocks/replan/preview",
+    operation_id = "preview_replan_time_blocks",
+    responses(
+        (status = 200, body = ReplanTimeBlocksPreviewResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn preview_replan_time_blocks(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+) -> Result<Json<ReplanTimeBlocksPreviewResponse>, ApiError> {
+    let preview = state
+        .service
+        .preview_replan_past_blocks()
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(ReplanTimeBlocksPreviewResponse {
+        as_of_date: preview.as_of_date,
+        candidate_ids: preview
+            .candidate_ids
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect(),
+        time_blocks: preview.blocks.into_iter().map(Into::into).collect(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-blocks/replan",
+    operation_id = "replan_time_blocks",
+    request_body = ReplanTimeBlocksRequest,
+    params(("Idempotency-Key" = String, Header, format = Uuid)),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replan_time_blocks(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    payload: Result<Json<ReplanTimeBlocksRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let expected_candidate_ids = payload
+        .expected_candidate_ids
+        .iter()
+        .map(|id| parse_path_id(id, TimeBlockId::parse, &request_id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mutation = state
+        .service
+        .replan_past_blocks(
+            operation_id,
+            payload.action.into(),
+            payload.expected_as_of_date,
+            expected_candidate_ids,
+        )
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/time-slots",
+    operation_id = "list_time_slots",
+    params(ListTimeSlotsQuery),
+    responses(
+        (status = 200, body = TimeSlotListResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_time_slots(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<ListTimeSlotsQuery>,
+) -> Result<Json<TimeSlotListResponse>, ApiError> {
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?
+        .unwrap_or_else(server_as_of_date);
+    let project_filter =
+        parse_nullable_id_filter(query.project_id.as_deref(), ProjectId::parse, &request_id)?;
+    let page = state
+        .service
+        .list_timeblocking_range(date, date)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    let time_slots = page
+        .slots
+        .into_iter()
+        .filter(|slot| match project_filter {
+            None => true,
+            Some(None) => slot.project_id.is_none(),
+            Some(Some(project_id)) => slot.project_id == Some(project_id),
+        })
+        .map(Into::into)
+        .collect();
+    Ok(Json(TimeSlotListResponse {
+        time_slots,
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-slots",
+    operation_id = "create_time_slot",
+    request_body = CreateTimeSlotRequest,
+    params(("Idempotency-Key" = String, Header, format = Uuid)),
+    responses(
+        (status = 201, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_time_slot(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    payload: Result<Json<CreateTimeSlotRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<MutationResponse>), ApiError> {
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let draft = payload.into_draft(&request_id)?;
+    let mutation = state
+        .service
+        .create_time_slot(operation_id, draft)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok((StatusCode::CREATED, Json(mutation.into())))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/time-slots/{time_slot_id}",
+    operation_id = "patch_time_slot",
+    request_body = PatchTimeSlotRequest,
+    params(
+        ("time_slot_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn patch_time_slot(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_slot_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<PatchTimeSlotRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_slot_id = parse_path_id(&time_slot_id, TimeSlotId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let patch = payload.into_patch(&request_id)?;
+    let mutation = state
+        .service
+        .patch_time_slot(operation_id, time_slot_id, patch)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/time-slots/{time_slot_id}",
+    operation_id = "delete_time_slot",
+    params(
+        ("time_slot_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_time_slot(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_slot_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_slot_id = parse_path_id(&time_slot_id, TimeSlotId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let mutation = state
+        .service
+        .delete_time_slot(operation_id, time_slot_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/time-slots/{time_slot_id}/tasks",
+    operation_id = "append_time_slot_task",
+    request_body = AppendTimeSlotTaskRequest,
+    params(
+        ("time_slot_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn append_time_slot_task(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_slot_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<AppendTimeSlotTaskRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_slot_id = parse_path_id(&time_slot_id, TimeSlotId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let task_id = payload.into_task_id(&request_id)?;
+    let mutation = state
+        .service
+        .append_slot_task(operation_id, time_slot_id, task_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/time-slots/{time_slot_id}/tasks",
+    operation_id = "replace_time_slot_tasks",
+    request_body = ReplaceTimeSlotTasksRequest,
+    params(
+        ("time_slot_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_time_slot_tasks(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(time_slot_id): AxumPath<String>,
+    headers: HeaderMap,
+    payload: Result<Json<ReplaceTimeSlotTasksRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_slot_id = parse_path_id(&time_slot_id, TimeSlotId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let ordered_ids = payload.into_task_ids(&request_id)?;
+    let mutation = state
+        .service
+        .reorder_slot_tasks(operation_id, time_slot_id, ordered_ids)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/time-slots/{time_slot_id}/tasks/{task_id}",
+    operation_id = "remove_time_slot_task",
+    params(
+        ("time_slot_id" = String, Path, format = Uuid),
+        ("task_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn remove_time_slot_task(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath((time_slot_id, task_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let time_slot_id = parse_path_id(&time_slot_id, TimeSlotId::parse, &request_id)?;
+    let task_id = parse_path_id(&task_id, TaskId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let mutation = state
+        .service
+        .remove_slot_task(operation_id, time_slot_id, task_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+// ── planning / analytics reads ─────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CalendarTasksQuery {
+    /// Inclusive civil start date (`YYYY-MM-DD`). Required.
+    pub from: Option<String>,
+    /// Inclusive civil end date (`YYYY-MM-DD`). Required.
+    pub to: Option<String>,
+    /// Optional exact project filter.
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct PlanningDateQuery {
+    /// Civil date (`YYYY-MM-DD`). Defaults to server-local today.
+    pub date: Option<String>,
+    /// Daily capacity in whole minutes. Defaults to 480.
+    pub capacity_minutes: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct WeeklyReviewQuery {
+    /// Civil date inside the current week (`YYYY-MM-DD`). Defaults to server-local today.
+    pub date: Option<String>,
+    /// Week start: `sunday` (default) or `monday`.
+    pub week_start: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct StatsQuery {
+    /// Inclusive civil start date (`YYYY-MM-DD`). Required.
+    pub from: Option<String>,
+    /// Inclusive civil end date (`YYYY-MM-DD`). Required.
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct MotivationDateQuery {
+    /// Civil date (`YYYY-MM-DD`). Defaults to server-local today.
+    pub date: Option<String>,
+}
+
+fn require_date_param(
+    raw: Option<&str>,
+    field: &'static str,
+    request_id: &RequestId,
+) -> Result<Date, ApiError> {
+    parse_date_param(raw, field, request_id)?.ok_or_else(|| {
+        validation_error(junban_domain::ValidationError::Empty { field }, request_id)
+    })
+}
+
+fn parse_capacity_param(
+    raw: Option<u32>,
+    request_id: &RequestId,
+) -> Result<Option<DailyCapacityMinutes>, ApiError> {
+    match raw {
+        None => Ok(None),
+        Some(value) => DailyCapacityMinutes::new(value)
+            .map(Some)
+            .map_err(|error| validation_error(error, request_id)),
+    }
+}
+
+fn parse_week_start_param(
+    raw: Option<&str>,
+    request_id: &RequestId,
+) -> Result<WeekStart, ApiError> {
+    match raw {
+        None => Ok(WeekStart::Sunday),
+        Some(value) => WeekStart::parse(value).map_err(|error| validation_error(error, request_id)),
+    }
+}
+
+fn id_strings(ids: impl IntoIterator<Item = junban_domain::TaskId>) -> Vec<String> {
+    ids.into_iter().map(|id| id.to_string()).collect()
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/calendar/tasks",
+    operation_id = "calendar_tasks",
+    params(CalendarTasksQuery),
+    responses(
+        (status = 200, body = CalendarTasksResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn calendar_tasks(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<CalendarTasksQuery>,
+) -> Result<Json<CalendarTasksResponse>, ApiError> {
+    let from = require_date_param(query.from.as_deref(), "from", &request_id)?;
+    let to = require_date_param(query.to.as_deref(), "to", &request_id)?;
+    let project_id = match query.project_id.as_deref() {
+        None => None,
+        Some(raw) => Some(ProjectId::parse(raw).map_err(|e| validation_error(e, &request_id))?),
+    };
+    let as_of = server_list_as_of().map_err(|error| validation_error(error, &request_id))?;
+    let page = state
+        .service
+        .calendar_tasks(from, to, project_id, as_of)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(CalendarTasksResponse {
+        tasks: page.tasks.into_iter().map(Into::into).collect(),
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/planning/daily",
+    operation_id = "planning_daily",
+    params(PlanningDateQuery),
+    responses(
+        (status = 200, body = DailyPlanResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn planning_daily(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<PlanningDateQuery>,
+) -> Result<Json<DailyPlanResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let capacity = parse_capacity_param(query.capacity_minutes, &request_id)?;
+    let page = state
+        .service
+        .daily_plan(date, capacity, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(DailyPlanResponse {
+        as_of_date: date,
+        overdue_task_ids: id_strings(page.overdue_task_ids),
+        overdue_tasks: page.overdue_tasks.into_iter().map(Into::into).collect(),
+        focus_task_ids: id_strings(page.focus_task_ids),
+        focus_tasks: page.focus_tasks.into_iter().map(Into::into).collect(),
+        estimated_total_minutes: page.estimated_total_minutes,
+        capacity_minutes: page.capacity_minutes,
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/planning/end-of-day",
+    operation_id = "planning_end_of_day",
+    params(PlanningDateQuery),
+    responses(
+        (status = 200, body = EndOfDayResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn planning_end_of_day(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<PlanningDateQuery>,
+) -> Result<Json<EndOfDayResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let capacity = parse_capacity_param(query.capacity_minutes, &request_id)?;
+    let page = state
+        .service
+        .end_of_day(date, capacity, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(EndOfDayResponse {
+        as_of_date: date,
+        win_task_ids: id_strings(page.win_task_ids),
+        win_tasks: page.win_tasks.into_iter().map(Into::into).collect(),
+        carry_over_task_ids: id_strings(page.carry_over_task_ids),
+        carry_over_tasks: page.carry_over_tasks.into_iter().map(Into::into).collect(),
+        tomorrow_task_ids: id_strings(page.tomorrow_task_ids),
+        tomorrow_tasks: page.tomorrow_tasks.into_iter().map(Into::into).collect(),
+        tomorrow_estimated_minutes: page.tomorrow_estimated_minutes,
+        completion_rate_percent: page.completion_rate_percent,
+        capacity_minutes: page.capacity_minutes,
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/planning/weekly",
+    operation_id = "planning_weekly",
+    params(WeeklyReviewQuery),
+    responses(
+        (status = 200, body = WeeklyReviewResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn planning_weekly(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<WeeklyReviewQuery>,
+) -> Result<Json<WeeklyReviewResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let week_start = parse_week_start_param(query.week_start.as_deref(), &request_id)?;
+    let page = state
+        .service
+        .weekly_review(date, week_start, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(WeeklyReviewResponse::from_page(page, date)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/stats",
+    operation_id = "stats",
+    params(StatsQuery),
+    responses(
+        (status = 200, body = StatsResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn stats(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<StatsQuery>,
+) -> Result<Json<StatsResponse>, ApiError> {
+    let from = require_date_param(query.from.as_deref(), "from", &request_id)?;
+    let to = require_date_param(query.to.as_deref(), "to", &request_id)?;
+    let (today, zone) = server_planning_clock();
+    let page = state
+        .service
+        .stats(from, to, today, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(StatsResponse::from_page(page)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/nudges",
+    operation_id = "nudges",
+    params(PlanningDateQuery),
+    responses(
+        (status = 200, body = NudgesResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn nudges(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<PlanningDateQuery>,
+) -> Result<Json<NudgesResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let capacity = parse_capacity_param(query.capacity_minutes, &request_id)?;
+    let page = state
+        .service
+        .nudges(date, capacity, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(NudgesResponse::from_page(page)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/temporal",
+    operation_id = "get_temporal_settings",
+    responses(
+        (status = 200, body = TemporalSettingsResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_temporal_settings() -> Json<TemporalSettingsResponse> {
+    let (_, zone) = server_planning_clock();
+    Json(junban_app::default_temporal_settings(&zone).into())
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/motivation/eat-the-frog",
+    operation_id = "motivation_eat_the_frog",
+    params(MotivationDateQuery),
+    responses(
+        (status = 200, body = EatTheFrogResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn motivation_eat_the_frog(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<MotivationDateQuery>,
+) -> Result<Json<EatTheFrogResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let page = state
+        .service
+        .eat_the_frog(date, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(EatTheFrogResponse {
+        task: page.task.map(Into::into),
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/motivation/task-jar",
+    operation_id = "motivation_task_jar",
+    params(MotivationDateQuery),
+    responses(
+        (status = 200, body = TaskJarResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn motivation_task_jar(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<MotivationDateQuery>,
+) -> Result<Json<TaskJarResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let page = state
+        .service
+        .task_jar(date, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(TaskJarResponse {
+        task_ids: id_strings(page.task_ids),
+        tasks: page.tasks.into_iter().map(Into::into).collect(),
+        revision: page.revision,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/motivation/dopamine-menu",
+    operation_id = "motivation_dopamine_menu",
+    params(MotivationDateQuery),
+    responses(
+        (status = 200, body = DopamineMenuResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn motivation_dopamine_menu(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<MotivationDateQuery>,
+) -> Result<Json<DopamineMenuResponse>, ApiError> {
+    let (today, zone) = server_planning_clock();
+    let date = parse_date_param(query.date.as_deref(), "date", &request_id)?.unwrap_or(today);
+    let page = state
+        .service
+        .dopamine_menu(date, &zone)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(DopamineMenuResponse {
+        task_ids: id_strings(page.task_ids),
+        tasks: page.tasks.into_iter().map(Into::into).collect(),
+        revision: page.revision,
+    }))
+}
+
 pub async fn api_not_found(Extension(request_id): Extension<RequestId>) -> ApiError {
     ApiError::new(
         StatusCode::NOT_FOUND,
@@ -1450,5 +2851,6 @@ const _: fn() = || {
     let _: Option<RelationDto> = None;
     let _: Option<TaskActivityDto> = None;
     let _: Option<TextImportDraftDto> = None;
+    let _: Option<ReminderOccurrenceDto> = None;
     let _: usize = MAX_SSE_CONNECTIONS;
 };

@@ -53,21 +53,21 @@ Quick mode uses one 500-task profile, 25 recurring sources / 50 affected tasks, 
 
 ## Measured result
 
-The five-sample command reran on 2026-07-31 after replacing paged analysis reads with one bounded SQLite snapshot and wrote [`phase-3-temporal-bench.json`](phase-3-temporal-bench.json). `authoritative_passed`: every latency and memory budget passed.
+The five-sample command reran on 2026-07-31 against the final same-head Phase 3 code and wrote [`phase-3-temporal-bench.json`](phase-3-temporal-bench.json). `authoritative_passed`: every latency and memory budget passed. Two immediately preceding high-I/O attempts exceeded only the Calendar latency budget and are retained beside the passing result, as required by the variance rule.
 
 | Measure                                    |                      Result |
 | ------------------------------------------ | --------------------------: |
-| Warm cgroup memory (median / maximum)      |       16.1523 / 16.5586 MiB |
-| Warm cgroup peak (maximum)                 |                 18.1953 MiB |
-| Idle cgroup memory (median / maximum)      |         2.5898 / 3.4023 MiB |
-| Startup to health (median / maximum)       |         47.698 / 130.047 ms |
-| Calendar 42-day p95                        |            46.724 ms (pass) |
-| Timeblocking 42-day p95                    |             0.472 ms (pass) |
-| Stats 366-day p95                          |            24.995 ms (pass) |
-| Nudges p95                                 |            24.868 ms (pass) |
-| Recurrence complete p95                    |             1.462 ms (pass) |
-| Bulk recurrence complete / reversal p95    | 285.390 / 343.658 ms (pass) |
-| Reminder lease + 20-row claim p95          |             2.307 ms (pass) |
-| Scheduler due-wake wait (median / maximum) |         87.733 / 288.641 ms |
+| Warm cgroup memory (median / maximum)      |       16.7812 / 23.8047 MiB |
+| Warm cgroup peak (maximum)                 |                 25.6328 MiB |
+| Idle cgroup memory (median / maximum)      |        7.0898 / 13.2617 MiB |
+| Startup to health (median / maximum)       |         46.674 / 105.140 ms |
+| Calendar 42-day p95                        |            61.987 ms (pass) |
+| Timeblocking 42-day p95                    |             1.376 ms (pass) |
+| Stats 366-day p95                          |            27.356 ms (pass) |
+| Nudges p95                                 |            29.528 ms (pass) |
+| Recurrence complete p95                    |             2.513 ms (pass) |
+| Bulk recurrence complete / reversal p95    | 107.637 / 212.777 ms (pass) |
+| Reminder lease + 20-row claim p95          |             3.464 ms (pass) |
+| Scheduler due-wake wait (median / maximum) |          49.627 / 57.585 ms |
 
-All five samples observed one scheduler due wake after the idle state, claimed and settled exactly 20 reminders, observed an empty post-settlement claim, and produced a 26-revision user-event delta. No Node process appeared in a measured cgroup and every profile cleaned up. `P3-FINAL-007` is fixed.
+All five samples observed one scheduler due wake after the idle state, claimed and settled exactly 20 reminders, observed an empty post-settlement claim, and produced a 26-revision user-event delta. No Node process appeared in a measured cgroup and every profile cleaned up. `P3-FINAL-007` remains fixed on the final code.

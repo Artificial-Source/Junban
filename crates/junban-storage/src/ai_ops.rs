@@ -6,15 +6,19 @@
 #![allow(dead_code)]
 #![allow(clippy::too_many_arguments)]
 
+use std::collections::HashSet;
+
 use jiff::{Timestamp, ToSpan};
 use junban_app::{
-    AffectedIds, CommittedMutation, EventType, RepositoryError, ResourceRef, ResyncScope,
+    AffectedIds, AiMemoryCursor, AiMemoryListPage, AiSessionCursor, AiSessionListPage,
+    CommittedMutation, EventType, RepositoryError, ResourceRef, ResyncScope,
 };
 use junban_domain::{
-    AI_APPROVAL_LIFETIME_SECS, AI_MEMORIES_PER_PROFILE_MAX, AI_MEMORY_CONTENT_BYTES_MAX,
-    AI_MESSAGES_PER_SESSION_MAX, AI_PENDING_APPROVAL_CONTENT_BYTES_MAX, AI_PENDING_APPROVALS_MAX,
-    AI_PROFILE_CONTENT_BYTES_MAX, AI_SESSION_CONTENT_BYTES_MAX, AI_SESSIONS_PER_PROFILE_MAX,
-    AiApprovalId, AiApprovalStatus, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiMessageId,
+    AI_APPROVAL_LIFETIME_SECS, AI_CONTEXT_MEMORIES_MAX, AI_MEMORIES_PER_PROFILE_MAX,
+    AI_MEMORY_CONTENT_BYTES_MAX, AI_MEMORY_PAGE_MAX, AI_MESSAGES_PER_SESSION_MAX,
+    AI_PENDING_APPROVAL_CONTENT_BYTES_MAX, AI_PENDING_APPROVALS_MAX, AI_PROFILE_CONTENT_BYTES_MAX,
+    AI_SESSION_CONTENT_BYTES_MAX, AI_SESSION_PAGE_MAX, AI_SESSIONS_PER_PROFILE_MAX, AiApprovalId,
+    AiApprovalStatus, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiMessageId,
     AiMessageRole, AiMessageStatus, AiRunId, AiRunPhase, AiRunState, AiSession, AiSessionId,
     AiSessionStatus, AiToolApproval, AiTurnId, OperationId, sha256_hex,
 };
@@ -28,8 +32,9 @@ use crate::tx::{MutationEffect, canonical_json, mutate};
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Req<'a> {
+    // Generated primary IDs are mutation material only and must not appear here:
+    // exact retries may pass a fresh throwaway ID while replaying the original row.
     CreateAiSession {
-        session_id: String,
         title: &'a str,
     },
     RenameAiSession {
@@ -51,7 +56,6 @@ enum Req<'a> {
         content_json: &'a str,
     },
     CreateAiMemory {
-        memory_id: String,
         content: &'a str,
     },
     UpdateAiMemory {
@@ -190,7 +194,6 @@ pub(crate) fn create_ai_session(
 ) -> Result<CommittedMutation, RepositoryError> {
     let session = AiSession::new(session_id, title, now).map_err(validation)?;
     let request = canonical_json(&Req::CreateAiSession {
-        session_id: session.id.to_string(),
         title: &session.title,
     })?;
     mutate(connection, operation_id, request, now, move |tx, _| {
@@ -672,7 +675,6 @@ pub(crate) fn create_ai_memory(
 ) -> Result<CommittedMutation, RepositoryError> {
     let memory = AiMemory::new(memory_id, content, now).map_err(validation)?;
     let request = canonical_json(&Req::CreateAiMemory {
-        memory_id: memory.id.to_string(),
         content: &memory.content,
     })?;
     mutate(connection, operation_id, request, now, move |tx, _| {
@@ -1879,4 +1881,263 @@ pub(crate) fn get_ai_approval(
         )
         .transpose()?
         .ok_or(RepositoryError::NotFound)
+}
+
+/// Recent-first session page using keyset pagination on `(updated_at DESC, id ASC)`.
+pub(crate) fn list_ai_sessions(
+    connection: &Connection,
+    cursor: Option<AiSessionCursor>,
+    limit: u32,
+) -> Result<AiSessionListPage, RepositoryError> {
+    let limit = limit.clamp(1, AI_SESSION_PAGE_MAX);
+    let fetch = i64::from(limit) + 1;
+    let mut sql = String::from(
+        "SELECT id, title, status, message_count, content_bytes,
+                created_at, updated_at, last_message_at
+         FROM ai_sessions",
+    );
+    let mut binds: Vec<String> = Vec::new();
+    if let Some(cursor) = &cursor {
+        sql.push_str(" WHERE updated_at < ?1 OR (updated_at = ?2 AND id > ?3)");
+        binds.push(cursor.updated_at.to_string());
+        binds.push(cursor.updated_at.to_string());
+        binds.push(cursor.session_id.to_string());
+    }
+    sql.push_str(" ORDER BY updated_at DESC, id ASC LIMIT ");
+    sql.push_str(&fetch.to_string());
+
+    let mut statement = connection.prepare(&sql).map_err(storage_error)?;
+    let rows = if binds.is_empty() {
+        statement
+            .query_map([], map_session_row)
+            .map_err(storage_error)?
+    } else {
+        statement
+            .query_map(rusqlite::params_from_iter(binds.iter()), map_session_row)
+            .map_err(storage_error)?
+    };
+
+    let mut sessions = Vec::new();
+    for row in rows {
+        sessions.push(row.map_err(storage_error).and_then(build_session)?);
+    }
+    let next_cursor = if sessions.len() as u32 > limit {
+        sessions.truncate(limit as usize);
+        sessions.last().map(|session| AiSessionCursor {
+            updated_at: session.updated_at,
+            session_id: session.id,
+        })
+    } else {
+        None
+    };
+    Ok(AiSessionListPage {
+        sessions,
+        next_cursor,
+    })
+}
+
+/// Load one explicit memory by id.
+pub(crate) fn get_ai_memory(
+    connection: &Connection,
+    memory_id: AiMemoryId,
+) -> Result<AiMemory, RepositoryError> {
+    connection
+        .query_row(
+            "SELECT id, content, content_bytes, created_at, updated_at
+             FROM ai_memories WHERE id = ?1",
+            [memory_id.to_string()],
+            map_memory_row,
+        )
+        .optional()
+        .map_err(storage_error)?
+        .map(build_memory)
+        .transpose()?
+        .ok_or(RepositoryError::NotFound)
+}
+
+/// Recent-first memory page using keyset pagination on `(updated_at DESC, id ASC)`.
+pub(crate) fn list_ai_memories(
+    connection: &Connection,
+    cursor: Option<AiMemoryCursor>,
+    limit: u32,
+) -> Result<AiMemoryListPage, RepositoryError> {
+    let limit = limit.clamp(1, AI_MEMORY_PAGE_MAX);
+    let fetch = i64::from(limit) + 1;
+    let mut sql =
+        String::from("SELECT id, content, content_bytes, created_at, updated_at FROM ai_memories");
+    let mut binds: Vec<String> = Vec::new();
+    if let Some(cursor) = &cursor {
+        sql.push_str(" WHERE updated_at < ?1 OR (updated_at = ?2 AND id > ?3)");
+        binds.push(cursor.updated_at.to_string());
+        binds.push(cursor.updated_at.to_string());
+        binds.push(cursor.memory_id.to_string());
+    }
+    sql.push_str(" ORDER BY updated_at DESC, id ASC LIMIT ");
+    sql.push_str(&fetch.to_string());
+
+    let mut statement = connection.prepare(&sql).map_err(storage_error)?;
+    let rows = if binds.is_empty() {
+        statement
+            .query_map([], map_memory_row)
+            .map_err(storage_error)?
+    } else {
+        statement
+            .query_map(rusqlite::params_from_iter(binds.iter()), map_memory_row)
+            .map_err(storage_error)?
+    };
+
+    let mut memories = Vec::new();
+    for row in rows {
+        memories.push(row.map_err(storage_error).and_then(build_memory)?);
+    }
+    let next_cursor = if memories.len() as u32 > limit {
+        memories.truncate(limit as usize);
+        memories.last().map(|memory| AiMemoryCursor {
+            updated_at: memory.updated_at,
+            memory_id: memory.id,
+        })
+    } else {
+        None
+    };
+    Ok(AiMemoryListPage {
+        memories,
+        next_cursor,
+    })
+}
+
+/// Bounded context selection: session-linked memories first, then recent others.
+///
+/// Order within each group is `updated_at DESC, id ASC`. Duplicates are excluded.
+/// The hard ceiling is [`AI_CONTEXT_MEMORIES_MAX`].
+pub(crate) fn select_ai_memories_for_context(
+    connection: &Connection,
+    session_id: Option<AiSessionId>,
+    limit: u32,
+) -> Result<Vec<AiMemory>, RepositoryError> {
+    let limit = limit.clamp(1, AI_CONTEXT_MEMORIES_MAX) as usize;
+    let mut out = Vec::with_capacity(limit);
+    let mut seen = HashSet::new();
+
+    if let Some(session_id) = session_id {
+        let mut statement = connection
+            .prepare(
+                "SELECT m.id, m.content, m.content_bytes, m.created_at, m.updated_at
+                 FROM ai_session_memories link
+                 INNER JOIN ai_memories m ON m.id = link.memory_id
+                 WHERE link.session_id = ?1
+                 ORDER BY m.updated_at DESC, m.id ASC
+                 LIMIT ?2",
+            )
+            .map_err(storage_error)?;
+        let rows = statement
+            .query_map(
+                params![
+                    session_id.to_string(),
+                    i64::try_from(limit).map_err(storage_error)?
+                ],
+                map_memory_row,
+            )
+            .map_err(storage_error)?;
+        for row in rows {
+            let memory = row.map_err(storage_error).and_then(build_memory)?;
+            if seen.insert(memory.id) {
+                out.push(memory);
+                if out.len() >= limit {
+                    return Ok(out);
+                }
+            }
+        }
+    }
+
+    if out.len() >= limit {
+        return Ok(out);
+    }
+
+    // At most `limit` linked ids are already selected, so a recent page of `limit`
+    // rows always yields enough unseen memories to fill the remainder.
+    let fetch = i64::try_from(limit).map_err(storage_error)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT id, content, content_bytes, created_at, updated_at
+             FROM ai_memories
+             ORDER BY updated_at DESC, id ASC
+             LIMIT ?1",
+        )
+        .map_err(storage_error)?;
+    let rows = statement
+        .query_map([fetch], map_memory_row)
+        .map_err(storage_error)?;
+    for row in rows {
+        let memory = row.map_err(storage_error).and_then(build_memory)?;
+        if seen.insert(memory.id) {
+            out.push(memory);
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    Ok(out)
+}
+
+type SessionRow = (
+    String,
+    String,
+    String,
+    i64,
+    i64,
+    String,
+    String,
+    Option<String>,
+);
+
+fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+    ))
+}
+
+fn build_session(row: SessionRow) -> Result<AiSession, RepositoryError> {
+    let (id, title, status, message_count, content_bytes, created_at, updated_at, last) = row;
+    Ok(AiSession {
+        id: AiSessionId::parse(&id).map_err(storage_error)?,
+        title,
+        status: AiSessionStatus::parse(&status).map_err(storage_error)?,
+        message_count: u32::try_from(message_count).map_err(storage_error)?,
+        content_bytes: u64::try_from(content_bytes).map_err(storage_error)?,
+        created_at: created_at.parse().map_err(storage_error)?,
+        updated_at: updated_at.parse().map_err(storage_error)?,
+        last_message_at: last
+            .map(|value| value.parse().map_err(storage_error))
+            .transpose()?,
+    })
+}
+
+type MemoryRow = (String, String, i64, String, String);
+
+fn map_memory_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+    ))
+}
+
+fn build_memory(row: MemoryRow) -> Result<AiMemory, RepositoryError> {
+    let (id, content, content_bytes, created_at, updated_at) = row;
+    Ok(AiMemory {
+        id: AiMemoryId::parse(&id).map_err(storage_error)?,
+        content,
+        content_bytes: u64::try_from(content_bytes).map_err(storage_error)?,
+        created_at: created_at.parse().map_err(storage_error)?,
+        updated_at: updated_at.parse().map_err(storage_error)?,
+    })
 }

@@ -4,32 +4,38 @@ use std::sync::Arc;
 
 use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
-    AppSettings, ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
-    DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName,
-    FilterQuery, HexColor, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS,
-    MarkdownText, NudgeRuleKind, OperationId, ProjectId, RelationKind, ReminderChannel,
-    ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence,
-    SavedFilterId, SectionId, SettingsPatch, TagId, TagName, Task, TaskActivity, TaskDraft, TaskId,
-    TaskQuery, TaskRelation, TaskSort, TaskStatus, TaskTitle, TemplateId, TimeBlock,
-    TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft, TimeSlotId, TransferApply, TransferError,
-    TransferFormat, TransferPreview, ValidationError, WeekStart, civil_occurrences_in_range,
-    daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges,
-    preview_transfer, select_eat_the_frog, stats_summary, task_jar_candidates,
-    validate_calendar_date_range, validate_owner_lost_mark_limit, validate_preview_matches_apply,
-    validate_reminder_claim_limit, validate_reminder_lease_secs, validate_stats_date_range,
-    validate_timeblock_date_range, weekly_review_summary,
+    AiApprovalId, AiMemory, AiMemoryId, AiMessage, AiRunId, AiRunState, AiSession, AiSessionId,
+    AiToolApproval, AppSettings, ClaimedReminder, Comment, CommentBody, CommentId,
+    DEFAULT_REMINDER_CLAIM_LIMIT, DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS,
+    DailyCapacityMinutes, EntityName, FilterQuery, HexColor, MAX_CALENDAR_TASKS,
+    MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS, MarkdownText, NudgeRuleKind, OperationId,
+    ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode,
+    ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId, SettingsPatch, TagId, TagName,
+    Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort, TaskStatus,
+    TaskTitle, TemplateId, TimeBlock, TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft,
+    TimeSlotId, TransferApply, TransferError, TransferFormat, TransferPreview, ValidationError,
+    WeekStart, civil_occurrences_in_range, daily_plan_summary, dopamine_menu_task_ids,
+    end_of_day_summary, evaluate_nudges, preview_transfer, select_eat_the_frog, stats_summary,
+    task_jar_candidates, validate_calendar_date_range, validate_owner_lost_mark_limit,
+    validate_preview_matches_apply, validate_reminder_claim_limit, validate_reminder_lease_secs,
+    validate_stats_date_range, validate_timeblock_date_range, weekly_review_summary,
 };
 
 use crate::{
-    AppError, BulkAction, CalendarTasksPage, CatalogSnapshot, CollectedTasks, CommentPatch,
-    CommittedEvent, CommittedMutation, DailyPlanPage, DopamineMenuPage, EatTheFrogPage,
-    EndOfDayPage, EventCatchUp, ExportFormat, MoveTarget, NudgesPage, ProjectDraft, ProjectPatch,
-    ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError,
-    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, StagedFile, StatsPage,
-    SyncState, TagDraft, TagPatch, TaskJarPage, TaskListAsOf, TaskListPage, TaskPatch,
+    AiCredentialBindResult, AiMemoryListPage, AiSessionListPage, AppError, BindAiCredentialRequest,
+    BulkAction, CalendarTasksPage, CatalogSnapshot, ClearAiCredentialRequest,
+    ClearAiSessionRequest, CollectedTasks, CommentPatch, CommittedEvent, CommittedMutation,
+    CreateAiMemoryRequest, CreateAiSessionRequest, DailyPlanPage, DeleteAiMemoryRequest,
+    DeleteAiSessionRequest, DopamineMenuPage, EatTheFrogPage, EndOfDayPage, EventCatchUp,
+    ExportFormat, LinkAiSessionMemoryRequest, ListAiMemoriesRequest, ListAiMessagesRequest,
+    ListAiSessionsRequest, MoveTarget, NudgesPage, ProjectDraft, ProjectPatch,
+    ProposeAiApprovalRequest, RenameAiSessionRequest, ReorderScope, ReplanPastBlocksAction,
+    ReplanPastBlocksPreview, Repository, RepositoryError, SavedFilterDraft, SavedFilterPatch,
+    SectionDraft, SectionPatch, SelectAiMemoriesRequest, SetAiApprovalStatusRequest, StagedFile,
+    StatsPage, SyncState, TagDraft, TagPatch, TaskJarPage, TaskListAsOf, TaskListPage, TaskPatch,
     TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TemporalSettings, TimeBlockPatch,
     TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
-    WeeklyReviewPage,
+    UpdateAiMemoryRequest, UpsertAiMessageRequest, UpsertAiRunStateRequest, WeeklyReviewPage,
 };
 
 /// Cursor page size used when collecting multi-page task reads.
@@ -1286,6 +1292,315 @@ where
             .map_err(AppError::from)
     }
 
+    // ── AI persistence (Wave 3a) ────────────────────────────────────────────
+
+    pub async fn create_ai_session(
+        &self,
+        operation_id: OperationId,
+        request: CreateAiSessionRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        // Fresh ID per attempt; excluded from receipt request bytes so exact retries
+        // replay the original committed resource even when this throwaway differs.
+        self.commit(
+            self.repository
+                .create_ai_session(
+                    operation_id,
+                    AiSessionId::new(),
+                    request.title,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn rename_ai_session(
+        &self,
+        operation_id: OperationId,
+        request: RenameAiSessionRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .rename_ai_session(
+                    operation_id,
+                    request.session_id,
+                    request.title,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn delete_ai_session(
+        &self,
+        operation_id: OperationId,
+        request: DeleteAiSessionRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .delete_ai_session(operation_id, request.session_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn clear_ai_session(
+        &self,
+        operation_id: OperationId,
+        request: ClearAiSessionRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .clear_ai_session(operation_id, request.session_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn get_ai_session(&self, session_id: AiSessionId) -> Result<AiSession, AppError> {
+        self.repository
+            .get_ai_session(session_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn list_ai_sessions(
+        &self,
+        request: ListAiSessionsRequest,
+    ) -> Result<AiSessionListPage, AppError> {
+        let limit = request.validated_limit()?;
+        self.repository
+            .list_ai_sessions(request.cursor, limit)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn upsert_ai_message(
+        &self,
+        operation_id: OperationId,
+        request: UpsertAiMessageRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .upsert_ai_message(
+                    operation_id,
+                    request.message_id,
+                    request.session_id,
+                    request.turn_id,
+                    request.role,
+                    request.status,
+                    request.content,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn list_ai_messages(
+        &self,
+        request: ListAiMessagesRequest,
+    ) -> Result<Vec<AiMessage>, AppError> {
+        let limit = request.validated_limit()?;
+        self.repository
+            .list_ai_messages(request.session_id, request.after_sequence, limit)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn create_ai_memory(
+        &self,
+        operation_id: OperationId,
+        request: CreateAiMemoryRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        // Fresh ID per attempt; excluded from receipt request bytes so exact retries
+        // replay the original committed resource even when this throwaway differs.
+        self.commit(
+            self.repository
+                .create_ai_memory(
+                    operation_id,
+                    AiMemoryId::new(),
+                    request.content,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn update_ai_memory(
+        &self,
+        operation_id: OperationId,
+        request: UpdateAiMemoryRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .update_ai_memory(
+                    operation_id,
+                    request.memory_id,
+                    request.content,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn delete_ai_memory(
+        &self,
+        operation_id: OperationId,
+        request: DeleteAiMemoryRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .delete_ai_memory(operation_id, request.memory_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn link_ai_session_memory(
+        &self,
+        operation_id: OperationId,
+        request: LinkAiSessionMemoryRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .link_ai_session_memory(
+                    operation_id,
+                    request.session_id,
+                    request.memory_id,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn get_ai_memory(&self, memory_id: AiMemoryId) -> Result<AiMemory, AppError> {
+        self.repository
+            .get_ai_memory(memory_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn list_ai_memories(
+        &self,
+        request: ListAiMemoriesRequest,
+    ) -> Result<AiMemoryListPage, AppError> {
+        let limit = request.validated_limit()?;
+        self.repository
+            .list_ai_memories(request.cursor, limit)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn select_ai_memories_for_context(
+        &self,
+        request: SelectAiMemoriesRequest,
+    ) -> Result<Vec<AiMemory>, AppError> {
+        let limit = request.validated_limit()?;
+        self.repository
+            .select_ai_memories_for_context(request.session_id, limit)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn propose_ai_approval(
+        &self,
+        operation_id: OperationId,
+        request: ProposeAiApprovalRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .propose_ai_approval(
+                    operation_id,
+                    request.approval_id,
+                    request.session_id,
+                    request.turn_id,
+                    request.run_id,
+                    request.generation,
+                    request.tool_name,
+                    request.arguments_json,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn set_ai_approval_status(
+        &self,
+        operation_id: OperationId,
+        request: SetAiApprovalStatusRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .set_ai_approval_status(
+                    operation_id,
+                    request.approval_id,
+                    request.status,
+                    request.dispatch_operation_id.map(|id| id.to_string()),
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn get_ai_approval(
+        &self,
+        approval_id: AiApprovalId,
+    ) -> Result<AiToolApproval, AppError> {
+        self.repository
+            .get_ai_approval(approval_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn upsert_ai_run_state(
+        &self,
+        operation_id: OperationId,
+        request: UpsertAiRunStateRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .upsert_ai_run_state(operation_id, request.state, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn get_ai_run_state(&self, run_id: AiRunId) -> Result<AiRunState, AppError> {
+        self.repository
+            .get_ai_run_state(run_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn bind_ai_credential(
+        &self,
+        operation_id: OperationId,
+        request: BindAiCredentialRequest,
+    ) -> Result<AiCredentialBindResult, AppError> {
+        let result = self
+            .repository
+            .bind_ai_credential(
+                operation_id,
+                request.target,
+                request.kind,
+                request.secret,
+                Timestamp::now(),
+            )
+            .await
+            .map_err(AppError::from)?;
+        if result.mutation.newly_committed {
+            self.events.publish(result.mutation.event.clone());
+        }
+        Ok(result)
+    }
+
+    pub async fn clear_ai_credential(
+        &self,
+        operation_id: OperationId,
+        request: ClearAiCredentialRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .clear_ai_credential_binding(operation_id, request.target, Timestamp::now())
+                .await,
+        )
+    }
+
     /// Serialize transferable tasks into a private staged file using bounded storage pages.
     pub async fn export_tasks(&self, format: ExportFormat) -> Result<StagedFile, AppError> {
         self.repository
@@ -2297,6 +2612,207 @@ mod tests {
                 ))
             })
         }
+        fn create_ai_session(
+            &self,
+            _: OperationId,
+            _: AiSessionId,
+            _: String,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("create_ai_session")
+        }
+        fn rename_ai_session(
+            &self,
+            _: OperationId,
+            _: AiSessionId,
+            _: String,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("rename_ai_session")
+        }
+        fn delete_ai_session(
+            &self,
+            _: OperationId,
+            _: AiSessionId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("delete_ai_session")
+        }
+        fn clear_ai_session(
+            &self,
+            _: OperationId,
+            _: AiSessionId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("clear_ai_session")
+        }
+        fn get_ai_session(&self, _: AiSessionId) -> crate::RepositoryFuture<'_, AiSession> {
+            self.calls.lock().unwrap().push("get_ai_session");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn list_ai_sessions(
+            &self,
+            _: Option<crate::AiSessionCursor>,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, AiSessionListPage> {
+            self.calls.lock().unwrap().push("list_ai_sessions");
+            Box::pin(async {
+                Ok(AiSessionListPage {
+                    sessions: Vec::new(),
+                    next_cursor: None,
+                })
+            })
+        }
+        fn upsert_ai_message(
+            &self,
+            _: OperationId,
+            _: junban_domain::AiMessageId,
+            _: AiSessionId,
+            _: junban_domain::AiTurnId,
+            _: junban_domain::AiMessageRole,
+            _: junban_domain::AiMessageStatus,
+            _: junban_domain::AiMessageContent,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("upsert_ai_message")
+        }
+        fn list_ai_messages(
+            &self,
+            _: AiSessionId,
+            _: Option<u32>,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, Vec<AiMessage>> {
+            self.calls.lock().unwrap().push("list_ai_messages");
+            Box::pin(async { Ok(Vec::new()) })
+        }
+        fn create_ai_memory(
+            &self,
+            _: OperationId,
+            _: AiMemoryId,
+            _: String,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("create_ai_memory")
+        }
+        fn update_ai_memory(
+            &self,
+            _: OperationId,
+            _: AiMemoryId,
+            _: String,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("update_ai_memory")
+        }
+        fn delete_ai_memory(
+            &self,
+            _: OperationId,
+            _: AiMemoryId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("delete_ai_memory")
+        }
+        fn link_ai_session_memory(
+            &self,
+            _: OperationId,
+            _: AiSessionId,
+            _: AiMemoryId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("link_ai_session_memory")
+        }
+        fn get_ai_memory(&self, _: AiMemoryId) -> crate::RepositoryFuture<'_, AiMemory> {
+            self.calls.lock().unwrap().push("get_ai_memory");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn list_ai_memories(
+            &self,
+            _: Option<crate::AiMemoryCursor>,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, AiMemoryListPage> {
+            self.calls.lock().unwrap().push("list_ai_memories");
+            Box::pin(async {
+                Ok(AiMemoryListPage {
+                    memories: Vec::new(),
+                    next_cursor: None,
+                })
+            })
+        }
+        fn select_ai_memories_for_context(
+            &self,
+            _: Option<AiSessionId>,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, Vec<AiMemory>> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push("select_ai_memories_for_context");
+            Box::pin(async { Ok(Vec::new()) })
+        }
+        fn propose_ai_approval(
+            &self,
+            _: OperationId,
+            _: AiApprovalId,
+            _: AiSessionId,
+            _: junban_domain::AiTurnId,
+            _: AiRunId,
+            _: u64,
+            _: String,
+            _: String,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("propose_ai_approval")
+        }
+        fn set_ai_approval_status(
+            &self,
+            _: OperationId,
+            _: AiApprovalId,
+            _: junban_domain::AiApprovalStatus,
+            _: Option<String>,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("set_ai_approval_status")
+        }
+        fn get_ai_approval(&self, _: AiApprovalId) -> crate::RepositoryFuture<'_, AiToolApproval> {
+            self.calls.lock().unwrap().push("get_ai_approval");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn upsert_ai_run_state(
+            &self,
+            _: OperationId,
+            _: AiRunState,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("upsert_ai_run_state")
+        }
+        fn get_ai_run_state(&self, _: AiRunId) -> crate::RepositoryFuture<'_, AiRunState> {
+            self.calls.lock().unwrap().push("get_ai_run_state");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn bind_ai_credential(
+            &self,
+            _: OperationId,
+            _: crate::AiCredentialBindingTarget,
+            _: junban_domain::AiSecretKind,
+            _: Option<crate::AiSecretBytes>,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, AiCredentialBindResult> {
+            self.calls.lock().unwrap().push("bind_ai_credential");
+            let mutation = self.result.lock().unwrap().clone();
+            Box::pin(async move {
+                mutation.map(|mutation| AiCredentialBindResult {
+                    mutation,
+                    credential_id: None,
+                })
+            })
+        }
+        fn clear_ai_credential_binding(
+            &self,
+            _: OperationId,
+            _: crate::AiCredentialBindingTarget,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("clear_ai_credential_binding")
+        }
     }
 
     #[derive(Default)]
@@ -2811,6 +3327,76 @@ mod tests {
                 .await,
             Err(AppError::ResultLimitExceeded)
         );
+    }
+
+    #[tokio::test]
+    async fn ai_session_create_publishes_once_and_replay_does_not() {
+        let repository = Arc::new(FakeRepository::new(Ok(mutation_with_flag(true))));
+        let sink = Arc::new(RecordingSink::default());
+        let service = JunbanService::new(repository.clone(), Arc::clone(&sink));
+        let first = service
+            .create_ai_session(
+                operation_id(),
+                CreateAiSessionRequest {
+                    title: "Planning".into(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(first.newly_committed);
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+
+        *repository.result.lock().unwrap() = Ok(mutation_with_flag(false));
+        let replay = service
+            .create_ai_session(
+                operation_id(),
+                CreateAiSessionRequest {
+                    title: "Planning".into(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!replay.newly_committed);
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+        assert_eq!(
+            repository.calls.lock().unwrap().as_slice(),
+            ["create_ai_session", "create_ai_session"]
+        );
+    }
+
+    #[tokio::test]
+    async fn ai_credential_bind_publishes_settings_event_once_on_fresh_commit() {
+        let repository = Arc::new(FakeRepository::new(Ok(mutation_with_flag(true))));
+        let sink = Arc::new(RecordingSink::default());
+        let service = JunbanService::new(repository.clone(), Arc::clone(&sink));
+        let result = service
+            .bind_ai_credential(
+                operation_id(),
+                BindAiCredentialRequest {
+                    target: crate::AiCredentialBindingTarget::AiProvider,
+                    kind: junban_domain::AiSecretKind::ApiKey,
+                    secret: Some(crate::AiSecretBytes::new("unit-test-secret-marker").unwrap()),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(result.mutation.newly_committed);
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+
+        *repository.result.lock().unwrap() = Ok(mutation_with_flag(false));
+        let replay = service
+            .bind_ai_credential(
+                operation_id(),
+                BindAiCredentialRequest {
+                    target: crate::AiCredentialBindingTarget::AiProvider,
+                    kind: junban_domain::AiSecretKind::ApiKey,
+                    secret: Some(crate::AiSecretBytes::new("unit-test-secret-marker").unwrap()),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!replay.mutation.newly_committed);
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
     }
 
     fn date(year: i16, month: i8, day: i8) -> Date {

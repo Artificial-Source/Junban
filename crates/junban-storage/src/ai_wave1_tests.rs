@@ -7,7 +7,9 @@ use std::{
 };
 
 use jiff::{Timestamp, ToSpan};
-use junban_app::{EventType, Repository, RepositoryError, StagedFile};
+use junban_app::{
+    AiCredentialBindingTarget, AiSecretBytes, EventType, Repository, RepositoryError, StagedFile,
+};
 use junban_domain::{
     AI_SECRETS_FILE, AI_SESSIONS_PER_PROFILE_MAX, AiApprovalId, AiApprovalStatus, AiMemoryId,
     AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus, AiProviderPreset, AiRunId,
@@ -19,9 +21,9 @@ use uuid::Uuid;
 
 use crate::ProfileOwner;
 use crate::ai_ops;
-use crate::ai_secrets::{AiSecretBytes, AiSecretStore};
+use crate::ai_secrets::AiSecretStore;
 use crate::migration::{self, CURRENT_SCHEMA_VERSION};
-use crate::settings_ops::{self, AiCredentialBindingTarget};
+use crate::settings_ops;
 
 fn temp_profile() -> PathBuf {
     let path = std::env::temp_dir().join(format!(
@@ -1795,7 +1797,7 @@ fn secret_binding_is_receipt_first_and_reconciles_orphans() {
     );
 
     let store = AiSecretStore::load(&profile).unwrap();
-    assert!(store.get_secret(&first_id).is_some());
+    assert!(store.get_secret(&first_id).unwrap().is_some());
     let listed = serde_json::to_string(&store.list_metadata()).unwrap();
     assert!(!listed.contains("fixture-provider-material"));
 
@@ -1811,8 +1813,8 @@ fn secret_binding_is_receipt_first_and_reconciles_orphans() {
     .unwrap();
     let second_id = second_id.unwrap();
     let store = AiSecretStore::load(&profile).unwrap();
-    assert!(store.get_secret(&first_id).is_none());
-    assert!(store.get_secret(&second_id).is_some());
+    assert!(store.get_secret(&first_id).unwrap().is_none());
+    assert!(store.get_secret(&second_id).unwrap().is_some());
 
     let orphan = store
         .publish(
@@ -1829,7 +1831,7 @@ fn secret_binding_is_receipt_first_and_reconciles_orphans() {
         ))
         .unwrap();
     assert_eq!(removed, 1);
-    assert!(store.get_secret(&orphan).is_none());
+    assert!(store.get_secret(&orphan).unwrap().is_none());
 
     settings_ops::clear_ai_credential_binding(
         &mut connection,
@@ -1850,6 +1852,7 @@ fn secret_binding_is_receipt_first_and_reconciles_orphans() {
         AiSecretStore::load(&profile)
             .unwrap()
             .get_secret(&second_id)
+            .unwrap()
             .is_none()
     );
 
@@ -1969,6 +1972,7 @@ async fn complete_backup_excludes_secrets_and_restore_clears_bindings() {
         AiSecretStore::load(&profile)
             .unwrap()
             .get_secret(&cred)
+            .unwrap()
             .is_some()
     );
 
@@ -2005,6 +2009,7 @@ async fn complete_backup_excludes_secrets_and_restore_clears_bindings() {
         AiSecretStore::load(&profile)
             .unwrap()
             .get_secret(&cred)
+            .unwrap()
             .is_none()
     );
     drop(owner);
@@ -2043,6 +2048,7 @@ async fn failed_restore_does_not_touch_secret_file() {
         AiSecretStore::load(&profile)
             .unwrap()
             .get_secret(&cred)
+            .unwrap()
             .is_some()
     );
     drop(repo);

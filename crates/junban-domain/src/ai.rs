@@ -17,6 +17,10 @@ use crate::ValidationError;
 pub const AI_SESSION_PAGE_MAX: u32 = 100;
 /// Messages returned per page.
 pub const AI_MESSAGE_PAGE_MAX: u32 = 100;
+/// Memories returned per page.
+pub const AI_MEMORY_PAGE_MAX: u32 = 100;
+/// Explicit/session-linked memories considered for one run context pack.
+pub const AI_CONTEXT_MEMORIES_MAX: u32 = 50;
 /// Sessions retained per profile.
 pub const AI_SESSIONS_PER_PROFILE_MAX: u32 = 500;
 /// Messages retained per session.

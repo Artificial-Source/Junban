@@ -1,9 +1,9 @@
 # Phase 6 review ledger
 
 - **Date:** 2026-08-03
-- **Current gate:** Wave 1 persistence and private-secret authority
-- **Reviewed base:** `059b671` plus the focused correction delta recorded here
-- **Gate result:** approved after `P6-DB-001`–`P6-DB-007` were fixed
+- **Current gate:** Wave 3a application/storage AI authority
+- **Reviewed base:** Wave 1 at `059b671`, then the Wave 3a delta from `ddafbe5`
+- **Gate result:** Wave 1 approved after `P6-DB-001`–`P6-DB-007`; Wave 3a approved after `P6-DB-008`–`P6-DB-009`
 
 ## Wave 1 database gate
 
@@ -17,7 +17,16 @@
 | `P6-DB-006` | Medium   | fixed  | Tests that use global restore fault instrumentation share one lock. Default-parallel, explicit multi-thread, and isolated fault-path runs pass without cross-test state consumption.                                                                                                                                                                                                                                                                                                                 |
 | `P6-DB-007` | Medium   | fixed  | Schema v6 now includes the in-place partial `idx_ai_run_state_approval` index. The exact terminal-approval restore query plan must `SEARCH` this index rather than scan every run for every historical approval. Fresh and v5→v6 migration regressions pass; no schema v7 or compatibility path was added.                                                                                                                                                                                           |
 
-## Validation used by the gate
+## Wave 3a database gate
+
+| ID          | Severity | Status | Resolution and focused regression                                                                                                                                                                                                                                                                                           |
+| ----------- | -------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `P6-DB-008` | High     | fixed  | Session and memory create requests contain only caller input. `JunbanService` generates primary IDs, and canonical receipt requests exclude them. Reopen regressions prove exact retries return the original committed resource ID with one row and no second event; changed title/content returns an idempotency mismatch. |
+| `P6-DB-009` | Medium   | fixed  | The public unchecked secret constructor was removed. Secret file parse, retrieval, and publication all re-admit material through the bounded, control-free validator with static non-material-bearing errors. Invalid and corrupted private material fails closed without entering durable state or diagnostics.            |
+
+The exact-delta recheck approved both findings and found no regression in `P6-DB-001`–`P6-DB-007`.
+
+## Validation used by the gates
 
 ```text
 cargo fmt --all -- --check
@@ -31,4 +40,4 @@ cargo deny check
 git diff --check
 ```
 
-The final focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The accepted storage suite contains 160 passing tests. No material Wave 1 persistence or secret-boundary finding remains.
+The final Wave 1 focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The Wave 3a gate additionally ran `cargo test --locked -p junban-app -p junban-storage --all-targets` (23 app and 168 storage tests), both crates' all-target/all-feature clippy with denied warnings, and downstream server/CLI/MCP checks. No material Wave 1 or Wave 3a persistence/secret-boundary finding remains.

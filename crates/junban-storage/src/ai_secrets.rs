@@ -13,9 +13,10 @@ use std::{
 
 use hmac::{Hmac, Mac};
 use jiff::Timestamp;
+use junban_app::AiSecretBytes;
 use junban_domain::{
-    AI_SECRET_BYTES_MAX, AI_SECRETS_FILE, AI_SECRETS_FILE_VERSION, AI_SECRETS_MAX, AiCredentialId,
-    AiSecretKind, AiSecretMetadata,
+    AI_SECRETS_FILE, AI_SECRETS_FILE_VERSION, AI_SECRETS_MAX, AiCredentialId, AiSecretKind,
+    AiSecretMetadata,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -25,42 +26,6 @@ use crate::atomic_replace_private_file;
 const VERIFICATION_KEY_BYTES: usize = 32;
 const VERIFICATION_KEY_HEX_BYTES: usize = VERIFICATION_KEY_BYTES * 2;
 const RECEIPT_VERIFIER_DOMAIN: &[u8] = b"junban-ai-secret-receipt-v1\0";
-
-/// Opaque secret material. Never implements Serialize or content-bearing Debug.
-#[derive(Clone)]
-pub struct AiSecretBytes(String);
-
-impl AiSecretBytes {
-    pub fn new(value: impl Into<String>) -> Result<Self, AiSecretStoreError> {
-        let value = value.into();
-        if value.is_empty() {
-            return Err(AiSecretStoreError::Invalid("secret must not be empty"));
-        }
-        if value.len() > AI_SECRET_BYTES_MAX {
-            return Err(AiSecretStoreError::Invalid(
-                "secret exceeds the 8 KiB per-entry ceiling",
-            ));
-        }
-        if value.chars().any(|ch| ch.is_control()) {
-            return Err(AiSecretStoreError::Invalid(
-                "secret must not contain control characters",
-            ));
-        }
-        Ok(Self(value))
-    }
-
-    /// Borrow the raw secret for an in-memory provider request only.
-    #[must_use]
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Debug for AiSecretBytes {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("AiSecretBytes([redacted])")
-    }
-}
 
 /// Internal durable record. The `secret` field is never re-exported.
 #[derive(Clone, Serialize, Deserialize)]
@@ -193,29 +158,38 @@ impl AiSecretStore {
     }
 
     /// Resolve raw bytes only when the confirmed binding ID is present.
-    pub fn get_secret(&self, id: &AiCredentialId) -> Option<AiSecretBytes> {
-        self.secrets
-            .read()
-            .expect("ai secrets poisoned")
-            .get(&id.to_string())
-            .map(|stored| AiSecretBytes(stored.secret.clone()))
+    ///
+    /// Reconstruction always re-admits through [`AiSecretBytes::new`]. Corrupted
+    /// durable material fails closed without leaking bytes into the error path.
+    pub fn get_secret(
+        &self,
+        id: &AiCredentialId,
+    ) -> Result<Option<AiSecretBytes>, AiSecretStoreError> {
+        let guard = self.secrets.read().expect("ai secrets poisoned");
+        let Some(stored) = guard.get(&id.to_string()) else {
+            return Ok(None);
+        };
+        Ok(Some(admit_secret_bytes(stored.secret.clone())?))
     }
 
     /// Atomically publish a new unreferenced secret and return its stable ID.
     ///
     /// Does not modify settings. A failed publication leaves the prior file intact.
+    /// Defense-in-depth: revalidates material immediately before durable replace.
     pub fn publish(
         &self,
         kind: AiSecretKind,
         secret: AiSecretBytes,
         now: Timestamp,
     ) -> Result<AiCredentialId, AiSecretStoreError> {
+        // Re-admit so no unchecked path can persist empty/oversized/control material.
+        let secret = admit_secret_bytes(secret.expose().to_owned())?;
         let id = AiCredentialId::new();
         let record = StoredAiSecret {
             id: id.to_string(),
             kind,
             updated_at: now,
-            secret: secret.0,
+            secret: secret.expose().to_owned(),
         };
         let mut guard = self.secrets.write().expect("ai secrets poisoned");
         if guard.len() >= AI_SECRETS_MAX {
@@ -347,6 +321,23 @@ impl fmt::Display for AiSecretStoreError {
 
 impl std::error::Error for AiSecretStoreError {}
 
+/// Re-admit durable or in-flight secret material through the public validator.
+/// Error messages never include secret bytes.
+fn admit_secret_bytes(value: String) -> Result<AiSecretBytes, AiSecretStoreError> {
+    AiSecretBytes::new(value).map_err(|error| match error {
+        junban_domain::ValidationError::Empty { .. } => {
+            AiSecretStoreError::Invalid("ai secret value must not be empty")
+        }
+        junban_domain::ValidationError::TooLong { .. } => {
+            AiSecretStoreError::Invalid("ai secret value exceeds the 8 KiB ceiling")
+        }
+        junban_domain::ValidationError::Invalid { .. } => {
+            AiSecretStoreError::Invalid("ai secret value must not contain control characters")
+        }
+        _ => AiSecretStoreError::Invalid("ai secret value is invalid"),
+    })
+}
+
 fn parse_secrets_document(
     data: &[u8],
 ) -> Result<(String, BTreeMap<String, StoredAiSecret>), String> {
@@ -374,15 +365,22 @@ fn parse_secrets_document(
     let mut map = BTreeMap::new();
     for secret in document.secrets {
         AiCredentialId::parse(&secret.id).map_err(|_| "ai secret id is not a UUID".to_owned())?;
-        if secret.secret.is_empty() {
-            return Err("ai secret value must not be empty".to_owned());
-        }
-        if secret.secret.len() > AI_SECRET_BYTES_MAX {
-            return Err("ai secret value exceeds the 8 KiB ceiling".to_owned());
-        }
-        if secret.secret.chars().any(|ch| ch.is_control()) {
-            return Err("ai secret value must not contain control characters".to_owned());
-        }
+        // File parsing already rejects bad material; still go through AiSecretBytes::new
+        // so load reconstruction shares one admission authority.
+        let admitted = AiSecretBytes::new(secret.secret.clone()).map_err(|error| match error {
+            junban_domain::ValidationError::Empty { .. } => {
+                "ai secret value must not be empty".to_owned()
+            }
+            junban_domain::ValidationError::TooLong { .. } => {
+                "ai secret value exceeds the 8 KiB ceiling".to_owned()
+            }
+            junban_domain::ValidationError::Invalid { .. } => {
+                "ai secret value must not contain control characters".to_owned()
+            }
+            _ => "ai secret value is invalid".to_owned(),
+        })?;
+        // Keep durable shape; admitted bytes are identical after validation.
+        let _ = admitted;
         if map.insert(secret.id.clone(), secret).is_some() {
             return Err("ai-secrets.json contains duplicate ids".to_owned());
         }
@@ -419,6 +417,8 @@ fn hex_encode(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    use junban_domain::AI_SECRET_BYTES_MAX;
 
     fn temp_profile() -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -559,14 +559,14 @@ mod tests {
         assert!(!meta_json.contains("fixture-secret-material"));
         assert!(!meta_json.contains("secret"));
 
-        let got = store.get_secret(&id).unwrap();
+        let got = store.get_secret(&id).unwrap().unwrap();
         assert_eq!(got.expose(), "fixture-secret-material");
         assert_eq!(format!("{got:?}"), "AiSecretBytes([redacted])");
         assert!(!format!("{store:?}").contains("fixture-secret-material"));
 
         store.delete(&id).unwrap();
         store.delete(&id).unwrap();
-        assert!(store.get_secret(&id).is_none());
+        assert!(store.get_secret(&id).unwrap().is_none());
         assert_eq!(store.list_metadata().len(), 0);
 
         // Durable file is owner-private on Unix.
@@ -605,7 +605,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(error, AiSecretStoreError::Io(_)));
         assert_eq!(store.len_for_test(), 1);
-        assert!(store.get_secret(&first).is_some());
+        assert!(store.get_secret(&first).unwrap().is_some());
 
         fs::remove_dir(&path).unwrap();
         fs::remove_dir_all(profile).unwrap();
@@ -649,8 +649,8 @@ mod tests {
 
         let removed = store.reconcile_unreferenced(&[keep]).unwrap();
         assert_eq!(removed, 1);
-        assert!(store.get_secret(&keep).is_some());
-        assert!(store.get_secret(&drop_id).is_none());
+        assert!(store.get_secret(&keep).unwrap().is_some());
+        assert!(store.get_secret(&drop_id).unwrap().is_none());
 
         fs::remove_dir_all(profile).unwrap();
     }
@@ -660,5 +660,70 @@ mod tests {
         assert!(AiSecretBytes::new("").is_err());
         assert!(AiSecretBytes::new("x".repeat(AI_SECRET_BYTES_MAX + 1)).is_err());
         assert!(AiSecretBytes::new("has\nnewline").is_err());
+    }
+
+    #[test]
+    fn publish_and_load_reject_empty_oversize_control_and_corrupted_without_leaking() {
+        let profile = temp_profile();
+        fs::create_dir_all(&profile).unwrap();
+        let store = AiSecretStore::load_or_create(&profile).unwrap();
+        let now = Timestamp::from_second(1_700_000_000).unwrap();
+
+        // No public constructor bypass: only AiSecretBytes::new admits material, and
+        // publish revalidates. Construct invalid candidates via raw JSON only.
+        let test_key = "00".repeat(VERIFICATION_KEY_BYTES);
+        let path = profile.join(AI_SECRETS_FILE);
+
+        let marker = "corrupt-secret-marker-must-not-leak";
+        for body in [
+            format!(
+                r#"{{"version":1,"verification_key":"{test_key}","secrets":[{{"id":"{}","kind":"api_key","updated_at":"2026-01-01T00:00:00Z","secret":""}}]}}"#,
+                AiCredentialId::new()
+            ),
+            format!(
+                r#"{{"version":1,"verification_key":"{test_key}","secrets":[{{"id":"{}","kind":"api_key","updated_at":"2026-01-01T00:00:00Z","secret":"{}"}}]}}"#,
+                AiCredentialId::new(),
+                "x".repeat(AI_SECRET_BYTES_MAX + 1)
+            ),
+            format!(
+                r#"{{"version":1,"verification_key":"{test_key}","secrets":[{{"id":"{}","kind":"api_key","updated_at":"2026-01-01T00:00:00Z","secret":"has\ncontrol"}}]}}"#,
+                AiCredentialId::new()
+            ),
+            format!(
+                r#"{{"version":1,"verification_key":"{test_key}","secrets":[{{"id":"{}","kind":"api_key","updated_at":"2026-01-01T00:00:00Z","secret":"{marker}","extra":true}}]}}"#,
+                AiCredentialId::new()
+            ),
+        ] {
+            fs::write(&path, &body).unwrap();
+            let error = AiSecretStore::load(&profile).unwrap_err();
+            let rendered = error.to_string();
+            assert!(
+                !rendered.contains(marker),
+                "load error leaked secret material"
+            );
+            assert!(!rendered.contains("has\ncontrol"));
+            assert!(!format!("{error:?}").contains(marker));
+        }
+
+        // Valid publish still works and never surfaces material in errors/debug.
+        let id = store
+            .publish(AiSecretKind::ApiKey, sample_secret(), now)
+            .unwrap();
+        let got = store.get_secret(&id).unwrap().unwrap();
+        assert_eq!(got.expose(), "fixture-secret-material");
+        assert!(!format!("{got:?}").contains("fixture-secret-material"));
+
+        // In-memory corruption fails closed on get without leaking bytes.
+        {
+            let mut guard = store.secrets.write().expect("ai secrets poisoned");
+            let entry = guard.get_mut(&id.to_string()).unwrap();
+            entry.secret = format!("{marker}\x00");
+        }
+        let error = store.get_secret(&id).unwrap_err();
+        let rendered = error.to_string();
+        assert!(!rendered.contains(marker));
+        assert!(!format!("{error:?}").contains(marker));
+
+        fs::remove_dir_all(profile).unwrap();
     }
 }

@@ -6,28 +6,19 @@ use std::path::Path;
 
 use jiff::Timestamp;
 use junban_app::{
-    AffectedIds, AppSettings, CommittedMutation, EventType, RepositoryError, ResourceRef,
-    ResyncScope, SettingsPatch,
+    AffectedIds, AiCredentialBindingTarget, AiSecretBytes, AppSettings, CommittedMutation,
+    EventType, RepositoryError, ResourceRef, ResyncScope, SettingsPatch,
 };
 use junban_domain::{AiCredentialId, AiSecretKind, OperationId};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
-use crate::ai_secrets::{AiSecretBytes, AiSecretStore, AiSecretStoreError};
+use crate::ai_secrets::{AiSecretStore, AiSecretStoreError};
 use crate::helpers::validation;
 use crate::rows::storage_error;
 use crate::tx::{MutationEffect, canonical_json, mutate};
 
 const SETTINGS_KEY: &str = "settings_json";
-
-/// Which confirmed settings field holds an AI credential binding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum AiCredentialBindingTarget {
-    AiProvider,
-    VoiceStt,
-    VoiceTts,
-}
 
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]

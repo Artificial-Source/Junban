@@ -4,20 +4,25 @@ use std::{future::Future, pin::Pin};
 
 use jiff::Timestamp;
 use junban_domain::{
-    AppSettings, ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId,
-    RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
-    ReminderOccurrence, SavedFilterId, SectionId, SettingsPatch, TagId, Task, TaskActivity,
-    TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId,
-    TimeSlotDraft, TimeSlotId, TransferApply, TransferFormat, TransferPreview,
+    AiApprovalId, AiApprovalStatus, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiMessageId,
+    AiMessageRole, AiMessageStatus, AiRunId, AiRunState, AiSecretKind, AiSession, AiSessionId,
+    AiToolApproval, AiTurnId, AppSettings, ClaimedReminder, Comment, CommentBody, CommentId,
+    OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
+    ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId,
+    SettingsPatch, TagId, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation,
+    TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId, TransferApply,
+    TransferFormat, TransferPreview,
 };
 
 use crate::{
-    BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, ExportFormat,
-    MoveTarget, ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction,
-    ReplanPastBlocksPreview, RepositoryError, SavedFilterDraft, SavedFilterPatch, SectionDraft,
-    SectionPatch, StagedFile, TagDraft, TagPatch, TaskListAsOf, TaskListPage, TaskPatch,
-    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TimeBlockPatch,
-    TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
+    AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
+    AiSecretBytes, AiSessionCursor, AiSessionListPage, BulkAction, CatalogSnapshot, CommentPatch,
+    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, ProjectDraft, ProjectPatch,
+    ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview, RepositoryError,
+    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, StagedFile, TagDraft, TagPatch,
+    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
+    TimeblockingRangeQuery,
 };
 
 pub type RepositoryFuture<'a, T> =
@@ -537,4 +542,159 @@ pub trait Repository: Send + Sync + 'static {
 
     /// Apply a previously validated and epoch-rotated SQLite candidate.
     fn restore_backup(&self, candidate: StagedFile) -> RepositoryFuture<'_, ()>;
+
+    // ── AI persistence (Wave 3a) ────────────────────────────────────────────
+
+    fn create_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        title: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn rename_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        title: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn delete_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn clear_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn get_ai_session(&self, session_id: AiSessionId) -> RepositoryFuture<'_, AiSession>;
+
+    fn list_ai_sessions(
+        &self,
+        cursor: Option<AiSessionCursor>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, AiSessionListPage>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn upsert_ai_message(
+        &self,
+        operation_id: OperationId,
+        message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        role: AiMessageRole,
+        status: AiMessageStatus,
+        content: AiMessageContent,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn list_ai_messages(
+        &self,
+        session_id: AiSessionId,
+        after_sequence: Option<u32>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, Vec<AiMessage>>;
+
+    fn create_ai_memory(
+        &self,
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        content: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn update_ai_memory(
+        &self,
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        content: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn delete_ai_memory(
+        &self,
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn link_ai_session_memory(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        memory_id: AiMemoryId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn get_ai_memory(&self, memory_id: AiMemoryId) -> RepositoryFuture<'_, AiMemory>;
+
+    fn list_ai_memories(
+        &self,
+        cursor: Option<AiMemoryCursor>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, AiMemoryListPage>;
+
+    fn select_ai_memories_for_context(
+        &self,
+        session_id: Option<AiSessionId>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, Vec<AiMemory>>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn propose_ai_approval(
+        &self,
+        operation_id: OperationId,
+        approval_id: AiApprovalId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        tool_name: String,
+        arguments_json: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn set_ai_approval_status(
+        &self,
+        operation_id: OperationId,
+        approval_id: AiApprovalId,
+        status: AiApprovalStatus,
+        dispatch_operation_id: Option<String>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn get_ai_approval(&self, approval_id: AiApprovalId) -> RepositoryFuture<'_, AiToolApproval>;
+
+    fn upsert_ai_run_state(
+        &self,
+        operation_id: OperationId,
+        state: AiRunState,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn get_ai_run_state(&self, run_id: AiRunId) -> RepositoryFuture<'_, AiRunState>;
+
+    fn bind_ai_credential(
+        &self,
+        operation_id: OperationId,
+        target: AiCredentialBindingTarget,
+        kind: AiSecretKind,
+        secret: Option<AiSecretBytes>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, AiCredentialBindResult>;
+
+    fn clear_ai_credential_binding(
+        &self,
+        operation_id: OperationId,
+        target: AiCredentialBindingTarget,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
 }

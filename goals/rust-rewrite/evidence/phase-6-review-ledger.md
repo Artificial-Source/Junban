@@ -1,9 +1,9 @@
 # Phase 6 review ledger
 
 - **Date:** 2026-08-03
-- **Current gate:** Wave 3a application/storage AI authority
-- **Reviewed base:** Wave 1 at `059b671`, then the Wave 3a delta from `ddafbe5`
-- **Gate result:** Wave 1 approved after `P6-DB-001`–`P6-DB-007`; Wave 3a approved after `P6-DB-008`–`P6-DB-009`
+- **Current gate:** Wave 3b lazy runtime and lifecycle authority
+- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, then the Wave 3b delta from `542ef17`
+- **Gate result:** persistence gates approved after `P6-DB-001`–`P6-DB-009`; lifecycle gate approved after `P6-ARCH-001`–`P6-ARCH-003`
 
 ## Wave 1 database gate
 
@@ -26,6 +26,16 @@
 
 The exact-delta recheck approved both findings and found no regression in `P6-DB-001`–`P6-DB-007`.
 
+## Wave 3b architecture gate
+
+| ID            | Severity | Status | Resolution and focused regression                                                                                                                                                                                                                                                                                                                                                                |
+| ------------- | -------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `P6-ARCH-001` | High     | fixed  | Provider work is reachable only through a non-cloneable admitted guard whose chat/model-discovery futures borrow it for their full lifetime. Raw runtime, client, cancellation token, and `RunCancel` authority cannot escape. Drop removes runtime authority before unregistering, so restore/reconfiguration drain observes all work. Compile-fail and loopback cancellation regressions pass. |
+| `P6-ARCH-002` | High     | fixed  | Hosted and in-process owner shutdown synchronously close AI admission and cancel runs before general shutdown/Axum drain. Explicit and Drop cleanup retain `ProfileOwner` until guards and reminders drain; cancelled/no-runtime cleanup deliberately retains lock-owning values fail-closed. Lock-retention and process SIGINT/SIGTERM regressions pass.                                        |
+| `P6-ARCH-003` | Medium   | fixed  | One synchronized `Accepting → Draining → Drained` lifecycle owns admission and reconfiguration. A timeout remains `Draining`; resume is impossible until active guards leave and the prior runtime is explicitly dropped. Timeout/drop/resume regressions pass.                                                                                                                                  |
+
+The exact-delta recheck approved all three architecture findings. Recovery mode still owns no AI runtime, startup constructs no client/runtime, and restore drains AI before stream/request/reminder cutover.
+
 ## Validation used by the gates
 
 ```text
@@ -40,4 +50,4 @@ cargo deny check
 git diff --check
 ```
 
-The final Wave 1 focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The Wave 3a gate additionally ran `cargo test --locked -p junban-app -p junban-storage --all-targets` (23 app and 168 storage tests), both crates' all-target/all-feature clippy with denied warnings, and downstream server/CLI/MCP checks. No material Wave 1 or Wave 3a persistence/secret-boundary finding remains.
+The final Wave 1 focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The Wave 3a gate additionally ran `cargo test --locked -p junban-app -p junban-storage --all-targets` (23 app and 168 storage tests), both crates' all-target/all-feature clippy with denied warnings, and downstream server/CLI/MCP checks. The Wave 3b gate ran all `junban-ai` and `junban-server` targets/features, compile-fail doctests, focused owner lock-retention and restore/shutdown tests, workspace clippy/check, audit, and deny. No material reviewed persistence, secret, or lifecycle finding remains.

@@ -1,5 +1,6 @@
 //! Axum router, HTTP contract, authentication, static serving, and SSE delivery.
 
+mod ai_runtime;
 mod authz;
 mod credentials;
 mod cursor;
@@ -78,6 +79,7 @@ use crate::routes::{
 };
 use crate::sse::{AppService, SseConnectionPermit};
 
+pub use crate::ai_runtime::{AiRunGuard, AiRuntimeError, AiRuntimeSupervisor, MAX_ACTIVE_AI_RUNS};
 pub use crate::authz::{
     AutomationScope, ClassifiedRoute, Principal as RequestPrincipal, RouteAccess, classified_routes,
 };
@@ -105,6 +107,8 @@ pub const MAX_BACKUP_BODY_BYTES: usize = junban_domain::MAX_BACKUP_PAYLOAD_BYTES
     + junban_domain::BACKUP_HEADER_LEN;
 /// Bounded drain deadline for restore under the maintenance barrier.
 pub const RESTORE_DRAIN_DEADLINE: Duration = Duration::from_secs(5);
+/// Bounded AI cancel/drain deadline during process shutdown.
+pub const AI_SHUTDOWN_DRAIN_DEADLINE: Duration = Duration::from_secs(5);
 const AUTH_ATTEMPTS: usize = 8;
 const AUTH_WINDOW: Duration = Duration::from_secs(30);
 pub const TOKEN_FILE: &str = "access-token";
@@ -317,6 +321,8 @@ pub struct ServerState {
     pub(crate) active_forwarders: Arc<AtomicUsize>,
     reminder_coordinator: Arc<Mutex<Option<RunningReminderCoordinator>>>,
     reminder_coordinator_stopped: Arc<AtomicBool>,
+    /// Lazy AI provider runtime + live-run registry (normal owner only).
+    ai_runtime: Arc<AiRuntimeSupervisor>,
     /// Random per-process instance id shared with runtime metadata and health.
     instance_id: Arc<str>,
 }
@@ -396,6 +402,7 @@ impl ServerState {
             active_forwarders: Arc::new(AtomicUsize::new(0)),
             reminder_coordinator: Arc::new(Mutex::new(None)),
             reminder_coordinator_stopped: Arc::new(AtomicBool::new(false)),
+            ai_runtime: AiRuntimeSupervisor::new(),
             instance_id: Arc::from(generate_instance_id()),
         })
     }
@@ -410,6 +417,18 @@ impl ServerState {
     #[must_use]
     pub fn maintenance(&self) -> &MaintenanceGate {
         self.maintenance.as_ref()
+    }
+
+    /// Lazy AI runtime supervisor owned by the normal profile owner only.
+    #[must_use]
+    pub fn ai_runtime(&self) -> &Arc<AiRuntimeSupervisor> {
+        &self.ai_runtime
+    }
+
+    /// Observation helper: provider HTTP client construction count at/after startup.
+    #[must_use]
+    pub fn ai_provider_client_construct_calls(&self) -> usize {
+        self.ai_runtime.provider_client_construct_calls()
     }
 
     /// Cancelled when the process begins graceful shutdown.
@@ -625,6 +644,29 @@ impl ServerState {
             running.handle.abort();
             let _ = running.handle.await;
         }
+    }
+
+    /// Synchronously close AI admission and cancel every active run.
+    ///
+    /// Shutdown paths call this before general cancellation or waiting for Axum.
+    pub fn begin_ai_shutdown(&self) {
+        self.ai_runtime.begin_drain();
+    }
+
+    /// Cancel and drain AI work, then drop the lazy provider runtime on success.
+    ///
+    /// On timeout, lifecycle stays draining and the runtime is retained (fail-closed).
+    pub async fn drain_ai_runtime(&self, deadline: Duration) -> bool {
+        self.ai_runtime.drain_and_drop(deadline).await
+    }
+
+    /// Hosted-process AI teardown. A timeout may continue process exit, but AI
+    /// cancellation must already have begun before Axum graceful drain.
+    pub async fn shutdown_ai_runtime(&self, deadline: Duration) {
+        if self.ai_runtime.drain_and_drop(deadline).await {
+            return;
+        }
+        tracing::warn!("AI runtime drain timed out during shutdown; continuing process shutdown");
     }
 
     #[must_use]

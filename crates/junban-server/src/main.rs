@@ -81,7 +81,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(%address, "Junban server listening");
     // Publish discovery metadata only after the listener is bound and the stack is ready.
-    let runtime_metadata = RuntimeMetadataFile::create(&data_dir, address, &instance_id)?;
+    let runtime_metadata = match RuntimeMetadataFile::create(&data_dir, address, &instance_id) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            // Rollback revokes AI before general shutdown and profile release.
+            state.begin_ai_shutdown();
+            shutdown.cancel();
+            state
+                .shutdown_ai_runtime(junban_server::AI_SHUTDOWN_DRAIN_DEADLINE)
+                .await;
+            state.stop_reminder_coordinator().await;
+            drop(owner);
+            return Err(error.into());
+        }
+    };
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown({
             let shutdown = shutdown.clone();
@@ -94,12 +107,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     None,
                     "graceful shutdown signal received",
                 );
-                // Cancel coordinator + SSE forwarders before Axum drains responses.
+                // Revoke AI provider authority before general cancellation and
+                // before Axum begins draining active responses.
+                state.begin_ai_shutdown();
                 shutdown.cancel();
             }
         })
         .await;
-    // Idempotent if graceful shutdown already cancelled; covers serve errors too.
+    // Idempotent if graceful shutdown already began; covers serve errors before
+    // general cancellation as well.
+    state.begin_ai_shutdown();
     shutdown.cancel();
     state.log_diagnostic(
         DiagnosticSeverity::Info,
@@ -107,6 +124,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
         "server event loop exited",
     );
+    // AI cancel/drain/drop before reminder join and profile lock release.
+    state
+        .shutdown_ai_runtime(junban_server::AI_SHUTDOWN_DRAIN_DEADLINE)
+        .await;
     state.stop_reminder_coordinator().await;
     drop(runtime_metadata);
     drop(owner);

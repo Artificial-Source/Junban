@@ -1016,6 +1016,7 @@ dependencies = [
  "futures-core",
  "http-body-util",
  "jiff",
+ "junban-ai",
  "junban-app",
  "junban-domain",
  "junban-storage",

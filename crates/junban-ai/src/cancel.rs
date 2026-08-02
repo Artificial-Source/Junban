@@ -21,6 +21,14 @@ impl RunId {
         Self(Uuid::now_v7())
     }
 
+    /// Adopt a durable run UUID already assigned by the domain/application layer.
+    ///
+    /// Provider cancellation must reuse this identity rather than minting a second one.
+    #[must_use]
+    pub const fn from_uuid(value: Uuid) -> Self {
+        Self(value)
+    }
+
     #[must_use]
     pub const fn as_uuid(self) -> Uuid {
         self.0
@@ -71,8 +79,14 @@ pub struct GenerationFence {
 impl GenerationFence {
     #[must_use]
     pub fn new() -> Self {
+        Self::at(Generation::new(1))
+    }
+
+    /// Fence whose current authoritative generation is exactly `generation`.
+    #[must_use]
+    pub fn at(generation: Generation) -> Self {
         Self {
-            current: AtomicU64::new(1),
+            current: AtomicU64::new(generation.get()),
         }
     }
 
@@ -118,6 +132,22 @@ impl RunCancel {
         let generation = fence.current();
         Self {
             run_id: RunId::new(),
+            fence,
+            token: CancellationToken::new(),
+            generation,
+        }
+    }
+
+    /// Build cancellation state for an already-assigned durable run identity.
+    ///
+    /// The handle carries exactly `run_id` and starts at `generation` so later
+    /// provider work, persistence fences, and server registry entries share one
+    /// identity rather than minting a second UUID.
+    #[must_use]
+    pub fn for_identity(run_id: RunId, generation: Generation) -> Self {
+        let fence = std::sync::Arc::new(GenerationFence::at(generation));
+        Self {
+            run_id,
             fence,
             token: CancellationToken::new(),
             generation,
@@ -184,5 +214,19 @@ mod tests {
             run.check_live(),
             Err(crate::error::ProviderError::Cancelled)
         ));
+    }
+
+    #[test]
+    fn for_identity_preserves_exact_uuid_and_starting_generation() {
+        let uuid = Uuid::now_v7();
+        let run_id = RunId::from_uuid(uuid);
+        let generation = Generation::new(7);
+        let run = RunCancel::for_identity(run_id, generation);
+        assert_eq!(run.run_id().as_uuid(), uuid);
+        assert_eq!(run.generation(), generation);
+        assert!(run.is_live());
+        run.cancel();
+        assert!(!run.is_live());
+        assert!(!run.fence.is_current(generation));
     }
 }

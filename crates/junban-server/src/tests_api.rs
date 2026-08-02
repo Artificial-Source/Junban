@@ -545,6 +545,103 @@ async fn restore_forwarder_timeout_is_fail_closed_without_cutover() {
 }
 
 #[test]
+fn normal_owner_startup_constructs_no_ai_provider_client() {
+    let context = TestContext::new();
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+    assert!(!context.state.ai_runtime().provider_client_constructed());
+    assert!(!context.state.ai_runtime().has_runtime());
+    assert!(context.state.ai_runtime().is_accepting());
+}
+
+#[test]
+fn recovery_state_does_not_own_ai_runtime() {
+    // RecoveryState fields are intentionally AI-free; constructing recovery mode must not
+    // pull a supervisor through ServerState.
+    let directory = env::temp_dir().join(format!(
+        "junban-recovery-ai-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&directory).unwrap();
+    let owner = RecoveryOwner::open(&directory).unwrap();
+    let state = RecoveryState::new(owner, TOKEN.to_owned(), [HOST.to_owned()]).unwrap();
+    // Compile-time/ownership proof: RecoveryState has no ai_runtime accessor. Runtime
+    // observation is limited to confirming recovery health still constructs.
+    let _ = state.instance_id();
+    let _ = fs::remove_dir_all(&directory);
+}
+
+#[tokio::test(start_paused = true)]
+async fn restore_ai_timeout_is_fail_closed_without_cutover() {
+    let context = TestContext::new();
+    let before = context.state.service.get_sync_state().await.unwrap();
+    let backup_response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/backup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    let backup = response_bytes(backup_response).await;
+
+    let stuck_guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 1)
+        .expect("active AI run");
+
+    let response = context
+        .request(
+            authenticated(Method::POST, "/api/v1/backup/restore")
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from(backup))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = json(response).await;
+    assert_eq!(body["error"]["code"], "maintenance_ai_timeout");
+    assert!(
+        !body["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains('-')
+    );
+    assert!(context.state.maintenance().restart_required());
+    assert!(context.state.maintenance().maintenance_active());
+    assert!(!context.state.ai_runtime().is_accepting());
+    assert!(context.state.ai_runtime().has_runtime());
+    assert_eq!(context.state.ai_runtime().active_count(), 1);
+    let after = context.state.service.get_sync_state().await.unwrap();
+    assert_eq!(after, before, "AI drain timeout must not apply restore");
+    drop(stuck_guard);
+}
+
+#[tokio::test(start_paused = true)]
+async fn server_ai_shutdown_lifecycle_is_idempotent() {
+    let context = TestContext::new();
+    let guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 4)
+        .expect("register");
+    drop(guard);
+    context
+        .state
+        .shutdown_ai_runtime(Duration::from_secs(1))
+        .await;
+    context
+        .state
+        .shutdown_ai_runtime(Duration::from_secs(1))
+        .await;
+    assert!(!context.state.ai_runtime().has_runtime());
+    assert!(!context.state.ai_runtime().is_accepting());
+}
+
+#[test]
 fn restore_failures_after_quiescence_never_reopen_normal_admission() {
     let ordinary = TestContext::new();
     let gate = ordinary.state.maintenance();

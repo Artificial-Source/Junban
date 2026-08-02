@@ -3906,6 +3906,21 @@ pub async fn restore_backup(
     // validated rollback requires restart so stale scheduler/service state never reopens.
     gate.mark_restart_required();
     let deadline = tokio::time::Instant::now() + crate::RESTORE_DRAIN_DEADLINE;
+    // Cancel and drain AI before SSE/request/reminder quiescence so provider work cannot
+    // outlive cutover. Timeout keeps restart-required/maintenance and skips cutover.
+    if !state
+        .drain_ai_runtime(deadline.saturating_duration_since(tokio::time::Instant::now()))
+        .await
+    {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "maintenance_ai_timeout",
+            "could not drain AI work before restore",
+            false,
+            &request_id,
+        ));
+    }
+
     if !state
         .quiesce_streams(deadline.saturating_duration_since(tokio::time::Instant::now()))
         .await

@@ -10,6 +10,270 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/v1/auth/credentials": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "list_automation_credentials",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationCredentialListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": ["routes"],
+        "operationId": "create_automation_credential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAutomationCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationCredentialDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/credentials/{credential_id}": {
+      "delete": {
+        "tags": ["routes"],
+        "operationId": "revoke_automation_credential",
+        "parameters": [
+          {
+            "name": "credential_id",
+            "in": "path",
+            "description": "Credential UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Credential revoked or already absent"
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/principal": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_principal",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrincipalResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/rotate": {
       "post": {
         "tags": ["routes"],
@@ -217,18 +481,20 @@
             "name": "from",
             "in": "query",
             "description": "Inclusive civil start date (`YYYY-MM-DD`). Required.",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "to",
             "in": "query",
             "description": "Inclusive civil end date (`YYYY-MM-DD`). Required.",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -1163,7 +1429,8 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           }
         ],
@@ -1227,7 +1494,8 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           }
         ],
@@ -1291,7 +1559,8 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           }
         ],
@@ -1355,18 +1624,20 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "capacity_minutes",
             "in": "query",
-            "description": "Daily capacity in whole minutes. Defaults to 480.",
+            "description": "Daily capacity in whole minutes (`60..=1440`). Defaults to 480.",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 1440,
+              "minimum": 60
             }
           }
         ],
@@ -1752,18 +2023,20 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "capacity_minutes",
             "in": "query",
-            "description": "Daily capacity in whole minutes. Defaults to 480.",
+            "description": "Daily capacity in whole minutes (`60..=1440`). Defaults to 480.",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 1440,
+              "minimum": 60
             }
           }
         ],
@@ -1827,18 +2100,20 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "capacity_minutes",
             "in": "query",
-            "description": "Daily capacity in whole minutes. Defaults to 480.",
+            "description": "Daily capacity in whole minutes (`60..=1440`). Defaults to 480.",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 1440,
+              "minimum": 60
             }
           }
         ],
@@ -1902,7 +2177,8 @@
             "description": "Civil date inside the current week (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -3909,18 +4185,20 @@
             "name": "from",
             "in": "query",
             "description": "Inclusive civil start date (`YYYY-MM-DD`). Required.",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "to",
             "in": "query",
             "description": "Inclusive civil end date (`YYYY-MM-DD`). Required.",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           }
         ],
@@ -4420,35 +4698,43 @@
           {
             "name": "priority",
             "in": "query",
+            "description": "Task priority P1 (highest) through P4 (lowest).",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 4,
+              "minimum": 1
             }
           },
           {
             "name": "due_on",
             "in": "query",
+            "description": "Civil due date filter (`YYYY-MM-DD`).",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "due_before",
             "in": "query",
+            "description": "Inclusive upper bound on due date (`YYYY-MM-DD`).",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "due_after",
             "in": "query",
+            "description": "Inclusive lower bound on due date (`YYYY-MM-DD`).",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -4486,11 +4772,13 @@
           {
             "name": "limit",
             "in": "query",
+            "description": "Page size in `1..=100`. Defaults to 100 when omitted.",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 100,
+              "minimum": 1
             }
           }
         ],
@@ -5186,11 +5474,13 @@
           {
             "name": "limit",
             "in": "query",
+            "description": "Page size in `1..=100`. Defaults to 50 when omitted.",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 100,
+              "minimum": 1
             }
           }
         ],
@@ -7041,7 +7331,8 @@
             "description": "Inclusive civil start date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -7050,7 +7341,8 @@
             "description": "Inclusive civil end date (`YYYY-MM-DD`). Defaults to `from`.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           }
         ],
@@ -7853,7 +8145,8 @@
             "description": "Civil date filter (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -8789,6 +9082,51 @@
         },
         "additionalProperties": false
       },
+      "AutomationCredentialDto": {
+        "type": "object",
+        "description": "Public automation credential metadata (never includes secrets or hashes).",
+        "required": ["id", "label", "created_at", "scopes"],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationScope"
+            }
+          }
+        }
+      },
+      "AutomationCredentialListResponse": {
+        "type": "object",
+        "description": "Operator-only list of automation credentials.",
+        "required": ["credentials"],
+        "properties": {
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationCredentialDto"
+            }
+          }
+        }
+      },
+      "AutomationScope": {
+        "type": "string",
+        "description": "Issuable automation scopes. None implies another.",
+        "enum": ["read", "write", "data"]
+      },
       "BackupManifestDto": {
         "type": "object",
         "description": "Inventory snapshot embedded in a backup artifact (wire projection).",
@@ -8944,7 +9282,8 @@
               "priority": {
                 "type": ["integer", "null"],
                 "format": "int32",
-                "minimum": 0
+                "maximum": 4,
+                "minimum": 1
               },
               "type": {
                 "type": "string",
@@ -9093,7 +9432,9 @@
           "limit": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "description": "Claim batch size in `1..=100`. Defaults to 20 when omitted.",
+            "maximum": 100,
+            "minimum": 1
           }
         },
         "additionalProperties": false
@@ -9254,6 +9595,38 @@
           }
         }
       },
+      "CreateAutomationCredentialRequest": {
+        "type": "object",
+        "description": "Operator-only create body. The client generates the id and one-time token.",
+        "required": ["id", "label", "scopes", "token"],
+        "properties": {
+          "expires_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Optional expiry instant; must be strictly after creation time."
+          },
+          "id": {
+            "type": "string",
+            "description": "Client-generated credential UUID."
+          },
+          "label": {
+            "type": "string",
+            "description": "Human label for operator listing."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationScope"
+            },
+            "description": "Exact scopes requested (duplicates rejected)."
+          },
+          "token": {
+            "type": "string",
+            "description": "Full high-entropy automation bearer. Persisted only as a one-way hash."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateCommentRequest": {
         "type": "object",
         "required": ["content"],
@@ -9405,7 +9778,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],
@@ -9450,7 +9824,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],
@@ -9921,8 +10296,12 @@
       },
       "HealthResponse": {
         "type": "object",
-        "required": ["status"],
+        "required": ["status", "instance_id"],
         "properties": {
+          "instance_id": {
+            "type": "string",
+            "description": "Random per-process id mirrored from private runtime metadata."
+          },
           "status": {
             "type": "string"
           }
@@ -10000,7 +10379,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_name": {
             "type": ["string", "null"]
@@ -10090,7 +10470,9 @@
           "limit": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "description": "Batch size in `1..=100`. Defaults to 20 when omitted.",
+            "maximum": 100,
+            "minimum": 1
           }
         },
         "additionalProperties": false
@@ -10627,7 +11009,8 @@
             "type": ["integer", "null"],
             "format": "int32",
             "description": "`null` clears priority; omit leaves unchanged.",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],
@@ -10671,7 +11054,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],
@@ -10795,6 +11179,27 @@
         },
         "additionalProperties": false
       },
+      "PrincipalKindDto": {
+        "type": "string",
+        "description": "Authenticated principal kind (never includes ids, tokens, or secrets).",
+        "enum": ["operator", "automation"]
+      },
+      "PrincipalResponse": {
+        "type": "object",
+        "description": "Capability snapshot for the active bearer.\n\nOperator always reports the full routine scope set (`read`, `write`, `data`).\nAutomation reports only the exact issued scopes. Identifiers and secrets are\nintentionally omitted so CLI/MCP clients can filter tools without learning\ncredential identity material.",
+        "required": ["kind", "scopes"],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/PrincipalKindDto"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationScope"
+            }
+          }
+        }
+      },
       "ProfileResponse": {
         "type": "object",
         "required": ["revision"],
@@ -10889,7 +11294,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_name": {
             "type": ["string", "null"]
@@ -11699,7 +12105,8 @@
           "default_priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "default_view": {
             "$ref": "#/components/schemas/TaskViewPresetDto"
@@ -11777,7 +12184,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],
@@ -11847,7 +12255,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_name": {
             "type": ["string", "null"]
@@ -11971,7 +12380,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],

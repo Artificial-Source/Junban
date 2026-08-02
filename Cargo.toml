@@ -22,6 +22,7 @@ rusqlite = { version = "0.39.0", default-features = false, features = ["bundled"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = { version = "0.10", default-features = false }
+subtle = { version = "2.6.1", default-features = false, features = ["std"] }
 thiserror = "2.0.18"
 tokio = { version = "1.53.1", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "0.7.19", default-features = false }
@@ -31,6 +32,7 @@ tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.22", default-features = false, features = ["fmt"] }
 utoipa = { version = "5.5.0", default-features = false, features = ["jiff_0_2", "macros", "uuid"] }
 uuid = { version = "1.24.0", default-features = false, features = ["rng-getrandom", "serde", "std", "v4", "v7"] }
+windows-sys = { version = "=0.61.2", default-features = false }
 
 [profile.release]
 codegen-units = 1

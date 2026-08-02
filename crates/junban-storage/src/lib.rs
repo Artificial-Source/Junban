@@ -257,6 +257,171 @@ pub fn atomic_replace_private_file(path: &Path, contents: &[u8]) -> io::Result<(
     atomic_replace_private_file_with(path, contents, |_| Ok(()))
 }
 
+/// Create a new owner-private file without changing permissions on its parent.
+///
+/// The file is protected before callers can write bytes. This is used for
+/// operator-selected artifact destinations, whose existing parent directories
+/// must never be chmodded by Junban.
+pub fn create_owner_private_file(path: &Path) -> io::Result<File> {
+    create_owner_private_file_with(path, protect_file_owner_only)
+}
+
+fn create_owner_private_file_with(
+    path: &Path,
+    protect: impl FnOnce(&File) -> io::Result<()>,
+) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create_new(true).read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::{Foundation::GENERIC_WRITE, Storage::FileSystem::WRITE_DAC};
+        options.access_mode(GENERIC_WRITE | WRITE_DAC);
+    }
+    let file = options.open(path)?;
+    if let Err(error) = protect(&file) {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(error);
+    }
+    #[cfg(unix)]
+    set_private_file_permissions(path)?;
+    Ok(file)
+}
+
+/// Create a protected same-directory temporary file for a private artifact.
+pub fn create_private_artifact_temp(destination: &Path) -> io::Result<(File, PathBuf)> {
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("artifact");
+    static ARTIFACT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let temp = parent.join(format!(
+        ".junban-{}-{}-{name}.part",
+        std::process::id(),
+        ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let file = create_owner_private_file(&temp)?;
+    Ok((file, temp))
+}
+
+/// Atomically publish a synced private same-directory temporary artifact.
+///
+/// With `overwrite=false`, publication atomically fails if the destination has
+/// appeared. With `overwrite=true`, the old destination remains intact unless
+/// replacement succeeds.
+pub fn publish_private_artifact(
+    temp: &Path,
+    destination: &Path,
+    overwrite: bool,
+) -> io::Result<()> {
+    publish_private_artifact_with(temp, destination, overwrite, |source, target, replace| {
+        publish_file(source, target, replace)
+    })
+}
+
+fn publish_private_artifact_with(
+    temp: &Path,
+    destination: &Path,
+    overwrite: bool,
+    publish: impl FnOnce(&Path, &Path, bool) -> io::Result<()>,
+) -> io::Result<()> {
+    publish(temp, destination, overwrite)?;
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    sync_directory(parent)
+}
+
+/// Atomically publish private bytes without mutating an existing parent mode.
+pub fn atomic_publish_private_bytes(
+    destination: &Path,
+    contents: &[u8],
+    overwrite: bool,
+) -> io::Result<()> {
+    let (mut file, temp) = create_private_artifact_temp(destination)?;
+    let result = (|| {
+        io::Write::write_all(&mut file, contents)?;
+        file.sync_all()?;
+        drop(file);
+        publish_private_artifact(&temp, destination, overwrite)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+/// Remove a private state file and durably publish the directory update on Unix.
+pub fn remove_private_file_durable(path: &Path) -> io::Result<()> {
+    fs::remove_file(path)?;
+    sync_directory(path.parent().unwrap_or_else(|| Path::new(".")))
+}
+
+#[cfg(unix)]
+fn publish_file(source: &Path, destination: &Path, overwrite: bool) -> io::Result<()> {
+    if overwrite {
+        fs::rename(source, destination)
+    } else {
+        // A same-directory hard link is an atomic no-replace publication. Remove
+        // the temporary name only after the destination name exists.
+        fs::hard_link(source, destination)?;
+        fs::remove_file(source)
+    }
+}
+
+#[cfg(windows)]
+fn publish_file(source: &Path, destination: &Path, overwrite: bool) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    fn wide(path: &Path) -> io::Result<Vec<u16>> {
+        let mut value: Vec<u16> = path.as_os_str().encode_wide().collect();
+        if value.contains(&0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "path contains NUL",
+            ));
+        }
+        value.push(0);
+        Ok(value)
+    }
+
+    let source = wide(source)?;
+    let destination = wide(destination)?;
+    let flags = MOVEFILE_WRITE_THROUGH
+        | if overwrite {
+            MOVEFILE_REPLACE_EXISTING
+        } else {
+            0
+        };
+    // SAFETY: both values are live NUL-terminated UTF-16 paths.
+    #[allow(unsafe_code)]
+    let moved = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), flags) };
+    if moved == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn publish_file(source: &Path, destination: &Path, overwrite: bool) -> io::Result<()> {
+    if !overwrite && destination.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "destination exists",
+        ));
+    }
+    fs::rename(source, destination)
+}
+
 fn persist_recovery_required(profile_dir: &Path) -> Result<(), RepositoryError> {
     let marker = RecoveryRequiredMarker {
         version: RECOVERY_MARKER_VERSION,
@@ -313,18 +478,75 @@ fn atomic_replace_private_file_with(
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            use windows_sys::Win32::{Foundation::GENERIC_WRITE, Storage::FileSystem::WRITE_DAC};
+            options.access_mode(GENERIC_WRITE | WRITE_DAC);
+        }
         let mut file = options.open(&temp_path)?;
+        // On Windows, inherited ACLs are not necessarily private. Protect the empty
+        // file before any secret or security-policy bytes are written.
+        protect_file_owner_only(&file)?;
         io::Write::write_all(&mut file, contents)?;
         file.sync_all()?;
+        drop(file);
         set_private_file_permissions(&temp_path)?;
         before_rename(&temp_path)?;
-        fs::rename(&temp_path, path)?;
+        replace_file(&temp_path, path)?;
         sync_directory(parent)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp_path);
     }
     result
+}
+
+#[cfg(unix)]
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    fn wide_path(path: &Path) -> io::Result<Vec<u16>> {
+        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        if wide.contains(&0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Windows path contains a NUL code unit",
+            ));
+        }
+        wide.push(0);
+        Ok(wide)
+    }
+
+    let source = wide_path(source)?;
+    let destination = wide_path(destination)?;
+    // SAFETY: both vectors are live, NUL-terminated UTF-16 strings for this call.
+    // MoveFileExW documents WRITE_THROUGH as not returning until the move is flushed.
+    #[allow(unsafe_code)]
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
 }
 
 #[cfg(unix)]
@@ -407,6 +629,122 @@ pub(crate) fn set_private_file_permissions(path: &Path) -> io::Result<()> {
     #[cfg(not(unix))]
     let _ = path;
     Ok(())
+}
+
+/// Protect an already-open file for its owner before private bytes are written.
+///
+/// Unix callers create files as `0600`; Windows callers replace inherited access
+/// with one protected owner-only DACL.
+pub fn protect_file_owner_only(file: &File) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        protect_file_owner_only_windows(file)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = file;
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn protect_file_owner_only_windows(file: &File) -> io::Result<()> {
+    use std::{mem, os::windows::io::AsRawHandle, ptr};
+    use windows_sys::Win32::{
+        Foundation::{ERROR_SUCCESS, LocalFree},
+        Security::{
+            ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, AddAccessAllowedAceEx,
+            Authorization::{GetSecurityInfo, SE_FILE_OBJECT, SetSecurityInfo},
+            DACL_SECURITY_INFORMATION, GetLengthSid, InitializeAcl, OWNER_SECURITY_INFORMATION,
+            PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+        },
+        Storage::FileSystem::FILE_ALL_ACCESS,
+    };
+
+    let handle = file.as_raw_handle();
+    let mut owner: PSID = ptr::null_mut();
+    let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
+    // SAFETY: `handle` is a live file handle. Windows allocates `descriptor` and
+    // points `owner` inside it; all unused output pointers are null.
+    #[allow(unsafe_code)]
+    let status = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &mut descriptor,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return Err(io::Error::from_raw_os_error(status.cast_signed()));
+    }
+    if owner.is_null() || descriptor.is_null() {
+        if !descriptor.is_null() {
+            // SAFETY: a non-null descriptor returned by GetSecurityInfo uses LocalAlloc.
+            #[allow(unsafe_code)]
+            let _ = unsafe { LocalFree(descriptor) };
+        }
+        return Err(io::Error::other(
+            "Windows did not return a file owner security descriptor",
+        ));
+    }
+
+    let result = (|| {
+        // SAFETY: a successful GetSecurityInfo returned a valid owner SID that
+        // remains live until `descriptor` is freed below.
+        #[allow(unsafe_code)]
+        let sid_len = unsafe { GetLengthSid(owner) } as usize;
+        if sid_len == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let acl_len = mem::size_of::<ACL>()
+            .checked_add(mem::size_of::<ACCESS_ALLOWED_ACE>() - mem::size_of::<u32>())
+            .and_then(|length| length.checked_add(sid_len))
+            .ok_or_else(|| io::Error::other("owner-only ACL size overflow"))?;
+        let word_len = acl_len.div_ceil(mem::size_of::<usize>());
+        let mut acl_words = vec![0_usize; word_len];
+        let acl = acl_words.as_mut_ptr().cast::<ACL>();
+        // SAFETY: `acl_words` is aligned and has at least `acl_len` writable
+        // bytes; `owner` is valid for the duration of these calls.
+        #[allow(unsafe_code)]
+        let initialized = unsafe { InitializeAcl(acl, acl_len as u32, ACL_REVISION) };
+        if initialized == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: the initialized ACL has enough room for exactly this owner ACE.
+        #[allow(unsafe_code)]
+        let added = unsafe { AddAccessAllowedAceEx(acl, ACL_REVISION, 0, FILE_ALL_ACCESS, owner) };
+        if added == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: the handle, owner SID, and ACL remain valid through the call.
+        // A protected DACL disables inherited ACEs and this ACL contains only owner.
+        #[allow(unsafe_code)]
+        let status = unsafe {
+            SetSecurityInfo(
+                handle,
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                acl,
+                ptr::null(),
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(io::Error::from_raw_os_error(status.cast_signed()));
+        }
+        Ok(())
+    })();
+
+    // SAFETY: GetSecurityInfo allocated this security descriptor with LocalAlloc.
+    #[allow(unsafe_code)]
+    let _ = unsafe { LocalFree(descriptor) };
+    result
 }
 
 /// Advise the kernel that clean pages for `file` may leave the page cache.

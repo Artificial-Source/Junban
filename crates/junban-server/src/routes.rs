@@ -32,22 +32,29 @@ use tokio_util::io::ReaderStream;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
+use crate::authz::{AutomationScope, Principal};
+use crate::credentials::{
+    CredentialStoreError, StoredAutomationCredential, validate_create_token,
+    validate_credential_label, validate_scope_list,
+};
 use crate::cursor::decode_task_cursor;
 use crate::dto::{
     AcquireReminderLeaseRequest, AddRelationRequest, AppSettingsResponse,
-    AppendTimeSlotTaskRequest, ApplyTemplateRequest, BulkTasksRequest, CalendarTasksResponse,
-    CatalogResponse, ClaimRemindersRequest, ClaimRemindersResponse, CommentDto,
-    CommentListResponse, CreateCommentRequest, CreateProjectRequest, CreateSavedFilterRequest,
-    CreateSectionRequest, CreateTagRequest, CreateTaskRequest, CreateTemplateRequest,
-    CreateTimeBlockRequest, CreateTimeSlotRequest, DailyPlanResponse, DiagnosticsResponse,
-    DopamineMenuResponse, EatTheFrogResponse, EndOfDayResponse, ExportTasksQuery, HealthResponse,
-    HostListRequest, HostListResponse, ImportApplyRequest, ImportPreviewRequest,
-    MaintenanceStatusResponse, MarkOwnerLostRemindersRequest, MarkOwnerLostRemindersResponse,
-    MoveTaskRequest, MoveTimeBlockRequest, MutationResponse, NudgesResponse, ParseFilterRequest,
-    ParseQuickEntryRequest, ParseTextImportRequest, ParsedFilterResponse, PatchCommentRequest,
-    PatchProjectRequest, PatchSavedFilterRequest, PatchSectionRequest, PatchSettingsRequest,
-    PatchTagRequest, PatchTaskRequest, PatchTemplateRequest, PatchTimeBlockRequest,
-    PatchTimeSlotRequest, ProfileResponse, QuickEntryDto, RecoveryStatusResponse, RelationDto,
+    AppendTimeSlotTaskRequest, ApplyTemplateRequest, AutomationCredentialDto,
+    AutomationCredentialListResponse, BulkTasksRequest, CalendarTasksResponse, CatalogResponse,
+    ClaimRemindersRequest, ClaimRemindersResponse, CommentDto, CommentListResponse,
+    CreateAutomationCredentialRequest, CreateCommentRequest, CreateProjectRequest,
+    CreateSavedFilterRequest, CreateSectionRequest, CreateTagRequest, CreateTaskRequest,
+    CreateTemplateRequest, CreateTimeBlockRequest, CreateTimeSlotRequest, DailyPlanResponse,
+    DiagnosticsResponse, DopamineMenuResponse, EatTheFrogResponse, EndOfDayResponse,
+    ExportTasksQuery, HealthResponse, HostListRequest, HostListResponse, ImportApplyRequest,
+    ImportPreviewRequest, MaintenanceStatusResponse, MarkOwnerLostRemindersRequest,
+    MarkOwnerLostRemindersResponse, MoveTaskRequest, MoveTimeBlockRequest, MutationResponse,
+    NudgesResponse, ParseFilterRequest, ParseQuickEntryRequest, ParseTextImportRequest,
+    ParsedFilterResponse, PatchCommentRequest, PatchProjectRequest, PatchSavedFilterRequest,
+    PatchSectionRequest, PatchSettingsRequest, PatchTagRequest, PatchTaskRequest,
+    PatchTemplateRequest, PatchTimeBlockRequest, PatchTimeSlotRequest, PrincipalKindDto,
+    PrincipalResponse, ProfileResponse, QuickEntryDto, RecoveryStatusResponse, RelationDto,
     RelationListResponse, ReleaseReminderLeaseRequest, ReminderDeliveryLeaseDto,
     ReminderListResponse, ReminderOccurrenceDto, RenewReminderLeaseRequest, ReorderTasksRequest,
     ReplaceTimeSlotTasksRequest, ReplanTimeBlocksPreviewResponse, ReplanTimeBlocksRequest,
@@ -90,8 +97,11 @@ pub fn server_planning_clock() -> (Date, TimeZone) {
     operation_id = "health",
     responses((status = 200, body = HealthResponse))
 )]
-pub async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok" })
+pub async fn health(State(state): State<ServerState>) -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok",
+        instance_id: state.instance_id().to_owned(),
+    })
 }
 
 #[utoipa::path(
@@ -176,8 +186,11 @@ form.addEventListener('submit',async(event)=>{
         .into_response()
 }
 
-pub async fn recovery_health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "recovery" })
+pub async fn recovery_health(State(state): State<RecoveryState>) -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "recovery",
+        instance_id: state.instance_id().to_owned(),
+    })
 }
 
 pub async fn recovery_status() -> Json<RecoveryStatusResponse> {
@@ -196,6 +209,35 @@ pub async fn recovery_api_unavailable(Extension(request_id): Extension<RequestId
         false,
         &request_id,
     )
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/principal",
+    operation_id = "get_principal",
+    responses(
+        (status = 200, body = PrincipalResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_principal(Extension(principal): Extension<Principal>) -> Json<PrincipalResponse> {
+    match principal {
+        Principal::Operator => Json(PrincipalResponse {
+            kind: PrincipalKindDto::Operator,
+            // Operator is treated as holding every routine automation scope.
+            scopes: vec![
+                AutomationScope::Read,
+                AutomationScope::Write,
+                AutomationScope::Data,
+            ],
+        }),
+        Principal::Automation { scopes, .. } => Json(PrincipalResponse {
+            kind: PrincipalKindDto::Automation,
+            scopes: scopes.into_iter().collect(),
+        }),
+    }
 }
 
 #[utoipa::path(
@@ -266,14 +308,24 @@ pub struct ListTasksQuery {
     pub tag_id: Option<String>,
     /// Comma-separated tag IDs. Tasks must include every listed tag (AND).
     pub tag_ids: Option<String>,
+    /// Task priority P1 (highest) through P4 (lowest).
+    #[param(minimum = 1, maximum = 4)]
     pub priority: Option<u8>,
+    /// Civil due date filter (`YYYY-MM-DD`).
+    #[param(value_type = Option<String>, format = Date)]
     pub due_on: Option<String>,
+    /// Inclusive upper bound on due date (`YYYY-MM-DD`).
+    #[param(value_type = Option<String>, format = Date)]
     pub due_before: Option<String>,
+    /// Inclusive lower bound on due date (`YYYY-MM-DD`).
+    #[param(value_type = Option<String>, format = Date)]
     pub due_after: Option<String>,
     pub someday: Option<bool>,
     pub overdue: Option<bool>,
     pub sort: Option<TaskSortDto>,
     pub cursor: Option<String>,
+    /// Page size in `1..=100`. Defaults to 100 when omitted.
+    #[param(minimum = 1, maximum = 100)]
     pub limit: Option<u32>,
 }
 
@@ -1363,6 +1415,8 @@ pub struct RelationKindQuery {
 pub struct ActivityQuery {
     pub after_revision: Option<u64>,
     pub after_sequence: Option<u32>,
+    /// Page size in `1..=100`. Defaults to 50 when omitted.
+    #[param(minimum = 1, maximum = 100)]
     pub limit: Option<u32>,
 }
 
@@ -2039,8 +2093,10 @@ pub async fn reminder_events(
 #[into_params(parameter_in = Query)]
 pub struct ListTimeBlocksQuery {
     /// Inclusive civil start date (`YYYY-MM-DD`). Defaults to server-local today.
+    #[param(value_type = Option<String>, format = Date)]
     pub from: Option<String>,
     /// Inclusive civil end date (`YYYY-MM-DD`). Defaults to `from`.
+    #[param(value_type = Option<String>, format = Date)]
     pub to: Option<String>,
 }
 
@@ -2048,6 +2104,7 @@ pub struct ListTimeBlocksQuery {
 #[into_params(parameter_in = Query)]
 pub struct ListTimeSlotsQuery {
     /// Civil date filter (`YYYY-MM-DD`). Defaults to server-local today.
+    #[param(value_type = Option<String>, format = Date)]
     pub date: Option<String>,
     /// Optional project filter. Use `-` for unscoped slots.
     pub project_id: Option<String>,
@@ -2626,8 +2683,10 @@ pub async fn remove_time_slot_task(
 #[into_params(parameter_in = Query)]
 pub struct CalendarTasksQuery {
     /// Inclusive civil start date (`YYYY-MM-DD`). Required.
+    #[param(required = true, value_type = String, format = Date)]
     pub from: Option<String>,
     /// Inclusive civil end date (`YYYY-MM-DD`). Required.
+    #[param(required = true, value_type = String, format = Date)]
     pub to: Option<String>,
     /// Optional exact project filter.
     pub project_id: Option<String>,
@@ -2637,8 +2696,10 @@ pub struct CalendarTasksQuery {
 #[into_params(parameter_in = Query)]
 pub struct PlanningDateQuery {
     /// Civil date (`YYYY-MM-DD`). Defaults to server-local today.
+    #[param(value_type = Option<String>, format = Date)]
     pub date: Option<String>,
-    /// Daily capacity in whole minutes. Defaults to 480.
+    /// Daily capacity in whole minutes (`60..=1440`). Defaults to 480.
+    #[param(minimum = 60, maximum = 1440)]
     pub capacity_minutes: Option<u32>,
 }
 
@@ -2646,6 +2707,7 @@ pub struct PlanningDateQuery {
 #[into_params(parameter_in = Query)]
 pub struct WeeklyReviewQuery {
     /// Civil date inside the current week (`YYYY-MM-DD`). Defaults to server-local today.
+    #[param(value_type = Option<String>, format = Date)]
     pub date: Option<String>,
     /// Week start: `sunday` (default) or `monday`.
     pub week_start: Option<String>,
@@ -2655,8 +2717,10 @@ pub struct WeeklyReviewQuery {
 #[into_params(parameter_in = Query)]
 pub struct StatsQuery {
     /// Inclusive civil start date (`YYYY-MM-DD`). Required.
+    #[param(required = true, value_type = String, format = Date)]
     pub from: Option<String>,
     /// Inclusive civil end date (`YYYY-MM-DD`). Required.
+    #[param(required = true, value_type = String, format = Date)]
     pub to: Option<String>,
 }
 
@@ -2664,6 +2728,7 @@ pub struct StatsQuery {
 #[into_params(parameter_in = Query)]
 pub struct MotivationDateQuery {
     /// Civil date (`YYYY-MM-DD`). Defaults to server-local today.
+    #[param(value_type = Option<String>, format = Date)]
     pub date: Option<String>,
 }
 
@@ -3322,6 +3387,212 @@ pub async fn rotate_token(
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(response)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/credentials",
+    operation_id = "list_automation_credentials",
+    responses(
+        (status = 200, body = AutomationCredentialListResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_automation_credentials(
+    State(state): State<ServerState>,
+) -> Json<AutomationCredentialListResponse> {
+    let credentials = state
+        .automation_credentials
+        .list_metadata()
+        .into_iter()
+        .map(AutomationCredentialDto::from)
+        .collect();
+    Json(AutomationCredentialListResponse { credentials })
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/credentials",
+    operation_id = "create_automation_credential",
+    request_body = CreateAutomationCredentialRequest,
+    responses(
+        (status = 200, body = AutomationCredentialDto),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_automation_credential(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<CreateAutomationCredentialRequest>, JsonRejection>,
+) -> Result<Json<AutomationCredentialDto>, ApiError> {
+    let body = extract_json(payload, &request_id)?;
+    let id = Uuid::parse_str(body.id.trim()).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            &request_id,
+        )
+        .with_field("id", "must be a UUID")
+    })?;
+    let label = validate_credential_label(&body.label).map_err(|message| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            &request_id,
+        )
+        .with_field("label", message)
+    })?;
+    let scopes = validate_scope_list(&body.scopes).map_err(|message| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            &request_id,
+        )
+        .with_field("scopes", message)
+    })?;
+    let token_sha256 = validate_create_token(&body.token, &id.to_string()).map_err(|message| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            &request_id,
+        )
+        .with_field("token", message)
+    })?;
+    let created_at = Timestamp::now();
+    if let Some(expires_at) = body.expires_at
+        && expires_at <= created_at
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            &request_id,
+        )
+        .with_field("expires_at", "must be strictly after creation time"));
+    }
+    let record = StoredAutomationCredential {
+        id: id.to_string(),
+        label,
+        created_at,
+        expires_at: body.expires_at,
+        scopes,
+        token_sha256,
+    };
+    match state.automation_credentials.create(record) {
+        Ok(metadata) => Ok(Json(AutomationCredentialDto::from(metadata))),
+        Err(CredentialStoreError::Conflict) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "credential_conflict",
+            "credential id already exists with different material",
+            false,
+            &request_id,
+        )),
+        Err(CredentialStoreError::BoundExceeded) => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "credential_bound_exceeded",
+            CredentialStoreError::BoundExceeded.to_string(),
+            false,
+            &request_id,
+        )),
+        Err(CredentialStoreError::Invalid(message)) => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            &request_id,
+        )
+        .with_field("credential", message)),
+        Err(CredentialStoreError::Io(error)) => {
+            state.log_diagnostic(
+                crate::diagnostics::DiagnosticSeverity::Error,
+                "credential_persist_failed",
+                Some(&request_id.0),
+                &format!("could not persist automation credential: {error}"),
+            );
+            Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "credential_persist_failed",
+                "could not persist automation credential",
+                true,
+                &request_id,
+            ))
+        }
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/auth/credentials/{credential_id}",
+    operation_id = "revoke_automation_credential",
+    params(("credential_id" = String, Path, description = "Credential UUID")),
+    responses(
+        (status = 204, description = "Credential revoked or already absent"),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn revoke_automation_credential(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    AxumPath(credential_id): AxumPath<String>,
+) -> Result<StatusCode, ApiError> {
+    let id = Uuid::parse_str(credential_id.trim()).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            &request_id,
+        )
+        .with_field("credential_id", "must be a UUID")
+    })?;
+    match state.automation_credentials.revoke(&id.to_string()) {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(CredentialStoreError::Io(error)) => {
+            state.log_diagnostic(
+                crate::diagnostics::DiagnosticSeverity::Error,
+                "credential_revoke_failed",
+                Some(&request_id.0),
+                &format!("could not revoke automation credential: {error}"),
+            );
+            Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "credential_revoke_failed",
+                "could not revoke automation credential",
+                true,
+                &request_id,
+            ))
+        }
+        Err(other) => Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            other.to_string(),
+            true,
+            &request_id,
+        )),
+    }
 }
 
 #[utoipa::path(

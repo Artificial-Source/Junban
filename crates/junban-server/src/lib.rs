@@ -1,10 +1,13 @@
 //! Axum router, HTTP contract, authentication, static serving, and SSE delivery.
 
+mod authz;
+mod credentials;
 mod cursor;
 mod diagnostics;
 mod dto;
 mod error;
 mod maintenance;
+mod owner_runtime;
 mod reminder_wake;
 mod routes;
 mod sse;
@@ -36,6 +39,7 @@ use junban_storage::{
     save_allowed_hosts, write_private_file,
 };
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tower_http::services::{ServeDir, ServeFile};
@@ -45,35 +49,50 @@ use utoipa::{
 };
 use uuid::Uuid;
 
+use crate::authz::{AuthorizationDecision, Principal, authorize, classify_request};
 use crate::diagnostics::{DIAGNOSTIC_RING_CAPACITY, DiagnosticRing};
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 use crate::reminder_wake::{ReminderWakeEventDto, ReminderWakeHub, start_reminder_coordinator};
 use crate::routes::{
     acquire_reminder_lease, add_relation, api_not_found, append_time_slot_task, apply_import,
     apply_template, bulk_tasks, calendar_tasks, cancel_task, claim_due_reminders,
-    clear_diagnostics, complete_task, create_backup, create_comment, create_project,
-    create_saved_filter, create_section, create_tag, create_task, create_template,
+    clear_diagnostics, complete_task, create_automation_credential, create_backup, create_comment,
+    create_project, create_saved_filter, create_section, create_tag, create_task, create_template,
     create_time_block, create_time_slot, delete_comment, delete_project, delete_saved_filter,
     delete_section, delete_tag, delete_task, delete_template, delete_time_block, delete_time_slot,
     dismiss_reminder, events, export_tasks, get_allowed_hosts, get_catalog, get_diagnostics,
-    get_maintenance_status, get_profile, get_recovery_status, get_settings, get_sync_state,
-    get_task, get_temporal_settings, health, list_comments, list_relations, list_task_activity,
-    list_task_reminders, list_tasks, list_time_blocks, list_time_slots, mark_owner_lost_reminders,
-    motivation_dopamine_menu, motivation_eat_the_frog, motivation_task_jar, move_task,
-    move_time_block, nudges, parse_filter_route, parse_quick_entry_route, parse_text_import_route,
-    patch_comment, patch_project, patch_saved_filter, patch_section, patch_settings, patch_tag,
-    patch_task, patch_template, patch_time_block, patch_time_slot, planning_daily,
-    planning_end_of_day, planning_weekly, preview_import, preview_replan_time_blocks,
-    put_allowed_hosts, recovery_api_unavailable, release_reminder_lease, reminder_events,
-    remove_relation, remove_time_slot_task, renew_reminder_lease, reopen_task, reorder_tasks,
+    get_maintenance_status, get_principal, get_profile, get_recovery_status, get_settings,
+    get_sync_state, get_task, get_temporal_settings, health, list_automation_credentials,
+    list_comments, list_relations, list_task_activity, list_task_reminders, list_tasks,
+    list_time_blocks, list_time_slots, mark_owner_lost_reminders, motivation_dopamine_menu,
+    motivation_eat_the_frog, motivation_task_jar, move_task, move_time_block, nudges,
+    parse_filter_route, parse_quick_entry_route, parse_text_import_route, patch_comment,
+    patch_project, patch_saved_filter, patch_section, patch_settings, patch_tag, patch_task,
+    patch_template, patch_time_block, patch_time_slot, planning_daily, planning_end_of_day,
+    planning_weekly, preview_import, preview_replan_time_blocks, put_allowed_hosts,
+    recovery_api_unavailable, release_reminder_lease, reminder_events, remove_relation,
+    remove_time_slot_task, renew_reminder_lease, reopen_task, reorder_tasks,
     replace_time_slot_tasks, replan_time_blocks, reschedule_reminder, resize_time_block,
-    restore_backup, rotate_token, settle_reminder_delivered, settle_reminder_failed, stats,
-    uncomplete_task, undo_operation,
+    restore_backup, revoke_automation_credential, rotate_token, settle_reminder_delivered,
+    settle_reminder_failed, stats, uncomplete_task, undo_operation,
 };
 use crate::sse::{AppService, SseConnectionPermit};
 
+pub use crate::authz::{
+    AutomationScope, ClassifiedRoute, Principal as RequestPrincipal, RouteAccess, classified_routes,
+};
+pub use crate::credentials::{
+    AUTOMATION_CREDENTIALS_FILE, AUTOMATION_TOKEN_PREFIX, AutomationCredentialMetadata,
+    AutomationCredentialStore, MAX_AUTOMATION_CREDENTIALS, mint_automation_token,
+    parse_automation_token, validate_create_token, validate_credential_label, validate_scope_list,
+};
 pub use crate::diagnostics::{DiagnosticEntry, DiagnosticSeverity, redact_secrets};
+pub use crate::dto::{PrincipalKindDto, PrincipalResponse};
 pub use crate::maintenance::MaintenanceGate;
+pub use crate::owner_runtime::{
+    DataDirPlatform, LocalApiOwner, LocalApiOwnerError, default_profile_dir,
+    resolve_default_profile_dir,
+};
 pub use crate::reminder_wake::{REMINDER_OVERDUE_WAKE_THROTTLE, REMINDER_WAKE_EVENT_TYPE};
 
 /// Phase 2 HTTP body ceiling (matches frozen transport plan).
@@ -91,6 +110,8 @@ const AUTH_WINDOW: Duration = Duration::from_secs(30);
 pub const TOKEN_FILE: &str = "access-token";
 pub const TOKEN_ROTATION_RECEIPT_FILE: &str = "access-token-rotation-receipt.json";
 pub const RUNTIME_FILE: &str = "runtime.json";
+/// Strict version for private `runtime.json` discovery records.
+pub const RUNTIME_METADATA_VERSION: u32 = 1;
 const TOKEN_ROTATION_RECEIPT_VERSION: u8 = 1;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -188,6 +209,7 @@ pub struct RecoveryState {
     auth_limiter: Arc<AuthLimiter>,
     restore_active: Arc<AtomicBool>,
     restore_complete: Arc<AtomicBool>,
+    instance_id: Arc<str>,
 }
 
 impl RecoveryState {
@@ -205,7 +227,14 @@ impl RecoveryState {
             auth_limiter: Arc::new(AuthLimiter::new()),
             restore_active: Arc::new(AtomicBool::new(false)),
             restore_complete: Arc::new(AtomicBool::new(false)),
+            instance_id: Arc::from(generate_instance_id()),
         })
+    }
+
+    /// Random per-process instance id shared with runtime metadata and health.
+    #[must_use]
+    pub fn instance_id(&self) -> &str {
+        self.instance_id.as_ref()
     }
 
     fn authenticate(&self, headers: &HeaderMap) -> bool {
@@ -273,6 +302,8 @@ pub struct ServerState {
     allowed_hosts: Arc<RwLock<HashSet<String>>>,
     pub(crate) profile_dir: PathBuf,
     auth_limiter: Arc<AuthLimiter>,
+    /// Hashed automation credentials loaded fail-closed at startup.
+    pub(crate) automation_credentials: Arc<AutomationCredentialStore>,
     shutdown: CancellationToken,
     /// Replaced on token rotation so active SSE forwarders observe cancellation.
     session_cancel: Arc<Mutex<CancellationToken>>,
@@ -286,6 +317,8 @@ pub struct ServerState {
     pub(crate) active_forwarders: Arc<AtomicUsize>,
     reminder_coordinator: Arc<Mutex<Option<RunningReminderCoordinator>>>,
     reminder_coordinator_stopped: Arc<AtomicBool>,
+    /// Random per-process instance id shared with runtime metadata and health.
+    instance_id: Arc<str>,
 }
 
 struct RunningReminderCoordinator {
@@ -331,6 +364,8 @@ impl ServerState {
                 "access token was not reconciled with rotation receipt",
             ));
         }
+        // Fail closed on malformed automation authority before admitting traffic.
+        let automation_credentials = AutomationCredentialStore::load(&profile_dir)?;
         let reminder_wakes = Arc::new(ReminderWakeHub::new());
         let events = Arc::new(BroadcastEventSink::new(128, Arc::clone(&reminder_wakes)));
         let service = TaskService::new(Arc::new(repository), Arc::clone(&events));
@@ -351,6 +386,7 @@ impl ServerState {
             allowed_hosts: Arc::new(RwLock::new(allowed_hosts)),
             profile_dir,
             auth_limiter: Arc::new(AuthLimiter::new()),
+            automation_credentials: Arc::new(automation_credentials),
             shutdown: CancellationToken::new(),
             session_cancel: Arc::new(Mutex::new(CancellationToken::new())),
             rotation_receipt: Arc::new(Mutex::new(rotation_receipt)),
@@ -360,7 +396,14 @@ impl ServerState {
             active_forwarders: Arc::new(AtomicUsize::new(0)),
             reminder_coordinator: Arc::new(Mutex::new(None)),
             reminder_coordinator_stopped: Arc::new(AtomicBool::new(false)),
+            instance_id: Arc::from(generate_instance_id()),
         })
+    }
+
+    /// Random per-process instance id shared with runtime metadata and health.
+    #[must_use]
+    pub fn instance_id(&self) -> &str {
+        self.instance_id.as_ref()
     }
 
     /// Process-wide maintenance / recovery barrier.
@@ -665,14 +708,11 @@ impl AuthLimiter {
     }
 }
 
-/// Builds the reusable API + static UI router.
-pub fn router(state: ServerState, web_dir: impl Into<PathBuf>) -> Router {
-    let web_dir = web_dir.into();
-    let index = web_dir.join("index.html");
-    let static_files = ServeDir::new(web_dir).fallback(ServeFile::new(index));
-
+/// API routes shared by hosted and API-only runtimes (no static asset fallback).
+fn api_route_table() -> Router<ServerState> {
     Router::new()
         .route("/api/v1/health", get(health))
+        .route("/api/v1/auth/principal", get(get_principal))
         .route("/api/v1/profile", get(get_profile))
         .route("/api/v1/sync-state", get(get_sync_state))
         .route("/api/v1/tasks", get(list_tasks).post(create_task))
@@ -844,6 +884,14 @@ pub fn router(state: ServerState, web_dir: impl Into<PathBuf>) -> Router {
         .route("/api/v1/recovery/status", get(get_recovery_status))
         .route("/api/v1/auth/rotate", post(rotate_token))
         .route(
+            "/api/v1/auth/credentials",
+            get(list_automation_credentials).post(create_automation_credential),
+        )
+        .route(
+            "/api/v1/auth/credentials/{credential_id}",
+            delete(revoke_automation_credential),
+        )
+        .route(
             "/api/v1/hosts",
             get(get_allowed_hosts).put(put_allowed_hosts),
         )
@@ -853,18 +901,36 @@ pub fn router(state: ServerState, web_dir: impl Into<PathBuf>) -> Router {
         )
         .route("/api", get(api_not_found))
         .route("/api/{*path}", get(api_not_found).fallback(api_not_found))
-        .fallback_service(static_files)
+}
+
+fn finish_api_router(router: Router<ServerState>, state: ServerState) -> Router {
+    // Layer order (outermost last): security → maintenance → body limit → handler.
+    // Authorization must reject before oversized/malformed body processing and before
+    // maintenance/staging admission so missing scope cannot probe those surfaces.
+    router
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            security_guard,
-        ))
-        // Outermost: admit/reject before auth so restore can drain cleanly.
         .layer(middleware::from_fn_with_state(
             state.clone(),
             maintenance_guard,
         ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            security_guard,
+        ))
         .with_state(state)
+}
+
+/// Builds the reusable API + static UI router.
+pub fn router(state: ServerState, web_dir: impl Into<PathBuf>) -> Router {
+    let web_dir = web_dir.into();
+    let index = web_dir.join("index.html");
+    let static_files = ServeDir::new(web_dir).fallback(ServeFile::new(index));
+    finish_api_router(api_route_table().fallback_service(static_files), state)
+}
+
+/// API-only router for in-process temporary owners (no frontend assets).
+pub fn api_only_router(state: ServerState) -> Router {
+    finish_api_router(api_route_table().fallback(api_not_found), state)
 }
 
 /// Minimal lock-retaining router used when storage cannot open a normal service.
@@ -994,10 +1060,6 @@ fn is_recovery_open_path(path: &str) -> bool {
         || path.starts_with("/api/v1/recovery/")
 }
 
-fn is_public_api_path(path: &str) -> bool {
-    path == "/api/v1/health" || path.starts_with("/api/v1/recovery/")
-}
-
 async fn security_guard(
     State(state): State<ServerState>,
     mut request: Request,
@@ -1070,46 +1132,94 @@ async fn security_guard(
     }
 
     let path = request.uri().path();
-    if path.starts_with("/api/v1") && !is_public_api_path(path) {
+    // Only the versioned API surface is authenticated. Bare `/api` and unknown
+    // `/api/*` fallbacks stay public so they can return JSON 404 without a bearer.
+    let access = if path.starts_with("/api/v1") {
+        classify_request(request.method(), path)
+    } else if path.starts_with("/api") {
+        RouteAccess::Public
+    } else {
+        classify_request(request.method(), path)
+    };
+    if !matches!(access, RouteAccess::Public) {
         let presented = request
             .headers()
             .get(header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.strip_prefix("Bearer "));
-        let authenticated = presented.is_some_and(|presented| {
-            if state.previous_token_retry_allowed(&request, presented) {
-                return true;
+        let principal = match resolve_principal(&state, &request, presented) {
+            Some(principal) => principal,
+            None => {
+                let status = state.auth_limiter.rejected_status();
+                let (code, message, retryable) = if status == StatusCode::TOO_MANY_REQUESTS {
+                    (
+                        "auth_rate_limited",
+                        "too many invalid authentication attempts",
+                        true,
+                    )
+                } else {
+                    (
+                        "authentication_required",
+                        "a valid bearer token is required",
+                        false,
+                    )
+                };
+                state.log_diagnostic(
+                    DiagnosticSeverity::Warning,
+                    code,
+                    Some(&request_id.0),
+                    message,
+                );
+                return secure_response(
+                    ApiError::new(status, code, message, retryable, &request_id).into_response(),
+                    &request_id,
+                );
             }
-            let current = state.current_token();
-            // A receipt-first rotation whose token-file write failed has not completed;
-            // the still-current credential remains valid while an exact retry can finish it.
-            presented.as_bytes() == current.as_bytes()
-        });
-        if !authenticated {
-            let status = state.auth_limiter.rejected_status();
-            let (code, message, retryable) = if status == StatusCode::TOO_MANY_REQUESTS {
-                (
-                    "auth_rate_limited",
-                    "too many invalid authentication attempts",
-                    true,
-                )
-            } else {
-                (
-                    "authentication_required",
-                    "a valid bearer token is required",
-                    false,
-                )
-            };
-            state.log_diagnostic(
-                DiagnosticSeverity::Warning,
-                code,
-                Some(&request_id.0),
-                message,
-            );
-            return secure_response(
-                ApiError::new(status, code, message, retryable, &request_id).into_response(),
-                &request_id,
-            );
+        };
+
+        match authorize(&principal, access) {
+            AuthorizationDecision::Allow => {
+                request.extensions_mut().insert(principal);
+            }
+            AuthorizationDecision::DenyOperatorOnly => {
+                state.log_diagnostic(
+                    DiagnosticSeverity::Warning,
+                    "operator_required",
+                    Some(&request_id.0),
+                    "operator credential required",
+                );
+                return secure_response(
+                    ApiError::new(
+                        StatusCode::FORBIDDEN,
+                        "operator_required",
+                        "this route requires the operator credential",
+                        false,
+                        &request_id,
+                    )
+                    .into_response(),
+                    &request_id,
+                );
+            }
+            AuthorizationDecision::DenyScope(scope) => {
+                state.log_diagnostic(
+                    DiagnosticSeverity::Warning,
+                    "insufficient_scope",
+                    Some(&request_id.0),
+                    &format!("missing required scope {scope}"),
+                );
+                return secure_response(
+                    ApiError::new(
+                        StatusCode::FORBIDDEN,
+                        "insufficient_scope",
+                        format!("this route requires the `{scope}` scope"),
+                        false,
+                        &request_id,
+                    )
+                    .with_field("required_scope", scope.as_str())
+                    .into_response(),
+                    &request_id,
+                );
+            }
         }
     }
 
@@ -1129,6 +1239,31 @@ async fn security_guard(
         );
     }
     secure_response(response, &request_id)
+}
+
+fn resolve_principal(
+    state: &ServerState,
+    request: &Request,
+    presented: Option<&str>,
+) -> Option<Principal> {
+    let presented = presented?;
+    if state.previous_token_retry_allowed(request, presented) {
+        return Some(Principal::Operator);
+    }
+    let current = state.current_token();
+    // A receipt-first rotation whose token-file write failed has not completed;
+    // the still-current credential remains valid while an exact retry can finish it.
+    if presented.as_bytes() == current.as_bytes() {
+        return Some(Principal::Operator);
+    }
+    let now = jiff::Timestamp::now();
+    state
+        .automation_credentials
+        .authenticate(presented, now)
+        .map(|automation| Principal::Automation {
+            id: automation.id,
+            scopes: automation.scopes,
+        })
 }
 
 /// Host/origin validation and bearer auth for recovery restore.
@@ -1402,7 +1537,11 @@ impl Modify for SecurityAddon {
         routes::motivation_eat_the_frog,
         routes::motivation_task_jar,
         routes::motivation_dopamine_menu,
+        routes::get_principal,
         routes::rotate_token,
+        routes::list_automation_credentials,
+        routes::create_automation_credential,
+        routes::revoke_automation_credential,
         routes::get_allowed_hosts,
         routes::put_allowed_hosts,
         routes::get_diagnostics,
@@ -1417,6 +1556,12 @@ impl Modify for SecurityAddon {
         dto::ProfileResponse,
         dto::SyncStateResponse,
         dto::TokenRotationResponse,
+        dto::PrincipalKindDto,
+        dto::PrincipalResponse,
+        dto::AutomationScopeDto,
+        dto::AutomationCredentialDto,
+        dto::AutomationCredentialListResponse,
+        dto::CreateAutomationCredentialRequest,
         dto::HostListResponse,
         dto::HostListRequest,
         dto::DiagnosticsResponse,
@@ -1589,6 +1734,12 @@ pub fn generate_access_token() -> String {
     token
 }
 
+/// Generate a random per-process instance id for runtime discovery matching.
+#[must_use]
+pub fn generate_instance_id() -> String {
+    Uuid::new_v4().to_string()
+}
+
 /// Atomically replace the operator-facing private access-token file.
 pub fn write_token_atomic(profile_dir: &Path, token: &str) -> io::Result<()> {
     atomic_replace_private_file(
@@ -1660,10 +1811,58 @@ pub fn load_or_create_token(profile_dir: &Path) -> io::Result<String> {
     Ok(token)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// Private discovery record published by an active owner. Not authoritative and never secret-bearing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeMetadata {
+    pub version: u32,
     pub address: SocketAddr,
     pub pid: u32,
+    pub instance_id: String,
+}
+
+/// Strict decode failure for private runtime metadata.
+#[derive(Debug, Error)]
+pub enum RuntimeMetadataError {
+    #[error("runtime metadata is not valid JSON: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("unsupported runtime metadata version {found} (expected {RUNTIME_METADATA_VERSION})")]
+    UnsupportedVersion { found: u32 },
+    #[error("runtime metadata instance_id must be non-empty")]
+    EmptyInstanceId,
+}
+
+impl RuntimeMetadata {
+    /// Parse and validate a versioned runtime metadata record.
+    pub fn parse(data: &[u8]) -> Result<Self, RuntimeMetadataError> {
+        let metadata: Self = serde_json::from_slice(data)?;
+        metadata.validate()?;
+        Ok(metadata)
+    }
+
+    fn validate(&self) -> Result<(), RuntimeMetadataError> {
+        if self.version != RUNTIME_METADATA_VERSION {
+            return Err(RuntimeMetadataError::UnsupportedVersion {
+                found: self.version,
+            });
+        }
+        if self.instance_id.is_empty() {
+            return Err(RuntimeMetadataError::EmptyInstanceId);
+        }
+        Ok(())
+    }
+}
+
+/// Read and strictly parse `runtime.json` when present.
+pub fn read_runtime_metadata(
+    profile_dir: &Path,
+) -> io::Result<Option<Result<RuntimeMetadata, RuntimeMetadataError>>> {
+    let path = profile_dir.join(RUNTIME_FILE);
+    match fs::read(&path) {
+        Ok(data) => Ok(Some(RuntimeMetadata::parse(&data))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 pub struct RuntimeMetadataFile {
@@ -1671,11 +1870,19 @@ pub struct RuntimeMetadataFile {
 }
 
 impl RuntimeMetadataFile {
-    pub fn create(profile_dir: &Path, address: SocketAddr) -> io::Result<Self> {
+    pub fn create(profile_dir: &Path, address: SocketAddr, instance_id: &str) -> io::Result<Self> {
+        if instance_id.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "runtime metadata instance_id must be non-empty",
+            ));
+        }
         let path = profile_dir.join(RUNTIME_FILE);
         let metadata = RuntimeMetadata {
+            version: RUNTIME_METADATA_VERSION,
             address,
             pid: std::process::id(),
+            instance_id: instance_id.to_owned(),
         };
         let mut json = serde_json::to_vec_pretty(&metadata).map_err(io::Error::other)?;
         json.push(b'\n');

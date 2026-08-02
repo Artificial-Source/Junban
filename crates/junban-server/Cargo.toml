@@ -20,6 +20,8 @@ junban-domain = { path = "../junban-domain", version = "0.1.0" }
 junban-storage = { path = "../junban-storage", version = "0.1.0" }
 serde.workspace = true
 serde_json.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util"] }
 tokio-util = { workspace = true, features = ["io"] }
 tower-http.workspace = true

@@ -29,6 +29,14 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-4-outcome.md`](../goals/rust-rewrite/evidence/phase-4-outcome.md): Phase 4 acceptance, validation, performance, dogfood, and review outcome
 - [`../goals/rust-rewrite/evidence/phase-4-review-ledger.md`](../goals/rust-rewrite/evidence/phase-4-review-ledger.md): closed Phase 4 database, security, UI, and dogfood findings
 - [`../goals/rust-rewrite/evidence/phase-4-dogfood/report.md`](../goals/rust-rewrite/evidence/phase-4-dogfood/report.md): production-build backup/restore and Settings dogfood evidence
+- [`../goals/rust-rewrite/evidence/phase-5-context-map.md`](../goals/rust-rewrite/evidence/phase-5-context-map.md): approved CLI/MCP authority, credential, catalog, lifecycle, and evidence contract
+- [`../goals/rust-rewrite/evidence/phase-5-conformance-protocol.md`](../goals/rust-rewrite/evidence/phase-5-conformance-protocol.md): frozen 17-revision CLI/MCP conformance corpus
+- [`../goals/rust-rewrite/evidence/phase-5-automation-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-5-automation-benchmark-protocol.md): frozen CLI/MCP latency, memory, lifecycle, and no-Node budgets
+- [`../goals/rust-rewrite/evidence/phase-5-review-ledger.md`](../goals/rust-rewrite/evidence/phase-5-review-ledger.md): closed credential-security, catalog, MCP, and human-output findings
+- [`../goals/rust-rewrite/evidence/phase-5-conformance.json`](../goals/rust-rewrite/evidence/phase-5-conformance.json): authoritative cross-surface corpus result
+- [`../goals/rust-rewrite/evidence/phase-5-automation-bench.json`](../goals/rust-rewrite/evidence/phase-5-automation-bench.json): authoritative automation latency, memory, lifecycle, and cleanup result
+- [`../goals/rust-rewrite/evidence/phase-5-dogfood/report.md`](../goals/rust-rewrite/evidence/phase-5-dogfood/report.md): native CLI and MCP dogfood evidence
+- [`../goals/rust-rewrite/evidence/phase-5-outcome.md`](../goals/rust-rewrite/evidence/phase-5-outcome.md): Phase 5 acceptance, validation, performance, dogfood, and review outcome
 - [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings
 - [`performance.md`](performance.md): hosted memory and scale harness commands
 
@@ -36,6 +44,8 @@ This directory contains canonical documentation for the active Rust implementati
 
 - [`architecture.md`](architecture.md): workspace boundaries and runtime ownership
 - [`security.md`](security.md): standing security posture and supply-chain policy
+- [`cli.md`](cli.md): native CLI setup, catalog, commands, JSON contract, and credentials
+- [`mcp.md`](mcp.md): native MCP stdio server, scopes, resources, prompts, and lifecycle
 - [`accessibility.md`](accessibility.md): accessibility contract for UI phases
 - [`performance.md`](performance.md): memory/performance measurement rules
 - [`setup.md`](setup.md): developer toolchain and commands

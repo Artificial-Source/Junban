@@ -219,6 +219,7 @@ pub struct TaskDto {
     pub id: String,
     pub title: String,
     pub description: String,
+    #[schema(minimum = 1, maximum = 4)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<u8>,
     #[schema(value_type = Option<String>, format = Date, nullable = true)]
@@ -300,6 +301,7 @@ pub struct CreateTaskRequest {
     pub title: String,
     #[serde(default)]
     pub description: Option<String>,
+    #[schema(minimum = 1, maximum = 4)]
     #[serde(default)]
     pub priority: Option<u8>,
     #[schema(value_type = Option<String>, format = Date, nullable = true)]
@@ -368,7 +370,7 @@ pub struct PatchTaskRequest {
     pub description: Option<String>,
     /// `null` clears priority; omit leaves unchanged.
     #[serde(default, deserialize_with = "double_option::deserialize")]
-    #[schema(nullable = true)]
+    #[schema(minimum = 1, maximum = 4, nullable = true)]
     pub priority: Option<Option<u8>>,
     #[serde(default, deserialize_with = "double_option::deserialize")]
     #[schema(value_type = Option<Option<String>>, format = Date, nullable = true)]
@@ -614,6 +616,7 @@ pub enum BulkActionDto {
     },
     Priority {
         #[serde(default)]
+        #[schema(minimum = 1, maximum = 4)]
         priority: Option<u8>,
     },
 }
@@ -785,6 +788,7 @@ pub struct TemplateDto {
     pub name: String,
     pub title: String,
     pub description: String,
+    #[schema(minimum = 1, maximum = 4)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<u8>,
     pub tag_names: Vec<String>,
@@ -1029,6 +1033,7 @@ pub struct CreateTemplateRequest {
     pub title: String,
     #[serde(default)]
     pub description: Option<String>,
+    #[schema(minimum = 1, maximum = 4)]
     #[serde(default)]
     pub priority: Option<u8>,
     #[serde(default)]
@@ -1077,7 +1082,7 @@ pub struct PatchTemplateRequest {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default, deserialize_with = "double_option::deserialize")]
-    #[schema(nullable = true)]
+    #[schema(minimum = 1, maximum = 4, nullable = true)]
     pub priority: Option<Option<u8>>,
     #[serde(default)]
     pub tag_names: Option<Vec<String>>,
@@ -1968,6 +1973,8 @@ impl From<CommittedMutation> for MutationResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct HealthResponse {
     pub status: &'static str,
+    /// Random per-process id mirrored from private runtime metadata.
+    pub instance_id: String,
 }
 
 /// Process-wide maintenance barrier snapshot.
@@ -2005,6 +2012,79 @@ pub struct TokenRotationResponse {
     pub token: String,
 }
 
+/// Issuable automation scope values.
+pub use crate::authz::AutomationScope as AutomationScopeDto;
+
+/// Authenticated principal kind (never includes ids, tokens, or secrets).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(rename_all = "snake_case")]
+pub enum PrincipalKindDto {
+    Operator,
+    Automation,
+}
+
+/// Capability snapshot for the active bearer.
+///
+/// Operator always reports the full routine scope set (`read`, `write`, `data`).
+/// Automation reports only the exact issued scopes. Identifiers and secrets are
+/// intentionally omitted so CLI/MCP clients can filter tools without learning
+/// credential identity material.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PrincipalResponse {
+    pub kind: PrincipalKindDto,
+    pub scopes: Vec<AutomationScopeDto>,
+}
+
+/// Public automation credential metadata (never includes secrets or hashes).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AutomationCredentialDto {
+    pub id: String,
+    pub label: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: jiff::Timestamp,
+    #[schema(value_type = Option<String>, format = DateTime, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<jiff::Timestamp>,
+    pub scopes: Vec<AutomationScopeDto>,
+}
+
+impl From<crate::credentials::AutomationCredentialMetadata> for AutomationCredentialDto {
+    fn from(value: crate::credentials::AutomationCredentialMetadata) -> Self {
+        Self {
+            id: value.id,
+            label: value.label,
+            created_at: value.created_at,
+            expires_at: value.expires_at,
+            scopes: value.scopes,
+        }
+    }
+}
+
+/// Operator-only list of automation credentials.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AutomationCredentialListResponse {
+    pub credentials: Vec<AutomationCredentialDto>,
+}
+
+/// Operator-only create body. The client generates the id and one-time token.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateAutomationCredentialRequest {
+    /// Client-generated credential UUID.
+    pub id: String,
+    /// Human label for operator listing.
+    pub label: String,
+    /// Exact scopes requested (duplicates rejected).
+    pub scopes: Vec<AutomationScopeDto>,
+    /// Optional expiry instant; must be strictly after creation time.
+    #[schema(value_type = Option<String>, format = DateTime, nullable = true)]
+    #[serde(default)]
+    pub expires_at: Option<jiff::Timestamp>,
+    /// Full high-entropy automation bearer. Persisted only as a one-way hash.
+    pub token: String,
+}
+
 /// Effective Host allowlist (CLI hosts plus persisted extras).
 #[derive(Debug, Serialize, ToSchema)]
 pub struct HostListResponse {
@@ -2036,6 +2116,7 @@ pub struct QuickEntryDto {
     #[schema(value_type = Option<String>, format = Date, nullable = true)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub due_date: Option<Date>,
+    #[schema(minimum = 1, maximum = 4)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2089,6 +2170,7 @@ pub struct TaskFilterDto {
     pub statuses: Vec<TaskStatusDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_name: Option<String>,
+    #[schema(minimum = 1, maximum = 4)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<u8>,
     #[schema(value_type = Option<String>, format = Date, nullable = true)]
@@ -2334,6 +2416,8 @@ pub struct ReleaseReminderLeaseRequest {
 #[serde(deny_unknown_fields)]
 pub struct ClaimRemindersRequest {
     pub fence_term: String,
+    /// Claim batch size in `1..=100`. Defaults to 20 when omitted.
+    #[schema(minimum = 1, maximum = 100)]
     #[serde(default)]
     pub limit: Option<u32>,
     #[serde(default)]
@@ -2370,6 +2454,8 @@ pub struct SettleReminderFailedRequest {
 #[serde(deny_unknown_fields)]
 pub struct MarkOwnerLostRemindersRequest {
     pub fence_term: String,
+    /// Batch size in `1..=100`. Defaults to 20 when omitted.
+    #[schema(minimum = 1, maximum = 100)]
     #[serde(default)]
     pub limit: Option<u32>,
 }
@@ -3177,6 +3263,7 @@ impl From<DateTimeSettings> for DateTimeSettingsDto {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskDefaultsDto {
+    #[schema(minimum = 1, maximum = 4)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_priority: Option<u8>,
     pub default_view: TaskViewPresetDto,
@@ -3513,6 +3600,7 @@ pub struct ImportDraftDto {
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[schema(minimum = 1, maximum = 4)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]

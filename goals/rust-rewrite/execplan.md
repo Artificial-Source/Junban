@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 4 are complete. Phase 5 is next.
+**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 5 are complete. Phase 6 is next.
 
 ## Purpose and user-visible outcome
 
@@ -712,7 +712,12 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 3 temporal benchmark harness and five-sample release evidence recorded; `P3-FINAL-007` is fixed after the bounded analysis snapshot rerun passed every frozen latency and memory budget.
 - [x] Phase 3 recurrence, reminder, planning, timeblocking, visual, accessibility, performance, review and delivery implementation.
 - [x] Phase 4 settings, portability, backup/recovery, hosted operations, performance, dogfood and specialist acceptance; all `P4-DB`, `P4-SEC`, `P4-UI`, and dogfood findings are closed.
-- [ ] Phase 5 implementation.
+- [x] Phase 5 context, ownership, credential, catalog, MCP lifecycle, conformance and performance plan approved; `P5-PLAN-001` and `P5-PLAN-002` are closed.
+- [x] Phase 5 Wave 0 dependency/ownership spike: `junban-cli`/`junban-mcp` crates, exact-pinned `rmcp 3.1.0` stdio features, versioned instance-matched runtime metadata, API-only `LocalApiOwner`, `junban status`, temporary MCP status probe, and focused regressions (see `evidence/phase-5-context-map.md`).
+- [x] Phase 5 Wave 1 principal scopes: private hashed automation credentials, centralized pre-body route authorization, operator CLI `auth create|list|revoke`, OpenAPI/TS contract update, and completed security gate; `P5-SEC-001`–`P5-SEC-004` are fixed with focused ambiguity, parent-permission, Windows-ACL, and durable-replacement regressions in `phase-5-review-ledger.md`.
+- [x] Phase 5 Wave 2 CLI session/catalog/commands: versioned 87-tool OpenAPI-bound catalog with exact result schemas, bounded HTTP request plans with idempotent retry, resumable token rotation, private atomic staged upload/download, generic `tools list`/`tool call`, ergonomic task/project/tag/reminder/plan/data/server commands, strict JSON parse errors, `docs/cli.md`, and focused catalog/executor/process regressions. `P5-API-001`–`P5-API-011` are fixed (see `evidence/phase-5-context-map.md` and `evidence/phase-5-review-ledger.md`).
+- [x] Phase 5 Waves 3–4 MCP, conformance, performance, dogfood, API-contract review, and phase closure: all four surfaces matched one 17-revision digest, optimized automation passed every absolute/lifecycle/latency budget, `P5-API-012`–`P5-API-018` plus `P5-DOG-001` are closed, and the phase is one clean commit.
+- [x] Phase 5 Wave 4 protocols frozen before measurement: 17-revision cross-surface corpus and fixed CLI/MCP latency, memory, lifecycle, ownership, secrecy, cleanup, and no-Node acceptance budgets; local-owner CLI dry run passed every corpus operation/error assumption.
 - [ ] Phase 6 implementation.
 - [ ] Phase 7 implementation.
 - [ ] Phase 8 implementation.
@@ -747,6 +752,9 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - `P3-FINAL-010` — **fixed**. Calendar planning controls now await authoritative task mutations and keep the selected task on failure instead of reporting success and clearing selection optimistically.
 - Phase 3 final review — **approved after fixes**. All reminder/storage findings and `P3-FINAL-001`–`P3-FINAL-016` are closed with focused regressions. The final closure hardened recurring reversal sidecars, reminder and recurring-timeblock timezone edits, immutable cancellation transitions, v3 undo-snapshot migration, and bounded migration memory; focused database re-review found no remaining material issue. Full ledger: `evidence/phase-3-review-ledger.md`.
 - Phase 4 final review — **approved after fixes**. Database `P4-DB-001`–`P4-DB-010` plus `P4-DB-R1`, security `P4-SEC-001`–`P4-SEC-003`, UI `P4-UI-001`–`P4-UI-006` plus `P4-UI-R1`, and dogfood `P4-UI-DOG-001` are closed with focused regressions. Database, security, and UI gates found no remaining material issue; full ledger: `evidence/phase-4-review-ledger.md`.
+- Phase 5 Wave 1 security review — **approved after fixes**. `P5-SEC-001`–`P5-SEC-004` close ambiguous credential creation, output-parent metadata mutation, Windows token DACL, and Windows write-through replacement findings with focused regressions. Full ledger: `evidence/phase-5-review-ledger.md`.
+- Phase 5 Wave 2 API-contract review — **approved after fixes**. Exact-delta recheck `630ac80..3ccb221` approved `P5-API-001`–`P5-API-011`, covering catalog result schemas, token-rotation recovery, secret-safe generic tools, bulk confirmation, side-effect annotations, cross-platform private/durable downloads, strict JSON parser failures, pure-parser metadata, restore ambiguity, and the operator access label.
+- Phase 5 final API-contract review — **approved after fixes**. `P5-API-012`–`P5-API-018` and `P5-DOG-001` close catalog identity, scoped MCP projection, lifecycle/progress/cancellation, concise secret-safe human output, and the discovered temporary-owner handoff race. Exact-delta recheck found no material contract issue remaining; full ledger: `evidence/phase-5-review-ledger.md`.
 
 ## Decision log
 
@@ -767,6 +775,8 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-07-31: the Phase 3 temporal benchmark extends the existing hosted cgroup harness and existing development-only scale seeder rather than adding a runner or dependency. Its recurring bulk covers 250 sources plus 250 generated children because the frozen 500 affected-task ceiling includes generated occurrences.
 - 2026-07-31: completed Phase 3 over the existing four crates with no scheduler/recurrence framework. One dormant reminder coordinator, server-civil-date planning authority, exact replan candidate binding, immutable cancellation-transition history, and immutable Phase 3 visual authorities preserve correctness while keeping the optimized 10,000-task workload below 18.20 MiB peak.
 - 2026-08-02: completed Phase 4 in the existing four crates. Settings remain one typed server-confirmed aggregate; complete backups use private bounded staging and fail-closed recovery; one server-wide permit serializes large artifacts; the legacy Settings modal is the visual authority. Linux drops durable rollback file-cache pages before cutover so a 10,000-task restore remains under the frozen 32 MiB peak without weakening rollback.
+- 2026-08-02: approved the Phase 5 contract plan after `P5-PLAN-001` and `P5-PLAN-002` were fixed. Phase 5 adds the two planned CLI/MCP crates, uses official slim `rmcp` over persistent stdio, verifies local owners through versioned instance-matched metadata, and uses one authenticated HTTP execution path with an in-process temporary owner after exclusive lock acquisition. Automation credentials are private-file-backed, hashed, non-admin, and scope-limited; explicit remote targets require a credential file, HTTPS, no redirects, and no URL credentials.
+- 2026-08-02: completed Phase 5 with an 87-tool OpenAPI-bound catalog shared by native CLI and MCP. No-owner clients host the existing Rust owner in-process only after exclusive lock acquisition; discovered local clients receive one bounded ownership handoff only for a definitive non-timeout pre-dispatch connect failure. The accepted automation result retains a failed raw owner-delta assertion and applies the frozen `durable-sqlite-state-growth` disposition only after matched idle controls and absolute 24/32 MiB ceilings passed.
 
 ## Discoveries and risks
 
@@ -799,6 +809,8 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 4 recovery: validating an upload is not sufficient if catastrophic state is only in memory. Durable recovery and cutover markers are reconciled while the profile lock is retained before any ordinary SQLite open, and hostile typed rows are rejected before maintenance.
 - Phase 4 performance: restore peak was file-cache pressure rather than heap growth. The first authoritative run retained three simultaneous 6.8 MiB SQLite copies and failed at 32.8086 MiB; syncing then advising away only rollback cache pages reduced the accepted maximum peak to 25.2617 MiB while preserving the rollback file.
 - Phase 4 dogfood: intentional restart-required cutover could race a terminal SSE callback and show a contradictory retry banner. A synchronous restart-required gate now clears and suppresses realtime errors only after successful restore; failed restores keep ordinary realtime behavior.
+- Phase 5 ownership: successful instance-matched discovery does not itself lease a temporary owner. A one-shot owner can exit before the discovered client's first request; one bounded reconnect on a definitive non-timeout connect failure closes that gap without replaying restore or any ambiguous sent write.
+- Phase 5 memory: state-creating MCP samples can retain about 1 MiB of new SQLite/WAL file cache after 50 mutations while idle controls remain flat. The protocol keeps the raw relative failure visible and permits the explicit durable-state disposition only when process count, cleanup, no-Node checks, and absolute 24/32 MiB ceilings all pass.
 
 ## Outcome and retrospective
 
@@ -847,3 +859,12 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - **Validation:** 389 Rust tests, 345 frontend tests, and 91 Playwright scenarios passed alongside release build, format, denied-warning Clippy, type, contract, docs, runtime-boundary, npm/Rust supply-chain checks, visual and accessibility gates, benchmark self-check, exact backup/restore evidence, and dogfood.
 - **Dogfood and review:** the real production build completed connection, settings, feature-gate, task, export, backup, restore, restart and integrity workflows. `P4-UI-DOG-001` was fixed and rechecked. Database, security, and UI specialist gates approved all named findings with no material issue remaining.
 - **Follow-up:** Phase 5 adds native CLI and MCP surfaces over the same Rust application/storage authority without direct competing database ownership.
+
+### Phase 5
+
+- **Outcome:** native Rust CLI and persistent stdio MCP expose the Phase 1–4 feature set through one 87-tool OpenAPI-bound catalog, scope-filtered automation principals, and the existing single-owner HTTP/application path. No direct CLI/MCP SQLite path or runtime Node process exists.
+- **Evidence:** `goals/rust-rewrite/evidence/phase-5-outcome.md`; `phase-5-conformance.json`; `phase-5-automation-bench.json`; retained `phase-5-automation-owner-delta-raw.json`; `phase-5-review-ledger.md`; `phase-5-dogfood/report.md`; frozen conformance and benchmark protocols.
+- **Conformance:** HTTP, attached CLI, no-owner CLI, and MCP completed the same 17 revisions and produced digest `8b511fadf02c066077e124fd7c4fe63b9d2c30df1ad45778b996c84cc7c5ca70` with state, events, errors, exports, backup, cleanup, and secret assertions passing.
+- **Performance:** accepted optimized results passed at 22.092 ms active-owner CLI p95, 62.535 ms no-owner CLI p95, 3.729/0.320 ms MCP create/get p95, 20.4648/20.9922 MiB attached MCP maximum warm/peak, and 21.9805/22.7227 MiB local-owner MCP maximum warm/peak. The raw relative owner-delta failure and explicit durable-SQLite-state disposition are both retained; no absolute ceiling was waived.
+- **Review and dogfood:** `P5-SEC-001`–`P5-SEC-004`, `P5-API-001`–`P5-API-018`, and `P5-DOG-001` are fixed with focused regressions and exact-delta approval. Manual use found and closed noisy human mutation rendering; authoritative lifecycle then found and closed the post-discovery temporary-owner exit race.
+- **Follow-up:** Phase 6 adds optional Rust AI/provider/voice services and preserved UI over the same catalog/application authority, with zero idle initialization when disabled.

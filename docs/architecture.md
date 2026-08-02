@@ -23,17 +23,17 @@ Phases 1 and 2 implement the hosted product in `junban-domain`, `junban-app`, `j
 
 ## Crate boundaries
 
-| Crate                | Responsibility                                                                |
-| -------------------- | ----------------------------------------------------------------------------- |
-| `junban-domain`      | Pure task entities, UUID IDs, title validation, civil dates and UTC instants  |
-| `junban-storage`     | SQLite schema/migrations, profile lock, receipts, activity and durable events |
-| `junban-app`         | Framework-free task use cases and application-owned repository/event ports    |
-| `junban-server`      | Axum composition, HTTP DTO/OpenAPI authority, auth, static serving and SSE    |
-| `junban-cli`         | Native CLI                                                                    |
-| `junban-mcp`         | Native MCP adapter                                                            |
-| `junban-ai`          | Optional provider clients and orchestration                                   |
-| `junban-plugin-sdk`  | WIT contract and package types                                                |
-| `junban-plugin-host` | Optional Wasmtime runtime after a measured spike                              |
+| Crate                | Responsibility                                                                                                               |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `junban-domain`      | Pure task entities, UUID IDs, title validation, civil dates and UTC instants                                                 |
+| `junban-storage`     | SQLite schema/migrations, profile lock, receipts, activity and durable events                                                |
+| `junban-app`         | Framework-free task use cases and application-owned repository/event ports                                                   |
+| `junban-server`      | Axum composition, HTTP DTO/OpenAPI authority, principal/scope auth, static serving, SSE, and reusable API-only owner runtime |
+| `junban-cli`         | Native CLI session, HTTP executor, versioned automation catalog, and human/JSON commands                                     |
+| `junban-mcp`         | Native MCP stdio adapter over the CLI session/catalog (Wave 3 completes tools/resources/prompts)                             |
+| `junban-ai`          | Optional provider clients and orchestration                                                                                  |
+| `junban-plugin-sdk`  | WIT contract and package types                                                                                               |
+| `junban-plugin-host` | Optional Wasmtime runtime after a measured spike                                                                             |
 
 Rules:
 
@@ -44,7 +44,9 @@ Rules:
 
 ## Runtime ownership
 
-At any moment, one process owns a profile’s SQLite authority. `fs4` acquires an exclusive profile lock before SQLite opens. The lock remains attached to every repository clone, so it cannot release while a connection is still usable.
+At any moment, one process owns a profile’s SQLite authority. `fs4` acquires an exclusive profile lock before SQLite opens. The lock remains attached to every repository clone, so it cannot release while a connection is still usable. Private `runtime.json` is a versioned discovery hint (`version`, `address`, `pid`, `instance_id`) and is never authoritative; clients may send a bearer only after an unauthenticated health probe returns the matching `instance_id`. CLI/MCP prefer a verified loopback owner and otherwise start an in-process API-only owner (`LocalApiOwner`) that holds the same lock for exactly their lifetime.
+
+Authenticated requests resolve a principal after Host/origin checks: the operator bearer, or a hashed automation credential with exact scopes `read`, `write`, and/or `data`. Route authorization is centralized and runs before body materialization and maintenance admission. Automation credentials live in private `automation-credentials.json` (not SQLite); operator-only routes cover token rotation, hostname policy, credential admin, restore/recovery mutations, diagnostics, and reminder delivery control-plane.
 
 One long-lived OS thread owns one bundled `rusqlite` connection. Async callers send typed commands over a standard channel and await Tokio one-shot replies; SQLite work never blocks a Tokio executor thread. The connection uses WAL, foreign keys, a 2.5-second busy timeout, `NORMAL` synchronization, and a 250-page (~1 MiB) WAL auto-checkpoint bound (below SQLite's 1000-page default) so commit-path checkpoints stay small. There is no pool.
 

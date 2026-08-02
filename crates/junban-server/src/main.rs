@@ -1,5 +1,4 @@
 use std::{
-    ffi::OsStr,
     io,
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -7,8 +6,8 @@ use std::{
 
 use clap::Parser;
 use junban_server::{
-    DiagnosticSeverity, RecoveryState, RuntimeMetadataFile, ServerState, load_or_create_token,
-    recovery_router, router,
+    DiagnosticSeverity, RecoveryState, RuntimeMetadataFile, ServerState, default_profile_dir,
+    load_or_create_token, recovery_router, router,
 };
 use junban_storage::{OpenError, ProfileOwner, RecoveryOwner, profile_recovery_required};
 
@@ -36,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compact()
         .init();
     let config = Config::parse();
-    let data_dir = config.data_dir.clone().unwrap_or_else(default_data_dir);
+    let data_dir = config.data_dir.clone().unwrap_or_else(default_profile_dir);
     if profile_recovery_required(&data_dir)? {
         let recovery_owner = RecoveryOwner::open(&data_dir)?;
         ensure_separate_profile_and_web(&data_dir, &config.web_dir)?;
@@ -65,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // CLI hosts merge with any persisted Tailnet hostnames under the profile dir.
     let state = ServerState::new(owner.repository(), token, cli_hosts, &data_dir)?;
+    let instance_id = state.instance_id().to_owned();
     let shutdown = state.shutdown_token();
     // Exactly one process-global reminder coordinator; not started by router tests.
     assert!(
@@ -78,9 +78,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &format!("listening on {address}"),
     );
     let app = router(state.clone(), config.web_dir);
-    let runtime_metadata = RuntimeMetadataFile::create(&data_dir, address)?;
 
     tracing::info!(%address, "Junban server listening");
+    // Publish discovery metadata only after the listener is bound and the stack is ready.
+    let runtime_metadata = RuntimeMetadataFile::create(&data_dir, address, &instance_id)?;
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown({
             let shutdown = shutdown.clone();
@@ -127,10 +128,11 @@ async fn run_recovery_server(
         allowed_hosts.push(format!("localhost:{}", address.port()));
     }
     let state = RecoveryState::new(owner, token, allowed_hosts)?;
+    let instance_id = state.instance_id().to_owned();
     let app = recovery_router(state, config.web_dir.clone());
-    let runtime_metadata = RuntimeMetadataFile::create(data_dir, address)?;
 
     tracing::warn!(%address, "Junban recovery-only server listening");
+    let runtime_metadata = RuntimeMetadataFile::create(data_dir, address, &instance_id)?;
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await;
@@ -149,87 +151,6 @@ fn ensure_separate_profile_and_web(data_dir: &Path, web_dir: &Path) -> io::Resul
         ));
     }
     Ok(())
-}
-
-/// OS family used to resolve the default private profile directory.
-///
-/// All variants are retained so unit tests can exercise every host path on any
-/// builder; production `default_data_dir` only constructs the current target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-enum DataDirPlatform {
-    /// Linux, BSD, and other non-macOS Unix hosts using XDG data dirs.
-    Unix,
-    MacOs,
-    Windows,
-}
-
-/// Resolve the default profile directory from explicit environment inputs.
-///
-/// Prefer OS conventions without depending on process-global env mutation in tests:
-/// - Unix: `$XDG_DATA_HOME/junban`, else `$HOME/.local/share/junban`
-/// - macOS: `$HOME/Library/Application Support/Junban`
-/// - Windows: `%LOCALAPPDATA%/Junban`
-/// - Fallback when required environment data is missing: `./data`
-fn resolve_default_data_dir(
-    platform: DataDirPlatform,
-    xdg_data_home: Option<&OsStr>,
-    home: Option<&OsStr>,
-    local_app_data: Option<&OsStr>,
-) -> PathBuf {
-    match platform {
-        DataDirPlatform::Unix => {
-            if let Some(xdg) = xdg_data_home.filter(|path| !path.is_empty()) {
-                return PathBuf::from(xdg).join("junban");
-            }
-            if let Some(home) = home.filter(|path| !path.is_empty()) {
-                return PathBuf::from(home).join(".local/share/junban");
-            }
-            PathBuf::from("data")
-        }
-        DataDirPlatform::MacOs => {
-            if let Some(home) = home.filter(|path| !path.is_empty()) {
-                return PathBuf::from(home).join("Library/Application Support/Junban");
-            }
-            PathBuf::from("data")
-        }
-        DataDirPlatform::Windows => {
-            if let Some(local) = local_app_data.filter(|path| !path.is_empty()) {
-                return PathBuf::from(local).join("Junban");
-            }
-            PathBuf::from("data")
-        }
-    }
-}
-
-fn default_data_dir() -> PathBuf {
-    #[cfg(windows)]
-    {
-        resolve_default_data_dir(
-            DataDirPlatform::Windows,
-            None,
-            None,
-            std::env::var_os("LOCALAPPDATA").as_deref(),
-        )
-    }
-    #[cfg(target_os = "macos")]
-    {
-        resolve_default_data_dir(
-            DataDirPlatform::MacOs,
-            None,
-            std::env::var_os("HOME").as_deref(),
-            None,
-        )
-    }
-    #[cfg(not(any(windows, target_os = "macos")))]
-    {
-        resolve_default_data_dir(
-            DataDirPlatform::Unix,
-            std::env::var_os("XDG_DATA_HOME").as_deref(),
-            std::env::var_os("HOME").as_deref(),
-            None,
-        )
-    }
 }
 
 async fn shutdown_signal() {
@@ -260,89 +181,5 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         ctrl_c.await;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{DataDirPlatform, resolve_default_data_dir};
-    use std::ffi::OsStr;
-    use std::path::PathBuf;
-
-    #[test]
-    fn unix_prefers_xdg_data_home() {
-        let path = resolve_default_data_dir(
-            DataDirPlatform::Unix,
-            Some(OsStr::new("/custom/xdg")),
-            Some(OsStr::new("/home/user")),
-            None,
-        );
-        assert_eq!(path, PathBuf::from("/custom/xdg/junban"));
-    }
-
-    #[test]
-    fn unix_falls_back_to_home_local_share() {
-        let path = resolve_default_data_dir(
-            DataDirPlatform::Unix,
-            None,
-            Some(OsStr::new("/home/user")),
-            None,
-        );
-        assert_eq!(path, PathBuf::from("/home/user/.local/share/junban"));
-    }
-
-    #[test]
-    fn unix_ignores_empty_xdg_and_uses_home() {
-        let path = resolve_default_data_dir(
-            DataDirPlatform::Unix,
-            Some(OsStr::new("")),
-            Some(OsStr::new("/home/user")),
-            None,
-        );
-        assert_eq!(path, PathBuf::from("/home/user/.local/share/junban"));
-    }
-
-    #[test]
-    fn unix_falls_back_to_relative_data_when_env_missing() {
-        let path = resolve_default_data_dir(DataDirPlatform::Unix, None, None, None);
-        assert_eq!(path, PathBuf::from("data"));
-    }
-
-    #[test]
-    fn macos_uses_application_support() {
-        let path = resolve_default_data_dir(
-            DataDirPlatform::MacOs,
-            Some(OsStr::new("/ignored/xdg")),
-            Some(OsStr::new("/Users/ada")),
-            None,
-        );
-        assert_eq!(
-            path,
-            PathBuf::from("/Users/ada/Library/Application Support/Junban")
-        );
-    }
-
-    #[test]
-    fn macos_falls_back_to_relative_data_when_home_missing() {
-        let path = resolve_default_data_dir(DataDirPlatform::MacOs, None, None, None);
-        assert_eq!(path, PathBuf::from("data"));
-    }
-
-    #[test]
-    fn windows_uses_local_app_data() {
-        let local = PathBuf::from(r"C:\Users\ada\AppData\Local");
-        let path = resolve_default_data_dir(
-            DataDirPlatform::Windows,
-            None,
-            None,
-            Some(local.as_os_str()),
-        );
-        assert_eq!(path, local.join("Junban"));
-    }
-
-    #[test]
-    fn windows_falls_back_to_relative_data_when_local_app_data_missing() {
-        let path = resolve_default_data_dir(DataDirPlatform::Windows, None, None, None);
-        assert_eq!(path, PathBuf::from("data"));
     }
 }

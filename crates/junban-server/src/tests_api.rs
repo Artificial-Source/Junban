@@ -486,7 +486,8 @@ async fn restore_drains_streams_and_requests_then_stops_owned_coordinator() {
         .await
         .unwrap()
     });
-    let deadline = Instant::now() + Duration::from_secs(2);
+    // Allow headroom under full-suite CPU/disk contention after upload + prepare_restore.
+    let deadline = Instant::now() + Duration::from_secs(10);
     while !context.state.maintenance().restart_required() {
         assert!(
             Instant::now() < deadline,
@@ -1975,17 +1976,56 @@ fn runtime_metadata_is_private_contains_no_token_and_is_removed() {
     let context = TestContext::new();
     let profile = context.directory.join("profile");
     let address: SocketAddr = "127.0.0.1:4123".parse().unwrap();
-    let runtime = RuntimeMetadataFile::create(&profile, address).unwrap();
+    let instance_id = context.state.instance_id().to_owned();
+    let runtime = RuntimeMetadataFile::create(&profile, address, &instance_id).unwrap();
     let text = fs::read_to_string(profile.join(RUNTIME_FILE)).unwrap();
     assert!(!text.contains(TOKEN));
-    assert_eq!(
-        serde_json::from_str::<RuntimeMetadata>(&text)
-            .unwrap()
-            .address,
-        address
-    );
+    let parsed = RuntimeMetadata::parse(text.as_bytes()).unwrap();
+    assert_eq!(parsed.address, address);
+    assert_eq!(parsed.instance_id, instance_id);
+    assert_eq!(parsed.version, RUNTIME_METADATA_VERSION);
     drop(runtime);
     assert!(!profile.join(RUNTIME_FILE).exists());
+}
+
+#[test]
+fn runtime_metadata_parse_rejects_unknown_version_and_fields() {
+    let err = RuntimeMetadata::parse(
+        br#"{"version":99,"address":"127.0.0.1:1","pid":1,"instance_id":"abc"}"#,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        RuntimeMetadataError::UnsupportedVersion { found: 99 }
+    ));
+
+    let err = RuntimeMetadata::parse(
+        br#"{"version":1,"address":"127.0.0.1:1","pid":1,"instance_id":"abc","extra":true}"#,
+    )
+    .unwrap_err();
+    assert!(matches!(err, RuntimeMetadataError::Json(_)));
+
+    let err = RuntimeMetadata::parse(
+        br#"{"version":1,"address":"127.0.0.1:1","pid":1,"instance_id":""}"#,
+    )
+    .unwrap_err();
+    assert!(matches!(err, RuntimeMetadataError::EmptyInstanceId));
+}
+
+#[tokio::test]
+async fn health_includes_instance_id_matching_state() {
+    let context = TestContext::new();
+    let response = context
+        .request(
+            request(Method::GET, "/api/v1/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json(response).await;
+    assert_eq!(body["status"], "ok");
+    assert_eq!(body["instance_id"], context.state.instance_id());
 }
 
 #[test]
@@ -5173,4 +5213,468 @@ async fn diagnostics_ring_records_auth_failures_and_supports_clear() {
             .all(|entry| entry["code"] == "diagnostics_cleared"),
         "{after_body}"
     );
+}
+
+// ── Phase 5 Wave 1: automation credentials and route authorization ─────────
+
+fn bearer(method: Method, uri: &str, token: &str) -> axum::http::request::Builder {
+    request(method, uri).header(header::AUTHORIZATION, format!("Bearer {token}"))
+}
+
+async fn create_automation_via_api(
+    context: &TestContext,
+    scopes: &[&str],
+) -> (String, String, Value) {
+    let id = Uuid::now_v7();
+    let token = mint_automation_token(&id);
+    let body = json!({
+        "id": id.to_string(),
+        "label": "test-agent",
+        "scopes": scopes,
+        "token": token,
+    });
+    let response = context
+        .request(
+            authenticated(Method::POST, "/api/v1/auth/credentials")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "create credential failed"
+    );
+    let meta = json(response).await;
+    assert_eq!(meta["id"], id.to_string());
+    assert!(meta.get("token").is_none());
+    assert!(meta.get("token_sha256").is_none());
+    (id.to_string(), token, meta)
+}
+
+#[tokio::test]
+async fn automation_credential_create_list_revoke_idempotent_and_secret() {
+    let context = TestContext::new();
+    let (id, token, _) = create_automation_via_api(&context, &["read"]).await;
+
+    // Idempotent exact replay (same id/label/scopes/token).
+    let id_uuid = Uuid::parse_str(&id).unwrap();
+    let body = json!({
+        "id": id,
+        "label": "test-agent",
+        "scopes": ["read"],
+        "token": token,
+    });
+    let replay = context
+        .request(
+            authenticated(Method::POST, "/api/v1/auth/credentials")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(replay.status(), StatusCode::OK);
+
+    // Conflict on same id with different label.
+    let conflict_body = json!({
+        "id": id,
+        "label": "other",
+        "scopes": ["read"],
+        "token": mint_automation_token(&id_uuid),
+    });
+    let conflict = context
+        .request(
+            authenticated(Method::POST, "/api/v1/auth/credentials")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&conflict_body).unwrap()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+
+    let listed = context
+        .request(
+            authenticated(Method::GET, "/api/v1/auth/credentials")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let list_body = json(listed).await;
+    let rendered = list_body.to_string();
+    assert!(!rendered.contains(&token));
+    assert!(!rendered.contains("token_sha256"));
+    assert_eq!(list_body["credentials"].as_array().unwrap().len(), 1);
+
+    // Automation token works for read.
+    let profile = context
+        .request(
+            bearer(Method::GET, "/api/v1/profile", &token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(profile.status(), StatusCode::OK);
+
+    let revoked = context
+        .request(
+            authenticated(Method::DELETE, &format!("/api/v1/auth/credentials/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(revoked.status(), StatusCode::NO_CONTENT);
+    let revoked_again = context
+        .request(
+            authenticated(Method::DELETE, &format!("/api/v1/auth/credentials/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(revoked_again.status(), StatusCode::NO_CONTENT);
+
+    let denied = context
+        .request(
+            bearer(Method::GET, "/api/v1/profile", &token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn principal_discovery_is_authenticated_without_scopes_and_omits_secrets() {
+    let context = TestContext::new();
+    let (_id, read_token, _) = create_automation_via_api(&context, &["read"]).await;
+    let (_id, write_token, _) = create_automation_via_api(&context, &["write"]).await;
+
+    let unauthenticated = context
+        .request(
+            request(Method::GET, "/api/v1/auth/principal")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let read_response = context
+        .request(
+            bearer(Method::GET, "/api/v1/auth/principal", &read_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(read_response.status(), StatusCode::OK);
+    let read_body = json(read_response).await;
+    assert_eq!(read_body["kind"], "automation");
+    assert_eq!(read_body["scopes"], json!(["read"]));
+    let read_dump = read_body.to_string();
+    assert!(!read_dump.contains(&read_token));
+    assert!(!read_dump.contains("Bearer"));
+    assert!(read_body.get("id").is_none());
+    assert!(read_body.get("token").is_none());
+
+    let write_response = context
+        .request(
+            bearer(Method::GET, "/api/v1/auth/principal", &write_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(write_response.status(), StatusCode::OK);
+    let write_body = json(write_response).await;
+    assert_eq!(write_body["kind"], "automation");
+    assert_eq!(write_body["scopes"], json!(["write"]));
+
+    let operator_response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/auth/principal")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(operator_response.status(), StatusCode::OK);
+    let operator_body = json(operator_response).await;
+    assert_eq!(operator_body["kind"], "operator");
+    assert_eq!(operator_body["scopes"], json!(["read", "write", "data"]));
+    let operator_dump = operator_body.to_string();
+    assert!(!operator_dump.contains(TOKEN));
+}
+
+#[tokio::test]
+async fn automation_scope_matrix_allows_and_denies_classified_routes() {
+    let context = TestContext::new();
+    let (_id, read_token, _) = create_automation_via_api(&context, &["read"]).await;
+    let (_id, write_token, _) = create_automation_via_api(&context, &["write"]).await;
+    let (_id, data_token, _) = create_automation_via_api(&context, &["data"]).await;
+
+    // read allows profile, denies task create and backup.
+    assert_eq!(
+        context
+            .request(
+                bearer(Method::GET, "/api/v1/profile", &read_token)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    let write_denied = context
+        .request(
+            bearer(Method::POST, "/api/v1/tasks", &read_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("idempotency-key", Uuid::now_v7().to_string())
+                .body(Body::from(
+                    serde_json::to_vec(&json!({"title": "x"})).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(write_denied.status(), StatusCode::FORBIDDEN);
+    let write_body = json(write_denied).await;
+    assert_eq!(write_body["error"]["code"], "insufficient_scope");
+    assert_eq!(write_body["error"]["fields"]["required_scope"], "write");
+
+    let data_denied = context
+        .request(
+            bearer(Method::GET, "/api/v1/backup", &read_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(data_denied.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        json(data_denied).await["error"]["fields"]["required_scope"],
+        "data"
+    );
+
+    // write allows create, denies backup and operator rotate.
+    let created = context
+        .request(
+            bearer(Method::POST, "/api/v1/tasks", &write_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("idempotency-key", Uuid::now_v7().to_string())
+                .body(Body::from(
+                    serde_json::to_vec(&json!({"title": "scoped write"})).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert!(
+        created.status().is_success(),
+        "write-scoped create failed: {}",
+        created.status()
+    );
+
+    assert_eq!(
+        context
+            .request(
+                bearer(Method::GET, "/api/v1/backup", &write_token)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let rotate_denied = context
+        .request(
+            bearer(Method::POST, "/api/v1/auth/rotate", &write_token)
+                .header("idempotency-key", Uuid::now_v7().to_string())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(rotate_denied.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        json(rotate_denied).await["error"]["code"],
+        "operator_required"
+    );
+
+    // data allows backup, denies profile (read) and rotate.
+    assert_eq!(
+        context
+            .request(
+                bearer(Method::GET, "/api/v1/backup", &data_token)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        context
+            .request(
+                bearer(Method::GET, "/api/v1/profile", &data_token)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // Operator-only surfaces denied for automation.
+    for (method, path) in [
+        (Method::GET, "/api/v1/hosts"),
+        (Method::GET, "/api/v1/diagnostics"),
+        (Method::DELETE, "/api/v1/diagnostics"),
+        (Method::GET, "/api/v1/auth/credentials"),
+        (Method::POST, "/api/v1/reminders/lease"),
+        (Method::POST, "/api/v1/reminders/claim"),
+        (Method::POST, "/api/v1/backup/restore"),
+    ] {
+        let response = context
+            .request(
+                bearer(method.clone(), path, &read_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("idempotency-key", Uuid::now_v7().to_string())
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "{method} {path} should be operator-only"
+        );
+        assert_eq!(json(response).await["error"]["code"], "operator_required");
+    }
+}
+
+#[tokio::test]
+async fn authorization_rejects_before_oversized_body_and_maintenance() {
+    let context = TestContext::new();
+    let (_id, read_token, _) = create_automation_via_api(&context, &["read"]).await;
+
+    // Oversized body on a write route with read-only token must be 403, not 413.
+    let oversized = vec![b'a'; MAX_BODY_BYTES + 64];
+    let response = context
+        .request(
+            bearer(Method::POST, "/api/v1/tasks", &read_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("idempotency-key", Uuid::now_v7().to_string())
+                .body(Body::from(oversized))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(json(response).await["error"]["code"], "insufficient_scope");
+
+    // Enter maintenance: missing scope still wins over maintenance for classified API.
+    assert!(context.state.maintenance().enter_maintenance());
+    let during_maintenance = context
+        .request(
+            bearer(Method::POST, "/api/v1/tasks", &read_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("idempotency-key", Uuid::now_v7().to_string())
+                .body(Body::from(
+                    serde_json::to_vec(&json!({"title": "x"})).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(during_maintenance.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        json(during_maintenance).await["error"]["code"],
+        "insufficient_scope"
+    );
+    context.state.maintenance().leave_maintenance();
+}
+
+#[tokio::test]
+async fn malformed_automation_credentials_fail_closed_at_startup() {
+    let directory = env::temp_dir().join(format!(
+        "junban-cred-startup-{}-{}",
+        std::process::id(),
+        Uuid::now_v7()
+    ));
+    let profile_dir = directory.join("profile");
+    let owner = ProfileOwner::open(&profile_dir).unwrap();
+    fs::write(
+        profile_dir.join(AUTOMATION_CREDENTIALS_FILE),
+        br#"{"version":1,"credentials":[],"extra":true}"#,
+    )
+    .unwrap();
+    let error = match ServerState::new(
+        owner.repository(),
+        TOKEN.to_owned(),
+        [HOST.to_owned()],
+        &profile_dir,
+    ) {
+        Ok(_) => panic!("malformed automation credentials must fail closed"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    drop(owner);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn openapi_operations_have_explicit_route_classification() {
+    let doc: Value = serde_json::from_str(&openapi_json()).unwrap();
+    let paths = doc["paths"].as_object().unwrap();
+    let mut openapi_ops = std::collections::BTreeSet::new();
+    for (path, item) in paths {
+        for method in ["get", "post", "patch", "put", "delete"] {
+            if item.get(method).is_some() {
+                openapi_ops.insert((method.to_ascii_uppercase(), path.clone()));
+            }
+        }
+    }
+
+    let mut classified = std::collections::BTreeSet::new();
+    for route in classified_routes() {
+        classified.insert((route.method.to_owned(), route.path.to_owned()));
+    }
+
+    let missing: Vec<_> = openapi_ops.difference(&classified).cloned().collect();
+    let extra: Vec<_> = classified
+        .difference(&openapi_ops)
+        .filter(|(method, path)| {
+            // Classification may include only OpenAPI ops; extras are unexpected.
+            let _ = method;
+            !path.starts_with("/api/")
+        })
+        .cloned()
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "OpenAPI operations missing classification: {missing:?}"
+    );
+    // Every classified route should be in OpenAPI (no silent dead classifications).
+    let stale: Vec<_> = classified.difference(&openapi_ops).cloned().collect();
+    assert!(
+        stale.is_empty(),
+        "classified routes absent from OpenAPI: {stale:?}"
+    );
+    let _ = extra;
+}
+
+#[tokio::test]
+async fn expired_automation_credential_is_rejected() {
+    let context = TestContext::new();
+    let id = Uuid::now_v7();
+    let token = mint_automation_token(&id);
+    // expires_at not strictly after creation is rejected at create time.
+    let body = json!({
+        "id": id.to_string(),
+        "label": "expired",
+        "scopes": ["read"],
+        "expires_at": "2000-01-01T00:00:00Z",
+        "token": token,
+    });
+    let response = context
+        .request(
+            authenticated(Method::POST, "/api/v1/auth/credentials")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }

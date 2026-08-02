@@ -13,7 +13,7 @@ This repository contains a ground-up implementation with:
 
 ## Status
 
-Phase 2 provides complete day-to-day task management on the Rust server: task organization and search, projects and sections, tags, templates, hierarchy, relations, comments, activity, saved filters, bulk actions, undo, live multi-client convergence, and the preserved React views. Planning/time, data portability, CLI/MCP, AI/voice, plugins, and desktop packaging remain later phases. There is no packaged product release yet.
+Phases 1–4 deliver the hosted Rust server through backup/restore. Phase 5 adds the native `junban` CLI and `junban-mcp` stdio server over one shared 87-tool automation catalog, scoped credentials, and the HTTP owner path. AI/voice, plugins, and desktop packaging remain later work. There is no packaged product release yet. See [`docs/cli.md`](docs/cli.md) and [`docs/mcp.md`](docs/mcp.md).
 
 The optimized Phase 2 server measured 6.89 MiB median / 7.17 MiB maximum warm cgroup memory in the frozen five-sample workload, versus 179.25 MiB for the retired implementation on the same host. The 10,000-task scale run remained below the 24 MiB warm / 32 MiB peak budget. See the [performance evidence](docs/performance.md) and follow the [live ExecPlan](goals/rust-rewrite/execplan.md) for exact scope and progress.
 

@@ -207,6 +207,42 @@ python3 scripts/bench-hosted-server.py --mode phase4 --quick
 pnpm bench:phase4:quick
 ```
 
+## Phase 5 automation harness (`junban-phase5-automation-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-5-automation-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-5-automation-benchmark-protocol.md). Cross-surface state parity is measured separately by [`../scripts/check-phase5-conformance.py`](../scripts/check-phase5-conformance.py) under the frozen conformance protocol.
+
+The automation harness measures optimized `junban`, `junban-mcp`, and the owning `junban-server` in transient cgroup-v2 user services. It covers 20 one-shot local CLI reads, 10 attached CLI reads, three 50-call attached MCP sessions, and three 50-mutation local-owner MCP sessions. Every sample records wall latency, cgroup current/peak memory, process count, process-tree commands, owner-memory before/after, profile-lock release, cleanup, binary hashes, and Node-process rejection.
+
+```bash
+cargo build --locked --release -p junban-server -p junban-cli -p junban-mcp
+python3 scripts/check-phase5-conformance.py --authoritative \
+  --output goals/rust-rewrite/evidence/phase-5-conformance.json
+python3 scripts/check-phase5-automation-budget.py \
+  --output goals/rust-rewrite/evidence/phase-5-automation-owner-delta-raw.json
+```
+
+Or use `pnpm conformance:phase5` and `pnpm bench:phase5`. `--quick` is a development smoke only. Authoritative mode requires Linux cgroup v2, `systemd --user`, a clean tracked worktree, optimized binaries built from that tree, and no environment-carried operator token.
+
+The frozen ceilings are active-owner CLI p95 ≤150 ms, no-owner CLI p95 ≤350 ms, persistent MCP create/get p95 ≤100/75 ms, and attached or local-owner MCP warm current ≤24 MiB / peak ≤32 MiB. Owner post-workload growth normally stays within max(15%, 1 MiB). If a state-creating workload exceeds that relative check, the protocol permits an explicit `--accept-explained-owner-delta durable-sqlite-state-growth` only after the harness retains the raw failure, runs a matched idle-host control, proves the absolute 24/32 MiB ceilings still pass, and attributes the bounded delta to durable SQLite/file-cache growth. The raw assertion remains visible; the decision never waives an absolute ceiling.
+
+If, and only if, the raw run fails solely for that explained delta and all required predicates pass, record the explicit decision:
+
+```bash
+python3 scripts/check-phase5-automation-budget.py \
+  --accept-explained-owner-delta durable-sqlite-state-growth \
+  --output goals/rust-rewrite/evidence/phase-5-automation-bench.json
+```
+
+The accepted Phase 5 run measured 22.092 ms active-owner CLI p95, 62.535 ms no-owner CLI p95, 3.729/0.320 ms MCP create/get p95, 20.4648/20.9922 MiB attached MCP maximum warm/peak, and 21.9805/22.7227 MiB local-owner MCP maximum warm/peak.
+
+### Quick Phase 5 smoke (not evidence)
+
+```bash
+python3 scripts/check-phase5-conformance.py --quick
+python3 scripts/check-phase5-automation-budget.py --quick
+pnpm bench:phase5:quick
+```
+
 ## Measurement rules
 
 - Optimized release binaries are authoritative. Development servers are not.

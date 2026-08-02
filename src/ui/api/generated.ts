@@ -4,6 +4,54 @@
  */
 
 export interface paths {
+  "/api/v1/auth/credentials": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_automation_credentials"];
+    put?: never;
+    post: operations["create_automation_credential"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/credentials/{credential_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete: operations["revoke_automation_credential"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/principal": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_principal"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/auth/rotate": {
     parameters: {
       query?: never;
@@ -1275,6 +1323,25 @@ export interface components {
       /** @description Placeholder values keyed by name without braces. Bounded by request body size. */
       variables?: components["schemas"]["TemplateVariableDto"][];
     };
+    /** @description Public automation credential metadata (never includes secrets or hashes). */
+    AutomationCredentialDto: {
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      expires_at?: string | null;
+      id: string;
+      label: string;
+      scopes: components["schemas"]["AutomationScope"][];
+    };
+    /** @description Operator-only list of automation credentials. */
+    AutomationCredentialListResponse: {
+      credentials: components["schemas"]["AutomationCredentialDto"][];
+    };
+    /**
+     * @description Issuable automation scopes. None implies another.
+     * @enum {string}
+     */
+    AutomationScope: "read" | "write" | "data";
     /** @description Inventory snapshot embedded in a backup artifact (wire projection). */
     BackupManifestDto: {
       /** Format: int32 */
@@ -1372,7 +1439,10 @@ export interface components {
       /** Format: int64 */
       claim_secs?: number | null;
       fence_term: string;
-      /** Format: int32 */
+      /**
+       * Format: int32
+       * @description Claim batch size in `1..=100`. Defaults to 20 when omitted.
+       */
       limit?: number | null;
     };
     ClaimRemindersResponse: {
@@ -1432,6 +1502,22 @@ export interface components {
       morning: number;
       /** Format: int32 */
       night: number;
+    };
+    /** @description Operator-only create body. The client generates the id and one-time token. */
+    CreateAutomationCredentialRequest: {
+      /**
+       * Format: date-time
+       * @description Optional expiry instant; must be strictly after creation time.
+       */
+      expires_at?: string | null;
+      /** @description Client-generated credential UUID. */
+      id: string;
+      /** @description Human label for operator listing. */
+      label: string;
+      /** @description Exact scopes requested (duplicates rejected). */
+      scopes: components["schemas"]["AutomationScope"][];
+      /** @description Full high-entropy automation bearer. Persisted only as a one-way hash. */
+      token: string;
     };
     CreateCommentRequest: {
       content: string;
@@ -1655,6 +1741,8 @@ export interface components {
     /** @enum {string} */
     FontSizeDto: "small" | "medium" | "large";
     HealthResponse: {
+      /** @description Random per-process id mirrored from private runtime metadata. */
+      instance_id: string;
       status: string;
     };
     /** @description Replace the persisted Host allowlist (CLI hosts are always retained). */
@@ -1704,7 +1792,10 @@ export interface components {
     };
     MarkOwnerLostRemindersRequest: {
       fence_term: string;
-      /** Format: int32 */
+      /**
+       * Format: int32
+       * @description Batch size in `1..=100`. Defaults to 20 when omitted.
+       */
       limit?: number | null;
     };
     MarkOwnerLostRemindersResponse: {
@@ -1924,6 +2015,23 @@ export interface components {
       capacity_minutes: number;
       nudge_rules: components["schemas"]["NudgeRuleSettingsDto"][];
       work_hours?: null | components["schemas"]["WorkHoursDto"];
+    };
+    /**
+     * @description Authenticated principal kind (never includes ids, tokens, or secrets).
+     * @enum {string}
+     */
+    PrincipalKindDto: "operator" | "automation";
+    /**
+     * @description Capability snapshot for the active bearer.
+     *
+     *     Operator always reports the full routine scope set (`read`, `write`, `data`).
+     *     Automation reports only the exact issued scopes. Identifiers and secrets are
+     *     intentionally omitted so CLI/MCP clients can filter tools without learning
+     *     credential identity material.
+     */
+    PrincipalResponse: {
+      kind: components["schemas"]["PrincipalKindDto"];
+      scopes: components["schemas"]["AutomationScope"][];
     };
     ProfileResponse: {
       /** Format: int64 */
@@ -2568,6 +2676,216 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  list_automation_credentials: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AutomationCredentialListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  create_automation_credential: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateAutomationCredentialRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AutomationCredentialDto"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  revoke_automation_credential: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Credential UUID */
+        credential_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Credential revoked or already absent */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_principal: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PrincipalResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   rotate_token: {
     parameters: {
       query?: never;
@@ -2728,11 +3046,11 @@ export interface operations {
   };
   calendar_tasks: {
     parameters: {
-      query?: {
+      query: {
         /** @description Inclusive civil start date (`YYYY-MM-DD`). Required. */
-        from?: string;
+        from: string;
         /** @description Inclusive civil end date (`YYYY-MM-DD`). Required. */
-        to?: string;
+        to: string;
         /** @description Optional exact project filter. */
         project_id?: string;
       };
@@ -3567,7 +3885,7 @@ export interface operations {
       query?: {
         /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
         date?: string;
-        /** @description Daily capacity in whole minutes. Defaults to 480. */
+        /** @description Daily capacity in whole minutes (`60..=1440`). Defaults to 480. */
         capacity_minutes?: number;
       };
       header?: never;
@@ -3851,7 +4169,7 @@ export interface operations {
       query?: {
         /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
         date?: string;
-        /** @description Daily capacity in whole minutes. Defaults to 480. */
+        /** @description Daily capacity in whole minutes (`60..=1440`). Defaults to 480. */
         capacity_minutes?: number;
       };
       header?: never;
@@ -3899,7 +4217,7 @@ export interface operations {
       query?: {
         /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
         date?: string;
-        /** @description Daily capacity in whole minutes. Defaults to 480. */
+        /** @description Daily capacity in whole minutes (`60..=1440`). Defaults to 480. */
         capacity_minutes?: number;
       };
       header?: never;
@@ -5421,11 +5739,11 @@ export interface operations {
   };
   stats: {
     parameters: {
-      query?: {
+      query: {
         /** @description Inclusive civil start date (`YYYY-MM-DD`). Required. */
-        from?: string;
+        from: string;
         /** @description Inclusive civil end date (`YYYY-MM-DD`). Required. */
-        to?: string;
+        to: string;
       };
       header?: never;
       path?: never;
@@ -5744,14 +6062,19 @@ export interface operations {
         tag_id?: string;
         /** @description Comma-separated tag IDs. Tasks must include every listed tag (AND). */
         tag_ids?: string;
+        /** @description Task priority P1 (highest) through P4 (lowest). */
         priority?: number;
+        /** @description Civil due date filter (`YYYY-MM-DD`). */
         due_on?: string;
+        /** @description Inclusive upper bound on due date (`YYYY-MM-DD`). */
         due_before?: string;
+        /** @description Inclusive lower bound on due date (`YYYY-MM-DD`). */
         due_after?: string;
         someday?: boolean;
         overdue?: boolean;
         sort?: components["schemas"]["TaskSortDto"];
         cursor?: string;
+        /** @description Page size in `1..=100`. Defaults to 100 when omitted. */
         limit?: number;
       };
       header?: never;
@@ -6225,6 +6548,7 @@ export interface operations {
       query?: {
         after_revision?: number;
         after_sequence?: number;
+        /** @description Page size in `1..=100`. Defaults to 50 when omitted. */
         limit?: number;
       };
       header?: never;

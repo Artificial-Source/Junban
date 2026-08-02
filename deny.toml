@@ -11,7 +11,9 @@ confidence-threshold = 0.8
 allow = [
   "Apache-2.0",
   "BSD-3-Clause",
+  "ISC",
   "MIT",
+  "OpenSSL",
   "Unicode-3.0",
   "Unlicense",
   "Zlib",

@@ -28,6 +28,9 @@ tokio = { workspace = true, features = ["sync"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 uuid.workspace = true
 

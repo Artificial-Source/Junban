@@ -1486,6 +1486,71 @@ fn advise_dont_need_pages_succeeds_on_private_synced_file() {
     assert!(bytes.iter().all(|byte| *byte == 0x5a));
 }
 
+#[test]
+fn private_artifact_privacy_failure_happens_before_write() {
+    let directory = TestDir::new();
+    let path = directory.0.join("artifact");
+    let error = create_owner_private_file_with(&path, |file| {
+        assert_eq!(file.metadata().unwrap().len(), 0);
+        Err(io::Error::other("injected privacy failure"))
+    })
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::Other);
+    assert!(!path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn private_artifact_is_0600_and_no_replace_wins_race() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = TestDir::new();
+    let destination = directory.0.join("artifact");
+    let (mut file, temp) = create_private_artifact_temp(&destination).unwrap();
+    file.write_all(b"new").unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+    fs::write(&destination, b"racer").unwrap();
+
+    let error = publish_private_artifact(&temp, &destination, false).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+    assert_eq!(fs::read(&destination).unwrap(), b"racer");
+    assert_eq!(
+        fs::metadata(&temp).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    fs::remove_file(temp).unwrap();
+}
+
+#[test]
+fn private_artifact_finalize_failure_preserves_old_destination_and_temp() {
+    use std::io::Write;
+
+    let directory = TestDir::new();
+    let destination = directory.0.join("artifact");
+    fs::write(&destination, b"old").unwrap();
+    let (mut file, temp) = create_private_artifact_temp(&destination).unwrap();
+    file.write_all(b"new").unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+
+    let error = publish_private_artifact_with(
+        &temp,
+        &destination,
+        true,
+        |_source, _destination, replace| {
+            assert!(replace);
+            Err(io::Error::other("injected finalize failure"))
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::Other);
+    assert_eq!(fs::read(&destination).unwrap(), b"old");
+    assert_eq!(fs::read(&temp).unwrap(), b"new");
+    fs::remove_file(temp).unwrap();
+}
+
 // --- Phase 2 core review regressions (DB-P2-001 .. DB-P2-011) ---
 
 fn project_draft(name: &str) -> ProjectDraft {

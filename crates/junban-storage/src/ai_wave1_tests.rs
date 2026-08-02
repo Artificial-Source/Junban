@@ -11,10 +11,11 @@ use junban_app::{
     AiCredentialBindingTarget, AiSecretBytes, EventType, Repository, RepositoryError, StagedFile,
 };
 use junban_domain::{
-    AI_SECRETS_FILE, AI_SESSIONS_PER_PROFILE_MAX, AiApprovalId, AiApprovalStatus, AiMemoryId,
-    AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus, AiProviderPreset, AiRunId,
-    AiRunPhase, AiRunState, AiSecretKind, AiSessionId, AiTurnId, OperationId, ProviderBaseUrl,
-    SettingsPatch, frame_backup_envelope, parse_backup_envelope, sha256_hex,
+    AI_SECRETS_FILE, AI_SESSION_CONTENT_BYTES_MAX, AI_SESSIONS_PER_PROFILE_MAX, AiApprovalId,
+    AiApprovalStatus, AiMemoryId, AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus,
+    AiProviderPreset, AiRunId, AiRunPhase, AiRunState, AiSecretKind, AiSessionId, AiTurnId,
+    OperationId, ProviderBaseUrl, SettingsPatch, frame_backup_envelope, parse_backup_envelope,
+    sha256_hex,
 };
 use rusqlite::{Connection, params};
 use uuid::Uuid;
@@ -1089,6 +1090,109 @@ async fn restore_preflight_rejects_orphan_and_cross_bound_active_approval_author
         drop(owner);
         fs::remove_dir_all(profile).unwrap();
     }
+}
+
+#[test]
+fn finish_ai_response_quota_failure_rolls_back_before_empty_failed_fallback() {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    let turn_id = AiTurnId::new();
+    let assistant_message_id = AiMessageId::new();
+    let run_id = AiRunId::new();
+    ai_ops::create_ai_session(&mut connection, op(), session_id, "quota".into(), now()).unwrap();
+    ai_ops::upsert_ai_message(
+        &mut connection,
+        op(),
+        assistant_message_id,
+        session_id,
+        turn_id,
+        AiMessageRole::Assistant,
+        AiMessageStatus::Streaming,
+        AiMessageContent::text("").unwrap(),
+        now(),
+    )
+    .unwrap();
+    ai_ops::upsert_ai_run_state(
+        &mut connection,
+        op(),
+        AiRunState {
+            run_id,
+            session_id,
+            turn_id,
+            generation: 1,
+            state: AiRunPhase::Running,
+            approval_id: None,
+            created_at: now(),
+            updated_at: now(),
+        },
+        now(),
+    )
+    .unwrap();
+    connection
+        .execute(
+            "UPDATE ai_sessions SET content_bytes = ?1 WHERE id = ?2",
+            params![AI_SESSION_CONTENT_BYTES_MAX as i64, session_id.to_string()],
+        )
+        .unwrap();
+    let terminal_operation = op();
+    let events_before: i64 = connection
+        .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+        .unwrap();
+
+    assert!(matches!(
+        ai_ops::finish_ai_response(
+            &mut connection,
+            terminal_operation,
+            assistant_message_id,
+            session_id,
+            turn_id,
+            run_id,
+            1,
+            AiMessageStatus::Completed,
+            AiMessageContent::text("would exceed quota").unwrap(),
+            AiRunPhase::Completed,
+            now(),
+        ),
+        Err(RepositoryError::Validation(_))
+    ));
+    assert_eq!(
+        ai_ops::get_ai_message(&connection, assistant_message_id)
+            .unwrap()
+            .status,
+        AiMessageStatus::Streaming
+    );
+    assert_eq!(
+        ai_ops::get_ai_run_state(&connection, run_id).unwrap().state,
+        AiRunPhase::Running
+    );
+
+    ai_ops::finish_ai_response(
+        &mut connection,
+        terminal_operation,
+        assistant_message_id,
+        session_id,
+        turn_id,
+        run_id,
+        1,
+        AiMessageStatus::Failed,
+        AiMessageContent::text("").unwrap(),
+        AiRunPhase::Failed,
+        now(),
+    )
+    .unwrap();
+    let assistant = ai_ops::get_ai_message(&connection, assistant_message_id).unwrap();
+    assert_eq!(assistant.status, AiMessageStatus::Failed);
+    assert!(assistant.content.text.is_empty());
+    assert_eq!(
+        ai_ops::get_ai_run_state(&connection, run_id).unwrap().state,
+        AiRunPhase::Failed
+    );
+    let events_after: i64 = connection
+        .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(events_after, events_before + 1);
+    fs::remove_dir_all(profile).unwrap();
 }
 
 #[test]

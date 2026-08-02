@@ -29,9 +29,9 @@ use junban_app::{
 };
 use junban_domain::{
     AiCredentialId, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiModelId, AiProviderPreset,
-    AiSecretKind, AiSecretMetadata, AiSession, AiSessionId, AiSessionStatus, AiSettings,
-    CustomInstructions, GracePeriodMs, ProviderBaseUrl, SettingsPatch, SpeechProviderPreset,
-    VoiceMode, VoiceSettings,
+    AiRunId, AiRunPhase, AiSecretKind, AiSecretMetadata, AiSession, AiSessionId, AiSessionStatus,
+    AiSettings, CustomInstructions, GracePeriodMs, ProviderBaseUrl, SettingsPatch,
+    SpeechProviderPreset, VoiceMode, VoiceSettings,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::OwnedMutexGuard;
@@ -45,7 +45,10 @@ use crate::dto::{CommittedEventDto, MutationResponse};
 use crate::error::{
     ApiError, extract_json_with_limit, extract_query, operation_id, parse_path_id, validation_error,
 };
-use crate::{AI_RECONFIGURE_DRAIN_DEADLINE, MAX_AI_CONFIG_BODY_BYTES, RequestId, ServerState};
+use crate::{
+    AI_RECONFIGURE_DRAIN_DEADLINE, MAX_AI_CONFIG_BODY_BYTES, MAX_AI_RESPONSE_BODY_BYTES, RequestId,
+    ServerState,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -578,6 +581,21 @@ pub struct ModelDiscoveryResponse {
     pub models: Vec<DiscoveredModelDto>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateAiResponseRequest {
+    pub message: String,
+    #[schema(value_type = Option<String>, format = Uuid)]
+    pub focused_task_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CancelAiRunResponse {
+    #[schema(value_type = String, format = Uuid)]
+    pub run_id: String,
+    pub status: String,
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/ai/providers",
@@ -968,6 +986,127 @@ pub async fn discover_ai_provider_models(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/ai/sessions/{session_id}/responses",
+    operation_id = "create_ai_response",
+    request_body = CreateAiResponseRequest,
+    params(
+        ("session_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid, description = "UUID operation id")
+    ),
+    responses(
+        (status = 200, content_type = "text/event-stream", body = crate::ai_chat::AiRunSseEnvelope),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_ai_response(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+    payload: Result<Json<CreateAiResponseRequest>, JsonRejection>,
+) -> Result<
+    axum::response::sse::Sse<
+        axum::response::sse::KeepAliveStream<crate::ai_chat::AiResponseStream>,
+    >,
+    ApiError,
+> {
+    let session_id = parse_path_id(&session_id, AiSessionId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json_with_limit(payload, &request_id, MAX_AI_RESPONSE_BODY_BYTES)?;
+    let permit = state.try_acquire_sse().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "sse_connection_limit",
+            "too many concurrent event streams",
+            true,
+            &request_id,
+        )
+    })?;
+    let serial = Arc::clone(&state.ai_reconfigure).lock_owned().await;
+    crate::ai_chat::start_response(
+        state.clone(),
+        &request_id,
+        session_id,
+        operation_id,
+        payload,
+        permit,
+        serial,
+    )
+    .await
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/ai/runs/{run_id}/cancel",
+    operation_id = "cancel_ai_run",
+    params(("run_id" = String, Path, format = Uuid)),
+    responses(
+        (status = 200, body = CancelAiRunResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn cancel_ai_run(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Path(run_id): Path<String>,
+) -> Result<Json<CancelAiRunResponse>, ApiError> {
+    let run_id = parse_path_id(&run_id, AiRunId::parse, &request_id)?;
+    let status = match state.ai_runtime().cancel_run(run_id) {
+        Ok(()) => "cancel_requested",
+        Err(crate::AiRuntimeError::Terminal) => "already_terminal",
+        Err(crate::AiRuntimeError::NotFound) => {
+            match state.service.get_ai_run_state(run_id).await {
+                Ok(run)
+                    if matches!(
+                        run.state,
+                        AiRunPhase::Completed | AiRunPhase::Cancelled | AiRunPhase::Failed
+                    ) =>
+                {
+                    "already_terminal"
+                }
+                Ok(_) | Err(AppError::NotFound) => {
+                    return Err(ApiError::new(
+                        StatusCode::NOT_FOUND,
+                        "ai_run_not_found",
+                        "AI run was not found",
+                        false,
+                        &request_id,
+                    ));
+                }
+                Err(error) => return Err(ApiError::from_app(error, &request_id)),
+            }
+        }
+        Err(_) => {
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ai_runtime_unavailable",
+                "AI runtime cancellation is unavailable",
+                true,
+                &request_id,
+            ));
+        }
+    };
+    Ok(Json(CancelAiRunResponse {
+        run_id: run_id.to_string(),
+        status: status.to_owned(),
+    }))
+}
+
 // ── Durable sessions / messages / memories ─────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -1096,6 +1235,9 @@ pub struct AiMessageContentDto {
     pub tool_result_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub briefing_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = Uuid)]
+    pub focused_task_id: Option<String>,
 }
 
 impl From<AiMessageContent> for AiMessageContentDto {
@@ -1106,6 +1248,7 @@ impl From<AiMessageContent> for AiMessageContentDto {
             tool_arguments_json: value.tool_arguments_json,
             tool_result_json: value.tool_result_json,
             briefing_date: value.briefing_date,
+            focused_task_id: value.focused_task_id.map(|id| id.to_string()),
         }
     }
 }

@@ -1,9 +1,9 @@
 # Phase 6 review ledger
 
 - **Date:** 2026-08-03
-- **Current gate:** Wave 3d sessions/messages/memories HTTP contract
-- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, then the Wave 3d delta from `c543b7f`
-- **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`; resource API approved after `P6-API-001`–`P6-API-003`
+- **Current gate:** Wave 3e basic no-tool streaming chat vertical
+- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, Wave 3d from `c543b7f`, then the Wave 3e delta from `c689099`
+- **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`; resource API approved after `P6-API-001`–`P6-API-003`; basic chat approved after `P6-CHAT-001`–`P6-CHAT-003`
 
 ## Wave 1 database gate
 
@@ -56,6 +56,16 @@ The exact-delta security recheck approved all three findings and confirmed `P6-S
 
 The exact-delta API recheck approved all three findings and found no regression in the closed persistence, lifecycle, or security findings.
 
+## Wave 3e basic-chat gate
+
+| ID            | Severity | Status | Resolution and focused regression                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------- | -------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `P6-CHAT-001` | High     | fixed  | Provider callbacks reserve bounded channel capacity in a cancellation-aware select before mutation, then commit output only while the shared run-phase mutex still authorizes the exact live generation. The guard drops before terminal delivery can block. A full 64-slot barrier proves cancellation and reconfiguration drain release authority without a blocked delta reaching SSE or SQLite.               |
+| `P6-CHAT-002` | Medium   | fixed  | Preflight reserves one deterministic streaming assistant placeholder. One receipt-backed SQLite mutation atomically validates and finalizes the exact assistant and run generation to matching terminal states; quota failure rolls back before an empty failed fallback. Exact user-receipt verification and inactive-run reconciliation make every preflight/crash boundary replayable without provider egress. |
+| `P6-CHAT-003` | Medium   | fixed  | Chat SSE uses the established 15-second comment-only keepalive. A paused-time regression verifies no early frame, exact periodic keepalive comments, and retained run authority.                                                                                                                                                                                                                                  |
+
+The exact-delta security recheck approved all three findings. No provider callback can cross a winning cancellation fence, no partial assistant/run terminal can commit, and silent inference retains the authenticated stream.
+
 ## Validation used by the gates
 
 ```text
@@ -70,4 +80,4 @@ cargo deny check
 git diff --check
 ```
 
-The final Wave 1 focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The Wave 3a gate additionally ran `cargo test --locked -p junban-app -p junban-storage --all-targets` (23 app and 168 storage tests), both crates' all-target/all-feature clippy with denied warnings, and downstream server/CLI/MCP checks. The Wave 3b gate ran all `junban-ai` and `junban-server` targets/features, compile-fail doctests, focused owner lock-retention and restore/shutdown tests, workspace clippy/check, audit, and deny. The Wave 3c gate ran 61 AI tests, 155 server library tests, focused secret/authority/overlap checks, generated-contract and frontend type checks, workspace validation, audit, and deny. The Wave 3d gate ran 163 server library tests plus process lifecycle, focused concurrency/query/body-limit checks, generated-contract/type checks, clippy, and workspace validation. No material reviewed persistence, secret, lifecycle, provider-configuration security, or resource API finding remains.
+The final Wave 1 focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The Wave 3a gate additionally ran `cargo test --locked -p junban-app -p junban-storage --all-targets` (23 app and 168 storage tests), both crates' all-target/all-feature clippy with denied warnings, and downstream server/CLI/MCP checks. The Wave 3b gate ran all `junban-ai` and `junban-server` targets/features, compile-fail doctests, focused owner lock-retention and restore/shutdown tests, workspace clippy/check, audit, and deny. The Wave 3c gate ran 61 AI tests, 155 server library tests, focused secret/authority/overlap checks, generated-contract and frontend type checks, workspace validation, audit, and deny. The Wave 3d gate ran 163 server library tests plus process lifecycle, focused concurrency/query/body-limit checks, generated-contract/type checks, clippy, and workspace validation. The Wave 3e gate ran 184 server unit/API tests, six process-lifecycle tests, 175 storage tests, 69 AI tests, focused cancellation/backpressure/atomic-finish/replay/keepalive regressions, and the full contract, clippy, workspace, audit, and deny checks. No material reviewed persistence, secret, lifecycle, provider-configuration security, resource API, or basic-chat finding remains.

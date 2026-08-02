@@ -20,7 +20,7 @@ use axum::{
 use futures_core::Stream;
 use http_body_util::BodyExt;
 use jiff::{Timestamp, ToSpan};
-use junban_app::{CommittedMutation, EventType, Repository, ResourceRef, ResyncScope};
+use junban_app::{AppError, CommittedMutation, EventType, Repository, ResourceRef, ResyncScope};
 use junban_domain::{
     OperationId, TaskId, UncompleteOutcome, frame_backup_envelope, parse_backup_envelope,
     sha256_hex,
@@ -47,6 +47,7 @@ struct TestContext {
     _owner: ProfileOwner,
     state: ServerState,
     app: Router,
+    preserve_directory: bool,
 }
 
 impl TestContext {
@@ -79,6 +80,7 @@ impl TestContext {
             _owner: owner,
             state,
             app,
+            preserve_directory: false,
         }
     }
 
@@ -140,7 +142,29 @@ impl TestContext {
 
 impl Drop for TestContext {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.directory);
+        if !self.preserve_directory {
+            let _ = fs::remove_dir_all(&self.directory);
+        }
+    }
+}
+
+fn reopen_test_context(directory: PathBuf) -> TestContext {
+    let profile_dir = directory.join("profile");
+    let owner = ProfileOwner::open(&profile_dir).unwrap();
+    let state = ServerState::new(
+        owner.repository(),
+        TOKEN.to_owned(),
+        [HOST.to_owned()],
+        profile_dir,
+    )
+    .unwrap();
+    let app = router(state.clone(), directory.join("web"));
+    TestContext {
+        directory,
+        _owner: owner,
+        state,
+        app,
+        preserve_directory: false,
     }
 }
 
@@ -5711,7 +5735,1094 @@ async fn malformed_automation_credentials_fail_closed_at_startup() {
     fs::remove_dir_all(directory).unwrap();
 }
 
-// ── Phase 6 Wave 3c: operator AI configuration and discovery ────────────────
+// ── Phase 6 Wave 3c/3e: operator AI configuration and basic chat ───────────
+
+async fn configure_loopback_ai_session(context: &TestContext, address: SocketAddr) -> String {
+    let config = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "ollama",
+            "model": "fixture-model",
+            "base_url": format!("http://{address}/v1"),
+            "custom_instructions": "Answer briefly.",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    let configured = context
+        .request(
+            operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(config.to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(configured.status(), StatusCode::OK);
+    let created = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/ai/sessions"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"title":"Chat fixture"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    json(created).await["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+async fn seed_ai_response_preflight(
+    context: &TestContext,
+    session_id: junban_domain::AiSessionId,
+    identity: crate::ai_identity::AiResponseIdentity,
+    stage: u8,
+) {
+    context
+        .state
+        .service
+        .upsert_ai_message(
+            identity.user_message_operation_id,
+            junban_app::UpsertAiMessageRequest {
+                message_id: identity.user_message_id,
+                session_id,
+                turn_id: identity.turn_id,
+                role: junban_domain::AiMessageRole::User,
+                status: junban_domain::AiMessageStatus::Completed,
+                content: junban_domain::AiMessageContent::text("Recover me").unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    if stage >= 2 {
+        context
+            .state
+            .service
+            .upsert_ai_message(
+                identity.assistant_start_operation_id,
+                junban_app::UpsertAiMessageRequest {
+                    message_id: identity.assistant_message_id,
+                    session_id,
+                    turn_id: identity.turn_id,
+                    role: junban_domain::AiMessageRole::Assistant,
+                    status: junban_domain::AiMessageStatus::Streaming,
+                    content: junban_domain::AiMessageContent::text("").unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+    if stage >= 3 {
+        let now = Timestamp::now();
+        context
+            .state
+            .service
+            .upsert_ai_run_state(
+                identity.running_run_operation_id,
+                junban_app::UpsertAiRunStateRequest {
+                    state: junban_domain::AiRunState {
+                        run_id: identity.run_id,
+                        session_id,
+                        turn_id: identity.turn_id,
+                        generation: 1,
+                        state: junban_domain::AiRunPhase::Running,
+                        approval_id: None,
+                        created_at: now,
+                        updated_at: now,
+                    },
+                },
+            )
+            .await
+            .unwrap();
+    }
+}
+
+async fn fragmented_chat_fixture(listener: tokio::net::TcpListener, chunks: &[&str]) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (mut socket, _) = listener.accept().await.unwrap();
+    let mut request = Vec::new();
+    let header_end = loop {
+        let mut bytes = [0_u8; 1024];
+        let read = socket.read(&mut bytes).await.unwrap();
+        assert_ne!(read, 0, "provider request ended before headers");
+        request.extend_from_slice(&bytes[..read]);
+        if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+            break index + 4;
+        }
+    };
+    let headers = String::from_utf8_lossy(&request[..header_end]);
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().unwrap())
+        })
+        .unwrap();
+    while request.len() < header_end + content_length {
+        let mut bytes = [0_u8; 1024];
+        let read = socket.read(&mut bytes).await.unwrap();
+        assert_ne!(read, 0, "provider request ended before body");
+        request.extend_from_slice(&bytes[..read]);
+    }
+
+    let body = chunks.concat();
+    let response_headers = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        body.len()
+    );
+    socket.write_all(response_headers.as_bytes()).await.unwrap();
+    'chunks: for chunk in chunks {
+        for fragment in chunk.as_bytes().chunks(3) {
+            if socket.write_all(fragment).await.is_err() {
+                break 'chunks;
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+    let _ = socket.shutdown().await;
+    String::from_utf8(request[header_end..header_end + content_length].to_vec()).unwrap()
+}
+
+fn ai_sse_envelopes(bytes: &[u8]) -> Vec<Value> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .map(|data| serde_json::from_str(data).unwrap())
+        .collect()
+}
+
+async fn blocking_chat_fixture(
+    listener: tokio::net::TcpListener,
+    ready: tokio::sync::oneshot::Sender<()>,
+    release: tokio::sync::oneshot::Receiver<()>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (mut socket, _) = listener.accept().await.unwrap();
+    let mut request = Vec::new();
+    loop {
+        let mut bytes = [0_u8; 1024];
+        let read = socket.read(&mut bytes).await.unwrap();
+        assert_ne!(read, 0);
+        request.extend_from_slice(&bytes[..read]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    socket
+        .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
+        .await
+        .unwrap();
+    socket.flush().await.unwrap();
+    ready.send(()).unwrap();
+    let _ = release.await;
+}
+
+#[tokio::test]
+async fn ai_response_empty_unknown_and_oversized_context_reject_before_mutation() {
+    use tokio::net::TcpListener;
+
+    let context = TestContext::new();
+    let operation = Uuid::now_v7().to_string();
+    let identity =
+        crate::ai_identity::AiResponseIdentity::derive(OperationId::parse(&operation).unwrap());
+    let missing_session = Uuid::now_v7();
+    let empty = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{missing_session}/responses"),
+                ),
+                &operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"message":" \n"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(empty.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(matches!(
+        context
+            .state
+            .service
+            .get_ai_message(identity.user_message_id)
+            .await,
+        Err(AppError::NotFound)
+    ));
+
+    let unknown = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                &format!("/api/v1/ai/sessions/{missing_session}/responses"),
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"message":"hello", "unknown":true}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let session_id = configure_loopback_ai_session(&context, listener.local_addr().unwrap()).await;
+    drop(listener);
+    let oversized_operation = Uuid::now_v7().to_string();
+    let oversized_identity = crate::ai_identity::AiResponseIdentity::derive(
+        OperationId::parse(&oversized_operation).unwrap(),
+    );
+    let oversized = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &oversized_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"message":"x".repeat(32_000)}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(oversized.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        json(oversized).await["error"]["code"],
+        "ai_context_too_large"
+    );
+    assert!(matches!(
+        context
+            .state
+            .service
+            .get_ai_message(oversized_identity.user_message_id)
+            .await,
+        Err(AppError::NotFound)
+    ));
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+}
+
+#[tokio::test]
+async fn ai_response_post_start_admission_failure_is_durable_failed_sse() {
+    use tokio::net::TcpListener;
+
+    let context = TestContext::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let session = configure_loopback_ai_session(&context, listener.local_addr().unwrap()).await;
+    drop(listener);
+    let guards: Vec<_> = (0..crate::MAX_ACTIVE_AI_RUNS)
+        .map(|_| {
+            context
+                .state
+                .ai_runtime()
+                .admit_run(junban_domain::AiRunId::new(), 1)
+                .unwrap()
+        })
+        .collect();
+    let operation = Uuid::now_v7().to_string();
+    let identity =
+        crate::ai_identity::AiResponseIdentity::derive(OperationId::parse(&operation).unwrap());
+    let uri = format!("/api/v1/ai/sessions/{session}/responses");
+    let response = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &uri), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"message":"No capacity"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let envelopes = ai_sse_envelopes(&response_bytes(response).await);
+    assert_eq!(envelopes.last().unwrap()["type"], "run_failed");
+    assert_eq!(
+        context
+            .state
+            .service
+            .get_ai_message(identity.assistant_message_id)
+            .await
+            .unwrap()
+            .status,
+        junban_domain::AiMessageStatus::Failed
+    );
+    assert_eq!(
+        context
+            .state
+            .service
+            .get_ai_run_state(identity.run_id)
+            .await
+            .unwrap()
+            .state,
+        junban_domain::AiRunPhase::Failed
+    );
+    let replay = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &uri), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"message":"No capacity"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(
+        ai_sse_envelopes(&response_bytes(replay).await)
+            .last()
+            .unwrap()["type"],
+        "run_failed"
+    );
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+    drop(guards);
+}
+
+#[tokio::test]
+async fn ai_response_preflight_boundaries_reconcile_without_provider_egress() {
+    use tokio::net::TcpListener;
+
+    let context = TestContext::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let session = configure_loopback_ai_session(&context, listener.local_addr().unwrap()).await;
+    drop(listener);
+    let session_id = junban_domain::AiSessionId::parse(&session).unwrap();
+
+    for stage in 1..=3 {
+        let operation = Uuid::now_v7().to_string();
+        let identity =
+            crate::ai_identity::AiResponseIdentity::derive(OperationId::parse(&operation).unwrap());
+        seed_ai_response_preflight(&context, session_id, identity, stage).await;
+        let response = context
+            .request(
+                operation_header_key(
+                    authenticated(
+                        Method::POST,
+                        &format!("/api/v1/ai/sessions/{session}/responses"),
+                    ),
+                    &operation,
+                )
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"message":"Recover me"}).to_string()))
+                .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::OK, "stage {stage}");
+        let envelopes = ai_sse_envelopes(&response_bytes(response).await);
+        assert_eq!(envelopes.last().unwrap()["type"], "run_cancelled");
+        assert_eq!(
+            context
+                .state
+                .service
+                .get_ai_message(identity.assistant_message_id)
+                .await
+                .unwrap()
+                .status,
+            junban_domain::AiMessageStatus::Cancelled
+        );
+        assert_eq!(
+            context
+                .state
+                .service
+                .get_ai_run_state(identity.run_id)
+                .await
+                .unwrap()
+                .state,
+            junban_domain::AiRunPhase::Cancelled
+        );
+    }
+    assert!(!context.state.ai_runtime().has_runtime());
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+}
+
+#[tokio::test]
+async fn ai_response_cancel_linearizes_partial_terminal_and_active_duplicate() {
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+
+    let context = TestContext::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let (release_tx, release_rx) = oneshot::channel();
+    let fixture = tokio::spawn(blocking_chat_fixture(listener, ready_tx, release_rx));
+    let session_id = configure_loopback_ai_session(&context, address).await;
+    let operation = Uuid::now_v7().to_string();
+    let identity =
+        crate::ai_identity::AiResponseIdentity::derive(OperationId::parse(&operation).unwrap());
+    let uri = format!("/api/v1/ai/sessions/{session_id}/responses");
+    let response = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &uri), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"message":"Begin"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    ready_rx.await.unwrap();
+    let mut response_body = response.into_body();
+    let mut streamed = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !String::from_utf8_lossy(&streamed).contains("\"text_delta\"") {
+            let frame = response_body.frame().await.unwrap().unwrap();
+            if let Ok(data) = frame.into_data() {
+                streamed.extend_from_slice(&data);
+            }
+        }
+    })
+    .await
+    .expect("partial provider delta must be emitted before cancellation");
+
+    let duplicate = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &uri), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"message":"Begin"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+    assert_eq!(json(duplicate).await["error"]["code"], "ai_run_active");
+
+    let cancelled = context
+        .request(
+            authenticated(
+                Method::POST,
+                &format!("/api/v1/ai/runs/{}/cancel", identity.run_id),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(cancelled.status(), StatusCode::OK);
+    assert_eq!(json(cancelled).await["status"], "cancel_requested");
+    let _ = release_tx.send(());
+    fixture.await.unwrap();
+    streamed.extend_from_slice(&response_body.collect().await.unwrap().to_bytes());
+
+    let envelopes = ai_sse_envelopes(&streamed);
+    assert_eq!(envelopes.last().unwrap()["type"], "run_cancelled");
+    assert_eq!(
+        envelopes
+            .iter()
+            .filter(|event| event["type"] == "run_cancelled")
+            .count(),
+        1
+    );
+    let run = context
+        .state
+        .service
+        .get_ai_run_state(identity.run_id)
+        .await
+        .unwrap();
+    assert_eq!(run.state, junban_domain::AiRunPhase::Cancelled);
+    let assistant = context
+        .state
+        .service
+        .get_ai_message(identity.assistant_message_id)
+        .await
+        .unwrap();
+    assert_eq!(assistant.status, junban_domain::AiMessageStatus::Cancelled);
+    assert_eq!(assistant.content.text, "partial");
+
+    let again = context
+        .request(
+            authenticated(
+                Method::POST,
+                &format!("/api/v1/ai/runs/{}/cancel", identity.run_id),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(again.status(), StatusCode::OK);
+    assert_eq!(json(again).await["status"], "already_terminal");
+}
+
+#[tokio::test]
+async fn ai_response_full_channel_reconfiguration_cancels_before_blocked_output_and_releases_guard()
+{
+    use tokio::net::TcpListener;
+
+    let context = TestContext::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        let mut chunks = Vec::new();
+        for index in 0..65 {
+            let text = if index < 63 {
+                format!("{index:02},")
+            } else if index == 63 {
+                "BLOCKED".to_owned()
+            } else {
+                "AFTER_BLOCKED".to_owned()
+            };
+            chunks.push(format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"content\":{}}}}}]}}\n\n",
+                serde_json::to_string(&text).unwrap()
+            ));
+        }
+        chunks.push("data: [DONE]\n\n".to_owned());
+        let references: Vec<_> = chunks.iter().map(String::as_str).collect();
+        fragmented_chat_fixture(listener, &references).await
+    });
+    let session_id = configure_loopback_ai_session(&context, address).await;
+    let operation = Uuid::now_v7().to_string();
+    let identity =
+        crate::ai_identity::AiResponseIdentity::derive(OperationId::parse(&operation).unwrap());
+    let response = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"message":"Fill the channel"}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let _provider_body = fixture.await.unwrap();
+    assert_eq!(context.state.ai_runtime().active_count(), 1);
+
+    let config = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "ollama",
+            "model": "fixture-model",
+            "base_url": format!("http://{address}/v1"),
+            "custom_instructions": "Answer briefly.",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    let reconfigured = tokio::time::timeout(
+        Duration::from_secs(2),
+        context.request(
+            operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(config.to_string()))
+                .unwrap(),
+        ),
+    )
+    .await
+    .expect("full response channel must not delay AI reconfiguration");
+    assert_eq!(reconfigured.status(), StatusCode::OK);
+    assert_eq!(context.state.ai_runtime().active_count(), 0);
+    assert!(context.state.ai_runtime().is_accepting());
+
+    let assistant = context
+        .state
+        .service
+        .get_ai_message(identity.assistant_message_id)
+        .await
+        .unwrap();
+    assert_eq!(assistant.status, junban_domain::AiMessageStatus::Cancelled);
+    assert!(!assistant.content.text.contains("BLOCKED"));
+    let run = context
+        .state
+        .service
+        .get_ai_run_state(identity.run_id)
+        .await
+        .unwrap();
+    assert_eq!(run.state, junban_domain::AiRunPhase::Cancelled);
+
+    let streamed = response_bytes(response).await;
+    let envelopes = ai_sse_envelopes(&streamed);
+    assert_eq!(envelopes.last().unwrap()["type"], "run_cancelled");
+    let streamed_text = envelopes
+        .iter()
+        .filter(|event| event["type"] == "text_delta")
+        .map(|event| event["payload"]["text"].as_str().unwrap())
+        .collect::<String>();
+    assert_eq!(streamed_text, assistant.content.text);
+    assert!(!streamed_text.contains("BLOCKED"));
+    assert!(!streamed_text.contains("AFTER_BLOCKED"));
+}
+
+#[tokio::test]
+async fn ai_response_disconnect_requests_cancellation_and_persists_terminal() {
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+
+    let context = TestContext::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let (release_tx, release_rx) = oneshot::channel();
+    let fixture = tokio::spawn(blocking_chat_fixture(listener, ready_tx, release_rx));
+    let session_id = configure_loopback_ai_session(&context, address).await;
+    let operation = Uuid::now_v7().to_string();
+    let identity =
+        crate::ai_identity::AiResponseIdentity::derive(OperationId::parse(&operation).unwrap());
+    let response = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"message":"Disconnect"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    ready_rx.await.unwrap();
+    drop(response);
+    let _ = release_tx.send(());
+    fixture.await.unwrap();
+
+    let run = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let run = context
+                .state
+                .service
+                .get_ai_run_state(identity.run_id)
+                .await
+                .unwrap();
+            if run.state.is_terminal() {
+                break run;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("disconnect cancellation must become durable");
+    assert_eq!(run.state, junban_domain::AiRunPhase::Cancelled);
+    let assistant = context
+        .state
+        .service
+        .get_ai_message(identity.assistant_message_id)
+        .await
+        .unwrap();
+    assert_eq!(assistant.status, junban_domain::AiMessageStatus::Cancelled);
+    assert!(assistant.content.text.is_empty() || assistant.content.text == "partial");
+    context.wait_until_connections(0).await;
+}
+
+#[tokio::test]
+async fn ai_response_fragmented_sse_persists_and_replays_without_second_provider_round() {
+    use tokio::net::TcpListener;
+
+    let context = TestContext::new();
+    let focused_task_id =
+        create_task(&context, "Focused fixture").await["event"]["snapshot"]["task"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        fragmented_chat_fixture(
+            listener,
+            &[
+                "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n",
+                "data: {\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2},\"choices\":[]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+        )
+        .await
+    });
+    let session_id = configure_loopback_ai_session(&context, address).await;
+    let operation = Uuid::now_v7().to_string();
+    let uri = format!("/api/v1/ai/sessions/{session_id}/responses");
+    let response = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &uri), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "message":"Say hello",
+                        "focused_task_id": focused_task_id,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/event-stream"
+    );
+    let streamed = response_bytes(response).await;
+    let provider_request = fixture.await.unwrap();
+    assert!(provider_request.contains("Say hello"));
+    assert!(provider_request.contains("Answer briefly."));
+    assert!(provider_request.contains("Focused fixture"));
+    let envelopes = ai_sse_envelopes(&streamed);
+    assert_eq!(envelopes.first().unwrap()["type"], "run_started");
+    assert_eq!(
+        envelopes
+            .iter()
+            .filter(|event| event["type"] == "text_delta")
+            .map(|event| event["payload"]["text"].as_str().unwrap())
+            .collect::<String>(),
+        "hello"
+    );
+    assert_eq!(
+        envelopes
+            .iter()
+            .filter(|event| event["type"].as_str().unwrap().starts_with("run_")
+                && event["type"] != "run_started")
+            .count(),
+        1
+    );
+    assert_eq!(envelopes.last().unwrap()["type"], "run_completed");
+    for (index, event) in envelopes.iter().enumerate() {
+        assert_eq!(event["version"], 1);
+        assert_eq!(event["generation"], 1);
+        assert_eq!(event["sequence"], (index + 1) as u64);
+    }
+
+    let identity =
+        crate::ai_identity::AiResponseIdentity::derive(OperationId::parse(&operation).unwrap());
+    let run = context
+        .state
+        .service
+        .get_ai_run_state(identity.run_id)
+        .await
+        .unwrap();
+    assert_eq!(run.state, junban_domain::AiRunPhase::Completed);
+    let assistant = context
+        .state
+        .service
+        .get_ai_message(identity.assistant_message_id)
+        .await
+        .unwrap();
+    assert_eq!(assistant.content.text, "hello");
+    assert_eq!(assistant.status, junban_domain::AiMessageStatus::Completed);
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 1);
+
+    let replay = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &uri), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "message":"Say hello",
+                        "focused_task_id": focused_task_id,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    let replay = ai_sse_envelopes(&response_bytes(replay).await);
+    assert_eq!(replay.last().unwrap()["type"], "run_completed");
+    assert_eq!(
+        replay.last().unwrap()["run_id"],
+        identity.run_id.to_string()
+    );
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 1);
+
+    let mismatch = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &uri), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "message":"Changed",
+                        "focused_task_id": focused_task_id,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(mismatch.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json(mismatch).await["error"]["code"],
+        "idempotency_mismatch"
+    );
+
+    let focused_mismatch = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &uri), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "message":"Say hello",
+                        "focused_task_id": Uuid::now_v7().to_string()
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(focused_mismatch.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json(focused_mismatch).await["error"]["code"],
+        "idempotency_mismatch"
+    );
+}
+
+#[tokio::test]
+async fn ai_nonterminal_preflight_reconciles_after_reopen_without_provider_egress() {
+    use tokio::net::TcpListener;
+
+    let mut context = TestContext::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let session = configure_loopback_ai_session(&context, listener.local_addr().unwrap()).await;
+    drop(listener);
+    let operation = Uuid::now_v7().to_string();
+    let identity =
+        crate::ai_identity::AiResponseIdentity::derive(OperationId::parse(&operation).unwrap());
+    seed_ai_response_preflight(
+        &context,
+        junban_domain::AiSessionId::parse(&session).unwrap(),
+        identity,
+        3,
+    )
+    .await;
+    let directory = context.directory.clone();
+    context.preserve_directory = true;
+    drop(context);
+
+    let reopened = reopen_test_context(directory);
+    assert_eq!(
+        reopened
+            .state
+            .service
+            .get_ai_run_state(identity.run_id)
+            .await
+            .unwrap()
+            .state,
+        junban_domain::AiRunPhase::Running
+    );
+    let response = reopened
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session}/responses"),
+                ),
+                &operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"message":"Recover me"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let envelopes = ai_sse_envelopes(&response_bytes(response).await);
+    assert_eq!(envelopes.last().unwrap()["type"], "run_cancelled");
+    assert_eq!(
+        reopened
+            .state
+            .service
+            .get_ai_message(identity.assistant_message_id)
+            .await
+            .unwrap()
+            .status,
+        junban_domain::AiMessageStatus::Cancelled
+    );
+    assert!(!reopened.state.ai_runtime().has_runtime());
+    assert_eq!(reopened.state.ai_provider_client_construct_calls(), 0);
+}
+
+#[tokio::test]
+async fn ai_completed_replay_is_exact_after_restart_without_runtime_or_provider_egress() {
+    use tokio::net::TcpListener;
+
+    let mut context = TestContext::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        fragmented_chat_fixture(
+            listener,
+            &[
+                "data: {\"choices\":[{\"delta\":{\"content\":\"durable\"}}]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+        )
+        .await
+    });
+    let session_id = configure_loopback_ai_session(&context, address).await;
+    let operation = Uuid::now_v7().to_string();
+    let uri = format!("/api/v1/ai/sessions/{session_id}/responses");
+    let body = json!({"message":"Persist this"}).to_string();
+    let response = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &uri), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let completed = ai_sse_envelopes(&response_bytes(response).await);
+    assert_eq!(completed.last().unwrap()["type"], "run_completed");
+    let _provider_body = fixture.await.unwrap();
+
+    let expected_replay = context
+        .request(
+            operation_header_key(authenticated(Method::POST, &uri), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await;
+    let expected_replay = response_bytes(expected_replay).await;
+    let directory = context.directory.clone();
+    context.preserve_directory = true;
+    drop(context);
+
+    let restarted = reopen_test_context(directory);
+    assert!(!restarted.state.ai_runtime().has_runtime());
+    assert_eq!(restarted.state.ai_provider_client_construct_calls(), 0);
+    let replay = restarted
+        .request(
+            operation_header_key(authenticated(Method::POST, &uri), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(response_bytes(replay).await, expected_replay);
+    assert!(!restarted.state.ai_runtime().has_runtime());
+    assert_eq!(restarted.state.ai_provider_client_construct_calls(), 0);
+}
+
+#[tokio::test]
+async fn ai_response_rejects_fragmented_credential_reflection_before_emission_or_persistence() {
+    use tokio::net::TcpListener;
+
+    const SECRET: &str = "credential-reflection-marker";
+    let context = TestContext::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        fragmented_chat_fixture(
+            listener,
+            &[
+                "data: {\"choices\":[{\"delta\":{\"content\":\"prefix credential-\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"reflection-marker suffix\"}}]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+        )
+        .await
+    });
+    let config = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "custom",
+            "model": "fixture-model",
+            "base_url": format!("http://{address}/v1"),
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    let configured = context
+        .request(
+            operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(config.to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(configured.status(), StatusCode::OK);
+    let bound = context
+        .request(
+            operation_header(authenticated(
+                Method::PUT,
+                "/api/v1/ai/credentials/ai_provider",
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"kind":"api_key", "secret":SECRET}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(bound.status(), StatusCode::OK);
+    let created = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/ai/sessions"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"title":"Reflection"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    let session_id = json(created).await["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let operation = Uuid::now_v7().to_string();
+    let response = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"message":"Reflect"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response_bytes(response).await;
+    let _provider_body = fixture.await.unwrap();
+    assert!(!String::from_utf8_lossy(&bytes).contains(SECRET));
+    let envelopes = ai_sse_envelopes(&bytes);
+    assert_eq!(envelopes.last().unwrap()["type"], "run_failed");
+    assert_eq!(
+        envelopes.last().unwrap()["payload"]["error"],
+        "ai_run_failed"
+    );
+
+    let identity =
+        crate::ai_identity::AiResponseIdentity::derive(OperationId::parse(&operation).unwrap());
+    let assistant = context
+        .state
+        .service
+        .get_ai_message(identity.assistant_message_id)
+        .await
+        .unwrap();
+    assert_eq!(assistant.status, junban_domain::AiMessageStatus::Failed);
+    assert_eq!(assistant.content.text, "prefix credential-");
+    assert!(!assistant.content.text.contains(SECRET));
+    for name in ["junban.sqlite3", "junban.sqlite3-wal", "junban.sqlite3-shm"] {
+        let path = context.directory.join("profile").join(name);
+        if path.exists() {
+            assert!(!String::from_utf8_lossy(&fs::read(path).unwrap()).contains(SECRET));
+        }
+    }
+    let diagnostics = context
+        .request(
+            authenticated(Method::GET, "/api/v1/diagnostics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert!(!String::from_utf8_lossy(&response_bytes(diagnostics).await).contains(SECRET));
+}
 
 fn default_voice_config() -> Value {
     json!({
@@ -5753,6 +6864,11 @@ async fn ai_routes_are_operator_only_before_body_parsing() {
             Method::GET,
             format!("/api/v1/ai/sessions/{session}/messages"),
         ),
+        (
+            Method::POST,
+            format!("/api/v1/ai/sessions/{session}/responses"),
+        ),
+        (Method::POST, format!("/api/v1/ai/runs/{session}/cancel")),
         (Method::POST, format!("/api/v1/ai/sessions/{session}/clear")),
         (Method::GET, "/api/v1/ai/memories".to_owned()),
         (Method::POST, "/api/v1/ai/memories".to_owned()),
@@ -7658,6 +8774,10 @@ async fn ai_json_routes_report_exact_32kib_body_limit() {
         (Method::PUT, "/api/v1/ai/credentials/ai_provider".to_owned()),
         (Method::POST, "/api/v1/ai/sessions".to_owned()),
         (Method::PATCH, format!("/api/v1/ai/sessions/{session}")),
+        (
+            Method::POST,
+            format!("/api/v1/ai/sessions/{session}/responses"),
+        ),
         (Method::POST, "/api/v1/ai/memories".to_owned()),
         (Method::PATCH, format!("/api/v1/ai/memories/{memory}")),
     ];

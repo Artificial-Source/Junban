@@ -1986,6 +1986,10 @@ impl Repository for SqliteRepository {
         )
     }
 
+    fn get_ai_message(&self, message_id: AiMessageId) -> RepositoryFuture<'_, AiMessage> {
+        mut_cmd!(self, GetAiMessage { message_id })
+    }
+
     fn list_ai_messages(
         &self,
         session_id: AiSessionId,
@@ -2162,6 +2166,36 @@ impl Repository for SqliteRepository {
 
     fn get_ai_run_state(&self, run_id: AiRunId) -> RepositoryFuture<'_, AiRunState> {
         mut_cmd!(self, GetAiRunState { run_id })
+    }
+
+    fn finish_ai_response(
+        &self,
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        message_status: AiMessageStatus,
+        content: AiMessageContent,
+        run_phase: junban_domain::AiRunPhase,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            FinishAiResponse {
+                operation_id,
+                assistant_message_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation,
+                message_status,
+                content,
+                run_phase,
+                now
+            }
+        )
     }
 
     fn list_ai_secret_metadata(&self) -> RepositoryFuture<'_, Vec<AiSecretMetadata>> {
@@ -2702,6 +2736,10 @@ enum Command {
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
+    GetAiMessage {
+        message_id: AiMessageId,
+        reply: oneshot::Sender<Result<AiMessage, RepositoryError>>,
+    },
     ListAiMessages {
         session_id: AiSessionId,
         after_sequence: Option<u32>,
@@ -2782,6 +2820,19 @@ enum Command {
     GetAiRunState {
         run_id: AiRunId,
         reply: oneshot::Sender<Result<AiRunState, RepositoryError>>,
+    },
+    FinishAiResponse {
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        message_status: AiMessageStatus,
+        content: AiMessageContent,
+        run_phase: junban_domain::AiRunPhase,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
     ListAiSecretMetadata {
         reply: oneshot::Sender<Result<Vec<AiSecretMetadata>, RepositoryError>>,
@@ -3774,6 +3825,9 @@ fn run_worker(
                     now,
                 ));
             }
+            Command::GetAiMessage { message_id, reply } => {
+                let _ = reply.send(ai_ops::get_ai_message(connection, message_id));
+            }
             Command::ListAiMessages {
                 session_id,
                 after_sequence,
@@ -3924,6 +3978,33 @@ fn run_worker(
             }
             Command::GetAiRunState { run_id, reply } => {
                 let _ = reply.send(ai_ops::get_ai_run_state(connection, run_id));
+            }
+            Command::FinishAiResponse {
+                operation_id,
+                assistant_message_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation,
+                message_status,
+                content,
+                run_phase,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::finish_ai_response(
+                    connection,
+                    operation_id,
+                    assistant_message_id,
+                    session_id,
+                    turn_id,
+                    run_id,
+                    generation,
+                    message_status,
+                    content,
+                    run_phase,
+                    now,
+                ));
             }
             Command::ListAiSecretMetadata { reply } => {
                 let result = AiSecretStore::load(&profile_dir)

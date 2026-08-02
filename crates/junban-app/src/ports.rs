@@ -596,6 +596,8 @@ pub trait Repository: Send + Sync + 'static {
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation>;
 
+    fn get_ai_message(&self, message_id: AiMessageId) -> RepositoryFuture<'_, AiMessage>;
+
     fn list_ai_messages(
         &self,
         session_id: AiSessionId,
@@ -681,6 +683,21 @@ pub trait Repository: Send + Sync + 'static {
     ) -> RepositoryFuture<'_, CommittedMutation>;
 
     fn get_ai_run_state(&self, run_id: AiRunId) -> RepositoryFuture<'_, AiRunState>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish_ai_response(
+        &self,
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        message_status: AiMessageStatus,
+        content: AiMessageContent,
+        run_phase: junban_domain::AiRunPhase,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
 
     /// Presence-only private credential inventory. Reads publish no event.
     fn list_ai_secret_metadata(&self) -> RepositoryFuture<'_, Vec<AiSecretMetadata>>;

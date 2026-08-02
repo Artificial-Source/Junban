@@ -1188,6 +1188,90 @@
         ]
       }
     },
+    "/api/v1/ai/runs/{run_id}/cancel": {
+      "post": {
+        "tags": ["routes_ai"],
+        "operationId": "cancel_ai_run",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelAiRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/ai/sessions": {
       "get": {
         "tags": ["routes_ai"],
@@ -1898,6 +1982,140 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/sessions/{session_id}/responses": {
+      "post": {
+        "tags": ["routes_ai"],
+        "operationId": "create_ai_response",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAiResponseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiRunSseEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
             "description": "",
             "content": {
               "application/json": {
@@ -10991,6 +11209,51 @@
           }
         }
       },
+      "AiContextMetadata": {
+        "type": "object",
+        "required": [
+          "history_rows_loaded",
+          "history_messages_included",
+          "memories_considered",
+          "memories_included",
+          "focused_task_included",
+          "truncated",
+          "utf8_bytes",
+          "approximate_tokens"
+        ],
+        "properties": {
+          "approximate_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "focused_task_included": {
+            "type": "boolean"
+          },
+          "history_messages_included": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "history_rows_loaded": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "memories_considered": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "memories_included": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "utf8_bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "AiCredentialBindingResponse": {
         "type": "object",
         "required": ["target"],
@@ -11128,6 +11391,10 @@
         "properties": {
           "briefing_date": {
             "type": ["string", "null"]
+          },
+          "focused_task_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
           },
           "text": {
             "type": "string"
@@ -11283,6 +11550,47 @@
             "items": {
               "$ref": "#/components/schemas/AiProviderRegistryEntry"
             }
+          }
+        }
+      },
+      "AiRunEventType": {
+        "type": "string",
+        "enum": [
+          "run_started",
+          "text_delta",
+          "reasoning_status",
+          "usage",
+          "run_completed",
+          "run_cancelled",
+          "run_failed"
+        ]
+      },
+      "AiRunSseEnvelope": {
+        "type": "object",
+        "required": ["version", "run_id", "generation", "sequence", "type", "payload"],
+        "properties": {
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "payload": {},
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "type": {
+            "$ref": "#/components/schemas/AiRunEventType"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           }
         }
       },
@@ -11807,6 +12115,19 @@
           }
         }
       },
+      "CancelAiRunResponse": {
+        "type": "object",
+        "required": ["run_id", "status"],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
       "CatalogResponse": {
         "type": "object",
         "required": ["projects", "sections", "tags", "templates", "saved_filters", "revision"],
@@ -12031,6 +12352,20 @@
         "required": ["content"],
         "properties": {
           "content": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateAiResponseRequest": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "focused_task_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "message": {
             "type": "string"
           }
         },

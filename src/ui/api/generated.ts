@@ -100,6 +100,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/ai/runs/{run_id}/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["cancel_ai_run"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/ai/sessions": {
     parameters: {
       query?: never;
@@ -158,6 +174,22 @@ export interface paths {
     get: operations["list_ai_messages"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/sessions/{session_id}/responses": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["create_ai_response"];
     delete?: never;
     options?: never;
     head?: never;
@@ -1477,6 +1509,16 @@ export interface components {
       credentials: components["schemas"]["AiCredentialBindingsDto"];
       voice: components["schemas"]["VoiceSettingsDto"];
     };
+    AiContextMetadata: {
+      approximate_tokens: number;
+      focused_task_included: boolean;
+      history_messages_included: number;
+      history_rows_loaded: number;
+      memories_considered: number;
+      memories_included: number;
+      truncated: boolean;
+      utf8_bytes: number;
+    };
     AiCredentialBindingResponse: {
       credential?: null | components["schemas"]["AiCredentialMetadataDto"];
       target: components["schemas"]["AiCredentialTargetDto"];
@@ -1518,6 +1560,8 @@ export interface components {
     };
     AiMessageContentDto: {
       briefing_date?: string | null;
+      /** Format: uuid */
+      focused_task_id?: string | null;
       text?: string;
       tool_arguments_json?: string | null;
       tool_name?: string | null;
@@ -1575,6 +1619,27 @@ export interface components {
     };
     AiProviderRegistryResponse: {
       providers: components["schemas"]["AiProviderRegistryEntry"][];
+    };
+    /** @enum {string} */
+    AiRunEventType:
+      | "run_started"
+      | "text_delta"
+      | "reasoning_status"
+      | "usage"
+      | "run_completed"
+      | "run_cancelled"
+      | "run_failed";
+    AiRunSseEnvelope: {
+      /** Format: int64 */
+      generation: number;
+      payload: unknown;
+      /** Format: uuid */
+      run_id: string;
+      /** Format: int64 */
+      sequence: number;
+      type: components["schemas"]["AiRunEventType"];
+      /** Format: int32 */
+      version: number;
     };
     /** @enum {string} */
     AiSecretKindDto: "api_key" | "bearer" | "inworld_basic" | "inworld_jwt";
@@ -1749,6 +1814,11 @@ export interface components {
       revision: number;
       tasks: components["schemas"]["TaskDto"][];
     };
+    CancelAiRunResponse: {
+      /** Format: uuid */
+      run_id: string;
+      status: string;
+    };
     CatalogResponse: {
       projects: components["schemas"]["ProjectDto"][];
       /** Format: int64 */
@@ -1828,6 +1898,11 @@ export interface components {
     };
     CreateAiMemoryHttpRequest: {
       content: string;
+    };
+    CreateAiResponseRequest: {
+      /** Format: uuid */
+      focused_task_id?: string | null;
+      message: string;
     };
     CreateAiSessionHttpRequest: {
       title: string;
@@ -3922,6 +3997,67 @@ export interface operations {
       };
     };
   };
+  cancel_ai_run: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CancelAiRunResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   list_ai_sessions: {
     parameters: {
       query?: {
@@ -4413,6 +4549,98 @@ export interface operations {
         };
       };
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  create_ai_response: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateAiResponseRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["AiRunSseEnvelope"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
         headers: {
           [name: string]: unknown;
         };

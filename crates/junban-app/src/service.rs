@@ -4,22 +4,22 @@ use std::sync::Arc;
 
 use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
-    AiApprovalId, AiCredentialId, AiMemory, AiMemoryId, AiMessage, AiRunId, AiRunState,
-    AiSecretMetadata, AiSession, AiSessionId, AiToolApproval, AppSettings, ClaimedReminder,
-    Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT, DEFAULT_REMINDER_CLAIM_SECS,
-    DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName, FilterQuery, HexColor,
-    MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS, MarkdownText,
-    NudgeRuleKind, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
-    ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId,
-    SettingsPatch, TagId, TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation,
-    TaskSort, TaskStatus, TaskTitle, TemplateId, TimeBlock, TimeBlockDraft, TimeBlockId, TimeSlot,
-    TimeSlotDraft, TimeSlotId, TransferApply, TransferError, TransferFormat, TransferPreview,
-    ValidationError, WeekStart, civil_occurrences_in_range, daily_plan_summary,
-    dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges, preview_transfer,
-    select_eat_the_frog, stats_summary, task_jar_candidates, validate_calendar_date_range,
-    validate_owner_lost_mark_limit, validate_preview_matches_apply, validate_reminder_claim_limit,
-    validate_reminder_lease_secs, validate_stats_date_range, validate_timeblock_date_range,
-    weekly_review_summary,
+    AiApprovalId, AiCredentialId, AiMemory, AiMemoryId, AiMessage, AiMessageId, AiRunId,
+    AiRunState, AiSecretMetadata, AiSession, AiSessionId, AiToolApproval, AppSettings,
+    ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
+    DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName,
+    FilterQuery, HexColor, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS,
+    MarkdownText, NudgeRuleKind, OperationId, ProjectId, RelationKind, ReminderChannel,
+    ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence,
+    SavedFilterId, SectionId, SettingsPatch, TagId, TagName, Task, TaskActivity, TaskDraft, TaskId,
+    TaskQuery, TaskRelation, TaskSort, TaskStatus, TaskTitle, TemplateId, TimeBlock,
+    TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft, TimeSlotId, TransferApply, TransferError,
+    TransferFormat, TransferPreview, ValidationError, WeekStart, civil_occurrences_in_range,
+    daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges,
+    preview_transfer, select_eat_the_frog, stats_summary, task_jar_candidates,
+    validate_calendar_date_range, validate_owner_lost_mark_limit, validate_preview_matches_apply,
+    validate_reminder_claim_limit, validate_reminder_lease_secs, validate_stats_date_range,
+    validate_timeblock_date_range, weekly_review_summary,
 };
 
 use crate::{
@@ -28,15 +28,16 @@ use crate::{
     ClearAiSessionRequest, CollectedTasks, CommentPatch, CommittedEvent, CommittedMutation,
     CreateAiMemoryRequest, CreateAiSessionRequest, DailyPlanPage, DeleteAiMemoryRequest,
     DeleteAiSessionRequest, DopamineMenuPage, EatTheFrogPage, EndOfDayPage, EventCatchUp,
-    ExportFormat, LinkAiSessionMemoryRequest, ListAiMemoriesRequest, ListAiMessagesRequest,
-    ListAiSessionsRequest, MoveTarget, NudgesPage, ProjectDraft, ProjectPatch,
-    ProposeAiApprovalRequest, RenameAiSessionRequest, ReorderScope, ReplanPastBlocksAction,
-    ReplanPastBlocksPreview, Repository, RepositoryError, SavedFilterDraft, SavedFilterPatch,
-    SectionDraft, SectionPatch, SelectAiMemoriesRequest, SetAiApprovalStatusRequest, StagedFile,
-    StatsPage, SyncState, TagDraft, TagPatch, TaskJarPage, TaskListAsOf, TaskListPage, TaskPatch,
-    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TemporalSettings, TimeBlockPatch,
-    TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
-    UpdateAiMemoryRequest, UpsertAiMessageRequest, UpsertAiRunStateRequest, WeeklyReviewPage,
+    ExportFormat, FinishAiResponseRequest, LinkAiSessionMemoryRequest, ListAiMemoriesRequest,
+    ListAiMessagesRequest, ListAiSessionsRequest, MoveTarget, NudgesPage, ProjectDraft,
+    ProjectPatch, ProposeAiApprovalRequest, RenameAiSessionRequest, ReorderScope,
+    ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError, SavedFilterDraft,
+    SavedFilterPatch, SectionDraft, SectionPatch, SelectAiMemoriesRequest,
+    SetAiApprovalStatusRequest, StagedFile, StatsPage, SyncState, TagDraft, TagPatch, TaskJarPage,
+    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TemporalSettings, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
+    TimeblockingRangePage, TimeblockingRangeQuery, UpdateAiMemoryRequest, UpsertAiMessageRequest,
+    UpsertAiRunStateRequest, WeeklyReviewPage,
 };
 
 /// Cursor page size used when collecting multi-page task reads.
@@ -1394,6 +1395,13 @@ where
         )
     }
 
+    pub async fn get_ai_message(&self, message_id: AiMessageId) -> Result<AiMessage, AppError> {
+        self.repository
+            .get_ai_message(message_id)
+            .await
+            .map_err(AppError::from)
+    }
+
     pub async fn list_ai_messages(
         &self,
         request: ListAiMessagesRequest,
@@ -1566,6 +1574,29 @@ where
             .get_ai_run_state(run_id)
             .await
             .map_err(AppError::from)
+    }
+
+    pub async fn finish_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: FinishAiResponseRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .finish_ai_response(
+                    operation_id,
+                    request.assistant_message_id,
+                    request.session_id,
+                    request.turn_id,
+                    request.run_id,
+                    request.generation,
+                    request.message_status,
+                    request.content,
+                    request.run_phase,
+                    Timestamp::now(),
+                )
+                .await,
+        )
     }
 
     /// Read presence-only private credential metadata without publishing an event.
@@ -2696,6 +2727,14 @@ mod tests {
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("upsert_ai_message")
         }
+        fn get_ai_message(
+            &self,
+            _: junban_domain::AiMessageId,
+        ) -> crate::RepositoryFuture<'_, AiMessage> {
+            self.calls.lock().unwrap().push("get_ai_message");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+
         fn list_ai_messages(
             &self,
             _: AiSessionId,
@@ -2807,6 +2846,21 @@ mod tests {
         fn get_ai_run_state(&self, _: AiRunId) -> crate::RepositoryFuture<'_, AiRunState> {
             self.calls.lock().unwrap().push("get_ai_run_state");
             Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn finish_ai_response(
+            &self,
+            _: OperationId,
+            _: junban_domain::AiMessageId,
+            _: AiSessionId,
+            _: junban_domain::AiTurnId,
+            _: AiRunId,
+            _: u64,
+            _: junban_domain::AiMessageStatus,
+            _: junban_domain::AiMessageContent,
+            _: junban_domain::AiRunPhase,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("finish_ai_response")
         }
         fn list_ai_secret_metadata(
             &self,

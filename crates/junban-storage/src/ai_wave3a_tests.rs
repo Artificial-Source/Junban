@@ -12,9 +12,10 @@ use jiff::Timestamp;
 use junban_app::{
     AiCredentialBindingTarget, AiSecretBytes, BindAiCredentialRequest, ClearAiCredentialRequest,
     ClearAiSessionRequest, CommittedEvent, CreateAiMemoryRequest, CreateAiSessionRequest,
-    EventSink, EventType, JunbanService, LinkAiSessionMemoryRequest, ListAiMemoriesRequest,
-    ListAiSessionsRequest, ProposeAiApprovalRequest, SelectAiMemoriesRequest,
-    SetAiApprovalStatusRequest, UpsertAiMessageRequest, UpsertAiRunStateRequest,
+    EventSink, EventType, FinishAiResponseRequest, JunbanService, LinkAiSessionMemoryRequest,
+    ListAiMemoriesRequest, ListAiSessionsRequest, ProposeAiApprovalRequest,
+    SelectAiMemoriesRequest, SetAiApprovalStatusRequest, UpsertAiMessageRequest,
+    UpsertAiRunStateRequest,
 };
 use junban_domain::{
     AI_CONTEXT_MEMORIES_MAX, AI_SECRETS_FILE, AiApprovalId, AiApprovalStatus, AiMemoryId,
@@ -555,6 +556,151 @@ async fn credential_bind_and_clear_replay_without_secret_multiplication() {
     drop(service);
     drop(sink);
     drop(owner);
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[tokio::test]
+async fn finish_ai_response_is_one_atomic_replayable_service_mutation() {
+    let profile = temp_profile();
+    let (owner, service, sink) = open_service(&profile);
+    let created = service
+        .create_ai_session(
+            op(),
+            CreateAiSessionRequest {
+                title: "response".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let session_id =
+        AiSessionId::parse(&created.event.primary.as_ref().expect("session primary").id).unwrap();
+    let assistant_message_id = AiMessageId::new();
+    let turn_id = AiTurnId::new();
+    let run_id = AiRunId::new();
+    service
+        .upsert_ai_message(
+            op(),
+            UpsertAiMessageRequest {
+                message_id: assistant_message_id,
+                session_id,
+                turn_id,
+                role: AiMessageRole::Assistant,
+                status: AiMessageStatus::Streaming,
+                content: AiMessageContent::text("").unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    let timestamp = Timestamp::now();
+    service
+        .upsert_ai_run_state(
+            op(),
+            UpsertAiRunStateRequest {
+                state: AiRunState {
+                    run_id,
+                    session_id,
+                    turn_id,
+                    generation: 1,
+                    state: AiRunPhase::Running,
+                    approval_id: None,
+                    created_at: timestamp,
+                    updated_at: timestamp,
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+    sink.0.lock().unwrap().clear();
+    let wrong_identity = FinishAiResponseRequest {
+        assistant_message_id,
+        session_id,
+        turn_id: AiTurnId::new(),
+        run_id,
+        generation: 1,
+        message_status: AiMessageStatus::Completed,
+        content: AiMessageContent::text("wrong").unwrap(),
+        run_phase: AiRunPhase::Completed,
+    };
+    assert_eq!(
+        service
+            .finish_ai_response(op(), wrong_identity.clone())
+            .await
+            .unwrap_err(),
+        junban_app::AppError::Conflict
+    );
+    assert_eq!(
+        service
+            .get_ai_message(assistant_message_id)
+            .await
+            .unwrap()
+            .status,
+        AiMessageStatus::Streaming
+    );
+    assert_eq!(
+        service.get_ai_run_state(run_id).await.unwrap().state,
+        AiRunPhase::Running
+    );
+
+    let operation_id = op();
+    let request = FinishAiResponseRequest {
+        assistant_message_id,
+        session_id,
+        turn_id,
+        run_id,
+        generation: 1,
+        message_status: AiMessageStatus::Completed,
+        content: AiMessageContent::text("done").unwrap(),
+        run_phase: AiRunPhase::Completed,
+    };
+    let committed = service
+        .finish_ai_response(operation_id, request.clone())
+        .await
+        .unwrap();
+    assert!(committed.newly_committed);
+    assert_eq!(sink.0.lock().unwrap().len(), 1);
+    assert_eq!(
+        service
+            .get_ai_message(assistant_message_id)
+            .await
+            .unwrap()
+            .status,
+        AiMessageStatus::Completed
+    );
+    assert_eq!(
+        service.get_ai_run_state(run_id).await.unwrap().state,
+        AiRunPhase::Completed
+    );
+
+    let replay = service
+        .finish_ai_response(operation_id, request.clone())
+        .await
+        .unwrap();
+    assert!(!replay.newly_committed);
+    assert_eq!(replay.event, committed.event);
+    assert_eq!(sink.0.lock().unwrap().len(), 1);
+    let mut mismatch = request;
+    mismatch.content = AiMessageContent::text("changed").unwrap();
+    assert_eq!(
+        service
+            .finish_ai_response(operation_id, mismatch)
+            .await
+            .unwrap_err(),
+        junban_app::AppError::IdempotencyMismatch
+    );
+
+    drop(service);
+    drop(sink);
+    drop(owner);
+    let connection = rusqlite::Connection::open(profile.join("junban.sqlite3")).unwrap();
+    let terminal_receipts: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?1",
+            [operation_id.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(terminal_receipts, 1);
     fs::remove_dir_all(profile).unwrap();
 }
 

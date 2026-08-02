@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-03 (Wave 2); Wave 3e incremental sink delta on the same evidence file
 - **Scope:** `crates/junban-ai` provider registry, four wire adapters, model discovery, retry/cancel/redaction, provider-neutral speech data contracts, and Wave 3e incremental normalized event delivery
-- **Claim boundary:** provider-runtime unit/fixture coverage and speech data-contract coverage only. No end-to-end server, settings, secrets store, orchestration, React, voice acceptance, cloud STT/TTS HTTP adapters, voice routes, or local voice inference is claimed. Wave 3e claims only the `junban-ai` incremental callback contract and its loopback fixture validation — not server POST-SSE composition.
+- **Claim boundary:** provider-runtime unit/fixture coverage and speech data-contract coverage only. This evidence file does not claim end-to-end server, settings, secrets store, orchestration, React, voice acceptance, cloud STT/TTS HTTP adapters, voice routes, or local voice inference. Its Wave 3e section claims only the `junban-ai` incremental callback contract; server POST-SSE composition is evidenced separately in `phase-6-wave-3.md`.
 - **Authority note:** chat preset identity and official base URLs are owned by `junban_domain::AiProviderPreset`. Speech preset identity is owned by `junban_domain::SpeechProviderPreset`. `junban-ai` depends narrowly on `junban-domain` and re-exports both; the duplicate runtime chat-provider enum is deleted.
 
 ## Official sources consulted
@@ -149,7 +149,7 @@ Wave 3e validation additionally runs the incremental sink regressions listed abo
 - No hard-coded complete vendor model catalogs; discovery maps provider-reported IDs and inherits provider-level capabilities without guessing per-model tool/vision support.
 - No OAuth / subscription-login emulation.
 - No server route composition, secret store, tool orchestration, or React work in this wave.
-- Wave 3e does not claim server POST-SSE orchestration, authenticated AI routes, or browser event forwarding — only the `junban-ai` incremental callback/transport contract.
+- This provider-adapter evidence section does not claim server POST-SSE orchestration or authenticated routes; those Wave 3e claims and regressions are recorded in `phase-6-wave-3.md`.
 - No cloud STT/TTS HTTP adapters, voice routes, browser speech/media/VAD runtime, or local voice model inference in this wave — only provider-neutral speech data contracts and capability metadata.
 - xAI is not a built-in chat preset; operators may use `custom` for non-inventory OpenAI-compatible origins.
 - Browser speech remains frontend-owned; declaring it on the speech capability matrix does not imply a Rust network adapter.

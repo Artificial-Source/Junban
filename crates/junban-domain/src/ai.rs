@@ -951,6 +951,12 @@ pub struct AiMessageContent {
     /// Local civil date for a daily-briefing assistant message (`YYYY-MM-DD`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub briefing_date: Option<String>,
+    /// Optional focused-task binding captured on a user message.
+    ///
+    /// This is durable request identity for exact response replay; it is never
+    /// accepted from a provider response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused_task_id: Option<crate::TaskId>,
 }
 
 impl AiMessageContent {
@@ -968,6 +974,7 @@ impl AiMessageContent {
             tool_arguments_json: None,
             tool_result_json: None,
             briefing_date: None,
+            focused_task_id: None,
         })
     }
 
@@ -1609,6 +1616,7 @@ mod tests {
             tool_arguments_json: Some("\\".repeat(AI_TOOL_ARGUMENTS_BYTES_MAX)),
             tool_result_json: Some("\\".repeat(AI_TOOL_RESULT_BYTES_MAX)),
             briefing_date: Some("9999-12-31".to_owned()),
+            focused_task_id: Some(crate::TaskId::new()),
         };
         let canonical = content.canonical_json().unwrap();
         assert!(canonical.len() <= AI_MESSAGE_CONTENT_JSON_BYTES_MAX);

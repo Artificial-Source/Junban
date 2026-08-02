@@ -1,9 +1,10 @@
 # Phase 6 Wave 3 — application, lifecycle, and operator configuration evidence
 
 - **Date:** 2026-08-02
-- **Base:** `c543b7f`
-- **Scope:** implemented Wave 3a–3d behavior only
-- **Claim boundary:** durable application wiring, guard-owned lazy runtime lifecycle, operator-only provider/configuration/credential/model-discovery HTTP APIs, and operator-only durable session/message/memory HTTP resources. This document does not claim chat orchestration, run SSE, approvals/tools, or UI/voice delivery.
+- **Base:** clean Wave 3e base `c689099` (earlier Wave 3a–3d bases retained below)
+- **Scope:** implemented Wave 3a–3e behavior
+- **Claim boundary:** durable application wiring, guard-owned lazy runtime lifecycle, operator-only provider/configuration/credential/model-discovery and durable AI resource APIs, plus one basic no-tool streaming chat round with cancellation and exact replay. This document does not claim tools/approvals, daily briefing, edit/regenerate, React, or voice delivery.
+- **Independent chat review status:** approved after focused correction and exact-delta re-review of `P6-CHAT-001`–`P6-CHAT-003`.
 
 ## Wave 3a — application and storage service boundary
 
@@ -51,6 +52,27 @@ Session delete/clear and every memory mutation reuse the epoch-owned `reconfigur
 
 Request bodies reuse the existing 32 KiB AI transport ceiling. All new operation IDs are excluded from the Phase 5 CLI/MCP catalog, preserving the frozen 87-tool surface. `openapi/junban-v1.json` and `src/ui/api/generated.ts` are regenerated artifacts.
 
+## Wave 3e — basic streaming chat vertical
+
+Added two authenticated operator-only routes:
+
+- `POST /api/v1/ai/sessions/{session_id}/responses` with strict `{message, focused_task_id?}`, a 32 KiB transport ceiling, required `Idempotency-Key`, and version-1 local SSE envelopes;
+- `POST /api/v1/ai/runs/{run_id}/cancel`, returning stable `cancel_requested`, `already_terminal`, or not-found behavior.
+
+The response route derives turn, run, user/assistant message, and four internal mutation-operation UUIDs (user start, assistant start, running run, and atomic finish) from the caller operation identity with domain-separated SHA-256 labels. RFC variant/version bits are normalized. Stable-vector, label-collision, and cross-operation regressions ensure request/model bodies cannot supply these identities. The optional focused task is captured in canonical durable user-message content, so a retry that changes either text or focus fails the existing receipt identity check.
+
+Preflight holds the shared `ai_reconfigure` serialization permit through active-session and confirmed settings/model/base/credential validation, deterministic prompt assembly, canonical completed-user persistence, deterministic empty streaming-assistant reservation, running-state persistence, and exact generation admission. Reserving the assistant row enforces message-count quota before provider admission. It then releases the permit before provider I/O. Context includes confirmed custom instructions, linked-first selected memories, an optional focused task, terminal durable user/assistant text, and the current user text. Frozen limits are 50 memories, 500 loaded conversation rows, 512 KiB assembled UTF-8, and approximately 8,000 tokens. Current input and any confirmed instructions are non-truncatable; optional context truncates deterministically from oldest/lower-priority material. Empty and over-budget input reject before mutation.
+
+`AiRuntimeSupervisor` now owns each generation's `Running → CancelRequested|Terminal` linearization under its existing short mutex. Cancellation and completion race through that one authority; a barrier regression proves exactly one wins. The non-cloneable guard still owns the provider future for its whole lifetime. Each provider callback first awaits bounded channel capacity in a cancellation-aware select, then synchronously mutates the accumulator and consumes the reserved permit only while the same supervisor lock still authorizes the exact live `Running` generation. Thus cancellation either follows an already committed output or prevents that output from reaching SSE and persistence.
+
+The public stream is a bounded, backpressured 64-message channel of version-1 envelopes with monotonic sequence and only `run_started`, `text_delta`, `reasoning_status`, `usage`, and one of `run_completed|run_cancelled|run_failed`. Vendor frames, bodies, identifiers, tool metadata, provider failure strings, credentials, and hidden reasoning never cross the route. Any unexpected tool event fails the no-tool run. A rolling credential-reflection scanner spans provider string fragments and rejects the completing fragment before SSE emission or assistant persistence. All terminal failures use static marker-free payloads.
+
+Disconnect drops the response-stream permit and requests supervisor cancellation. Explicit cancel, disconnect, restore/reconfiguration cancellation, and normal completion converge on one terminal outcome. One `finish_ai_response` repository/application mutation validates the exact reserved assistant and exact nonterminal run generation, then updates both to matching terminal states in one SQLite transaction, event, and receipt whose canonical request includes all terminal material. Content-quota failure falls back through the same operation identity to an empty failed assistant plus failed run. The run guard is dropped after terminal persistence succeeds or fails and before terminal SSE capacity is awaited, so a stalled receiver cannot retain runtime/drain authority.
+
+Completed/cancelled/failed retries first verify the canonical user receipt, then replay the deterministic assistant plus exactly one matching terminal without settings, credential, runtime, client, or provider access. A nonterminal derived run with no exact active generation is atomically reconciled to cancelled before replay; partial preflight receipts are deterministically completed and reconciled without provider admission. Startup/restore expiration leaves streaming-placeholder response runs for this receipt-backed reconciliation while still expiring other ephemeral AI authority. Post-start admission failure atomically finalizes failed and returns replayable failure SSE. Active exact generations return stable 409. Restart replay is byte-identical to in-process replay.
+
+The generated OpenAPI/TypeScript artifacts include both routes and focused-task message metadata. Both operation IDs remain excluded from the frozen Phase 5 CLI/MCP catalog; its 87 tools are unchanged.
+
 ## Wave 3 security review closures
 
 - **P6-SEC-007:** Bound credentials can no longer cross provider authority. AI provider/base-URL and speech-provider changes require explicit credential deletion first; credential PUT is accepted only for the currently confirmed authority and its exact auth-kind matrix. Credential-free providers and browser speech reject material, Inworld STT remains unavailable, and `AuthScheme::None` plus endpoint resolution fail closed on any supplied credential.
@@ -82,7 +104,15 @@ Coverage proves:
 - create/rename serialize-through-fetch barrier against concurrent delete (P6-API-001);
 - AI list query extractor 422 coverage for malformed/unknown/duplicate/invalid forms on sessions, messages, and memories (P6-API-002);
 - exact 32 KiB AI JSON 413 message/code on representative config/session/memory/credential routes with auth-first denial (P6-API-003);
-- route/classification/OpenAPI parity and unchanged 87-tool CLI catalog.
+- route/classification/OpenAPI parity and unchanged 87-tool CLI catalog;
+- deterministic SHA-256-derived identity vectors/collision checks and changed-message/focused-task receipt conflicts;
+- fragmented loopback SSE forwarding, monotonic local envelopes, one durable assistant-before-run terminal, active-duplicate 409, explicit cancel, and disconnect cancellation;
+- cancel/completion barrier linearization plus a full 64-slot channel regression proving cancellation-aware reservation, no blocked delta in SSE/SQLite, reconfiguration drain/resume before receiver progress, and guard release before terminal delivery capacity;
+- atomic/replayable assistant-placeholder plus run finalization, quota rollback-to-empty-failed fallback, exact-state conflict, partial-preflight recovery, post-start admission failure SSE, and reopen reconciliation without provider egress;
+- paused-time comment-only 15-second chat keepalive with continued stream authority;
+- empty/unknown/over-budget response input rejection before message mutation and before provider-client construction;
+- fragmented credential reflection rejection before the completing delta reaches SSE or SQLite, with static failed terminal and marker-free diagnostics;
+- exact terminal replay before and after profile reopen with no second provider round and no restarted runtime/client construction.
 
 ## Validation
 
@@ -100,12 +130,12 @@ pnpm exec prettier --check goals/rust-rewrite/evidence/phase-6-wave-3.md docs/RE
 git diff --check
 ```
 
-The commands above completed successfully for this Wave 3d delta. Focused lifecycle, route, secret-worker, provider-runtime, session/memory, and catalog tests were also run individually while implementing the change.
+The commands above completed successfully for the Wave 3d delta and are re-run for Wave 3e. Wave 3e additionally runs focused `ai_chat`, `ai_context`, `ai_identity`, runtime-authority, fragmented-loopback response/cancel/disconnect/reflection/restart, body-policy, contract, and 87-tool catalog regressions.
 
 ## Non-claims
 
-- No chat/run SSE routes, conversation orchestration, prompt assembly, tool dispatch, approval UI, or memory retrieval policy beyond durable CRUD/list.
-- No arbitrary message upsert HTTP route; message creation remains owned by later run orchestration.
+- No tool dispatch/execution, tool approval, daily briefing, edit/regenerate, multi-round autonomous loop, or hidden reasoning exposure.
+- No arbitrary message upsert HTTP route; message creation remains owned by the basic response orchestrator.
 - No manual memory-link HTTP route.
 - No voice audio/STT/TTS HTTP routes, browser media path, cloud speech adapter, or local inference.
 - No React AI/voice/settings UI.

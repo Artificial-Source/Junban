@@ -46,7 +46,7 @@ const EXCLUDED_OPERATION_IDS: &[&str] = &[
     "settle_reminder_delivered",
     "settle_reminder_failed",
     "mark_owner_lost_reminders",
-    // Phase 6 operator-only AI control plane remains outside the frozen 87-tool catalog.
+    // Phase 6 operator-only AI APIs remain outside the frozen 87-tool catalog.
     "list_ai_providers",
     "get_ai_config",
     "put_ai_config",
@@ -60,6 +60,8 @@ const EXCLUDED_OPERATION_IDS: &[&str] = &[
     "patch_ai_session",
     "delete_ai_session",
     "list_ai_messages",
+    "create_ai_response",
+    "cancel_ai_run",
     "clear_ai_session",
     "list_ai_memories",
     "create_ai_memory",

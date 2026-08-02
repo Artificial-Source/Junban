@@ -34,6 +34,9 @@ pub enum AiRuntimeError {
     /// Cancel targeted a run that is not active.
     #[error("AI run was not found")]
     NotFound,
+    /// Cancel arrived after terminal outcome linearization.
+    #[error("AI run is already terminal")]
+    Terminal,
     /// A drain or drop was requested while active work remains.
     #[error("AI runtime is still busy")]
     Busy,
@@ -57,9 +60,25 @@ enum AiRuntimeLifecycle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ReconfigureEpoch(u64);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActiveRunPhase {
+    Running,
+    CancelRequested,
+    Terminal(AiTerminalOutcome),
+}
+
+/// Stable terminal outcome selected at the process-local linearization point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiTerminalOutcome {
+    Completed,
+    Cancelled,
+    Failed,
+}
+
 struct ActiveRun {
     generation: u64,
     cancel: Arc<RunCancel>,
+    phase: ActiveRunPhase,
 }
 
 struct AiRuntimeInner {
@@ -133,9 +152,47 @@ impl AiRunGuard {
         self.cancel.is_live()
     }
 
-    /// Idempotently cancel this generation's provider work.
+    /// Idempotently request cancellation through the shared phase authority.
     pub fn cancel(&self) {
-        self.cancel.cancel();
+        let _ = self.supervisor.cancel_run(self.run_id);
+    }
+
+    /// Check that this exact generation still has provider-output authority.
+    #[must_use]
+    pub fn may_emit_provider_output(&self) -> bool {
+        self.supervisor
+            .may_emit_provider_output(self.run_id, self.generation)
+    }
+
+    /// Wait for cancellation without exposing the underlying token.
+    pub(crate) async fn wait_cancelled(&self) {
+        self.cancel.token().cancelled_owned().await;
+    }
+
+    /// Commit one already-capacity-reserved output under the run-phase authority.
+    ///
+    /// The closure is synchronous so no channel or accumulator mutation can escape
+    /// the exact `Running` generation check.
+    pub(crate) fn commit_provider_output<T>(&self, commit: impl FnOnce() -> T) -> Option<T> {
+        self.supervisor
+            .commit_provider_output(self.run_id, self.generation, commit)
+    }
+
+    /// Atomically select exactly one terminal winner for this generation.
+    ///
+    /// A prior cancellation always changes a proposed completion/failure into
+    /// cancellation. Once selected, neither cancellation nor another terminal
+    /// attempt can overwrite the outcome.
+    pub fn linearize_terminal(&self, proposed: AiTerminalOutcome) -> Option<AiTerminalOutcome> {
+        self.supervisor
+            .linearize_terminal(self.run_id, self.generation, proposed)
+    }
+
+    /// Check that this guard still owns the exact selected terminal outcome.
+    #[must_use]
+    pub fn owns_terminal(&self, outcome: AiTerminalOutcome) -> bool {
+        self.supervisor
+            .owns_terminal(self.run_id, self.generation, outcome)
     }
 
     /// Execute provider chat while retaining this guard's tracked authority.
@@ -148,6 +205,24 @@ impl AiRunGuard {
             .as_ref()
             .expect("admitted AI guard missing runtime")
             .chat(endpoint, request, self.cancel.as_ref())
+            .await
+    }
+
+    /// Execute provider chat incrementally while retaining this guard's tracked authority.
+    pub async fn chat_stream<F, Fut>(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ProviderChatRequest,
+        on_event: F,
+    ) -> Result<(), ProviderError>
+    where
+        F: FnMut(NormalizedStreamEvent) -> Fut,
+        Fut: std::future::Future<Output = Result<(), ProviderError>>,
+    {
+        self.runtime
+            .as_ref()
+            .expect("admitted AI guard missing runtime")
+            .chat_stream(endpoint, request, self.cancel.as_ref(), on_event)
             .await
     }
 
@@ -265,6 +340,7 @@ impl AiRuntimeSupervisor {
             ActiveRun {
                 generation,
                 cancel: Arc::clone(&cancel),
+                phase: ActiveRunPhase::Running,
             },
         );
         Ok(AiRunGuard {
@@ -276,14 +352,21 @@ impl AiRuntimeSupervisor {
         })
     }
 
-    /// Idempotently cancel one active run. Unknown runs return [`AiRuntimeError::NotFound`].
+    /// Idempotently cancel one active run before terminal linearization.
     pub fn cancel_run(&self, run_id: AiRunId) -> Result<(), AiRuntimeError> {
-        let inner = self.inner.lock().expect("AI runtime poisoned");
-        let Some(entry) = inner.active.get(&run_id) else {
+        let mut inner = self.inner.lock().expect("AI runtime poisoned");
+        let Some(entry) = inner.active.get_mut(&run_id) else {
             return Err(AiRuntimeError::NotFound);
         };
-        entry.cancel.cancel();
-        Ok(())
+        match entry.phase {
+            ActiveRunPhase::Running => {
+                entry.phase = ActiveRunPhase::CancelRequested;
+                entry.cancel.cancel();
+                Ok(())
+            }
+            ActiveRunPhase::CancelRequested => Ok(()),
+            ActiveRunPhase::Terminal(_) => Err(AiRuntimeError::Terminal),
+        }
     }
 
     /// Begin one temporary reconfiguration epoch, closing admission and cancelling runs.
@@ -301,8 +384,11 @@ impl AiRuntimeSupervisor {
             epoch,
             runtime_dropped: false,
         };
-        for entry in inner.active.values() {
-            entry.cancel.cancel();
+        for entry in inner.active.values_mut() {
+            if entry.phase == ActiveRunPhase::Running {
+                entry.phase = ActiveRunPhase::CancelRequested;
+                entry.cancel.cancel();
+            }
         }
         Ok(epoch)
     }
@@ -313,8 +399,11 @@ impl AiRuntimeSupervisor {
         if inner.lifecycle != AiRuntimeLifecycle::PermanentDrained {
             inner.lifecycle = AiRuntimeLifecycle::PermanentDraining;
         }
-        for entry in inner.active.values() {
-            entry.cancel.cancel();
+        for entry in inner.active.values_mut() {
+            if entry.phase == ActiveRunPhase::Running {
+                entry.phase = ActiveRunPhase::CancelRequested;
+                entry.cancel.cancel();
+            }
         }
     }
 
@@ -414,6 +503,56 @@ impl AiRuntimeSupervisor {
         self.drop_permanent_runtime().is_ok()
     }
 
+    pub(crate) fn is_active_generation(&self, run_id: AiRunId, generation: u64) -> bool {
+        let inner = self.inner.lock().expect("AI runtime poisoned");
+        inner
+            .active
+            .get(&run_id)
+            .is_some_and(|entry| entry.generation == generation)
+    }
+
+    fn may_emit_provider_output(&self, run_id: AiRunId, generation: u64) -> bool {
+        let inner = self.inner.lock().expect("AI runtime poisoned");
+        output_is_live(&inner, run_id, generation)
+    }
+
+    fn commit_provider_output<T>(
+        &self,
+        run_id: AiRunId,
+        generation: u64,
+        commit: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let inner = self.inner.lock().expect("AI runtime poisoned");
+        output_is_live(&inner, run_id, generation).then(commit)
+    }
+
+    fn linearize_terminal(
+        &self,
+        run_id: AiRunId,
+        generation: u64,
+        proposed: AiTerminalOutcome,
+    ) -> Option<AiTerminalOutcome> {
+        let mut inner = self.inner.lock().expect("AI runtime poisoned");
+        let entry = inner.active.get_mut(&run_id)?;
+        if entry.generation != generation {
+            return None;
+        }
+        let outcome = match entry.phase {
+            ActiveRunPhase::Running => proposed,
+            ActiveRunPhase::CancelRequested => AiTerminalOutcome::Cancelled,
+            ActiveRunPhase::Terminal(_) => return None,
+        };
+        entry.phase = ActiveRunPhase::Terminal(outcome);
+        Some(outcome)
+    }
+
+    fn owns_terminal(&self, run_id: AiRunId, generation: u64, outcome: AiTerminalOutcome) -> bool {
+        let inner = self.inner.lock().expect("AI runtime poisoned");
+        inner.active.get(&run_id).is_some_and(|entry| {
+            entry.generation == generation && entry.phase == ActiveRunPhase::Terminal(outcome)
+        })
+    }
+
     fn unregister(&self, run_id: AiRunId, generation: u64) {
         let mut inner = self.inner.lock().expect("AI runtime poisoned");
         let should_notify = match inner.active.get(&run_id) {
@@ -428,6 +567,14 @@ impl AiRuntimeSupervisor {
             self.drain_notify.notify_waiters();
         }
     }
+}
+
+fn output_is_live(inner: &AiRuntimeInner, run_id: AiRunId, generation: u64) -> bool {
+    inner.active.get(&run_id).is_some_and(|entry| {
+        entry.generation == generation
+            && entry.phase == ActiveRunPhase::Running
+            && entry.cancel.is_live()
+    })
 }
 
 impl std::fmt::Debug for AiRuntimeSupervisor {
@@ -516,6 +663,39 @@ mod tests {
             Err(ProviderError::Cancelled)
         ));
         assert!(!supervisor.provider_client_constructed());
+    }
+
+    #[test]
+    fn cancellation_and_completion_linearize_under_one_authority() {
+        for _ in 0..100 {
+            let supervisor = AiRuntimeSupervisor::new();
+            let run_id = AiRunId::new();
+            let guard = supervisor.admit_run(run_id, 1).unwrap();
+            let barrier = Arc::new(Barrier::new(2));
+            let cancel_supervisor = Arc::clone(&supervisor);
+            let cancel_barrier = Arc::clone(&barrier);
+            let cancel = std::thread::spawn(move || {
+                cancel_barrier.wait();
+                cancel_supervisor.cancel_run(run_id)
+            });
+            barrier.wait();
+            let terminal = guard.linearize_terminal(AiTerminalOutcome::Completed);
+            let cancel = cancel.join().unwrap();
+            match (terminal, cancel) {
+                (Some(AiTerminalOutcome::Completed), Err(AiRuntimeError::Terminal)) => {
+                    assert!(guard.owns_terminal(AiTerminalOutcome::Completed));
+                }
+                (Some(AiTerminalOutcome::Cancelled), Ok(())) => {
+                    assert!(guard.owns_terminal(AiTerminalOutcome::Cancelled));
+                }
+                other => panic!("invalid cancel/completion linearization: {other:?}"),
+            }
+            assert!(
+                guard
+                    .linearize_terminal(AiTerminalOutcome::Failed)
+                    .is_none()
+            );
+        }
     }
 
     #[test]

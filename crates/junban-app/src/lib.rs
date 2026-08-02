@@ -15,10 +15,11 @@ pub use ai::{
     AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
     AiMessageListPage, AiSecretBytes, AiSessionCursor, AiSessionListPage, BindAiCredentialRequest,
     ClearAiCredentialRequest, ClearAiSessionRequest, CreateAiMemoryRequest, CreateAiSessionRequest,
-    DeleteAiMemoryRequest, DeleteAiSessionRequest, LinkAiSessionMemoryRequest,
-    ListAiMemoriesRequest, ListAiMessagesRequest, ListAiSessionsRequest, ProposeAiApprovalRequest,
-    RenameAiSessionRequest, SelectAiMemoriesRequest, SetAiApprovalStatusRequest,
-    UpdateAiMemoryRequest, UpsertAiMessageRequest, UpsertAiRunStateRequest,
+    DeleteAiMemoryRequest, DeleteAiSessionRequest, FinishAiResponseRequest,
+    LinkAiSessionMemoryRequest, ListAiMemoriesRequest, ListAiMessagesRequest,
+    ListAiSessionsRequest, ProposeAiApprovalRequest, RenameAiSessionRequest,
+    SelectAiMemoriesRequest, SetAiApprovalStatusRequest, UpdateAiMemoryRequest,
+    UpsertAiMessageRequest, UpsertAiRunStateRequest,
 };
 pub use artifact::StagedFile;
 pub use error::{AppError, RepositoryError};

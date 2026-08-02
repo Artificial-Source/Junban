@@ -242,6 +242,16 @@ pub fn classified_routes() -> &'static [ClassifiedRoute] {
         },
         ClassifiedRoute {
             method: "POST",
+            path: "/api/v1/ai/sessions/{session_id}/responses",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/runs/{run_id}/cancel",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
             path: "/api/v1/ai/sessions/{session_id}/clear",
             access: RouteAccess::OperatorOnly,
         },

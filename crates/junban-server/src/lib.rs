@@ -1,5 +1,8 @@
 //! Axum router, HTTP contract, authentication, static serving, and SSE delivery.
 
+mod ai_chat;
+mod ai_context;
+mod ai_identity;
 mod ai_runtime;
 mod authz;
 mod credentials;
@@ -81,14 +84,17 @@ use crate::routes::{
     settle_reminder_failed, stats, uncomplete_task, undo_operation,
 };
 use crate::routes_ai::{
-    clear_ai_session, create_ai_memory, create_ai_session, delete_ai_config, delete_ai_credential,
-    delete_ai_memory, delete_ai_session, discover_ai_provider_models, get_ai_config, get_ai_memory,
-    get_ai_session, list_ai_memories, list_ai_messages, list_ai_providers, list_ai_sessions,
-    patch_ai_memory, patch_ai_session, put_ai_config, put_ai_credential,
+    cancel_ai_run, clear_ai_session, create_ai_memory, create_ai_response, create_ai_session,
+    delete_ai_config, delete_ai_credential, delete_ai_memory, delete_ai_session,
+    discover_ai_provider_models, get_ai_config, get_ai_memory, get_ai_session, list_ai_memories,
+    list_ai_messages, list_ai_providers, list_ai_sessions, patch_ai_memory, patch_ai_session,
+    put_ai_config, put_ai_credential,
 };
 use crate::sse::{AppService, SseConnectionPermit};
 
-pub use crate::ai_runtime::{AiRunGuard, AiRuntimeError, AiRuntimeSupervisor, MAX_ACTIVE_AI_RUNS};
+pub use crate::ai_runtime::{
+    AiRunGuard, AiRuntimeError, AiRuntimeSupervisor, AiTerminalOutcome, MAX_ACTIVE_AI_RUNS,
+};
 pub use crate::authz::{
     AutomationScope, ClassifiedRoute, Principal as RequestPrincipal, RouteAccess, classified_routes,
 };
@@ -122,6 +128,8 @@ pub const AI_SHUTDOWN_DRAIN_DEADLINE: Duration = Duration::from_secs(5);
 pub const AI_RECONFIGURE_DRAIN_DEADLINE: Duration = Duration::from_secs(5);
 /// Strict ceiling for typed AI/voice configuration and credential request bodies.
 pub const MAX_AI_CONFIG_BODY_BYTES: usize = 32 * 1024;
+/// Strict ceiling for one basic AI response request body.
+pub const MAX_AI_RESPONSE_BODY_BYTES: usize = 32 * 1024;
 const AUTH_ATTEMPTS: usize = 8;
 const AUTH_WINDOW: Duration = Duration::from_secs(30);
 pub const TOKEN_FILE: &str = "access-token";
@@ -980,6 +988,11 @@ fn api_route_table() -> Router<ServerState> {
             get(list_ai_messages),
         )
         .route(
+            "/api/v1/ai/sessions/{session_id}/responses",
+            post(create_ai_response).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
+        )
+        .route("/api/v1/ai/runs/{run_id}/cancel", post(cancel_ai_run))
+        .route(
             "/api/v1/ai/sessions/{session_id}/clear",
             post(clear_ai_session),
         )
@@ -1686,6 +1699,8 @@ impl Modify for SecurityAddon {
         routes_ai::patch_ai_session,
         routes_ai::delete_ai_session,
         routes_ai::list_ai_messages,
+        routes_ai::create_ai_response,
+        routes_ai::cancel_ai_run,
         routes_ai::clear_ai_session,
         routes_ai::list_ai_memories,
         routes_ai::create_ai_memory,
@@ -1876,6 +1891,11 @@ impl Modify for SecurityAddon {
         routes_ai::AiCredentialBindingResponse,
         routes_ai::DiscoveredModelDto,
         routes_ai::ModelDiscoveryResponse,
+        routes_ai::CreateAiResponseRequest,
+        routes_ai::CancelAiRunResponse,
+        ai_chat::AiRunSseEnvelope,
+        ai_chat::AiRunEventType,
+        ai_context::AiContextMetadata,
         routes_ai::AiSessionStatusDto,
         routes_ai::AiSessionDto,
         routes_ai::AiMemoryDto,

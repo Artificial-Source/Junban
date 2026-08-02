@@ -91,6 +91,16 @@ enum Req<'a> {
         state: &'a str,
         approval_id: Option<&'a str>,
     },
+    FinishAiResponse {
+        assistant_message_id: String,
+        session_id: String,
+        turn_id: String,
+        run_id: String,
+        generation: u64,
+        message_status: &'a str,
+        content_json: &'a str,
+        run_phase: &'a str,
+    },
 }
 
 fn ai_effect(
@@ -605,6 +615,37 @@ pub(crate) fn upsert_ai_message(
     })
 }
 
+pub(crate) fn get_ai_message(
+    connection: &Connection,
+    message_id: AiMessageId,
+) -> Result<AiMessage, RepositoryError> {
+    let row = connection
+        .query_row(
+            "SELECT id, session_id, turn_id, sequence, role, status,
+                    content_json, content_bytes, created_at, updated_at
+             FROM ai_messages WHERE id = ?1",
+            [message_id.to_string()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(storage_error)?
+        .ok_or(RepositoryError::NotFound)?;
+    build_message(row)
+}
+
 #[allow(dead_code)]
 pub(crate) fn list_ai_messages(
     connection: &Connection,
@@ -645,25 +686,40 @@ pub(crate) fn list_ai_messages(
         .map_err(storage_error)?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, sid, turn, sequence, role, status, content_json, bytes, created, updated) =
-            row.map_err(storage_error)?;
-        let content: AiMessageContent =
-            serde_json::from_str(&content_json).map_err(storage_error)?;
-        content.validate().map_err(validation)?;
-        out.push(AiMessage {
-            id: AiMessageId::parse(&id).map_err(storage_error)?,
-            session_id: AiSessionId::parse(&sid).map_err(storage_error)?,
-            turn_id: AiTurnId::parse(&turn).map_err(storage_error)?,
-            sequence: u32::try_from(sequence).map_err(storage_error)?,
-            role: AiMessageRole::parse(&role).map_err(storage_error)?,
-            status: AiMessageStatus::parse(&status).map_err(storage_error)?,
-            content,
-            content_bytes: u64::try_from(bytes).map_err(storage_error)?,
-            created_at: created.parse().map_err(storage_error)?,
-            updated_at: updated.parse().map_err(storage_error)?,
-        });
+        out.push(build_message(row.map_err(storage_error)?)?);
     }
     Ok(out)
+}
+
+type MessageRow = (
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+);
+
+fn build_message(row: MessageRow) -> Result<AiMessage, RepositoryError> {
+    let (id, sid, turn, sequence, role, status, content_json, bytes, created, updated) = row;
+    let content: AiMessageContent = serde_json::from_str(&content_json).map_err(storage_error)?;
+    content.validate().map_err(validation)?;
+    Ok(AiMessage {
+        id: AiMessageId::parse(&id).map_err(storage_error)?,
+        session_id: AiSessionId::parse(&sid).map_err(storage_error)?,
+        turn_id: AiTurnId::parse(&turn).map_err(storage_error)?,
+        sequence: u32::try_from(sequence).map_err(storage_error)?,
+        role: AiMessageRole::parse(&role).map_err(storage_error)?,
+        status: AiMessageStatus::parse(&status).map_err(storage_error)?,
+        content,
+        content_bytes: u64::try_from(bytes).map_err(storage_error)?,
+        created_at: created.parse().map_err(storage_error)?,
+        updated_at: updated.parse().map_err(storage_error)?,
+    })
 }
 
 pub(crate) fn create_ai_memory(
@@ -1382,6 +1438,214 @@ pub(crate) fn upsert_ai_run_state(
     })
 }
 
+/// Atomically finalize a reserved assistant placeholder and its exact run generation.
+pub(crate) fn finish_ai_response(
+    connection: &mut Connection,
+    operation_id: OperationId,
+    assistant_message_id: AiMessageId,
+    session_id: AiSessionId,
+    turn_id: AiTurnId,
+    run_id: AiRunId,
+    generation: u64,
+    message_status: AiMessageStatus,
+    mut content: AiMessageContent,
+    run_phase: AiRunPhase,
+    now: Timestamp,
+) -> Result<CommittedMutation, RepositoryError> {
+    let matching_terminal = matches!(
+        (message_status, run_phase),
+        (AiMessageStatus::Completed, AiRunPhase::Completed)
+            | (AiMessageStatus::Cancelled, AiRunPhase::Cancelled)
+            | (AiMessageStatus::Failed, AiRunPhase::Failed)
+    );
+    if !matching_terminal {
+        return Err(validation(junban_domain::ValidationError::Invalid {
+            field: "ai_response.terminal",
+            reason: "assistant status and run phase must be matching terminal states",
+        }));
+    }
+    canonicalize_optional_json(
+        &mut content.tool_arguments_json,
+        "ai_message.content.tool_arguments_json",
+        junban_domain::AI_TOOL_ARGUMENTS_BYTES_MAX,
+    )?;
+    canonicalize_optional_json(
+        &mut content.tool_result_json,
+        "ai_message.content.tool_result_json",
+        junban_domain::AI_TOOL_RESULT_BYTES_MAX,
+    )?;
+    if content.text.len() > junban_domain::AI_ASSISTANT_TEXT_BYTES_MAX {
+        return Err(validation(junban_domain::ValidationError::TooLong {
+            field: "ai_message.content.text",
+            max: junban_domain::AI_ASSISTANT_TEXT_BYTES_MAX,
+        }));
+    }
+    let content_json = content.canonical_json().map_err(validation)?;
+    let content_bytes = AiMessageContent::byte_len(&content_json);
+    let request = canonical_json(&Req::FinishAiResponse {
+        assistant_message_id: assistant_message_id.to_string(),
+        session_id: session_id.to_string(),
+        turn_id: turn_id.to_string(),
+        run_id: run_id.to_string(),
+        generation,
+        message_status: message_status.as_str(),
+        content_json: &content_json,
+        run_phase: run_phase.as_str(),
+    })?;
+
+    mutate(connection, operation_id, request, now, move |tx, _| {
+        let (durable_session, durable_turn, durable_role, durable_status, old_bytes) = tx
+            .query_row(
+                "SELECT session_id, turn_id, role, status, content_bytes
+                 FROM ai_messages WHERE id = ?1",
+                [assistant_message_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(storage_error)?
+            .ok_or(RepositoryError::NotFound)?;
+        if durable_session != session_id.to_string()
+            || durable_turn != turn_id.to_string()
+            || durable_role != AiMessageRole::Assistant.as_str()
+            || durable_status != AiMessageStatus::Streaming.as_str()
+        {
+            return Err(RepositoryError::Conflict);
+        }
+
+        let (run_session, run_turn, run_generation, old_phase, approval_id) = tx
+            .query_row(
+                "SELECT session_id, turn_id, generation, state, approval_id
+                 FROM ai_run_state WHERE run_id = ?1",
+                [run_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(storage_error)?
+            .ok_or(RepositoryError::NotFound)?;
+        let old_phase = AiRunPhase::parse(&old_phase).map_err(storage_error)?;
+        if run_session != session_id.to_string()
+            || run_turn != turn_id.to_string()
+            || u64::try_from(run_generation).map_err(storage_error)? != generation
+            || old_phase.is_terminal()
+            || approval_id.is_some()
+        {
+            return Err(RepositoryError::Conflict);
+        }
+
+        let session_bytes: i64 = tx
+            .query_row(
+                "SELECT content_bytes FROM ai_sessions WHERE id = ?1",
+                [session_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage_error)?
+            .ok_or(RepositoryError::NotFound)?;
+        let delta_bytes = content_bytes as i64 - old_bytes;
+        let next_session_bytes = session_bytes
+            .checked_add(delta_bytes)
+            .and_then(|value| u64::try_from(value).ok())
+            .ok_or_else(|| RepositoryError::Storage("invalid AI session byte counter".into()))?;
+        if next_session_bytes > AI_SESSION_CONTENT_BYTES_MAX {
+            return Err(quota_err("ai_session.content_bytes"));
+        }
+        let mut quota = load_quota(tx)?;
+        let next_profile_bytes = if delta_bytes >= 0 {
+            quota
+                .total_content_bytes
+                .checked_add(delta_bytes as u64)
+                .ok_or_else(|| quota_err("ai_profile.content_bytes"))?
+        } else {
+            quota
+                .total_content_bytes
+                .saturating_sub((-delta_bytes) as u64)
+        };
+        if next_profile_bytes > AI_PROFILE_CONTENT_BYTES_MAX {
+            return Err(quota_err("ai_profile.content_bytes"));
+        }
+
+        let message_updated = tx
+            .execute(
+                "UPDATE ai_messages
+                 SET status = ?1, content_json = ?2, content_bytes = ?3, updated_at = ?4
+                 WHERE id = ?5 AND session_id = ?6 AND turn_id = ?7
+                   AND role = 'assistant' AND status = 'streaming'",
+                params![
+                    message_status.as_str(),
+                    content_json,
+                    content_bytes as i64,
+                    now.to_string(),
+                    assistant_message_id.to_string(),
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                ],
+            )
+            .map_err(storage_error)?;
+        if message_updated != 1 {
+            return Err(RepositoryError::Conflict);
+        }
+        let run_updated = tx
+            .execute(
+                "UPDATE ai_run_state
+                 SET state = ?1, updated_at = ?2
+                 WHERE run_id = ?3 AND session_id = ?4 AND turn_id = ?5
+                   AND generation = ?6 AND state = ?7 AND approval_id IS NULL",
+                params![
+                    run_phase.as_str(),
+                    now.to_string(),
+                    run_id.to_string(),
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    run_generation,
+                    old_phase.as_str(),
+                ],
+            )
+            .map_err(storage_error)?;
+        if run_updated != 1 {
+            return Err(RepositoryError::Conflict);
+        }
+        let session_updated = tx
+            .execute(
+                "UPDATE ai_sessions
+                 SET content_bytes = ?1, updated_at = ?2, last_message_at = ?2
+                 WHERE id = ?3",
+                params![
+                    next_session_bytes as i64,
+                    now.to_string(),
+                    session_id.to_string(),
+                ],
+            )
+            .map_err(storage_error)?;
+        if session_updated != 1 {
+            return Err(RepositoryError::Conflict);
+        }
+        quota.total_content_bytes = next_profile_bytes;
+        save_quota(tx, &quota)?;
+
+        Ok(ai_effect(
+            EventType::AI_SESSION_CHANGED,
+            ResourceRef::ai_session(session_id),
+            ("ai_response", run_id.to_string()),
+        ))
+    })
+}
+
 #[allow(dead_code)]
 pub(crate) fn get_ai_run_state(
     connection: &Connection,
@@ -1429,9 +1693,10 @@ pub(crate) fn get_ai_run_state(
 
 /// Fail-closed startup/restore recovery for ephemeral AI runtime authority.
 ///
-/// Pending and approved approvals become expired, every non-terminal run becomes
-/// cancelled and unbound, and consumed approvals remain legal terminal history beside
-/// their cancelled/unbound exact run. This transaction emits no event or receipt.
+/// Pending and approved approvals become expired, and non-terminal tool runs become
+/// cancelled and unbound. Basic response runs with a reserved streaming assistant stay
+/// non-terminal so the response route can reconcile both rows through its receipt-backed
+/// atomic terminal mutation. This transaction emits no event or receipt.
 pub(crate) fn expire_ai_runtime_state(
     connection: &Connection,
     now: Timestamp,
@@ -1446,7 +1711,16 @@ pub(crate) fn expire_ai_runtime_state(
     tx.execute(
         "UPDATE ai_run_state
          SET state = 'cancelled', approval_id = NULL, updated_at = ?1
-         WHERE state IN ('running', 'awaiting_approval', 'dispatching')",
+         WHERE state IN ('running', 'awaiting_approval', 'dispatching')
+           AND NOT (
+               state = 'running' AND approval_id IS NULL AND EXISTS (
+                   SELECT 1 FROM ai_messages
+                   WHERE ai_messages.session_id = ai_run_state.session_id
+                     AND ai_messages.turn_id = ai_run_state.turn_id
+                     AND ai_messages.role = 'assistant'
+                     AND ai_messages.status = 'streaming'
+               )
+           )",
         [now.to_string()],
     )
     .map_err(storage_error)?;

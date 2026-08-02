@@ -229,6 +229,19 @@ pub struct UpsertAiRunStateRequest {
     pub state: AiRunState,
 }
 
+/// Atomically finalize one reserved assistant response and its exact durable run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinishAiResponseRequest {
+    pub assistant_message_id: AiMessageId,
+    pub session_id: AiSessionId,
+    pub turn_id: AiTurnId,
+    pub run_id: AiRunId,
+    pub generation: u64,
+    pub message_status: AiMessageStatus,
+    pub content: AiMessageContent,
+    pub run_phase: junban_domain::AiRunPhase,
+}
+
 /// Bind or replace a settings credential reference after optional secret publication.
 pub struct BindAiCredentialRequest {
     pub target: AiCredentialBindingTarget,

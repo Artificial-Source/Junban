@@ -1,8 +1,8 @@
-# Phase 6 Wave 2 — Provider Adapters Evidence
+# Phase 6 Wave 2 / 3e — Provider Adapters Evidence
 
-- **Date:** 2026-08-03
-- **Scope:** `crates/junban-ai` provider registry, four wire adapters, model discovery, retry/cancel/redaction, and provider-neutral speech data contracts
-- **Claim boundary:** provider-runtime unit/fixture coverage and speech data-contract coverage only. No end-to-end server, settings, secrets store, orchestration, React, voice acceptance, cloud STT/TTS HTTP adapters, voice routes, or local voice inference is claimed.
+- **Date:** 2026-08-03 (Wave 2); Wave 3e incremental sink delta on the same evidence file
+- **Scope:** `crates/junban-ai` provider registry, four wire adapters, model discovery, retry/cancel/redaction, provider-neutral speech data contracts, and Wave 3e incremental normalized event delivery
+- **Claim boundary:** provider-runtime unit/fixture coverage and speech data-contract coverage only. No end-to-end server, settings, secrets store, orchestration, React, voice acceptance, cloud STT/TTS HTTP adapters, voice routes, or local voice inference is claimed. Wave 3e claims only the `junban-ai` incremental callback contract and its loopback fixture validation — not server POST-SSE composition.
 - **Authority note:** chat preset identity and official base URLs are owned by `junban_domain::AiProviderPreset`. Speech preset identity is owned by `junban_domain::SpeechProviderPreset`. `junban-ai` depends narrowly on `junban-domain` and re-exports both; the duplicate runtime chat-provider enum is deleted.
 
 ## Official sources consulted
@@ -75,19 +75,48 @@ Wave 2 freezes the data shapes Wave 4 cloud STT/TTS adapters will consume. No as
 
 Focused regressions live in `crates/junban-ai/src/speech.rs` tests (bounds, format/token rejection, capability matrix, rust-adapter ownership, redacted Debug).
 
+## Wave 3e — incremental normalized event delivery
+
+Provider-core half only (`crates/junban-ai`). A server POST-SSE orchestrator can forward deltas before the provider response ends by consuming the async sink APIs; this evidence does not claim that server composition.
+
+| Item             | Frozen contract                                                                                                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime API      | `ProviderRuntime::chat_stream(endpoint, request, run, on_event)` delivers each `NormalizedStreamEvent` to an async `FnMut(event) -> Future<Result<(), ProviderError>>` sink                                               |
+| Transport API    | `stream_provider_sse` / `stream_provider_json` are the incremental primitives; `consume_provider_sse` / `consume_provider_json` / `chat()` collect through them and remain source-compatible                              |
+| Delivery timing  | SSE: each event is delivered as soon as its frame normalizes, before further body bytes are read. Non-stream JSON: bounded body completes, then events emit in order                                                      |
+| Backpressure     | Sink is awaited; no unbounded event queue in this crate. A slow sink stalls further `response.chunk()` reads                                                                                                              |
+| Fence            | `RunCancel::check_live` runs before and after every sink callback; cancellation/revocation forbids all later callbacks                                                                                                    |
+| Retry            | Retry only before any sink event is accepted. After the first effect (including status/tool/usage), transport or sink failure is terminal — no second vendor request. Existing no-retry-after-body / 401/403 rules remain |
+| Sink failure     | Close/backpressure maps to stable `Cancelled` or `stream_failed` without body/secret material; Connect/Stream sink errors collapse to `stream_failed`                                                                     |
+| Gemini terminal  | Synthesized `Completed` at EOF only when no explicit terminal was delivered; exactly once; same order as collect APIs                                                                                                     |
+| Bounds / secrecy | Existing SSE frame/line/event/response and non-stream JSON caps; active-secret success/error reflection protections; no callback Debug/logging of payloads                                                                |
+| Families         | All four wire families (OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Gemini generateContent)                                                                                                            |
+
+Focused regressions in `crates/junban-ai/tests/provider_runtime.rs`:
+
+- `incremental_first_delta_before_terminal` — first text delta observed before mock writes terminal/EOF
+- `incremental_fragmented_sse_all_four_families` — fragmented UTF-8/event order via sink
+- `incremental_slow_sink_backpressure` — second text-delta callback waits; no hidden queue
+- `incremental_cancel_while_sink_blocked` — cancel during blocked sink yields `Cancelled`, no late event
+- `incremental_sink_failure_after_effect_no_retry` — one request after first effect
+- `incremental_pre_body_retry_still_works` — pre-body 503 retry path unchanged
+- `chat_collected_equals_chat_stream_collection` — `chat()` exact-equals streamed collection; consume equals stream collect
+- `incremental_gemini_eof_terminal_once` — Gemini EOF terminal synthesized once
+
 ## Safety posture
 
 - Redirects disabled; ambient proxy disabled; connect 10s / total 60s / idle pool 30s.
 - Max three attempts; retry only pre-body connect/408/429/5xx with capped Retry-After + deterministic jitter.
-- Never retry 401/403, after body acceptance, tool/result effect, or mid-stream failure.
+- Never retry 401/403, after body acceptance, tool/result effect, sink effect delivery, or mid-stream failure.
 - Base URLs reject userinfo, fragments, query strings, non-loopback HTTP, and cloud origin overrides.
 - Domain `ProviderBaseUrl::for_provider` and runtime `ProviderEndpoint::resolve` accept/reject the same exact preset official origin for every built-in non-custom preset.
 - Credentials use `SecretString` (redacted Debug, no Serialize) and sensitive header values.
 - Public `ProviderError` / `AiError` never embeds arbitrary vendor bodies. HTTP failures expose status, optional short vendor code, and retry timing only.
 - Error-body inspection is cancellation-aware and hard-capped at 64 KiB (`read_error_body_bounded`); the connection is dropped at the cap.
 - Active request credentials are scrubbed from any retained diagnostic message fields before error construction/return.
-- Generation fence checked at frame and effect boundaries; cancel yields `Cancelled` without applying late effects.
+- Generation fence checked at frame, sink-delivery, and effect boundaries; cancel yields `Cancelled` without applying late effects or late sink callbacks.
 - Speech contracts carry no credentials/URLs/headers and never log audio bytes or raw transcript/synthesis text via Debug.
+- Incremental sinks never Debug/log event payloads; sink close maps to stable cancelled/stream failure without body/secret material.
 
 ## Wave 0 security findings closed in this wave
 
@@ -96,7 +125,7 @@ Focused regressions live in `crates/junban-ai/src/speech.rs` tests (bounds, form
 | `P6-W0-SEC-001` | Replaced `Response::bytes()` error-body reads with cancel-aware incremental reads capped at 64 KiB; drop immediately at the cap. Regression: `p6_w0_sec_001_error_body_read_is_bounded_and_cancel_aware`.                                  |
 | `P6-W0-SEC-002` | Public HTTP errors no longer carry vendor body text; only status/optional short code/retry-after. Active credential scrubbing on retained diagnostics. Regression: `p6_w0_sec_002_active_credential_reflection_never_enters_public_error`. |
 
-## Validation performed (Wave 2 + preset-authority reconciliation + speech contracts)
+## Validation performed (Wave 2 + preset-authority reconciliation + speech contracts + Wave 3e incremental sink)
 
 ```bash
 cargo fmt --all -- --check
@@ -112,12 +141,15 @@ git diff --check
 
 Cross-layer contract tests in `crates/junban-ai/tests/provider_authority.rs` prove every `AiProviderPreset::ALL` entry has exactly one descriptor, canonical descriptor ID equals `as_str`, descriptor default URL equals `official_base_url` (except Custom), no extra registry entry exists, and DeepSeek is present while xAI is absent.
 
+Wave 3e validation additionally runs the incremental sink regressions listed above (deterministic loopback/barriers only; no live egress).
+
 ## Limitations / non-claims
 
 - No live provider network tests in CI.
 - No hard-coded complete vendor model catalogs; discovery maps provider-reported IDs and inherits provider-level capabilities without guessing per-model tool/vision support.
 - No OAuth / subscription-login emulation.
 - No server route composition, secret store, tool orchestration, or React work in this wave.
+- Wave 3e does not claim server POST-SSE orchestration, authenticated AI routes, or browser event forwarding — only the `junban-ai` incremental callback/transport contract.
 - No cloud STT/TTS HTTP adapters, voice routes, browser speech/media/VAD runtime, or local voice model inference in this wave — only provider-neutral speech data contracts and capability metadata.
 - xAI is not a built-in chat preset; operators may use `custom` for non-inventory OpenAI-compatible origins.
 - Browser speech remains frontend-owned; declaring it on the speech capability matrix does not imply a Rust network adapter.

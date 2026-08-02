@@ -1,11 +1,18 @@
 //! Streaming and unary transport helpers for provider responses.
 //!
-//! Used by adapters and the Wave 0/2 contract suites. Redirect refusal, body
+//! Used by adapters and the Wave 0/2/3e contract suites. Redirect refusal, body
 //! bounds, generation-fence checks, and family-specific normalization live here.
+//!
+//! Incremental SSE/JSON consumers deliver each [`NormalizedStreamEvent`] through
+//! an async sink as soon as a frame normalizes. Collecting helpers are thin
+//! wrappers over that primitive. There is no unbounded event queue: the consumer
+//! awaits the sink before reading further body bytes.
 //!
 //! Error-body inspection is cancellation-aware and hard-capped at
 //! [`MAX_PROVIDER_ERROR_BODY_BYTES`]. Arbitrary vendor bodies never enter
 //! public [`ProviderError`] values.
+
+use std::future::Future;
 
 use reqwest::Response;
 
@@ -29,11 +36,43 @@ pub async fn consume_openai_compatible_sse(
 }
 
 /// Stream and normalize a provider SSE body for the given wire family.
+///
+/// Collects through [`stream_provider_sse`] so callers observe the same event
+/// order as the incremental sink API.
 pub async fn consume_provider_sse(
     response: Response,
     run: &RunCancel,
     kind: ProviderKind,
 ) -> Result<Vec<NormalizedStreamEvent>, ProviderError> {
+    let mut events = Vec::new();
+    stream_provider_sse(response, run, kind, |event| {
+        events.push(event);
+        std::future::ready(Ok(()))
+    })
+    .await?;
+    Ok(events)
+}
+
+/// Incrementally stream and normalize a provider SSE body.
+///
+/// Each normalized event is delivered to `on_event` immediately after its frame
+/// normalizes, before further body bytes are read. The sink is awaited (natural
+/// backpressure); failures and cancellation are checked around every delivery.
+///
+/// Sink errors should be stable [`ProviderError`] values (typically
+/// [`ProviderError::Cancelled`] or [`ProviderError::stream_failed`]) and must
+/// not embed vendor bodies or secrets. Callbacks never run after the generation
+/// fence is revoked.
+pub async fn stream_provider_sse<F, Fut>(
+    response: Response,
+    run: &RunCancel,
+    kind: ProviderKind,
+    mut on_event: F,
+) -> Result<(), ProviderError>
+where
+    F: FnMut(NormalizedStreamEvent) -> Fut,
+    Fut: Future<Output = Result<(), ProviderError>>,
+{
     run.check_live()?;
 
     let status = response.status();
@@ -49,8 +88,8 @@ pub async fn consume_provider_sse(
 
     let mut decoder = SseDecoder::new();
     let mut normalizer = FrameNormalizer::new(kind);
-    let mut events = Vec::new();
     let mut body_phase = RequestBodyPhase::PreBody;
+    let mut saw_terminal = false;
     let mut response = response;
     let cancel = run.token();
     loop {
@@ -74,31 +113,73 @@ pub async fn consume_provider_sse(
         body_phase = RequestBodyPhase::BodyAccepted;
 
         let sse_events = decoder.push(&chunk)?;
-        append_normalized(&mut events, &mut normalizer, sse_events, run)?;
+        emit_normalized(
+            &mut normalizer,
+            sse_events,
+            run,
+            &mut on_event,
+            &mut saw_terminal,
+        )
+        .await?;
         // Effect boundary: generation fence must still be live after accepting frames.
         run.check_live()?;
     }
 
     run.check_live()?;
     let trailing = decoder.finish()?;
-    append_normalized(&mut events, &mut normalizer, trailing, run)?;
+    emit_normalized(
+        &mut normalizer,
+        trailing,
+        run,
+        &mut on_event,
+        &mut saw_terminal,
+    )
+    .await?;
 
     // Gemini SSE often ends without an explicit terminal event.
-    if kind == ProviderKind::GeminiGenerateContent
-        && !events.iter().any(NormalizedStreamEvent::is_terminal)
-    {
-        events.push(NormalizedStreamEvent::Completed);
+    if kind == ProviderKind::GeminiGenerateContent && !saw_terminal {
+        deliver_event(
+            NormalizedStreamEvent::Completed,
+            run,
+            &mut on_event,
+            &mut saw_terminal,
+        )
+        .await?;
     }
 
-    Ok(events)
+    Ok(())
 }
 
 /// Read and normalize a non-streaming JSON provider response body.
+///
+/// Collects through [`stream_provider_json`].
 pub async fn consume_provider_json(
     response: Response,
     run: &RunCancel,
     kind: ProviderKind,
 ) -> Result<Vec<NormalizedStreamEvent>, ProviderError> {
+    let mut events = Vec::new();
+    stream_provider_json(response, run, kind, |event| {
+        events.push(event);
+        std::future::ready(Ok(()))
+    })
+    .await?;
+    Ok(events)
+}
+
+/// Normalize a non-streaming JSON provider body, then deliver events in order.
+///
+/// The bounded body is fully read before any sink delivery (JSON is not framed).
+pub async fn stream_provider_json<F, Fut>(
+    response: Response,
+    run: &RunCancel,
+    kind: ProviderKind,
+    mut on_event: F,
+) -> Result<(), ProviderError>
+where
+    F: FnMut(NormalizedStreamEvent) -> Fut,
+    Fut: Future<Output = Result<(), ProviderError>>,
+{
     run.check_live()?;
 
     let status = response.status();
@@ -114,10 +195,13 @@ pub async fn consume_provider_json(
     let body = read_bounded_success_body(response, run).await?;
     run.check_live()?;
     let mut normalizer = FrameNormalizer::new(kind);
+    let mut saw_terminal = false;
     match normalizer.push_json_body(&body)? {
         NormalizedProviderFrame::Events(events) => {
-            run.check_live()?;
-            Ok(events)
+            for event in events {
+                deliver_event(event, run, &mut on_event, &mut saw_terminal).await?;
+            }
+            Ok(())
         }
         NormalizedProviderFrame::Ignored => Err(ProviderError::stream(
             "provider JSON body produced no events",
@@ -125,25 +209,77 @@ pub async fn consume_provider_json(
     }
 }
 
-fn append_normalized(
-    out: &mut Vec<NormalizedStreamEvent>,
+async fn emit_normalized<F, Fut>(
     normalizer: &mut FrameNormalizer,
     sse_events: Vec<crate::sse::SseEvent>,
     run: &RunCancel,
-) -> Result<(), ProviderError> {
+    on_event: &mut F,
+    saw_terminal: &mut bool,
+) -> Result<(), ProviderError>
+where
+    F: FnMut(NormalizedStreamEvent) -> Fut,
+    Fut: Future<Output = Result<(), ProviderError>>,
+{
     for event in sse_events {
         run.check_live()?;
         match normalizer.push_data(&event.data)? {
             NormalizedProviderFrame::Events(items) => {
                 for item in items {
-                    run.check_live()?;
-                    out.push(item);
+                    deliver_event(item, run, on_event, saw_terminal).await?;
                 }
             }
             NormalizedProviderFrame::Ignored => {}
         }
     }
     Ok(())
+}
+
+async fn deliver_event<F, Fut>(
+    event: NormalizedStreamEvent,
+    run: &RunCancel,
+    on_event: &mut F,
+    saw_terminal: &mut bool,
+) -> Result<(), ProviderError>
+where
+    F: FnMut(NormalizedStreamEvent) -> Fut,
+    Fut: Future<Output = Result<(), ProviderError>>,
+{
+    // Fence before delivery: revocation forbids the callback entirely.
+    run.check_live()?;
+    if event.is_terminal() {
+        *saw_terminal = true;
+    }
+    let sink_result = on_event(event).await;
+    // Fence after delivery: cancel during the sink await is terminal and
+    // forbids treating a successful sink result as authorization to continue.
+    run.check_live()?;
+    // Map sink failures to stable variants without attaching payload material.
+    match sink_result {
+        Ok(()) => Ok(()),
+        Err(ProviderError::Cancelled) => Err(ProviderError::Cancelled),
+        Err(ProviderError::BoundExceeded { bound }) => Err(ProviderError::BoundExceeded { bound }),
+        Err(ProviderError::Timeout) => Err(ProviderError::Timeout),
+        Err(ProviderError::Unavailable { capability }) => {
+            Err(ProviderError::Unavailable { capability })
+        }
+        Err(ProviderError::HttpStatus {
+            status,
+            code,
+            retry_after_ms,
+        }) => Err(ProviderError::HttpStatus {
+            status,
+            code,
+            retry_after_ms,
+        }),
+        Err(ProviderError::Invalid { field, reason }) => {
+            Err(ProviderError::Invalid { field, reason })
+        }
+        // Connect/Stream (and any unexpected) sink failures collapse to a stable
+        // stream failure so backpressure/close paths cannot reflect body bytes.
+        Err(ProviderError::Connect { .. } | ProviderError::Stream { .. }) => {
+            Err(ProviderError::stream_failed())
+        }
+    }
 }
 
 /// Map a non-success HTTP response without embedding the vendor body.

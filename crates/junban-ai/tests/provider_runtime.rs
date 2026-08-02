@@ -13,8 +13,8 @@ use junban_ai::{
     ModelId, NormalizedStreamEvent, OriginClass, ProviderCapabilities, ProviderCapability,
     ProviderChatRequest, ProviderDescriptor, ProviderEndpoint, ProviderError, ProviderHttpFactory,
     ProviderKind, ProviderPreset, ProviderRuntime, RequestBodyPhase, RetryDecision, RunCancel,
-    SecretString, ToolSpec, builtin_providers, classify_retry, descriptor, parse_models_body,
-    prepare_chat_request, validate_base_url,
+    SecretString, ToolSpec, builtin_providers, classify_retry, consume_provider_sse, descriptor,
+    parse_models_body, prepare_chat_request, stream_provider_sse, validate_base_url,
 };
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -604,6 +604,399 @@ async fn zero_construction_when_unused() {
     assert_eq!(runtime.factory().construct_calls(), 0);
 }
 
+/// Wave 3e: first text delta is observed before the mock writes terminal/EOF.
+#[tokio::test]
+async fn incremental_first_delta_before_terminal() {
+    let (delta_seen_tx, delta_seen_rx) = oneshot::channel::<()>();
+    let (allow_terminal_tx, allow_terminal_rx) = oneshot::channel::<()>();
+    let url = spawn_sse_delta_then_gate(allow_terminal_rx).await;
+
+    let factory = ProviderHttpFactory::new();
+    let client = factory.client().unwrap();
+    let run = RunCancel::new();
+    let response = client.get(format!("{url}/stream")).send().await.unwrap();
+
+    let mut delta_seen_tx = Some(delta_seen_tx);
+    let join = tokio::spawn(async move {
+        let mut events = Vec::new();
+        stream_provider_sse(
+            response,
+            &run,
+            ProviderKind::OpenAiChatCompletions,
+            |event| {
+                if matches!(event, NormalizedStreamEvent::TextDelta { .. })
+                    && let Some(tx) = delta_seen_tx.take()
+                {
+                    let _ = tx.send(());
+                }
+                events.push(event);
+                std::future::ready(Ok(()))
+            },
+        )
+        .await
+        .map(|()| events)
+    });
+
+    // Prove the sink saw the text delta while the server is still gated.
+    tokio::time::timeout(Duration::from_secs(2), delta_seen_rx)
+        .await
+        .expect("delta should arrive before timeout")
+        .expect("delta signal");
+    let _ = allow_terminal_tx.send(());
+    let events = join.await.unwrap().unwrap();
+    assert!(events.iter().any(
+        |event| matches!(event, NormalizedStreamEvent::TextDelta { text } if text == "early")
+    ));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, NormalizedStreamEvent::Completed))
+    );
+}
+
+/// Wave 3e: fragmented UTF-8/event order via incremental sink for all four families.
+#[tokio::test]
+async fn incremental_fragmented_sse_all_four_families() {
+    let chat_body = b"data: {\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\r\n\r\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"\xe4\xb8\x96\"}}]}\n\n\
+data: [DONE]\n\n";
+    let events = stream_family_incremental(
+        ProviderKind::OpenAiChatCompletions,
+        split_mid_utf8(chat_body),
+    )
+    .await
+    .unwrap();
+    assert!(events.contains(&NormalizedStreamEvent::TextDelta { text: "世".into() }));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, NormalizedStreamEvent::Completed))
+    );
+
+    let responses_body = concat!(
+        "data: {\"type\":\"response.created\"}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\n",
+        "data: {\"type\":\"response.reasoning.delta\",\"delta\":\"hidden-cot\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let events = stream_family_incremental(
+        ProviderKind::OpenAiResponses,
+        split_mid_utf8(responses_body.as_bytes()),
+    )
+    .await
+    .unwrap();
+    assert!(!format!("{events:?}").contains("hidden-cot"));
+    assert!(events.contains(&NormalizedStreamEvent::TextDelta { text: "Hi".into() }));
+
+    let anthropic_body = "event: message_start\r\n\
+data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":0}}}\r\n\r\n\
+event: content_block_delta\r\n\
+data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"An\"}}\r\n\r\n\
+event: content_block_delta\n\
+data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"thro\"}}\n\n\
+event: message_stop\n\
+data: {\"type\":\"message_stop\"}\n\n";
+    let events = stream_family_incremental(
+        ProviderKind::AnthropicMessages,
+        split_mid_utf8(anthropic_body.as_bytes()),
+    )
+    .await
+    .unwrap();
+    assert!(events.contains(&NormalizedStreamEvent::TextDelta { text: "An".into() }));
+    assert!(events.contains(&NormalizedStreamEvent::TextDelta {
+        text: "thro".into()
+    }));
+
+    let gemini_body = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Ge\"}]}}]}\n\n\
+data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"mini\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":2}}\n\n";
+    let events = stream_family_incremental(
+        ProviderKind::GeminiGenerateContent,
+        split_mid_utf8(gemini_body.as_bytes()),
+    )
+    .await
+    .unwrap();
+    assert!(events.contains(&NormalizedStreamEvent::TextDelta { text: "Ge".into() }));
+    assert!(events.contains(&NormalizedStreamEvent::TextDelta {
+        text: "mini".into()
+    }));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, NormalizedStreamEvent::Completed))
+            .count(),
+        1,
+        "Gemini EOF terminal must be synthesized exactly once"
+    );
+}
+
+/// Wave 3e: slow sink backpressure — second callback waits; no hidden queue.
+#[tokio::test]
+async fn incremental_slow_sink_backpressure() {
+    let (entered_tx, entered_rx) = oneshot::channel::<()>();
+    let (release_tx, release_rx) = oneshot::channel::<()>();
+    let release_rx = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+
+    // Two events in separate TCP chunks so the consumer must read twice.
+    let chunks = vec![
+        b"data: {\"choices\":[{\"delta\":{\"content\":\"one\"}}]}\n\n".to_vec(),
+        b"data: {\"choices\":[{\"delta\":{\"content\":\"two\"}}]}\n\ndata: [DONE]\n\n".to_vec(),
+    ];
+    let url = spawn_chunked(chunks, Duration::from_millis(5)).await;
+
+    let factory = ProviderHttpFactory::new();
+    let client = factory.client().unwrap();
+    let run = RunCancel::new();
+    let response = client.get(format!("{url}/stream")).send().await.unwrap();
+
+    let delivered = Arc::new(AtomicUsize::new(0));
+    let delivered_task = Arc::clone(&delivered);
+    let entered_tx = Arc::new(tokio::sync::Mutex::new(Some(entered_tx)));
+    let join = tokio::spawn(async move {
+        stream_provider_sse(
+            response,
+            &run,
+            ProviderKind::OpenAiChatCompletions,
+            |event| {
+                let release_rx = Arc::clone(&release_rx);
+                let delivered_task = Arc::clone(&delivered_task);
+                let entered_tx = Arc::clone(&entered_tx);
+                async move {
+                    if matches!(event, NormalizedStreamEvent::TextDelta { .. }) {
+                        let n = delivered_task.fetch_add(1, Ordering::SeqCst);
+                        if n == 0 {
+                            if let Some(tx) = entered_tx.lock().await.take() {
+                                let _ = tx.send(());
+                            }
+                            if let Some(rx) = release_rx.lock().await.take() {
+                                let _ = rx.await;
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+            },
+        )
+        .await
+    });
+
+    tokio::time::timeout(Duration::from_secs(2), entered_rx)
+        .await
+        .expect("first sink entry")
+        .expect("entered signal");
+    // While the first text-delta sink is held, the second text delta must not run.
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert_eq!(
+        delivered.load(Ordering::SeqCst),
+        1,
+        "slow sink must apply backpressure without a hidden event queue"
+    );
+    let _ = release_tx.send(());
+    join.await.unwrap().unwrap();
+    assert_eq!(delivered.load(Ordering::SeqCst), 2);
+}
+
+/// Wave 3e: cancel while sink blocked yields Cancelled and no late events.
+#[tokio::test]
+async fn incremental_cancel_while_sink_blocked() {
+    let (entered_tx, entered_rx) = oneshot::channel::<()>();
+    let (release_tx, release_rx) = oneshot::channel::<()>();
+    let release_rx = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+    let late = Arc::new(AtomicUsize::new(0));
+
+    let (gate_tx, gate_rx) = oneshot::channel::<()>();
+    let url = spawn_gated(gate_rx).await;
+
+    let factory = ProviderHttpFactory::new();
+    let client = factory.client().unwrap();
+    let run = Arc::new(RunCancel::new());
+    let run_task = Arc::clone(&run);
+    let response = client.get(format!("{url}/stream")).send().await.unwrap();
+
+    let late_task = Arc::clone(&late);
+    let entered_tx = Arc::new(tokio::sync::Mutex::new(Some(entered_tx)));
+    let join = tokio::spawn(async move {
+        stream_provider_sse(
+            response,
+            &run_task,
+            ProviderKind::OpenAiChatCompletions,
+            |event| {
+                let release_rx = Arc::clone(&release_rx);
+                let late_task = Arc::clone(&late_task);
+                let entered_tx = Arc::clone(&entered_tx);
+                async move {
+                    if let NormalizedStreamEvent::TextDelta { text } = &event {
+                        if text == "LATE" {
+                            late_task.fetch_add(1, Ordering::SeqCst);
+                        }
+                        if text == "partial" {
+                            if let Some(tx) = entered_tx.lock().await.take() {
+                                let _ = tx.send(());
+                            }
+                            if let Some(rx) = release_rx.lock().await.take() {
+                                let _ = rx.await;
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+            },
+        )
+        .await
+    });
+
+    tokio::time::timeout(Duration::from_secs(2), entered_rx)
+        .await
+        .expect("blocked sink")
+        .expect("entered");
+    run.cancel();
+    // Unblock the sink and the server late write; fence must reject further delivery.
+    let _ = release_tx.send(());
+    let _ = gate_tx.send(());
+    let err = join.await.unwrap().unwrap_err();
+    assert!(matches!(err, ProviderError::Cancelled));
+    assert_eq!(late.load(Ordering::SeqCst), 0, "no late event after cancel");
+}
+
+/// Wave 3e: sink failure after first effect — one request, no retry.
+#[tokio::test]
+async fn incremental_sink_failure_after_effect_no_retry() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let url = spawn_counting_sse_ok(Arc::clone(&hits)).await;
+    let runtime = ProviderRuntime::new();
+    let endpoint = endpoint_for_mock(ProviderPreset::OpenRouter, &url);
+    let request = simple_request();
+    let run = RunCancel::new();
+
+    let mut saw_effect = false;
+    let err = runtime
+        .chat_stream(&endpoint, &request, &run, |event| {
+            if !matches!(event, NormalizedStreamEvent::Cancelled) {
+                saw_effect = true;
+            }
+            std::future::ready(Err(ProviderError::stream("sink closed")))
+        })
+        .await
+        .unwrap_err();
+
+    assert!(saw_effect);
+    assert!(matches!(err, ProviderError::Stream { .. }));
+    // Stable mapping: no sink message body material required, but must not retry.
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+}
+
+/// Wave 3e: pre-body retry still works with chat_stream.
+#[tokio::test]
+async fn incremental_pre_body_retry_still_works() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let url = spawn_flaky_then_sse(Arc::clone(&hits)).await;
+    let runtime = ProviderRuntime::new();
+    let endpoint = endpoint_for_mock(ProviderPreset::OpenRouter, &url);
+    let request = simple_request();
+    let run = RunCancel::new();
+
+    let mut events = Vec::new();
+    runtime
+        .chat_stream(&endpoint, &request, &run, |event| {
+            events.push(event);
+            std::future::ready(Ok(()))
+        })
+        .await
+        .unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, NormalizedStreamEvent::TextDelta { .. }))
+    );
+    assert!(hits.load(Ordering::SeqCst) >= 2);
+}
+
+/// Wave 3e: collected chat() output exact-equals streamed collection.
+#[tokio::test]
+async fn chat_collected_equals_chat_stream_collection() {
+    let body = b"data: {\"choices\":[{\"delta\":{\"content\":\"eq\"}}]}\n\ndata: [DONE]\n\n";
+    let url = spawn_raw(vec![body.to_vec()]).await;
+
+    let runtime = ProviderRuntime::new();
+    let endpoint = endpoint_for_mock(ProviderPreset::Custom, &url);
+    let request = simple_request();
+    let run = RunCancel::new();
+    let collected = runtime.chat(&endpoint, &request, &run).await.unwrap();
+
+    // Fresh server for the stream path (connection: close single-shot).
+    let url = spawn_raw(vec![body.to_vec()]).await;
+    let endpoint = endpoint_for_mock(ProviderPreset::Custom, &url);
+    let run = RunCancel::new();
+    let mut streamed = Vec::new();
+    runtime
+        .chat_stream(&endpoint, &request, &run, |event| {
+            streamed.push(event);
+            std::future::ready(Ok(()))
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(collected, streamed);
+
+    // Transport collect helper matches incremental collect for the same body.
+    let url = spawn_raw(vec![body.to_vec()]).await;
+    let factory = ProviderHttpFactory::new();
+    let client = factory.client().unwrap();
+    let run = RunCancel::new();
+    let response = client.get(format!("{url}/stream")).send().await.unwrap();
+    let via_consume = consume_provider_sse(response, &run, ProviderKind::OpenAiChatCompletions)
+        .await
+        .unwrap();
+
+    let url = spawn_raw(vec![body.to_vec()]).await;
+    let response = client.get(format!("{url}/stream")).send().await.unwrap();
+    let mut via_stream = Vec::new();
+    stream_provider_sse(
+        response,
+        &run,
+        ProviderKind::OpenAiChatCompletions,
+        |event| {
+            via_stream.push(event);
+            std::future::ready(Ok(()))
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(via_consume, via_stream);
+}
+
+/// Wave 3e: Gemini EOF terminal is delivered once via incremental path.
+#[tokio::test]
+async fn incremental_gemini_eof_terminal_once() {
+    let gemini_body = b"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"g\"}]}}]}\n\n";
+    let events = stream_family_incremental(
+        ProviderKind::GeminiGenerateContent,
+        split_mid_utf8(gemini_body),
+    )
+    .await
+    .unwrap();
+    let terminals: Vec<_> = events.iter().filter(|event| event.is_terminal()).collect();
+    assert_eq!(terminals.len(), 1);
+    assert!(matches!(terminals[0], NormalizedStreamEvent::Completed));
+
+    // Explicit terminal must not be doubled at EOF.
+    let with_stop = b"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"x\"}]},\"finishReason\":\"STOP\"}]}\n\n";
+    // finishReason alone does not emit Completed from the normalizer; EOF still synthesizes once.
+    let events = stream_family_incremental(
+        ProviderKind::GeminiGenerateContent,
+        vec![with_stop.to_vec()],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, NormalizedStreamEvent::Completed))
+            .count(),
+        1
+    );
+}
+
 fn simple_request() -> ProviderChatRequest {
     ProviderChatRequest {
         model: ModelId::new("test-model").unwrap(),
@@ -636,7 +1029,6 @@ async fn stream_url(
     kind: ProviderKind,
     url: &str,
 ) -> Result<Vec<NormalizedStreamEvent>, ProviderError> {
-    use junban_ai::consume_provider_sse;
     let factory = ProviderHttpFactory::new();
     let client = factory.client()?;
     let run = RunCancel::new();
@@ -646,6 +1038,28 @@ async fn stream_url(
         .await
         .map_err(|error| ProviderError::connect(error.to_string()))?;
     consume_provider_sse(response, &run, kind).await
+}
+
+async fn stream_family_incremental(
+    kind: ProviderKind,
+    chunks: Vec<Vec<u8>>,
+) -> Result<Vec<NormalizedStreamEvent>, ProviderError> {
+    let url = spawn_chunked(chunks, Duration::from_millis(2)).await;
+    let factory = ProviderHttpFactory::new();
+    let client = factory.client()?;
+    let run = RunCancel::new();
+    let response = client
+        .get(format!("{url}/stream"))
+        .send()
+        .await
+        .map_err(|error| ProviderError::connect(error.to_string()))?;
+    let mut events = Vec::new();
+    stream_provider_sse(response, &run, kind, |event| {
+        events.push(event);
+        std::future::ready(Ok(()))
+    })
+    .await?;
+    Ok(events)
 }
 
 fn split_mid_utf8(body: &[u8]) -> Vec<Vec<u8>> {
@@ -844,6 +1258,53 @@ async fn spawn_hanging_error_body() -> String {
         let _ = socket.write_all(b"5\r\nhello\r\n").await;
         let _ = socket.flush().await;
         tokio::time::sleep(Duration::from_secs(30)).await;
+    });
+    format!("http://{addr}")
+}
+
+async fn spawn_sse_delta_then_gate(gate: oneshot::Receiver<()>) -> String {
+    let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = vec![0u8; 8192];
+        let _ = socket.read(&mut buf).await;
+        let header =
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+        let _ = socket.write_all(header).await;
+        let first = b"data: {\"choices\":[{\"delta\":{\"content\":\"early\"}}]}\n\n";
+        let _ = socket.write_all(first).await;
+        let _ = socket.flush().await;
+        // Hold terminal/EOF until the client has observed the first delta.
+        let _ = gate.await;
+        let terminal = b"data: [DONE]\n\n";
+        let _ = socket.write_all(terminal).await;
+    });
+    format!("http://{addr}")
+}
+
+async fn spawn_counting_sse_ok(hits: Arc<AtomicUsize>) -> String {
+    let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                break;
+            };
+            hits.fetch_add(1, Ordering::SeqCst);
+            let mut buf = vec![0u8; 8192];
+            let _ = socket.read(&mut buf).await;
+            let header =
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+            let _ = socket.write_all(header).await;
+            let body =
+                b"data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n";
+            let _ = socket.write_all(body).await;
+        }
     });
     format!("http://{addr}")
 }

@@ -4,7 +4,9 @@
 //! retry classification, generation cancellation, and a lazy HTTP client
 //! factory. Wave 2 adds the typed provider registry, four wire adapters,
 //! model discovery, fixture-driven runtime tests, and provider-neutral
-//! speech data contracts (no HTTP speech adapters or routes yet).
+//! speech data contracts (no HTTP speech adapters or routes yet). Wave 3e
+//! adds incremental normalized event delivery via async sinks so a server
+//! POST-SSE orchestrator can forward deltas before the provider response ends.
 //!
 //! This crate performs no global runtime initialization. Constructing the
 //! default [`ProviderHttpFactory`] or [`ProviderRuntime`] must not create a
@@ -78,6 +80,6 @@ pub use sse::{SseDecoder, SseEvent};
 pub use stream::NormalizedStreamEvent;
 pub use transport::{
     consume_openai_compatible_sse, consume_provider_json, consume_provider_sse,
-    read_error_body_bounded,
+    read_error_body_bounded, stream_provider_json, stream_provider_sse,
 };
 pub use url_policy::{OriginClass, host_is_loopback, join_base_path, validate_base_url};

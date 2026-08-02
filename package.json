@@ -23,6 +23,7 @@
     "contract:check": "node scripts/contract.mjs check",
     "check:docs": "node scripts/check-docs.mjs",
     "check:runtime-boundary": "node scripts/check-runtime-boundary.mjs",
+    "check:local-voice-assets": "node scripts/check-local-voice-assets.mjs --require-dist",
     "bench:hosted-server": "python3 scripts/bench-hosted-server.py",
     "bench:hosted-server:quick": "python3 scripts/bench-hosted-server.py --quick",
     "bench:scale": "python3 scripts/bench-hosted-server.py --mode scale",
@@ -35,9 +36,14 @@
     "bench:phase5:quick": "python3 scripts/check-phase5-automation-budget.py --quick",
     "conformance:phase5": "python3 scripts/check-phase5-conformance.py --authoritative",
     "bench:self-check": "python3 scripts/bench-hosted-server.py --self-check",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary"
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary && pnpm check:local-voice-assets"
   },
   "dependencies": {
+    "@diffusionstudio/piper-wasm": "1.0.0",
+    "@huggingface/transformers": "3.8.1",
+    "@mintplex-labs/piper-tts-web": "1.0.4",
+    "@ricky0123/vad-web": "0.0.30",
+    "kokoro-js": "1.2.1",
     "lucide-react": "^0.548.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -64,7 +70,13 @@
   "pnpm": {
     "overrides": {
       "brace-expansion": "5.0.8",
-      "js-yaml": "4.3.0"
+      "js-yaml": "4.3.0",
+      "sharp": "0.35.3"
+    },
+    "patchedDependencies": {
+      "@mintplex-labs/piper-tts-web@1.0.4": "patches/@mintplex-labs__piper-tts-web@1.0.4.patch",
+      "kokoro-js@1.2.1": "patches/kokoro-js@1.2.1.patch",
+      "@huggingface/transformers@3.8.1": "patches/@huggingface__transformers@3.8.1.patch"
     }
   }
 }

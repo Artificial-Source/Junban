@@ -1,0 +1,24 @@
+//! Frozen provider transport bounds from the Phase 6 contract.
+
+use std::time::Duration;
+
+/// Maximum UTF-8 bytes accepted for one SSE event frame (all field lines).
+pub const MAX_PROVIDER_STREAM_FRAME_BYTES: usize = 64 * 1024;
+
+/// Maximum total provider response body bytes inspected for one request.
+pub const MAX_PROVIDER_RESPONSE_BYTES: usize = 1024 * 1024;
+
+/// Maximum provider error body bytes retained for classification/redaction.
+pub const MAX_PROVIDER_ERROR_BODY_BYTES: usize = 64 * 1024;
+
+/// Maximum attempts for a single logical provider operation (initial + retries).
+pub const MAX_RETRY_ATTEMPTS: u32 = 3;
+
+/// Upper bound applied to provider `Retry-After` values.
+pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
+
+/// Maximum accepted length for a provider identifier.
+pub const MAX_PROVIDER_ID_BYTES: usize = 64;
+
+/// Maximum accepted length for a model identifier.
+pub const MAX_MODEL_ID_BYTES: usize = 256;

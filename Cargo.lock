@@ -918,6 +918,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "junban-ai"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "junban-app"
 version = "0.1.0"
 dependencies = [

@@ -720,7 +720,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 5 Wave 4 protocols frozen before measurement: 17-revision cross-surface corpus and fixed CLI/MCP latency, memory, lifecycle, ownership, secrecy, cleanup, and no-Node acceptance budgets; local-owner CLI dry run passed every corpus operation/error assumption.
 - [x] Phase 6 legacy/current context and official provider/local-browser dependency research completed; four provider wire families, exact lazy local-voice pins, schema/settings/secrets/tool/cancel authority, interface scenes, and disabled/enabled release budgets are frozen in `evidence/phase-6-context-map.md`. The high-risk planning gate approved after `P6-PLAN-001`–`P6-PLAN-005` were fixed.
 - [x] Phase 6 Wave 0 dependency/contract authorities: lazy provider client/SSE/error/cancel foundation in `junban-ai`; exact-pinned browser-only Whisper, Kokoro, Piper, and VAD packages behind dynamic workers; bounded hash-verified OPFS admission with same-origin support assets; and sixteen immutable legacy-rendered AI/voice authorities.
-- [ ] Phase 6 Wave 1 schema-v6 persistence and secret authority.
+- [x] Phase 6 Wave 1 schema-v6 persistence and secret authority: typed `AiSettings`/`VoiceSettings`, atomic v5→v6 AI tables/quotas, non-undoable session/message/memory/approval/run primitives, private receipt-first `ai-secrets.json`, restore credential clearing, and focused failure-injection coverage (see `evidence/phase-6-wave-1.md`).
 - [ ] Phase 6 Waves 2–5 provider runtime, tools, preserved UI/voice, evidence, reviews and closure.
 - [ ] Phase 7 implementation.
 - [ ] Phase 8 implementation.
@@ -817,6 +817,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 5 ownership: successful instance-matched discovery does not itself lease a temporary owner. A one-shot owner can exit before the discovered client's first request; one bounded reconnect on a definitive non-timeout connect failure closes that gap without replaying restore or any ambiguous sent write.
 - Phase 5 memory: state-creating MCP samples can retain about 1 MiB of new SQLite/WAL file cache after 50 mutations while idle controls remain flat. The protocol keeps the raw relative failure visible and permits the explicit durable-state disposition only when process count, cleanup, no-Node checks, and absolute 24/32 MiB ceilings all pass.
 - Phase 6 local voice: immutable Hugging Face `resolve/<commit>` URLs redirect large files to HF-owned content bridges. Junban sends no credentials or query material, validates final HTTPS delivery hosts, and treats exact size plus SHA-256 as the trust anchor before marker-gated OPFS admission. Mutable package download defaults are patched out, and ordinary startup contains no engine/model static graph.
+- Phase 6 Wave 1 secrets: provider/speech bytes stay out of SQLite and complete backups by using a private versioned `ai-secrets.json` with receipt-first binding. Failed publication leaves settings unchanged; failed binding leaves only an orphan file entry; startup reconciliation removes unreferenced IDs diagnostically without inventing bindings. Candidate restore clears every credential binding and forces AI/cloud speech disabled before cutover while preserving chat/memory/preferences.
 
 ## Outcome and retrospective
 

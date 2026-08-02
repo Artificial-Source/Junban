@@ -1641,7 +1641,7 @@ mod tests {
         let payload = b"sqlite-bytes-not-real".to_vec();
         let manifest = BackupManifest {
             artifact_version: BACKUP_VERSION,
-            schema_version: 5,
+            schema_version: 6,
             created_at: "2026-03-22T12:00:00Z".into(),
             payload_sha256: sha256_hex(&payload),
             task_count: 1,

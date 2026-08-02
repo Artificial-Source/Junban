@@ -1,5 +1,7 @@
 //! SQLite persistence with one profile owner and one dedicated connection thread.
 
+mod ai_ops;
+mod ai_secrets;
 mod backup_ops;
 mod catalog_ops;
 mod detail_ops;
@@ -17,6 +19,8 @@ mod timeblock_ops;
 mod transfer_ops;
 mod tx;
 mod undo_ops;
+
+pub use ai_secrets::{AiSecretBytes, AiSecretStore, AiSecretStoreError};
 
 use std::{
     collections::HashSet,
@@ -3462,7 +3466,37 @@ fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
         )
     })?;
     migration::migrate(&mut connection, profile_dir)?;
+    // Recompute AI counters and expire stale runtime rows after every successful open.
+    // Secret reconciliation is best-effort/diagnostic-only when the private file is dirty.
+    if let Err(error) = ai_ops::recompute_ai_quotas(&connection) {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::Unknown,
+                extended_code: 1,
+            },
+            Some(format!("ai quota recompute failed: {error}")),
+        ));
+    }
+    let _ = reconcile_ai_secrets_on_open(&connection, profile_dir);
     Ok(connection)
+}
+
+fn reconcile_ai_secrets_on_open(
+    connection: &Connection,
+    profile_dir: &Path,
+) -> Result<(), RepositoryError> {
+    let settings = settings_ops::get_settings(connection)?;
+    let referenced = junban_domain::referenced_ai_credential_ids(&settings.ai, &settings.voice);
+    match AiSecretStore::load(profile_dir) {
+        Ok(store) => {
+            // Failure to clean unreferenced secrets is diagnostic-only: settings remain
+            // the sole binding authority and cannot address orphan file entries.
+            let _ = store.reconcile_unreferenced(&referenced);
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(RepositoryError::Storage(error.to_string())),
+    }
 }
 
 #[cfg(test)]
@@ -3531,5 +3565,7 @@ fn table_count(connection: &Connection, table: &str) -> Result<i64, RepositoryEr
         .map_err(|e| RepositoryError::Storage(e.to_string()))
 }
 
+#[cfg(test)]
+mod ai_wave1_tests;
 #[cfg(test)]
 mod tests;

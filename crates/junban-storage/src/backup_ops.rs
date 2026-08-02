@@ -202,6 +202,9 @@ pub(crate) fn prepare_restore(
             "app_state row missing while preparing restore".into(),
         ));
     }
+    // Candidate restore validation clears credential bindings and forces AI/cloud
+    // speech disabled while preserving non-secret preferences/chat/memory data.
+    sanitize_restored_ai_state(&validated)?;
     checkpoint_wal(&validated)?;
     validate_payload(&validated, &manifest, profile_dir)?;
     drop(validated);
@@ -1246,6 +1249,11 @@ fn validate_event_type(raw: &str) -> Result<(), RepositoryError> {
             | EventType::TIME_SLOT_MEMBERSHIP_UPDATED
             | EventType::SETTINGS_UPDATED
             | EventType::IMPORT_APPLIED
+            | EventType::AI_SESSION_CHANGED
+            | EventType::AI_SESSION_DELETED
+            | EventType::AI_MEMORY_CHANGED
+            | EventType::AI_MEMORY_DELETED
+            | EventType::AI_APPROVAL_CHANGED
     ) {
         Ok(())
     } else {
@@ -1273,6 +1281,18 @@ fn validate_subject(
         (Some("time_slot"), Some(id)) => TimeSlotId::parse(id).map(|_| ()).map_err(storage_error),
         (Some("operation"), Some(id)) => OperationId::parse(id).map(|_| ()).map_err(storage_error),
         (Some("settings"), Some("settings")) | (Some("import"), Some(_)) => Ok(()),
+        (Some("ai_session"), Some(id)) => junban_domain::AiSessionId::parse(id)
+            .map(|_| ())
+            .map_err(storage_error),
+        (Some("ai_memory"), Some(id)) => junban_domain::AiMemoryId::parse(id)
+            .map(|_| ())
+            .map_err(storage_error),
+        (Some("ai_approval"), Some(id)) => junban_domain::AiApprovalId::parse(id)
+            .map(|_| ())
+            .map_err(storage_error),
+        (Some("ai_message"), Some(_))
+        | (Some("ai_session_memory"), Some(_))
+        | (Some("ai_run"), Some(_)) => Ok(()),
         _ => Err(RepositoryError::Storage(
             "invalid activity subject".to_owned(),
         )),
@@ -1352,6 +1372,15 @@ fn validate_resource_id(kind: ResourceType, id: &str) -> Result<(), RepositoryEr
         ResourceType::TimeBlock => TimeBlockId::parse(id).map(|_| ()).map_err(storage_error),
         ResourceType::TimeSlot => TimeSlotId::parse(id).map(|_| ()).map_err(storage_error),
         ResourceType::Settings if id == "settings" => Ok(()),
+        ResourceType::AiSession => junban_domain::AiSessionId::parse(id)
+            .map(|_| ())
+            .map_err(storage_error),
+        ResourceType::AiMemory => junban_domain::AiMemoryId::parse(id)
+            .map(|_| ())
+            .map_err(storage_error),
+        ResourceType::AiApproval => junban_domain::AiApprovalId::parse(id)
+            .map(|_| ())
+            .map_err(storage_error),
         ResourceType::Relation => Ok(()),
         _ => Err(RepositoryError::Storage(
             "invalid event resource id".to_owned(),
@@ -1804,6 +1833,29 @@ fn normalize_runtime_state(connection: &Connection) -> Result<(), RepositoryErro
     connection
         .execute("DELETE FROM reminder_delivery_lease", [])
         .map_err(storage_error)?;
+    Ok(())
+}
+
+/// Clear credential bindings, force AI/cloud speech disabled, and expire pending
+/// approvals/runs on a restore candidate. Never touches `ai-secrets.json`.
+fn sanitize_restored_ai_state(connection: &Connection) -> Result<(), RepositoryError> {
+    let mut settings = read_settings(connection)?;
+    settings = settings.cleared_for_restore();
+    settings.validate().map_err(crate::helpers::validation)?;
+    let json = serde_json::to_string(&settings).map_err(storage_error)?;
+    let updated = connection
+        .execute(
+            "UPDATE app_settings SET value_json = ?1, updated_at = ?2 WHERE key = ?3",
+            params![json, Timestamp::now().to_string(), SETTINGS_KEY],
+        )
+        .map_err(storage_error)?;
+    if updated != 1 {
+        return Err(RepositoryError::Storage(
+            "settings_json row missing while sanitizing restore candidate".into(),
+        ));
+    }
+    crate::ai_ops::expire_ai_runtime_state(connection, Timestamp::now())?;
+    crate::ai_ops::recompute_ai_quotas(connection)?;
     Ok(())
 }
 

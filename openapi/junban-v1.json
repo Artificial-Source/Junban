@@ -11771,7 +11771,10 @@
           "operation",
           "time_block",
           "time_slot",
-          "settings"
+          "settings",
+          "ai_session",
+          "ai_memory",
+          "ai_approval"
         ]
       },
       "RestoreResponse": {

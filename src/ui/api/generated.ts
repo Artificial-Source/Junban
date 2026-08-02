@@ -2248,7 +2248,10 @@ export interface components {
       | "operation"
       | "time_block"
       | "time_slot"
-      | "settings";
+      | "settings"
+      | "ai_session"
+      | "ai_memory"
+      | "ai_approval";
     /** @description Successful restore response; process must restart before normal traffic resumes. */
     RestoreResponse: {
       restart_required: boolean;

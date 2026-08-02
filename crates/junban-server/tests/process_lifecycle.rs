@@ -196,7 +196,7 @@ fn interrupted_recovery_cutover_is_reconciled_before_process_can_open_sqlite() {
             "rollback_dir": rollback_relative,
             "candidate_len": candidate_bytes.len(),
             "candidate_sha256": sha256_hex(&candidate_bytes),
-            "schema_version": 5,
+            "schema_version": 6,
             "event_epoch": event_epoch,
         }))
         .unwrap(),

@@ -37,6 +37,7 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-5-automation-bench.json`](../goals/rust-rewrite/evidence/phase-5-automation-bench.json): authoritative automation latency, memory, lifecycle, and cleanup result
 - [`../goals/rust-rewrite/evidence/phase-5-dogfood/report.md`](../goals/rust-rewrite/evidence/phase-5-dogfood/report.md): native CLI and MCP dogfood evidence
 - [`../goals/rust-rewrite/evidence/phase-5-outcome.md`](../goals/rust-rewrite/evidence/phase-5-outcome.md): Phase 5 acceptance, validation, performance, dogfood, and review outcome
+- [`../goals/rust-rewrite/evidence/phase-6-context-map.md`](../goals/rust-rewrite/evidence/phase-6-context-map.md): frozen AI/voice authority, provider, persistence, security, interface, dependency, and evidence plan
 - [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings
 - [`performance.md`](performance.md): hosted memory and scale harness commands
 

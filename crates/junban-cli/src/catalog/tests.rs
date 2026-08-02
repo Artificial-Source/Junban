@@ -218,7 +218,7 @@ fn contains_ref(value: &Value) -> bool {
 
 #[test]
 fn catalog_count_is_stable_snapshot() {
-    // 99 OpenAPI ops − 12 excluded (health, principal, 2 SSE, 7 delivery, raw credential create) = 87.
+    // OpenAPI ops minus excluded health/principal/SSE/delivery/AI/raw-credential ops = 87.
     let catalog = catalog();
     assert_eq!(
         catalog.tools.len(),

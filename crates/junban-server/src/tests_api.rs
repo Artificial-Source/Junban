@@ -5731,21 +5731,42 @@ fn default_voice_config() -> Value {
 async fn ai_routes_are_operator_only_before_body_parsing() {
     let context = TestContext::new();
     let (_id, token, _) = create_automation_via_api(&context, &["read", "write", "data"]).await;
-    for (method, path, body) in [
-        (Method::GET, "/api/v1/ai/providers", "{"),
-        (Method::GET, "/api/v1/ai/config", "{"),
-        (Method::PUT, "/api/v1/ai/config", "{"),
-        (Method::DELETE, "/api/v1/ai/config", "{"),
-        (Method::PUT, "/api/v1/ai/credentials/ai_provider", "{"),
-        (Method::DELETE, "/api/v1/ai/credentials/ai_provider", "{"),
-        (Method::GET, "/api/v1/ai/providers/ollama/models", "{"),
-    ] {
+    let session = Uuid::now_v7();
+    let memory = Uuid::now_v7();
+    let paths = vec![
+        (Method::GET, "/api/v1/ai/providers".to_owned()),
+        (Method::GET, "/api/v1/ai/config".to_owned()),
+        (Method::PUT, "/api/v1/ai/config".to_owned()),
+        (Method::DELETE, "/api/v1/ai/config".to_owned()),
+        (Method::PUT, "/api/v1/ai/credentials/ai_provider".to_owned()),
+        (
+            Method::DELETE,
+            "/api/v1/ai/credentials/ai_provider".to_owned(),
+        ),
+        (Method::GET, "/api/v1/ai/providers/ollama/models".to_owned()),
+        (Method::GET, "/api/v1/ai/sessions".to_owned()),
+        (Method::POST, "/api/v1/ai/sessions".to_owned()),
+        (Method::GET, format!("/api/v1/ai/sessions/{session}")),
+        (Method::PATCH, format!("/api/v1/ai/sessions/{session}")),
+        (Method::DELETE, format!("/api/v1/ai/sessions/{session}")),
+        (
+            Method::GET,
+            format!("/api/v1/ai/sessions/{session}/messages"),
+        ),
+        (Method::POST, format!("/api/v1/ai/sessions/{session}/clear")),
+        (Method::GET, "/api/v1/ai/memories".to_owned()),
+        (Method::POST, "/api/v1/ai/memories".to_owned()),
+        (Method::GET, format!("/api/v1/ai/memories/{memory}")),
+        (Method::PATCH, format!("/api/v1/ai/memories/{memory}")),
+        (Method::DELETE, format!("/api/v1/ai/memories/{memory}")),
+    ];
+    for (method, path) in paths {
         let response = context
             .request(
-                bearer(method.clone(), path, &token)
+                bearer(method.clone(), &path, &token)
                     .header(header::CONTENT_TYPE, "application/json")
                     .header("idempotency-key", Uuid::now_v7().to_string())
-                    .body(Body::from(body))
+                    .body(Body::from("{"))
                     .unwrap(),
             )
             .await;
@@ -7043,6 +7064,754 @@ async fn malformed_and_oversize_ai_credentials_never_publish_secret() {
         .await;
     assert_eq!(oversized_body.status(), StatusCode::PAYLOAD_TOO_LARGE);
     assert!(!secrets.exists());
+}
+
+#[tokio::test]
+async fn ai_session_and_memory_operator_crud_cursors_clear_and_exact_retry() {
+    let context = TestContext::new();
+
+    let created = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/ai/sessions"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"title":"Alpha"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created_body = json(created).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(created_body["session"]["title"], "Alpha");
+    assert_eq!(created_body["event"]["event_type"], "ai.session.changed");
+    assert!(created_body["event"]["snapshot"].is_null());
+    assert!(
+        !created_body["event"]
+            .to_string()
+            .contains("message_body_marker")
+    );
+
+    let operation = Uuid::now_v7().to_string();
+    let first = context
+        .request(
+            operation_header_key(
+                authenticated(Method::POST, "/api/v1/ai/sessions"),
+                &operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"title":"Retry me"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first_body = json(first).await;
+    let retry_id = first_body["session"]["id"].as_str().unwrap().to_owned();
+    let second = context
+        .request(
+            operation_header_key(
+                authenticated(Method::POST, "/api/v1/ai/sessions"),
+                &operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"title":"Retry me"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(second.status(), StatusCode::CREATED);
+    let second_body = json(second).await;
+    assert_eq!(second_body["session"]["id"], retry_id);
+    assert_eq!(second_body["event"], first_body["event"]);
+
+    let renamed = context
+        .request(
+            operation_header(authenticated(
+                Method::PATCH,
+                &format!("/api/v1/ai/sessions/{session_id}"),
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"title":"Alpha renamed"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(renamed.status(), StatusCode::OK);
+    assert_eq!(json(renamed).await["session"]["title"], "Alpha renamed");
+
+    let got = context
+        .request(
+            authenticated(Method::GET, &format!("/api/v1/ai/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(got.status(), StatusCode::OK);
+    assert_eq!(json(got).await["title"], "Alpha renamed");
+
+    // Seed additional sessions for recent-first paging.
+    for title in ["Beta", "Gamma"] {
+        let response = context
+            .request(
+                operation_header(authenticated(Method::POST, "/api/v1/ai/sessions"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(json!({"title": title}).to_string()))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+    let page1 = context
+        .request(
+            authenticated(Method::GET, "/api/v1/ai/sessions?limit=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(page1.status(), StatusCode::OK);
+    let page1_body = json(page1).await;
+    assert_eq!(page1_body["sessions"].as_array().unwrap().len(), 2);
+    let cursor = page1_body["next_cursor"].as_str().unwrap().to_owned();
+    let page2 = context
+        .request(
+            authenticated(
+                Method::GET,
+                &format!("/api/v1/ai/sessions?limit=2&cursor={cursor}"),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(page2.status(), StatusCode::OK);
+    let page2_body = json(page2).await;
+    assert!(!page2_body["sessions"].as_array().unwrap().is_empty());
+    let page1_ids: Vec<_> = page1_body["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|session| session["id"].as_str().unwrap().to_owned())
+        .collect();
+    for session in page2_body["sessions"].as_array().unwrap() {
+        assert!(!page1_ids.contains(&session["id"].as_str().unwrap().to_owned()));
+    }
+
+    let bad_cursor = context
+        .request(
+            authenticated(Method::GET, "/api/v1/ai/sessions?cursor=%%%")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(bad_cursor.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let messages = context
+        .request(
+            authenticated(
+                Method::GET,
+                &format!("/api/v1/ai/sessions/{session_id}/messages?after_sequence=0&limit=10"),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(messages.status(), StatusCode::OK);
+    assert!(
+        json(messages).await["messages"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    let cleared = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                &format!("/api/v1/ai/sessions/{session_id}/clear"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(cleared.status(), StatusCode::OK);
+    let cleared_body = json(cleared).await;
+    assert_eq!(cleared_body["session"]["message_count"], 0);
+    assert!(cleared_body["event"]["snapshot"].is_null());
+
+    let memory_op = Uuid::now_v7().to_string();
+    let memory_created = context
+        .request(
+            operation_header_key(
+                authenticated(Method::POST, "/api/v1/ai/memories"),
+                &memory_op,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"content":"remember this"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(memory_created.status(), StatusCode::CREATED);
+    let memory_body = json(memory_created).await;
+    let memory_id = memory_body["memory"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(memory_body["memory"]["content"], "remember this");
+    assert!(memory_body["event"]["snapshot"].is_null());
+    assert!(!memory_body["event"].to_string().contains("remember this"));
+
+    let memory_retry = context
+        .request(
+            operation_header_key(
+                authenticated(Method::POST, "/api/v1/ai/memories"),
+                &memory_op,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"content":"remember this"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(memory_retry.status(), StatusCode::CREATED);
+    let memory_retry_body = json(memory_retry).await;
+    assert_eq!(memory_retry_body["memory"]["id"], memory_id);
+    assert_eq!(memory_retry_body["event"], memory_body["event"]);
+
+    let memory_patched = context
+        .request(
+            operation_header(authenticated(
+                Method::PATCH,
+                &format!("/api/v1/ai/memories/{memory_id}"),
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"content":"updated memory"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(memory_patched.status(), StatusCode::OK);
+    assert_eq!(
+        json(memory_patched).await["memory"]["content"],
+        "updated memory"
+    );
+
+    // Seed more memories for paging and cross-kind cursor rejection.
+    for index in 0..2 {
+        let response = context
+            .request(
+                operation_header(authenticated(Method::POST, "/api/v1/ai/memories"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"content": format!("mem-{index}")}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+    let mem_page = context
+        .request(
+            authenticated(Method::GET, "/api/v1/ai/memories?limit=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(mem_page.status(), StatusCode::OK);
+    let mem_page_body = json(mem_page).await;
+    let mem_cursor = mem_page_body["next_cursor"].as_str().unwrap().to_owned();
+    let cross = context
+        .request(
+            authenticated(
+                Method::GET,
+                &format!("/api/v1/ai/sessions?cursor={mem_cursor}"),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(cross.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let unknown_session = context
+        .request(
+            authenticated(
+                Method::GET,
+                &format!("/api/v1/ai/sessions/{}", Uuid::now_v7()),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(unknown_session.status(), StatusCode::NOT_FOUND);
+
+    let bad_limit = context
+        .request(
+            authenticated(Method::GET, "/api/v1/ai/sessions?limit=0")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(bad_limit.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let over_limit = context
+        .request(
+            authenticated(Method::GET, "/api/v1/ai/sessions?limit=101")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(over_limit.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let strict_body = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/ai/sessions"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"title":"x","extra":1}"#))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(strict_body.status(), StatusCode::BAD_REQUEST);
+
+    let deleted_memory = context
+        .request(
+            operation_header(authenticated(
+                Method::DELETE,
+                &format!("/api/v1/ai/memories/{memory_id}"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(deleted_memory.status(), StatusCode::OK);
+    assert_eq!(
+        json(deleted_memory).await["event"]["event_type"],
+        "ai.memory.deleted"
+    );
+
+    let deleted_session = context
+        .request(
+            operation_header(authenticated(
+                Method::DELETE,
+                &format!("/api/v1/ai/sessions/{session_id}"),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(deleted_session.status(), StatusCode::OK);
+    assert_eq!(
+        json(deleted_session).await["event"]["event_type"],
+        "ai.session.deleted"
+    );
+    let missing = context
+        .request(
+            authenticated(Method::GET, &format!("/api/v1/ai/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn ai_session_create_and_rename_serialize_through_canonical_fetch() {
+    // P6-API-001: committed create/rename must not race a concurrent delete into a false 404.
+    let context = TestContext::new();
+
+    // --- create holds ai_reconfigure through post-commit fetch ---
+    context.state.ai_reconfigure_test_gate.arm();
+    let app = context.app.clone();
+    let create_request = operation_header(authenticated(Method::POST, "/api/v1/ai/sessions"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"title":"serialized-create"}).to_string()))
+        .unwrap();
+    let create_handle = tokio::spawn(async move { app.oneshot(create_request).await.unwrap() });
+    context.state.ai_reconfigure_test_gate.wait_reached().await;
+
+    let listed = context
+        .state
+        .service
+        .list_ai_sessions(junban_app::ListAiSessionsRequest {
+            cursor: None,
+            limit: Some(10),
+        })
+        .await
+        .unwrap();
+    assert_eq!(listed.sessions.len(), 1);
+    let session_id = listed.sessions[0].id.to_string();
+
+    let app = context.app.clone();
+    let delete_request = operation_header(authenticated(
+        Method::DELETE,
+        &format!("/api/v1/ai/sessions/{session_id}"),
+    ))
+    .body(Body::empty())
+    .unwrap();
+    let delete_handle = tokio::spawn(async move { app.oneshot(delete_request).await.unwrap() });
+    // Give delete a chance to contend for the serialize permit while create still holds it.
+    for _ in 0..32 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        context
+            .state
+            .service
+            .get_ai_session(junban_domain::AiSessionId::parse(&session_id).unwrap())
+            .await
+            .is_ok(),
+        "delete must not interleave between create commit and canonical fetch"
+    );
+
+    context.state.ai_reconfigure_test_gate.release();
+    let created = create_handle.await.unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created_body = json(created).await;
+    assert_eq!(created_body["session"]["id"], session_id);
+    assert_eq!(created_body["session"]["title"], "serialized-create");
+
+    let deleted = delete_handle.await.unwrap();
+    assert_eq!(deleted.status(), StatusCode::OK);
+    assert!(
+        context
+            .state
+            .service
+            .get_ai_session(junban_domain::AiSessionId::parse(&session_id).unwrap())
+            .await
+            .is_err()
+    );
+
+    // --- rename holds the same permit through post-commit fetch ---
+    let seeded = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/ai/sessions"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"title":"before-rename"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(seeded.status(), StatusCode::CREATED);
+    let rename_id = json(seeded).await["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    context.state.ai_reconfigure_test_gate.arm();
+    let app = context.app.clone();
+    let rename_request = operation_header(authenticated(
+        Method::PATCH,
+        &format!("/api/v1/ai/sessions/{rename_id}"),
+    ))
+    .header(header::CONTENT_TYPE, "application/json")
+    .body(Body::from(json!({"title":"after-rename"}).to_string()))
+    .unwrap();
+    let rename_handle = tokio::spawn(async move { app.oneshot(rename_request).await.unwrap() });
+    context.state.ai_reconfigure_test_gate.wait_reached().await;
+
+    let app = context.app.clone();
+    let delete_rename_request = operation_header(authenticated(
+        Method::DELETE,
+        &format!("/api/v1/ai/sessions/{rename_id}"),
+    ))
+    .body(Body::empty())
+    .unwrap();
+    let delete_rename_handle =
+        tokio::spawn(async move { app.oneshot(delete_rename_request).await.unwrap() });
+    for _ in 0..32 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        context
+            .state
+            .service
+            .get_ai_session(junban_domain::AiSessionId::parse(&rename_id).unwrap())
+            .await
+            .is_ok(),
+        "delete must not interleave between rename commit and canonical fetch"
+    );
+
+    context.state.ai_reconfigure_test_gate.release();
+    let renamed = rename_handle.await.unwrap();
+    assert_eq!(renamed.status(), StatusCode::OK);
+    let renamed_body = json(renamed).await;
+    assert_eq!(renamed_body["session"]["id"], rename_id);
+    assert_eq!(renamed_body["session"]["title"], "after-rename");
+
+    let deleted_rename = delete_rename_handle.await.unwrap();
+    assert_eq!(deleted_rename.status(), StatusCode::OK);
+
+    // Idempotent create retry still returns the original identity under the serialize path.
+    let operation = Uuid::now_v7().to_string();
+    let first = context
+        .request(
+            operation_header_key(
+                authenticated(Method::POST, "/api/v1/ai/sessions"),
+                &operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"title":"retry-serialize"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first_body = json(first).await;
+    let retry = context
+        .request(
+            operation_header_key(
+                authenticated(Method::POST, "/api/v1/ai/sessions"),
+                &operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"title":"retry-serialize"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(retry.status(), StatusCode::CREATED);
+    let retry_body = json(retry).await;
+    assert_eq!(retry_body["session"]["id"], first_body["session"]["id"]);
+    assert_eq!(retry_body["event"], first_body["event"]);
+}
+
+#[tokio::test]
+async fn ai_list_query_extraction_rejects_malformed_unknown_and_invalid_forms() {
+    // P6-API-002: every AI list query maps extractor failures to stable 422 envelopes.
+    let context = TestContext::new();
+    let created = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/ai/sessions"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"title":"query-target"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session_id = json(created).await["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let cases = vec![
+        // sessions list
+        "/api/v1/ai/sessions?limit=-1".to_owned(),
+        "/api/v1/ai/sessions?limit=abc".to_owned(),
+        "/api/v1/ai/sessions?extra=1".to_owned(),
+        "/api/v1/ai/sessions?limit=10&limit=20".to_owned(),
+        "/api/v1/ai/sessions?cursor=%%%".to_owned(),
+        // messages list
+        format!("/api/v1/ai/sessions/{session_id}/messages?after_sequence=-1"),
+        format!("/api/v1/ai/sessions/{session_id}/messages?after_sequence=abc"),
+        format!("/api/v1/ai/sessions/{session_id}/messages?limit=nope"),
+        format!("/api/v1/ai/sessions/{session_id}/messages?unknown=1"),
+        format!("/api/v1/ai/sessions/{session_id}/messages?limit=1&limit=2"),
+        // memories list
+        "/api/v1/ai/memories?limit=-3".to_owned(),
+        "/api/v1/ai/memories?limit=xyz".to_owned(),
+        "/api/v1/ai/memories?foo=bar".to_owned(),
+        "/api/v1/ai/memories?limit=1&limit=2".to_owned(),
+        "/api/v1/ai/memories?cursor=%%%".to_owned(),
+    ];
+
+    for path in &cases {
+        let response = context
+            .request(
+                authenticated(Method::GET, path)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "expected 422 for {path}"
+        );
+        let header_id = response.headers()["x-request-id"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let body = json(response).await;
+        assert_eq!(body["error"]["code"], "validation_error", "{path}");
+        assert_eq!(body["request_id"], header_id, "{path}");
+        assert!(
+            body["error"]["fields"].is_object() || body["error"]["message"].is_string(),
+            "{path}"
+        );
+    }
+
+    let doc: Value = serde_json::from_str(&openapi_json()).unwrap();
+    for operation in ["list_ai_sessions", "list_ai_messages", "list_ai_memories"] {
+        let mut found = false;
+        for item in doc["paths"].as_object().unwrap().values() {
+            if let Some(get) = item.get("get")
+                && get.get("operationId").and_then(|value| value.as_str()) == Some(operation)
+            {
+                assert!(
+                    get["responses"].get("422").is_some(),
+                    "{operation} must document 422"
+                );
+                assert!(
+                    get["responses"].get("400").is_none(),
+                    "{operation} must not document query extraction as 400"
+                );
+                found = true;
+            }
+        }
+        assert!(found, "missing OpenAPI operation {operation}");
+    }
+}
+
+#[tokio::test]
+async fn ai_json_routes_report_exact_32kib_body_limit() {
+    // P6-API-003: AI JSON handlers report the effective 32 KiB ceiling, not the ordinary 512 KiB.
+    let context = TestContext::new();
+    let oversized = vec![b'x'; 40 * 1024];
+    let session = Uuid::now_v7();
+    let memory = Uuid::now_v7();
+    let routes = [
+        (Method::PUT, "/api/v1/ai/config".to_owned()),
+        (Method::PUT, "/api/v1/ai/credentials/ai_provider".to_owned()),
+        (Method::POST, "/api/v1/ai/sessions".to_owned()),
+        (Method::PATCH, format!("/api/v1/ai/sessions/{session}")),
+        (Method::POST, "/api/v1/ai/memories".to_owned()),
+        (Method::PATCH, format!("/api/v1/ai/memories/{memory}")),
+    ];
+
+    for (method, path) in &routes {
+        let response = context
+            .request(
+                operation_header(authenticated(method.clone(), path))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(oversized.clone()))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "{method} {path}"
+        );
+        let body = json(response).await;
+        assert_eq!(body["error"]["code"], "body_too_large", "{method} {path}");
+        assert_eq!(
+            body["error"]["message"],
+            format!(
+                "request body must not exceed {} bytes",
+                crate::MAX_AI_CONFIG_BODY_BYTES
+            ),
+            "{method} {path}"
+        );
+        assert!(
+            !body.to_string().contains(&"x".repeat(64)),
+            "413 must never echo the oversized body for {method} {path}"
+        );
+    }
+
+    // Auth denial still happens before body parsing and never echoes the payload.
+    let denied = context
+        .request(
+            request(Method::POST, "/api/v1/ai/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(oversized))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+    let denied_body = json(denied).await;
+    assert_ne!(denied_body["error"]["code"], "body_too_large");
+    assert!(!denied_body.to_string().contains(&"x".repeat(64)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn ai_session_delete_timeout_leaves_durable_state_unchanged() {
+    let context = TestContext::new();
+    let created = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/ai/sessions"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"title":"keep-me"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session_id = json(created).await["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 1)
+        .unwrap();
+    let app = context.app.clone();
+    let request = operation_header(authenticated(
+        Method::DELETE,
+        &format!("/api/v1/ai/sessions/{session_id}"),
+    ))
+    .body(Body::empty())
+    .unwrap();
+    let pending = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
+    while guard.is_live() {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        context
+            .state
+            .service
+            .get_ai_session(junban_domain::AiSessionId::parse(&session_id).unwrap())
+            .await
+            .is_ok()
+    );
+    tokio::time::advance(AI_RECONFIGURE_DRAIN_DEADLINE).await;
+    tokio::task::yield_now().await;
+    let response = pending.await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        json(response).await["error"]["code"],
+        "ai_reconfigure_timeout"
+    );
+    assert!(
+        context
+            .state
+            .service
+            .get_ai_session(junban_domain::AiSessionId::parse(&session_id).unwrap())
+            .await
+            .is_ok(),
+        "timeout must leave the session durable"
+    );
+    assert!(!context.state.ai_runtime().is_accepting());
+    drop(guard);
+}
+
+#[tokio::test]
+async fn cancelled_ai_memory_mutation_still_completes_owned_worker() {
+    let context = TestContext::new();
+    context.state.ai_reconfigure_test_gate.arm();
+    let app = context.app.clone();
+    let request = operation_header(authenticated(Method::POST, "/api/v1/ai/memories"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"content":"detached-memory"}).to_string()))
+        .unwrap();
+    let handler = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
+    context.state.ai_reconfigure_test_gate.wait_reached().await;
+    let listed = context
+        .state
+        .service
+        .list_ai_memories(junban_app::ListAiMemoriesRequest {
+            cursor: None,
+            limit: Some(10),
+        })
+        .await
+        .unwrap();
+    assert_eq!(listed.memories.len(), 1);
+    assert_eq!(listed.memories[0].content, "detached-memory");
+    assert!(!context.state.ai_runtime().is_accepting());
+    handler.abort();
+    assert!(handler.await.unwrap_err().is_cancelled());
+    context.state.ai_reconfigure_test_gate.release();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !context.state.ai_runtime().is_accepting() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("memory mutation worker finished its exact epoch");
+    let listed = context
+        .state
+        .service
+        .list_ai_memories(junban_app::ListAiMemoriesRequest {
+            cursor: None,
+            limit: Some(10),
+        })
+        .await
+        .unwrap();
+    assert_eq!(listed.memories.len(), 1);
 }
 
 #[test]

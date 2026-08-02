@@ -81,8 +81,10 @@ use crate::routes::{
     settle_reminder_failed, stats, uncomplete_task, undo_operation,
 };
 use crate::routes_ai::{
-    delete_ai_config, delete_ai_credential, discover_ai_provider_models, get_ai_config,
-    list_ai_providers, put_ai_config, put_ai_credential,
+    clear_ai_session, create_ai_memory, create_ai_session, delete_ai_config, delete_ai_credential,
+    delete_ai_memory, delete_ai_session, discover_ai_provider_models, get_ai_config, get_ai_memory,
+    get_ai_session, list_ai_memories, list_ai_messages, list_ai_providers, list_ai_sessions,
+    patch_ai_memory, patch_ai_session, put_ai_config, put_ai_credential,
 };
 use crate::sse::{AppService, SseConnectionPermit};
 
@@ -961,6 +963,40 @@ fn api_route_table() -> Router<ServerState> {
                 .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
         )
         .route(
+            "/api/v1/ai/sessions",
+            get(list_ai_sessions)
+                .post(create_ai_session)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}",
+            get(get_ai_session)
+                .patch(patch_ai_session)
+                .delete(delete_ai_session)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/messages",
+            get(list_ai_messages),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/clear",
+            post(clear_ai_session),
+        )
+        .route(
+            "/api/v1/ai/memories",
+            get(list_ai_memories)
+                .post(create_ai_memory)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/memories/{memory_id}",
+            get(get_ai_memory)
+                .patch(patch_ai_memory)
+                .delete(delete_ai_memory)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
+        .route(
             "/api/v1/imports/preview",
             post(preview_import).layer(DefaultBodyLimit::max(MAX_TRANSFER_BODY_BYTES)),
         )
@@ -1644,6 +1680,18 @@ impl Modify for SecurityAddon {
         routes_ai::put_ai_credential,
         routes_ai::delete_ai_credential,
         routes_ai::discover_ai_provider_models,
+        routes_ai::list_ai_sessions,
+        routes_ai::create_ai_session,
+        routes_ai::get_ai_session,
+        routes_ai::patch_ai_session,
+        routes_ai::delete_ai_session,
+        routes_ai::list_ai_messages,
+        routes_ai::clear_ai_session,
+        routes_ai::list_ai_memories,
+        routes_ai::create_ai_memory,
+        routes_ai::get_ai_memory,
+        routes_ai::patch_ai_memory,
+        routes_ai::delete_ai_memory,
         routes::preview_import,
         routes::apply_import,
         routes::export_tasks,
@@ -1828,6 +1876,22 @@ impl Modify for SecurityAddon {
         routes_ai::AiCredentialBindingResponse,
         routes_ai::DiscoveredModelDto,
         routes_ai::ModelDiscoveryResponse,
+        routes_ai::AiSessionStatusDto,
+        routes_ai::AiSessionDto,
+        routes_ai::AiMemoryDto,
+        routes_ai::AiMessageRoleDto,
+        routes_ai::AiMessageStatusDto,
+        routes_ai::AiMessageContentDto,
+        routes_ai::AiMessageDto,
+        routes_ai::CreateAiSessionHttpRequest,
+        routes_ai::PatchAiSessionRequest,
+        routes_ai::CreateAiMemoryHttpRequest,
+        routes_ai::PatchAiMemoryRequest,
+        routes_ai::AiSessionListResponse,
+        routes_ai::AiMessageListResponse,
+        routes_ai::AiMemoryListResponse,
+        routes_ai::AiSessionMutationResponse,
+        routes_ai::AiMemoryMutationResponse,
         dto::EatTheFrogResponse,
         dto::TaskJarResponse,
         dto::DopamineMenuResponse,

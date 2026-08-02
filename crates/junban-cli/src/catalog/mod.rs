@@ -54,6 +54,18 @@ const EXCLUDED_OPERATION_IDS: &[&str] = &[
     "put_ai_credential",
     "delete_ai_credential",
     "discover_ai_provider_models",
+    "list_ai_sessions",
+    "create_ai_session",
+    "get_ai_session",
+    "patch_ai_session",
+    "delete_ai_session",
+    "list_ai_messages",
+    "clear_ai_session",
+    "list_ai_memories",
+    "create_ai_memory",
+    "get_ai_memory",
+    "patch_ai_memory",
+    "delete_ai_memory",
     // Raw automation secrets are accepted only by the reviewed `auth create
     // --write-token` ambiguity protocol, never by generic tool input.
     "create_automation_credential",

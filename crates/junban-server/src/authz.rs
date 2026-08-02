@@ -209,6 +209,67 @@ pub fn classified_routes() -> &'static [ClassifiedRoute] {
             path: "/api/v1/ai/credentials/{target}",
             access: RouteAccess::OperatorOnly,
         },
+        // Durable AI session/message/memory control plane — operator only.
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/sessions",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/sessions",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/sessions/{session_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "PATCH",
+            path: "/api/v1/ai/sessions/{session_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/ai/sessions/{session_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/sessions/{session_id}/messages",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/sessions/{session_id}/clear",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/memories",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/memories",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/memories/{memory_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "PATCH",
+            path: "/api/v1/ai/memories/{memory_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/ai/memories/{memory_id}",
+            access: RouteAccess::OperatorOnly,
+        },
         // Reminder delivery control plane — operator only
         ClassifiedRoute {
             method: "POST",

@@ -1,13 +1,19 @@
-//! Operator-only AI provider registry, confirmed configuration, credentials, and model discovery.
+//! Operator-only AI provider registry, confirmed configuration, credentials, model discovery,
+//! and durable session/message/memory resources.
 //!
 //! Raw credential material is accepted only by the write-only credential request and is
 //! transiently resolved through the application/storage worker for endpoint construction.
+//! Session message creation remains owned by later run orchestration; this module exposes
+//! read/list only for messages.
 
 use std::{fmt, future::Future, sync::Arc};
 
 use axum::{
     Json,
-    extract::{Extension, Path, State, rejection::JsonRejection},
+    extract::{
+        Extension, Path, Query, State,
+        rejection::{JsonRejection, QueryRejection},
+    },
     http::{HeaderMap, StatusCode},
 };
 use jiff::Timestamp;
@@ -17,19 +23,29 @@ use junban_ai::{
 };
 use junban_app::{
     AiCredentialBindingTarget, AiSecretBytes, AppError, BindAiCredentialRequest,
-    ClearAiCredentialRequest,
+    ClearAiCredentialRequest, ClearAiSessionRequest, CreateAiMemoryRequest, CreateAiSessionRequest,
+    DeleteAiMemoryRequest, DeleteAiSessionRequest, ListAiMemoriesRequest, ListAiMessagesRequest,
+    ListAiSessionsRequest, RenameAiSessionRequest, UpdateAiMemoryRequest,
 };
 use junban_domain::{
-    AiCredentialId, AiModelId, AiProviderPreset, AiSecretKind, AiSecretMetadata, AiSettings,
+    AiCredentialId, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiModelId, AiProviderPreset,
+    AiSecretKind, AiSecretMetadata, AiSession, AiSessionId, AiSessionStatus, AiSettings,
     CustomInstructions, GracePeriodMs, ProviderBaseUrl, SettingsPatch, SpeechProviderPreset,
     VoiceMode, VoiceSettings,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::OwnedMutexGuard;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
-use crate::error::{ApiError, extract_json, operation_id, validation_error};
-use crate::{AI_RECONFIGURE_DRAIN_DEADLINE, RequestId, ServerState};
+use crate::cursor::{
+    decode_ai_memory_cursor, decode_ai_session_cursor, encode_ai_memory_cursor,
+    encode_ai_session_cursor,
+};
+use crate::dto::{CommittedEventDto, MutationResponse};
+use crate::error::{
+    ApiError, extract_json_with_limit, extract_query, operation_id, parse_path_id, validation_error,
+};
+use crate::{AI_RECONFIGURE_DRAIN_DEADLINE, MAX_AI_CONFIG_BODY_BYTES, RequestId, ServerState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -637,7 +653,7 @@ pub async fn put_ai_config(
     payload: Result<Json<AiConfigPutRequest>, JsonRejection>,
 ) -> Result<Json<AiConfigResponse>, ApiError> {
     let operation_id = operation_id(&headers, &request_id)?;
-    let payload = extract_json(payload, &request_id)?;
+    let payload = extract_json_with_limit(payload, &request_id, MAX_AI_CONFIG_BODY_BYTES)?;
     let serial = Arc::clone(&state.ai_reconfigure).lock_owned().await;
     let current = state
         .service
@@ -751,7 +767,7 @@ pub async fn put_ai_credential(
 ) -> Result<Json<AiCredentialBindingResponse>, ApiError> {
     let target = AiCredentialTargetDto::parse(&target, &request_id)?;
     let operation_id = operation_id(&headers, &request_id)?;
-    let payload = extract_json(payload, &request_id)?;
+    let payload = extract_json_with_limit(payload, &request_id, MAX_AI_CONFIG_BODY_BYTES)?;
     let secret =
         AiSecretBytes::new(payload.secret).map_err(|error| validation_error(error, &request_id))?;
     let kind = payload.kind.into();
@@ -952,6 +968,848 @@ pub async fn discover_ai_provider_models(
     }))
 }
 
+// ── Durable sessions / messages / memories ─────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AiSessionStatusDto {
+    Active,
+    Archived,
+}
+
+impl From<AiSessionStatus> for AiSessionStatusDto {
+    fn from(value: AiSessionStatus) -> Self {
+        match value {
+            AiSessionStatus::Active => Self::Active,
+            AiSessionStatus::Archived => Self::Archived,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AiSessionDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub id: String,
+    pub title: String,
+    pub status: AiSessionStatusDto,
+    pub message_count: u32,
+    pub content_bytes: u64,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: Timestamp,
+    #[schema(value_type = Option<String>, format = DateTime, nullable = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_message_at: Option<Timestamp>,
+}
+
+impl From<AiSession> for AiSessionDto {
+    fn from(value: AiSession) -> Self {
+        Self {
+            id: value.id.to_string(),
+            title: value.title,
+            status: value.status.into(),
+            message_count: value.message_count,
+            content_bytes: value.content_bytes,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            last_message_at: value.last_message_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AiMemoryDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub id: String,
+    pub content: String,
+    pub content_bytes: u64,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: Timestamp,
+}
+
+impl From<AiMemory> for AiMemoryDto {
+    fn from(value: AiMemory) -> Self {
+        Self {
+            id: value.id.to_string(),
+            content: value.content,
+            content_bytes: value.content_bytes,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AiMessageRoleDto {
+    User,
+    Assistant,
+    System,
+    Tool,
+}
+
+impl From<junban_domain::AiMessageRole> for AiMessageRoleDto {
+    fn from(value: junban_domain::AiMessageRole) -> Self {
+        match value {
+            junban_domain::AiMessageRole::User => Self::User,
+            junban_domain::AiMessageRole::Assistant => Self::Assistant,
+            junban_domain::AiMessageRole::System => Self::System,
+            junban_domain::AiMessageRole::Tool => Self::Tool,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AiMessageStatusDto {
+    Pending,
+    Streaming,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl From<junban_domain::AiMessageStatus> for AiMessageStatusDto {
+    fn from(value: junban_domain::AiMessageStatus) -> Self {
+        match value {
+            junban_domain::AiMessageStatus::Pending => Self::Pending,
+            junban_domain::AiMessageStatus::Streaming => Self::Streaming,
+            junban_domain::AiMessageStatus::Completed => Self::Completed,
+            junban_domain::AiMessageStatus::Failed => Self::Failed,
+            junban_domain::AiMessageStatus::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AiMessageContentDto {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_arguments_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_result_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub briefing_date: Option<String>,
+}
+
+impl From<AiMessageContent> for AiMessageContentDto {
+    fn from(value: AiMessageContent) -> Self {
+        Self {
+            text: value.text,
+            tool_name: value.tool_name,
+            tool_arguments_json: value.tool_arguments_json,
+            tool_result_json: value.tool_result_json,
+            briefing_date: value.briefing_date,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AiMessageDto {
+    #[schema(value_type = String, format = Uuid)]
+    pub id: String,
+    #[schema(value_type = String, format = Uuid)]
+    pub session_id: String,
+    #[schema(value_type = String, format = Uuid)]
+    pub turn_id: String,
+    pub sequence: u32,
+    pub role: AiMessageRoleDto,
+    pub status: AiMessageStatusDto,
+    pub content: AiMessageContentDto,
+    pub content_bytes: u64,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: Timestamp,
+}
+
+impl From<AiMessage> for AiMessageDto {
+    fn from(value: AiMessage) -> Self {
+        Self {
+            id: value.id.to_string(),
+            session_id: value.session_id.to_string(),
+            turn_id: value.turn_id.to_string(),
+            sequence: value.sequence,
+            role: value.role.into(),
+            status: value.status.into(),
+            content: value.content.into(),
+            content_bytes: value.content_bytes,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateAiSessionHttpRequest {
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PatchAiSessionRequest {
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateAiMemoryHttpRequest {
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PatchAiMemoryRequest {
+    pub content: String,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct ListAiSessionsQuery {
+    pub cursor: Option<String>,
+    /// Page size in `1..=100`. Defaults to 100 when omitted.
+    #[param(minimum = 1, maximum = 100)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct ListAiMessagesQuery {
+    /// Return messages with `sequence` strictly greater than this value.
+    pub after_sequence: Option<u32>,
+    /// Page size in `1..=100`. Defaults to 100 when omitted.
+    #[param(minimum = 1, maximum = 100)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct ListAiMemoriesQuery {
+    pub cursor: Option<String>,
+    /// Page size in `1..=100`. Defaults to 100 when omitted.
+    #[param(minimum = 1, maximum = 100)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AiSessionListResponse {
+    pub sessions: Vec<AiSessionDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AiMessageListResponse {
+    pub messages: Vec<AiMessageDto>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AiMemoryListResponse {
+    pub memories: Vec<AiMemoryDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+/// Create/rename/clear responses carry the canonical resource plus the committed event.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AiSessionMutationResponse {
+    pub session: AiSessionDto,
+    pub event: CommittedEventDto,
+}
+
+/// Create/update memory responses carry the canonical resource plus the committed event.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AiMemoryMutationResponse {
+    pub memory: AiMemoryDto,
+    pub event: CommittedEventDto,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai/sessions",
+    operation_id = "list_ai_sessions",
+    params(ListAiSessionsQuery),
+    responses(
+        (status = 200, body = AiSessionListResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_ai_sessions(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    query: Result<Query<ListAiSessionsQuery>, QueryRejection>,
+) -> Result<Json<AiSessionListResponse>, ApiError> {
+    let params = extract_query(query, &request_id)?;
+    let _serial = state.ai_reconfigure.lock().await;
+    let cursor = params
+        .cursor
+        .as_deref()
+        .map(|raw| decode_ai_session_cursor(raw, &request_id))
+        .transpose()?;
+    let page = state
+        .service
+        .list_ai_sessions(ListAiSessionsRequest {
+            cursor,
+            limit: params.limit,
+        })
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    let next_cursor = page
+        .next_cursor
+        .as_ref()
+        .map(encode_ai_session_cursor)
+        .transpose()
+        .map_err(|error| validation_error(error, &request_id))?;
+    Ok(Json(AiSessionListResponse {
+        sessions: page.sessions.into_iter().map(Into::into).collect(),
+        next_cursor,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/ai/sessions",
+    operation_id = "create_ai_session",
+    request_body = CreateAiSessionHttpRequest,
+    params(("Idempotency-Key" = String, Header, format = Uuid, description = "UUID operation id")),
+    responses(
+        (status = 201, body = AiSessionMutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_ai_session(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    payload: Result<Json<CreateAiSessionHttpRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<AiSessionMutationResponse>), ApiError> {
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json_with_limit(payload, &request_id, MAX_AI_CONFIG_BODY_BYTES)?;
+    // Hold the reconfigure serialize permit through commit + canonical fetch so a concurrent
+    // delete cannot make a committed create appear as 404. No runtime drain on create.
+    let _serial = state.ai_reconfigure.lock().await;
+    let mutation = state
+        .service
+        .create_ai_session(
+            operation_id,
+            CreateAiSessionRequest {
+                title: payload.title,
+            },
+        )
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    #[cfg(test)]
+    state.ai_reconfigure_test_gate.pause_after_commit().await;
+    let response = session_mutation_response(&state, mutation, &request_id).await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai/sessions/{session_id}",
+    operation_id = "get_ai_session",
+    params(("session_id" = String, Path, format = Uuid)),
+    responses(
+        (status = 200, body = AiSessionDto),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_ai_session(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Path(session_id): Path<String>,
+) -> Result<Json<AiSessionDto>, ApiError> {
+    let session_id = parse_path_id(&session_id, AiSessionId::parse, &request_id)?;
+    let _serial = state.ai_reconfigure.lock().await;
+    let session = state
+        .service
+        .get_ai_session(session_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(session.into()))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/ai/sessions/{session_id}",
+    operation_id = "patch_ai_session",
+    request_body = PatchAiSessionRequest,
+    params(
+        ("session_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid, description = "UUID operation id")
+    ),
+    responses(
+        (status = 200, body = AiSessionMutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn patch_ai_session(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+    payload: Result<Json<PatchAiSessionRequest>, JsonRejection>,
+) -> Result<Json<AiSessionMutationResponse>, ApiError> {
+    let session_id = parse_path_id(&session_id, AiSessionId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json_with_limit(payload, &request_id, MAX_AI_CONFIG_BODY_BYTES)?;
+    // Hold the reconfigure serialize permit through commit + canonical fetch so a concurrent
+    // delete cannot make a committed rename appear as 404. No runtime drain on rename.
+    let _serial = state.ai_reconfigure.lock().await;
+    let mutation = state
+        .service
+        .rename_ai_session(
+            operation_id,
+            RenameAiSessionRequest {
+                session_id,
+                title: payload.title,
+            },
+        )
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    #[cfg(test)]
+    state.ai_reconfigure_test_gate.pause_after_commit().await;
+    Ok(Json(
+        session_mutation_response(&state, mutation, &request_id).await?,
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/ai/sessions/{session_id}",
+    operation_id = "delete_ai_session",
+    params(
+        ("session_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid, description = "UUID operation id")
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_ai_session(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let session_id = parse_path_id(&session_id, AiSessionId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let serial = Arc::clone(&state.ai_reconfigure).lock_owned().await;
+    let commit_state = state.clone();
+    let commit_request_id = request_id.clone();
+    reconfigure_owned(&state, &request_id, serial, async move {
+        let mutation = commit_state
+            .service
+            .delete_ai_session(operation_id, DeleteAiSessionRequest { session_id })
+            .await
+            .map_err(|error| ApiError::from_app(error, &commit_request_id))?;
+        Ok(MutationResponse::from(mutation))
+    })
+    .await
+    .map(Json)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai/sessions/{session_id}/messages",
+    operation_id = "list_ai_messages",
+    params(
+        ("session_id" = String, Path, format = Uuid),
+        ListAiMessagesQuery
+    ),
+    responses(
+        (status = 200, body = AiMessageListResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_ai_messages(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Path(session_id): Path<String>,
+    query: Result<Query<ListAiMessagesQuery>, QueryRejection>,
+) -> Result<Json<AiMessageListResponse>, ApiError> {
+    let params = extract_query(query, &request_id)?;
+    let session_id = parse_path_id(&session_id, AiSessionId::parse, &request_id)?;
+    let _serial = state.ai_reconfigure.lock().await;
+    // Fail closed on unknown sessions before paging messages.
+    state
+        .service
+        .get_ai_session(session_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    let messages = state
+        .service
+        .list_ai_messages(ListAiMessagesRequest {
+            session_id,
+            after_sequence: params.after_sequence,
+            limit: params.limit,
+        })
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(AiMessageListResponse {
+        messages: messages.into_iter().map(Into::into).collect(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/ai/sessions/{session_id}/clear",
+    operation_id = "clear_ai_session",
+    params(
+        ("session_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid, description = "UUID operation id")
+    ),
+    responses(
+        (status = 200, body = AiSessionMutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn clear_ai_session(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<AiSessionMutationResponse>, ApiError> {
+    let session_id = parse_path_id(&session_id, AiSessionId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let serial = Arc::clone(&state.ai_reconfigure).lock_owned().await;
+    let commit_state = state.clone();
+    let commit_request_id = request_id.clone();
+    reconfigure_owned(&state, &request_id, serial, async move {
+        let mutation = commit_state
+            .service
+            .clear_ai_session(operation_id, ClearAiSessionRequest { session_id })
+            .await
+            .map_err(|error| ApiError::from_app(error, &commit_request_id))?;
+        session_mutation_response(&commit_state, mutation, &commit_request_id).await
+    })
+    .await
+    .map(Json)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai/memories",
+    operation_id = "list_ai_memories",
+    params(ListAiMemoriesQuery),
+    responses(
+        (status = 200, body = AiMemoryListResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_ai_memories(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    query: Result<Query<ListAiMemoriesQuery>, QueryRejection>,
+) -> Result<Json<AiMemoryListResponse>, ApiError> {
+    let params = extract_query(query, &request_id)?;
+    let _serial = state.ai_reconfigure.lock().await;
+    let cursor = params
+        .cursor
+        .as_deref()
+        .map(|raw| decode_ai_memory_cursor(raw, &request_id))
+        .transpose()?;
+    let page = state
+        .service
+        .list_ai_memories(ListAiMemoriesRequest {
+            cursor,
+            limit: params.limit,
+        })
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    let next_cursor = page
+        .next_cursor
+        .as_ref()
+        .map(encode_ai_memory_cursor)
+        .transpose()
+        .map_err(|error| validation_error(error, &request_id))?;
+    Ok(Json(AiMemoryListResponse {
+        memories: page.memories.into_iter().map(Into::into).collect(),
+        next_cursor,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/ai/memories",
+    operation_id = "create_ai_memory",
+    request_body = CreateAiMemoryHttpRequest,
+    params(("Idempotency-Key" = String, Header, format = Uuid, description = "UUID operation id")),
+    responses(
+        (status = 201, body = AiMemoryMutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_ai_memory(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    payload: Result<Json<CreateAiMemoryHttpRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<AiMemoryMutationResponse>), ApiError> {
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json_with_limit(payload, &request_id, MAX_AI_CONFIG_BODY_BYTES)?;
+    // Validate content before drain so empty/oversize bodies never cancel the runtime.
+    let content = AiMemory::new(AiMemoryId::new(), payload.content, Timestamp::now())
+        .map_err(|error| validation_error(error, &request_id))?
+        .content;
+    let serial = Arc::clone(&state.ai_reconfigure).lock_owned().await;
+    let commit_state = state.clone();
+    let commit_request_id = request_id.clone();
+    reconfigure_owned(&state, &request_id, serial, async move {
+        let mutation = commit_state
+            .service
+            .create_ai_memory(operation_id, CreateAiMemoryRequest { content })
+            .await
+            .map_err(|error| ApiError::from_app(error, &commit_request_id))?;
+        memory_mutation_response(&commit_state, mutation, &commit_request_id).await
+    })
+    .await
+    .map(|response| (StatusCode::CREATED, Json(response)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai/memories/{memory_id}",
+    operation_id = "get_ai_memory",
+    params(("memory_id" = String, Path, format = Uuid)),
+    responses(
+        (status = 200, body = AiMemoryDto),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_ai_memory(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Path(memory_id): Path<String>,
+) -> Result<Json<AiMemoryDto>, ApiError> {
+    let memory_id = parse_path_id(&memory_id, AiMemoryId::parse, &request_id)?;
+    let _serial = state.ai_reconfigure.lock().await;
+    let memory = state
+        .service
+        .get_ai_memory(memory_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(memory.into()))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/ai/memories/{memory_id}",
+    operation_id = "patch_ai_memory",
+    request_body = PatchAiMemoryRequest,
+    params(
+        ("memory_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid, description = "UUID operation id")
+    ),
+    responses(
+        (status = 200, body = AiMemoryMutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn patch_ai_memory(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Path(memory_id): Path<String>,
+    headers: HeaderMap,
+    payload: Result<Json<PatchAiMemoryRequest>, JsonRejection>,
+) -> Result<Json<AiMemoryMutationResponse>, ApiError> {
+    let memory_id = parse_path_id(&memory_id, AiMemoryId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json_with_limit(payload, &request_id, MAX_AI_CONFIG_BODY_BYTES)?;
+    // Validate content before drain so empty/oversize bodies never cancel the runtime.
+    let content = AiMemory::new(memory_id, payload.content, Timestamp::now())
+        .map_err(|error| validation_error(error, &request_id))?
+        .content;
+    let serial = Arc::clone(&state.ai_reconfigure).lock_owned().await;
+    let commit_state = state.clone();
+    let commit_request_id = request_id.clone();
+    reconfigure_owned(&state, &request_id, serial, async move {
+        let mutation = commit_state
+            .service
+            .update_ai_memory(operation_id, UpdateAiMemoryRequest { memory_id, content })
+            .await
+            .map_err(|error| ApiError::from_app(error, &commit_request_id))?;
+        memory_mutation_response(&commit_state, mutation, &commit_request_id).await
+    })
+    .await
+    .map(Json)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/ai/memories/{memory_id}",
+    operation_id = "delete_ai_memory",
+    params(
+        ("memory_id" = String, Path, format = Uuid),
+        ("Idempotency-Key" = String, Header, format = Uuid, description = "UUID operation id")
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_ai_memory(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Path(memory_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let memory_id = parse_path_id(&memory_id, AiMemoryId::parse, &request_id)?;
+    let operation_id = operation_id(&headers, &request_id)?;
+    let serial = Arc::clone(&state.ai_reconfigure).lock_owned().await;
+    let commit_state = state.clone();
+    let commit_request_id = request_id.clone();
+    reconfigure_owned(&state, &request_id, serial, async move {
+        let mutation = commit_state
+            .service
+            .delete_ai_memory(operation_id, DeleteAiMemoryRequest { memory_id })
+            .await
+            .map_err(|error| ApiError::from_app(error, &commit_request_id))?;
+        Ok(MutationResponse::from(mutation))
+    })
+    .await
+    .map(Json)
+}
+
+async fn session_mutation_response(
+    state: &ServerState,
+    mutation: junban_app::CommittedMutation,
+    request_id: &RequestId,
+) -> Result<AiSessionMutationResponse, ApiError> {
+    let session_id = mutation
+        .event
+        .primary
+        .as_ref()
+        .ok_or_else(|| missing_primary(request_id))
+        .and_then(|primary| parse_path_id(&primary.id, AiSessionId::parse, request_id))?;
+    let session = state
+        .service
+        .get_ai_session(session_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, request_id))?;
+    Ok(AiSessionMutationResponse {
+        session: session.into(),
+        event: mutation.event.into(),
+    })
+}
+
+async fn memory_mutation_response(
+    state: &ServerState,
+    mutation: junban_app::CommittedMutation,
+    request_id: &RequestId,
+) -> Result<AiMemoryMutationResponse, ApiError> {
+    let memory_id = mutation
+        .event
+        .primary
+        .as_ref()
+        .ok_or_else(|| missing_primary(request_id))
+        .and_then(|primary| parse_path_id(&primary.id, AiMemoryId::parse, request_id))?;
+    let memory = state
+        .service
+        .get_ai_memory(memory_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, request_id))?;
+    Ok(AiMemoryMutationResponse {
+        memory: memory.into(),
+        event: mutation.event.into(),
+    })
+}
+
+fn missing_primary(request_id: &RequestId) -> ApiError {
+    ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "ai_resource_unavailable",
+        "committed AI resource identity is unavailable",
+        true,
+        request_id,
+    )
+}
+
 async fn load_config_response(
     state: &ServerState,
     request_id: &RequestId,
@@ -993,7 +1851,7 @@ async fn load_config_response(
 /// The caller acquires `serial`, reads confirmed settings, and validates while retaining the
 /// same permit. A timeout never polls `commit` and leaves its epoch fail-closed. After a clean
 /// runtime drop, both commit success and failure finish only that exact epoch.
-async fn reconfigure_owned<T>(
+pub(crate) async fn reconfigure_owned<T>(
     state: &ServerState,
     request_id: &RequestId,
     serial: OwnedMutexGuard<()>,

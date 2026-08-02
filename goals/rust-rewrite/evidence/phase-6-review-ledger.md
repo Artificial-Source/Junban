@@ -1,9 +1,9 @@
 # Phase 6 review ledger
 
 - **Date:** 2026-08-03
-- **Current gate:** Wave 3c operator configuration and provider boundary
-- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, then the Wave 3c delta from `f471009`
-- **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`
+- **Current gate:** Wave 3d sessions/messages/memories HTTP contract
+- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, then the Wave 3d delta from `c543b7f`
+- **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`; resource API approved after `P6-API-001`–`P6-API-003`
 
 ## Wave 1 database gate
 
@@ -46,6 +46,16 @@ The exact-delta recheck approved all three architecture findings. Recovery mode 
 
 The exact-delta security recheck approved all three findings and confirmed `P6-SEC-001`–`P6-SEC-006` remain closed.
 
+## Wave 3d API-contract gate
+
+| ID           | Severity | Status | Resolution and focused regression                                                                                                                                                                                                                                           |
+| ------------ | -------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `P6-API-001` | High     | fixed  | Session create and rename hold the shared AI serialization permit from mutation through canonical resource fetch. A deterministic concurrent-delete barrier proves a committed mutation cannot return a false 404, and exact retry retains the original generated identity. |
+| `P6-API-002` | Medium   | fixed  | Session/message/memory list queries reject unknown fields and route every malformed, negative, duplicate, or invalid cursor form through a stable documented 422 envelope with the matching request ID. All three list contracts and OpenAPI regressions pass.              |
+| `P6-API-003` | Medium   | fixed  | AI JSON rejection mapping receives the route's exact 32 KiB ceiling instead of reporting the ordinary 512 KiB limit. Config, credential, session, and memory oversized-body regressions report 32768 bytes while authentication denial still precedes body parsing.         |
+
+The exact-delta API recheck approved all three findings and found no regression in the closed persistence, lifecycle, or security findings.
+
 ## Validation used by the gates
 
 ```text
@@ -60,4 +70,4 @@ cargo deny check
 git diff --check
 ```
 
-The final Wave 1 focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The Wave 3a gate additionally ran `cargo test --locked -p junban-app -p junban-storage --all-targets` (23 app and 168 storage tests), both crates' all-target/all-feature clippy with denied warnings, and downstream server/CLI/MCP checks. The Wave 3b gate ran all `junban-ai` and `junban-server` targets/features, compile-fail doctests, focused owner lock-retention and restore/shutdown tests, workspace clippy/check, audit, and deny. The Wave 3c gate ran 61 AI tests, 155 server library tests, focused secret/authority/overlap checks, generated-contract and frontend type checks, workspace validation, audit, and deny. No material reviewed persistence, secret, lifecycle, or provider-configuration security finding remains.
+The final Wave 1 focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The Wave 3a gate additionally ran `cargo test --locked -p junban-app -p junban-storage --all-targets` (23 app and 168 storage tests), both crates' all-target/all-feature clippy with denied warnings, and downstream server/CLI/MCP checks. The Wave 3b gate ran all `junban-ai` and `junban-server` targets/features, compile-fail doctests, focused owner lock-retention and restore/shutdown tests, workspace clippy/check, audit, and deny. The Wave 3c gate ran 61 AI tests, 155 server library tests, focused secret/authority/overlap checks, generated-contract and frontend type checks, workspace validation, audit, and deny. The Wave 3d gate ran 163 server library tests plus process lifecycle, focused concurrency/query/body-limit checks, generated-contract/type checks, clippy, and workspace validation. No material reviewed persistence, secret, lifecycle, provider-configuration security, or resource API finding remains.

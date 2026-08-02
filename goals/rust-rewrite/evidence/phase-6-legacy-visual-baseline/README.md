@@ -16,24 +16,24 @@ Phase 1–4 visual authorities remain immutable and are not modified here.
 
 ## 16-scene matrix
 
-| # | Scene ID | File | Viewport | Theme |
-| - | -------- | ---- | -------- | ----- |
-| 1 | AI chat not configured panel | `ai-not-configured-panel-desktop-light.png` | 320×720 | light |
-| 2 | Welcome / daily briefing | `ai-welcome-briefing-desktop-light.png` | 1440×900 | light |
-| 3 | Conversation + tool cards | `ai-conversation-tools-desktop-light.png` | 1440×900 | light |
-| 4 | Chat history | `ai-chat-history-desktop-light.png` | 1440×900 | light |
-| 5 | Mobile AI view + bottom nav | `ai-mobile-view-nav-light.png` | 390×844 | light |
-| 6 | Settings AI unconfigured | `settings-ai-unconfigured-desktop-light.png` | 1280×900 | light |
-| 7 | Settings AI configured (masked) | `settings-ai-configured-masked-desktop-light.png` | 1280×900 | light |
-| 8 | Settings Voice defaults | `settings-voice-defaults-desktop-light.png` | 1280×900 | light |
-| 9 | Settings Voice cloud | `settings-voice-cloud-desktop-dark.png` | 1280×900 | dark |
-| 10 | PTT listening | `ptt-listening-desktop-light.png` | 480×320 | light |
-| 11 | PTT transcribing | `ptt-transcribing-desktop-light.png` | 480×320 | light |
-| 12 | PTT error | `ptt-error-desktop-light.png` | 480×320 | light |
-| 13 | VAD grace period | `vad-grace-desktop-light.png` | 480×420 | light |
-| 14 | Voice-call states | `voice-call-states-desktop-light.png` | 1280×900 | light |
-| 15 | Focused-task launch | `focused-task-launch-desktop-light.png` | 1440×900 | light |
-| 16 | Onboarding StepAI | `onboarding-step-ai-desktop-light.png` | 720×720 | light |
+| #   | Scene ID                        | File                                              | Viewport | Theme |
+| --- | ------------------------------- | ------------------------------------------------- | -------- | ----- |
+| 1   | AI chat not configured panel    | `ai-not-configured-panel-desktop-light.png`       | 320×720  | light |
+| 2   | Welcome / daily briefing        | `ai-welcome-briefing-desktop-light.png`           | 1440×900 | light |
+| 3   | Conversation + tool cards       | `ai-conversation-tools-desktop-light.png`         | 1440×900 | light |
+| 4   | Chat history                    | `ai-chat-history-desktop-light.png`               | 1440×900 | light |
+| 5   | Mobile AI view + bottom nav     | `ai-mobile-view-nav-light.png`                    | 390×844  | light |
+| 6   | Settings AI unconfigured        | `settings-ai-unconfigured-desktop-light.png`      | 1280×900 | light |
+| 7   | Settings AI configured (masked) | `settings-ai-configured-masked-desktop-light.png` | 1280×900 | light |
+| 8   | Settings Voice defaults         | `settings-voice-defaults-desktop-light.png`       | 1280×900 | light |
+| 9   | Settings Voice cloud            | `settings-voice-cloud-desktop-dark.png`           | 1280×900 | dark  |
+| 10  | PTT listening                   | `ptt-listening-desktop-light.png`                 | 480×320  | light |
+| 11  | PTT transcribing                | `ptt-transcribing-desktop-light.png`              | 480×320  | light |
+| 12  | PTT error                       | `ptt-error-desktop-light.png`                     | 480×320  | light |
+| 13  | VAD grace period                | `vad-grace-desktop-light.png`                     | 480×420  | light |
+| 14  | Voice-call states               | `voice-call-states-desktop-light.png`             | 1280×900 | light |
+| 15  | Focused-task launch             | `focused-task-launch-desktop-light.png`           | 1440×900 | light |
+| 16  | Onboarding StepAI               | `onboarding-step-ai-desktop-light.png`            | 720×720  | light |
 
 Each scene records its legacy component and focused test authority in
 `manifest.json`. Every scene uses `maxDiffPixelRatio: 0.01`.

@@ -324,7 +324,11 @@ function VoiceCallStatesScene() {
 
 function OnboardingScene() {
   return (
-    <Shell width={720} height={720} className="flex items-center justify-center p-8 bg-surface-secondary">
+    <Shell
+      width={720}
+      height={720}
+      className="flex items-center justify-center p-8 bg-surface-secondary"
+    >
       <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl">
         <StepAI onSetWantsAI={() => undefined} onNext={() => undefined} />
       </div>

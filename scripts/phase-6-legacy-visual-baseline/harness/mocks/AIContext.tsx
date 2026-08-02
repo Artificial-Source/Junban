@@ -195,9 +195,7 @@ export function AIProvider({ children }: { children: ReactNode }) {
       deleteSession: noop,
       renameSession: noop,
       focusedTaskId:
-        fixture.scene === "focused-task-launch-desktop-light"
-          ? FIXTURE_COPY.focusedTaskId
-          : null,
+        fixture.scene === "focused-task-launch-desktop-light" ? FIXTURE_COPY.focusedTaskId : null,
       setFocusedTaskId: noop,
       updateConfig: asyncNoop,
       refreshConfig: asyncNoop,

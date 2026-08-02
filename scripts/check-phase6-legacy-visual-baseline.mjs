@@ -27,6 +27,10 @@ const AUTHORITY_DIR = path.join(
 );
 const EXPECTED_COMMIT = "5e2b2b5adc865f401843c5030285293c5fabccc5";
 const EXPECTED_RATIO = 0.01;
+const CAPTURE_SCRIPT = path.join(REPO_ROOT, "scripts/capture-phase-6-legacy-visual-baseline.mjs");
+const HARNESS_ROOT = path.join(REPO_ROOT, "scripts/phase-6-legacy-visual-baseline");
+const CAPTURE_SPEC = path.join(HARNESS_ROOT, "capture.spec.mjs");
+const HARNESS_SOURCE = path.join(HARNESS_ROOT, "harness");
 
 const FORBIDDEN = [
   // Avoid short hex-overlapping tokens like "sk-" (collides with sha256 digests).
@@ -56,6 +60,29 @@ function fail(message) {
 
 function sha256(buf) {
   return createHash("sha256").update(buf).digest("hex");
+}
+
+function sha256Tree(rootDir) {
+  const files = [];
+  function walk(dir, prefix = "") {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      const full = path.join(dir, entry.name);
+      const rel = path.join(prefix, entry.name);
+      if (entry.isDirectory()) walk(full, rel);
+      else if (entry.isFile()) files.push(rel);
+    }
+  }
+  walk(rootDir);
+  files.sort();
+  const hash = createHash("sha256");
+  for (const rel of files) {
+    hash.update(rel);
+    hash.update("\0");
+    hash.update(readFileSync(path.join(rootDir, rel)));
+    hash.update("\0");
+  }
+  return { sha256: hash.digest("hex"), files };
 }
 
 function pngSize(buf) {
@@ -109,15 +136,29 @@ if (manifest.policy?.maxDiffPixelRatio !== EXPECTED_RATIO) {
   fail(`policy.maxDiffPixelRatio must be ${EXPECTED_RATIO}`);
 }
 
+const captureScriptHash = sha256(readFileSync(CAPTURE_SCRIPT));
+if (manifest.hashes?.capture_script_sha256 !== captureScriptHash) {
+  fail("capture script SHA-256 does not match manifest provenance");
+}
+const captureSpecHash = sha256(readFileSync(CAPTURE_SPEC));
+if (manifest.hashes?.capture_spec_sha256 !== captureSpecHash) {
+  fail("capture spec SHA-256 does not match manifest provenance");
+}
+const harnessHash = sha256Tree(HARNESS_SOURCE);
+if (manifest.hashes?.harness_tree_sha256 !== harnessHash.sha256) {
+  fail("harness tree SHA-256 does not match manifest provenance");
+}
+if (JSON.stringify(manifest.hashes?.harness_files) !== JSON.stringify(harnessHash.files)) {
+  fail("harness file inventory does not match manifest provenance");
+}
+
 if (!Array.isArray(manifest.scenes) || manifest.scenes.length === 0) {
   fail("manifest.scenes must be a non-empty array");
 }
 
 const seenIds = new Set();
 const seenFiles = new Set();
-const pngNames = new Set(
-  readdirSync(AUTHORITY_DIR).filter((name) => name.endsWith(".png")),
-);
+const pngNames = new Set(readdirSync(AUTHORITY_DIR).filter((name) => name.endsWith(".png")));
 
 for (const scene of manifest.scenes ?? []) {
   if (!scene || typeof scene !== "object") {
@@ -133,7 +174,9 @@ for (const scene of manifest.scenes ?? []) {
   seenFiles.add(scene.file);
 
   if (scene.maxDiffPixelRatio !== EXPECTED_RATIO) {
-    fail(`scene ${scene.id} maxDiffPixelRatio must be ${EXPECTED_RATIO}, got ${scene.maxDiffPixelRatio}`);
+    fail(
+      `scene ${scene.id} maxDiffPixelRatio must be ${EXPECTED_RATIO}, got ${scene.maxDiffPixelRatio}`,
+    );
   }
 
   const filePath = path.join(AUTHORITY_DIR, scene.file);

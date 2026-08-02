@@ -27,9 +27,9 @@
     "worktree_policy": "git worktree add --detach at pinned commit; removed after capture"
   },
   "hashes": {
-    "capture_script_sha256": "5a3b6c5b6580a55dc6b8a255af98cf049b29e0ade34a61381f3a3f0ea2fc5ee5",
+    "capture_script_sha256": "2ea688b92b73ac2ee588c1f853205c5eccfaf494dfeee5acb32756d6b25484b5",
     "capture_spec_sha256": "a9981bc1e445c69d936bc4df5fa35b36b23a58519d214e1d0ad5c7f20c082aa7",
-    "harness_tree_sha256": "41ddfc5a4fe684f6c66f7811765180883d6e9a70ff2805a175a3cc5c8258fa3d",
+    "harness_tree_sha256": "862ab7ae42bb18fee7e5a1a0f6ac44ad81025a530faf2bd10f76829b6fdc6fd6",
     "harness_files": [
       "fixture-state.ts",
       "index.html",

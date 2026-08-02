@@ -44,9 +44,7 @@ const LEGACY_ROOT =
   process.env.JUNBAN_LEGACY_ROOT ?? "/home/xn3/Projects/Personal/ASF/Junban-legacy";
 const VITE_PORT = process.env.PHASE6_VITE_PORT ?? "5196";
 
-const SCENES = JSON.parse(
-  readFileSync(path.join(HARNESS_SRC, "scenes.json"), "utf8"),
-);
+const SCENES = JSON.parse(readFileSync(path.join(HARNESS_SRC, "scenes.json"), "utf8"));
 
 function fail(message) {
   console.error(`error: ${message}`);
@@ -157,9 +155,13 @@ function createCleanWorktree() {
   }
   // Verify the pinned commit is reachable without checking out the main tree.
   try {
-    execFileSync("git", ["-C", LEGACY_ROOT, "cat-file", "-e", `${EXPECTED_LEGACY_COMMIT}^{commit}`], {
-      stdio: "pipe",
-    });
+    execFileSync(
+      "git",
+      ["-C", LEGACY_ROOT, "cat-file", "-e", `${EXPECTED_LEGACY_COMMIT}^{commit}`],
+      {
+        stdio: "pipe",
+      },
+    );
   } catch {
     fail(`Pinned legacy commit ${EXPECTED_LEGACY_COMMIT} is not available in ${LEGACY_ROOT}`);
   }
@@ -168,15 +170,7 @@ function createCleanWorktree() {
   const worktree = path.join(parent, "worktree");
   execFileSync(
     "git",
-    [
-      "-C",
-      LEGACY_ROOT,
-      "worktree",
-      "add",
-      "--detach",
-      worktree,
-      EXPECTED_LEGACY_COMMIT,
-    ],
+    ["-C", LEGACY_ROOT, "worktree", "add", "--detach", worktree, EXPECTED_LEGACY_COMMIT],
     { stdio: "inherit" },
   );
 
@@ -222,7 +216,9 @@ function overlayHarness(worktree) {
     ["mocks/audio-utils.ts", "src/ai/voice/audio-utils.ts"],
   ];
   // Shared helper copied beside every replaced module directory.
-  const helperDirs = new Set(mockPairs.map(([, toRel]) => path.dirname(path.join(worktree, toRel))));
+  const helperDirs = new Set(
+    mockPairs.map(([, toRel]) => path.dirname(path.join(worktree, toRel))),
+  );
   for (const dir of helperDirs) {
     cpSync(path.join(dest, "mocks/read-fixture.ts"), path.join(dir, "read-fixture.ts"));
   }
@@ -280,7 +276,10 @@ async function main() {
   try {
     const harnessDir = overlayHarness(worktree);
     // Copy playwright config + capture spec beside harness for stable paths.
-    cpSync(path.join(HARNESS_SRC, "capture.spec.mjs"), path.join(worktree, "phase6-capture.spec.mjs"));
+    cpSync(
+      path.join(HARNESS_SRC, "capture.spec.mjs"),
+      path.join(worktree, "phase6-capture.spec.mjs"),
+    );
     cpSync(path.join(HARNESS_SRC, "scenes.json"), path.join(worktree, "scenes.json"));
     // Rewrite playwright config to use worktree-local harness path.
     const pwConfig = `import { defineConfig } from "@playwright/test";
@@ -350,19 +349,23 @@ export default defineConfig({
     console.log(`  harness overlay  : ${harnessDir}`);
     console.log(`  playwright cli   : ${cliPath}`);
 
-    await run(process.execPath, [cliPath, "test", `--config=${path.join(worktree, "phase6-playwright.config.mjs")}`], {
-      cwd: worktree,
-      env: {
-        ...process.env,
-        JUNBAN_LEGACY_WORKTREE: worktree,
-        PHASE6_VISUAL_OUT: OUT_DIR,
-        PHASE6_VITE_PORT: String(VITE_PORT),
-        BROWSERSLIST: "Chrome >= 120",
-        NODE_PATH: [path.join(worktree, "node_modules"), process.env.NODE_PATH]
-          .filter(Boolean)
-          .join(path.delimiter),
+    await run(
+      process.execPath,
+      [cliPath, "test", `--config=${path.join(worktree, "phase6-playwright.config.mjs")}`],
+      {
+        cwd: worktree,
+        env: {
+          ...process.env,
+          JUNBAN_LEGACY_WORKTREE: worktree,
+          PHASE6_VISUAL_OUT: OUT_DIR,
+          PHASE6_VITE_PORT: String(VITE_PORT),
+          BROWSERSLIST: "Chrome >= 120",
+          NODE_PATH: [path.join(worktree, "node_modules"), process.env.NODE_PATH]
+            .filter(Boolean)
+            .join(path.delimiter),
+        },
       },
-    });
+    );
 
     /** @type {string[]} */
     const sourcePaths = [

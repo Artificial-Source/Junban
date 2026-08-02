@@ -40,6 +40,7 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-6-context-map.md`](../goals/rust-rewrite/evidence/phase-6-context-map.md): frozen AI/voice authority, provider, persistence, security, interface, dependency, and evidence plan
 - [`../goals/rust-rewrite/evidence/phase-6-wave-1.md`](../goals/rust-rewrite/evidence/phase-6-wave-1.md): schema-v6 typed AI/voice persistence and private secret-authority evidence
 - [`../goals/rust-rewrite/evidence/phase-6-provider-adapters.md`](../goals/rust-rewrite/evidence/phase-6-provider-adapters.md): Wave 2 provider registry, adapters, model discovery, retry/cancel, and speech-contract evidence
+- [`../goals/rust-rewrite/evidence/phase-6-wave-3.md`](../goals/rust-rewrite/evidence/phase-6-wave-3.md): Wave 3 application wiring, lazy lifecycle, and operator configuration/model-discovery API evidence
 - [`../goals/rust-rewrite/evidence/phase-6-review-ledger.md`](../goals/rust-rewrite/evidence/phase-6-review-ledger.md): Phase 6 specialist findings and closure evidence
 - [`../goals/rust-rewrite/evidence/phase-6-legacy-visual-baseline/README.md`](../goals/rust-rewrite/evidence/phase-6-legacy-visual-baseline/README.md): independent legacy-rendered Phase 6 AI/voice visual authorities and manifest
 - [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings

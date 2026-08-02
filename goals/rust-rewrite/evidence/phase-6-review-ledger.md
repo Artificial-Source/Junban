@@ -1,9 +1,9 @@
 # Phase 6 review ledger
 
 - **Date:** 2026-08-03
-- **Current gate:** Wave 3b lazy runtime and lifecycle authority
-- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, then the Wave 3b delta from `542ef17`
-- **Gate result:** persistence gates approved after `P6-DB-001`–`P6-DB-009`; lifecycle gate approved after `P6-ARCH-001`–`P6-ARCH-003`
+- **Current gate:** Wave 3c operator configuration and provider boundary
+- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, then the Wave 3c delta from `f471009`
+- **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`
 
 ## Wave 1 database gate
 
@@ -36,6 +36,16 @@ The exact-delta recheck approved both findings and found no regression in `P6-DB
 
 The exact-delta recheck approved all three architecture findings. Recovery mode still owns no AI runtime, startup constructs no client/runtime, and restore drains AI before stream/request/reminder cutover.
 
+## Wave 3c security gate
+
+| ID           | Severity | Status | Resolution and focused regression                                                                                                                                                                                                                                                                                                                                                   |
+| ------------ | -------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `P6-SEC-007` | High     | fixed  | A bound credential blocks AI provider/base-origin and speech-provider changes until explicit credential deletion. Credential bind validates the selected authority and exact kind before drain. Credential-free local/browser authorities reject credentials, and `AuthScheme::None` cannot accept or send one. Cloud→loopback/custom/cloud and speech transition regressions pass. |
+| `P6-SEC-008` | Medium   | fixed  | Every accepted model-list shape rejects the entire successful response when any provider-derived ID/name/display name contains the active credential. The check runs before public DTO construction and returns a static body-free error. AI-crate shape fixtures and a server loopback response regression remain marker-free.                                                     |
+| `P6-SEC-009` | Medium   | fixed  | Temporary reconfiguration uses an exact epoch and an owned task/serialization permit through drain, runtime drop, durable worker result, and finish. Restore waits that permit through cutover; restore/shutdown permanent drain invalidates any epoch and can never resume admission. HTTP cancellation and timeout remain fail-closed, with deterministic overlap regressions.    |
+
+The exact-delta security recheck approved all three findings and confirmed `P6-SEC-001`–`P6-SEC-006` remain closed.
+
 ## Validation used by the gates
 
 ```text
@@ -50,4 +60,4 @@ cargo deny check
 git diff --check
 ```
 
-The final Wave 1 focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The Wave 3a gate additionally ran `cargo test --locked -p junban-app -p junban-storage --all-targets` (23 app and 168 storage tests), both crates' all-target/all-feature clippy with denied warnings, and downstream server/CLI/MCP checks. The Wave 3b gate ran all `junban-ai` and `junban-server` targets/features, compile-fail doctests, focused owner lock-retention and restore/shutdown tests, workspace clippy/check, audit, and deny. No material reviewed persistence, secret, or lifecycle finding remains.
+The final Wave 1 focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The Wave 3a gate additionally ran `cargo test --locked -p junban-app -p junban-storage --all-targets` (23 app and 168 storage tests), both crates' all-target/all-feature clippy with denied warnings, and downstream server/CLI/MCP checks. The Wave 3b gate ran all `junban-ai` and `junban-server` targets/features, compile-fail doctests, focused owner lock-retention and restore/shutdown tests, workspace clippy/check, audit, and deny. The Wave 3c gate ran 61 AI tests, 155 server library tests, focused secret/authority/overlap checks, generated-contract and frontend type checks, workspace validation, audit, and deny. No material reviewed persistence, secret, lifecycle, or provider-configuration security finding remains.

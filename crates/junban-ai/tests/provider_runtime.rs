@@ -10,11 +10,11 @@ use std::time::Duration;
 
 use junban_ai::{
     AuthScheme, ChatMessage, FrameNormalizer, MAX_PROVIDER_STREAM_FRAME_BYTES, MAX_RETRY_AFTER,
-    ModelId, NormalizedStreamEvent, OriginClass, ProviderCapability, ProviderChatRequest,
-    ProviderEndpoint, ProviderError, ProviderHttpFactory, ProviderKind, ProviderPreset,
-    ProviderRuntime, RequestBodyPhase, RetryDecision, RunCancel, SecretString, ToolSpec,
-    builtin_providers, classify_retry, descriptor, parse_models_body, prepare_chat_request,
-    validate_base_url,
+    ModelId, NormalizedStreamEvent, OriginClass, ProviderCapabilities, ProviderCapability,
+    ProviderChatRequest, ProviderDescriptor, ProviderEndpoint, ProviderError, ProviderHttpFactory,
+    ProviderKind, ProviderPreset, ProviderRuntime, RequestBodyPhase, RetryDecision, RunCancel,
+    SecretString, ToolSpec, builtin_providers, classify_retry, descriptor, parse_models_body,
+    prepare_chat_request, validate_base_url,
 };
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -46,9 +46,45 @@ fn registry_is_complete_and_construction_is_zero_egress() {
     assert_eq!(custom.origin_class, OriginClass::OperatorCustom);
     assert!(ProviderEndpoint::resolve(custom, None, Some(SecretString::new(SYNTH))).is_err());
 
+    let none_error = ProviderEndpoint::resolve(
+        descriptor(ProviderPreset::Ollama),
+        None,
+        Some(SecretString::new(SYNTH)),
+    )
+    .unwrap_err();
+    assert!(matches!(none_error, ProviderError::Invalid { .. }));
+    assert!(!none_error.to_string().contains(SYNTH));
+    assert!(!format!("{none_error:?}").contains(SYNTH));
+
     // Still no client after pure registry/resolve work.
     assert!(!runtime.is_client_constructed());
     assert_eq!(runtime.factory().construct_calls(), 0);
+}
+
+#[tokio::test]
+async fn unsupported_discovery_fails_before_client_construction() {
+    let descriptor = Box::leak(Box::new(ProviderDescriptor {
+        preset: ProviderPreset::Custom,
+        kind: ProviderKind::OpenAiChatCompletions,
+        auth: AuthScheme::None,
+        origin_class: OriginClass::OperatorCustom,
+        default_base_url: "",
+        chat_path: "chat/completions",
+        models_path: None,
+        capabilities: ProviderCapabilities::default(),
+    }));
+    let endpoint =
+        ProviderEndpoint::resolve(descriptor, Some("http://127.0.0.1:9/v1"), None).unwrap();
+    let runtime = ProviderRuntime::new();
+    let run = RunCancel::new();
+    assert!(matches!(
+        runtime.discover_models(&endpoint, &run).await,
+        Err(ProviderError::Unavailable {
+            capability: "model_discovery"
+        })
+    ));
+    assert_eq!(runtime.factory().construct_calls(), 0);
+    assert!(!runtime.is_client_constructed());
 }
 
 #[test]

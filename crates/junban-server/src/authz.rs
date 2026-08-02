@@ -173,6 +173,42 @@ pub fn classified_routes() -> &'static [ClassifiedRoute] {
             path: "/api/v1/backup/restore",
             access: RouteAccess::OperatorOnly,
         },
+        // AI/provider configuration and credential control plane — operator only.
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/providers",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/providers/{provider}/models",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/config",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "PUT",
+            path: "/api/v1/ai/config",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/ai/config",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "PUT",
+            path: "/api/v1/ai/credentials/{target}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/ai/credentials/{target}",
+            access: RouteAccess::OperatorOnly,
+        },
         // Reminder delivery control plane — operator only
         ClassifiedRoute {
             method: "POST",

@@ -50,13 +50,14 @@ use junban_app::{
     TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
 };
 use junban_domain::{
-    AiApprovalId, AiApprovalStatus, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiMessageId,
-    AiMessageRole, AiMessageStatus, AiRunId, AiRunState, AiSecretKind, AiSession, AiSessionId,
-    AiToolApproval, AiTurnId, ClaimedReminder, Comment, CommentBody, CommentId, OperationId,
-    ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode,
-    ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity,
-    TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId,
-    TimeSlotDraft, TimeSlotId, TransferApply, TransferFormat, TransferPreview,
+    AiApprovalId, AiApprovalStatus, AiCredentialId, AiMemory, AiMemoryId, AiMessage,
+    AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus, AiRunId, AiRunState,
+    AiSecretKind, AiSecretMetadata, AiSession, AiSessionId, AiToolApproval, AiTurnId,
+    ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
+    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
+    TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId,
+    TransferApply, TransferFormat, TransferPreview,
 };
 use rusqlite::Connection;
 use thiserror::Error;
@@ -2163,6 +2164,17 @@ impl Repository for SqliteRepository {
         mut_cmd!(self, GetAiRunState { run_id })
     }
 
+    fn list_ai_secret_metadata(&self) -> RepositoryFuture<'_, Vec<AiSecretMetadata>> {
+        mut_cmd!(self, ListAiSecretMetadata {})
+    }
+
+    fn resolve_ai_secret(
+        &self,
+        credential_id: AiCredentialId,
+    ) -> RepositoryFuture<'_, AiSecretBytes> {
+        mut_cmd!(self, ResolveAiSecret { credential_id })
+    }
+
     fn bind_ai_credential(
         &self,
         operation_id: OperationId,
@@ -2770,6 +2782,13 @@ enum Command {
     GetAiRunState {
         run_id: AiRunId,
         reply: oneshot::Sender<Result<AiRunState, RepositoryError>>,
+    },
+    ListAiSecretMetadata {
+        reply: oneshot::Sender<Result<Vec<AiSecretMetadata>, RepositoryError>>,
+    },
+    ResolveAiSecret {
+        credential_id: AiCredentialId,
+        reply: oneshot::Sender<Result<AiSecretBytes, RepositoryError>>,
     },
     BindAiCredential {
         operation_id: OperationId,
@@ -3905,6 +3924,34 @@ fn run_worker(
             }
             Command::GetAiRunState { run_id, reply } => {
                 let _ = reply.send(ai_ops::get_ai_run_state(connection, run_id));
+            }
+            Command::ListAiSecretMetadata { reply } => {
+                let result = AiSecretStore::load(&profile_dir)
+                    .map(|store| store.list_metadata())
+                    .map_err(|error| {
+                        RepositoryError::Storage(format!("ai-secrets load failed: {error}"))
+                    });
+                let _ = reply.send(result);
+            }
+            Command::ResolveAiSecret {
+                credential_id,
+                reply,
+            } => {
+                let result = AiSecretStore::load(&profile_dir)
+                    .map_err(|error| {
+                        RepositoryError::Storage(format!("ai-secrets load failed: {error}"))
+                    })
+                    .and_then(|store| {
+                        store
+                            .get_secret(&credential_id)
+                            .map_err(|error| {
+                                RepositoryError::Storage(format!(
+                                    "ai-secrets resolve failed: {error}"
+                                ))
+                            })?
+                            .ok_or(RepositoryError::NotFound)
+                    });
+                let _ = reply.send(result);
             }
             Command::BindAiCredential {
                 operation_id,

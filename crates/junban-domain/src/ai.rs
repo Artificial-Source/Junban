@@ -3,7 +3,7 @@
 //! Raw provider/speech secret bytes never appear in these types. Credential bindings
 //! store only stable random IDs that reference the private `ai-secrets.json` file.
 
-use std::{fmt, str::FromStr};
+use std::{fmt, net::IpAddr, str::FromStr};
 
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -429,6 +429,24 @@ impl ProviderBaseUrl {
                 // Custom may be HTTPS anywhere or loopback HTTP only.
                 Ok(url)
             }
+            AiProviderPreset::Ollama | AiProviderPreset::LmStudio => {
+                // Local engines may listen on an operator-selected loopback port.
+                let rest = url
+                    .as_str()
+                    .split_once("://")
+                    .expect("validated base URL has a scheme")
+                    .1;
+                let authority = rest.split('/').next().unwrap_or(rest);
+                let host = strip_port(authority)?;
+                if is_loopback_host(host) {
+                    Ok(url)
+                } else {
+                    Err(ValidationError::Invalid {
+                        field: "ai.base_url",
+                        reason: "local providers require a loopback host",
+                    })
+                }
+            }
             other => {
                 if let Some(official) = other.official_base_url() {
                     if url.as_str() == official {
@@ -624,12 +642,9 @@ impl AiSettings {
                 reason: "enabled AI requires a selected provider",
             });
         }
-        if self.credential_id.is_some() && self.provider.is_none() {
-            return Err(ValidationError::Invalid {
-                field: "ai.credential_id",
-                reason: "credential binding requires a selected provider",
-            });
-        }
+        // A credential may be staged while AI is disabled so operator-only
+        // configuration and secret rotation remain independent operations.
+        // Provider use still requires `enabled` plus a selected provider.
         Ok(())
     }
 
@@ -1372,11 +1387,8 @@ fn strip_port(authority: &str) -> Result<&str, ValidationError> {
                 reason: "invalid IPv6 host",
             });
         }
-        if rest.starts_with(':') && rest[1..].is_empty() {
-            return Err(ValidationError::Invalid {
-                field: "ai.base_url",
-                reason: "invalid port",
-            });
+        if let Some(port) = rest.strip_prefix(':') {
+            validate_port(port)?;
         }
         return Ok(inside);
     }
@@ -1389,21 +1401,28 @@ fn strip_port(authority: &str) -> Result<&str, ValidationError> {
                 reason: "IPv6 hosts must be bracketed",
             });
         }
-        if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(ValidationError::Invalid {
-                field: "ai.base_url",
-                reason: "invalid port",
-            });
-        }
+        validate_port(port)?;
         return Ok(host);
     }
     Ok(authority)
 }
 
+fn validate_port(port: &str) -> Result<(), ValidationError> {
+    if port.parse::<u16>().ok().filter(|port| *port > 0).is_none() {
+        return Err(ValidationError::Invalid {
+            field: "ai.base_url",
+            reason: "invalid port",
+        });
+    }
+    Ok(())
+}
+
 fn is_loopback_host(host: &str) -> bool {
-    let host = host.trim();
-    let lower = host.to_ascii_lowercase();
-    lower == "localhost" || lower == "127.0.0.1" || lower == "::1" || lower == "0:0:0:0:0:0:0:1"
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .map(|address| address.is_loopback())
+            .unwrap_or(false)
 }
 
 /// Collect every credential ID referenced by AI/voice settings.
@@ -1419,6 +1438,15 @@ pub fn referenced_ai_credential_ids(ai: &AiSettings, voice: &VoiceSettings) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_ai_may_hold_an_unassigned_credential() {
+        let mut ai = AiSettings::default_settings();
+        ai.credential_id = Some(AiCredentialId::new());
+        ai.validate().unwrap();
+        ai.enabled = true;
+        assert!(ai.validate().is_err());
+    }
 
     #[test]
     fn defaults_leave_cloud_ai_and_speech_disabled() {
@@ -1444,7 +1472,10 @@ mod tests {
         assert!(validate_base_url("https://api.example.com#frag").is_err());
         assert!(validate_base_url("http://example.com/v1").is_err());
         assert!(validate_base_url("http://127.0.0.1:11434/v1").is_ok());
+        assert!(validate_base_url("http://127.0.0.2:11434/v1").is_ok());
         assert!(validate_base_url("http://localhost:1234/v1").is_ok());
+        assert!(validate_base_url("http://127.0.0.1:bad/v1").is_err());
+        assert!(validate_base_url("http://[::1]:70000/v1").is_err());
         assert!(validate_base_url("https://api.openai.com/v1").is_ok());
     }
 
@@ -1468,6 +1499,14 @@ mod tests {
         assert!(
             ProviderBaseUrl::for_provider(AiProviderPreset::Ollama, "http://127.0.0.1:11434/v1")
                 .is_ok()
+        );
+        assert!(
+            ProviderBaseUrl::for_provider(AiProviderPreset::Ollama, "http://127.0.0.1:42191/v1")
+                .is_ok()
+        );
+        assert!(
+            ProviderBaseUrl::for_provider(AiProviderPreset::Ollama, "https://remote.example/v1")
+                .is_err()
         );
         assert!(
             ProviderBaseUrl::for_provider(

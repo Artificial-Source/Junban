@@ -133,7 +133,7 @@ async fn discover_once(
 
     let text = read_success_body_bounded(response, run).await?;
     run.check_live()?;
-    parse_models_body(&text, descriptor)
+    parse_models_body_for_request(&text, descriptor, active_secret)
 }
 
 async fn read_success_body_bounded(
@@ -176,6 +176,14 @@ pub fn parse_models_body(
     body: &str,
     descriptor: &ProviderDescriptor,
 ) -> Result<Vec<DiscoveredModel>, ProviderError> {
+    parse_models_body_for_request(body, descriptor, None)
+}
+
+fn parse_models_body_for_request(
+    body: &str,
+    descriptor: &ProviderDescriptor,
+    active_secret: Option<&str>,
+) -> Result<Vec<DiscoveredModel>, ProviderError> {
     let value: Value = serde_json::from_str(body)
         .map_err(|_| ProviderError::stream("model list body is not valid JSON"))?;
 
@@ -186,6 +194,7 @@ pub fn parse_models_body(
                 .get("models")
                 .and_then(Value::as_array)
                 .ok_or_else(|| ProviderError::stream("gemini model list missing models"))?;
+            reject_reflected_fields(list, &["name", "displayName"], active_secret)?;
             for item in list {
                 let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
                 let id_raw = name.strip_prefix("models/").unwrap_or(name);
@@ -236,6 +245,7 @@ pub fn parse_models_body(
                 .and_then(Value::as_array)
                 .or_else(|| value.as_array())
                 .ok_or_else(|| ProviderError::stream("model list missing data array"))?;
+            reject_reflected_fields(list, &["id", "name", "display_name"], active_secret)?;
             for item in list {
                 let id_raw = item.get("id").and_then(Value::as_str).unwrap_or_default();
                 if id_raw.is_empty() {
@@ -270,6 +280,82 @@ pub fn parse_models_body(
     Ok(models)
 }
 
+fn reject_reflected_fields(
+    list: &[Value],
+    fields: &[&str],
+    active_secret: Option<&str>,
+) -> Result<(), ProviderError> {
+    let Some(secret) = active_secret.filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    if list.iter().any(|item| {
+        fields.iter().any(|field| {
+            item.get(*field)
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.contains(secret))
+        })
+    }) {
+        return Err(ProviderError::stream(
+            "provider model list reflected active credential",
+        ));
+    }
+    Ok(())
+}
+
 fn jitter(attempt: u32) -> Duration {
     Duration::from_millis(u64::from(attempt.wrapping_mul(37) % 250))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ProviderPreset, descriptor};
+
+    const MARKER: &str = "reflected-discovery-credential-marker";
+
+    #[test]
+    fn every_model_list_shape_rejects_reflection_without_rendering_secret() {
+        let fixtures = [
+            (
+                ProviderPreset::OpenAi,
+                format!(r#"{{"data":[{{"id":"model-{MARKER}"}}]}}"#),
+            ),
+            (
+                ProviderPreset::Anthropic,
+                format!(r#"[{{"id":"model","name":"name-{MARKER}"}}]"#),
+            ),
+            (
+                ProviderPreset::Groq,
+                format!(r#"{{"data":[{{"id":"model","display_name":"{MARKER}"}}]}}"#),
+            ),
+            (
+                ProviderPreset::Gemini,
+                format!(
+                    r#"{{"models":[{{"name":"models/model","displayName":"Gemini {MARKER}"}}]}}"#
+                ),
+            ),
+            (
+                ProviderPreset::Gemini,
+                format!(r#"{{"models":[{{"name":"models/{MARKER}"}}]}}"#),
+            ),
+        ];
+
+        for (preset, body) in fixtures {
+            let error =
+                parse_models_body_for_request(&body, descriptor(preset), Some(MARKER)).unwrap_err();
+            assert!(matches!(error, ProviderError::Stream { .. }));
+            assert!(!error.to_string().contains(MARKER));
+            assert!(!format!("{error:?}").contains(MARKER));
+        }
+    }
+
+    #[test]
+    fn unrelated_model_fields_do_not_trigger_active_credential_rejection() {
+        let body =
+            format!(r#"{{"data":[{{"id":"safe-model","description":"ignored {MARKER}"}}]}}"#);
+        let models =
+            parse_models_body_for_request(&body, descriptor(ProviderPreset::OpenAi), Some(MARKER))
+                .expect("unrelated field is not returned");
+        assert_eq!(models.len(), 1);
+    }
 }

@@ -46,6 +46,14 @@ const EXCLUDED_OPERATION_IDS: &[&str] = &[
     "settle_reminder_delivered",
     "settle_reminder_failed",
     "mark_owner_lost_reminders",
+    // Phase 6 operator-only AI control plane remains outside the frozen 87-tool catalog.
+    "list_ai_providers",
+    "get_ai_config",
+    "put_ai_config",
+    "delete_ai_config",
+    "put_ai_credential",
+    "delete_ai_credential",
+    "discover_ai_provider_models",
     // Raw automation secrets are accepted only by the reviewed `auth create
     // --write-token` ambiguity protocol, never by generic tool input.
     "create_automation_credential",

@@ -146,6 +146,12 @@ impl ProviderEndpoint {
                 "provider requires a credential",
             ));
         }
+        if !descriptor.auth.requires_credential() && credential.is_some() {
+            return Err(ProviderError::invalid(
+                "credential",
+                "credential-free provider rejects credential material",
+            ));
+        }
 
         Ok(Self {
             descriptor,

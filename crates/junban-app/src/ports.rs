@@ -5,9 +5,9 @@ use std::{future::Future, pin::Pin};
 use jiff::Timestamp;
 use junban_domain::{
     AiApprovalId, AiApprovalStatus, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiMessageId,
-    AiMessageRole, AiMessageStatus, AiRunId, AiRunState, AiSecretKind, AiSession, AiSessionId,
-    AiToolApproval, AiTurnId, AppSettings, ClaimedReminder, Comment, CommentBody, CommentId,
-    OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
+    AiMessageRole, AiMessageStatus, AiRunId, AiRunState, AiSecretKind, AiSecretMetadata, AiSession,
+    AiSessionId, AiToolApproval, AiTurnId, AppSettings, ClaimedReminder, Comment, CommentBody,
+    CommentId, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
     ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId,
     SettingsPatch, TagId, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation,
     TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId, TransferApply,
@@ -681,6 +681,15 @@ pub trait Repository: Send + Sync + 'static {
     ) -> RepositoryFuture<'_, CommittedMutation>;
 
     fn get_ai_run_state(&self, run_id: AiRunId) -> RepositoryFuture<'_, AiRunState>;
+
+    /// Presence-only private credential inventory. Reads publish no event.
+    fn list_ai_secret_metadata(&self) -> RepositoryFuture<'_, Vec<AiSecretMetadata>>;
+
+    /// Resolve one confirmed private credential transiently. Missing/stale IDs fail closed.
+    fn resolve_ai_secret(
+        &self,
+        credential_id: junban_domain::AiCredentialId,
+    ) -> RepositoryFuture<'_, AiSecretBytes>;
 
     fn bind_ai_credential(
         &self,

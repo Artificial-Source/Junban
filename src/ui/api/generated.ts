@@ -4,6 +4,70 @@
  */
 
 export interface paths {
+  "/api/v1/ai/config": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_ai_config"];
+    put: operations["put_ai_config"];
+    post?: never;
+    delete: operations["delete_ai_config"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/credentials/{target}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put: operations["put_ai_credential"];
+    post?: never;
+    delete: operations["delete_ai_credential"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/providers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_ai_providers"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/providers/{provider}/models": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["discover_ai_provider_models"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/auth/credentials": {
     parameters: {
       query?: never;
@@ -1296,6 +1360,89 @@ export interface components {
       time_block_ids?: string[];
       time_slot_ids?: string[];
     };
+    AiConfigInput: {
+      auto_send: boolean;
+      base_url?: string | null;
+      custom_instructions: string;
+      daily_briefing_enabled: boolean;
+      /** Format: int32 */
+      default_energy?: number | null;
+      enabled: boolean;
+      model?: string | null;
+      provider?: null | components["schemas"]["AiProviderPresetDto"];
+      smart_endpoint: boolean;
+    };
+    AiConfigPutRequest: {
+      ai: components["schemas"]["AiConfigInput"];
+      voice: components["schemas"]["VoiceConfigInput"];
+    };
+    AiConfigResponse: {
+      ai: components["schemas"]["AiSettingsDto"];
+      credentials: components["schemas"]["AiCredentialBindingsDto"];
+      voice: components["schemas"]["VoiceSettingsDto"];
+    };
+    AiCredentialBindingResponse: {
+      credential?: null | components["schemas"]["AiCredentialMetadataDto"];
+      target: components["schemas"]["AiCredentialTargetDto"];
+    };
+    AiCredentialBindingsDto: {
+      ai_provider?: null | components["schemas"]["AiCredentialMetadataDto"];
+      voice_stt?: null | components["schemas"]["AiCredentialMetadataDto"];
+      voice_tts?: null | components["schemas"]["AiCredentialMetadataDto"];
+    };
+    AiCredentialMetadataDto: {
+      /** Format: uuid */
+      id: string;
+      kind: components["schemas"]["AiSecretKindDto"];
+      present: boolean;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @enum {string} */
+    AiCredentialTargetDto: "ai_provider" | "voice_stt" | "voice_tts";
+    /** @enum {string} */
+    AiProviderPresetDto:
+      | "openai"
+      | "anthropic"
+      | "gemini"
+      | "openrouter"
+      | "ollama"
+      | "lm_studio"
+      | "deepseek"
+      | "mistral"
+      | "kimi"
+      | "dashscope"
+      | "groq"
+      | "z_ai"
+      | "custom";
+    AiProviderRegistryEntry: {
+      auth_scheme: string;
+      capabilities: components["schemas"]["ProviderCapabilityDto"][];
+      credential_required: boolean;
+      default_base_url?: string | null;
+      display_name: string;
+      id: components["schemas"]["AiProviderPresetDto"];
+      origin_class: components["schemas"]["ProviderOriginClassDto"];
+    };
+    AiProviderRegistryResponse: {
+      providers: components["schemas"]["AiProviderRegistryEntry"][];
+    };
+    /** @enum {string} */
+    AiSecretKindDto: "api_key" | "bearer" | "inworld_basic" | "inworld_jwt";
+    AiSettingsDto: {
+      auto_send: boolean;
+      base_url?: string | null;
+      /** Format: uuid */
+      credential_id?: string | null;
+      custom_instructions: string;
+      daily_briefing_enabled: boolean;
+      /** Format: int32 */
+      default_energy?: number | null;
+      enabled: boolean;
+      model?: string | null;
+      provider?: null | components["schemas"]["AiProviderPresetDto"];
+      smart_endpoint: boolean;
+    };
     AppSettingsResponse: {
       appearance: components["schemas"]["AppearanceSettingsDto"];
       date_time: components["schemas"]["DateTimeSettingsDto"];
@@ -1680,6 +1827,11 @@ export interface components {
     DiagnosticsResponse: {
       entries: components["schemas"]["DiagnosticEntry"][];
     };
+    DiscoveredModelDto: {
+      capabilities: components["schemas"]["ProviderCapabilityDto"][];
+      display_name?: string | null;
+      id: string;
+    };
     DopamineMenuResponse: {
       /** Format: int64 */
       revision: number;
@@ -1801,6 +1953,10 @@ export interface components {
     MarkOwnerLostRemindersResponse: {
       /** Format: int32 */
       marked: number;
+    };
+    ModelDiscoveryResponse: {
+      models: components["schemas"]["DiscoveredModelDto"][];
+      provider: components["schemas"]["AiProviderPresetDto"];
     };
     MoveTaskRequest: {
       order?: null | components["schemas"]["OrderAnchorDto"];
@@ -2057,6 +2213,21 @@ export interface components {
     };
     /** @enum {string} */
     ProjectViewDto: "list" | "board" | "calendar";
+    /** @enum {string} */
+    ProviderCapabilityDto:
+      | "chat_streaming"
+      | "chat_completion"
+      | "tools"
+      | "streaming_tools"
+      | "vision"
+      | "reasoning_status"
+      | "model_discovery";
+    /** @enum {string} */
+    ProviderOriginClassDto: "fixed_cloud_https" | "loopback" | "operator_custom";
+    PutAiCredentialRequest: {
+      kind: components["schemas"]["AiSecretKindDto"];
+      secret: string;
+    };
     QuickEntryDto: {
       /** Format: date-time */
       deadline?: string | null;
@@ -2314,6 +2485,8 @@ export interface components {
       /** Format: uuid */
       task_id: string;
     };
+    /** @enum {string} */
+    SpeechProviderPresetDto: "browser" | "openai" | "groq" | "inworld";
     StatsResponse: {
       /** Format: int32 */
       average_actual_minutes?: number | null;
@@ -2598,6 +2771,36 @@ export interface components {
      * @enum {string}
      */
     UncompleteOutcomeDto: "exact" | "source_only";
+    VoiceConfigInput: {
+      cloud_speech_enabled: boolean;
+      /** Format: int32 */
+      grace_period_ms: number;
+      stt_model?: string | null;
+      stt_provider: components["schemas"]["SpeechProviderPresetDto"];
+      tts_enabled: boolean;
+      tts_model?: string | null;
+      tts_provider: components["schemas"]["SpeechProviderPresetDto"];
+      tts_voice?: string | null;
+      voice_mode: components["schemas"]["VoiceModeDto"];
+    };
+    /** @enum {string} */
+    VoiceModeDto: "push_to_talk" | "hands_free";
+    VoiceSettingsDto: {
+      cloud_speech_enabled: boolean;
+      /** Format: int32 */
+      grace_period_ms: number;
+      /** Format: uuid */
+      stt_credential_id?: string | null;
+      stt_model?: string | null;
+      stt_provider: components["schemas"]["SpeechProviderPresetDto"];
+      /** Format: uuid */
+      tts_credential_id?: string | null;
+      tts_enabled: boolean;
+      tts_model?: string | null;
+      tts_provider: components["schemas"]["SpeechProviderPresetDto"];
+      tts_voice?: string | null;
+      voice_mode: components["schemas"]["VoiceModeDto"];
+    };
     /** @enum {string} */
     WeekStartDto: "sunday" | "monday" | "saturday";
     WeeklyDayStatsDto: {
@@ -2679,6 +2882,488 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  get_ai_config: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiConfigResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  put_ai_config: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AiConfigPutRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiConfigResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  delete_ai_config: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiConfigResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  put_ai_credential: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        /** @description credential binding target */
+        target: components["schemas"]["AiCredentialTargetDto"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PutAiCredentialRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiCredentialBindingResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  delete_ai_credential: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        /** @description credential binding target */
+        target: components["schemas"]["AiCredentialTargetDto"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiCredentialBindingResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_ai_providers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiProviderRegistryResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  discover_ai_provider_models: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description canonical provider id */
+        provider: components["schemas"]["AiProviderPresetDto"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelDiscoveryResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   list_automation_credentials: {
     parameters: {
       query?: never;

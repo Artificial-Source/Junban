@@ -1,7 +1,7 @@
 //! Provider authentication header construction.
 //!
 //! OAuth is not emulated. Supported schemes are bearer tokens, Anthropic
-//! `x-api-key`, Gemini `x-goog-api-key`, and optional none for local runtimes.
+//! `x-api-key`, Gemini `x-goog-api-key`, and credential-free local runtimes.
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
@@ -50,10 +50,11 @@ pub fn build_auth_headers(
     let mut headers = HeaderMap::new();
     match scheme {
         AuthScheme::None => {
-            if let Some(credential) = credential.filter(|value| !value.is_empty()) {
-                // Local servers may still accept an optional bearer.
-                let (name, value) = bearer_authorization_header(credential.expose())?;
-                headers.insert(name, value);
+            if credential.is_some() {
+                return Err(ProviderError::invalid(
+                    "credential",
+                    "credential-free provider rejects credential material",
+                ));
             }
         }
         AuthScheme::Bearer => {
@@ -115,8 +116,14 @@ mod tests {
     }
 
     #[test]
-    fn none_allows_missing_credential() {
+    fn none_requires_credential_absence() {
         let headers = build_auth_headers(AuthScheme::None, None).unwrap();
         assert!(headers.get(reqwest::header::AUTHORIZATION).is_none());
+
+        let secret = SecretString::new("none-must-not-attach-marker");
+        let error = build_auth_headers(AuthScheme::None, Some(&secret)).unwrap_err();
+        assert!(matches!(error, ProviderError::Invalid { .. }));
+        assert!(!error.to_string().contains(secret.expose()));
+        assert!(!format!("{error:?}").contains(secret.expose()));
     }
 }

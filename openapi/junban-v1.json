@@ -10,6 +10,658 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/v1/ai/config": {
+      "get": {
+        "tags": ["routes_ai"],
+        "operationId": "get_ai_config",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": ["routes_ai"],
+        "operationId": "put_ai_config",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiConfigPutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes_ai"],
+        "operationId": "delete_ai_config",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/credentials/{target}": {
+      "put": {
+        "tags": ["routes_ai"],
+        "operationId": "put_ai_credential",
+        "parameters": [
+          {
+            "name": "target",
+            "in": "path",
+            "description": "credential binding target",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AiCredentialTargetDto"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutAiCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiCredentialBindingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes_ai"],
+        "operationId": "delete_ai_credential",
+        "parameters": [
+          {
+            "name": "target",
+            "in": "path",
+            "description": "credential binding target",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AiCredentialTargetDto"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiCredentialBindingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/providers": {
+      "get": {
+        "tags": ["routes_ai"],
+        "operationId": "list_ai_providers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiProviderRegistryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/providers/{provider}/models": {
+      "get": {
+        "tags": ["routes_ai"],
+        "operationId": "discover_ai_provider_models",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "description": "canonical provider id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AiProviderPresetDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelDiscoveryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/credentials": {
       "get": {
         "tags": ["routes"],
@@ -8989,6 +9641,284 @@
           }
         }
       },
+      "AiConfigInput": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "custom_instructions",
+          "daily_briefing_enabled",
+          "auto_send",
+          "smart_endpoint"
+        ],
+        "properties": {
+          "auto_send": {
+            "type": "boolean"
+          },
+          "base_url": {
+            "type": ["string", "null"]
+          },
+          "custom_instructions": {
+            "type": "string"
+          },
+          "daily_briefing_enabled": {
+            "type": "boolean"
+          },
+          "default_energy": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": ["string", "null"]
+          },
+          "provider": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiProviderPresetDto"
+              }
+            ]
+          },
+          "smart_endpoint": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AiConfigPutRequest": {
+        "type": "object",
+        "required": ["ai", "voice"],
+        "properties": {
+          "ai": {
+            "$ref": "#/components/schemas/AiConfigInput"
+          },
+          "voice": {
+            "$ref": "#/components/schemas/VoiceConfigInput"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AiConfigResponse": {
+        "type": "object",
+        "required": ["ai", "voice", "credentials"],
+        "properties": {
+          "ai": {
+            "$ref": "#/components/schemas/AiSettingsDto"
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/AiCredentialBindingsDto"
+          },
+          "voice": {
+            "$ref": "#/components/schemas/VoiceSettingsDto"
+          }
+        }
+      },
+      "AiCredentialBindingResponse": {
+        "type": "object",
+        "required": ["target"],
+        "properties": {
+          "credential": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiCredentialMetadataDto"
+              }
+            ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/AiCredentialTargetDto"
+          }
+        }
+      },
+      "AiCredentialBindingsDto": {
+        "type": "object",
+        "properties": {
+          "ai_provider": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiCredentialMetadataDto"
+              }
+            ]
+          },
+          "voice_stt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiCredentialMetadataDto"
+              }
+            ]
+          },
+          "voice_tts": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiCredentialMetadataDto"
+              }
+            ]
+          }
+        }
+      },
+      "AiCredentialMetadataDto": {
+        "type": "object",
+        "required": ["id", "kind", "updated_at", "present"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AiSecretKindDto"
+          },
+          "present": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AiCredentialTargetDto": {
+        "type": "string",
+        "enum": ["ai_provider", "voice_stt", "voice_tts"]
+      },
+      "AiProviderPresetDto": {
+        "type": "string",
+        "enum": [
+          "openai",
+          "anthropic",
+          "gemini",
+          "openrouter",
+          "ollama",
+          "lm_studio",
+          "deepseek",
+          "mistral",
+          "kimi",
+          "dashscope",
+          "groq",
+          "z_ai",
+          "custom"
+        ]
+      },
+      "AiProviderRegistryEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "display_name",
+          "origin_class",
+          "auth_scheme",
+          "credential_required",
+          "capabilities"
+        ],
+        "properties": {
+          "auth_scheme": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderCapabilityDto"
+            }
+          },
+          "credential_required": {
+            "type": "boolean"
+          },
+          "default_base_url": {
+            "type": ["string", "null"]
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/AiProviderPresetDto"
+          },
+          "origin_class": {
+            "$ref": "#/components/schemas/ProviderOriginClassDto"
+          }
+        }
+      },
+      "AiProviderRegistryResponse": {
+        "type": "object",
+        "required": ["providers"],
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiProviderRegistryEntry"
+            }
+          }
+        }
+      },
+      "AiSecretKindDto": {
+        "type": "string",
+        "enum": ["api_key", "bearer", "inworld_basic", "inworld_jwt"]
+      },
+      "AiSettingsDto": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "custom_instructions",
+          "daily_briefing_enabled",
+          "auto_send",
+          "smart_endpoint"
+        ],
+        "properties": {
+          "auto_send": {
+            "type": "boolean"
+          },
+          "base_url": {
+            "type": ["string", "null"]
+          },
+          "credential_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "custom_instructions": {
+            "type": "string"
+          },
+          "daily_briefing_enabled": {
+            "type": "boolean"
+          },
+          "default_energy": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": ["string", "null"]
+          },
+          "provider": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiProviderPresetDto"
+              }
+            ]
+          },
+          "smart_endpoint": {
+            "type": "boolean"
+          }
+        }
+      },
       "AppSettingsResponse": {
         "type": "object",
         "required": [
@@ -10081,6 +11011,24 @@
           }
         }
       },
+      "DiscoveredModelDto": {
+        "type": "object",
+        "required": ["id", "capabilities"],
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderCapabilityDto"
+            }
+          },
+          "display_name": {
+            "type": ["string", "null"]
+          },
+          "id": {
+            "type": "string"
+          }
+        }
+      },
       "DopamineMenuResponse": {
         "type": "object",
         "required": ["task_ids", "tasks", "revision"],
@@ -10485,6 +11433,21 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "ModelDiscoveryResponse": {
+        "type": "object",
+        "required": ["provider", "models"],
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredModelDto"
+            }
+          },
+          "provider": {
+            "$ref": "#/components/schemas/AiProviderPresetDto"
           }
         }
       },
@@ -11269,6 +12232,37 @@
         "type": "string",
         "enum": ["list", "board", "calendar"]
       },
+      "ProviderCapabilityDto": {
+        "type": "string",
+        "enum": [
+          "chat_streaming",
+          "chat_completion",
+          "tools",
+          "streaming_tools",
+          "vision",
+          "reasoning_status",
+          "model_discovery"
+        ]
+      },
+      "ProviderOriginClassDto": {
+        "type": "string",
+        "enum": ["fixed_cloud_https", "loopback", "operator_custom"]
+      },
+      "PutAiCredentialRequest": {
+        "type": "object",
+        "required": ["kind", "secret"],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/AiSecretKindDto"
+          },
+          "secret": {
+            "type": "string",
+            "writeOnly": true,
+            "maxLength": 8192
+          }
+        },
+        "additionalProperties": false
+      },
       "QuickEntryDto": {
         "type": "object",
         "required": ["title", "tag_names", "someday"],
@@ -11926,6 +12920,10 @@
           }
         },
         "additionalProperties": false
+      },
+      "SpeechProviderPresetDto": {
+        "type": "string",
+        "enum": ["browser", "openai", "groq", "inworld"]
       },
       "StatsResponse": {
         "type": "object",
@@ -12752,6 +13750,103 @@
         "type": "string",
         "description": "How an ordinary uncomplete handled recurring work.",
         "enum": ["exact", "source_only"]
+      },
+      "VoiceConfigInput": {
+        "type": "object",
+        "required": [
+          "cloud_speech_enabled",
+          "stt_provider",
+          "tts_provider",
+          "tts_enabled",
+          "voice_mode",
+          "grace_period_ms"
+        ],
+        "properties": {
+          "cloud_speech_enabled": {
+            "type": "boolean"
+          },
+          "grace_period_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "stt_model": {
+            "type": ["string", "null"]
+          },
+          "stt_provider": {
+            "$ref": "#/components/schemas/SpeechProviderPresetDto"
+          },
+          "tts_enabled": {
+            "type": "boolean"
+          },
+          "tts_model": {
+            "type": ["string", "null"]
+          },
+          "tts_provider": {
+            "$ref": "#/components/schemas/SpeechProviderPresetDto"
+          },
+          "tts_voice": {
+            "type": ["string", "null"]
+          },
+          "voice_mode": {
+            "$ref": "#/components/schemas/VoiceModeDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "VoiceModeDto": {
+        "type": "string",
+        "enum": ["push_to_talk", "hands_free"]
+      },
+      "VoiceSettingsDto": {
+        "type": "object",
+        "required": [
+          "cloud_speech_enabled",
+          "stt_provider",
+          "tts_provider",
+          "tts_enabled",
+          "voice_mode",
+          "grace_period_ms"
+        ],
+        "properties": {
+          "cloud_speech_enabled": {
+            "type": "boolean"
+          },
+          "grace_period_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "stt_credential_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "stt_model": {
+            "type": ["string", "null"]
+          },
+          "stt_provider": {
+            "$ref": "#/components/schemas/SpeechProviderPresetDto"
+          },
+          "tts_credential_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "tts_enabled": {
+            "type": "boolean"
+          },
+          "tts_model": {
+            "type": ["string", "null"]
+          },
+          "tts_provider": {
+            "$ref": "#/components/schemas/SpeechProviderPresetDto"
+          },
+          "tts_voice": {
+            "type": ["string", "null"]
+          },
+          "voice_mode": {
+            "$ref": "#/components/schemas/VoiceModeDto"
+          }
+        }
       },
       "WeekStartDto": {
         "type": "string",

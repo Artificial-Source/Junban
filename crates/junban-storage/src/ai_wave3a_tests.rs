@@ -498,6 +498,24 @@ async fn credential_bind_and_clear_replay_without_secret_multiplication() {
     assert!(!debug.contains(marker));
     assert_eq!(AiSecretStore::load(&profile).unwrap().len_for_test(), 1);
 
+    let event_count = sink.0.lock().unwrap().len();
+    let metadata = service.list_ai_secret_metadata().await.unwrap();
+    assert_eq!(metadata.len(), 1);
+    assert_eq!(metadata[0].id, bound.credential_id.unwrap());
+    assert!(metadata[0].present);
+    let resolved = service
+        .resolve_ai_secret(bound.credential_id.unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resolved.expose(), marker);
+    assert!(matches!(
+        service
+            .resolve_ai_secret(junban_domain::AiCredentialId::new())
+            .await,
+        Err(junban_app::AppError::NotFound)
+    ));
+    assert_eq!(sink.0.lock().unwrap().len(), event_count);
+
     let replay = service
         .bind_ai_credential(
             operation_id,

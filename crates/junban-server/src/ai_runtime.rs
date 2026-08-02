@@ -45,9 +45,17 @@ pub enum AiRuntimeError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AiRuntimeLifecycle {
     Accepting,
-    Draining,
-    Drained,
+    Reconfiguring {
+        epoch: ReconfigureEpoch,
+        runtime_dropped: bool,
+    },
+    PermanentDraining,
+    PermanentDrained,
 }
+
+/// Unforgeable authority for one temporary provider reconfiguration lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReconfigureEpoch(u64);
 
 struct ActiveRun {
     generation: u64,
@@ -56,6 +64,7 @@ struct ActiveRun {
 
 struct AiRuntimeInner {
     lifecycle: AiRuntimeLifecycle,
+    next_reconfigure_epoch: u64,
     runtime: Option<Arc<ProviderRuntime>>,
     active: HashMap<AiRunId, ActiveRun>,
 }
@@ -171,6 +180,7 @@ impl AiRuntimeSupervisor {
         Arc::new(Self {
             inner: Mutex::new(AiRuntimeInner {
                 lifecycle: AiRuntimeLifecycle::Accepting,
+                next_reconfigure_epoch: 1,
                 runtime: None,
                 active: HashMap::new(),
             }),
@@ -224,7 +234,7 @@ impl AiRuntimeSupervisor {
     ///
     /// Duplicate identities and the concurrent ceiling fail closed. Admission,
     /// runtime creation, and insertion of `(run_id, generation)` share the same
-    /// mutex as [`Self::begin_drain`].
+    /// mutex as [`Self::begin_reconfigure`] and [`Self::begin_permanent_drain`].
     pub fn admit_run(
         self: &Arc<Self>,
         run_id: AiRunId,
@@ -276,14 +286,32 @@ impl AiRuntimeSupervisor {
         Ok(())
     }
 
-    /// Close admission and cancel every registered generation synchronously.
+    /// Begin one temporary reconfiguration epoch, closing admission and cancelling runs.
     ///
-    /// `Accepting` transitions to `Draining`; later calls never advance a timed-out
-    /// drain to `Drained`. Does not wait for guards to drop.
-    pub fn begin_drain(&self) {
+    /// Only accepting state may start an epoch. A timed-out epoch remains fail-closed and
+    /// cannot be replaced or resumed by a later request.
+    pub(crate) fn begin_reconfigure(&self) -> Result<ReconfigureEpoch, AiRuntimeError> {
         let mut inner = self.inner.lock().expect("AI runtime poisoned");
-        if inner.lifecycle == AiRuntimeLifecycle::Accepting {
-            inner.lifecycle = AiRuntimeLifecycle::Draining;
+        if inner.lifecycle != AiRuntimeLifecycle::Accepting {
+            return Err(AiRuntimeError::InvalidLifecycle);
+        }
+        let epoch = ReconfigureEpoch(inner.next_reconfigure_epoch);
+        inner.next_reconfigure_epoch = inner.next_reconfigure_epoch.wrapping_add(1).max(1);
+        inner.lifecycle = AiRuntimeLifecycle::Reconfiguring {
+            epoch,
+            runtime_dropped: false,
+        };
+        for entry in inner.active.values() {
+            entry.cancel.cancel();
+        }
+        Ok(epoch)
+    }
+
+    /// Enter the non-resumable restore/shutdown lifecycle and invalidate any temporary epoch.
+    pub fn begin_permanent_drain(&self) {
+        let mut inner = self.inner.lock().expect("AI runtime poisoned");
+        if inner.lifecycle != AiRuntimeLifecycle::PermanentDrained {
+            inner.lifecycle = AiRuntimeLifecycle::PermanentDraining;
         }
         for entry in inner.active.values() {
             entry.cancel.cancel();
@@ -316,29 +344,39 @@ impl AiRuntimeSupervisor {
         }
     }
 
-    /// Drop the lazy provider runtime after a successful drain.
-    ///
-    /// Only `Draining`/`Drained` with zero active guards may become `Drained`.
-    pub fn drop_runtime(&self) -> Result<(), AiRuntimeError> {
+    /// Drop the lazy provider runtime for the exact, still-current temporary epoch.
+    pub(crate) fn drop_reconfigure_runtime(
+        &self,
+        epoch: ReconfigureEpoch,
+    ) -> Result<(), AiRuntimeError> {
         let mut inner = self.inner.lock().expect("AI runtime poisoned");
-        if inner.lifecycle == AiRuntimeLifecycle::Accepting {
+        if inner.lifecycle
+            != (AiRuntimeLifecycle::Reconfiguring {
+                epoch,
+                runtime_dropped: false,
+            })
+        {
             return Err(AiRuntimeError::InvalidLifecycle);
         }
         if !inner.active.is_empty() {
             return Err(AiRuntimeError::Busy);
         }
         inner.runtime = None;
-        inner.lifecycle = AiRuntimeLifecycle::Drained;
+        inner.lifecycle = AiRuntimeLifecycle::Reconfiguring {
+            epoch,
+            runtime_dropped: true,
+        };
         Ok(())
     }
 
-    /// Re-open admission after a completed provider reconfiguration drain.
-    ///
-    /// A partial/timed-out drain remains `Draining` and cannot resume even after
-    /// its last guard later drops; callers must explicitly finish `drop_runtime`.
-    pub fn resume_after_reconfigure(&self) -> Result<(), AiRuntimeError> {
+    /// Re-open admission only for the exact epoch whose runtime was successfully dropped.
+    pub(crate) fn finish_reconfigure(&self, epoch: ReconfigureEpoch) -> Result<(), AiRuntimeError> {
         let mut inner = self.inner.lock().expect("AI runtime poisoned");
-        if inner.lifecycle != AiRuntimeLifecycle::Drained
+        if inner.lifecycle
+            != (AiRuntimeLifecycle::Reconfiguring {
+                epoch,
+                runtime_dropped: true,
+            })
             || inner.runtime.is_some()
             || !inner.active.is_empty()
         {
@@ -348,15 +386,32 @@ impl AiRuntimeSupervisor {
         Ok(())
     }
 
-    /// Close admission, cancel all runs, wait for guards, then drop the runtime.
+    /// Drop the lazy runtime only from the non-resumable permanent drain lifecycle.
+    pub fn drop_permanent_runtime(&self) -> Result<(), AiRuntimeError> {
+        let mut inner = self.inner.lock().expect("AI runtime poisoned");
+        match inner.lifecycle {
+            AiRuntimeLifecycle::PermanentDraining | AiRuntimeLifecycle::PermanentDrained => {}
+            AiRuntimeLifecycle::Accepting | AiRuntimeLifecycle::Reconfiguring { .. } => {
+                return Err(AiRuntimeError::InvalidLifecycle);
+            }
+        }
+        if !inner.active.is_empty() {
+            return Err(AiRuntimeError::Busy);
+        }
+        inner.runtime = None;
+        inner.lifecycle = AiRuntimeLifecycle::PermanentDrained;
+        Ok(())
+    }
+
+    /// Permanently close admission, cancel runs, wait for guards, and drop the runtime.
     ///
-    /// On timeout, lifecycle stays `Draining` and the runtime is retained.
-    pub async fn drain_and_drop(&self, deadline: Duration) -> bool {
-        self.begin_drain();
+    /// On timeout, lifecycle stays permanently draining and cannot be resumed.
+    pub async fn permanent_drain_and_drop(&self, deadline: Duration) -> bool {
+        self.begin_permanent_drain();
         if !self.wait_drained(deadline).await {
             return false;
         }
-        self.drop_runtime().is_ok()
+        self.drop_permanent_runtime().is_ok()
     }
 
     fn unregister(&self, run_id: AiRunId, generation: u64) {
@@ -507,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn admit_and_begin_drain_share_one_admission_lock() {
+    fn admit_and_permanent_drain_share_one_admission_lock() {
         for _ in 0..64 {
             let supervisor = AiRuntimeSupervisor::new();
             let barrier = Arc::new(Barrier::new(2));
@@ -523,7 +578,7 @@ mod tests {
             });
             let drain = std::thread::spawn(move || {
                 drain_barrier.wait();
-                drain_supervisor.begin_drain();
+                drain_supervisor.begin_permanent_drain();
             });
 
             let admitted = admit.join().expect("admit thread");
@@ -578,60 +633,66 @@ mod tests {
                 result = headers_received => result.expect("headers signal"),
             }
 
-            supervisor.begin_drain();
+            supervisor.begin_permanent_drain();
             assert!(!guard.is_live());
             assert!(matches!(
                 provider.as_mut().await,
                 Err(ProviderError::Cancelled)
             ));
             assert!(!supervisor.wait_drained(Duration::from_millis(10)).await);
-            assert_eq!(supervisor.drop_runtime(), Err(AiRuntimeError::Busy));
+            assert_eq!(
+                supervisor.drop_permanent_runtime(),
+                Err(AiRuntimeError::Busy)
+            );
         }
         drop(guard);
         assert!(supervisor.wait_drained(Duration::from_secs(1)).await);
-        supervisor.drop_runtime().expect("drop after guard");
+        supervisor
+            .drop_permanent_runtime()
+            .expect("drop after guard");
         server.abort();
         let _ = server.await;
     }
 
     #[tokio::test(start_paused = true)]
-    async fn timeout_then_guard_drop_requires_explicit_drop_before_resume() {
+    async fn timed_out_reconfigure_stays_fail_closed_after_guard_drop() {
         let supervisor = AiRuntimeSupervisor::new();
         let guard = supervisor.admit_run(AiRunId::new(), 1).expect("admit");
-        assert!(!supervisor.drain_and_drop(Duration::from_millis(5)).await);
+        let epoch = supervisor.begin_reconfigure().expect("begin epoch");
+        assert!(!supervisor.wait_drained(Duration::from_millis(5)).await);
         assert!(!supervisor.is_accepting());
         assert!(supervisor.has_runtime());
         assert_eq!(supervisor.active_count(), 1);
         drop(guard);
         assert!(supervisor.wait_drained(Duration::from_secs(1)).await);
         assert_eq!(
-            supervisor.resume_after_reconfigure(),
+            supervisor.finish_reconfigure(epoch),
             Err(AiRuntimeError::InvalidLifecycle)
         );
         assert!(supervisor.has_runtime());
-        supervisor.drop_runtime().expect("explicit drop");
-        supervisor
-            .resume_after_reconfigure()
-            .expect("resume after explicit drop");
-        assert!(supervisor.is_accepting());
+        assert!(!supervisor.is_accepting());
     }
 
     #[tokio::test(start_paused = true)]
-    async fn successful_drop_then_resume_creates_a_fresh_lazy_runtime() {
+    async fn successful_epoch_drop_then_finish_creates_a_fresh_lazy_runtime() {
         let supervisor = AiRuntimeSupervisor::new();
         let guard = supervisor.admit_run(AiRunId::new(), 1).expect("admit");
+        let epoch = supervisor.begin_reconfigure().expect("begin epoch");
         let drain = {
             let supervisor = Arc::clone(&supervisor);
-            tokio::spawn(async move { supervisor.drain_and_drop(Duration::from_secs(1)).await })
+            tokio::spawn(async move {
+                assert!(supervisor.wait_drained(Duration::from_secs(1)).await);
+                supervisor.drop_reconfigure_runtime(epoch)
+            })
         };
         tokio::task::yield_now().await;
         drop(guard);
-        assert!(drain.await.expect("join"));
+        drain.await.expect("join").expect("drop runtime");
         assert!(!supervisor.has_runtime());
         assert!(!supervisor.is_accepting());
         supervisor
-            .resume_after_reconfigure()
-            .expect("resume after clean drop");
+            .finish_reconfigure(epoch)
+            .expect("finish exact epoch");
         let next = supervisor
             .admit_run(AiRunId::new(), 1)
             .expect("fresh admission");
@@ -639,11 +700,41 @@ mod tests {
         assert!(next.is_live());
     }
 
+    #[test]
+    fn permanent_drain_invalidates_reconfigure_epoch_and_never_resumes() {
+        let supervisor = AiRuntimeSupervisor::new();
+        let epoch = supervisor.begin_reconfigure().expect("begin epoch");
+        supervisor
+            .drop_reconfigure_runtime(epoch)
+            .expect("drop for epoch");
+        supervisor.begin_permanent_drain();
+        assert_eq!(
+            supervisor.finish_reconfigure(epoch),
+            Err(AiRuntimeError::InvalidLifecycle)
+        );
+        supervisor
+            .drop_permanent_runtime()
+            .expect("finish permanent drop");
+        assert!(!supervisor.is_accepting());
+        assert_eq!(
+            supervisor.finish_reconfigure(epoch),
+            Err(AiRuntimeError::InvalidLifecycle)
+        );
+    }
+
     #[tokio::test(start_paused = true)]
     async fn shutdown_lifecycle_is_idempotent() {
         let supervisor = AiRuntimeSupervisor::new();
-        assert!(supervisor.drain_and_drop(Duration::from_secs(1)).await);
-        assert!(supervisor.drain_and_drop(Duration::from_secs(1)).await);
+        assert!(
+            supervisor
+                .permanent_drain_and_drop(Duration::from_secs(1))
+                .await
+        );
+        assert!(
+            supervisor
+                .permanent_drain_and_drop(Duration::from_secs(1))
+                .await
+        );
         assert!(!supervisor.has_runtime());
         assert!(!supervisor.is_accepting());
         assert_eq!(

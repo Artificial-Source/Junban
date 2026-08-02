@@ -5711,6 +5711,1340 @@ async fn malformed_automation_credentials_fail_closed_at_startup() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+// ── Phase 6 Wave 3c: operator AI configuration and discovery ────────────────
+
+fn default_voice_config() -> Value {
+    json!({
+        "cloud_speech_enabled": false,
+        "stt_provider": "browser",
+        "stt_model": null,
+        "tts_provider": "browser",
+        "tts_model": null,
+        "tts_voice": null,
+        "tts_enabled": true,
+        "voice_mode": "push_to_talk",
+        "grace_period_ms": 1000
+    })
+}
+
+#[tokio::test]
+async fn ai_routes_are_operator_only_before_body_parsing() {
+    let context = TestContext::new();
+    let (_id, token, _) = create_automation_via_api(&context, &["read", "write", "data"]).await;
+    for (method, path, body) in [
+        (Method::GET, "/api/v1/ai/providers", "{"),
+        (Method::GET, "/api/v1/ai/config", "{"),
+        (Method::PUT, "/api/v1/ai/config", "{"),
+        (Method::DELETE, "/api/v1/ai/config", "{"),
+        (Method::PUT, "/api/v1/ai/credentials/ai_provider", "{"),
+        (Method::DELETE, "/api/v1/ai/credentials/ai_provider", "{"),
+        (Method::GET, "/api/v1/ai/providers/ollama/models", "{"),
+    ] {
+        let response = context
+            .request(
+                bearer(method.clone(), path, &token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("idempotency-key", Uuid::now_v7().to_string())
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{method} {path}");
+        assert_eq!(json(response).await["error"]["code"], "operator_required");
+    }
+
+    let oversized = context
+        .request(
+            bearer(Method::PUT, "/api/v1/ai/credentials/ai_provider", &token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("idempotency-key", Uuid::now_v7().to_string())
+                .body(Body::from(vec![b'x'; MAX_BODY_BYTES + 1]))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(oversized.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn ai_operator_config_credentials_and_loopback_discovery_are_lazy_and_redacted() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    const SECRET: &str = "phase6-route-secret-marker-never-published";
+    let context = TestContext::new();
+    assert!(!context.state.ai_runtime().has_runtime());
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+
+    let providers = context
+        .request(
+            authenticated(Method::GET, "/api/v1/ai/providers")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(providers.status(), StatusCode::OK);
+    let providers = json(providers).await;
+    assert_eq!(providers["providers"].as_array().unwrap().len(), 13);
+    assert!(!providers.to_string().contains("deep_seek"));
+    assert!(providers.to_string().contains("deepseek"));
+    assert!(!providers.to_string().contains("xai"));
+
+    let config = context
+        .request(
+            authenticated(Method::GET, "/api/v1/ai/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(config.status(), StatusCode::OK);
+    assert!(!context.state.ai_runtime().has_runtime());
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+
+    let openai_config = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "openai",
+            "model": "gpt-test",
+            "base_url": "https://api.openai.com/v1",
+            "custom_instructions": "be concise",
+            "daily_briefing_enabled": true,
+            "default_energy": 3,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    let initially_configured = context
+        .request(
+            operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(openai_config.to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(initially_configured.status(), StatusCode::OK);
+
+    let credential_operation = Uuid::now_v7().to_string();
+    let credential_body = json!({"kind": "api_key", "secret": SECRET});
+    let credential = context
+        .request(
+            operation_header_key(
+                authenticated(Method::PUT, "/api/v1/ai/credentials/ai_provider"),
+                &credential_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(credential_body.to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(credential.status(), StatusCode::OK);
+    let credential = json(credential).await;
+    let credential_id = credential["credential"]["id"].as_str().unwrap().to_owned();
+    assert!(!credential.to_string().contains(SECRET));
+
+    let replay = context
+        .request(
+            operation_header_key(
+                authenticated(Method::PUT, "/api/v1/ai/credentials/ai_provider"),
+                &credential_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(credential_body.to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(json(replay).await["credential"]["id"], credential_id);
+
+    let connection =
+        rusqlite::Connection::open(context.directory.join("profile").join("junban.sqlite3"))
+            .unwrap();
+    let (receipt_request, receipt_response): (String, String) = connection
+        .query_row(
+            "SELECT request_json, response_json FROM operation_receipts WHERE operation_id = ?1",
+            [&credential_operation],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    let event_json: String = connection
+        .query_row(
+            "SELECT event_json FROM events WHERE operation_id = ?1",
+            [&credential_operation],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!receipt_request.contains(SECRET));
+    assert!(!receipt_response.contains(SECRET));
+    assert!(!event_json.contains(SECRET));
+    drop(connection);
+    let openapi_artifact = include_str!("../../../openapi/junban-v1.json");
+    assert!(!openapi_artifact.contains(SECRET));
+    assert!(!include_str!("../../../src/ui/api/generated.ts").contains(SECRET));
+    let openapi: Value = serde_json::from_str(openapi_artifact).unwrap();
+    let secret_schema =
+        &openapi["components"]["schemas"]["PutAiCredentialRequest"]["properties"]["secret"];
+    assert_eq!(secret_schema["writeOnly"], true);
+    assert!(secret_schema.get("default").is_none());
+    assert!(secret_schema.get("example").is_none());
+
+    let config_operation = Uuid::now_v7().to_string();
+    for _ in 0..2 {
+        let response = context
+            .request(
+                operation_header_key(
+                    authenticated(Method::PUT, "/api/v1/ai/config"),
+                    &config_operation,
+                )
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(openai_config.to_string()))
+                .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json(response).await;
+        assert_eq!(body["ai"]["provider"], "openai");
+        assert_eq!(body["credentials"]["ai_provider"]["id"], credential_id);
+        assert!(!body.to_string().contains(SECRET));
+    }
+
+    let rejected_delete = context
+        .request(
+            operation_header(authenticated(Method::DELETE, "/api/v1/ai/config"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(rejected_delete.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let cleared = context
+        .request(
+            operation_header(authenticated(
+                Method::DELETE,
+                "/api/v1/ai/credentials/ai_provider",
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(cleared.status(), StatusCode::OK);
+    assert!(json(cleared).await["credential"].is_null());
+
+    let deleted = context
+        .request(
+            operation_header(authenticated(Method::DELETE, "/api/v1/ai/config"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(deleted.status(), StatusCode::OK);
+    assert!(!json(deleted).await["ai"]["enabled"].as_bool().unwrap());
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 2048];
+        let read = socket.read(&mut request).await.unwrap();
+        let request = String::from_utf8_lossy(&request[..read]);
+        assert!(request.starts_with("GET /v1/models "));
+        let body = r#"{"data":[{"id":"model-b","name":"Model B"},{"id":"model-a"}]}"#;
+        socket
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    let ollama_config = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "ollama",
+            "model": "model-a",
+            "base_url": format!("http://{address}/v1"),
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    let configured = context
+        .request(
+            operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(ollama_config.to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(
+        configured.status(),
+        StatusCode::OK,
+        "{}",
+        json(configured).await
+    );
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+
+    let models = context
+        .request(
+            authenticated(Method::GET, "/api/v1/ai/providers/ollama/models")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(models.status(), StatusCode::OK);
+    let models = json(models).await;
+    assert_eq!(models["models"].as_array().unwrap().len(), 2);
+    assert_eq!(models["models"][0]["id"], "model-b");
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 1);
+    fixture.await.unwrap();
+
+    for name in ["junban.sqlite3", "junban.sqlite3-wal", "junban.sqlite3-shm"] {
+        let path = context.directory.join("profile").join(name);
+        if path.exists() {
+            assert!(
+                !String::from_utf8_lossy(&fs::read(path).unwrap()).contains(SECRET),
+                "secret material entered SQLite file {name}"
+            );
+        }
+    }
+    let diagnostics = context
+        .request(
+            authenticated(Method::GET, "/api/v1/diagnostics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert!(!String::from_utf8_lossy(&response_bytes(diagnostics).await).contains(SECRET));
+    assert!(!openapi_json().contains(SECRET));
+}
+
+#[tokio::test]
+async fn voice_credential_targets_bind_and_clear_presence_only_metadata() {
+    let context = TestContext::new();
+    let config = json!({
+        "ai": {
+            "enabled": false,
+            "provider": null,
+            "model": null,
+            "base_url": null,
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": {
+            "cloud_speech_enabled": true,
+            "stt_provider": "openai",
+            "stt_model": "whisper-fixture",
+            "tts_provider": "inworld",
+            "tts_model": "tts-fixture",
+            "tts_voice": "voice-fixture",
+            "tts_enabled": true,
+            "voice_mode": "push_to_talk",
+            "grace_period_ms": 1000
+        }
+    });
+    let configured = context
+        .request(
+            operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(config.to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(configured.status(), StatusCode::OK);
+
+    for (target, kind) in [("voice_stt", "api_key"), ("voice_tts", "inworld_jwt")] {
+        let marker = format!("{target}-private-route-fixture");
+        let response = context
+            .request(
+                operation_header(authenticated(
+                    Method::PUT,
+                    &format!("/api/v1/ai/credentials/{target}"),
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"kind":kind, "secret":marker}).to_string(),
+                ))
+                .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = json(response).await;
+        assert_eq!(response["target"], target);
+        assert_eq!(response["credential"]["present"], true);
+        assert!(!response.to_string().contains(&marker));
+    }
+
+    let confirmed = context
+        .request(
+            authenticated(Method::GET, "/api/v1/ai/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    let confirmed = json(confirmed).await;
+    assert_eq!(confirmed["credentials"]["voice_stt"]["present"], true);
+    assert_eq!(confirmed["credentials"]["voice_tts"]["present"], true);
+
+    for target in ["voice_stt", "voice_tts"] {
+        let response = context
+            .request(
+                operation_header(authenticated(
+                    Method::DELETE,
+                    &format!("/api/v1/ai/credentials/{target}"),
+                ))
+                .body(Body::empty())
+                .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(json(response).await["credential"].is_null());
+    }
+}
+
+#[tokio::test]
+async fn bound_ai_credential_blocks_every_authority_transition_before_drain_or_network() {
+    use tokio::net::TcpListener;
+
+    const MARKER: &str = "bound-authority-secret-marker";
+    let context = TestContext::new();
+    let openai = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "openai",
+            "model": "model-a",
+            "base_url": "https://api.openai.com/v1",
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    assert_eq!(
+        context
+            .request(
+                operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(openai.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        context
+            .request(
+                operation_header(authenticated(
+                    Method::PUT,
+                    "/api/v1/ai/credentials/ai_provider",
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"kind":"api_key", "secret":MARKER}).to_string(),
+                ))
+                .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    let fixture = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fixture_url = format!("http://{}/v1", fixture.local_addr().unwrap());
+    let before = context.state.service.get_settings().await.unwrap();
+    let guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 1)
+        .unwrap();
+    for (provider, base_url) in [
+        ("ollama", fixture_url.clone()),
+        ("custom", fixture_url.clone()),
+        ("anthropic", "https://api.anthropic.com".to_owned()),
+    ] {
+        let changed = json!({
+            "ai": {
+                "enabled": true,
+                "provider": provider,
+                "model": "model-b",
+                "base_url": base_url,
+                "custom_instructions": "",
+                "daily_briefing_enabled": false,
+                "default_energy": null,
+                "auto_send": false,
+                "smart_endpoint": false
+            },
+            "voice": default_voice_config()
+        });
+        let response = context
+            .request(
+                operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(changed.to_string()))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = json(response).await;
+        assert!(body["error"]["fields"].get("ai.provider").is_some());
+        assert!(
+            guard.is_live(),
+            "validation must happen before runtime drain"
+        );
+        assert_eq!(context.state.service.get_settings().await.unwrap(), before);
+        assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(30), fixture.accept())
+            .await
+            .is_err(),
+        "rejected authority reached the fixture"
+    );
+    drop(guard);
+
+    assert_eq!(
+        context
+            .request(
+                operation_header(authenticated(
+                    Method::DELETE,
+                    "/api/v1/ai/credentials/ai_provider",
+                ))
+                .body(Body::empty())
+                .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    let first_custom = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let second_custom = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let custom = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "custom",
+            "model": "model-a",
+            "base_url": format!("http://{}/v1", first_custom.local_addr().unwrap()),
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    assert_eq!(
+        context
+            .request(
+                operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(custom.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        context
+            .request(
+                operation_header(authenticated(
+                    Method::PUT,
+                    "/api/v1/ai/credentials/ai_provider",
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"kind":"bearer", "secret":MARKER}).to_string(),
+                ))
+                .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    let before = context.state.service.get_settings().await.unwrap();
+    let guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 2)
+        .unwrap();
+    let mut moved_custom = custom;
+    moved_custom["ai"]["base_url"] =
+        json!(format!("http://{}/v1", second_custom.local_addr().unwrap()));
+    let response = context
+        .request(
+            operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(moved_custom.to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = json(response).await;
+    assert!(body["error"]["fields"].get("ai.base_url").is_some());
+    assert!(guard.is_live());
+    assert_eq!(context.state.service.get_settings().await.unwrap(), before);
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+    for listener in [&first_custom, &second_custom] {
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[tokio::test]
+async fn bound_speech_credentials_block_provider_changes_before_drain() {
+    let context = TestContext::new();
+    let configured = json!({
+        "ai": {
+            "enabled": false,
+            "provider": null,
+            "model": null,
+            "base_url": null,
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": {
+            "cloud_speech_enabled": true,
+            "stt_provider": "openai",
+            "stt_model": null,
+            "tts_provider": "inworld",
+            "tts_model": null,
+            "tts_voice": null,
+            "tts_enabled": true,
+            "voice_mode": "push_to_talk",
+            "grace_period_ms": 1000
+        }
+    });
+    assert_eq!(
+        context
+            .request(
+                operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(configured.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    for (target, kind) in [("voice_stt", "api_key"), ("voice_tts", "inworld_basic")] {
+        assert_eq!(
+            context
+                .request(
+                    operation_header(authenticated(
+                        Method::PUT,
+                        &format!("/api/v1/ai/credentials/{target}"),
+                    ))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"kind":kind, "secret":format!("{target}-authority-marker")})
+                            .to_string(),
+                    ))
+                    .unwrap(),
+                )
+                .await
+                .status(),
+            StatusCode::OK
+        );
+    }
+    let before = context.state.service.get_settings().await.unwrap();
+    let guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 1)
+        .unwrap();
+    for (field, stt, tts) in [
+        ("voice.stt_provider", "groq", "inworld"),
+        ("voice.tts_provider", "openai", "openai"),
+    ] {
+        let mut changed = configured.clone();
+        changed["voice"]["stt_provider"] = json!(stt);
+        changed["voice"]["tts_provider"] = json!(tts);
+        let response = context
+            .request(
+                operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(changed.to_string()))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = json(response).await;
+        assert!(body["error"]["fields"].get(field).is_some());
+        assert!(guard.is_live());
+        assert_eq!(context.state.service.get_settings().await.unwrap(), before);
+    }
+}
+
+#[tokio::test]
+async fn credential_put_for_none_authority_rejects_before_drain_or_secret_publication() {
+    const MARKER: &str = "none-authority-must-not-stage";
+    let context = TestContext::new();
+    let unselected_guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 1)
+        .unwrap();
+    let unselected = context
+        .request(
+            operation_header(authenticated(
+                Method::PUT,
+                "/api/v1/ai/credentials/ai_provider",
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"kind":"bearer", "secret":MARKER}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(unselected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let unselected = json(unselected).await;
+    assert!(
+        unselected["error"]["fields"]
+            .get("credential.target")
+            .is_some()
+    );
+    assert!(!unselected.to_string().contains(MARKER));
+    assert!(unselected_guard.is_live());
+    assert!(!context.directory.join("profile/ai-secrets.json").exists());
+    drop(unselected_guard);
+
+    let ollama = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "ollama",
+            "model": "fixture",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    assert_eq!(
+        context
+            .request(
+                operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(ollama.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    let guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 1)
+        .unwrap();
+    let response = context
+        .request(
+            operation_header(authenticated(
+                Method::PUT,
+                "/api/v1/ai/credentials/ai_provider",
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"kind":"bearer", "secret":MARKER}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = json(response).await;
+    assert!(body["error"]["fields"].get("credential.kind").is_some());
+    assert!(!body.to_string().contains(MARKER));
+    assert!(guard.is_live());
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+    assert!(!context.directory.join("profile/ai-secrets.json").exists());
+}
+
+#[tokio::test]
+async fn reflected_discovery_credential_is_rejected_without_response_leak() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    const MARKER: &str = "discovery-success-reflection-marker";
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = [0_u8; 2048];
+        let _ = socket.read(&mut request).await.unwrap();
+        let body = format!(r#"{{"data":[{{"id":"model-{MARKER}"}}]}}"#);
+        socket
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    let context = TestContext::new();
+    let configured = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "custom",
+            "model": "fixture",
+            "base_url": format!("http://{address}/v1"),
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    assert_eq!(
+        context
+            .request(
+                operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(configured.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        context
+            .request(
+                operation_header(authenticated(
+                    Method::PUT,
+                    "/api/v1/ai/credentials/ai_provider",
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"kind":"bearer", "secret":MARKER}).to_string(),
+                ))
+                .unwrap(),
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    let response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/ai/providers/custom/models")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = response_bytes(response).await;
+    assert!(!String::from_utf8_lossy(&body).contains(MARKER));
+    fixture.await.unwrap();
+}
+
+#[tokio::test]
+async fn ai_reconfigure_cancels_and_drains_before_commit_then_resumes() {
+    let context = TestContext::new();
+    let guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 1)
+        .unwrap();
+    let body = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "ollama",
+            "model": "fixture",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    let app = context.app.clone();
+    let request = operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let pending = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
+    while guard.is_live() {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        !context
+            .state
+            .service
+            .get_settings()
+            .await
+            .unwrap()
+            .ai
+            .enabled
+    );
+    assert!(
+        !pending.is_finished(),
+        "commit ran before held guard dropped"
+    );
+    drop(guard);
+    let response = pending.await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        context
+            .state
+            .service
+            .get_settings()
+            .await
+            .unwrap()
+            .ai
+            .enabled
+    );
+    assert!(context.state.ai_runtime().is_accepting());
+
+    // A post-drop commit failure must still resume admission with old confirmed settings.
+    let mismatch = json!({
+        "ai": {
+            "enabled": false,
+            "provider": null,
+            "model": null,
+            "base_url": null,
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    let operation = Uuid::now_v7().to_string();
+    let first = context
+        .request(
+            operation_header_key(authenticated(Method::PUT, "/api/v1/ai/config"), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let failed = context
+        .request(
+            operation_header_key(authenticated(Method::PUT, "/api/v1/ai/config"), &operation)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(mismatch.to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(failed.status(), StatusCode::CONFLICT);
+    assert!(
+        context
+            .state
+            .service
+            .get_settings()
+            .await
+            .unwrap()
+            .ai
+            .enabled
+    );
+    assert!(context.state.ai_runtime().is_accepting());
+    drop(
+        context
+            .state
+            .ai_runtime()
+            .admit_run(junban_domain::AiRunId::new(), 1)
+            .unwrap(),
+    );
+}
+
+#[tokio::test]
+async fn cancelled_handler_after_storage_result_does_not_cancel_reconfigure_worker() {
+    let context = TestContext::new();
+    let body = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "ollama",
+            "model": "detached-worker",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    context.state.ai_reconfigure_test_gate.arm();
+    let app = context.app.clone();
+    let request = operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let handler = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
+    context.state.ai_reconfigure_test_gate.wait_reached().await;
+    assert!(
+        context
+            .state
+            .service
+            .get_settings()
+            .await
+            .unwrap()
+            .ai
+            .enabled,
+        "storage result was not committed before the test gate"
+    );
+    assert!(!context.state.ai_runtime().is_accepting());
+    handler.abort();
+    assert!(handler.await.unwrap_err().is_cancelled());
+    assert!(!context.state.ai_runtime().is_accepting());
+
+    context.state.ai_reconfigure_test_gate.release();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !context.state.ai_runtime().is_accepting() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("detached worker finished its exact epoch");
+    assert!(
+        context
+            .state
+            .service
+            .get_settings()
+            .await
+            .unwrap()
+            .ai
+            .enabled
+    );
+}
+
+#[tokio::test]
+async fn cancelled_handler_during_drain_cannot_strand_temporary_lifecycle() {
+    let context = TestContext::new();
+    let guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 1)
+        .unwrap();
+    let body = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "ollama",
+            "model": "cancelled-during-drain",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    let app = context.app.clone();
+    let request = operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let handler = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
+    while guard.is_live() {
+        tokio::task::yield_now().await;
+    }
+    handler.abort();
+    assert!(handler.await.unwrap_err().is_cancelled());
+    assert!(!context.state.ai_runtime().is_accepting());
+    assert!(
+        !context
+            .state
+            .service
+            .get_settings()
+            .await
+            .unwrap()
+            .ai
+            .enabled
+    );
+    drop(guard);
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let settings = context.state.service.get_settings().await.unwrap();
+            if settings.ai.enabled && context.state.ai_runtime().is_accepting() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("detached drain/drop/commit/finish sequence completed");
+}
+
+#[tokio::test]
+async fn restore_waits_for_owned_reconfigure_commit_then_permanently_drains() {
+    let context = TestContext::new();
+    let backup = response_bytes(
+        context
+            .request(
+                authenticated(Method::GET, "/api/v1/backup")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await,
+    )
+    .await;
+    let body = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "ollama",
+            "model": "restore-overlap",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    context.state.ai_reconfigure_test_gate.arm();
+    let app = context.app.clone();
+    let config_request = operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let config = tokio::spawn(async move { app.oneshot(config_request).await.unwrap() });
+    context.state.ai_reconfigure_test_gate.wait_reached().await;
+
+    let app = context.app.clone();
+    let restore = tokio::spawn(async move {
+        app.oneshot(
+            authenticated(Method::POST, "/api/v1/backup/restore")
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from(backup))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !context.state.maintenance().restart_required() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("restore entered maintenance");
+    assert!(!restore.is_finished());
+    assert!(!config.is_finished());
+    assert!(!context.state.ai_runtime().is_accepting());
+
+    context.state.ai_reconfigure_test_gate.release();
+    assert_eq!(config.await.unwrap().status(), StatusCode::OK);
+    assert_eq!(restore.await.unwrap().status(), StatusCode::OK);
+    assert!(!context.state.ai_runtime().is_accepting());
+    assert!(!context.state.ai_runtime().has_runtime());
+    assert!(context.state.maintenance().restart_required());
+}
+
+#[tokio::test]
+async fn shutdown_invalidates_inflight_epoch_after_commit_and_never_resumes() {
+    let context = TestContext::new();
+    let body = json!({
+        "ai": {
+            "enabled": true,
+            "provider": "ollama",
+            "model": "shutdown-overlap",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    context.state.ai_reconfigure_test_gate.arm();
+    let app = context.app.clone();
+    let request = operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let handler = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
+    context.state.ai_reconfigure_test_gate.wait_reached().await;
+    assert!(!context.state.ai_runtime().is_accepting());
+    context.state.begin_ai_shutdown();
+    context.state.ai_reconfigure_test_gate.release();
+    let response = handler.await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        json(response).await["error"]["code"],
+        "ai_runtime_unavailable"
+    );
+    assert!(!context.state.ai_runtime().is_accepting());
+    assert!(
+        context
+            .state
+            .service
+            .get_settings()
+            .await
+            .unwrap()
+            .ai
+            .enabled,
+        "commit completed before shutdown invalidated the epoch"
+    );
+    context
+        .state
+        .shutdown_ai_runtime(Duration::from_secs(1))
+        .await;
+    assert!(!context.state.ai_runtime().is_accepting());
+}
+
+#[tokio::test(start_paused = true)]
+async fn ai_reconfigure_timeout_leaves_database_and_secret_file_unchanged() {
+    const SECRET: &str = "phase6-timeout-secret-marker";
+    let context = TestContext::new();
+    let config = json!({
+        "ai": {
+            "enabled": false,
+            "provider": "openai",
+            "model": null,
+            "base_url": "https://api.openai.com/v1",
+            "custom_instructions": "",
+            "daily_briefing_enabled": false,
+            "default_energy": null,
+            "auto_send": false,
+            "smart_endpoint": false
+        },
+        "voice": default_voice_config()
+    });
+    let configured = context
+        .request(
+            operation_header(authenticated(Method::PUT, "/api/v1/ai/config"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(config.to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(configured.status(), StatusCode::OK);
+    let guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 1)
+        .unwrap();
+    let app = context.app.clone();
+    let request = operation_header(authenticated(
+        Method::PUT,
+        "/api/v1/ai/credentials/ai_provider",
+    ))
+    .header(header::CONTENT_TYPE, "application/json")
+    .body(Body::from(
+        json!({"kind":"api_key", "secret":SECRET}).to_string(),
+    ))
+    .unwrap();
+    let pending = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
+    while guard.is_live() {
+        tokio::task::yield_now().await;
+    }
+    let secrets = context.directory.join("profile/ai-secrets.json");
+    assert!(!secrets.exists());
+    assert!(
+        context
+            .state
+            .service
+            .get_settings()
+            .await
+            .unwrap()
+            .ai
+            .credential_id
+            .is_none()
+    );
+    tokio::time::advance(AI_RECONFIGURE_DRAIN_DEADLINE).await;
+    tokio::task::yield_now().await;
+    let response = pending.await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        json(response).await["error"]["code"],
+        "ai_reconfigure_timeout"
+    );
+    assert!(!secrets.exists());
+    assert!(
+        context
+            .state
+            .service
+            .get_settings()
+            .await
+            .unwrap()
+            .ai
+            .credential_id
+            .is_none()
+    );
+    assert!(!context.state.ai_runtime().is_accepting());
+    drop(guard);
+}
+
+#[tokio::test]
+async fn malformed_and_oversize_ai_credentials_never_publish_secret() {
+    let context = TestContext::new();
+    let secrets = context.directory.join("profile/ai-secrets.json");
+    let malformed = context
+        .request(
+            operation_header(authenticated(
+                Method::PUT,
+                "/api/v1/ai/credentials/ai_provider",
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"kind":"api_key","secret":"has\ncontrol"}"#))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(malformed.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(!secrets.exists());
+
+    let oversized_secret = "x".repeat(junban_domain::AI_SECRET_BYTES_MAX + 1);
+    let oversized = context
+        .request(
+            operation_header(authenticated(
+                Method::PUT,
+                "/api/v1/ai/credentials/ai_provider",
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"kind":"api_key", "secret":oversized_secret}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(oversized.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(!secrets.exists());
+
+    let oversized_body = context
+        .request(
+            operation_header(authenticated(
+                Method::PUT,
+                "/api/v1/ai/credentials/ai_provider",
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(vec![b'x'; crate::MAX_AI_CONFIG_BODY_BYTES + 1]))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(oversized_body.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(!secrets.exists());
+}
+
 #[test]
 fn openapi_operations_have_explicit_route_classification() {
     let doc: Value = serde_json::from_str(&openapi_json()).unwrap();

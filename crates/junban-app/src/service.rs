@@ -4,21 +4,22 @@ use std::sync::Arc;
 
 use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
-    AiApprovalId, AiMemory, AiMemoryId, AiMessage, AiRunId, AiRunState, AiSession, AiSessionId,
-    AiToolApproval, AppSettings, ClaimedReminder, Comment, CommentBody, CommentId,
-    DEFAULT_REMINDER_CLAIM_LIMIT, DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS,
-    DailyCapacityMinutes, EntityName, FilterQuery, HexColor, MAX_CALENDAR_TASKS,
-    MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS, MarkdownText, NudgeRuleKind, OperationId,
-    ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode,
-    ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId, SettingsPatch, TagId, TagName,
-    Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort, TaskStatus,
-    TaskTitle, TemplateId, TimeBlock, TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft,
-    TimeSlotId, TransferApply, TransferError, TransferFormat, TransferPreview, ValidationError,
-    WeekStart, civil_occurrences_in_range, daily_plan_summary, dopamine_menu_task_ids,
-    end_of_day_summary, evaluate_nudges, preview_transfer, select_eat_the_frog, stats_summary,
-    task_jar_candidates, validate_calendar_date_range, validate_owner_lost_mark_limit,
-    validate_preview_matches_apply, validate_reminder_claim_limit, validate_reminder_lease_secs,
-    validate_stats_date_range, validate_timeblock_date_range, weekly_review_summary,
+    AiApprovalId, AiCredentialId, AiMemory, AiMemoryId, AiMessage, AiRunId, AiRunState,
+    AiSecretMetadata, AiSession, AiSessionId, AiToolApproval, AppSettings, ClaimedReminder,
+    Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT, DEFAULT_REMINDER_CLAIM_SECS,
+    DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName, FilterQuery, HexColor,
+    MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS, MarkdownText,
+    NudgeRuleKind, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
+    ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId,
+    SettingsPatch, TagId, TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation,
+    TaskSort, TaskStatus, TaskTitle, TemplateId, TimeBlock, TimeBlockDraft, TimeBlockId, TimeSlot,
+    TimeSlotDraft, TimeSlotId, TransferApply, TransferError, TransferFormat, TransferPreview,
+    ValidationError, WeekStart, civil_occurrences_in_range, daily_plan_summary,
+    dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges, preview_transfer,
+    select_eat_the_frog, stats_summary, task_jar_candidates, validate_calendar_date_range,
+    validate_owner_lost_mark_limit, validate_preview_matches_apply, validate_reminder_claim_limit,
+    validate_reminder_lease_secs, validate_stats_date_range, validate_timeblock_date_range,
+    weekly_review_summary,
 };
 
 use crate::{
@@ -1567,6 +1568,25 @@ where
             .map_err(AppError::from)
     }
 
+    /// Read presence-only private credential metadata without publishing an event.
+    pub async fn list_ai_secret_metadata(&self) -> Result<Vec<AiSecretMetadata>, AppError> {
+        self.repository
+            .list_ai_secret_metadata()
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Resolve private credential material transiently for provider endpoint construction.
+    pub async fn resolve_ai_secret(
+        &self,
+        credential_id: AiCredentialId,
+    ) -> Result<crate::AiSecretBytes, AppError> {
+        self.repository
+            .resolve_ai_secret(credential_id)
+            .await
+            .map_err(AppError::from)
+    }
+
     pub async fn bind_ai_credential(
         &self,
         operation_id: OperationId,
@@ -2788,6 +2808,21 @@ mod tests {
             self.calls.lock().unwrap().push("get_ai_run_state");
             Box::pin(async { Err(RepositoryError::NotFound) })
         }
+        fn list_ai_secret_metadata(
+            &self,
+        ) -> crate::RepositoryFuture<'_, Vec<junban_domain::AiSecretMetadata>> {
+            self.calls.lock().unwrap().push("list_ai_secret_metadata");
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn resolve_ai_secret(
+            &self,
+            _: junban_domain::AiCredentialId,
+        ) -> crate::RepositoryFuture<'_, crate::AiSecretBytes> {
+            self.calls.lock().unwrap().push("resolve_ai_secret");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+
         fn bind_ai_credential(
             &self,
             _: OperationId,

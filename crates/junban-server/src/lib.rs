@@ -11,6 +11,7 @@ mod maintenance;
 mod owner_runtime;
 mod reminder_wake;
 mod routes;
+mod routes_ai;
 mod sse;
 
 use std::{
@@ -41,7 +42,9 @@ use junban_storage::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::broadcast;
+#[cfg(test)]
+use tokio::sync::Notify;
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
 use tokio_util::sync::CancellationToken;
 use tower_http::services::{ServeDir, ServeFile};
 use utoipa::{
@@ -77,6 +80,10 @@ use crate::routes::{
     restore_backup, revoke_automation_credential, rotate_token, settle_reminder_delivered,
     settle_reminder_failed, stats, uncomplete_task, undo_operation,
 };
+use crate::routes_ai::{
+    delete_ai_config, delete_ai_credential, discover_ai_provider_models, get_ai_config,
+    list_ai_providers, put_ai_config, put_ai_credential,
+};
 use crate::sse::{AppService, SseConnectionPermit};
 
 pub use crate::ai_runtime::{AiRunGuard, AiRuntimeError, AiRuntimeSupervisor, MAX_ACTIVE_AI_RUNS};
@@ -109,6 +116,10 @@ pub const MAX_BACKUP_BODY_BYTES: usize = junban_domain::MAX_BACKUP_PAYLOAD_BYTES
 pub const RESTORE_DRAIN_DEADLINE: Duration = Duration::from_secs(5);
 /// Bounded AI cancel/drain deadline during process shutdown.
 pub const AI_SHUTDOWN_DRAIN_DEADLINE: Duration = Duration::from_secs(5);
+/// Bounded cancel/drain deadline before confirmed AI/voice reconfiguration.
+pub const AI_RECONFIGURE_DRAIN_DEADLINE: Duration = Duration::from_secs(5);
+/// Strict ceiling for typed AI/voice configuration and credential request bodies.
+pub const MAX_AI_CONFIG_BODY_BYTES: usize = 32 * 1024;
 const AUTH_ATTEMPTS: usize = 8;
 const AUTH_WINDOW: Duration = Duration::from_secs(30);
 pub const TOKEN_FILE: &str = "access-token";
@@ -294,6 +305,36 @@ impl Drop for RecoveryRestorePermit {
     }
 }
 
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct AiReconfigureTestGate {
+    armed: AtomicBool,
+    reached: Notify,
+    release: Notify,
+}
+
+#[cfg(test)]
+impl AiReconfigureTestGate {
+    pub(crate) fn arm(&self) {
+        self.armed.store(true, Ordering::Release);
+    }
+
+    pub(crate) async fn wait_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+
+    pub(crate) async fn pause_after_commit(&self) {
+        if self.armed.swap(false, Ordering::AcqRel) {
+            self.reached.notify_one();
+            self.release.notified().await;
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ServerState {
     pub(crate) service: AppService,
@@ -323,6 +364,10 @@ pub struct ServerState {
     reminder_coordinator_stopped: Arc<AtomicBool>,
     /// Lazy AI provider runtime + live-run registry (normal owner only).
     ai_runtime: Arc<AiRuntimeSupervisor>,
+    /// Serializes confirmed AI/voice reconfiguration and consistent config reads.
+    pub(crate) ai_reconfigure: Arc<AsyncMutex<()>>,
+    #[cfg(test)]
+    pub(crate) ai_reconfigure_test_gate: Arc<AiReconfigureTestGate>,
     /// Random per-process instance id shared with runtime metadata and health.
     instance_id: Arc<str>,
 }
@@ -403,6 +448,9 @@ impl ServerState {
             reminder_coordinator: Arc::new(Mutex::new(None)),
             reminder_coordinator_stopped: Arc::new(AtomicBool::new(false)),
             ai_runtime: AiRuntimeSupervisor::new(),
+            ai_reconfigure: Arc::new(AsyncMutex::new(())),
+            #[cfg(test)]
+            ai_reconfigure_test_gate: Arc::new(AiReconfigureTestGate::default()),
             instance_id: Arc::from(generate_instance_id()),
         })
     }
@@ -646,24 +694,24 @@ impl ServerState {
         }
     }
 
-    /// Synchronously close AI admission and cancel every active run.
+    /// Synchronously close AI admission, invalidate any temporary epoch, and cancel all runs.
     ///
     /// Shutdown paths call this before general cancellation or waiting for Axum.
     pub fn begin_ai_shutdown(&self) {
-        self.ai_runtime.begin_drain();
+        self.ai_runtime.begin_permanent_drain();
     }
 
-    /// Cancel and drain AI work, then drop the lazy provider runtime on success.
+    /// Permanently cancel and drain AI work, then drop the lazy runtime on success.
     ///
-    /// On timeout, lifecycle stays draining and the runtime is retained (fail-closed).
+    /// On timeout, lifecycle stays permanently draining and fail-closed.
     pub async fn drain_ai_runtime(&self, deadline: Duration) -> bool {
-        self.ai_runtime.drain_and_drop(deadline).await
+        self.ai_runtime.permanent_drain_and_drop(deadline).await
     }
 
     /// Hosted-process AI teardown. A timeout may continue process exit, but AI
     /// cancellation must already have begun before Axum graceful drain.
     pub async fn shutdown_ai_runtime(&self, deadline: Duration) {
-        if self.ai_runtime.drain_and_drop(deadline).await {
+        if self.ai_runtime.permanent_drain_and_drop(deadline).await {
             return;
         }
         tracing::warn!("AI runtime drain timed out during shutdown; continuing process shutdown");
@@ -894,6 +942,24 @@ fn api_route_table() -> Router<ServerState> {
         .route("/api/v1/nudges", get(nudges))
         .route("/api/v1/settings", get(get_settings).patch(patch_settings))
         .route("/api/v1/settings/temporal", get(get_temporal_settings))
+        .route("/api/v1/ai/providers", get(list_ai_providers))
+        .route(
+            "/api/v1/ai/providers/{provider}/models",
+            get(discover_ai_provider_models),
+        )
+        .route(
+            "/api/v1/ai/config",
+            get(get_ai_config)
+                .put(put_ai_config)
+                .delete(delete_ai_config)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/credentials/{target}",
+            axum::routing::put(put_ai_credential)
+                .delete(delete_ai_credential)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
         .route(
             "/api/v1/imports/preview",
             post(preview_import).layer(DefaultBodyLimit::max(MAX_TRANSFER_BODY_BYTES)),
@@ -1571,6 +1637,13 @@ impl Modify for SecurityAddon {
         routes::get_settings,
         routes::patch_settings,
         routes::get_temporal_settings,
+        routes_ai::list_ai_providers,
+        routes_ai::get_ai_config,
+        routes_ai::put_ai_config,
+        routes_ai::delete_ai_config,
+        routes_ai::put_ai_credential,
+        routes_ai::delete_ai_credential,
+        routes_ai::discover_ai_provider_models,
         routes::preview_import,
         routes::apply_import,
         routes::export_tasks,
@@ -1734,6 +1807,27 @@ impl Modify for SecurityAddon {
         dto::AppSettingsResponse,
         dto::PatchSettingsRequest,
         dto::TemporalSettingsResponse,
+        routes_ai::AiProviderPresetDto,
+        routes_ai::SpeechProviderPresetDto,
+        routes_ai::VoiceModeDto,
+        routes_ai::AiSecretKindDto,
+        routes_ai::AiCredentialTargetDto,
+        routes_ai::ProviderOriginClassDto,
+        routes_ai::ProviderCapabilityDto,
+        routes_ai::AiProviderRegistryEntry,
+        routes_ai::AiProviderRegistryResponse,
+        routes_ai::AiSettingsDto,
+        routes_ai::VoiceSettingsDto,
+        routes_ai::AiCredentialMetadataDto,
+        routes_ai::AiCredentialBindingsDto,
+        routes_ai::AiConfigResponse,
+        routes_ai::AiConfigPutRequest,
+        routes_ai::AiConfigInput,
+        routes_ai::VoiceConfigInput,
+        routes_ai::PutAiCredentialRequest,
+        routes_ai::AiCredentialBindingResponse,
+        routes_ai::DiscoveredModelDto,
+        routes_ai::ModelDiscoveryResponse,
         dto::EatTheFrogResponse,
         dto::TaskJarResponse,
         dto::DopamineMenuResponse,

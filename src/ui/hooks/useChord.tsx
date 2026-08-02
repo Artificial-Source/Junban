@@ -1,19 +1,17 @@
-/**
- * Phase 2 keyboard shortcuts and chord indicator.
- * Ships only working Phase 2 commands. Later-phase commands are absent.
- * Shortcuts do not intercept focused inputs or modal focus traps.
- *
- * Config keys use the `cmd+…` spelling. That primary modifier is Meta on
- * Apple platforms and Control elsewhere (Linux/Windows).
- */
+/** Server-confirmed keyboard shortcuts and two-key chord indicator. */
 import { useEffect, useRef, useState } from "react";
 
 export interface ShortcutCommand {
   id: string;
   description: string;
-  defaultKey: string;
-  chord?: string;
+  /** Platform-independent canonical binding (`cmd+k` or `g t`). */
+  binding: string;
   action: () => void;
+}
+
+export interface PersistedShortcut {
+  action: string;
+  chord: string;
 }
 
 export interface ChordState {
@@ -32,6 +30,35 @@ export function isAppleHotkeyPlatform(
   return /Mac|iPhone|iPad|iPod/.test(haystack);
 }
 
+/** Resolve one command from an authoritative settings snapshot. */
+export function shortcutBindingFor(
+  shortcuts: readonly PersistedShortcut[] | null | undefined,
+  action: string,
+  fallback: string,
+): string {
+  return shortcuts?.find((shortcut) => shortcut.action === action)?.chord ?? fallback;
+}
+
+/** Present a canonical binding using the current platform's primary modifier. */
+export function formatShortcutBinding(
+  binding: string,
+  apple: boolean = isAppleHotkeyPlatform(),
+): string {
+  return binding
+    .split(" ")
+    .map((stroke) =>
+      stroke
+        .split("+")
+        .map((part) => {
+          if (part === "cmd") return apple ? "⌘" : "Ctrl";
+          if (part === "shift") return apple ? "⇧" : "Shift";
+          return part.length === 1 ? part.toUpperCase() : part;
+        })
+        .join(apple ? "" : "+"),
+    )
+    .join(" ");
+}
+
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
@@ -39,11 +66,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return target.isContentEditable;
 }
 
-/**
- * Normalize a keydown into the config spelling (`cmd+k`, `cmd+shift+p`, `g`, …).
- * Returns null when the event should not match shortcuts (Alt, wrong-platform
- * primary modifier, or modifier-only keydowns).
- */
+/** Normalize keydown input to the persisted platform-independent spelling. */
 export function normalizeKey(
   e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
   apple: boolean = isAppleHotkeyPlatform(),
@@ -52,7 +75,6 @@ export function normalizeKey(
 
   const primaryPressed = apple ? e.metaKey : e.ctrlKey;
   const wrongPrimary = apple ? e.ctrlKey && !e.metaKey : e.metaKey && !e.ctrlKey;
-  // Reject the non-primary accelerator used alone (Ctrl on macOS, Super on Linux/Windows).
   if (wrongPrimary && !primaryPressed) return null;
 
   const parts: string[] = [];
@@ -93,40 +115,34 @@ export function useChord(commands: ShortcutCommand[], enabled: boolean): { chord
       const pressed = normalizeKey(e);
       if (!pressed) return;
 
-      // Check for chord completion.
       if (pendingChordRef.current) {
         const chordCombo = `${pendingChordRef.current} ${pressed}`;
         clearChord();
-        for (const cmd of commandsRef.current) {
-          if (cmd.chord && cmd.chord.toLowerCase() === chordCombo) {
+        for (const command of commandsRef.current) {
+          if (command.binding === chordCombo) {
             e.preventDefault();
-            cmd.action();
-            return;
-          }
-        }
-        // No match — fall through to single-key handling below.
-      }
-
-      // Check if this key starts any chord.
-      for (const cmd of commandsRef.current) {
-        if (cmd.chord) {
-          const firstKey = cmd.chord.toLowerCase().split(" ")[0];
-          if (firstKey === pressed) {
-            e.preventDefault();
-            setPendingChord(pressed);
-            pendingChordRef.current = pressed;
-            if (chordTimerRef.current) clearTimeout(chordTimerRef.current);
-            chordTimerRef.current = setTimeout(clearChord, 1000);
+            command.action();
             return;
           }
         }
       }
 
-      // Single-key shortcuts.
-      for (const cmd of commandsRef.current) {
-        if (cmd.defaultKey && cmd.defaultKey.toLowerCase() === pressed) {
+      for (const command of commandsRef.current) {
+        const [first, second] = command.binding.split(" ");
+        if (second && first === pressed) {
           e.preventDefault();
-          cmd.action();
+          setPendingChord(pressed);
+          pendingChordRef.current = pressed;
+          if (chordTimerRef.current) clearTimeout(chordTimerRef.current);
+          chordTimerRef.current = setTimeout(clearChord, 1000);
+          return;
+        }
+      }
+
+      for (const command of commandsRef.current) {
+        if (!command.binding.includes(" ") && command.binding === pressed) {
+          e.preventDefault();
+          command.action();
           return;
         }
       }
@@ -142,9 +158,6 @@ export function useChord(commands: ShortcutCommand[], enabled: boolean): { chord
   return { chord: { pending: pendingChord } };
 }
 
-/**
- * Chord indicator component showing pending chord state.
- */
 export function ChordIndicator({ chord }: { chord: ChordState }) {
   if (!chord.pending) return null;
 

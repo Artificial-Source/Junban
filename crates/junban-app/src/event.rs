@@ -55,6 +55,8 @@ impl EventType {
     pub const TIME_SLOT_UPDATED: &'static str = "time_slot.updated";
     pub const TIME_SLOT_DELETED: &'static str = "time_slot.deleted";
     pub const TIME_SLOT_MEMBERSHIP_UPDATED: &'static str = "time_slot.membership_updated";
+    pub const SETTINGS_UPDATED: &'static str = "settings.updated";
+    pub const IMPORT_APPLIED: &'static str = "import.applied";
 
     #[must_use]
     pub fn new(value: impl Into<String>) -> Self {
@@ -87,6 +89,7 @@ pub enum ResourceType {
     Operation,
     TimeBlock,
     TimeSlot,
+    Settings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,6 +178,14 @@ impl ResourceRef {
             id: id.to_string(),
         }
     }
+
+    #[must_use]
+    pub fn settings() -> Self {
+        Self {
+            resource_type: ResourceType::Settings,
+            id: "settings".to_owned(),
+        }
+    }
 }
 
 /// At most one tagged resource snapshot is attached to a single-resource event.
@@ -261,24 +272,36 @@ pub struct ResyncScope {
     pub tasks: bool,
     /// Clients should reload the organization catalog snapshot.
     pub catalog: bool,
+    /// Clients should reload the settings aggregate.
+    #[serde(default)]
+    pub settings: bool,
 }
 
 impl ResyncScope {
     pub const NONE: Self = Self {
         tasks: false,
         catalog: false,
+        settings: false,
     };
     pub const TASKS: Self = Self {
         tasks: true,
         catalog: false,
+        settings: false,
     };
     pub const CATALOG: Self = Self {
         tasks: false,
         catalog: true,
+        settings: false,
+    };
+    pub const SETTINGS: Self = Self {
+        tasks: false,
+        catalog: false,
+        settings: true,
     };
     pub const BOTH: Self = Self {
         tasks: true,
         catalog: true,
+        settings: false,
     };
 }
 

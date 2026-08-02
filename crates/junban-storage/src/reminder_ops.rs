@@ -68,7 +68,7 @@ pub(crate) fn load_reminder_occurrence(
     .map_err(storage_error)
 }
 
-fn map_occurrence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderOccurrence> {
+pub(crate) fn map_occurrence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderOccurrence> {
     let task_id = parse_sql(row.get::<_, String>(0)?, TaskId::parse)?;
     let remind_at = parse_sql(row.get::<_, String>(1)?, |value| {
         value
@@ -702,7 +702,9 @@ fn new_fence_term() -> Result<ReminderFenceTerm, RepositoryError> {
     ReminderFenceTerm::parse(&TaskId::new().to_string()).map_err(validation)
 }
 
-fn read_lease(tx: &Transaction<'_>) -> Result<Option<ReminderDeliveryLease>, RepositoryError> {
+pub(crate) fn read_lease(
+    tx: &Transaction<'_>,
+) -> Result<Option<ReminderDeliveryLease>, RepositoryError> {
     tx.query_row(
         "SELECT fence_term, expires_at, updated_at
          FROM reminder_delivery_lease

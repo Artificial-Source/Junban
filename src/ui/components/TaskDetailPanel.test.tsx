@@ -142,7 +142,7 @@ function mutationOk(): MutationResponse {
       event_type: "task.updated",
       occurred_at: "2026-07-23T10:01:00Z",
       affected: { task_ids: [] },
-      resync: { tasks: false, catalog: false },
+      resync: { tasks: false, catalog: false, settings: false },
     },
   };
 }

@@ -168,6 +168,45 @@ Quick mode uses one 500-task profile, 25 recurring sources (50 affected tasks), 
 
 The 2026-07-31 authoritative rerun recorded 16.1523 MiB median / 16.5586 MiB maximum warm cgroup memory and an 18.1953 MiB maximum peak. It passed every frozen budget, including Stats p95 24.995 ms (150 ms budget) and Nudges p95 24.868 ms (100 ms budget); see the protocol for the complete result and scheduler evidence.
 
+## Phase 4 data harness (`junban-phase4-data-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-4-data-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-4-data-benchmark-protocol.md).
+
+`--mode phase4` extends the same cgroup harness for streamed JSON export, complete backup, restore cutover, and post-restore warm memory. The seeder writes a deterministic profile outside the measured cgroup; the release server is the only measured process. Driver-side artifact I/O streams to/from temporary files without buffering export/backup payloads in Python.
+
+```bash
+pnpm build
+cargo build --locked --release -p junban-server
+cargo build --locked --release -p junban-storage --features scale-bench --bin junban-scale-seed
+python3 scripts/bench-hosted-server.py \
+  --mode phase4 \
+  --server target/release/junban-server \
+  --seeder target/release/junban-scale-seed \
+  --web-dir dist \
+  --output goals/rust-rewrite/evidence/phase-4-data-bench.json
+```
+
+Or use `pnpm bench:phase4 -- --output goals/rust-rewrite/evidence/phase-4-data-bench.json`.
+
+| Knob       |                                   Authoritative | Quick | Notes                                           |
+| ---------- | ----------------------------------------------: | ----: | ----------------------------------------------- |
+| samples    |                                               3 |     1 | Independent fresh profiles                      |
+| tasks      |                                          10_000 |   500 | Pre-seeded outside the cgroup                   |
+| settle     |                                            2.0s |  2.0s | Same condition-polled readiness/shutdown        |
+| operations | export JSON, backup, restore, post-restore warm |  same | Streamed HTTP; restore restarts in a new cgroup |
+| memory     |                                     24 / 32 MiB |  same | Post-restore warm current / sample peak         |
+
+Throughput and per-operation latency are recorded. Overall `budget_passed` is integrity (exact task counts, valid backup envelope, `restart_required`, cleanup) plus the frozen memory ceilings — not an invented throughput gate.
+
+The accepted three-sample 10,000-task run exported JSON at 506.48 ms p50 / 510.13 ms p95, created complete backups at 199.17 / 223.88 ms, and restored at 1,136.45 / 1,146.49 ms. Post-restore warm memory was 6.6562 MiB median / 6.8516 MiB maximum and the maximum operation peak was 25.2617 MiB, passing the frozen 24/32 MiB ceilings. See `phase-4-data-bench.json`; the retained preceding failed run and its file-cache root cause are documented in the protocol.
+
+### Quick Phase 4 smoke (not evidence)
+
+```bash
+python3 scripts/bench-hosted-server.py --mode phase4 --quick
+pnpm bench:phase4:quick
+```
+
 ## Measurement rules
 
 - Optimized release binaries are authoritative. Development servers are not.

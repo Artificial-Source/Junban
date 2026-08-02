@@ -104,6 +104,8 @@ pub(crate) fn create_task(
     draft: TaskDraft,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    // Canonical request bytes preserve the caller's payload for exact retry replay.
+    // Task-default fill happens only after receipt admission, inside the write txn.
     let request = canonical_json(&Req::CreateTask { draft: &draft })?;
     mutate(
         connection,
@@ -111,6 +113,14 @@ pub(crate) fn create_task(
         request,
         now,
         move |tx, revision| {
+            let settings = crate::settings_ops::load_settings_tx(tx)?;
+            let mut draft = draft;
+            if draft.priority.is_none() {
+                draft.priority = settings.task_defaults.default_priority;
+            }
+            if draft.estimated_minutes.is_none() {
+                draft.estimated_minutes = settings.task_defaults.default_estimated_minutes;
+            }
             let task = Task::from_draft(task_id, draft, now, revision).map_err(validation)?;
             validate_task_refs(tx, &task)?;
             insert_task(tx, &task)?;

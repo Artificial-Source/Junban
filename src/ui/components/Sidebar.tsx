@@ -1,7 +1,7 @@
 /**
  * Sidebar: full navigation, project tree, saved filters, Phase 3 tools, workspace chrome.
  * Phase 3 authority places Calendar/Matrix/Stats/Timeblocking after projects and keeps a
- * non-functional Workspace footer (AI Chat / Settings) matching the frozen legacy shell.
+ * Workspace footer: AI Chat remains presentational until Phase 6; Settings is live in Phase 4.
  * Filters & Labels and Quick Wins remain reachable via routes/command palette; they are
  * omitted from the primary tool strip so the Phase 3 visual authority chrome matches.
  */
@@ -23,7 +23,7 @@ import {
   Settings,
   GripVertical,
 } from "lucide-react";
-import type { View, AppRoute } from "../hooks/useRouting";
+import type { View, AppRoute, NavigateTarget } from "../hooks/useRouting";
 import type { CatalogResponse, ProjectDto, SavedFilterDto } from "../api/client";
 
 interface NavItem {
@@ -55,7 +55,7 @@ const TOOL_NAV_ITEMS: NavItem[] = [
 interface SidebarProps {
   currentView: View;
   currentRoute: AppRoute;
-  onNavigate: (target: View | AppRoute) => void;
+  onNavigate: (target: NavigateTarget) => void;
   onAddTask: () => void;
   onSearch: () => void;
   collapsed: boolean;
@@ -498,12 +498,11 @@ export function Sidebar({
               <li>
                 <button
                   type="button"
-                  title="Settings arrives in Phase 4"
-                  aria-disabled="true"
-                  onClick={(event) => event.preventDefault()}
-                  className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-on-surface-secondary transition-colors hover:bg-surface-tertiary hover:text-on-surface ${
+                  title={collapsed ? "Settings" : undefined}
+                  onClick={() => onNavigate({ name: "settings" })}
+                  className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
                     collapsed ? "justify-center" : "gap-3"
-                  }`}
+                  } text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface`}
                 >
                   <Settings size={18} strokeWidth={1.75} aria-hidden="true" />
                   {!collapsed && <span>Settings</span>}

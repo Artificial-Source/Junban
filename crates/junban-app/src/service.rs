@@ -4,29 +4,32 @@ use std::sync::Arc;
 
 use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
-    ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
+    AppSettings, ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
     DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName,
     FilterQuery, HexColor, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS,
-    MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
-    ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId, TagId,
-    TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort, TaskStatus,
-    TaskTitle, TemplateId, TimeBlock, TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft,
-    TimeSlotId, ValidationError, WeekStart, civil_occurrences_in_range, daily_plan_summary,
-    dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges, select_eat_the_frog,
-    stats_summary, task_jar_candidates, validate_calendar_date_range,
-    validate_owner_lost_mark_limit, validate_reminder_claim_limit, validate_reminder_lease_secs,
-    validate_stats_date_range, validate_timeblock_date_range, weekly_review_summary,
+    MarkdownText, NudgeRuleKind, OperationId, ProjectId, RelationKind, ReminderChannel,
+    ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence,
+    SavedFilterId, SectionId, SettingsPatch, TagId, TagName, Task, TaskActivity, TaskDraft, TaskId,
+    TaskQuery, TaskRelation, TaskSort, TaskStatus, TaskTitle, TemplateId, TimeBlock,
+    TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft, TimeSlotId, TransferApply, TransferError,
+    TransferFormat, TransferPreview, ValidationError, WeekStart, civil_occurrences_in_range,
+    daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges,
+    preview_transfer, select_eat_the_frog, stats_summary, task_jar_candidates,
+    validate_calendar_date_range, validate_owner_lost_mark_limit, validate_preview_matches_apply,
+    validate_reminder_claim_limit, validate_reminder_lease_secs, validate_stats_date_range,
+    validate_timeblock_date_range, weekly_review_summary,
 };
 
 use crate::{
     AppError, BulkAction, CalendarTasksPage, CatalogSnapshot, CollectedTasks, CommentPatch,
     CommittedEvent, CommittedMutation, DailyPlanPage, DopamineMenuPage, EatTheFrogPage,
-    EndOfDayPage, EventCatchUp, MoveTarget, NudgesPage, ProjectDraft, ProjectPatch, ReorderScope,
-    ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError, SavedFilterDraft,
-    SavedFilterPatch, SectionDraft, SectionPatch, StatsPage, TagDraft, TagPatch, TaskJarPage,
-    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext, TemporalSettings, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
-    TimeblockingRangePage, TimeblockingRangeQuery, WeeklyReviewPage,
+    EndOfDayPage, EventCatchUp, ExportFormat, MoveTarget, NudgesPage, ProjectDraft, ProjectPatch,
+    ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError,
+    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, StagedFile, StatsPage,
+    SyncState, TagDraft, TagPatch, TaskJarPage, TaskListAsOf, TaskListPage, TaskPatch,
+    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TemporalSettings, TimeBlockPatch,
+    TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
+    WeeklyReviewPage,
 };
 
 /// Cursor page size used when collecting multi-page task reads.
@@ -700,6 +703,10 @@ where
         self.repository.list_events(since).await.map_err(Into::into)
     }
 
+    pub async fn get_sync_state(&self) -> Result<SyncState, AppError> {
+        self.repository.get_sync_state().await.map_err(Into::into)
+    }
+
     pub async fn undo(
         &self,
         source_operation_id: OperationId,
@@ -1202,12 +1209,117 @@ where
         })
     }
 
+    pub async fn get_settings(&self) -> Result<AppSettings, AppError> {
+        self.repository.get_settings().await.map_err(AppError::from)
+    }
+
+    pub async fn patch_settings(
+        &self,
+        operation_id: OperationId,
+        patch: SettingsPatch,
+    ) -> Result<CommittedMutation, AppError> {
+        patch.validate()?;
+        self.commit(
+            self.repository
+                .patch_settings(operation_id, patch, Timestamp::now())
+                .await,
+        )
+    }
+
+    /// Parse transfer content into a fingerprint-bound import preview.
+    pub async fn preview_import(
+        &self,
+        format: TransferFormat,
+        content: String,
+    ) -> Result<TransferPreview, AppError> {
+        self.repository
+            .preview_import(format, content)
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Apply a transfer import after re-validating the content fingerprint.
+    pub async fn apply_import(
+        &self,
+        operation_id: OperationId,
+        apply: TransferApply,
+    ) -> Result<CommittedMutation, AppError> {
+        let fresh = preview_transfer(apply.format, &apply.content).map_err(map_transfer_error)?;
+        if fresh.content_fingerprint != apply.fingerprint
+            || !validate_preview_matches_apply(&fresh, &apply)
+        {
+            return Err(AppError::Conflict);
+        }
+        self.commit(
+            self.repository
+                .apply_import(operation_id, apply, Timestamp::now())
+                .await,
+        )
+    }
+
+    /// Create a complete framed profile backup artifact on private staged disk.
+    pub async fn create_backup(&self) -> Result<StagedFile, AppError> {
+        self.repository
+            .create_backup()
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Fully validate an uploaded backup and rotate its candidate epoch before maintenance.
+    pub async fn prepare_restore(&self, upload: StagedFile) -> Result<StagedFile, AppError> {
+        if upload.is_empty() {
+            return Err(AppError::Validation(ValidationError::Empty {
+                field: "backup",
+            }));
+        }
+        self.repository
+            .prepare_restore(upload)
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Cut over to a previously validated and epoch-rotated candidate.
+    pub async fn restore_backup(&self, candidate: StagedFile) -> Result<(), AppError> {
+        self.repository
+            .restore_backup(candidate)
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Serialize transferable tasks into a private staged file using bounded storage pages.
+    pub async fn export_tasks(&self, format: ExportFormat) -> Result<StagedFile, AppError> {
+        self.repository
+            .create_export(format)
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Compatibility projection of persisted settings for Phase 3 temporal callers.
+    ///
+    /// Samples the current system IANA zone on each read; zone is not persisted.
+    pub async fn temporal_settings_from_store(&self) -> Result<TemporalSettings, AppError> {
+        let settings = self.get_settings().await?;
+        let time_zone = Zoned::now()
+            .time_zone()
+            .iana_name()
+            .unwrap_or("UTC")
+            .to_owned();
+        Ok(TemporalSettings::from_app_settings(&settings, time_zone))
+    }
+
     pub async fn daily_plan(
         &self,
         date: Date,
         capacity: Option<DailyCapacityMinutes>,
         zone: &TimeZone,
     ) -> Result<DailyPlanPage, AppError> {
+        let settings = self.get_settings().await?;
+        let capacity = match capacity {
+            Some(value) => Some(value),
+            None => Some(DailyCapacityMinutes::new(
+                settings.planning.capacity_minutes,
+            )?),
+        };
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
         let summary = daily_plan_summary(&collected.tasks, date, capacity);
@@ -1224,10 +1336,14 @@ where
         capacity: Option<DailyCapacityMinutes>,
         zone: &TimeZone,
     ) -> Result<EndOfDayPage, AppError> {
+        let settings = self.get_settings().await?;
+        let capacity_minutes = match capacity {
+            Some(value) => value.get(),
+            None => settings.planning.capacity_minutes,
+        };
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
         let summary = end_of_day_summary(&collected.tasks, date, zone);
-        let capacity_minutes = capacity.unwrap_or(DailyCapacityMinutes::DEFAULT).get();
         Ok(EndOfDayPage::from_summary(
             summary,
             &collected.tasks,
@@ -1239,9 +1355,11 @@ where
     pub async fn weekly_review(
         &self,
         date: Date,
-        week_start: WeekStart,
+        week_start: Option<WeekStart>,
         zone: &TimeZone,
     ) -> Result<WeeklyReviewPage, AppError> {
+        let settings = self.get_settings().await?;
+        let week_start = week_start.unwrap_or(settings.date_time.week_start);
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
         let catalog = self.list_catalog().await?;
@@ -1299,10 +1417,35 @@ where
         capacity: Option<DailyCapacityMinutes>,
         zone: &TimeZone,
     ) -> Result<NudgesPage, AppError> {
+        let settings = self.get_settings().await?;
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
-        let capacity = capacity.unwrap_or(DailyCapacityMinutes::DEFAULT);
-        let facts = evaluate_nudges(&collected.tasks, date, capacity, zone, &[], None);
+        // Feature visibility is UI-owned; evaluation still uses persisted capacity/rules.
+        let capacity = match capacity {
+            Some(value) => value,
+            None => DailyCapacityMinutes::new(settings.planning.capacity_minutes)?,
+        };
+        let enabled: Vec<NudgeRuleKind> = settings
+            .planning
+            .nudge_rules
+            .iter()
+            .filter(|rule| rule.enabled)
+            .map(|rule| rule.kind)
+            .collect();
+        let stale_after_days = settings
+            .planning
+            .nudge_rules
+            .iter()
+            .find(|rule| rule.kind == NudgeRuleKind::StaleTask)
+            .and_then(|rule| rule.threshold);
+        let facts = evaluate_nudges(
+            &collected.tasks,
+            date,
+            capacity,
+            zone,
+            &enabled,
+            stale_after_days,
+        );
         let mut ids = Vec::new();
         for rule in &facts.rules {
             for id in &rule.task_ids {
@@ -1319,7 +1462,7 @@ where
         })
     }
 
-    /// Read-only Phase 3 temporal defaults (no durable settings mutation yet).
+    /// Static Phase 3-compatible defaults derived from [`AppSettings`].
     #[must_use]
     pub fn temporal_settings(zone: &TimeZone) -> TemporalSettings {
         default_temporal_settings(zone)
@@ -1330,6 +1473,7 @@ where
         date: Date,
         zone: &TimeZone,
     ) -> Result<EatTheFrogPage, AppError> {
+        // Feature visibility is UI-owned; always compute the selection from analysis tasks.
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
         let task = select_eat_the_frog(&collected.tasks)
@@ -1341,6 +1485,7 @@ where
     }
 
     pub async fn task_jar(&self, date: Date, zone: &TimeZone) -> Result<TaskJarPage, AppError> {
+        // Feature visibility is UI-owned; always compute candidates from analysis tasks.
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
         let task_ids = task_jar_candidates(&collected.tasks, date);
@@ -1387,17 +1532,29 @@ fn tasks_for_ids(tasks: &[Task], ids: &[TaskId]) -> Vec<Task> {
         .collect()
 }
 
-/// Phase 3 read-only temporal defaults until settings mutations land in Phase 4.
+fn map_transfer_error(error: TransferError) -> AppError {
+    match error {
+        TransferError::ValidationError(error) => AppError::Validation(error),
+        TransferError::UnsupportedFormat => AppError::Validation(ValidationError::Invalid {
+            field: "format",
+            reason: "unsupported transfer format",
+        }),
+        TransferError::ParseError { .. } => AppError::Validation(ValidationError::Invalid {
+            field: "content",
+            reason: "invalid transfer content",
+        }),
+    }
+}
+
+/// Phase 3-compatible temporal defaults derived from [`AppSettings`].
+///
+/// Uses the caller-supplied zone name for the response projection only.
 #[must_use]
 pub fn default_temporal_settings(zone: &TimeZone) -> TemporalSettings {
-    TemporalSettings {
-        time_zone: zone.iana_name().unwrap_or("UTC").to_owned(),
-        capacity_minutes: DailyCapacityMinutes::DEFAULT.get(),
-        week_start: WeekStart::Sunday,
-        nudges_enabled: true,
-        eat_the_frog_enabled: false,
-        task_jar_enabled: false,
-    }
+    TemporalSettings::from_app_settings(
+        &AppSettings::default_settings(),
+        zone.iana_name().unwrap_or("UTC"),
+    )
 }
 
 // Re-export constructors used by tests without forcing callers to import domain pieces.
@@ -1850,6 +2007,15 @@ mod tests {
                 })
             })
         }
+        fn get_sync_state(&self) -> crate::RepositoryFuture<'_, crate::SyncState> {
+            self.calls.lock().unwrap().push("get_sync_state");
+            Box::pin(async {
+                Ok(crate::SyncState {
+                    event_epoch: "test-event-epoch".to_owned(),
+                    revision: 0,
+                })
+            })
+        }
         fn undo(
             &self,
             _: OperationId,
@@ -2066,6 +2232,70 @@ mod tests {
             _: TemporalContext,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("replan_past_blocks")
+        }
+        fn get_settings(&self) -> crate::RepositoryFuture<'_, AppSettings> {
+            self.calls.lock().unwrap().push("get_settings");
+            Box::pin(async { Ok(AppSettings::default_settings()) })
+        }
+        fn patch_settings(
+            &self,
+            _: OperationId,
+            _: SettingsPatch,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("patch_settings")
+        }
+        fn preview_import(
+            &self,
+            _: TransferFormat,
+            _: String,
+        ) -> crate::RepositoryFuture<'_, TransferPreview> {
+            self.calls.lock().unwrap().push("preview_import");
+            Box::pin(async {
+                Err(RepositoryError::Storage(
+                    "preview_import unused in unit fake".into(),
+                ))
+            })
+        }
+        fn apply_import(
+            &self,
+            _: OperationId,
+            _: TransferApply,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("apply_import")
+        }
+        fn create_export(&self, _: ExportFormat) -> crate::RepositoryFuture<'_, StagedFile> {
+            self.calls.lock().unwrap().push("create_export");
+            Box::pin(async {
+                Err(RepositoryError::Storage(
+                    "create_export unused in unit fake".into(),
+                ))
+            })
+        }
+        fn create_backup(&self) -> crate::RepositoryFuture<'_, StagedFile> {
+            self.calls.lock().unwrap().push("create_backup");
+            Box::pin(async {
+                Err(RepositoryError::Storage(
+                    "create_backup unused in unit fake".into(),
+                ))
+            })
+        }
+        fn prepare_restore(&self, _: StagedFile) -> crate::RepositoryFuture<'_, StagedFile> {
+            self.calls.lock().unwrap().push("prepare_restore");
+            Box::pin(async {
+                Err(RepositoryError::Storage(
+                    "prepare_restore unused in unit fake".into(),
+                ))
+            })
+        }
+        fn restore_backup(&self, _: StagedFile) -> crate::RepositoryFuture<'_, ()> {
+            self.calls.lock().unwrap().push("restore_backup");
+            Box::pin(async {
+                Err(RepositoryError::Storage(
+                    "restore_backup unused in unit fake".into(),
+                ))
+            })
         }
     }
 
@@ -2342,7 +2572,10 @@ mod tests {
         );
         assert_eq!(page.tasks[0].tag_ids, vec![tag_a]);
         assert_eq!(page.tasks[1].tag_ids, vec![tag_b]);
-        assert_eq!(*repository.calls.lock().unwrap(), vec!["analysis"]);
+        assert_eq!(
+            *repository.calls.lock().unwrap(),
+            vec!["get_settings", "analysis"]
+        );
     }
 
     #[tokio::test]

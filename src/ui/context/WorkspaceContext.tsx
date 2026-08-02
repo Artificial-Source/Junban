@@ -9,17 +9,32 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import type { CatalogResponse, CommittedEventDto, MutationResponse } from "../api/client";
-import { hasStoredToken } from "../api/client";
+import type {
+  AppSettingsResponse,
+  CatalogResponse,
+  CommittedEventDto,
+  MutationResponse,
+  PatchSettingsRequest,
+} from "../api/client";
+import {
+  generateOperationId,
+  getSettings,
+  hasStoredToken,
+  NetworkError,
+  patchSettings,
+} from "../api/client";
 import { useCatalog } from "../hooks/useCatalog";
-import { useMutations, type MutationPhase } from "../hooks/useMutations";
+import { useMutations, isOutcomeUnknown, type MutationPhase } from "../hooks/useMutations";
 import { useToasts, type ShowToastOptions, type ToastEntry } from "../components/Toast";
 import { useSseSubscription } from "../hooks/useSseSubscription";
+import { setConfirmedDateTimePreferences } from "../lib/dateTimePreferences";
+import { applyAppearance } from "../themes/manager";
 
 // Session undo/redo stacks: 50 entries max (per context map rule).
 // Server undo-of-undo is redo; the browser only stores operation IDs + labels.
@@ -61,10 +76,16 @@ export interface WorkspaceContextValue {
 
   // SSE
   sseError: string | null;
+  /**
+   * After authoritative restore cutover (`restart_required: true`), suppress
+   * realtime terminal errors and disconnect the subscription until reload.
+   * The server is fail-closed; retry banners would contradict DataTab status.
+   */
+  enterRestartRequired: () => void;
 
   // Task event fan-out registration
   registerTaskEventHandler: (handler: (event: CommittedEventDto) => void) => () => void;
-  registerTaskResyncHandler: (handler: () => void) => () => void;
+  registerTaskResyncHandler: (handler: () => void | Promise<void>) => () => void;
 
   // Run a mutation with full tracking
   runMutation: (
@@ -75,6 +96,14 @@ export interface WorkspaceContextValue {
       onOutcomeUnknown?: (operationId: string) => void | Promise<void>;
     },
   ) => Promise<MutationResponse | null>;
+
+  // Settings (Phase 4)
+  settings: AppSettingsResponse | null;
+  settingsLoading: boolean;
+  settingsError: string | null;
+  refreshSettings: () => Promise<void>;
+  /** Persists a settings patch. Throws ApiError on validation/server failure. */
+  saveSettings: (patch: PatchSettingsRequest) => Promise<MutationResponse>;
 
   // Revision tracking
   revision: number;
@@ -96,9 +125,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { toasts, show: showToast, dismiss: dismissToast } = useToasts();
 
   const [sseError, setSseError] = useState<string | null>(null);
+  // Ref is the race-safe gate: terminal SSE callbacks can fire before React re-renders.
+  const restartRequiredRef = useRef(false);
+  const [restartRequired, setRestartRequired] = useState(false);
   const [revision, setRevision] = useState(0);
   const [undoStack, setUndoStack] = useState<HistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
+  const [settings, setSettings] = useState<AppSettingsResponse | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   // Refs keep toast/keyboard handlers on the latest stacks without stale closures.
   const undoStackRef = useRef(undoStack);
   const redoStackRef = useRef(redoStack);
@@ -107,7 +142,47 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   // Task event handler registry — views register/unregister as they mount.
   const taskEventHandlersRef = useRef(new Set<(event: CommittedEventDto) => void>());
-  const taskResyncHandlersRef = useRef(new Set<() => void>());
+  const taskResyncHandlersRef = useRef(new Set<() => void | Promise<void>>());
+
+  const applySettingsPayload = useCallback((next: AppSettingsResponse) => {
+    setSettings(next);
+    // Immutable visual fixtures own their explicit theme/appearance presentation.
+    // Normal runtime still applies only the server-confirmed payload.
+    if (!new URLSearchParams(window.location.search).has("visual-fixture")) {
+      applyAppearance(next.appearance);
+    }
+    setConfirmedDateTimePreferences({
+      dateFormat: next.date_time.date_format,
+      timeFormat: next.date_time.time_format,
+    });
+  }, []);
+
+  const refreshSettingsStrict = useCallback(async () => {
+    if (!hasStoredToken()) return;
+    setSettingsLoading(true);
+    setSettingsError(null);
+    try {
+      const next = await getSettings();
+      applySettingsPayload(next);
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "Could not load settings");
+      throw error;
+    } finally {
+      setSettingsLoading(false);
+    }
+  }, [applySettingsPayload]);
+
+  const refreshSettings = useCallback(async () => {
+    try {
+      await refreshSettingsStrict();
+    } catch {
+      // Ordinary refreshes expose errors in state; event-reset handling uses strict refresh.
+    }
+  }, [refreshSettingsStrict]);
+
+  useEffect(() => {
+    void refreshSettings();
+  }, [refreshSettings]);
 
   const registerTaskEventHandler = useCallback((handler: (event: CommittedEventDto) => void) => {
     taskEventHandlersRef.current.add(handler);
@@ -116,7 +191,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const registerTaskResyncHandler = useCallback((handler: () => void) => {
+  const registerTaskResyncHandler = useCallback((handler: () => void | Promise<void>) => {
     taskResyncHandlersRef.current.add(handler);
     return () => {
       taskResyncHandlersRef.current.delete(handler);
@@ -138,32 +213,59 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [applyCatalogEventFn],
   );
 
-  const onTaskResync = useCallback(() => {
-    for (const handler of taskResyncHandlersRef.current) {
-      handler();
-    }
+  const onTaskResync = useCallback(async () => {
+    await Promise.all([...taskResyncHandlersRef.current].map((handler) => handler()));
   }, []);
 
-  const onCatalogResync = useCallback(() => {
-    requestCatalogResync();
-  }, [requestCatalogResync]);
+  const onCatalogResync = useCallback(() => requestCatalogResync(), [requestCatalogResync]);
+
+  const onSettingsEvent = useCallback(
+    (event: CommittedEventDto) => {
+      setRevision((prev) => Math.max(prev, event.revision));
+      if (event.event_type === "settings.updated" || event.resync.settings) {
+        void refreshSettings();
+      }
+    },
+    [refreshSettings],
+  );
+
+  const onSettingsResync = useCallback(() => refreshSettingsStrict(), [refreshSettingsStrict]);
 
   const onReconnect = useCallback(() => {
     // On reconnect, SSE client sends Last-Event-ID for catch-up.
     // If catch-up fails, the server sends sync.resync_required which triggers onTaskResync/onCatalogResync.
     // Also force a catalog refresh as a safety net.
     requestCatalogResync();
-  }, [requestCatalogResync]);
+    void refreshSettings();
+  }, [requestCatalogResync, refreshSettings]);
 
   const onTerminalError = useCallback((message: string) => {
+    // Ignore post-restore 503/terminal noise once cutover authoritatively confirmed restart.
+    if (restartRequiredRef.current) return;
     setSseError(message);
   }, []);
 
-  // SSE is enabled once we have a token and catalog has loaded at least once.
-  const sseEnabled = hasStoredToken();
+  const enterRestartRequired = useCallback(() => {
+    // Synchronous ref first so in-flight terminal callbacks cannot race setState.
+    restartRequiredRef.current = true;
+    setRestartRequired(true);
+    setSseError(null);
+  }, []);
+
+  // SSE is enabled once we have a token; disabled after restore restart-required cutover.
+  const sseEnabled = hasStoredToken() && !restartRequired;
 
   useSseSubscription(
-    { onTaskEvent, onCatalogEvent, onTaskResync, onCatalogResync, onReconnect, onTerminalError },
+    {
+      onTaskEvent,
+      onCatalogEvent,
+      onSettingsEvent,
+      onTaskResync,
+      onCatalogResync,
+      onSettingsResync,
+      onReconnect,
+      onTerminalError,
+    },
     revision,
     sseEnabled,
   );
@@ -180,8 +282,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       } else {
         applyCatalogEventFn(event);
       }
+      if (event.event_type === "settings.updated" || event.resync.settings) {
+        void refreshSettings();
+      }
     },
-    [applyCatalogEventFn, requestCatalogResync],
+    [applyCatalogEventFn, requestCatalogResync, refreshSettings],
   );
 
   /** One coalesced task + catalog resync after ambiguous network failure. */
@@ -191,6 +296,30 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     requestCatalogResync();
   }, [requestCatalogResync]);
+
+  const saveSettings = useCallback(
+    async (patch: PatchSettingsRequest): Promise<MutationResponse> => {
+      const operationId = generateOperationId();
+      try {
+        const result = await patchSettings(patch, operationId);
+        applyOwnCommittedEvent(result.event);
+        // Authoritative refresh so appearance applies only after confirmed persistence.
+        await refreshSettings();
+        return result;
+      } catch (error) {
+        if (isOutcomeUnknown(error)) {
+          resyncAfterOutcomeUnknown();
+          void refreshSettings();
+          throw new NetworkError(
+            error instanceof Error ? error.message : "Settings save outcome unknown",
+            true,
+          );
+        }
+        throw error;
+      }
+    },
+    [applyOwnCommittedEvent, refreshSettings, resyncAfterOutcomeUnknown],
+  );
 
   const runMutation = useCallback(
     async (
@@ -318,9 +447,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       showToast,
       dismissToast,
       sseError,
+      enterRestartRequired,
       registerTaskEventHandler,
       registerTaskResyncHandler,
       runMutation,
+      settings,
+      settingsLoading,
+      settingsError,
+      refreshSettings,
+      saveSettings,
       revision,
     }),
     [
@@ -338,9 +473,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       showToast,
       dismissToast,
       sseError,
+      enterRestartRequired,
       registerTaskEventHandler,
       registerTaskResyncHandler,
       runMutation,
+      settings,
+      settingsLoading,
+      settingsError,
+      refreshSettings,
+      saveSettings,
       revision,
     ],
   );

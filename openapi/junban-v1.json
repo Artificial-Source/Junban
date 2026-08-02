@@ -10,6 +10,204 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/v1/auth/rotate": {
+      "post": {
+        "tags": ["routes"],
+        "operationId": "rotate_token",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenRotationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backup": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "create_backup",
+        "responses": {
+          "200": {
+            "description": "Framed .junban-backup artifact"
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backup/restore": {
+      "post": {
+        "tags": ["routes"],
+        "operationId": "restore_backup",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/calendar/tasks": {
       "get": {
         "tags": ["routes"],
@@ -349,6 +547,83 @@
         ]
       }
     },
+    "/api/v1/diagnostics": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_diagnostics",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosticsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes"],
+        "operationId": "clear_diagnostics",
+        "responses": {
+          "204": {
+            "description": "diagnostic ring cleared"
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/events": {
       "get": {
         "tags": ["routes"],
@@ -362,6 +637,14 @@
               "type": "integer",
               "format": "int64",
               "minimum": 0
+            }
+          },
+          {
+            "name": "event_epoch",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           },
           {
@@ -393,6 +676,83 @@
             }
           },
           "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/exports/tasks": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "export_tasks",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "path",
+            "description": "One of `json`, `csv`, or `markdown`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transfer document body"
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
             "description": "",
             "content": {
               "application/json": {
@@ -436,6 +796,360 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/hosts": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_allowed_hosts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": ["routes"],
+        "operationId": "put_allowed_hosts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/imports/apply": {
+      "post": {
+        "tags": ["routes"],
+        "operationId": "apply_import",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/imports/preview": {
+      "post": {
+        "tags": ["routes"],
+        "operationId": "preview_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferPreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/maintenance/status": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_maintenance_status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
     "/api/v1/motivation/dopamine-menu": {
@@ -1629,6 +2343,24 @@
             "bearer_auth": []
           }
         ]
+      }
+    },
+    "/api/v1/recovery/status": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_recovery_status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryStatusResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/reminders/claim": {
@@ -2980,6 +3712,151 @@
         ]
       }
     },
+    "/api/v1/settings": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_settings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppSettingsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": ["routes"],
+        "operationId": "patch_settings",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/settings/temporal": {
       "get": {
         "tags": ["routes"],
@@ -3069,6 +3946,49 @@
             }
           },
           "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sync-state": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_sync_state",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncStateResponse"
+                }
+              }
+            }
+          },
+          "401": {
             "description": "",
             "content": {
               "application/json": {
@@ -7776,6 +8696,70 @@
           }
         }
       },
+      "AppSettingsResponse": {
+        "type": "object",
+        "required": [
+          "appearance",
+          "date_time",
+          "task_defaults",
+          "notifications",
+          "features",
+          "planning",
+          "keyboard_shortcuts"
+        ],
+        "properties": {
+          "appearance": {
+            "$ref": "#/components/schemas/AppearanceSettingsDto"
+          },
+          "date_time": {
+            "$ref": "#/components/schemas/DateTimeSettingsDto"
+          },
+          "features": {
+            "$ref": "#/components/schemas/FeatureSettingsDto"
+          },
+          "keyboard_shortcuts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeyboardShortcutDto"
+            }
+          },
+          "notifications": {
+            "$ref": "#/components/schemas/NotificationSettingsDto"
+          },
+          "planning": {
+            "$ref": "#/components/schemas/PlanningSettingsDto"
+          },
+          "task_defaults": {
+            "$ref": "#/components/schemas/TaskDefaultsDto"
+          }
+        }
+      },
+      "AppearanceSettingsDto": {
+        "type": "object",
+        "required": ["theme", "accent", "density", "font_size", "font_family", "reduced_motion"],
+        "properties": {
+          "accent": {
+            "type": "string",
+            "pattern": "^#[0-9A-Fa-f]{6}$"
+          },
+          "density": {
+            "$ref": "#/components/schemas/DensityDto"
+          },
+          "font_family": {
+            "$ref": "#/components/schemas/FontFamilyDto"
+          },
+          "font_size": {
+            "$ref": "#/components/schemas/FontSizeDto"
+          },
+          "reduced_motion": {
+            "type": "boolean"
+          },
+          "theme": {
+            "$ref": "#/components/schemas/ThemeDto"
+          }
+        },
+        "additionalProperties": false
+      },
       "AppendTimeSlotTaskRequest": {
         "type": "object",
         "required": ["task_id"],
@@ -7804,6 +8788,63 @@
           }
         },
         "additionalProperties": false
+      },
+      "BackupManifestDto": {
+        "type": "object",
+        "description": "Inventory snapshot embedded in a backup artifact (wire projection).",
+        "required": [
+          "artifact_version",
+          "schema_version",
+          "created_at",
+          "payload_sha256",
+          "task_count",
+          "project_count",
+          "tag_count",
+          "event_count",
+          "revision"
+        ],
+        "properties": {
+          "artifact_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "event_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "payload_sha256": {
+            "type": "string"
+          },
+          "project_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tag_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "task_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       },
       "BulkActionDto": {
         "oneOf": [
@@ -7974,6 +9015,10 @@
           }
         },
         "additionalProperties": false
+      },
+      "CalendarDefaultDto": {
+        "type": "string",
+        "enum": ["day", "week", "month"]
       },
       "CalendarTasksResponse": {
         "type": "object",
@@ -8591,6 +9636,76 @@
           }
         }
       },
+      "DateFormatDto": {
+        "type": "string",
+        "enum": ["relative", "short", "long", "iso"]
+      },
+      "DateTimeSettingsDto": {
+        "type": "object",
+        "required": ["week_start", "calendar_default", "date_format", "time_format"],
+        "properties": {
+          "calendar_default": {
+            "$ref": "#/components/schemas/CalendarDefaultDto"
+          },
+          "date_format": {
+            "$ref": "#/components/schemas/DateFormatDto"
+          },
+          "time_format": {
+            "$ref": "#/components/schemas/TimeFormatDto"
+          },
+          "week_start": {
+            "$ref": "#/components/schemas/WeekStartDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DensityDto": {
+        "type": "string",
+        "enum": ["compact", "default", "comfortable"]
+      },
+      "DiagnosticEntry": {
+        "type": "object",
+        "description": "One structured diagnostic record. Messages must already be redacted.",
+        "required": ["timestamp", "severity", "code", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable machine-facing event code."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable detail; never includes raw secrets."
+          },
+          "request_id": {
+            "type": ["string", "null"]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/DiagnosticSeverity"
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "RFC3339 / ISO-8601 timestamp from the server clock."
+          }
+        }
+      },
+      "DiagnosticSeverity": {
+        "type": "string",
+        "description": "Severity of a diagnostic entry.",
+        "enum": ["info", "warning", "error"]
+      },
+      "DiagnosticsResponse": {
+        "type": "object",
+        "description": "Bounded diagnostic ring snapshot.",
+        "required": ["entries"],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticEntry"
+            }
+          }
+        }
+      },
       "DopamineMenuResponse": {
         "type": "object",
         "required": ["task_ids", "tasks", "revision"],
@@ -8754,6 +9869,56 @@
           }
         }
       },
+      "ExportTasksQuery": {
+        "type": "object",
+        "required": ["format"],
+        "properties": {
+          "format": {
+            "type": "string",
+            "description": "One of `json`, `csv`, or `markdown`."
+          }
+        }
+      },
+      "FeatureSettingsDto": {
+        "type": "object",
+        "required": [
+          "nudges_enabled",
+          "eat_the_frog_enabled",
+          "task_jar_enabled",
+          "focus_mode_enabled",
+          "daily_planning_enabled",
+          "weekly_review_enabled"
+        ],
+        "properties": {
+          "daily_planning_enabled": {
+            "type": "boolean"
+          },
+          "eat_the_frog_enabled": {
+            "type": "boolean"
+          },
+          "focus_mode_enabled": {
+            "type": "boolean"
+          },
+          "nudges_enabled": {
+            "type": "boolean"
+          },
+          "task_jar_enabled": {
+            "type": "boolean"
+          },
+          "weekly_review_enabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FontFamilyDto": {
+        "type": "string",
+        "enum": ["outfit", "inter", "system"]
+      },
+      "FontSizeDto": {
+        "type": "string",
+        "enum": ["small", "medium", "large"]
+      },
       "HealthResponse": {
         "type": "object",
         "required": ["status"],
@@ -8762,6 +9927,120 @@
             "type": "string"
           }
         }
+      },
+      "HostListRequest": {
+        "type": "object",
+        "description": "Replace the persisted Host allowlist (CLI hosts are always retained).",
+        "required": ["hosts"],
+        "properties": {
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "HostListResponse": {
+        "type": "object",
+        "description": "Effective Host allowlist (CLI hosts plus persisted extras).",
+        "required": ["hosts"],
+        "properties": {
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ImportApplyRequest": {
+        "type": "object",
+        "required": ["format", "content", "fingerprint"],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/TransferFormatDto"
+          },
+          "project_name_mapping": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameMappingDto"
+            }
+          },
+          "tag_name_mapping": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameMappingDto"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImportDraftDto": {
+        "type": "object",
+        "required": ["title", "tag_names", "line"],
+        "properties": {
+          "description": {
+            "type": ["string", "null"]
+          },
+          "due_date": {
+            "type": ["string", "null"]
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "priority": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
+          "project_name": {
+            "type": ["string", "null"]
+          },
+          "tag_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "ImportPreviewRequest": {
+        "type": "object",
+        "required": ["format", "content"],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/TransferFormatDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "KeyboardShortcutDto": {
+        "type": "object",
+        "required": ["action", "chord"],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "chord": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "LocalDueTimeDto": {
         "type": "object",
@@ -8773,6 +10052,31 @@
           },
           "time_zone": {
             "type": "string"
+          }
+        }
+      },
+      "MaintenanceStatusResponse": {
+        "type": "object",
+        "description": "Process-wide maintenance barrier snapshot.",
+        "required": [
+          "maintenance_active",
+          "restart_required",
+          "recovery_mode",
+          "admitted_requests"
+        ],
+        "properties": {
+          "admitted_requests": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maintenance_active": {
+            "type": "boolean"
+          },
+          "recovery_mode": {
+            "type": "boolean"
+          },
+          "restart_required": {
+            "type": "boolean"
           }
         }
       },
@@ -8871,6 +10175,19 @@
           }
         }
       },
+      "NameMappingDto": {
+        "type": "object",
+        "required": ["from", "to"],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "NeglectedProjectFactDto": {
         "type": "object",
         "required": ["project_id", "overdue_count", "reason"],
@@ -8892,6 +10209,47 @@
       "NeglectedProjectReasonDto": {
         "type": "string",
         "enum": ["overdue_tasks", "no_activity"]
+      },
+      "NotificationSettingsDto": {
+        "type": "object",
+        "required": [
+          "channels",
+          "sound_enabled",
+          "volume_percent",
+          "task_completed_sound",
+          "task_created_sound",
+          "task_deleted_sound",
+          "reminder_sound"
+        ],
+        "properties": {
+          "channels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReminderChannelDto"
+            }
+          },
+          "reminder_sound": {
+            "type": "boolean"
+          },
+          "sound_enabled": {
+            "type": "boolean"
+          },
+          "task_completed_sound": {
+            "type": "boolean"
+          },
+          "task_created_sound": {
+            "type": "boolean"
+          },
+          "task_deleted_sound": {
+            "type": "boolean"
+          },
+          "volume_percent": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "NudgeRuleFactsDto": {
         "type": "object",
@@ -8915,6 +10273,24 @@
       "NudgeRuleKindDto": {
         "type": "string",
         "enum": ["overdue", "approaching_deadline", "stale_task", "empty_today", "overloaded_day"]
+      },
+      "NudgeRuleSettingsDto": {
+        "type": "object",
+        "required": ["kind", "enabled"],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NudgeRuleKindDto"
+          },
+          "threshold": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "NudgesResponse": {
         "type": "object",
@@ -9120,6 +10496,78 @@
         },
         "additionalProperties": false
       },
+      "PatchSettingsRequest": {
+        "type": "object",
+        "properties": {
+          "appearance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AppearanceSettingsDto"
+              }
+            ]
+          },
+          "date_time": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DateTimeSettingsDto"
+              }
+            ]
+          },
+          "features": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FeatureSettingsDto"
+              }
+            ]
+          },
+          "keyboard_shortcuts": {
+            "type": ["array", "null"],
+            "items": {
+              "$ref": "#/components/schemas/KeyboardShortcutDto"
+            }
+          },
+          "notifications": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NotificationSettingsDto"
+              }
+            ]
+          },
+          "planning": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlanningSettingsDto"
+              }
+            ]
+          },
+          "task_defaults": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskDefaultsDto"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "PatchTagRequest": {
         "type": "object",
         "properties": {
@@ -9319,6 +10767,34 @@
         },
         "additionalProperties": false
       },
+      "PlanningSettingsDto": {
+        "type": "object",
+        "required": ["capacity_minutes", "nudge_rules"],
+        "properties": {
+          "capacity_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "nudge_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NudgeRuleSettingsDto"
+            }
+          },
+          "work_hours": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WorkHoursDto"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "ProfileResponse": {
         "type": "object",
         "required": ["revision"],
@@ -9432,6 +10908,19 @@
           },
           "title": {
             "type": "string"
+          }
+        }
+      },
+      "RecoveryStatusResponse": {
+        "type": "object",
+        "description": "Narrow recovery-mode status (no auth).",
+        "required": ["mode", "restart_required"],
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "restart_required": {
+            "type": "boolean"
           }
         }
       },
@@ -9875,14 +11364,28 @@
           "relation",
           "operation",
           "time_block",
-          "time_slot"
+          "time_slot",
+          "settings"
         ]
+      },
+      "RestoreResponse": {
+        "type": "object",
+        "description": "Successful restore response; process must restart before normal traffic resumes.",
+        "required": ["restart_required"],
+        "properties": {
+          "restart_required": {
+            "type": "boolean"
+          }
+        }
       },
       "ResyncScopeDto": {
         "type": "object",
-        "required": ["tasks", "catalog"],
+        "required": ["tasks", "catalog", "settings"],
         "properties": {
           "catalog": {
+            "type": "boolean"
+          },
+          "settings": {
             "type": "boolean"
           },
           "tasks": {
@@ -10090,6 +11593,21 @@
           }
         }
       },
+      "SyncStateResponse": {
+        "type": "object",
+        "description": "Atomic event-stream identity and head revision snapshot.",
+        "required": ["event_epoch", "revision"],
+        "properties": {
+          "event_epoch": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "TagDto": {
         "type": "object",
         "required": ["id", "name", "color", "created_at", "updated_at"],
@@ -10165,6 +11683,29 @@
             }
           }
         }
+      },
+      "TaskDefaultsDto": {
+        "type": "object",
+        "required": ["default_view", "confirm_before_delete"],
+        "properties": {
+          "confirm_before_delete": {
+            "type": "boolean"
+          },
+          "default_estimated_minutes": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
+          "default_priority": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
+          "default_view": {
+            "$ref": "#/components/schemas/TaskViewPresetDto"
+          }
+        },
+        "additionalProperties": false
       },
       "TaskDto": {
         "type": "object",
@@ -10531,6 +12072,10 @@
           }
         }
       },
+      "ThemeDto": {
+        "type": "string",
+        "enum": ["system", "light", "dark", "nord"]
+      },
       "TimeBlockDto": {
         "type": "object",
         "required": [
@@ -10624,6 +12169,10 @@
           }
         }
       },
+      "TimeFormatDto": {
+        "type": "string",
+        "enum": ["h24", "h12"]
+      },
       "TimeSlotDto": {
         "type": "object",
         "required": [
@@ -10715,6 +12264,77 @@
           }
         }
       },
+      "TokenRotationResponse": {
+        "type": "object",
+        "description": "One-time response after a successful access-token rotation.",
+        "required": ["token"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Fresh bearer token. Never logged or cached by intermediaries."
+          }
+        }
+      },
+      "TransferFormatDto": {
+        "type": "string",
+        "enum": ["json", "csv", "markdown", "todoist_json"]
+      },
+      "TransferPreviewResponse": {
+        "type": "object",
+        "required": [
+          "format",
+          "drafts",
+          "project_names",
+          "tag_names",
+          "warnings",
+          "content_fingerprint"
+        ],
+        "properties": {
+          "content_fingerprint": {
+            "type": "string"
+          },
+          "drafts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportDraftDto"
+            }
+          },
+          "format": {
+            "$ref": "#/components/schemas/TransferFormatDto"
+          },
+          "project_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tag_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TransferWarningDto"
+            }
+          }
+        }
+      },
+      "TransferWarningDto": {
+        "type": "object",
+        "required": ["line", "message"],
+        "properties": {
+          "line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
       "UncompleteOutcomeDto": {
         "type": "string",
         "description": "How an ordinary uncomplete handled recurring work.",
@@ -10722,7 +12342,7 @@
       },
       "WeekStartDto": {
         "type": "string",
-        "enum": ["sunday", "monday"]
+        "enum": ["sunday", "monday", "saturday"]
       },
       "WeeklyDayStatsDto": {
         "type": "object",
@@ -10932,6 +12552,23 @@
             }
           }
         ]
+      },
+      "WorkHoursDto": {
+        "type": "object",
+        "required": ["start_minute", "end_minute"],
+        "properties": {
+          "end_minute": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "start_minute": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {

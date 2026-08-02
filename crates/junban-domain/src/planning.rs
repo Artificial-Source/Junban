@@ -138,18 +138,20 @@ impl DailyCapacityMinutes {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WeekStart {
-    Monday,
     Sunday,
+    Monday,
+    Saturday,
 }
 
 impl WeekStart {
     pub fn parse(value: &str) -> Result<Self, ValidationError> {
         match value {
-            "monday" => Ok(Self::Monday),
             "sunday" => Ok(Self::Sunday),
+            "monday" => Ok(Self::Monday),
+            "saturday" => Ok(Self::Saturday),
             _ => Err(ValidationError::InvalidFormat {
                 field: "week_start",
-                expected: "monday|sunday",
+                expected: "sunday|monday|saturday",
             }),
         }
     }
@@ -157,16 +159,18 @@ impl WeekStart {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Monday => "monday",
             Self::Sunday => "sunday",
+            Self::Monday => "monday",
+            Self::Saturday => "saturday",
         }
     }
 
     #[must_use]
     pub const fn to_weekday(self) -> Weekday {
         match self {
-            Self::Monday => Weekday::Monday,
             Self::Sunday => Weekday::Sunday,
+            Self::Monday => Weekday::Monday,
+            Self::Saturday => Weekday::Saturday,
         }
     }
 
@@ -174,8 +178,9 @@ impl WeekStart {
     #[must_use]
     pub fn offset_of(self, weekday: Weekday) -> i8 {
         match self {
-            Self::Monday => weekday.to_monday_zero_offset(),
             Self::Sunday => weekday.to_sunday_zero_offset(),
+            Self::Monday => weekday.to_monday_zero_offset(),
+            Self::Saturday => (weekday.to_sunday_zero_offset() + 1) % 7,
         }
     }
 }
@@ -1640,6 +1645,9 @@ mod tests {
         assert_eq!(DailyCapacityMinutes::DEFAULT.get(), 480);
         assert!(DailyCapacityMinutes::new(0).is_err());
         assert_eq!(WeekStart::parse("monday").unwrap(), WeekStart::Monday);
+        assert_eq!(WeekStart::parse("saturday").unwrap(), WeekStart::Saturday);
+        assert_eq!(WeekStart::Saturday.offset_of(Weekday::Saturday), 0);
+        assert_eq!(WeekStart::Saturday.offset_of(Weekday::Friday), 6);
         assert!(WeekStart::parse("friday").is_err());
         assert!(WorkHours::new(9 * 60, 9 * 60).is_err());
         assert_eq!(
@@ -1803,7 +1811,7 @@ mod tests {
     }
 
     #[test]
-    fn prior_complete_week_sunday_and_monday() {
+    fn prior_complete_week_handles_all_supported_week_starts() {
         // Wednesday 2026-03-11.
         let today = date(2026, 3, 11);
         let (sun_start, sun_end) = prior_complete_week(today, WeekStart::Sunday).unwrap();
@@ -1820,11 +1828,22 @@ mod tests {
         assert_eq!(mon_start.weekday(), Weekday::Monday);
         assert_eq!(mon_end.weekday(), Weekday::Sunday);
 
+        let (sat_start, sat_end) = prior_complete_week(today, WeekStart::Saturday).unwrap();
+        // Current week starts Saturday 2026-03-07; prior is 2026-02-28..2026-03-06.
+        assert_eq!(sat_start, date(2026, 2, 28));
+        assert_eq!(sat_end, date(2026, 3, 6));
+        assert_eq!(sat_start.weekday(), Weekday::Saturday);
+        assert_eq!(sat_end.weekday(), Weekday::Friday);
+
         // On the week-start day itself, prior week is still the previous seven days.
         let sunday = date(2026, 3, 8);
         let (s0, s1) = prior_complete_week(sunday, WeekStart::Sunday).unwrap();
         assert_eq!(s0, date(2026, 3, 1));
         assert_eq!(s1, date(2026, 3, 7));
+        let saturday = date(2026, 3, 7);
+        let (s0, s1) = prior_complete_week(saturday, WeekStart::Saturday).unwrap();
+        assert_eq!(s0, date(2026, 2, 28));
+        assert_eq!(s1, date(2026, 3, 6));
     }
 
     #[test]

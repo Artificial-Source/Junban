@@ -110,6 +110,13 @@ impl ApiError {
                 true,
                 request_id,
             ),
+            AppError::CatastrophicRestore => Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "recovery_required",
+                "restore failed and database recovery is required",
+                false,
+                request_id,
+            ),
         }
     }
 }

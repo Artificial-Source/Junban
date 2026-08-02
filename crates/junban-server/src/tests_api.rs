@@ -5,21 +5,27 @@ use std::{
     env, fs,
     net::SocketAddr,
     path::{Path, PathBuf},
+    pin::Pin,
     sync::atomic::{AtomicU64, Ordering},
+    task::{Context, Poll},
     time::{Duration, Instant, SystemTime},
 };
 
 use axum::{
     Router,
-    body::Body,
+    body::{Body, Bytes},
     http::{Method, StatusCode, header},
     response::{Response, sse::Event as SseEvent},
 };
+use futures_core::Stream;
 use http_body_util::BodyExt;
 use jiff::{Timestamp, ToSpan};
 use junban_app::{CommittedMutation, EventType, Repository, ResourceRef, ResyncScope};
-use junban_domain::{OperationId, TaskId, UncompleteOutcome};
-use junban_storage::ProfileOwner;
+use junban_domain::{
+    OperationId, TaskId, UncompleteOutcome, frame_backup_envelope, parse_backup_envelope,
+    sha256_hex,
+};
+use junban_storage::{OpenError, ProfileOwner, RecoveryOwner};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -58,8 +64,15 @@ impl TestContext {
         fs::create_dir_all(web_dir.join("assets")).unwrap();
         fs::write(web_dir.join("index.html"), "<main>Junban shell</main>").unwrap();
         fs::write(web_dir.join("assets/app.js"), "console.log('ui')").unwrap();
-        let owner = ProfileOwner::open(directory.join("profile")).unwrap();
-        let state = ServerState::new(owner.repository(), TOKEN.to_owned(), [HOST.to_owned()]);
+        let profile_dir = directory.join("profile");
+        let owner = ProfileOwner::open(&profile_dir).unwrap();
+        let state = ServerState::new(
+            owner.repository(),
+            TOKEN.to_owned(),
+            [HOST.to_owned()],
+            profile_dir,
+        )
+        .unwrap();
         let app = router(state.clone(), web_dir);
         Self {
             directory,
@@ -73,10 +86,19 @@ impl TestContext {
         self.app.clone().oneshot(request).await.unwrap()
     }
 
+    async fn event_uri(&self, since: u64) -> String {
+        let sync = self.state.service.get_sync_state().await.unwrap();
+        format!(
+            "/api/v1/events?event_epoch={}&since={since}",
+            sync.event_epoch
+        )
+    }
+
     async fn open_sse(&self) -> Response {
+        let uri = self.event_uri(0).await;
         let response = self
             .request(
-                authenticated(Method::GET, "/api/v1/events")
+                authenticated(Method::GET, &uri)
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -162,6 +184,30 @@ fn new_id() -> String {
     Uuid::now_v7().to_string()
 }
 
+fn staged_file_count(profile_dir: &Path) -> usize {
+    [profile_dir.join("backups"), profile_dir.join("transfers")]
+        .into_iter()
+        .filter_map(|directory| fs::read_dir(directory).ok())
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with('.'))
+        .count()
+}
+
+struct HeldBodyStream {
+    first: Option<Bytes>,
+}
+
+impl Stream for HeldBodyStream {
+    type Item = Result<Bytes, Infallible>;
+
+    fn poll_next(mut self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.first
+            .take()
+            .map_or(Poll::Pending, |bytes| Poll::Ready(Some(Ok(bytes))))
+    }
+}
+
 async fn create_task_payload(context: &TestContext, payload: Value) -> Value {
     let response = context
         .request(
@@ -205,6 +251,453 @@ async fn list_titles(context: &TestContext, query: &str) -> Vec<String> {
         .collect::<Vec<_>>();
     titles.sort();
     titles
+}
+
+#[tokio::test]
+async fn body_limits_are_route_specific_and_transfer_uploads_pass_the_ordinary_ceiling() {
+    let context = TestContext::new();
+
+    let ordinary = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/tasks"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "title": "x".repeat(MAX_BODY_BYTES) }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(ordinary.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+    let transfer_body = json!({
+        "format": "markdown",
+        "content": " ".repeat(MAX_BODY_BYTES + 32 * 1024),
+    })
+    .to_string();
+    assert!(transfer_body.len() > MAX_BODY_BYTES);
+    assert!(transfer_body.len() < MAX_TRANSFER_BODY_BYTES);
+    let transfer = context
+        .request(
+            authenticated(Method::POST, "/api/v1/imports/preview")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(transfer_body))
+                .unwrap(),
+        )
+        .await;
+    assert_ne!(
+        transfer.status(),
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "the transfer extractor must receive bodies above the ordinary ceiling"
+    );
+
+    let oversized_transfer = context
+        .request(
+            authenticated(Method::POST, "/api/v1/imports/preview")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "format": "markdown",
+                        "content": "x".repeat(MAX_TRANSFER_BODY_BYTES),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(oversized_transfer.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn generated_backup_restore_streams_above_the_ordinary_body_ceiling() {
+    let context = TestContext::new();
+    for index in 0..64 {
+        create_task_payload(
+            &context,
+            json!({
+                "title": format!("backup task {index}"),
+                "description": "x".repeat(10_000),
+            }),
+        )
+        .await;
+    }
+    let backup_response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/backup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(backup_response.status(), StatusCode::OK);
+    let backup = response_bytes(backup_response).await;
+    assert!(backup.len() > MAX_BODY_BYTES);
+
+    let restored = context
+        .request(
+            authenticated(Method::POST, "/api/v1/backup/restore")
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from(backup))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(restored.status(), StatusCode::OK);
+    assert!(context.state.maintenance().restart_required());
+}
+
+#[tokio::test]
+async fn held_download_rejects_other_staged_operations_without_creating_files() {
+    let context = TestContext::new();
+    let profile_dir = context.directory.join("profile");
+    let held = context
+        .request(
+            authenticated(Method::GET, "/api/v1/backup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(held.status(), StatusCode::OK);
+    let held_count = staged_file_count(&profile_dir);
+    assert_eq!(held_count, 1);
+
+    for request in [
+        authenticated(Method::GET, "/api/v1/backup")
+            .body(Body::empty())
+            .unwrap(),
+        authenticated(Method::GET, "/api/v1/exports/tasks?format=json")
+            .body(Body::empty())
+            .unwrap(),
+        authenticated(Method::POST, "/api/v1/backup/restore")
+            .body(Body::from("must-not-be-staged"))
+            .unwrap(),
+    ] {
+        let response = context.request(request).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            json(response).await["error"]["code"],
+            "staged_artifact_conflict"
+        );
+        assert_eq!(staged_file_count(&profile_dir), held_count);
+    }
+
+    drop(held);
+    assert_eq!(staged_file_count(&profile_dir), 0);
+    let next = context
+        .request(
+            authenticated(Method::GET, "/api/v1/exports/tasks?format=json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(next.status(), StatusCode::OK);
+    drop(next);
+    assert_eq!(staged_file_count(&profile_dir), 0);
+}
+
+#[tokio::test]
+async fn held_restore_upload_rejects_staged_operations_and_cleans_up_on_cancel() {
+    let context = TestContext::new();
+    let profile_dir = context.directory.join("profile");
+    let app = context.app.clone();
+    let upload = tokio::spawn(async move {
+        app.oneshot(
+            authenticated(Method::POST, "/api/v1/backup/restore")
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from_stream(HeldBodyStream {
+                    first: Some(Bytes::from_static(b"JNBK")),
+                }))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while staged_file_count(&profile_dir) != 1 {
+        assert!(Instant::now() < deadline, "restore upload was not staged");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/backup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json(response).await["error"]["code"],
+        "staged_artifact_conflict"
+    );
+    assert_eq!(staged_file_count(&profile_dir), 1);
+
+    upload.abort();
+    let _ = upload.await;
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while staged_file_count(&profile_dir) != 0 {
+        assert!(
+            Instant::now() < deadline,
+            "cancelled upload was not removed"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let next = context
+        .request(
+            authenticated(Method::GET, "/api/v1/backup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(next.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn restore_drains_streams_and_requests_then_stops_owned_coordinator() {
+    let context = TestContext::new();
+    assert!(context.state.start_reminder_coordinator());
+    assert!(!context.state.start_reminder_coordinator());
+    let stream = context.open_sse().await;
+    let reminder_stream = context
+        .request(
+            authenticated(Method::GET, "/api/v1/reminders/events")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(reminder_stream.status(), StatusCode::OK);
+    context.wait_until_forwarders(2).await;
+
+    let backup_response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/backup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    let backup = response_bytes(backup_response).await;
+    assert!(context.state.maintenance().try_admit());
+
+    let app = context.app.clone();
+    let restore = tokio::spawn(async move {
+        app.oneshot(
+            authenticated(Method::POST, "/api/v1/backup/restore")
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from(backup))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    });
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !context.state.maintenance().restart_required() {
+        assert!(
+            Instant::now() < deadline,
+            "restore did not enter quiescence"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    context.wait_until_forwarders(0).await;
+    assert!(
+        !restore.is_finished(),
+        "restore cut over before admitted request drained"
+    );
+
+    context.state.maintenance().release();
+    let restored = restore.await.unwrap();
+    assert_eq!(restored.status(), StatusCode::OK);
+    assert!(!context.state.reminder_coordinator_running());
+    assert!(!context.state.start_reminder_coordinator());
+    assert_eq!(context.state.active_forwarders.load(Ordering::SeqCst), 0);
+    drop(reminder_stream);
+    drop(stream);
+}
+
+#[tokio::test(start_paused = true)]
+async fn restore_forwarder_timeout_is_fail_closed_without_cutover() {
+    let context = TestContext::new();
+    let before = context.state.service.get_sync_state().await.unwrap();
+    let backup_response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/backup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    let backup = response_bytes(backup_response).await;
+    context.state.active_forwarders.store(1, Ordering::SeqCst);
+
+    let response = context
+        .request(
+            authenticated(Method::POST, "/api/v1/backup/restore")
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from(backup))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        json(response).await["error"]["code"],
+        "maintenance_forwarder_timeout"
+    );
+    assert!(context.state.maintenance().restart_required());
+    let after = context.state.service.get_sync_state().await.unwrap();
+    assert_eq!(after, before, "timed-out drain must not apply restore");
+    context.state.active_forwarders.store(0, Ordering::SeqCst);
+}
+
+#[test]
+fn restore_failures_after_quiescence_never_reopen_normal_admission() {
+    let ordinary = TestContext::new();
+    let gate = ordinary.state.maintenance();
+    assert!(gate.enter_maintenance());
+    gate.mark_restart_required();
+    let response = crate::routes::restore_failure_after_quiescence(
+        gate,
+        junban_app::AppError::Storage,
+        &RequestId("ordinary-rollback".to_owned()),
+    )
+    .into_response();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(gate.restart_required());
+    assert!(!gate.recovery_mode());
+    assert!(!gate.is_normal());
+
+    let catastrophic = TestContext::new();
+    let gate = catastrophic.state.maintenance();
+    assert!(gate.enter_maintenance());
+    gate.mark_restart_required();
+    let response = crate::routes::restore_failure_after_quiescence(
+        gate,
+        junban_app::AppError::CatastrophicRestore,
+        &RequestId("catastrophic-rollback".to_owned()),
+    )
+    .into_response();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(gate.restart_required());
+    assert!(gate.recovery_mode());
+    assert!(!gate.is_normal());
+}
+
+#[tokio::test]
+async fn catastrophic_runtime_boundary_accepts_authenticated_recovery_restore() {
+    let context = TestContext::new();
+    let backup_response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/backup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    let backup = response_bytes(backup_response).await;
+
+    fs::write(
+        context
+            .state
+            .profile_dir
+            .join(junban_storage::RECOVERY_REQUIRED_FILE),
+        b"{\"version\":1,\"reason\":\"catastrophic_restore\"}\n",
+    )
+    .unwrap();
+    let gate = context.state.maintenance();
+    assert!(gate.enter_maintenance());
+    gate.mark_restart_required();
+    gate.enter_recovery();
+
+    let response = context
+        .request(
+            authenticated(Method::POST, "/api/v1/backup/restore")
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from(backup))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json(response).await["restart_required"], true);
+    assert!(
+        !context
+            .state
+            .profile_dir
+            .join(junban_storage::RECOVERY_REQUIRED_FILE)
+            .exists(),
+        "durable successful recovery restore must clear the catastrophic marker"
+    );
+    assert!(
+        gate.recovery_mode(),
+        "normal admission stays closed until restart"
+    );
+}
+
+#[tokio::test]
+async fn invalid_backup_preflight_keeps_maintenance_and_active_streams_untouched() {
+    let context = TestContext::new();
+    create_task_payload(&context, json!({ "title": "hostile backup target" })).await;
+    let sync_before = context.state.service.get_sync_state().await.unwrap();
+    let stream = context.open_sse().await;
+    context.wait_until_forwarders(1).await;
+
+    let backup_response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/backup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(backup_response.status(), StatusCode::OK);
+    let backup = response_bytes(backup_response).await;
+
+    let mut bad_magic = backup.clone();
+    bad_magic[0] ^= 0xff;
+    let mut bad_version = backup.clone();
+    bad_version[4..6].copy_from_slice(&99_u16.to_le_bytes());
+    let mut bad_hash = backup.clone();
+    *bad_hash.last_mut().unwrap() ^= 0xff;
+
+    let (manifest, payload) = parse_backup_envelope(&backup).unwrap();
+    let mut hostile_rows = Vec::new();
+    for (index, sql) in [
+        "CREATE TABLE unexpected_restore_table(value TEXT);",
+        "PRAGMA ignore_check_constraints=ON; UPDATE tasks SET title = '';",
+        "UPDATE events SET event_json = '{}';",
+        "UPDATE operation_receipts SET response_json = '{}';",
+        "UPDATE operation_undo SET inverse_json = '{}';",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let sqlite_path = context
+            .directory
+            .join(format!("hostile-restore-{index}.sqlite3"));
+        fs::write(&sqlite_path, &payload).unwrap();
+        let connection = rusqlite::Connection::open(&sqlite_path).unwrap();
+        connection.execute_batch(sql).unwrap();
+        drop(connection);
+        let hostile_payload = fs::read(&sqlite_path).unwrap();
+        let mut hostile_manifest = manifest.clone();
+        hostile_manifest.payload_sha256 = sha256_hex(&hostile_payload);
+        hostile_rows.push(frame_backup_envelope(&hostile_manifest, &hostile_payload).unwrap());
+    }
+
+    let mut candidates = vec![bad_magic, bad_version, bad_hash];
+    candidates.extend(hostile_rows);
+    for candidate in candidates {
+        let response = context
+            .request(
+                authenticated(Method::POST, "/api/v1/backup/restore")
+                    .header(header::CONTENT_TYPE, "application/octet-stream")
+                    .body(Body::from(candidate))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(context.state.maintenance().is_normal());
+        assert_eq!(
+            context.state.service.get_sync_state().await.unwrap(),
+            sync_before,
+            "invalid preflight must not rotate the live epoch or revision"
+        );
+        context.wait_until_forwarders(1).await;
+    }
+
+    drop(stream);
+    context.wait_until_forwarders(0).await;
 }
 
 #[tokio::test]
@@ -969,6 +1462,201 @@ async fn p2_api_002_constraint_violations_map_to_stable_http_conflicts() {
 }
 
 #[tokio::test]
+async fn recovery_router_is_lock_retaining_minimal_authenticated_and_restart_only() {
+    let directory = env::temp_dir().join(format!(
+        "junban-recovery-test-{}-{}",
+        std::process::id(),
+        TEST_CONTEXT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let donor_dir = directory.join("donor");
+    let donor = ProfileOwner::open(&donor_dir).unwrap();
+    let backup = donor.repository().create_backup().await.unwrap();
+    let backup_bytes = fs::read(backup.path()).unwrap();
+    drop(backup);
+    drop(donor);
+
+    let profile_dir = directory.join("profile");
+    fs::create_dir_all(&profile_dir).unwrap();
+    fs::write(profile_dir.join("junban.sqlite3"), b"not a sqlite database").unwrap();
+    assert!(matches!(
+        ProfileOwner::open(&profile_dir),
+        Err(OpenError::Database(_))
+    ));
+    let owner = RecoveryOwner::open(&profile_dir).unwrap();
+    let web_dir = directory.join("web");
+    fs::create_dir_all(&web_dir).unwrap();
+    fs::write(web_dir.join("index.html"), "<main>Recovery</main>").unwrap();
+    let state = RecoveryState::new(owner, TOKEN.to_owned(), [HOST.to_owned()]).unwrap();
+    let app = recovery_router(state.clone(), &web_dir);
+
+    let ui = app
+        .clone()
+        .oneshot(request(Method::GET, "/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(ui.status(), StatusCode::OK);
+    assert!(
+        String::from_utf8(response_bytes(ui).await)
+            .unwrap()
+            .contains("Junban recovery")
+    );
+
+    let health = app
+        .clone()
+        .oneshot(
+            request(Method::GET, "/api/v1/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(health.status(), StatusCode::OK);
+    assert_eq!(json(health).await["status"], "recovery");
+    let status = app
+        .clone()
+        .oneshot(
+            request(Method::GET, "/api/v1/recovery/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(status.status(), StatusCode::OK);
+    assert_eq!(json(status).await["mode"], "recovery");
+    let unavailable = app
+        .clone()
+        .oneshot(
+            authenticated(Method::GET, "/api/v1/tasks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let unauthenticated_restore = app
+        .clone()
+        .oneshot(
+            request(Method::POST, "/api/v1/backup/restore")
+                .body(Body::from(backup_bytes.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthenticated_restore.status(), StatusCode::UNAUTHORIZED);
+    assert!(matches!(
+        RecoveryOwner::open(&profile_dir),
+        Err(OpenError::AlreadyOwned)
+    ));
+
+    let restored = app
+        .clone()
+        .oneshot(
+            authenticated(Method::POST, "/api/v1/backup/restore")
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from(backup_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(restored.status(), StatusCode::OK);
+    assert_eq!(json(restored).await["restart_required"], true);
+    let repeated_restore = app
+        .clone()
+        .oneshot(
+            authenticated(Method::POST, "/api/v1/backup/restore")
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from("not-used-after-terminal-restore"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(repeated_restore.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json(repeated_restore).await["error"]["code"],
+        "maintenance_conflict"
+    );
+    let still_unavailable = app
+        .clone()
+        .oneshot(
+            authenticated(Method::GET, "/api/v1/tasks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(still_unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    drop(app);
+    drop(state);
+    let reopened = ProfileOwner::open(&profile_dir).expect("restored profile opens after restart");
+    drop(reopened);
+    assert!(
+        profile_dir
+            .join("backups/pre-recovery")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some()
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn future_schema_profile_can_transfer_its_lock_to_recovery_owner() {
+    let directory = env::temp_dir().join(format!(
+        "junban-future-recovery-test-{}-{}",
+        std::process::id(),
+        TEST_CONTEXT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&directory).unwrap();
+    let connection = rusqlite::Connection::open(directory.join("junban.sqlite3")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            );
+            INSERT INTO schema_migrations(version, applied_at)
+            VALUES (999, '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+    drop(connection);
+    match ProfileOwner::open(&directory) {
+        Err(OpenError::Database(_)) => {}
+        Err(error) => panic!("expected future-schema database error, got {error:?}"),
+        Ok(_) => panic!("future-schema profile unexpectedly opened"),
+    }
+    let recovery = RecoveryOwner::open(&directory).unwrap();
+    assert!(matches!(
+        RecoveryOwner::open(&directory),
+        Err(OpenError::AlreadyOwned)
+    ));
+    drop(recovery);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn database_file_open_failure_can_transfer_its_lock_to_recovery_owner() {
+    let directory = env::temp_dir().join(format!(
+        "junban-open-recovery-test-{}-{}",
+        std::process::id(),
+        TEST_CONTEXT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(directory.join("junban.sqlite3")).unwrap();
+    assert!(matches!(
+        ProfileOwner::open(&directory),
+        Err(OpenError::Database(_))
+    ));
+    let recovery = RecoveryOwner::open(&directory).unwrap();
+    assert!(matches!(
+        RecoveryOwner::open(&directory),
+        Err(OpenError::AlreadyOwned)
+    ));
+    drop(recovery);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
 async fn api_fallback_never_returns_spa_html_and_static_bootstrap_is_public() {
     let context = TestContext::new();
     let api = context
@@ -996,7 +1684,7 @@ async fn api_fallback_never_returns_spa_html_and_static_bootstrap_is_public() {
 
     let invalid_query = context
         .request(
-            authenticated(Method::GET, "/api/v1/events?since=bad")
+            authenticated(Method::GET, "/api/v1/tasks?limit=bad")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1016,20 +1704,115 @@ async fn api_fallback_never_returns_spa_html_and_static_bootstrap_is_public() {
 }
 
 #[tokio::test]
+async fn sync_state_is_authenticated_and_sse_rejects_invalid_reset_cursors() {
+    let context = TestContext::new();
+    let unauthenticated = context
+        .request(
+            request(Method::GET, "/api/v1/sync-state")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let sync = context.state.service.get_sync_state().await.unwrap();
+    let response = context
+        .request(
+            authenticated(Method::GET, "/api/v1/sync-state")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json(response).await;
+    assert_eq!(body["event_epoch"], sync.event_epoch);
+    assert_eq!(body["revision"], 0);
+
+    let cases = [
+        "/api/v1/events".to_owned(),
+        format!("/api/v1/events?event_epoch={}", sync.event_epoch),
+        "/api/v1/events?event_epoch=not-a-uuid&since=0".to_owned(),
+        format!("/api/v1/events?event_epoch={}&since=bad", sync.event_epoch),
+        format!("/api/v1/events?event_epoch={}&since=0", Uuid::new_v4()),
+        format!("/api/v1/events?event_epoch={}&since=1", sync.event_epoch),
+    ];
+    for uri in cases {
+        let response = context
+            .request(
+                authenticated(Method::GET, &uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::CONFLICT, "{uri}");
+        assert_eq!(
+            json(response).await["error"]["code"],
+            "event_reset_required"
+        );
+    }
+    let malformed_header = context
+        .request(
+            authenticated(
+                Method::GET,
+                &format!("/api/v1/events?event_epoch={}", sync.event_epoch),
+            )
+            .header("last-event-id", "bad")
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(malformed_header.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json(malformed_header).await["error"]["code"],
+        "event_reset_required"
+    );
+
+    create_task(&context, "first retained").await;
+    create_task(&context, "second retained").await;
+    rusqlite::Connection::open(context.state.profile_dir.join("junban.sqlite3"))
+        .unwrap()
+        .execute("DELETE FROM events WHERE revision = 1", [])
+        .unwrap();
+    let response = context
+        .request(
+            authenticated(
+                Method::GET,
+                &format!("/api/v1/events?event_epoch={}&since=0", sync.event_epoch),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json(response).await["error"]["code"],
+        "event_reset_required"
+    );
+}
+
+#[tokio::test]
 async fn sse_catches_up_with_full_envelope_and_multi_page() {
     let context = TestContext::new();
     create_task(&context, "First").await;
     create_task(&context, "Second").await;
 
+    let epoch = context
+        .state
+        .service
+        .get_sync_state()
+        .await
+        .unwrap()
+        .event_epoch;
     let response = context
         .request(
-            authenticated(Method::GET, "/api/v1/events")
+            authenticated(Method::GET, &format!("/api/v1/events?event_epoch={epoch}"))
                 .header("last-event-id", "1")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await;
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["x-junban-event-epoch"], epoch.as_str());
     let mut body = response.into_body();
     let frame = tokio::time::timeout(Duration::from_secs(1), body.frame())
         .await
@@ -1050,7 +1833,7 @@ async fn sse_catches_up_with_full_envelope_and_multi_page() {
     }
     let response = context
         .request(
-            authenticated(Method::GET, "/api/v1/events")
+            authenticated(Method::GET, &format!("/api/v1/events?event_epoch={epoch}"))
                 .header("last-event-id", "0")
                 .body(Body::empty())
                 .unwrap(),
@@ -1106,9 +1889,10 @@ async fn sse_connection_cap_is_enforced_and_released() {
     context.wait_until_forwarders(MAX_SSE_CONNECTIONS).await;
     context.wait_until_connections(MAX_SSE_CONNECTIONS).await;
 
+    let overflow_uri = context.event_uri(0).await;
     let overflow = context
         .request(
-            authenticated(Method::GET, "/api/v1/events")
+            authenticated(Method::GET, &overflow_uri)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1212,6 +1996,74 @@ fn openapi_artifact_does_not_drift() {
     let checked: Value = serde_json::from_str(&checked).unwrap();
     let generated: Value = serde_json::from_str(&openapi_json()).unwrap();
     assert_eq!(checked, generated, "run openapi generation");
+}
+
+#[test]
+fn phase_4_openapi_exposes_corrected_typed_settings_contract() {
+    let doc: Value = serde_json::from_str(&openapi_json()).unwrap();
+    let schemas = &doc["components"]["schemas"];
+    assert_eq!(
+        schemas["ThemeDto"]["enum"],
+        json!(["system", "light", "dark", "nord"])
+    );
+    assert_eq!(
+        schemas["DensityDto"]["enum"],
+        json!(["compact", "default", "comfortable"])
+    );
+    assert_eq!(
+        schemas["WeekStartDto"]["enum"],
+        json!(["sunday", "monday", "saturday"])
+    );
+    assert_eq!(
+        schemas["CalendarDefaultDto"]["enum"],
+        json!(["day", "week", "month"])
+    );
+    assert_eq!(
+        schemas["DateFormatDto"]["enum"],
+        json!(["relative", "short", "long", "iso"])
+    );
+    assert!(schemas.get("AccentColorDto").is_none());
+    assert_eq!(
+        schemas["AppearanceSettingsDto"]["properties"]["accent"]["type"],
+        "string"
+    );
+    assert_eq!(
+        schemas["AppearanceSettingsDto"]["properties"]["accent"]["pattern"],
+        "^#[0-9A-Fa-f]{6}$"
+    );
+    assert!(
+        schemas["TaskDefaultsDto"]["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("confirm_before_delete"))
+    );
+    assert!(
+        schemas["DateTimeSettingsDto"]["properties"]
+            .get("time_zone")
+            .is_none()
+    );
+    assert!(schemas.get("ReminderSettingsDto").is_none());
+    assert!(
+        schemas["NotificationSettingsDto"]["properties"]
+            .get("reminder_defaults")
+            .is_none()
+    );
+    for required in [
+        "sound_enabled",
+        "volume_percent",
+        "task_completed_sound",
+        "task_created_sound",
+        "task_deleted_sound",
+        "reminder_sound",
+    ] {
+        assert!(
+            schemas["NotificationSettingsDto"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(required)),
+            "missing required notification field {required}"
+        );
+    }
 }
 
 #[test]
@@ -1326,7 +2178,9 @@ fn openapi_declares_security_and_operation_ids() {
                 if op.get("operationId").and_then(|v| v.as_str()).is_none() {
                     missing.push(format!("{method} {path}"));
                 }
+                // Health and recovery status are intentionally unauthenticated.
                 if path != "/api/v1/health"
+                    && path != "/api/v1/recovery/status"
                     && op
                         .get("security")
                         .and_then(|v| v.as_array())
@@ -1836,7 +2690,7 @@ async fn recv_wake(
 async fn reminder_coordinator_due_wake_throttles_without_notify() {
     let context = TestContext::new();
     let mut wakes = context.state.reminder_wakes.subscribe();
-    let handle = context.state.start_reminder_coordinator();
+    assert!(context.state.start_reminder_coordinator());
     tokio::task::yield_now().await;
 
     let created = create_task(&context, "overdue-wake").await;
@@ -1864,15 +2718,14 @@ async fn reminder_coordinator_due_wake_throttles_without_notify() {
     let second = recv_wake(&mut wakes).await;
     assert_eq!(second.sequence, 2);
 
-    context.state.shutdown_token().cancel();
-    handle.await.unwrap();
+    context.state.stop_reminder_coordinator().await;
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn reminder_coordinator_notification_bypasses_overdue_throttle() {
     let context = TestContext::new();
     let mut wakes = context.state.reminder_wakes.subscribe();
-    let handle = context.state.start_reminder_coordinator();
+    assert!(context.state.start_reminder_coordinator());
     tokio::task::yield_now().await;
 
     let created = create_task(&context, "overdue-notify").await;
@@ -1891,15 +2744,14 @@ async fn reminder_coordinator_notification_bypasses_overdue_throttle() {
     let second = recv_wake(&mut wakes).await;
     assert_eq!(second.sequence, 2);
 
-    context.state.shutdown_token().cancel();
-    handle.await.unwrap();
+    context.state.stop_reminder_coordinator().await;
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn reminder_coordinator_sleeps_until_future_eligibility() {
     let context = TestContext::new();
     let mut wakes = context.state.reminder_wakes.subscribe();
-    let handle = context.state.start_reminder_coordinator();
+    assert!(context.state.start_reminder_coordinator());
     tokio::task::yield_now().await;
 
     let created = create_task(&context, "future-wake").await;
@@ -1924,23 +2776,21 @@ async fn reminder_coordinator_sleeps_until_future_eligibility() {
     let wake = recv_wake(&mut wakes).await;
     assert_eq!(wake.sequence, 1);
 
-    context.state.shutdown_token().cancel();
-    handle.await.unwrap();
+    context.state.stop_reminder_coordinator().await;
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn reminder_coordinator_idles_without_rows() {
     let context = TestContext::new();
     let mut wakes = context.state.reminder_wakes.subscribe();
-    let handle = context.state.start_reminder_coordinator();
+    assert!(context.state.start_reminder_coordinator());
     tokio::task::yield_now().await;
 
     tokio::time::advance(Duration::from_secs(600)).await;
     tokio::task::yield_now().await;
     assert!(wakes.try_recv().is_err(), "no-row idle must not poll");
 
-    context.state.shutdown_token().cancel();
-    handle.await.unwrap();
+    context.state.stop_reminder_coordinator().await;
 }
 
 #[tokio::test]
@@ -3185,6 +4035,236 @@ async fn seed_task_with(
 }
 
 #[tokio::test]
+async fn settings_api_defaults_canonicalizes_shortcuts_and_returns_field_errors() {
+    let context = TestContext::new();
+    let (status, defaults) = get_json(&context, "/api/v1/settings").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(defaults["appearance"]["theme"], "light");
+    assert_eq!(defaults["appearance"]["accent"], "#3b82f6");
+    assert_eq!(defaults["appearance"]["density"], "comfortable");
+    assert_eq!(defaults["appearance"]["font_family"], "outfit");
+    assert_eq!(defaults["date_time"]["date_format"], "short");
+    assert_eq!(defaults["date_time"]["time_format"], "h24");
+    assert!(defaults["date_time"].get("time_zone").is_none());
+    assert_eq!(defaults["task_defaults"]["default_view"], "today");
+    assert_eq!(defaults["task_defaults"]["confirm_before_delete"], true);
+    assert!(defaults["notifications"].get("reminder_defaults").is_none());
+    assert_eq!(defaults["notifications"]["sound_enabled"], true);
+    assert_eq!(defaults["notifications"]["volume_percent"], 70);
+    assert_eq!(defaults["notifications"]["task_completed_sound"], true);
+    assert_eq!(defaults["notifications"]["task_created_sound"], true);
+    assert_eq!(defaults["notifications"]["task_deleted_sound"], true);
+    assert_eq!(defaults["notifications"]["reminder_sound"], true);
+    let approaching = defaults["planning"]["nudge_rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["kind"] == "approaching_deadline")
+        .expect("approaching_deadline rule");
+    assert!(approaching.get("threshold").is_none() || approaching["threshold"].is_null());
+    assert_eq!(
+        defaults["keyboard_shortcuts"].as_array().unwrap().len(),
+        junban_domain::KEYBOARD_SHORTCUT_ACTIONS.len()
+    );
+
+    let malformed_accent = mutate_json(
+        &context,
+        Method::PATCH,
+        "/api/v1/settings",
+        json!({
+            "appearance": {
+                "theme": "system",
+                "accent": "blue",
+                "density": "default",
+                "font_size": "medium",
+                "font_family": "system",
+                "reduced_motion": false
+            }
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(malformed_accent.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(json(malformed_accent).await["error"]["fields"]["accent"].is_string());
+
+    let patched = mutate_json(
+        &context,
+        Method::PATCH,
+        "/api/v1/settings",
+        json!({
+            "keyboard_shortcuts": [
+                {"action": "quick_add", "chord": "Control + K"},
+                {"action": "today", "chord": "G T"}
+            ]
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(patched.status(), StatusCode::OK);
+    let (_, settings) = get_json(&context, "/api/v1/settings").await;
+    assert_eq!(
+        settings["keyboard_shortcuts"],
+        json!([
+            {"action": "quick-add", "chord": "cmd+k"},
+            {"action": "today", "chord": "g t"}
+        ])
+    );
+
+    let duplicate = mutate_json(
+        &context,
+        Method::PATCH,
+        "/api/v1/settings",
+        json!({
+            "keyboard_shortcuts": [
+                {"action": "quick-add", "chord": "ctrl+k"},
+                {"action": "search", "chord": "cmd+k"}
+            ]
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(duplicate.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(json(duplicate).await["error"]["fields"]["keyboard_shortcuts.chord"].is_string());
+
+    let unknown_action = mutate_json(
+        &context,
+        Method::PATCH,
+        "/api/v1/settings",
+        json!({"keyboard_shortcuts": [{"action": "open-tab", "chord": "cmd+k"}]}),
+        None,
+    )
+    .await;
+    assert_eq!(unknown_action.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(json(unknown_action).await["error"]["fields"]["keyboard_shortcut.action"].is_string());
+
+    let arbitrary_key = mutate_json(
+        &context,
+        Method::PATCH,
+        "/api/v1/settings",
+        json!({"custom_setting": true}),
+        None,
+    )
+    .await;
+    assert_eq!(arbitrary_key.status(), StatusCode::BAD_REQUEST);
+
+    let inert_threshold = mutate_json(
+        &context,
+        Method::PATCH,
+        "/api/v1/settings",
+        json!({
+            "planning": {
+                "capacity_minutes": 480,
+                "nudge_rules": [
+                    {"kind": "approaching_deadline", "enabled": true, "threshold": 3}
+                ]
+            }
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(inert_threshold.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(json(inert_threshold).await["error"]["fields"]["nudge_rules.threshold"].is_string());
+}
+
+#[tokio::test]
+async fn create_task_applies_task_defaults_and_exact_retry_ignores_later_settings() {
+    let context = TestContext::new();
+
+    let patched = mutate_json(
+        &context,
+        Method::PATCH,
+        "/api/v1/settings",
+        json!({
+            "task_defaults": {
+                "default_priority": 2,
+                "default_view": "today",
+                "default_estimated_minutes": 25,
+                "confirm_before_delete": true
+            }
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(patched.status(), StatusCode::OK);
+
+    let defaulted = create_task_payload(&context, json!({ "title": "Defaulted" })).await;
+    assert_eq!(defaulted["event"]["snapshot"]["task"]["priority"], 2);
+    assert_eq!(
+        defaulted["event"]["snapshot"]["task"]["estimated_minutes"],
+        25
+    );
+
+    let explicit = create_task_payload(
+        &context,
+        json!({
+            "title": "Explicit",
+            "priority": 4,
+            "estimated_minutes": 10
+        }),
+    )
+    .await;
+    assert_eq!(explicit["event"]["snapshot"]["task"]["priority"], 4);
+    assert_eq!(
+        explicit["event"]["snapshot"]["task"]["estimated_minutes"],
+        10
+    );
+
+    let key = Uuid::new_v4().to_string();
+    let body = json!({ "title": "Replay me" }).to_string();
+    let first = context
+        .request(
+            operation_header_key(authenticated(Method::POST, "/api/v1/tasks"), &key)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first_bytes = response_bytes(first).await;
+    let first_json: Value = serde_json::from_slice(&first_bytes).unwrap();
+    assert_eq!(first_json["event"]["snapshot"]["task"]["priority"], 2);
+    assert_eq!(
+        first_json["event"]["snapshot"]["task"]["estimated_minutes"],
+        25
+    );
+
+    let changed = mutate_json(
+        &context,
+        Method::PATCH,
+        "/api/v1/settings",
+        json!({
+            "task_defaults": {
+                "default_priority": 1,
+                "default_view": "today",
+                "default_estimated_minutes": 99,
+                "confirm_before_delete": true
+            }
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(changed.status(), StatusCode::OK);
+
+    let second = context
+        .request(
+            operation_header_key(authenticated(Method::POST, "/api/v1/tasks"), &key)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(second.status(), StatusCode::CREATED);
+    let second_bytes = response_bytes(second).await;
+    assert_eq!(second_bytes, first_bytes);
+    let second_json: Value = serde_json::from_slice(&second_bytes).unwrap();
+    assert_eq!(second_json["event"]["snapshot"]["task"]["priority"], 2);
+    assert_eq!(
+        second_json["event"]["snapshot"]["task"]["estimated_minutes"],
+        25
+    );
+}
+
+#[tokio::test]
 async fn planning_routes_require_auth() {
     // Auth limiter is per-state and counts failures; use fresh contexts in batches.
     let uris = [
@@ -3724,4 +4804,373 @@ async fn motivation_ordering_and_temporal_defaults() {
     assert_eq!(status, StatusCode::OK);
     let (status, _) = get_json(&context, "/api/v1/nudges").await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn token_rotation_discarded_response_retries_exactly_and_rejects_old_token_elsewhere() {
+    let context = TestContext::new();
+    let sse = context.open_sse().await;
+    context.wait_until_forwarders(1).await;
+    let operation_id = Uuid::now_v7().to_string();
+
+    let discarded = context
+        .request(
+            operation_header_key(
+                authenticated(Method::POST, "/api/v1/auth/rotate"),
+                &operation_id,
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(discarded.status(), StatusCode::OK);
+    assert_eq!(
+        discarded.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
+    drop(discarded);
+    let durable_issued = load_token_rotation_receipt(&context.directory.join("profile"))
+        .unwrap()
+        .unwrap()
+        .issued_token;
+    context.wait_until_forwarders(0).await;
+    drop(sse);
+
+    let retried = context
+        .request(
+            operation_header_key(
+                authenticated(Method::POST, "/api/v1/auth/rotate"),
+                &operation_id,
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(retried.status(), StatusCode::OK);
+    assert_eq!(
+        retried.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
+    let body = json(retried).await;
+    let new_token = body["token"].as_str().unwrap().to_owned();
+    assert_ne!(new_token, TOKEN);
+    assert_eq!(new_token, durable_issued);
+
+    let wrong_operation = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/auth/rotate"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(wrong_operation.status(), StatusCode::UNAUTHORIZED);
+    let other_route = context
+        .request(
+            authenticated(Method::GET, "/api/v1/profile")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(other_route.status(), StatusCode::UNAUTHORIZED);
+
+    let accepted = context
+        .request(
+            request(Method::GET, "/api/v1/profile")
+                .header(header::AUTHORIZATION, format!("Bearer {new_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(accepted.status(), StatusCode::OK);
+
+    let profile_dir = context.directory.join("profile");
+    let token_on_disk = fs::read_to_string(profile_dir.join(TOKEN_FILE))
+        .unwrap()
+        .trim()
+        .to_owned();
+    assert_eq!(token_on_disk, new_token);
+    let receipt_path = profile_dir.join(TOKEN_ROTATION_RECEIPT_FILE);
+    assert!(receipt_path.is_file());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(receipt_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    let diag = context
+        .request(
+            request(Method::GET, "/api/v1/diagnostics")
+                .header(header::AUTHORIZATION, format!("Bearer {new_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(diag.status(), StatusCode::OK);
+    let rendered = json(diag).await.to_string();
+    assert!(!rendered.contains(&new_token));
+    assert!(!rendered.contains(TOKEN));
+}
+
+#[tokio::test]
+async fn token_rotation_write_failure_keeps_current_token_and_durable_retry() {
+    let context = TestContext::new();
+    let profile_dir = context.directory.join("profile");
+    let token_path = profile_dir.join(TOKEN_FILE);
+    fs::create_dir(&token_path).unwrap();
+    let operation_id = Uuid::now_v7().to_string();
+
+    let failed = context
+        .request(
+            operation_header_key(
+                authenticated(Method::POST, "/api/v1/auth/rotate"),
+                &operation_id,
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(failed.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let pending_issued = load_token_rotation_receipt(&profile_dir)
+        .unwrap()
+        .unwrap()
+        .issued_token;
+
+    let current_still_works = context
+        .request(
+            authenticated(Method::GET, "/api/v1/profile")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(current_still_works.status(), StatusCode::OK);
+
+    fs::remove_dir(&token_path).unwrap();
+    write_token_atomic(&profile_dir, TOKEN).unwrap();
+    let retried = context
+        .request(
+            operation_header_key(
+                authenticated(Method::POST, "/api/v1/auth/rotate"),
+                &operation_id,
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(retried.status(), StatusCode::OK);
+    let issued = json(retried).await["token"].as_str().unwrap().to_owned();
+    assert_eq!(issued, pending_issued);
+    assert_eq!(
+        fs::read_to_string(token_path).unwrap().trim(),
+        issued.as_str()
+    );
+}
+
+#[tokio::test]
+async fn startup_reconciles_pending_rotation_and_retains_exact_retry_receipt() {
+    let directory = env::temp_dir().join(format!(
+        "junban-token-restart-test-{}-{}",
+        std::process::id(),
+        Uuid::now_v7()
+    ));
+    let profile_dir = directory.join("profile");
+    let owner = ProfileOwner::open(&profile_dir).unwrap();
+    write_token_atomic(&profile_dir, TOKEN).unwrap();
+    let state = ServerState::new(
+        owner.repository(),
+        TOKEN.to_owned(),
+        [HOST.to_owned()],
+        &profile_dir,
+    )
+    .unwrap();
+    let operation_id = OperationId::parse(&Uuid::now_v7().to_string()).unwrap();
+    let issued = state.rotate_token(operation_id).unwrap();
+
+    // Model a crash after receipt fsync but before access-token replacement.
+    write_token_atomic(&profile_dir, TOKEN).unwrap();
+    drop(state);
+    drop(owner);
+
+    let reconciled = load_or_create_token(&profile_dir).unwrap();
+    assert_eq!(reconciled, issued);
+    assert_eq!(
+        fs::read_to_string(profile_dir.join(TOKEN_FILE))
+            .unwrap()
+            .trim(),
+        issued
+    );
+    let reopened = ProfileOwner::open(&profile_dir).unwrap();
+    let restarted = ServerState::new(
+        reopened.repository(),
+        reconciled,
+        [HOST.to_owned()],
+        &profile_dir,
+    )
+    .unwrap();
+    let web_dir = directory.join("web");
+    fs::create_dir_all(&web_dir).unwrap();
+    fs::write(web_dir.join("index.html"), "<main>Junban</main>").unwrap();
+    let app = router(restarted, web_dir);
+    let exact_retry = app
+        .clone()
+        .oneshot(
+            operation_header_key(
+                authenticated(Method::POST, "/api/v1/auth/rotate"),
+                &operation_id.to_string(),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(exact_retry.status(), StatusCode::OK);
+    assert_eq!(json(exact_retry).await["token"], issued);
+    let denied = app
+        .oneshot(
+            authenticated(Method::GET, "/api/v1/profile")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+    drop(reopened);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn token_rotation_receipt_rejects_unknown_fields_and_versions() {
+    let directory = env::temp_dir().join(format!(
+        "junban-token-receipt-test-{}-{}",
+        std::process::id(),
+        Uuid::now_v7()
+    ));
+    fs::create_dir_all(&directory).unwrap();
+    let receipt = TokenRotationReceipt::new(
+        OperationId::parse(&Uuid::now_v7().to_string()).unwrap(),
+        TOKEN,
+        generate_access_token(),
+    );
+    persist_token_rotation_receipt(&directory, &receipt).unwrap();
+    let path = directory.join(TOKEN_ROTATION_RECEIPT_FILE);
+    let mut value: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    value["unknown"] = json!(true);
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let error = match load_token_rotation_receipt(&directory) {
+        Ok(_) => panic!("unknown receipt field was accepted"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    value.as_object_mut().unwrap().remove("unknown");
+    value["version"] = json!(99);
+    fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let error = match load_token_rotation_receipt(&directory) {
+        Ok(_) => panic!("unknown receipt version was accepted"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn host_allowlist_persists_and_rejects_invalid_entries() {
+    let context = TestContext::new();
+
+    let bad = context
+        .request(
+            authenticated(Method::PUT, "/api/v1/hosts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"hosts":["bad:443"]}"#))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let ok = context
+        .request(
+            authenticated(Method::PUT, "/api/v1/hosts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"hosts":["device.tailnet.ts.net"]}"#))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(ok.status(), StatusCode::OK);
+    let body = json(ok).await;
+    let hosts = body["hosts"].as_array().unwrap();
+    assert!(hosts.iter().any(|h| h == "device.tailnet.ts.net"));
+    assert!(hosts.iter().any(|h| h == HOST));
+
+    let file =
+        fs::read_to_string(context.directory.join("profile").join("allowed-hosts.json")).unwrap();
+    assert!(file.contains("device.tailnet.ts.net"));
+    assert!(!file.contains(HOST), "CLI hosts must not be re-persisted");
+
+    let listed = context
+        .request(
+            authenticated(Method::GET, "/api/v1/hosts")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(listed.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn diagnostics_ring_records_auth_failures_and_supports_clear() {
+    let context = TestContext::new();
+    let denied = context
+        .request(
+            request(Method::GET, "/api/v1/profile")
+                .header(header::AUTHORIZATION, "Bearer wrong-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let diag = context
+        .request(
+            authenticated(Method::GET, "/api/v1/diagnostics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(diag.status(), StatusCode::OK);
+    let body = json(diag).await;
+    let entries = body["entries"].as_array().unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["code"] == "authentication_required"),
+        "expected auth failure diagnostic, got {body}"
+    );
+    assert!(!body.to_string().contains(TOKEN));
+
+    let cleared = context
+        .request(
+            authenticated(Method::DELETE, "/api/v1/diagnostics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(cleared.status(), StatusCode::NO_CONTENT);
+
+    let after = context
+        .request(
+            authenticated(Method::GET, "/api/v1/diagnostics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    let after_body = json(after).await;
+    let entries = after_body["entries"].as_array().unwrap();
+    // clear logs a diagnostics_cleared info entry
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry["code"] == "diagnostics_cleared"),
+        "{after_body}"
+    );
 }

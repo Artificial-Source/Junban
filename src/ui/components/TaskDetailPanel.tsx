@@ -97,7 +97,9 @@ export function TaskDetailPanel({
   onEnterFocusMode,
   phase3VisualFixture = false,
 }: TaskDetailPanelProps) {
-  const { catalog, mutationPhase, mutationError, revision } = useWorkspace();
+  const { catalog, mutationPhase, mutationError, revision, settings } = useWorkspace();
+  const confirmBeforeDelete = settings?.task_defaults.confirm_before_delete ?? true;
+  const focusModeEnabled = settings?.features.focus_mode_enabled ?? false;
   const {
     patchTask,
     deleteTask,
@@ -746,7 +748,7 @@ export function TaskDetailPanel({
               {section && <span className="text-on-surface-muted">/ {section.name}</span>}
             </span>
             <div className="ml-auto flex shrink-0 items-center gap-0.5">
-              {onEnterFocusMode && committed.status === "pending" && (
+              {focusModeEnabled && onEnterFocusMode && committed.status === "pending" && (
                 <button
                   type="button"
                   onClick={() => onEnterFocusMode(committed.id)}
@@ -1973,7 +1975,10 @@ export function TaskDetailPanel({
                 <div className="order-6 rounded-2xl border border-error/20 bg-error/5 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
                   <button
                     type="button"
-                    onClick={() => setConfirmDelete(true)}
+                    onClick={() => {
+                      if (confirmBeforeDelete) setConfirmDelete(true);
+                      else void handleDeleteConfirmed();
+                    }}
                     disabled={pending}
                     aria-label="Delete task"
                     className="flex w-full items-center gap-2 rounded-xl px-1 py-1 text-sm text-error transition-colors hover:text-error/80 disabled:opacity-50"

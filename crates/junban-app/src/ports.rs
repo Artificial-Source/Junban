@@ -4,23 +4,31 @@ use std::{future::Future, pin::Pin};
 
 use jiff::Timestamp;
 use junban_domain::{
-    ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
-    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
-    ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
-    TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId,
+    AppSettings, ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId,
+    RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    ReminderOccurrence, SavedFilterId, SectionId, SettingsPatch, TagId, Task, TaskActivity,
+    TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId,
+    TimeSlotDraft, TimeSlotId, TransferApply, TransferFormat, TransferPreview,
 };
 
 use crate::{
-    BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, MoveTarget,
-    ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
-    RepositoryError, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, TagDraft,
-    TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
-    TimeblockingRangeQuery,
+    BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, ExportFormat,
+    MoveTarget, ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction,
+    ReplanPastBlocksPreview, RepositoryError, SavedFilterDraft, SavedFilterPatch, SectionDraft,
+    SectionPatch, StagedFile, TagDraft, TagPatch, TaskListAsOf, TaskListPage, TaskPatch,
+    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TimeBlockPatch,
+    TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
 };
 
 pub type RepositoryFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, RepositoryError>> + Send + 'a>>;
+
+/// Atomic event-stream identity and head revision read from `app_state`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncState {
+    pub event_epoch: String,
+    pub revision: u64,
+}
 
 /// Single profile store. Implemented by the SQLite worker owner only.
 pub trait Repository: Send + Sync + 'static {
@@ -294,6 +302,9 @@ pub trait Repository: Send + Sync + 'static {
 
     fn list_events(&self, since: u64) -> RepositoryFuture<'_, EventCatchUp>;
 
+    /// Read the durable event epoch and global revision in one `app_state` query.
+    fn get_sync_state(&self) -> RepositoryFuture<'_, SyncState>;
+
     fn undo(
         &self,
         source_operation_id: OperationId,
@@ -488,4 +499,42 @@ pub trait Repository: Send + Sync + 'static {
         now: Timestamp,
         temporal: TemporalContext,
     ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    /// Read the persisted settings aggregate.
+    fn get_settings(&self) -> RepositoryFuture<'_, AppSettings>;
+
+    /// Patch settings in one transaction and emit `settings.updated`.
+    fn patch_settings(
+        &self,
+        operation_id: OperationId,
+        patch: SettingsPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    /// Parse transfer content into a fingerprint-bound import preview.
+    fn preview_import(
+        &self,
+        format: TransferFormat,
+        content: String,
+    ) -> RepositoryFuture<'_, TransferPreview>;
+
+    /// Apply a previously previewed import in one transaction.
+    fn apply_import(
+        &self,
+        operation_id: OperationId,
+        apply: TransferApply,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    /// Serialize transferable tasks into a private staged file using bounded pages.
+    fn create_export(&self, format: ExportFormat) -> RepositoryFuture<'_, StagedFile>;
+
+    /// Create a complete framed `.junban-backup` in a private staged file.
+    fn create_backup(&self) -> RepositoryFuture<'_, StagedFile>;
+
+    /// Fully validate an uploaded envelope and prepare its rotated SQLite candidate.
+    fn prepare_restore(&self, upload: StagedFile) -> RepositoryFuture<'_, StagedFile>;
+
+    /// Apply a previously validated and epoch-rotated SQLite candidate.
+    fn restore_backup(&self, candidate: StagedFile) -> RepositoryFuture<'_, ()>;
 }

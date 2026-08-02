@@ -1,5 +1,6 @@
 //! SQLite persistence with one profile owner and one dedicated connection thread.
 
+mod backup_ops;
 mod catalog_ops;
 mod detail_ops;
 mod helpers;
@@ -10,16 +11,23 @@ mod reminder_ops;
 mod rows;
 #[cfg(feature = "scale-bench")]
 pub mod scale_seed;
+mod settings_ops;
 mod task_ops;
 mod timeblock_ops;
+mod transfer_ops;
 mod tx;
 mod undo_ops;
 
 use std::{
+    collections::HashSet,
     fs::{self, File, OpenOptions},
     io,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+        mpsc,
+    },
     thread,
     time::Duration,
 };
@@ -27,18 +35,20 @@ use std::{
 use fs4::FileExt;
 use jiff::{Timestamp, civil::Date};
 use junban_app::{
-    BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, MoveTarget,
-    ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
-    Repository, RepositoryError, RepositoryFuture, SavedFilterDraft, SavedFilterPatch,
-    SectionDraft, SectionPatch, TagDraft, TagPatch, TaskListAsOf, TaskListPage, TaskPatch,
-    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TimeBlockPatch,
-    TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
+    AppSettings, BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp,
+    ExportFormat, MoveTarget, ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction,
+    ReplanPastBlocksPreview, Repository, RepositoryError, RepositoryFuture, SavedFilterDraft,
+    SavedFilterPatch, SectionDraft, SectionPatch, SettingsPatch, StagedFile, SyncState, TagDraft,
+    TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
+    TimeblockingRangeQuery,
 };
 use junban_domain::{
     ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
     ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
     ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
     TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId,
+    TransferApply, TransferFormat, TransferPreview,
 };
 use rusqlite::Connection;
 use thiserror::Error;
@@ -46,7 +56,31 @@ use tokio::sync::oneshot;
 
 const DATABASE_FILE: &str = "junban.sqlite3";
 const LOCK_FILE: &str = "profile.lock";
+/// Durable fail-closed flag left by a restore whose apply and rollback both failed.
+pub const RECOVERY_REQUIRED_FILE: &str = "recovery-required.json";
+const RECOVERY_CUTOVER_FILE: &str = "recovery-cutover.json";
+const RECOVERY_MARKER_VERSION: u8 = 1;
+const RECOVERY_CUTOVER_VERSION: u8 = 1;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(2_500);
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryRequiredMarker {
+    version: u8,
+    reason: String,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryCutoverMarker {
+    version: u8,
+    candidate_file: String,
+    rollback_dir: String,
+    candidate_len: u64,
+    candidate_sha256: String,
+    schema_version: i64,
+    event_epoch: String,
+}
 /// WAL pages between automatic PASSIVE checkpoints (4 KiB pages → 1 MiB).
 ///
 /// SQLite's default is 1000 pages (~4 MiB). On a representative host, PASSIVE
@@ -74,6 +108,93 @@ pub struct ProfileOwner {
     repository: SqliteRepository,
 }
 
+/// Profile-lock owner used when the normal SQLite worker cannot be constructed.
+///
+/// Recovery mode deliberately has no repository or application service. It can only
+/// preflight a complete backup and replace the unavailable database for next restart.
+pub struct RecoveryOwner {
+    profile_dir: PathBuf,
+    _lock: File,
+}
+
+impl RecoveryOwner {
+    pub fn open(profile_dir: impl AsRef<Path>) -> Result<Self, OpenError> {
+        let profile_dir = profile_dir.as_ref().to_path_buf();
+        ensure_private_dir(&profile_dir)?;
+        let lock_path = profile_dir.join(LOCK_FILE);
+        let lock = open_private_file(&lock_path)?;
+        FileExt::try_lock(&lock).map_err(|error| match error {
+            fs4::TryLockError::WouldBlock => OpenError::AlreadyOwned,
+            fs4::TryLockError::Error(error) => OpenError::Io(error),
+        })?;
+        reconcile_recovery_cutover(&profile_dir)
+            .map_err(|error| OpenError::Database(error.to_string()))?;
+        Ok(Self {
+            profile_dir,
+            _lock: lock,
+        })
+    }
+
+    #[must_use]
+    pub fn profile_dir(&self) -> &Path {
+        &self.profile_dir
+    }
+
+    /// Strictly validate and epoch-rotate a complete backup before cutover.
+    pub fn prepare_restore(&self, upload: StagedFile) -> Result<StagedFile, RepositoryError> {
+        backup_ops::prepare_restore(&self.profile_dir, upload)
+    }
+
+    /// Replace the unavailable database while retaining its exact files for rollback.
+    pub fn complete_restore(&self, candidate: StagedFile) -> Result<(), RepositoryError> {
+        recovery_replace_database(&self.profile_dir, &candidate)?;
+        clear_recovery_required(&self.profile_dir)
+    }
+}
+
+/// Whether startup must retain the profile lock without opening SQLite normally.
+///
+/// Both markers are checked before `ProfileOwner` can create a missing database.
+pub fn profile_recovery_required(profile_dir: &Path) -> io::Result<bool> {
+    marker_exists_and_valid::<RecoveryRequiredMarker>(
+        &profile_dir.join(RECOVERY_REQUIRED_FILE),
+        |marker| {
+            marker.version == RECOVERY_MARKER_VERSION && marker.reason == "catastrophic_restore"
+        },
+    )
+    .and_then(|required| {
+        if required {
+            Ok(true)
+        } else {
+            marker_exists_and_valid::<RecoveryCutoverMarker>(
+                &profile_dir.join(RECOVERY_CUTOVER_FILE),
+                validate_cutover_marker_basics,
+            )
+        }
+    })
+}
+
+fn marker_exists_and_valid<T: serde::de::DeserializeOwned>(
+    path: &Path,
+    validate: impl FnOnce(&T) -> bool,
+) -> io::Result<bool> {
+    match fs::read(path) {
+        Ok(bytes) => {
+            let marker: T = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+            if validate(&marker) {
+                Ok(true)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid recovery marker",
+                ))
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 impl ProfileOwner {
     pub fn open(profile_dir: impl AsRef<Path>) -> Result<Self, OpenError> {
         let profile_dir = profile_dir.as_ref();
@@ -85,9 +206,15 @@ impl ProfileOwner {
             fs4::TryLockError::WouldBlock => OpenError::AlreadyOwned,
             fs4::TryLockError::Error(error) => OpenError::Io(error),
         })?;
+        if profile_recovery_required(profile_dir)? {
+            return Err(OpenError::Database(
+                "profile requires recovery before normal admission".to_owned(),
+            ));
+        }
 
         let database_path = profile_dir.join(DATABASE_FILE);
-        open_private_file(&database_path)?;
+        open_private_file(&database_path)
+            .map_err(|error| OpenError::Database(error.to_string()))?;
         let repository = SqliteRepository::start(database_path, lock)?;
         Ok(Self { repository })
     }
@@ -125,6 +252,139 @@ pub fn write_private_file(path: &Path, contents: &[u8]) -> io::Result<()> {
     set_private_file_permissions(path)
 }
 
+/// Durably replace a private file without exposing a truncated intermediate value.
+pub fn atomic_replace_private_file(path: &Path, contents: &[u8]) -> io::Result<()> {
+    atomic_replace_private_file_with(path, contents, |_| Ok(()))
+}
+
+fn persist_recovery_required(profile_dir: &Path) -> Result<(), RepositoryError> {
+    let marker = RecoveryRequiredMarker {
+        version: RECOVERY_MARKER_VERSION,
+        reason: "catastrophic_restore".to_owned(),
+    };
+    let mut bytes =
+        serde_json::to_vec(&marker).map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    bytes.push(b'\n');
+    atomic_replace_private_file(&profile_dir.join(RECOVERY_REQUIRED_FILE), &bytes)
+        .map_err(|error| RepositoryError::Storage(error.to_string()))
+}
+
+fn clear_recovery_required(profile_dir: &Path) -> Result<(), RepositoryError> {
+    let path = profile_dir.join(RECOVERY_REQUIRED_FILE);
+    match fs::remove_file(&path) {
+        Ok(()) => {
+            sync_directory(profile_dir).map_err(|error| RepositoryError::Storage(error.to_string()))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(RepositoryError::Storage(error.to_string())),
+    }
+}
+
+fn atomic_replace_private_file_with(
+    path: &Path,
+    contents: &[u8],
+    before_rename: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "private file has no parent"))?;
+    ensure_private_dir(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "private file name is not UTF-8",
+            )
+        })?;
+
+    static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let temp_path = parent.join(format!(
+        ".{file_name}.{}.{}.tmp",
+        std::process::id(),
+        TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temp_path)?;
+        io::Write::write_all(&mut file, contents)?;
+        file.sync_all()?;
+        set_private_file_permissions(&temp_path)?;
+        before_rename(&temp_path)?;
+        fs::rename(&temp_path, path)?;
+        sync_directory(parent)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> io::Result<()> {
+    File::open(path)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+/// Private profile file holding operator-added Host allowlist entries (JSON string array).
+pub const ALLOWED_HOSTS_FILE: &str = "allowed-hosts.json";
+
+/// Load the effective Host allowlist: immutable CLI hosts plus any persisted extras.
+pub fn load_allowed_hosts(
+    profile_dir: &Path,
+    cli_hosts: Vec<String>,
+) -> io::Result<HashSet<String>> {
+    let mut hosts: HashSet<String> = cli_hosts.into_iter().collect();
+    let path = profile_dir.join(ALLOWED_HOSTS_FILE);
+    match fs::read_to_string(&path) {
+        Ok(data) => {
+            let persisted: Vec<String> = serde_json::from_str(&data).map_err(io::Error::other)?;
+            hosts.extend(persisted);
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    Ok(hosts)
+}
+
+/// Persist only hosts that were not supplied on the CLI (CLI hosts stay immutable).
+pub fn save_allowed_hosts(
+    profile_dir: &Path,
+    hosts: &HashSet<String>,
+    cli_hosts: &[String],
+) -> io::Result<()> {
+    save_allowed_hosts_with(profile_dir, hosts, cli_hosts, |_| Ok(()))
+}
+
+fn save_allowed_hosts_with(
+    profile_dir: &Path,
+    hosts: &HashSet<String>,
+    cli_hosts: &[String],
+    before_rename: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    let cli_set: HashSet<&str> = cli_hosts.iter().map(String::as_str).collect();
+    let mut persisted: Vec<&String> = hosts
+        .iter()
+        .filter(|host| !cli_set.contains(host.as_str()))
+        .collect();
+    persisted.sort();
+    let path = profile_dir.join(ALLOWED_HOSTS_FILE);
+    let mut json = serde_json::to_vec(&persisted).map_err(io::Error::other)?;
+    json.push(b'\n');
+    atomic_replace_private_file_with(&path, &json, before_rename)
+}
+
 fn open_private_file(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.create(true).read(true).write(true);
@@ -146,6 +406,41 @@ pub(crate) fn set_private_file_permissions(path: &Path) -> io::Result<()> {
     }
     #[cfg(not(unix))]
     let _ = path;
+    Ok(())
+}
+
+/// Advise the kernel that clean pages for `file` may leave the page cache.
+///
+/// Restore keeps a private rollback snapshot durable on disk until apply finishes.
+/// Once that snapshot is fsync'd, its pages need not stay resident: Linux cgroup
+/// memory includes page cache, and holding candidate + rollback + live images at
+/// once is what pushed peak restore over the frozen budget. This is a
+/// Linux-authoritative optimization; other targets are a documented no-op.
+///
+/// # Errors
+///
+/// On Linux, returns the OS error when `posix_fadvise` returns nonzero. The fd is
+/// left open and the on-disk file is unchanged either way.
+#[cfg(target_os = "linux")]
+pub(crate) fn advise_dont_need_pages(file: &File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    // SAFETY: `file` is an open owned fd; offset and len of 0 mean the whole file
+    // per POSIX; `POSIX_FADV_DONTNEED` is a valid advice constant. `posix_fadvise`
+    // does not close the fd or free caller-owned memory. It returns an errno value
+    // directly (does not set errno).
+    #[allow(unsafe_code)]
+    let rc = unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
+    if rc != 0 {
+        Err(io::Error::from_raw_os_error(rc))
+    } else {
+        Ok(())
+    }
+}
+
+/// Non-Linux platforms have no equivalent cgroup page-cache budget to enforce.
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn advise_dont_need_pages(_file: &File) -> io::Result<()> {
     Ok(())
 }
 
@@ -171,6 +466,15 @@ impl Drop for Worker {
 
 impl SqliteRepository {
     fn start(database_path: PathBuf, lock: File) -> Result<Self, OpenError> {
+        let profile_dir = database_path
+            .parent()
+            .ok_or_else(|| {
+                OpenError::Database(format!(
+                    "database path '{}' has no parent profile directory",
+                    database_path.display()
+                ))
+            })?
+            .to_path_buf();
         let (sender, receiver) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let join = thread::Builder::new()
@@ -180,7 +484,7 @@ impl SqliteRepository {
                 match connection {
                     Ok(mut connection) => {
                         let _ = ready_sender.send(Ok(()));
-                        run_worker(&mut connection, receiver);
+                        run_worker(&mut connection, profile_dir, receiver);
                     }
                     Err(error) => {
                         let _ = ready_sender.send(Err(error.to_string()));
@@ -813,6 +1117,9 @@ impl Repository for SqliteRepository {
     fn list_events(&self, since: u64) -> RepositoryFuture<'_, EventCatchUp> {
         mut_cmd!(self, ListEvents { since })
     }
+    fn get_sync_state(&self) -> RepositoryFuture<'_, SyncState> {
+        mut_cmd!(self, GetSyncState {})
+    }
     fn undo(
         &self,
         source_operation_id: OperationId,
@@ -1173,6 +1480,58 @@ impl Repository for SqliteRepository {
             }
         )
     }
+    fn get_settings(&self) -> RepositoryFuture<'_, AppSettings> {
+        mut_cmd!(self, GetSettings {})
+    }
+    fn patch_settings(
+        &self,
+        operation_id: OperationId,
+        patch: SettingsPatch,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            PatchSettings {
+                operation_id,
+                patch,
+                now
+            }
+        )
+    }
+    fn preview_import(
+        &self,
+        format: TransferFormat,
+        content: String,
+    ) -> RepositoryFuture<'_, TransferPreview> {
+        mut_cmd!(self, PreviewImport { format, content })
+    }
+    fn apply_import(
+        &self,
+        operation_id: OperationId,
+        apply: TransferApply,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            ApplyImport {
+                operation_id,
+                apply,
+                now
+            }
+        )
+    }
+    fn create_export(&self, format: ExportFormat) -> RepositoryFuture<'_, StagedFile> {
+        mut_cmd!(self, CreateExport { format })
+    }
+    fn create_backup(&self) -> RepositoryFuture<'_, StagedFile> {
+        mut_cmd!(self, CreateBackup {})
+    }
+    fn prepare_restore(&self, upload: StagedFile) -> RepositoryFuture<'_, StagedFile> {
+        mut_cmd!(self, PrepareRestore { upload })
+    }
+    fn restore_backup(&self, candidate: StagedFile) -> RepositoryFuture<'_, ()> {
+        mut_cmd!(self, RestoreBackup { candidate })
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1422,6 +1781,9 @@ enum Command {
         since: u64,
         reply: oneshot::Sender<Result<EventCatchUp, RepositoryError>>,
     },
+    GetSyncState {
+        reply: oneshot::Sender<Result<SyncState, RepositoryError>>,
+    },
     Undo {
         source_operation_id: OperationId,
         new_operation_id: OperationId,
@@ -1581,6 +1943,41 @@ enum Command {
         temporal: TemporalContext,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
+    GetSettings {
+        reply: oneshot::Sender<Result<AppSettings, RepositoryError>>,
+    },
+    PatchSettings {
+        operation_id: OperationId,
+        patch: SettingsPatch,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    PreviewImport {
+        format: TransferFormat,
+        content: String,
+        reply: oneshot::Sender<Result<TransferPreview, RepositoryError>>,
+    },
+    ApplyImport {
+        operation_id: OperationId,
+        apply: TransferApply,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    CreateExport {
+        format: ExportFormat,
+        reply: oneshot::Sender<Result<StagedFile, RepositoryError>>,
+    },
+    CreateBackup {
+        reply: oneshot::Sender<Result<StagedFile, RepositoryError>>,
+    },
+    PrepareRestore {
+        upload: StagedFile,
+        reply: oneshot::Sender<Result<StagedFile, RepositoryError>>,
+    },
+    RestoreBackup {
+        candidate: StagedFile,
+        reply: oneshot::Sender<Result<(), RepositoryError>>,
+    },
     #[cfg(test)]
     Diagnostics(oneshot::Sender<Result<Diagnostics, RepositoryError>>),
     #[cfg(test)]
@@ -1590,7 +1987,11 @@ enum Command {
     },
 }
 
-fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
+fn run_worker(
+    connection: &mut Connection,
+    profile_dir: PathBuf,
+    receiver: mpsc::Receiver<Command>,
+) {
     for command in receiver {
         match command {
             Command::CreateTask {
@@ -2088,6 +2489,9 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
             Command::ListEvents { since, reply } => {
                 let _ = reply.send(detail_ops::list_events(connection, since));
             }
+            Command::GetSyncState { reply } => {
+                let _ = reply.send(read_sync_state(connection));
+            }
             Command::Undo {
                 source_operation_id,
                 new_operation_id,
@@ -2399,6 +2803,62 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
                     temporal,
                 ));
             }
+            Command::GetSettings { reply } => {
+                let _ = reply.send(settings_ops::get_settings(connection));
+            }
+            Command::PatchSettings {
+                operation_id,
+                patch,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(settings_ops::patch_settings(
+                    connection,
+                    operation_id,
+                    patch,
+                    now,
+                ));
+            }
+            Command::PreviewImport {
+                format,
+                content,
+                reply,
+            } => {
+                let _ = reply.send(transfer_ops::preview_import(connection, format, &content));
+            }
+            Command::ApplyImport {
+                operation_id,
+                apply,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(transfer_ops::apply_import(
+                    connection,
+                    operation_id,
+                    apply,
+                    now,
+                ));
+            }
+            Command::CreateExport { format, reply } => {
+                let _ = reply.send(transfer_ops::create_export(
+                    connection,
+                    &profile_dir,
+                    format,
+                ));
+            }
+            Command::CreateBackup { reply } => {
+                let _ = reply.send(backup_ops::create_backup(connection, &profile_dir));
+            }
+            Command::PrepareRestore { upload, reply } => {
+                let _ = reply.send(backup_ops::prepare_restore(&profile_dir, upload));
+            }
+            Command::RestoreBackup { candidate, reply } => {
+                let _ = reply.send(backup_ops::restore_backup(
+                    connection,
+                    &profile_dir,
+                    candidate,
+                ));
+            }
             #[cfg(test)]
             Command::Diagnostics(reply) => {
                 let _ = reply.send(read_diagnostics(connection));
@@ -2412,6 +2872,232 @@ fn run_worker(connection: &mut Connection, receiver: mpsc::Receiver<Command>) {
             }
         }
     }
+}
+
+fn recovery_replace_database(
+    profile_dir: &Path,
+    candidate: &StagedFile,
+) -> Result<(), RepositoryError> {
+    recovery_replace_database_with(profile_dir, candidate, |_| Ok(()))
+}
+
+fn recovery_replace_database_with(
+    profile_dir: &Path,
+    candidate: &StagedFile,
+    mut after_rename: impl FnMut(usize) -> io::Result<()>,
+) -> Result<(), RepositoryError> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let backups_dir = profile_dir.join("backups").join("pre-recovery");
+    ensure_private_dir(&backups_dir)
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?
+        .as_nanos();
+    let rollback_name = format!("{stamp}-{}", std::process::id());
+    let rollback_dir = backups_dir.join(&rollback_name);
+    ensure_private_dir(&rollback_dir)
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+
+    let staged_name = format!(".{DATABASE_FILE}.recovery-new");
+    let staged = profile_dir.join(&staged_name);
+    if staged.exists() {
+        return Err(RepositoryError::Storage(
+            "an earlier recovery candidate still requires reconciliation".to_owned(),
+        ));
+    }
+    fs::copy(candidate.path(), &staged)
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    set_private_file_permissions(&staged)
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    File::open(&staged)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    let (candidate_len, candidate_sha256, schema_version, event_epoch) =
+        backup_ops::recovery_candidate_identity(&staged, profile_dir)?;
+    let marker = RecoveryCutoverMarker {
+        version: RECOVERY_CUTOVER_VERSION,
+        candidate_file: staged_name,
+        rollback_dir: format!("backups/pre-recovery/{rollback_name}"),
+        candidate_len,
+        candidate_sha256,
+        schema_version,
+        event_epoch,
+    };
+    write_cutover_marker(profile_dir, &marker)?;
+    finish_recovery_cutover(profile_dir, &marker, &mut after_rename)
+}
+
+fn write_cutover_marker(
+    profile_dir: &Path,
+    marker: &RecoveryCutoverMarker,
+) -> Result<(), RepositoryError> {
+    let mut bytes =
+        serde_json::to_vec(marker).map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    bytes.push(b'\n');
+    atomic_replace_private_file(&profile_dir.join(RECOVERY_CUTOVER_FILE), &bytes)
+        .map_err(|error| RepositoryError::Storage(error.to_string()))
+}
+
+fn validate_cutover_marker_basics(marker: &RecoveryCutoverMarker) -> bool {
+    marker.version == RECOVERY_CUTOVER_VERSION
+        && marker.candidate_file == format!(".{DATABASE_FILE}.recovery-new")
+        && marker.schema_version == migration::CURRENT_SCHEMA_VERSION
+        && marker.candidate_len > 0
+        && marker.candidate_sha256.len() == 64
+        && marker
+            .candidate_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && TaskId::parse(&marker.event_epoch).is_ok()
+        && {
+            let path = Path::new(&marker.rollback_dir);
+            !path.is_absolute()
+                && path.components().all(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::Normal(_) | std::path::Component::CurDir
+                    )
+                })
+                && path.starts_with("backups/pre-recovery")
+                && path.components().count() == 3
+        }
+}
+
+fn read_cutover_marker(
+    profile_dir: &Path,
+) -> Result<Option<RecoveryCutoverMarker>, RepositoryError> {
+    let path = profile_dir.join(RECOVERY_CUTOVER_FILE);
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(RepositoryError::Storage(error.to_string())),
+    };
+    let marker: RecoveryCutoverMarker = serde_json::from_slice(&bytes)
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    if !validate_cutover_marker_basics(&marker) {
+        return Err(RepositoryError::Storage(
+            "invalid recovery cutover marker".to_owned(),
+        ));
+    }
+    Ok(Some(marker))
+}
+
+fn reconcile_recovery_cutover(profile_dir: &Path) -> Result<(), RepositoryError> {
+    let Some(marker) = read_cutover_marker(profile_dir)? else {
+        return Ok(());
+    };
+    finish_recovery_cutover(profile_dir, &marker, &mut |_| Ok(()))
+}
+
+fn finish_recovery_cutover(
+    profile_dir: &Path,
+    marker: &RecoveryCutoverMarker,
+    after_rename: &mut impl FnMut(usize) -> io::Result<()>,
+) -> Result<(), RepositoryError> {
+    let live = profile_dir.join(DATABASE_FILE);
+    let staged = profile_dir.join(&marker.candidate_file);
+    let rollback_dir = profile_dir.join(&marker.rollback_dir);
+    ensure_private_dir(&rollback_dir)
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+
+    if !staged.exists() {
+        if !live.exists() {
+            return Err(RepositoryError::Storage(
+                "recovery cutover lost both candidate and live database".to_owned(),
+            ));
+        }
+        backup_ops::validate_recovery_candidate(
+            &live,
+            profile_dir,
+            marker.candidate_len,
+            &marker.candidate_sha256,
+            marker.schema_version,
+            &marker.event_epoch,
+        )?;
+        return finalize_recovery_cutover(profile_dir);
+    }
+
+    backup_ops::validate_recovery_candidate(
+        &staged,
+        profile_dir,
+        marker.candidate_len,
+        &marker.candidate_sha256,
+        marker.schema_version,
+        &marker.event_epoch,
+    )?;
+    let live_files = [
+        (live.clone(), rollback_dir.join(DATABASE_FILE)),
+        (
+            profile_dir.join(format!("{DATABASE_FILE}-wal")),
+            rollback_dir.join(format!("{DATABASE_FILE}-wal")),
+        ),
+        (
+            profile_dir.join(format!("{DATABASE_FILE}-shm")),
+            rollback_dir.join(format!("{DATABASE_FILE}-shm")),
+        ),
+    ];
+    let mut boundary = 0usize;
+    for (source, backup) in live_files {
+        if source.exists() {
+            if backup.exists() {
+                return Err(RepositoryError::Storage(format!(
+                    "recovery rollback destination already exists: {}",
+                    backup.display()
+                )));
+            }
+            fs::rename(&source, &backup)
+                .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+            after_rename(boundary).map_err(|error| RepositoryError::Storage(error.to_string()))?;
+            boundary += 1;
+        }
+    }
+    sync_directory(&rollback_dir)
+        .and_then(|()| sync_directory(profile_dir))
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    fs::rename(&staged, &live).map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    after_rename(boundary).map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    backup_ops::validate_recovery_candidate(
+        &live,
+        profile_dir,
+        marker.candidate_len,
+        &marker.candidate_sha256,
+        marker.schema_version,
+        &marker.event_epoch,
+    )?;
+    finalize_recovery_cutover(profile_dir)
+}
+
+fn finalize_recovery_cutover(profile_dir: &Path) -> Result<(), RepositoryError> {
+    sync_directory(profile_dir).map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    fs::remove_file(profile_dir.join(RECOVERY_CUTOVER_FILE))
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    sync_directory(profile_dir).map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    clear_recovery_required(profile_dir)
+}
+
+fn read_sync_state(connection: &Connection) -> Result<SyncState, RepositoryError> {
+    connection
+        .query_row(
+            "SELECT event_epoch, global_revision FROM app_state WHERE singleton = 1",
+            [],
+            |row| {
+                let revision = row.get::<_, i64>(1)?;
+                let revision = u64::try_from(revision).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        1,
+                        rusqlite::types::Type::Integer,
+                        Box::new(error),
+                    )
+                })?;
+                Ok(SyncState {
+                    event_epoch: row.get(0)?,
+                    revision,
+                })
+            },
+        )
+        .map_err(|error| RepositoryError::Storage(error.to_string()))
 }
 
 fn open_connection(path: &Path) -> rusqlite::Result<Connection> {

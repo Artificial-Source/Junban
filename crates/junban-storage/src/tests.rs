@@ -14,11 +14,11 @@ use junban_app::{
     TemporalContext,
 };
 use junban_domain::{
-    CommentBody, CommentId, DEFAULT_REMINDER_LEASE_SECS, EntityName, HexColor,
+    CommentBody, CommentId, DEFAULT_REMINDER_LEASE_SECS, EntityName, EstimatedMinutes, HexColor,
     MAX_ANALYSIS_TASK_READ, MAX_BULK_IDS, MAX_REMINDER_CLAIM_LIMIT, MarkdownText, OperationId,
-    ProjectId, RelationKind, ReminderChannel, ReminderFailureCode, ReminderOccurrenceState,
-    SortOrder, TagId, TagName, TaskCursor, TaskDraft, TaskId, TaskQuery, TaskSort, TaskStatus,
-    TaskTitle, TaskViewPreset, TemplateId, WeekStart, weekly_review_summary,
+    Priority, ProjectId, RelationKind, ReminderChannel, ReminderFailureCode,
+    ReminderOccurrenceState, SortOrder, TagId, TagName, TaskCursor, TaskDraft, TaskId, TaskQuery,
+    TaskSort, TaskStatus, TaskTitle, TaskViewPreset, TemplateId, WeekStart, weekly_review_summary,
 };
 use uuid::Uuid;
 
@@ -1472,6 +1472,20 @@ fn profile_files_are_owner_only() {
     }
 }
 
+#[test]
+fn advise_dont_need_pages_succeeds_on_private_synced_file() {
+    let directory = TestDir::new();
+    let path = directory.0.join("rollback-cache-drop");
+    write_private_file(&path, &vec![0x5a; 64 * 1024]).unwrap();
+    let file = fs::File::open(&path).unwrap();
+    file.sync_all().unwrap();
+    advise_dont_need_pages(&file).expect("posix_fadvise DONTNEED on a private synced file");
+    // File remains readable after the advice; only cache residency should change.
+    let bytes = fs::read(&path).unwrap();
+    assert_eq!(bytes.len(), 64 * 1024);
+    assert!(bytes.iter().all(|byte| *byte == 0x5a));
+}
+
 // --- Phase 2 core review regressions (DB-P2-001 .. DB-P2-011) ---
 
 fn project_draft(name: &str) -> ProjectDraft {
@@ -2557,8 +2571,7 @@ async fn db_p2_011_cursor_validation_covers_each_sort() {
 
 use jiff::civil::{Time, date};
 use junban_domain::{
-    DreadLevel, EstimatedMinutes, LocalDueTime, MonthlyAnchorDay, Priority, RecurrenceRule,
-    UncompleteOutcome,
+    DreadLevel, LocalDueTime, MonthlyAnchorDay, RecurrenceRule, UncompleteOutcome,
 };
 
 fn recurring_draft(title: &str, rule: &str, due: Option<&str>) -> TaskDraft {
@@ -5780,4 +5793,251 @@ async fn p3_tb_004_invalid_civil_ranges_are_rejected_without_durable_rows() {
     assert_eq!(page.blocks[0].range.end.to_string(), "10:00:00");
     assert_eq!(page.slots[0].range.start.to_string(), "09:00:00");
     assert_eq!(page.slots[0].range.end.to_string(), "12:00:00");
+}
+
+#[tokio::test]
+async fn settings_defaults_round_trip_and_patch_emits_settings_resync() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let initial = repo.get_settings().await.unwrap();
+    assert_eq!(initial.date_time.week_start, WeekStart::Sunday);
+    assert_eq!(initial.planning.capacity_minutes, 480);
+    assert!(initial.features.nudges_enabled);
+    assert!(!initial.features.eat_the_frog_enabled);
+
+    let mut features = initial.features.clone();
+    features.eat_the_frog_enabled = true;
+    features.task_jar_enabled = true;
+    let mut planning = initial.planning.clone();
+    planning.capacity_minutes = 300;
+    planning.work_hours = Some(junban_domain::WorkHours::new(9 * 60, 17 * 60).unwrap());
+    let mut shortcuts = initial.keyboard_shortcuts.clone();
+    shortcuts
+        .iter_mut()
+        .find(|shortcut| shortcut.action == "quick-add")
+        .unwrap()
+        .chord = "cmd+j".into();
+
+    let mutation = repo
+        .patch_settings(
+            operation(),
+            junban_app::SettingsPatch {
+                features: Some(features),
+                planning: Some(planning),
+                keyboard_shortcuts: Some(shortcuts),
+                ..Default::default()
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(mutation.event.event_type.as_str(), "settings.updated");
+    assert!(mutation.event.resync.settings);
+    assert!(!mutation.event.resync.tasks);
+    assert!(!mutation.event.resync.catalog);
+    assert_eq!(
+        mutation.event.primary.as_ref().map(|p| p.resource_type),
+        Some(junban_app::ResourceType::Settings)
+    );
+
+    let updated = repo.get_settings().await.unwrap();
+    assert!(updated.features.eat_the_frog_enabled);
+    assert!(updated.features.task_jar_enabled);
+    assert_eq!(updated.planning.capacity_minutes, 300);
+    assert_eq!(
+        updated
+            .planning
+            .work_hours
+            .map(|h| (h.start_minute, h.end_minute)),
+        Some((540, 1020))
+    );
+    assert_eq!(updated.appearance.theme, junban_domain::Theme::Light);
+    assert_eq!(updated.date_time.week_start, WeekStart::Sunday);
+    assert_eq!(
+        updated
+            .keyboard_shortcuts
+            .iter()
+            .find(|shortcut| shortcut.action == "quick-add")
+            .unwrap()
+            .chord,
+        "cmd+j"
+    );
+
+    drop(updated);
+    drop(repo);
+    drop(owner);
+    let reopened = ProfileOwner::open(&directory.0).unwrap();
+    let persisted = reopened.repository().get_settings().await.unwrap();
+    assert!(persisted.features.eat_the_frog_enabled);
+    assert_eq!(
+        persisted
+            .keyboard_shortcuts
+            .iter()
+            .find(|shortcut| shortcut.action == "quick-add")
+            .unwrap()
+            .chord,
+        "cmd+j"
+    );
+}
+
+#[tokio::test]
+async fn settings_patch_rejects_reserved_browser_chords() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let error = repo
+        .patch_settings(
+            operation(),
+            junban_app::SettingsPatch {
+                keyboard_shortcuts: Some(vec![junban_domain::KeyboardShortcut {
+                    action: "new-project".into(),
+                    chord: "cmd+shift+n".into(),
+                }]),
+                ..Default::default()
+            },
+            now(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, RepositoryError::Validation(_)));
+}
+
+#[tokio::test]
+async fn create_task_applies_task_defaults_and_exact_retry_ignores_later_settings() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let initial = repo.get_settings().await.unwrap();
+    let mut task_defaults = initial.task_defaults.clone();
+    task_defaults.default_priority = Some(Priority::new(2).unwrap());
+    task_defaults.default_estimated_minutes = Some(EstimatedMinutes::new(25).unwrap());
+    repo.patch_settings(
+        operation(),
+        junban_app::SettingsPatch {
+            task_defaults: Some(task_defaults),
+            ..Default::default()
+        },
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let defaulted = repo
+        .create_task(operation(), TaskId::new(), draft("Defaulted"), now())
+        .await
+        .unwrap()
+        .task()
+        .unwrap()
+        .clone();
+    assert_eq!(defaulted.priority.map(|p| p.get()), Some(2));
+    assert_eq!(defaulted.estimated_minutes.map(|m| m.get()), Some(25));
+
+    let mut explicit = draft("Explicit");
+    explicit.priority = Some(Priority::new(4).unwrap());
+    explicit.estimated_minutes = Some(EstimatedMinutes::new(10).unwrap());
+    let explicit_task = repo
+        .create_task(operation(), TaskId::new(), explicit, now())
+        .await
+        .unwrap()
+        .task()
+        .unwrap()
+        .clone();
+    assert_eq!(explicit_task.priority.map(|p| p.get()), Some(4));
+    assert_eq!(explicit_task.estimated_minutes.map(|m| m.get()), Some(10));
+
+    let op = operation();
+    let first = repo
+        .create_task(op, TaskId::new(), draft("Replay me"), now())
+        .await
+        .unwrap();
+    let first_task = first.task().unwrap().clone();
+    assert_eq!(first_task.priority.map(|p| p.get()), Some(2));
+    assert_eq!(first_task.estimated_minutes.map(|m| m.get()), Some(25));
+
+    // Change settings after the original create so a buggy fill-before-receipt path would drift.
+    let mut changed = repo.get_settings().await.unwrap().task_defaults.clone();
+    changed.default_priority = Some(Priority::new(1).unwrap());
+    changed.default_estimated_minutes = Some(EstimatedMinutes::new(99).unwrap());
+    repo.patch_settings(
+        operation(),
+        junban_app::SettingsPatch {
+            task_defaults: Some(changed),
+            ..Default::default()
+        },
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let replay = repo
+        .create_task(op, TaskId::new(), draft("Replay me"), now())
+        .await
+        .unwrap();
+    assert!(!replay.newly_committed);
+    assert_eq!(replay.event.revision, first.event.revision);
+    let replay_task = replay.task().unwrap().clone();
+    assert_eq!(replay_task.id, first_task.id);
+    assert_eq!(replay_task.priority.map(|p| p.get()), Some(2));
+    assert_eq!(replay_task.estimated_minutes.map(|m| m.get()), Some(25));
+}
+
+#[test]
+fn allowed_hosts_atomic_failure_before_rename_preserves_prior_policy() {
+    let directory = TestDir::new();
+    let profile = &directory.0;
+    let cli = vec!["127.0.0.1:4219".to_owned()];
+    let old = std::collections::HashSet::from([cli[0].clone(), "old.tailnet.ts.net".to_owned()]);
+    crate::save_allowed_hosts(profile, &old, &cli).unwrap();
+    let new = std::collections::HashSet::from([cli[0].clone(), "new.tailnet.ts.net".to_owned()]);
+
+    let error = crate::save_allowed_hosts_with(profile, &new, &cli, |_| {
+        Err(std::io::Error::other("injected before rename"))
+    })
+    .unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    let reloaded = crate::load_allowed_hosts(profile, cli).unwrap();
+    assert!(reloaded.contains("old.tailnet.ts.net"));
+    assert!(!reloaded.contains("new.tailnet.ts.net"));
+    let sibling_temps = std::fs::read_dir(profile)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+        .count();
+    assert_eq!(sibling_temps, 0);
+}
+
+#[test]
+fn load_and_save_allowed_hosts_merges_cli_and_persisted() {
+    let directory = TestDir::new();
+    let profile = &directory.0;
+    let cli = vec!["127.0.0.1:4219".to_owned(), "localhost:4219".to_owned()];
+
+    let initial = crate::load_allowed_hosts(profile, cli.clone()).unwrap();
+    assert_eq!(initial.len(), 2);
+
+    let mut effective = initial;
+    effective.insert("device.tailnet.ts.net".to_owned());
+    crate::save_allowed_hosts(profile, &effective, &cli).unwrap();
+
+    let reloaded = crate::load_allowed_hosts(profile, cli.clone()).unwrap();
+    assert!(reloaded.contains("device.tailnet.ts.net"));
+    assert!(reloaded.contains("127.0.0.1:4219"));
+
+    let path = profile.join(crate::ALLOWED_HOSTS_FILE);
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains("device.tailnet.ts.net"));
+    assert!(!raw.contains("127.0.0.1:4219"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
 }

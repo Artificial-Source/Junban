@@ -14,7 +14,7 @@ use rusqlite::{
 use crate::ops_types::{Inverse, PostImage};
 
 /// Highest schema version applied by this crate.
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 4;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 /// Live database file name under a profile directory.
 const DATABASE_FILE: &str = "junban.sqlite3";
@@ -125,6 +125,15 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
         apply_v4(&transaction)?;
         assert_foreign_keys_clean(&transaction)?;
         record_version(&transaction, 4)?;
+        transaction.commit()?;
+    }
+
+    let current = current_version(connection)?;
+    if current < 5 {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        apply_v5(&transaction)?;
+        assert_foreign_keys_clean(&transaction)?;
+        record_version(&transaction, 5)?;
         transaction.commit()?;
     }
 
@@ -850,6 +859,166 @@ CREATE INDEX idx_time_slot_tasks_task ON time_slot_tasks(task_id);
     Ok(())
 }
 
+/// Expand settings into a typed aggregate and stamp a durable event-history epoch.
+fn apply_v5(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
+    use junban_domain::{AppSettings, NudgeRuleKind, NudgeRuleSettings, TaskId, WorkHours};
+
+    // Capture any Phase 3 allowlisted temporal keys before rebuilding the table.
+    let mut legacy: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if let Ok(mut statement) = transaction.prepare("SELECT key, value_json FROM app_settings") {
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            legacy.insert(key, value);
+        }
+    }
+
+    transaction.execute_batch(
+        "
+DROP TABLE IF EXISTS app_settings;
+CREATE TABLE app_settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+",
+    )?;
+
+    // Existing profiles always receive one generated epoch during migration.
+    // TaskId::new() is a random UUID string without adding a storage uuid dep.
+    let event_epoch = TaskId::new().as_uuid().to_string();
+    let has_event_epoch: bool = {
+        let mut statement = transaction.prepare("PRAGMA table_info(app_state)")?;
+        let mut rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = false;
+        for name in rows.by_ref() {
+            if name? == "event_epoch" {
+                found = true;
+                break;
+            }
+        }
+        found
+    };
+    if !has_event_epoch {
+        transaction.execute_batch(
+            "ALTER TABLE app_state ADD COLUMN event_epoch TEXT NOT NULL DEFAULT '';",
+        )?;
+    }
+    transaction.execute(
+        "UPDATE app_state SET event_epoch = ?1 WHERE singleton = 1",
+        [&event_epoch],
+    )?;
+
+    let mut settings = AppSettings::default_settings();
+
+    if let Some(raw) = legacy.get("week_start")
+        && let Ok(week_start) = parse_legacy_week_start(raw)
+    {
+        settings.date_time.week_start = week_start;
+    }
+    if let Some(raw) = legacy.get("capacity")
+        && let Ok(capacity) = parse_legacy_capacity(raw)
+    {
+        settings.planning.capacity_minutes = capacity;
+    }
+    if let Some(raw) = legacy.get("work_hours")
+        && let Ok(hours) = serde_json::from_str::<WorkHours>(raw)
+        && WorkHours::new(hours.start_minute, hours.end_minute).is_ok()
+    {
+        settings.planning.work_hours = Some(hours);
+    }
+    if let Some(raw) = legacy.get("nudge_rules")
+        && let Ok(rules) = serde_json::from_str::<Vec<NudgeRuleSettings>>(raw)
+    {
+        let mut seen = Vec::new();
+        let mut clean = Vec::new();
+        for rule in rules {
+            if !seen.contains(&rule.kind) && NudgeRuleKind::ALL.contains(&rule.kind) {
+                seen.push(rule.kind);
+                // Only stale_task evaluation consumes a threshold; drop inert values.
+                let threshold = if rule.kind == NudgeRuleKind::StaleTask {
+                    rule.threshold
+                } else {
+                    None
+                };
+                clean.push(NudgeRuleSettings::new(rule.kind, rule.enabled, threshold));
+            }
+        }
+        if !clean.is_empty() {
+            settings.planning.nudge_rules = clean;
+        }
+    }
+    if let Some(raw) = legacy.get("notification_channels")
+        && let Ok(channels) = parse_legacy_channels(raw)
+    {
+        settings.notifications.channels = channels;
+    }
+
+    settings.validate().map_err(|error| {
+        migration_err(format!(
+            "default settings invalid after v5 migrate: {error}"
+        ))
+    })?;
+
+    let settings_json =
+        serde_json::to_string(&settings).map_err(|error| migration_err(error.to_string()))?;
+    let updated_at = Timestamp::now().to_string();
+    transaction.execute(
+        "INSERT INTO app_settings(key, value_json, updated_at) VALUES (?1, ?2, ?3)",
+        rusqlite::params!["settings_json", settings_json, updated_at],
+    )?;
+
+    Ok(())
+}
+
+fn parse_legacy_week_start(raw: &str) -> Result<junban_domain::WeekStart, ()> {
+    if let Ok(value) = serde_json::from_str::<junban_domain::WeekStart>(raw) {
+        return Ok(value);
+    }
+    if let Ok(wrapper) = serde_json::from_str::<serde_json::Value>(raw) {
+        if let Some(day) = wrapper.get("day").and_then(|v| v.as_str()) {
+            return junban_domain::WeekStart::parse(day).map_err(|_| ());
+        }
+        if let Some(day) = wrapper.as_str() {
+            return junban_domain::WeekStart::parse(day).map_err(|_| ());
+        }
+    }
+    junban_domain::WeekStart::parse(raw.trim_matches('"')).map_err(|_| ())
+}
+
+fn parse_legacy_capacity(raw: &str) -> Result<u32, ()> {
+    if let Ok(value) = serde_json::from_str::<u32>(raw) {
+        return Ok(value);
+    }
+    if let Ok(wrapper) = serde_json::from_str::<serde_json::Value>(raw) {
+        if let Some(value) = wrapper.as_u64() {
+            return u32::try_from(value).map_err(|_| ());
+        }
+        if let Some(value) = wrapper
+            .get("daily_capacity")
+            .and_then(|v| v.as_u64())
+            .or_else(|| wrapper.get("capacity_minutes").and_then(|v| v.as_u64()))
+        {
+            return u32::try_from(value).map_err(|_| ());
+        }
+    }
+    raw.parse().map_err(|_| ())
+}
+
+fn parse_legacy_channels(raw: &str) -> Result<junban_domain::ReminderChannelSet, ()> {
+    if let Ok(set) = serde_json::from_str::<junban_domain::ReminderChannelSet>(raw)
+        && !set.as_slice().is_empty()
+    {
+        return Ok(set);
+    }
+    if let Ok(channels) = serde_json::from_str::<Vec<junban_domain::ReminderChannel>>(raw) {
+        return junban_domain::ReminderChannelSet::new(channels).map_err(|_| ());
+    }
+    Err(())
+}
+
 /// Persist the transition into the current cancelled state independently of mutable edits.
 fn apply_v4(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
     transaction.execute_batch(
@@ -970,9 +1139,10 @@ fn reconcile_inverse_tasks(
 ) -> rusqlite::Result<bool> {
     let tasks = match inverse {
         Inverse::RestoreClosure { closure } => &mut closure.tasks,
-        Inverse::RestoreTasks { tasks, .. } => tasks,
+        Inverse::RestoreTasks { tasks, .. } | Inverse::RestoreImport { tasks, .. } => tasks,
         Inverse::ReverseCompletion { sources, .. } => sources,
         Inverse::DeleteTasks { .. }
+        | Inverse::DeleteImport { .. }
         | Inverse::RestoreOrders { .. }
         | Inverse::RestoreComment { .. }
         | Inverse::RestoreRelation { .. } => return Ok(false),
@@ -1525,12 +1695,12 @@ mod tests {
     }
 
     #[test]
-    fn fresh_migrate_reaches_schema_v4_with_expected_tables() {
+    fn fresh_migrate_reaches_schema_v5_with_expected_tables() {
         let db = TestDb::new();
         let mut connection = db.open();
         db.migrate(&mut connection).unwrap();
 
-        assert_eq!(current_version(&connection).unwrap(), 4);
+        assert_eq!(current_version(&connection).unwrap(), 5);
         let tables = table_names(&connection);
         for name in [
             "app_state",
@@ -1649,6 +1819,44 @@ mod tests {
                 "missing app_settings column {required}"
             );
         }
+
+        let app_state_columns: HashSet<_> = table_columns(&connection, "app_state")
+            .into_iter()
+            .collect();
+        assert!(
+            app_state_columns.contains("event_epoch"),
+            "missing app_state.event_epoch"
+        );
+        let event_epoch: String = connection
+            .query_row(
+                "SELECT event_epoch FROM app_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!event_epoch.is_empty(), "event_epoch must be generated");
+        let settings_json: String = connection
+            .query_row(
+                "SELECT value_json FROM app_settings WHERE key = 'settings_json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let settings: junban_domain::AppSettings = serde_json::from_str(&settings_json).unwrap();
+        settings.validate().unwrap();
+        assert!(!settings.date_time.week_start.as_str().is_empty());
+        assert_eq!(settings.planning.capacity_minutes, 480);
+        assert_eq!(settings.notifications.volume_percent.get(), 70);
+        assert!(
+            settings
+                .planning
+                .nudge_rules
+                .iter()
+                .find(|rule| rule.kind == junban_domain::NudgeRuleKind::ApproachingDeadline)
+                .expect("approaching_deadline")
+                .threshold
+                .is_none()
+        );
 
         let occurrence_columns: HashSet<_> = table_columns(&connection, "reminder_occurrences")
             .into_iter()
@@ -1817,7 +2025,7 @@ mod tests {
             seed_v1_with_sample_rows(&mut connection);
             assert_eq!(current_version(&connection).unwrap(), 1);
             db.migrate(&mut connection).unwrap();
-            assert_eq!(current_version(&connection).unwrap(), 4);
+            assert_eq!(current_version(&connection).unwrap(), 5);
             // Fresh migrations do not create a pre-v2 backup.
             assert!(pre_migration_backups(db.profile_dir()).is_empty());
 
@@ -1965,7 +2173,7 @@ mod tests {
 
         connection.execute_batch("DROP TABLE comments;").unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 4);
+        assert_eq!(current_version(&connection).unwrap(), 5);
         assert!(table_names(&connection).contains("projects"));
         assert!(table_names(&connection).contains("operation_undo"));
         assert!(table_names(&connection).contains("app_settings"));
@@ -1995,7 +2203,7 @@ mod tests {
         assert_eq!(current_version(&connection).unwrap(), 2);
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 4);
+        assert_eq!(current_version(&connection).unwrap(), 5);
 
         let title: String = connection
             .query_row(
@@ -2091,7 +2299,7 @@ INSERT INTO task_activity(
             .unwrap();
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 4);
+        assert_eq!(current_version(&connection).unwrap(), 5);
         let cancelled_at: Option<String> = connection
             .query_row(
                 "SELECT cancelled_at FROM tasks WHERE id = '33333333-3333-7333-8333-333333333333'",
@@ -2382,7 +2590,7 @@ INSERT INTO task_activity(
             .execute_batch("DROP TRIGGER fail_last_undo_reconciliation;")
             .unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 4);
+        assert_eq!(current_version(&connection).unwrap(), 5);
 
         let mut migrated_rows = Vec::new();
         for (source_operation_id, original) in &original_payloads {
@@ -2454,7 +2662,7 @@ END;
             .execute_batch("DROP TRIGGER fail_cancel_backfill;")
             .unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 4);
+        assert_eq!(current_version(&connection).unwrap(), 5);
         let cancelled_at: Option<String> = connection
             .query_row(
                 "SELECT cancelled_at FROM tasks WHERE id = '11111111-1111-7111-8111-111111111111'",
@@ -2506,7 +2714,7 @@ END;
             .execute_batch("DROP TABLE app_settings;")
             .unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 4);
+        assert_eq!(current_version(&connection).unwrap(), 5);
         assert!(table_names(&connection).contains("app_settings"));
         assert!(table_names(&connection).contains("time_slot_tasks"));
         assert!(task_columns(&connection).contains(&"completion_operation_id".to_owned()));
@@ -2547,7 +2755,7 @@ END;
         assert_eq!(pre_migration_backups(db.profile_dir()).len(), 4);
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 4);
+        assert_eq!(current_version(&connection).unwrap(), 5);
 
         let mut remaining = pre_migration_backups(db.profile_dir());
         remaining.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
@@ -2578,7 +2786,102 @@ END;
     }
 
     #[test]
-    fn schema_v4_enforces_lineage_settings_and_membership_uniqueness() {
+    fn migrate_v4_to_v5_preserves_legacy_temporal_settings_and_stamps_epoch() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 5);
+
+        // Rewrite the profile back to a Phase 3/v4 settings shape, then re-run migrate.
+        connection
+            .execute_batch(
+                r#"
+DELETE FROM schema_migrations WHERE version = 5;
+DELETE FROM app_settings;
+DROP TABLE app_settings;
+CREATE TABLE app_settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (key IN (
+        'notification_channels',
+        'reminder_defaults',
+        'capacity',
+        'work_hours',
+        'week_start',
+        'nudge_rules'
+    ))
+);
+ALTER TABLE app_state DROP COLUMN event_epoch;
+INSERT INTO app_settings(key, value_json, updated_at) VALUES
+    ('week_start', '"monday"', '2026-07-28T12:00:00Z'),
+    ('capacity', '240', '2026-07-28T12:00:00Z');
+"#,
+            )
+            .unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 4);
+
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 5);
+
+        let epoch: String = connection
+            .query_row(
+                "SELECT event_epoch FROM app_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!epoch.is_empty());
+
+        let settings_json: String = connection
+            .query_row(
+                "SELECT value_json FROM app_settings WHERE key = 'settings_json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let settings: junban_domain::AppSettings = serde_json::from_str(&settings_json).unwrap();
+        assert_eq!(
+            settings.date_time.week_start,
+            junban_domain::WeekStart::Monday
+        );
+        assert_eq!(settings.planning.capacity_minutes, 240);
+        assert_eq!(settings.notifications.volume_percent.get(), 70);
+        assert_eq!(settings.appearance.theme, junban_domain::Theme::Light);
+        assert_eq!(settings.appearance.accent.as_str(), "#3b82f6");
+        assert_eq!(
+            settings.appearance.density,
+            junban_domain::Density::Comfortable
+        );
+        assert_eq!(
+            settings.appearance.font_family,
+            junban_domain::FontFamily::Outfit
+        );
+        assert_eq!(
+            settings.date_time.date_format,
+            junban_domain::DateFormat::Short
+        );
+        assert_eq!(
+            settings.date_time.time_format,
+            junban_domain::TimeFormat::H24
+        );
+        assert_eq!(
+            settings.task_defaults.default_view,
+            junban_domain::TaskViewPreset::Today
+        );
+        assert!(settings.task_defaults.confirm_before_delete);
+        assert_eq!(
+            settings.keyboard_shortcuts.len(),
+            junban_domain::KEYBOARD_SHORTCUT_ACTIONS.len()
+        );
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM app_settings", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn schema_v5_enforces_lineage_settings_and_membership_uniqueness() {
         let db = TestDb::new();
         let mut connection = db.open();
         db.migrate(&mut connection).unwrap();
@@ -2642,12 +2945,14 @@ END;
         );
         assert!(bad_anchor.is_err());
 
-        let bad_setting = connection.execute(
-            "INSERT INTO app_settings(key, value_json, updated_at)
-             VALUES ('theme', '{}', '2026-07-28T12:00:00Z')",
-            [],
-        );
-        assert!(bad_setting.is_err());
+        // v5 drops the Phase 3 key allowlist; arbitrary keys are storage-legal.
+        connection
+            .execute(
+                "INSERT INTO app_settings(key, value_json, updated_at)
+                 VALUES ('theme', '{}', '2026-07-28T12:00:00Z')",
+                [],
+            )
+            .unwrap();
 
         connection
             .execute(
@@ -2656,6 +2961,15 @@ END;
                 [],
             )
             .unwrap();
+
+        let settings_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM app_settings WHERE key = 'settings_json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(settings_count, 1);
 
         connection
             .execute(

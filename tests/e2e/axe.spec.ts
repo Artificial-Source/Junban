@@ -270,12 +270,37 @@ test("a11y: Add Project closes on Escape (P2-A11Y-004)", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await authenticate(page, "/today");
 
-  await page.keyboard.press("Control+Shift+N");
+  await page.keyboard.press("g");
+  await page.keyboard.press("n");
   const dialog = page.getByRole("dialog", { name: "New Project" });
   await expect(dialog).toBeVisible({ timeout: 5000 });
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 });
+
+async function enableFocusMode(page: import("@playwright/test").Page) {
+  const status = await page.evaluate(
+    async ({ baseUrl, token }) => {
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Origin: baseUrl,
+      };
+      const current = await fetch(`${baseUrl}/api/v1/settings`, { headers });
+      const settings = (await current.json()) as { features: Record<string, unknown> };
+      const response = await fetch(`${baseUrl}/api/v1/settings`, {
+        method: "PATCH",
+        headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({
+          features: { ...settings.features, focus_mode_enabled: true },
+        }),
+      });
+      return response.status;
+    },
+    { baseUrl: server.baseUrl, token: server.token },
+  );
+  expect(status).toBe(200);
+}
 
 async function expectNoSeriousAxe(page: import("@playwright/test").Page) {
   await page.evaluate(() => document.fonts.ready);
@@ -415,6 +440,8 @@ test("a11y: Focus Mode dialog name, focus containment, shell inert, keyboard con
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await authenticate(page, "/today");
+  await enableFocusMode(page);
   await authenticate(page, "/today?focus=1");
   const dialog = page.getByRole("dialog", { name: "Focus mode" });
   await expectDialogShellIsolation(page, dialog);
@@ -454,7 +481,30 @@ test("axe: Weekly Review open dialog has no serious/critical violations", async 
 
 test("axe: Focus Mode open dialog has no serious/critical violations", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await authenticate(page, "/today");
+  await enableFocusMode(page);
   await authenticate(page, "/today?focus=1");
   await expect(page.getByRole("dialog", { name: "Focus mode" })).toBeVisible({ timeout: 10_000 });
+  await expectNoSeriousAxe(page);
+});
+
+test("a11y: Settings desktop dialog isolates the shell and restores focus", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await authenticate(page, "/inbox");
+  const trigger = page.getByRole("button", { name: "Settings" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expectDialogShellIsolation(page, dialog);
+  await expectNoSeriousAxe(page);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+test("axe: Settings mobile detail has no serious/critical violations", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await authenticate(page, "/settings/data");
+  await expect(page.getByRole("button", { name: "Back to settings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Data", exact: true }).first()).toBeVisible();
   await expectNoSeriousAxe(page);
 });

@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 3 are complete. Phase 4 is next.
+**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 4 are complete. Phase 5 is next.
 
 ## Purpose and user-visible outcome
 
@@ -711,7 +711,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 3 context, temporal authority, migration recovery, reminder fencing, timeblock/slot, bounds and visual-evidence plan approved.
 - [x] Phase 3 temporal benchmark harness and five-sample release evidence recorded; `P3-FINAL-007` is fixed after the bounded analysis snapshot rerun passed every frozen latency and memory budget.
 - [x] Phase 3 recurrence, reminder, planning, timeblocking, visual, accessibility, performance, review and delivery implementation.
-- [ ] Phase 4 implementation.
+- [x] Phase 4 settings, portability, backup/recovery, hosted operations, performance, dogfood and specialist acceptance; all `P4-DB`, `P4-SEC`, `P4-UI`, and dogfood findings are closed.
 - [ ] Phase 5 implementation.
 - [ ] Phase 6 implementation.
 - [ ] Phase 7 implementation.
@@ -746,6 +746,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - `P3-FINAL-009` — **fixed**. Timeblocking mutations no longer advertise or push unsupported Undo entries, preserving earlier valid task undo history.
 - `P3-FINAL-010` — **fixed**. Calendar planning controls now await authoritative task mutations and keep the selected task on failure instead of reporting success and clearing selection optimistically.
 - Phase 3 final review — **approved after fixes**. All reminder/storage findings and `P3-FINAL-001`–`P3-FINAL-016` are closed with focused regressions. The final closure hardened recurring reversal sidecars, reminder and recurring-timeblock timezone edits, immutable cancellation transitions, v3 undo-snapshot migration, and bounded migration memory; focused database re-review found no remaining material issue. Full ledger: `evidence/phase-3-review-ledger.md`.
+- Phase 4 final review — **approved after fixes**. Database `P4-DB-001`–`P4-DB-010` plus `P4-DB-R1`, security `P4-SEC-001`–`P4-SEC-003`, UI `P4-UI-001`–`P4-UI-006` plus `P4-UI-R1`, and dogfood `P4-UI-DOG-001` are closed with focused regressions. Database, security, and UI gates found no remaining material issue; full ledger: `evidence/phase-4-review-ledger.md`.
 
 ## Decision log
 
@@ -765,6 +766,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-07-30: Phase 3 keeps the four-crate architecture and adds no scheduler/recurrence framework. One dormant Tokio wake loop, fenced browser/native delivery ownership, verified v2 backup before schema v3 migration, bounded virtual time recurrence, and independent legacy visual authority are required.
 - 2026-07-31: the Phase 3 temporal benchmark extends the existing hosted cgroup harness and existing development-only scale seeder rather than adding a runner or dependency. Its recurring bulk covers 250 sources plus 250 generated children because the frozen 500 affected-task ceiling includes generated occurrences.
 - 2026-07-31: completed Phase 3 over the existing four crates with no scheduler/recurrence framework. One dormant reminder coordinator, server-civil-date planning authority, exact replan candidate binding, immutable cancellation-transition history, and immutable Phase 3 visual authorities preserve correctness while keeping the optimized 10,000-task workload below 18.20 MiB peak.
+- 2026-08-02: completed Phase 4 in the existing four crates. Settings remain one typed server-confirmed aggregate; complete backups use private bounded staging and fail-closed recovery; one server-wide permit serializes large artifacts; the legacy Settings modal is the visual authority. Linux drops durable rollback file-cache pages before cutover so a 10,000-task restore remains under the frozen 32 MiB peak without weakening rollback.
 
 ## Discoveries and risks
 
@@ -794,6 +796,9 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - Phase 2 scale: the final deterministic 10,000-task run stayed below 15.36 MiB peak and all p95 budgets by wide margins, so the simple indexed SQL query path remains authoritative.
 - Phase 3 temporal benchmark: paged full-task analysis made 100 repository calls and hydrated each task and tags individually. One bounded read transaction now loads task rows and tags in two batched queries; the final same-head five-sample rerun passed Stats at 27.356 ms p95 and Nudges at 29.528 ms p95 without relaxing frozen limits.
 - Phase 3 closure: coupling ordinary timeblocking loads to destructive replan preview made a bounded preview overflow hide valid schedule data. Preview failure is now isolated, keeps blocks/slots visible, and explains why replan is unavailable.
+- Phase 4 recovery: validating an upload is not sufficient if catastrophic state is only in memory. Durable recovery and cutover markers are reconciled while the profile lock is retained before any ordinary SQLite open, and hostile typed rows are rejected before maintenance.
+- Phase 4 performance: restore peak was file-cache pressure rather than heap growth. The first authoritative run retained three simultaneous 6.8 MiB SQLite copies and failed at 32.8086 MiB; syncing then advising away only rollback cache pages reduced the accepted maximum peak to 25.2617 MiB while preserving the rollback file.
+- Phase 4 dogfood: intentional restart-required cutover could race a terminal SSE callback and show a contradictory retry banner. A synchronous restart-required gate now clears and suppresses realtime errors only after successful restore; failed restores keep ordinary realtime behavior.
 
 ## Outcome and retrospective
 
@@ -833,3 +838,12 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - **Validation:** 314 Rust tests, 294 frontend tests, and 77 Playwright scenarios passed alongside release build, format, Clippy, type, contract, docs, runtime-boundary, npm/Rust audit, visual, accessibility, and cleanup checks.
 - **Review:** all reminder/storage findings and `P3-FINAL-001`–`P3-FINAL-016` are fixed with focused regressions; narrow final database re-review found no material issue remaining.
 - **Follow-up:** Phase 4 adds data portability, complete backup/restore, settings, hosted controls, token rotation, diagnostics, and maintenance barriers without creating a second live store.
+
+### Phase 4
+
+- **Outcome:** typed server-confirmed Settings, import/export, complete backup and fail-closed restore/recovery, hosted policy/token controls, diagnostics, and multi-client epoch recovery now run through the existing Rust authority while preserving the approved Settings modal.
+- **Evidence:** `goals/rust-rewrite/evidence/phase-4-outcome.md`; `phase-4-data-bench.json`; retained `phase-4-data-bench-failed.json`; `phase-4-data-benchmark-protocol.md`; `phase-4-review-ledger.md`; `phase-4-dogfood/report.md`; ten immutable visual authorities under `phase-4-visual-authority/`.
+- **Memory and data scale:** three final 10,000-task samples passed at 6.6562 MiB median / 6.8516 MiB maximum post-restore warm memory and 25.2617 MiB maximum peak. Timed JSON export, backup and restore evidence plus exact transfer/restore counts, integrity, cleanup, and restart-boundary checks passed; CSV and Markdown behavior remain covered by focused transfer tests. The preceding 32.8086 MiB restore failure is retained with its root-cause correction.
+- **Validation:** 389 Rust tests, 345 frontend tests, and 91 Playwright scenarios passed alongside release build, format, denied-warning Clippy, type, contract, docs, runtime-boundary, npm/Rust supply-chain checks, visual and accessibility gates, benchmark self-check, exact backup/restore evidence, and dogfood.
+- **Dogfood and review:** the real production build completed connection, settings, feature-gate, task, export, backup, restore, restart and integrity workflows. `P4-UI-DOG-001` was fixed and rechecked. Database, security, and UI specialist gates approved all named findings with no material issue remaining.
+- **Follow-up:** Phase 5 adds native CLI and MCP surfaces over the same Rust application/storage authority without direct competing database ownership.

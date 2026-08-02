@@ -10,9 +10,11 @@ mod query;
 mod quick_entry;
 mod recurrence;
 mod reminder;
+mod settings;
 mod task;
 mod text_import;
 mod timeblock;
+mod transfer;
 mod values;
 
 pub use catalog::{
@@ -64,6 +66,13 @@ pub use reminder::{
     reminder_occurrence_key, validate_owner_lost_mark_limit, validate_reminder_claim_limit,
     validate_reminder_lease_secs,
 };
+pub use settings::{
+    AppSettings, AppearanceSettings, CalendarDefault, DateFormat, DateTimeSettings, Density,
+    FeatureSettings, FontFamily, FontSize, KEYBOARD_SHORTCUT_ACTIONS, KeyboardShortcut,
+    MAX_CAPACITY_MINUTES, MIN_CAPACITY_MINUTES, NotificationSettings, PlanningSettings,
+    RESERVED_BROWSER_CHORDS, SettingsPatch, TaskDefaults, Theme, TimeFormat, VolumePercent,
+    is_reserved_browser_chord, normalize_chord,
+};
 pub use task::{
     Task, TaskDraft, TaskStatus, UncompleteOutcome, recurrence_rule_uses_anchor,
     resolve_recurrence_anchor,
@@ -73,6 +82,16 @@ pub use timeblock::{
     CivilTimeRange, MAX_SLOT_MEMBERSHIP, MAX_TIMEBLOCK_RANGE_DAYS, MAX_TIMEBLOCK_RANGE_ITEMS,
     OrderedSlotMembership, REPLAN_LOOKBACK_DAYS, TimeBlock, TimeBlockDraft, TimeSlot,
     TimeSlotDraft, replan_window, validate_timeblock_date_range,
+};
+pub use transfer::{
+    BACKUP_HEADER_LEN, BACKUP_MAGIC, BACKUP_VERSION, BackupError, BackupHeader, BackupManifest,
+    ImportDraft, MAX_BACKUP_MANIFEST_BYTES, MAX_BACKUP_PAYLOAD_BYTES, MAX_TRANSFER_CONTENT_BYTES,
+    TransferApply, TransferError, TransferFormat, TransferPreview, TransferWarning,
+    content_fingerprint, decode_sha256_hex, draft_to_task_fields, export_tasks_csv,
+    export_tasks_csv_with_names, export_tasks_json, export_tasks_markdown, frame_backup_envelope,
+    parse_backup_envelope, parse_csv_transfer, parse_json_transfer, parse_markdown_transfer,
+    parse_todoist_json, preview_transfer, read_backup_header, sha256_bytes, sha256_hex,
+    validate_backup_header, validate_preview_matches_apply, write_backup_header,
 };
 pub use values::{
     ActualMinutes, CommentBody, DreadLevel, EntityName, EstimatedMinutes, FilterQuery, HexColor,

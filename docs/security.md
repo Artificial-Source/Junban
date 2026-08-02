@@ -17,14 +17,15 @@ The hosted Rust server implements:
 - `127.0.0.1:4219` as the default bind, with explicit bind override;
 - exact raw `Host` allowlisting on every request; `Forwarded` and `X-Forwarded-Host` are ignored;
 - unauthenticated health and static shell/assets, with bearer authentication on every other `/api/v1` request including fetch-parsed SSE;
-- a persistent random bearer token in the private profile's `access-token` file; the token is never placed in runtime metadata or logs;
+- a persistent random bearer token in the private profile's operator-readable `access-token` file; rotation first durably records one private recovery receipt, and the immediately previous token is accepted only for an exact retry of `POST /api/v1/auth/rotate` with that receipt's operation ID; tokens are never placed in runtime metadata or logs;
 - a small global in-memory invalid-auth limiter (eight attempts per rolling 30 seconds). It is deliberately bounded and resets at process restart; per-client/scoped credentials belong to the CLI/MCP phase;
 - authenticated bearer holders are untrusted for availability: concurrent SSE connections are hard-capped at 64 per process with a retryable `503 sse_connection_limit` overflow, and SSE forwarders cancel on client disconnect and graceful shutdown so open streams cannot pin the process;
 - rejection of unsafe browser mutations when an optional `Origin` does not exactly match the raw Host, while clients with no Origin remain usable;
 - a 512 KiB JSON body limit with JSON errors, independent 4 MiB receipt-material and 512 KiB event limits, global CSP/frame/content-type/referrer headers, and generated request IDs returned in `x-request-id` and error envelopes;
 - explicit `/api` fallback routes before the static SPA fallback, so unknown API paths never return HTML;
 - startup rejection when the static web directory and private profile directory overlap, preventing accidental token/database serving;
-- bounded task cascades/bulk actions, event catch-up pages, retained event history, undo receipts, and WAL checkpoint work so an authenticated client cannot request unbounded transaction or stream material.
+- bounded task cascades/bulk actions, event catch-up pages, retained event history, undo receipts, and WAL checkpoint work so an authenticated client cannot request unbounded transaction or stream material;
+- durable atomic replacement of the persisted Host policy and one process-wide staged-artifact permit: while a backup download, restore upload/cutover, or task export is active, another staged operation fails with `409 staged_artifact_conflict` before creating a temporary file.
 
 Static assets remain public because URL fragments are not sent to the server. The browser accepts only one nonempty, correctly decoded `#access_token=<value>` fragment, moves it to `sessionStorage`, and immediately removes the fragment. Any fragment shape outside that exact form is discarded; `access_token` query parameters are removed without being used, while unrelated query parameters remain. Query-string tokens and native `EventSource` are not supported.
 
@@ -32,7 +33,7 @@ Junban never invokes, installs, or configures Tailscale. Setup guidance may be d
 
 ## Profile files and secrets
 
-The profile directory is owner-only (`0700`) and its database, lock, token and runtime metadata files are owner-only (`0600`) on Unix. Default profiles use the per-user application-data location for the host OS (`$XDG_DATA_HOME/junban` or `$HOME/.local/share/junban` on Linux/BSD, `$HOME/Library/Application Support/Junban` on macOS, `%LOCALAPPDATA%/Junban` on Windows), falling back to `./data` only when required environment data is missing. The default Windows profile inherits that user-profile ACL; a custom profile inherits its selected parent ACL. Junban never broadens inherited Windows permissions. Runtime metadata contains only the bound address and process ID and is removed on graceful shutdown (Ctrl-C everywhere; SIGTERM on Unix as well).
+The profile directory is owner-only (`0700`) and its database, lock, access token, token-rotation receipt, persisted Host policy, and runtime metadata files are owner-only (`0600`) on Unix. Default profiles use the per-user application-data location for the host OS (`$XDG_DATA_HOME/junban` or `$HOME/.local/share/junban` on Linux/BSD, `$HOME/Library/Application Support/Junban` on macOS, `%LOCALAPPDATA%/Junban` on Windows), falling back to `./data` only when required environment data is missing. The default Windows profile inherits that user-profile ACL; a custom profile inherits its selected parent ACL. Junban never broadens inherited Windows permissions. Runtime metadata contains only the bound address and process ID and is removed on graceful shutdown (Ctrl-C everywhere; SIGTERM on Unix as well).
 
 - Provider API keys and local tokens are secrets.
 - Diagnostics and error logs must redact secrets and sensitive URLs.

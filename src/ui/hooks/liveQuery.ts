@@ -21,6 +21,7 @@ export function nextStateFromRevisionSnapshot<T>(
 export class RefreshCoalescer {
   private inFlight = false;
   private queued = false;
+  private completion: Promise<void> | null = null;
 
   get isInFlight(): boolean {
     return this.inFlight;
@@ -30,20 +31,25 @@ export class RefreshCoalescer {
     return this.queued;
   }
 
-  async run(task: () => Promise<void>): Promise<void> {
-    if (this.inFlight) {
+  run(task: () => Promise<void>): Promise<void> {
+    if (this.completion) {
       this.queued = true;
-      return;
+      return this.completion;
     }
     this.inFlight = true;
-    try {
-      do {
-        this.queued = false;
-        await task();
-      } while (this.queued);
-    } finally {
-      this.inFlight = false;
-    }
+    const completion = (async () => {
+      try {
+        do {
+          this.queued = false;
+          await task();
+        } while (this.queued);
+      } finally {
+        this.inFlight = false;
+        this.completion = null;
+      }
+    })();
+    this.completion = completion;
+    return completion;
   }
 }
 

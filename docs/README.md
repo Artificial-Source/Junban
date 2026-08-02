@@ -24,6 +24,11 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-3-review-ledger.md`](../goals/rust-rewrite/evidence/phase-3-review-ledger.md): material Phase 3 findings and their regression evidence
 - [`../goals/rust-rewrite/evidence/phase-3-temporal-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-3-temporal-benchmark-protocol.md): Phase 3 temporal workload protocol and result
 - [`../goals/rust-rewrite/evidence/phase-3-temporal-bench.json`](../goals/rust-rewrite/evidence/phase-3-temporal-bench.json): authoritative temporal memory, latency, and scheduler result
+- [`../goals/rust-rewrite/evidence/phase-4-data-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-4-data-benchmark-protocol.md): Phase 4 export/backup/restore data-operation protocol
+- [`../goals/rust-rewrite/evidence/phase-4-data-bench.json`](../goals/rust-rewrite/evidence/phase-4-data-bench.json): accepted 10,000-task Phase 4 data-operation evidence
+- [`../goals/rust-rewrite/evidence/phase-4-outcome.md`](../goals/rust-rewrite/evidence/phase-4-outcome.md): Phase 4 acceptance, validation, performance, dogfood, and review outcome
+- [`../goals/rust-rewrite/evidence/phase-4-review-ledger.md`](../goals/rust-rewrite/evidence/phase-4-review-ledger.md): closed Phase 4 database, security, UI, and dogfood findings
+- [`../goals/rust-rewrite/evidence/phase-4-dogfood/report.md`](../goals/rust-rewrite/evidence/phase-4-dogfood/report.md): production-build backup/restore and Settings dogfood evidence
 - [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings
 - [`performance.md`](performance.md): hosted memory and scale harness commands
 

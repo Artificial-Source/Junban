@@ -842,7 +842,7 @@ pub(crate) fn load_task_activity_for_tasks(
     Ok(out)
 }
 
-fn activity_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskActivity> {
+pub(crate) fn activity_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskActivity> {
     let revision: i64 = row.get(0)?;
     let sequence: i64 = row.get(1)?;
     let operation_id: String = row.get(2)?;

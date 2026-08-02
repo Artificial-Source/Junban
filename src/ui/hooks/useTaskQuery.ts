@@ -184,7 +184,7 @@ export function useTaskQuery(params?: TaskListParams): TaskQueryState & {
   reload: () => void;
   loadMore: () => Promise<void>;
   applyEvent: (event: CommittedEventDto) => void;
-  requestResync: () => void;
+  requestResync: () => Promise<void>;
   replaceTasks: (tasks: TaskDto[], revision: number) => void;
 } {
   const queryKey = stableQueryKey(params as Record<string, unknown> | undefined);
@@ -245,7 +245,7 @@ export function useTaskQuery(params?: TaskListParams): TaskQueryState & {
     [],
   );
 
-  const reload = useCallback(async () => {
+  const reloadStrict = useCallback(async () => {
     if (!hasStoredToken()) {
       setLoading(false);
       return;
@@ -257,11 +257,20 @@ export function useTaskQuery(params?: TaskListParams): TaskQueryState & {
         setError(null);
       } catch (err) {
         setError(formatQueryError(err));
+        throw err;
       } finally {
         setLoading(false);
       }
     });
   }, [applyListSnapshot, normalized]);
+
+  const reload = useCallback(async () => {
+    try {
+      await reloadStrict();
+    } catch {
+      // Ordinary view refreshes expose the error in state; reset handling uses strict reload.
+    }
+  }, [reloadStrict]);
 
   // Reset and load when the query identity changes.
   useEffect(() => {
@@ -334,9 +343,7 @@ export function useTaskQuery(params?: TaskListParams): TaskQueryState & {
     },
     loadMore,
     applyEvent,
-    requestResync: () => {
-      void reload();
-    },
+    requestResync: reloadStrict,
     replaceTasks,
   };
 }

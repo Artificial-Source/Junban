@@ -92,7 +92,7 @@ function tagMutation(tag: TagDto): MutationResponse {
       occurred_at: "2026-07-28T00:00:00Z",
       event_type: "tag.created",
       affected: { tag_ids: [tag.id] },
-      resync: { tasks: false, catalog: false },
+      resync: { tasks: false, catalog: false, settings: false },
       snapshot: { resource_type: "tag", tag },
     },
   };
@@ -106,7 +106,7 @@ function taskMutation(): MutationResponse {
       occurred_at: "2026-07-28T00:00:00Z",
       event_type: "task.created",
       affected: { task_ids: ["task-1"] },
-      resync: { tasks: false, catalog: false },
+      resync: { tasks: false, catalog: false, settings: false },
       snapshot: null,
     },
   };

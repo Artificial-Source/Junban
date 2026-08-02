@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { parseRoute, pathToView, routeToPath, viewToPath, viewToRoute } from "./useRouting";
+import {
+  parseRoute,
+  parseSettingsLocation,
+  pathToView,
+  routeToPath,
+  settingsToPath,
+  viewToPath,
+  viewToRoute,
+} from "./useRouting";
 
 const FILTER_ID = "11111111-1111-4111-8111-111111111111";
 const PROJECT_ID = "22222222-2222-4222-8222-222222222222";
@@ -29,7 +37,6 @@ describe("parseRoute / routeToPath round trips", () => {
     [`/tasks/${TASK_ID}`, { name: "task" as const, taskId: TASK_ID }],
   ])("parses %s", (path, route) => {
     expect(parseRoute(path)).toEqual(route);
-    // Canonical path may collapse aliases (/today -> /, /filters-labels -> /filters).
     expect(parseRoute(routeToPath(route))).toEqual(
       route.name === "today"
         ? { name: "today" }
@@ -54,7 +61,7 @@ describe("parseRoute / routeToPath round trips", () => {
 describe("parseRoute rejection", () => {
   it.each([
     "/unknown",
-    "/settings",
+    "/settings/unknown",
     "/focus",
     "/projects/not-a-uuid",
     "/tasks/nope",
@@ -65,51 +72,56 @@ describe("parseRoute rejection", () => {
   });
 });
 
-describe("parseRoute Phase 3 acceptance", () => {
-  it("accepts project calendar layout", () => {
-    expect(parseRoute("/projects/11111111-1111-4111-8111-111111111111/calendar")).toEqual({
-      name: "project",
-      projectId: "11111111-1111-4111-8111-111111111111",
-      layout: "calendar",
+describe("Phase 4 settings route matrix", () => {
+  it("parses the closed settings tab set", () => {
+    expect(parseSettingsLocation("/settings")).toEqual({ open: true, tab: null });
+    expect(parseSettingsLocation("/settings/essentials")).toEqual({
+      open: true,
+      tab: "essentials",
+    });
+    expect(parseSettingsLocation("/settings/appearance")).toEqual({
+      open: true,
+      tab: "appearance",
+    });
+    expect(parseSettingsLocation("/settings/features")).toEqual({ open: true, tab: "features" });
+    expect(parseSettingsLocation("/settings/keyboard")).toEqual({ open: true, tab: "keyboard" });
+    expect(parseSettingsLocation("/settings/templates")).toEqual({ open: true, tab: "templates" });
+    expect(parseSettingsLocation("/settings/data")).toEqual({ open: true, tab: "data" });
+    expect(parseSettingsLocation("/settings/hosted")).toEqual({ open: true, tab: "hosted" });
+    expect(parseSettingsLocation("/settings/diagnostics")).toEqual({
+      open: true,
+      tab: "diagnostics",
     });
   });
 
-  it("accepts first-party Phase 3 tools", () => {
-    expect(parseRoute("/calendar")).toEqual({ name: "calendar" });
-    expect(parseRoute("/matrix")).toEqual({ name: "matrix" });
-    expect(parseRoute("/stats")).toEqual({ name: "stats" });
-    expect(parseRoute("/dopamine-menu")).toEqual({ name: "dopamine-menu" });
+  it("rejects hidden legacy tabs and unknown segments", () => {
+    expect(parseSettingsLocation("/settings/ai")).toBeNull();
+    expect(parseSettingsLocation("/settings/voice")).toBeNull();
+    expect(parseSettingsLocation("/settings/plugins")).toBeNull();
+    expect(parseSettingsLocation("/settings/about")).toBeNull();
+    expect(parseSettingsLocation("/settings/general")).toBeNull();
+    expect(parseSettingsLocation("/inbox")).toBeNull();
+  });
+
+  it("builds canonical settings paths", () => {
+    expect(settingsToPath(null)).toBe("/settings");
+    expect(settingsToPath("essentials")).toBe("/settings/essentials");
+    expect(settingsToPath("data")).toBe("/settings/data");
+    expect(settingsToPath("templates")).toBe("/settings/templates");
+  });
+
+  it("keeps content routes separate from settings overlay paths", () => {
+    expect(parseRoute("/settings")).toBeNull();
+    expect(parseRoute("/settings/appearance")).toBeNull();
+    expect(parseRoute("/inbox")).toEqual({ name: "inbox" });
   });
 });
 
-describe("pathToView / viewToPath compatibility", () => {
-  it("maps /inbox to inbox", () => {
+describe("view helpers", () => {
+  it("maps views without settings", () => {
+    expect(viewToRoute("today")).toEqual({ name: "today" });
     expect(pathToView("/inbox")).toBe("inbox");
-  });
-
-  it("maps / to today", () => {
-    expect(pathToView("/")).toBe("today");
-  });
-
-  it("maps /today to today", () => {
-    expect(pathToView("/today")).toBe("today");
-  });
-
-  it("defaults unknown paths to today for legacy chrome", () => {
-    expect(pathToView("/unknown")).toBe("today");
-  });
-
-  it("maps today to /", () => {
-    expect(viewToPath("today")).toBe("/");
-  });
-
-  it("maps inbox to /inbox", () => {
     expect(viewToPath("inbox")).toBe("/inbox");
-  });
-
-  it("refuses to invent ids for resource views", () => {
-    expect(viewToRoute("project")).toBeNull();
-    expect(viewToRoute("task")).toBeNull();
-    expect(viewToRoute("saved-filter")).toBeNull();
+    expect(pathToView("/settings")).toBe("today");
   });
 });

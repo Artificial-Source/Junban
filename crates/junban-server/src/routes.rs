@@ -1,48 +1,67 @@
 //! Authenticated `/api/v1` route handlers.
 
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+
 use axum::{
     Json,
+    body::{Body, Bytes},
     extract::{Extension, Path as AxumPath, Query, State, rejection::JsonRejection},
-    http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{Html, IntoResponse, Response},
 };
-use jiff::{Zoned, civil::Date, tz::TimeZone};
+use futures_core::Stream;
+use http_body_util::BodyExt;
+use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
+use junban_app::{AppError, ExportFormat, StagedFile};
 use junban_domain::{
     CommentId, DailyCapacityMinutes, MAX_QUERY_PAGE_LIMIT, MAX_TAGS_PER_TASK, OperationId,
     ProjectId, SavedFilterId, SectionId, TagId, TaskId, TaskQuery, TaskSort, TaskStatus,
     TemplateId, TimeBlockId, TimeSlotId, WeekStart, parse_filter, parse_quick_entry,
     parse_text_import, validate_page_limit,
 };
+use junban_storage::ensure_private_dir;
 use serde::Deserialize;
+use tokio::io::AsyncWriteExt;
+use tokio_util::io::ReaderStream;
 use utoipa::IntoParams;
+use uuid::Uuid;
 
 use crate::cursor::decode_task_cursor;
 use crate::dto::{
-    AcquireReminderLeaseRequest, AddRelationRequest, AppendTimeSlotTaskRequest,
-    ApplyTemplateRequest, BulkTasksRequest, CalendarTasksResponse, CatalogResponse,
-    ClaimRemindersRequest, ClaimRemindersResponse, CommentDto, CommentListResponse,
-    CreateCommentRequest, CreateProjectRequest, CreateSavedFilterRequest, CreateSectionRequest,
-    CreateTagRequest, CreateTaskRequest, CreateTemplateRequest, CreateTimeBlockRequest,
-    CreateTimeSlotRequest, DailyPlanResponse, DopamineMenuResponse, EatTheFrogResponse,
-    EndOfDayResponse, HealthResponse, MarkOwnerLostRemindersRequest,
-    MarkOwnerLostRemindersResponse, MoveTaskRequest, MoveTimeBlockRequest, MutationResponse,
-    NudgesResponse, ParseFilterRequest, ParseQuickEntryRequest, ParseTextImportRequest,
-    ParsedFilterResponse, PatchCommentRequest, PatchProjectRequest, PatchSavedFilterRequest,
-    PatchSectionRequest, PatchTagRequest, PatchTaskRequest, PatchTemplateRequest,
-    PatchTimeBlockRequest, PatchTimeSlotRequest, ProfileResponse, QuickEntryDto, RelationDto,
+    AcquireReminderLeaseRequest, AddRelationRequest, AppSettingsResponse,
+    AppendTimeSlotTaskRequest, ApplyTemplateRequest, BulkTasksRequest, CalendarTasksResponse,
+    CatalogResponse, ClaimRemindersRequest, ClaimRemindersResponse, CommentDto,
+    CommentListResponse, CreateCommentRequest, CreateProjectRequest, CreateSavedFilterRequest,
+    CreateSectionRequest, CreateTagRequest, CreateTaskRequest, CreateTemplateRequest,
+    CreateTimeBlockRequest, CreateTimeSlotRequest, DailyPlanResponse, DiagnosticsResponse,
+    DopamineMenuResponse, EatTheFrogResponse, EndOfDayResponse, ExportTasksQuery, HealthResponse,
+    HostListRequest, HostListResponse, ImportApplyRequest, ImportPreviewRequest,
+    MaintenanceStatusResponse, MarkOwnerLostRemindersRequest, MarkOwnerLostRemindersResponse,
+    MoveTaskRequest, MoveTimeBlockRequest, MutationResponse, NudgesResponse, ParseFilterRequest,
+    ParseQuickEntryRequest, ParseTextImportRequest, ParsedFilterResponse, PatchCommentRequest,
+    PatchProjectRequest, PatchSavedFilterRequest, PatchSectionRequest, PatchSettingsRequest,
+    PatchTagRequest, PatchTaskRequest, PatchTemplateRequest, PatchTimeBlockRequest,
+    PatchTimeSlotRequest, ProfileResponse, QuickEntryDto, RecoveryStatusResponse, RelationDto,
     RelationListResponse, ReleaseReminderLeaseRequest, ReminderDeliveryLeaseDto,
     ReminderListResponse, ReminderOccurrenceDto, RenewReminderLeaseRequest, ReorderTasksRequest,
     ReplaceTimeSlotTasksRequest, ReplanTimeBlocksPreviewResponse, ReplanTimeBlocksRequest,
-    RescheduleReminderRequest, ResizeTimeBlockRequest, SettleReminderDeliveredRequest,
-    SettleReminderFailedRequest, StatsResponse, TaskActivityDto, TaskActivityResponse, TaskDto,
-    TaskJarResponse, TaskListResponse, TaskSortDto, TaskViewPresetDto, TemporalSettingsResponse,
-    TextImportDraftDto, TextImportResponse, TimeBlockListResponse, TimeSlotListResponse,
+    RescheduleReminderRequest, ResizeTimeBlockRequest, RestoreResponse,
+    SettleReminderDeliveredRequest, SettleReminderFailedRequest, StatsResponse, SyncStateResponse,
+    TaskActivityDto, TaskActivityResponse, TaskDto, TaskJarResponse, TaskListResponse, TaskSortDto,
+    TaskViewPresetDto, TemporalSettingsResponse, TextImportDraftDto, TextImportResponse,
+    TimeBlockListResponse, TimeSlotListResponse, TokenRotationResponse, TransferPreviewResponse,
     WeeklyReviewResponse,
 };
 use crate::error::{ApiError, extract_json, operation_id, parse_path_id, validation_error};
 use crate::reminder_wake::open_reminder_sse_stream;
 use crate::sse::{MAX_SSE_CONNECTIONS, open_sse_stream};
-use crate::{RequestId, ServerState};
+use crate::{RecoveryState, RequestId, ServerState, StagedArtifactPermit};
 
 // Re-export constants used by list activity defaults.
 use junban_app::{ACTIVITY_PAGE_DEFAULT, ACTIVITY_PAGE_MAX, TaskListAsOf};
@@ -77,6 +96,110 @@ pub async fn health() -> Json<HealthResponse> {
 
 #[utoipa::path(
     get,
+    path = "/api/v1/maintenance/status",
+    operation_id = "get_maintenance_status",
+    responses(
+        (status = 200, body = MaintenanceStatusResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_maintenance_status(
+    State(state): State<ServerState>,
+) -> Json<MaintenanceStatusResponse> {
+    let gate = state.maintenance();
+    Json(MaintenanceStatusResponse {
+        maintenance_active: gate.maintenance_active(),
+        restart_required: gate.restart_required(),
+        recovery_mode: gate.recovery_mode(),
+        admitted_requests: gate.admitted_requests(),
+    })
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/recovery/status",
+    operation_id = "get_recovery_status",
+    responses((status = 200, body = RecoveryStatusResponse))
+)]
+pub async fn get_recovery_status(State(state): State<ServerState>) -> Json<RecoveryStatusResponse> {
+    Json(RecoveryStatusResponse {
+        mode: "recovery",
+        restart_required: state.maintenance().restart_required(),
+    })
+}
+
+pub async fn recovery_ui() -> Html<&'static str> {
+    Html(
+        r#"<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Junban recovery</title></head>
+<body>
+<main>
+  <h1>Junban recovery</h1>
+  <p>The database could not be opened. Restore a complete Junban backup, then restart the server.</p>
+  <form id="restore-form">
+    <label>Access token <input id="token" type="password" autocomplete="off" required></label>
+    <label>Complete backup <input id="backup" type="file" accept=".junban-backup,application/octet-stream" required></label>
+    <button type="submit">Restore backup</button>
+  </form>
+  <p id="result" role="status" aria-live="polite"></p>
+</main>
+<script src="/recovery.js" defer></script>
+</body>
+</html>"#,
+    )
+}
+
+pub async fn recovery_script() -> Response {
+    const SCRIPT: &str = r#"const form=document.getElementById('restore-form');
+const result=document.getElementById('result');
+form.addEventListener('submit',async(event)=>{
+  event.preventDefault();
+  result.textContent='Validating and restoring backup…';
+  const token=document.getElementById('token').value;
+  const file=document.getElementById('backup').files[0];
+  try {
+    const response=await fetch('/api/v1/backup/restore',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/octet-stream'},body:file});
+    const body=await response.json();
+    result.textContent=response.ok?'Restore complete. Restart Junban before continuing.':(body.error?.message??'Restore failed.');
+  } catch (_) { result.textContent='Restore request failed.'; }
+});"#;
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        SCRIPT,
+    )
+        .into_response()
+}
+
+pub async fn recovery_health() -> Json<HealthResponse> {
+    Json(HealthResponse { status: "recovery" })
+}
+
+pub async fn recovery_status() -> Json<RecoveryStatusResponse> {
+    Json(RecoveryStatusResponse {
+        mode: "recovery",
+        restart_required: true,
+    })
+}
+
+/// Catch-all for API routes while the process is in recovery mode.
+pub async fn recovery_api_unavailable(Extension(request_id): Extension<RequestId>) -> ApiError {
+    ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "recovery_mode",
+        "server is in recovery mode; only health and recovery endpoints are available",
+        false,
+        &request_id,
+    )
+}
+
+#[utoipa::path(
+    get,
     path = "/api/v1/profile",
     operation_id = "get_profile",
     responses(
@@ -97,6 +220,32 @@ pub async fn get_profile(
         .map_err(|error| ApiError::from_app(error, &request_id))?;
     Ok(Json(ProfileResponse {
         revision: catalog.revision,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/sync-state",
+    operation_id = "get_sync_state",
+    responses(
+        (status = 200, body = SyncStateResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_sync_state(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+) -> Result<Json<SyncStateResponse>, ApiError> {
+    let sync = state
+        .service
+        .get_sync_state()
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(SyncStateResponse {
+        event_epoch: sync.event_epoch,
+        revision: sync.revision,
     }))
 }
 
@@ -1379,7 +1528,9 @@ pub async fn parse_text_import_route(
 
 #[derive(Debug, Default, Deserialize)]
 pub struct EventQuery {
-    since: Option<u64>,
+    since: Option<String>,
+    /// Client-held event epoch. Mismatch returns `409 event_reset_required`.
+    event_epoch: Option<String>,
 }
 
 #[utoipa::path(
@@ -1388,12 +1539,14 @@ pub struct EventQuery {
     operation_id = "events",
     params(
         ("since" = Option<u64>, Query),
+        ("event_epoch" = String, Query),
         ("Last-Event-ID" = Option<u64>, Header)
     ),
     responses(
         (status = 200, description = "Revisioned committed-event stream", content_type = "text/event-stream"),
         (status = 400, body = crate::error::ErrorEnvelope),
         (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
         (status = 503, body = crate::error::ErrorEnvelope)
     ),
     security(("bearer_auth" = []))
@@ -1403,26 +1556,37 @@ pub async fn events(
     Extension(request_id): Extension<RequestId>,
     Query(query): Query<EventQuery>,
     headers: HeaderMap,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<Response, ApiError> {
+    let client_epoch = query
+        .event_epoch
+        .as_deref()
+        .ok_or_else(|| event_reset_required(&request_id))?;
+    if Uuid::parse_str(client_epoch).is_err() {
+        return Err(event_reset_required(&request_id));
+    }
+
     let since = if let Some(since) = query.since {
         since
+            .parse::<u64>()
+            .map_err(|_| event_reset_required(&request_id))?
     } else if let Some(value) = headers.get("last-event-id") {
         value
             .to_str()
             .ok()
             .and_then(|value| value.parse().ok())
-            .ok_or_else(|| {
-                ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_event_cursor",
-                    "Last-Event-ID must be an unsigned revision",
-                    false,
-                    &request_id,
-                )
-            })?
+            .ok_or_else(|| event_reset_required(&request_id))?
     } else {
-        0
+        return Err(event_reset_required(&request_id));
     };
+
+    let sync = state
+        .service
+        .get_sync_state()
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    if client_epoch != sync.event_epoch || since > sync.revision {
+        return Err(event_reset_required(&request_id));
+    }
 
     let permit = state.try_acquire_sse().ok_or_else(|| {
         ApiError::new(
@@ -1441,16 +1605,34 @@ pub async fn events(
         .list_events(since)
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;
+    if matches!(catch_up, junban_app::EventCatchUp::ResyncRequired { .. }) {
+        return Err(event_reset_required(&request_id));
+    }
 
-    Ok(open_sse_stream(
+    let mut response = open_sse_stream(
         state.service.clone(),
         receiver,
         catch_up,
         since,
-        state.shutdown_token(),
+        state.stream_cancel_token(),
         permit,
         std::sync::Arc::clone(&state.active_forwarders),
-    ))
+    )
+    .into_response();
+    if let Ok(epoch) = HeaderValue::from_str(&sync.event_epoch) {
+        response.headers_mut().insert("x-junban-event-epoch", epoch);
+    }
+    Ok(response)
+}
+
+fn event_reset_required(request_id: &RequestId) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        "event_reset_required",
+        "event history was reset; full resync is required",
+        false,
+        request_id,
+    )
 }
 
 // ── reminders ──────────────────────────────────────────────────────────────
@@ -1845,7 +2027,7 @@ pub async fn reminder_events(
     Ok(open_reminder_sse_stream(
         std::sync::Arc::clone(&state.reminder_wakes),
         receiver,
-        state.shutdown_token(),
+        state.stream_cancel_token(),
         permit,
         std::sync::Arc::clone(&state.active_forwarders),
     ))
@@ -2510,10 +2692,12 @@ fn parse_capacity_param(
 fn parse_week_start_param(
     raw: Option<&str>,
     request_id: &RequestId,
-) -> Result<WeekStart, ApiError> {
+) -> Result<Option<WeekStart>, ApiError> {
     match raw {
-        None => Ok(WeekStart::Sunday),
-        Some(value) => WeekStart::parse(value).map_err(|error| validation_error(error, request_id)),
+        None => Ok(None),
+        Some(value) => WeekStart::parse(value)
+            .map(Some)
+            .map_err(|error| validation_error(error, request_id)),
     }
 }
 
@@ -2668,6 +2852,235 @@ pub async fn planning_weekly(
 
 #[utoipa::path(
     get,
+    path = "/api/v1/settings",
+    operation_id = "get_settings",
+    responses(
+        (status = 200, body = AppSettingsResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_settings(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+) -> Result<Json<AppSettingsResponse>, ApiError> {
+    let settings = state
+        .service
+        .get_settings()
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(settings.into()))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings",
+    operation_id = "patch_settings",
+    request_body = PatchSettingsRequest,
+    params(
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn patch_settings(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    payload: Result<Json<PatchSettingsRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let patch = payload.into_patch(&request_id)?;
+    let mutation = state
+        .service
+        .patch_settings(operation_id, patch)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/imports/preview",
+    operation_id = "preview_import",
+    request_body = ImportPreviewRequest,
+    responses(
+        (status = 200, body = TransferPreviewResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn preview_import(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<ImportPreviewRequest>, JsonRejection>,
+) -> Result<Json<TransferPreviewResponse>, ApiError> {
+    let payload = extract_json(payload, &request_id)?;
+    let preview = state
+        .service
+        .preview_import(payload.format.into_domain(), payload.content)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(preview.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/imports/apply",
+    operation_id = "apply_import",
+    request_body = ImportApplyRequest,
+    params(
+        ("Idempotency-Key" = String, Header, format = Uuid)
+    ),
+    responses(
+        (status = 200, body = MutationResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn apply_import(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    payload: Result<Json<ImportApplyRequest>, JsonRejection>,
+) -> Result<Json<MutationResponse>, ApiError> {
+    let operation_id = operation_id(&headers, &request_id)?;
+    let payload = extract_json(payload, &request_id)?;
+    let mutation = state
+        .service
+        .apply_import(operation_id, payload.into_apply())
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(mutation.into()))
+}
+
+struct StagedFileStream {
+    inner: ReaderStream<tokio::fs::File>,
+    _staged: StagedFile,
+    _permit: StagedArtifactPermit,
+}
+
+impl Stream for StagedFileStream {
+    type Item = Result<Bytes, io::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        Pin::new(&mut this.inner).poll_next(context)
+    }
+}
+
+async fn streamed_staged_body(
+    staged: StagedFile,
+    permit: StagedArtifactPermit,
+) -> io::Result<Body> {
+    let file = tokio::fs::File::open(staged.path()).await?;
+    Ok(Body::from_stream(StagedFileStream {
+        inner: ReaderStream::new(file),
+        _staged: staged,
+        _permit: permit,
+    }))
+}
+
+fn staged_artifact_permit(
+    state: &ServerState,
+    request_id: &RequestId,
+) -> Result<StagedArtifactPermit, ApiError> {
+    state.try_acquire_staged_artifact().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::CONFLICT,
+            "staged_artifact_conflict",
+            "another backup, restore, or export operation is already active",
+            false,
+            request_id,
+        )
+    })
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/exports/tasks",
+    operation_id = "export_tasks",
+    params(ExportTasksQuery),
+    responses(
+        (status = 200, description = "Transfer document body"),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn export_tasks(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    Query(query): Query<ExportTasksQuery>,
+) -> Result<Response, ApiError> {
+    let format = ExportFormat::parse(&query.format).map_err(|_| {
+        validation_error(
+            junban_domain::ValidationError::Invalid {
+                field: "format",
+                reason: "unsupported export format",
+            },
+            &request_id,
+        )
+    })?;
+    let permit = staged_artifact_permit(&state, &request_id)?;
+    let staged = state
+        .service
+        .export_tasks(format)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    let content_length = staged.len();
+    let body = streamed_staged_body(staged, permit).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_error",
+            "could not open staged export",
+            true,
+            &request_id,
+        )
+    })?;
+    let mut response = Response::new(body);
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(format.content_type()),
+    );
+    response.headers_mut().insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!("attachment; filename=\"{}\"", format.file_name()))
+            .unwrap_or_else(|_| HeaderValue::from_static("attachment")),
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    if let Ok(value) = HeaderValue::from_str(&content_length.to_string()) {
+        response.headers_mut().insert(header::CONTENT_LENGTH, value);
+    }
+    Ok(response)
+}
+
+#[utoipa::path(
+    get,
     path = "/api/v1/stats",
     operation_id = "stats",
     params(StatsQuery),
@@ -2735,9 +3148,16 @@ pub async fn nudges(
     ),
     security(("bearer_auth" = []))
 )]
-pub async fn get_temporal_settings() -> Json<TemporalSettingsResponse> {
-    let (_, zone) = server_planning_clock();
-    Json(junban_app::default_temporal_settings(&zone).into())
+pub async fn get_temporal_settings(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+) -> Result<Json<TemporalSettingsResponse>, ApiError> {
+    let settings = state
+        .service
+        .temporal_settings_from_store()
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    Ok(Json(settings.into()))
 }
 
 #[utoipa::path(
@@ -2845,6 +3265,243 @@ pub async fn api_not_found(Extension(request_id): Extension<RequestId>) -> ApiEr
     )
 }
 
+// ── hosted operations: token, hosts, diagnostics ───────────────────────────
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/rotate",
+    operation_id = "rotate_token",
+    params(("Idempotency-Key" = String, Header, format = Uuid)),
+    responses(
+        (status = 200, body = TokenRotationResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn rotate_token(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let operation_id = operation_id(&headers, &request_id)?;
+    let token = state.rotate_token(operation_id).map_err(|error| {
+        state.log_diagnostic(
+            crate::diagnostics::DiagnosticSeverity::Error,
+            "token_rotation_failed",
+            Some(&request_id.0),
+            &format!("token rotation failed: {error}"),
+        );
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "token_rotation_failed",
+            "could not rotate access token",
+            true,
+            &request_id,
+        )
+    })?;
+
+    let mut response = Response::new(Body::from(
+        serde_json::to_vec(&TokenRotationResponse { token }).map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "the server could not complete the request",
+                true,
+                &request_id,
+            )
+        })?,
+    ));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/hosts",
+    operation_id = "get_allowed_hosts",
+    responses(
+        (status = 200, body = HostListResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_allowed_hosts(State(state): State<ServerState>) -> Json<HostListResponse> {
+    let mut hosts: Vec<String> = state.current_allowed_hosts().into_iter().collect();
+    hosts.sort();
+    Json(HostListResponse { hosts })
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/hosts",
+    operation_id = "put_allowed_hosts",
+    request_body = HostListRequest,
+    responses(
+        (status = 200, body = HostListResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn put_allowed_hosts(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    payload: Result<Json<HostListRequest>, JsonRejection>,
+) -> Result<Json<HostListResponse>, ApiError> {
+    let body = extract_json(payload, &request_id)?;
+    let mut seen = std::collections::HashSet::with_capacity(body.hosts.len());
+    let mut persisted = Vec::with_capacity(body.hosts.len());
+    for (index, host) in body.hosts.into_iter().enumerate() {
+        validate_persisted_host(&host, index, &request_id)?;
+        if seen.insert(host.clone()) {
+            persisted.push(host);
+        }
+    }
+    let effective = state.set_persisted_hosts(persisted).map_err(|error| {
+        state.log_diagnostic(
+            crate::diagnostics::DiagnosticSeverity::Error,
+            "hosts_update_failed",
+            Some(&request_id.0),
+            &format!("could not persist hosts: {error}"),
+        );
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "hosts_update_failed",
+            "could not persist allowed hosts",
+            true,
+            &request_id,
+        )
+    })?;
+    let mut hosts: Vec<String> = effective.into_iter().collect();
+    hosts.sort();
+    Ok(Json(HostListResponse { hosts }))
+}
+
+fn validate_persisted_host(
+    host: &str,
+    index: usize,
+    request_id: &RequestId,
+) -> Result<(), ApiError> {
+    let field = format!("hosts[{index}]");
+    if host.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            request_id,
+        )
+        .with_field(field, "must not be empty"));
+    }
+    if !host.is_ascii() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            request_id,
+        )
+        .with_field(field, "must be ASCII-only"));
+    }
+    if host.contains('*') {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            request_id,
+        )
+        .with_field(field, "wildcards are not allowed"));
+    }
+    if host.contains(':') {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            request_id,
+        )
+        .with_field(field, "ports are not allowed in persisted hosts"));
+    }
+    if host.contains('/') || host.contains(' ') || host.contains('@') {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            request_id,
+        )
+        .with_field(field, "must be a plain hostname"));
+    }
+    // Hostname labels: alphanumerics, hyphen, dot only.
+    if !host
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            request_id,
+        )
+        .with_field(field, "contains invalid hostname characters"));
+    }
+    Ok(())
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/diagnostics",
+    operation_id = "get_diagnostics",
+    responses(
+        (status = 200, body = DiagnosticsResponse),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_diagnostics(State(state): State<ServerState>) -> Json<DiagnosticsResponse> {
+    Json(DiagnosticsResponse {
+        entries: state.diagnostics.snapshot(),
+    })
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/diagnostics",
+    operation_id = "clear_diagnostics",
+    responses(
+        (status = 204, description = "diagnostic ring cleared"),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn clear_diagnostics(State(state): State<ServerState>) -> StatusCode {
+    state.diagnostics.clear();
+    state.log_diagnostic(
+        crate::diagnostics::DiagnosticSeverity::Info,
+        "diagnostics_cleared",
+        None,
+        "diagnostic ring cleared",
+    );
+    StatusCode::NO_CONTENT
+}
+
 // Silence unused import warnings for types referenced only by utoipa macros in some builds.
 const _: fn() = || {
     let _: Option<CommentDto> = None;
@@ -2853,4 +3510,332 @@ const _: fn() = || {
     let _: Option<TextImportDraftDto> = None;
     let _: Option<ReminderOccurrenceDto> = None;
     let _: usize = MAX_SSE_CONNECTIONS;
+    let _: Option<RestoreResponse> = None;
 };
+
+// ── complete backup / restore ──────────────────────────────────────────────
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/backup",
+    operation_id = "create_backup",
+    responses(
+        (status = 200, description = "Framed .junban-backup artifact"),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_backup(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+) -> Result<Response, ApiError> {
+    if state.maintenance().maintenance_active() || !state.maintenance().is_normal() {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "maintenance_mode",
+            "server is temporarily unavailable for maintenance",
+            true,
+            &request_id,
+        ));
+    }
+    let permit = staged_artifact_permit(&state, &request_id)?;
+    let staged = state
+        .service
+        .create_backup()
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+    let content_length = staged.len();
+    let body = streamed_staged_body(staged, permit).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_error",
+            "could not open staged backup",
+            true,
+            &request_id,
+        )
+    })?;
+    let stamp = Timestamp::now().to_string().replace(':', "-");
+    let filename = format!("junban-{stamp}.junban-backup");
+    let mut response = Response::new(body);
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    response.headers_mut().insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+            .unwrap_or_else(|_| HeaderValue::from_static("attachment")),
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    if let Ok(value) = HeaderValue::from_str(&content_length.to_string()) {
+        response.headers_mut().insert(header::CONTENT_LENGTH, value);
+    }
+    Ok(response)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/backup/restore",
+    operation_id = "restore_backup",
+    request_body(content_type = "application/octet-stream"),
+    responses(
+        (status = 200, body = RestoreResponse),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope),
+        (status = 413, body = crate::error::ErrorEnvelope),
+        (status = 422, body = crate::error::ErrorEnvelope),
+        (status = 503, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn restore_backup(
+    State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
+    body: Body,
+) -> Result<Json<RestoreResponse>, ApiError> {
+    let _permit = staged_artifact_permit(&state, &request_id)?;
+    let upload = stage_restore_upload(&state.profile_dir, body, &request_id).await?;
+    // Hostile framing, hashes, schema and inventory are all checked before maintenance or
+    // session invalidation. The returned file is a validated, epoch-rotated SQLite candidate.
+    let candidate = state
+        .service
+        .prepare_restore(upload)
+        .await
+        .map_err(|error| ApiError::from_app(error, &request_id))?;
+
+    let gate = state.maintenance();
+    if gate.recovery_mode() {
+        // The normal owner and SQLite worker remain lock-retaining after a catastrophic
+        // rollback. Reuse only their validated restore primitive; every other application
+        // route remains closed by maintenance_guard until this process restarts.
+        return match state.service.restore_backup(candidate).await {
+            Ok(()) => Ok(Json(RestoreResponse {
+                restart_required: true,
+            })),
+            Err(error) => Err(restore_failure_after_quiescence(gate, error, &request_id)),
+        };
+    }
+    if !gate.enter_maintenance() {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "maintenance_conflict",
+            "another maintenance operation is already in progress",
+            false,
+            &request_id,
+        ));
+    }
+
+    // Once quiescence starts this runtime is intentionally non-resumable. Even a
+    // validated rollback requires restart so stale scheduler/service state never reopens.
+    gate.mark_restart_required();
+    let deadline = tokio::time::Instant::now() + crate::RESTORE_DRAIN_DEADLINE;
+    if !state
+        .quiesce_streams(deadline.saturating_duration_since(tokio::time::Instant::now()))
+        .await
+    {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "maintenance_forwarder_timeout",
+            "could not close active streams before restore",
+            false,
+            &request_id,
+        ));
+    }
+
+    if !gate
+        .drain(deadline.saturating_duration_since(tokio::time::Instant::now()))
+        .await
+    {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "maintenance_drain_timeout",
+            "could not drain admitted requests before restore",
+            false,
+            &request_id,
+        ));
+    }
+
+    state.stop_reminder_coordinator().await;
+    match state.service.restore_backup(candidate).await {
+        Ok(()) => Ok(Json(RestoreResponse {
+            restart_required: true,
+        })),
+        Err(error) => Err(restore_failure_after_quiescence(gate, error, &request_id)),
+    }
+}
+
+pub(crate) fn restore_failure_after_quiescence(
+    gate: &crate::maintenance::MaintenanceGate,
+    error: AppError,
+    request_id: &RequestId,
+) -> ApiError {
+    if matches!(error, AppError::CatastrophicRestore) {
+        gate.enter_recovery();
+    }
+    ApiError::from_app(error, request_id)
+}
+
+pub async fn recovery_restore_backup(
+    State(state): State<RecoveryState>,
+    Extension(request_id): Extension<RequestId>,
+    body: Body,
+) -> Result<Json<RestoreResponse>, ApiError> {
+    let _permit = state.try_begin_restore().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::CONFLICT,
+            "maintenance_conflict",
+            "a recovery restore is already active or has completed",
+            false,
+            &request_id,
+        )
+    })?;
+    let owner = state.owner();
+    let upload = stage_restore_upload(owner.profile_dir(), body, &request_id).await?;
+    let prepare_owner = Arc::clone(&owner);
+    let candidate = tokio::task::spawn_blocking(move || prepare_owner.prepare_restore(upload))
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "storage_unavailable",
+                "restore preflight worker failed",
+                false,
+                &request_id,
+            )
+        })?
+        .map_err(|error| ApiError::from_app(error.into(), &request_id))?;
+    tokio::task::spawn_blocking(move || owner.complete_restore(candidate))
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "storage_unavailable",
+                "recovery cutover worker failed",
+                false,
+                &request_id,
+            )
+        })?
+        .map_err(|error| ApiError::from_app(error.into(), &request_id))?;
+    state.mark_restore_complete();
+    Ok(Json(RestoreResponse {
+        restart_required: true,
+    }))
+}
+
+struct StagedPathGuard(Option<PathBuf>);
+
+impl StagedPathGuard {
+    fn into_staged(mut self, len: u64) -> StagedFile {
+        StagedFile::new(self.0.take().expect("staged path present"), len)
+    }
+}
+
+impl Drop for StagedPathGuard {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+async fn stage_restore_upload(
+    profile_dir: &Path,
+    mut body: Body,
+    request_id: &RequestId,
+) -> Result<StagedFile, ApiError> {
+    let backups_dir = profile_dir.join("backups");
+    ensure_private_dir(&backups_dir).map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_error",
+            "could not prepare backup staging directory",
+            true,
+            request_id,
+        )
+    })?;
+    let path = backups_dir.join(format!(
+        ".restore-upload-{}.junban-backup",
+        TaskId::new().as_uuid()
+    ));
+    let staged_guard = StagedPathGuard(Some(path.clone()));
+    let mut options = tokio::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        options.mode(0o600);
+    }
+    let mut file = options.open(&path).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_error",
+            "could not create private backup staging file",
+            true,
+            request_id,
+        )
+    })?;
+
+    let mut len = 0usize;
+    while let Some(frame) = body.frame().await {
+        let frame = match frame {
+            Ok(frame) => frame,
+            Err(_) => {
+                let _ = tokio::fs::remove_file(&path).await;
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_body",
+                    "could not read backup upload",
+                    false,
+                    request_id,
+                ));
+            }
+        };
+        let Ok(data) = frame.into_data() else {
+            continue;
+        };
+        len = len.saturating_add(data.len());
+        if len > crate::MAX_BACKUP_BODY_BYTES {
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(ApiError::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "payload_too_large",
+                "backup upload exceeds the allowed size",
+                false,
+                request_id,
+            ));
+        }
+        if file.write_all(&data).await.is_err() {
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "storage_error",
+                "could not stage backup upload",
+                true,
+                request_id,
+            ));
+        }
+    }
+    if len == 0 {
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(validation_error(
+            junban_domain::ValidationError::Empty { field: "backup" },
+            request_id,
+        ));
+    }
+    if file.sync_all().await.is_err() {
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_error",
+            "could not durably stage backup upload",
+            true,
+            request_id,
+        ));
+    }
+    Ok(staged_guard.into_staged(len as u64))
+}

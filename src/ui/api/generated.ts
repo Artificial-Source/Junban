@@ -4,6 +4,54 @@
  */
 
 export interface paths {
+  "/api/v1/auth/rotate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["rotate_token"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/backup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["create_backup"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/backup/restore": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["restore_backup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/calendar/tasks": {
     parameters: {
       query?: never;
@@ -52,6 +100,22 @@ export interface paths {
     patch: operations["patch_comment"];
     trace?: never;
   };
+  "/api/v1/diagnostics": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_diagnostics"];
+    put?: never;
+    post?: never;
+    delete: operations["clear_diagnostics"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/events": {
     parameters: {
       query?: never;
@@ -68,6 +132,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/exports/tasks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["export_tasks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/health": {
     parameters: {
       query?: never;
@@ -76,6 +156,70 @@ export interface paths {
       cookie?: never;
     };
     get: operations["health"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/hosts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_allowed_hosts"];
+    put: operations["put_allowed_hosts"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/imports/apply": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["apply_import"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/imports/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["preview_import"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/maintenance/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_maintenance_status"];
     put?: never;
     post?: never;
     delete?: never;
@@ -308,6 +452,22 @@ export interface paths {
     patch: operations["patch_project"];
     trace?: never;
   };
+  "/api/v1/recovery/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_recovery_status"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/reminders/claim": {
     parameters: {
       query?: never;
@@ -500,6 +660,22 @@ export interface paths {
     patch: operations["patch_section"];
     trace?: never;
   };
+  "/api/v1/settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_settings"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch: operations["patch_settings"];
+    trace?: never;
+  };
   "/api/v1/settings/temporal": {
     parameters: {
       query?: never;
@@ -524,6 +700,22 @@ export interface paths {
       cookie?: never;
     };
     get: operations["stats"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sync-state": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_sync_state"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1056,6 +1248,23 @@ export interface components {
       time_block_ids?: string[];
       time_slot_ids?: string[];
     };
+    AppSettingsResponse: {
+      appearance: components["schemas"]["AppearanceSettingsDto"];
+      date_time: components["schemas"]["DateTimeSettingsDto"];
+      features: components["schemas"]["FeatureSettingsDto"];
+      keyboard_shortcuts: components["schemas"]["KeyboardShortcutDto"][];
+      notifications: components["schemas"]["NotificationSettingsDto"];
+      planning: components["schemas"]["PlanningSettingsDto"];
+      task_defaults: components["schemas"]["TaskDefaultsDto"];
+    };
+    AppearanceSettingsDto: {
+      accent: string;
+      density: components["schemas"]["DensityDto"];
+      font_family: components["schemas"]["FontFamilyDto"];
+      font_size: components["schemas"]["FontSizeDto"];
+      reduced_motion: boolean;
+      theme: components["schemas"]["ThemeDto"];
+    };
     AppendTimeSlotTaskRequest: {
       /** Format: uuid */
       task_id: string;
@@ -1065,6 +1274,25 @@ export interface components {
       template_id: string;
       /** @description Placeholder values keyed by name without braces. Bounded by request body size. */
       variables?: components["schemas"]["TemplateVariableDto"][];
+    };
+    /** @description Inventory snapshot embedded in a backup artifact (wire projection). */
+    BackupManifestDto: {
+      /** Format: int32 */
+      artifact_version: number;
+      created_at: string;
+      /** Format: int64 */
+      event_count: number;
+      payload_sha256: string;
+      /** Format: int64 */
+      project_count: number;
+      /** Format: int64 */
+      revision: number;
+      /** Format: int64 */
+      schema_version: number;
+      /** Format: int64 */
+      tag_count: number;
+      /** Format: int64 */
+      task_count: number;
     };
     BulkActionDto:
       | {
@@ -1124,6 +1352,8 @@ export interface components {
       action: components["schemas"]["BulkActionDto"];
       task_ids: string[];
     };
+    /** @enum {string} */
+    CalendarDefaultDto: "day" | "week" | "month";
     CalendarTasksResponse: {
       /** Format: int64 */
       revision: number;
@@ -1334,6 +1564,36 @@ export interface components {
       /** Format: date */
       date: string;
     };
+    /** @enum {string} */
+    DateFormatDto: "relative" | "short" | "long" | "iso";
+    DateTimeSettingsDto: {
+      calendar_default: components["schemas"]["CalendarDefaultDto"];
+      date_format: components["schemas"]["DateFormatDto"];
+      time_format: components["schemas"]["TimeFormatDto"];
+      week_start: components["schemas"]["WeekStartDto"];
+    };
+    /** @enum {string} */
+    DensityDto: "compact" | "default" | "comfortable";
+    /** @description One structured diagnostic record. Messages must already be redacted. */
+    DiagnosticEntry: {
+      /** @description Stable machine-facing event code. */
+      code: string;
+      /** @description Human-readable detail; never includes raw secrets. */
+      message: string;
+      request_id?: string | null;
+      severity: components["schemas"]["DiagnosticSeverity"];
+      /** @description RFC3339 / ISO-8601 timestamp from the server clock. */
+      timestamp: string;
+    };
+    /**
+     * @description Severity of a diagnostic entry.
+     * @enum {string}
+     */
+    DiagnosticSeverity: "info" | "warning" | "error";
+    /** @description Bounded diagnostic ring snapshot. */
+    DiagnosticsResponse: {
+      entries: components["schemas"]["DiagnosticEntry"][];
+    };
     DopamineMenuResponse: {
       /** Format: int64 */
       revision: number;
@@ -1378,13 +1638,69 @@ export interface components {
       error: components["schemas"]["ErrorBody"];
       request_id: string;
     };
+    ExportTasksQuery: {
+      /** @description One of `json`, `csv`, or `markdown`. */
+      format: string;
+    };
+    FeatureSettingsDto: {
+      daily_planning_enabled: boolean;
+      eat_the_frog_enabled: boolean;
+      focus_mode_enabled: boolean;
+      nudges_enabled: boolean;
+      task_jar_enabled: boolean;
+      weekly_review_enabled: boolean;
+    };
+    /** @enum {string} */
+    FontFamilyDto: "outfit" | "inter" | "system";
+    /** @enum {string} */
+    FontSizeDto: "small" | "medium" | "large";
     HealthResponse: {
       status: string;
+    };
+    /** @description Replace the persisted Host allowlist (CLI hosts are always retained). */
+    HostListRequest: {
+      hosts: string[];
+    };
+    /** @description Effective Host allowlist (CLI hosts plus persisted extras). */
+    HostListResponse: {
+      hosts: string[];
+    };
+    ImportApplyRequest: {
+      content: string;
+      fingerprint: string;
+      format: components["schemas"]["TransferFormatDto"];
+      project_name_mapping?: components["schemas"]["NameMappingDto"][];
+      tag_name_mapping?: components["schemas"]["NameMappingDto"][];
+    };
+    ImportDraftDto: {
+      description?: string | null;
+      due_date?: string | null;
+      line: number;
+      /** Format: int32 */
+      priority?: number | null;
+      project_name?: string | null;
+      tag_names: string[];
+      title: string;
+    };
+    ImportPreviewRequest: {
+      content: string;
+      format: components["schemas"]["TransferFormatDto"];
+    };
+    KeyboardShortcutDto: {
+      action: string;
+      chord: string;
     };
     LocalDueTimeDto: {
       /** @description Civil wall-clock time `HH:MM[:SS]`. */
       time: string;
       time_zone: string;
+    };
+    /** @description Process-wide maintenance barrier snapshot. */
+    MaintenanceStatusResponse: {
+      admitted_requests: number;
+      maintenance_active: boolean;
+      recovery_mode: boolean;
+      restart_required: boolean;
     };
     MarkOwnerLostRemindersRequest: {
       fence_term: string;
@@ -1416,6 +1732,10 @@ export interface components {
       event: components["schemas"]["CommittedEventDto"];
       uncomplete_outcome?: null | components["schemas"]["UncompleteOutcomeDto"];
     };
+    NameMappingDto: {
+      from: string;
+      to: string;
+    };
     NeglectedProjectFactDto: {
       /** Format: int32 */
       overdue_count: number;
@@ -1425,6 +1745,16 @@ export interface components {
     };
     /** @enum {string} */
     NeglectedProjectReasonDto: "overdue_tasks" | "no_activity";
+    NotificationSettingsDto: {
+      channels: components["schemas"]["ReminderChannelDto"][];
+      reminder_sound: boolean;
+      sound_enabled: boolean;
+      task_completed_sound: boolean;
+      task_created_sound: boolean;
+      task_deleted_sound: boolean;
+      /** Format: int32 */
+      volume_percent: number;
+    };
     NudgeRuleFactsDto: {
       has_more: boolean;
       kind: components["schemas"]["NudgeRuleKindDto"];
@@ -1433,6 +1763,12 @@ export interface components {
     /** @enum {string} */
     NudgeRuleKindDto:
       "overdue" | "approaching_deadline" | "stale_task" | "empty_today" | "overloaded_day";
+    NudgeRuleSettingsDto: {
+      enabled: boolean;
+      kind: components["schemas"]["NudgeRuleKindDto"];
+      /** Format: int32 */
+      threshold?: number | null;
+    };
     NudgesResponse: {
       has_more: boolean;
       /** Format: int64 */
@@ -1498,6 +1834,15 @@ export interface components {
       name?: string | null;
       /** Format: int64 */
       sort_order?: number | null;
+    };
+    PatchSettingsRequest: {
+      appearance?: null | components["schemas"]["AppearanceSettingsDto"];
+      date_time?: null | components["schemas"]["DateTimeSettingsDto"];
+      features?: null | components["schemas"]["FeatureSettingsDto"];
+      keyboard_shortcuts?: components["schemas"]["KeyboardShortcutDto"][] | null;
+      notifications?: null | components["schemas"]["NotificationSettingsDto"];
+      planning?: null | components["schemas"]["PlanningSettingsDto"];
+      task_defaults?: null | components["schemas"]["TaskDefaultsDto"];
     };
     PatchTagRequest: {
       color?: string | null;
@@ -1574,6 +1919,12 @@ export interface components {
       time_zone?: string | null;
       title?: string | null;
     };
+    PlanningSettingsDto: {
+      /** Format: int32 */
+      capacity_minutes: number;
+      nudge_rules: components["schemas"]["NudgeRuleSettingsDto"][];
+      work_hours?: null | components["schemas"]["WorkHoursDto"];
+    };
     ProfileResponse: {
       /** Format: int64 */
       revision: number;
@@ -1614,6 +1965,11 @@ export interface components {
       someday: boolean;
       tag_names: string[];
       title: string;
+    };
+    /** @description Narrow recovery-mode status (no auth). */
+    RecoveryStatusResponse: {
+      mode: string;
+      restart_required: boolean;
     };
     RelationDto: {
       /** Format: uuid */
@@ -1783,9 +2139,15 @@ export interface components {
       | "relation"
       | "operation"
       | "time_block"
-      | "time_slot";
+      | "time_slot"
+      | "settings";
+    /** @description Successful restore response; process must restart before normal traffic resumes. */
+    RestoreResponse: {
+      restart_required: boolean;
+    };
     ResyncScopeDto: {
       catalog: boolean;
+      settings: boolean;
       tasks: boolean;
     };
     SavedFilterDto: {
@@ -1866,6 +2228,12 @@ export interface components {
       /** Format: int32 */
       total_creations: number;
     };
+    /** @description Atomic event-stream identity and head revision snapshot. */
+    SyncStateResponse: {
+      event_epoch: string;
+      /** Format: int64 */
+      revision: number;
+    };
     TagDto: {
       color: string;
       /** Format: date-time */
@@ -1894,6 +2262,14 @@ export interface components {
     };
     TaskActivityResponse: {
       activity: components["schemas"]["TaskActivityDto"][];
+    };
+    TaskDefaultsDto: {
+      confirm_before_delete: boolean;
+      /** Format: int32 */
+      default_estimated_minutes?: number | null;
+      /** Format: int32 */
+      default_priority?: number | null;
+      default_view: components["schemas"]["TaskViewPresetDto"];
     };
     TaskDto: {
       /** Format: int32 */
@@ -2021,6 +2397,8 @@ export interface components {
     TextImportResponse: {
       drafts: components["schemas"]["TextImportDraftDto"][];
     };
+    /** @enum {string} */
+    ThemeDto: "system" | "light" | "dark" | "nord";
     TimeBlockDto: {
       color?: string | null;
       /** Format: date-time */
@@ -2053,6 +2431,8 @@ export interface components {
       revision: number;
       time_blocks: components["schemas"]["TimeBlockDto"][];
     };
+    /** @enum {string} */
+    TimeFormatDto: "h24" | "h12";
     TimeSlotDto: {
       color?: string | null;
       /** Format: date-time */
@@ -2083,13 +2463,32 @@ export interface components {
       revision: number;
       time_slots: components["schemas"]["TimeSlotDto"][];
     };
+    /** @description One-time response after a successful access-token rotation. */
+    TokenRotationResponse: {
+      /** @description Fresh bearer token. Never logged or cached by intermediaries. */
+      token: string;
+    };
+    /** @enum {string} */
+    TransferFormatDto: "json" | "csv" | "markdown" | "todoist_json";
+    TransferPreviewResponse: {
+      content_fingerprint: string;
+      drafts: components["schemas"]["ImportDraftDto"][];
+      format: components["schemas"]["TransferFormatDto"];
+      project_names: string[];
+      tag_names: string[];
+      warnings: components["schemas"]["TransferWarningDto"][];
+    };
+    TransferWarningDto: {
+      line: number;
+      message: string;
+    };
     /**
      * @description How an ordinary uncomplete handled recurring work.
      * @enum {string}
      */
     UncompleteOutcomeDto: "exact" | "source_only";
     /** @enum {string} */
-    WeekStartDto: "sunday" | "monday";
+    WeekStartDto: "sunday" | "monday" | "saturday";
     WeeklyDayStatsDto: {
       /** Format: int32 */
       completed: number;
@@ -2154,6 +2553,12 @@ export interface components {
           /** @enum {string} */
           kind: "keep_streak";
         };
+    WorkHoursDto: {
+      /** Format: int32 */
+      end_minute: number;
+      /** Format: int32 */
+      start_minute: number;
+    };
   };
   responses: never;
   parameters: never;
@@ -2163,6 +2568,164 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  rotate_token: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TokenRotationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  create_backup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Framed .junban-backup artifact */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  restore_backup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/octet-stream": unknown;
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RestoreResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   calendar_tasks: {
     parameters: {
       query?: {
@@ -2394,10 +2957,80 @@ export interface operations {
       };
     };
   };
+  get_diagnostics: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DiagnosticsResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  clear_diagnostics: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description diagnostic ring cleared */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   events: {
     parameters: {
-      query?: {
+      query: {
         since?: number;
+        event_epoch: string;
       };
       header?: {
         "Last-Event-ID"?: number | null;
@@ -2432,6 +3065,67 @@ export interface operations {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
       };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  export_tasks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description One of `json`, `csv`, or `markdown`. */
+        format: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Transfer document body */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
       503: {
         headers: {
           [name: string]: unknown;
@@ -2457,6 +3151,275 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HealthResponse"];
+        };
+      };
+    };
+  };
+  get_allowed_hosts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HostListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  put_allowed_hosts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["HostListRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HostListResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  apply_import: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ImportApplyRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  preview_import: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ImportPreviewRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TransferPreviewResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_maintenance_status: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MaintenanceStatusResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
         };
       };
     };
@@ -3293,6 +4256,25 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_recovery_status: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RecoveryStatusResponse"];
         };
       };
     };
@@ -4294,6 +5276,114 @@ export interface operations {
       };
     };
   };
+  get_settings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppSettingsResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  patch_settings: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PatchSettingsRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   get_temporal_settings: {
     parameters: {
       query?: never;
@@ -4360,6 +5450,41 @@ export interface operations {
         };
       };
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_sync_state: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SyncStateResponse"];
+        };
+      };
+      401: {
         headers: {
           [name: string]: unknown;
         };

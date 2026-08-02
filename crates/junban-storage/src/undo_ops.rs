@@ -1,6 +1,6 @@
 //! Conflict-safe undo with post-image validation and redo receipts.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use jiff::Timestamp;
 use junban_app::{
@@ -8,7 +8,8 @@ use junban_app::{
     ResyncScope,
 };
 use junban_domain::{
-    CommentId, OperationId, SortOrder, TaskActivityAction, TaskId, TimeBlockId, TimeSlotId,
+    CommentId, OperationId, Project, ProjectId, SortOrder, Tag, TagId, TaskActivityAction, TaskId,
+    TimeBlockId, TimeSlotId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
@@ -24,7 +25,8 @@ use crate::reminder_ops::{
 };
 use crate::rows::{
     activity_action_str, delete_task_row, field_activity, insert_task, load_blocks_edges,
-    load_comment, load_task, revision_to_i64, storage_error, task_exists, update_task_row,
+    load_comment, load_project, load_tag, load_task, revision_to_i64, storage_error, task_exists,
+    update_task_row,
 };
 use crate::timeblock_ops::{
     detach_planning_links_for_tasks, load_time_block, load_time_slot, restore_planning_links,
@@ -147,6 +149,40 @@ pub(crate) fn validate_inverse_post_image(
         if &actual != expected {
             return Err(RepositoryError::Conflict);
         }
+    }
+    for id in &post.absent_project_ids {
+        match load_project(tx, *id) {
+            Ok(_) => return Err(RepositoryError::Conflict),
+            Err(RepositoryError::NotFound) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    for (id, expected) in &post.projects {
+        let project_id = ProjectId::parse(id).map_err(storage_error)?;
+        if load_project(tx, project_id).map_err(missing_as_conflict)? != *expected {
+            return Err(RepositoryError::Conflict);
+        }
+    }
+    for id in &post.absent_tag_ids {
+        match load_tag(tx, *id) {
+            Ok(_) => return Err(RepositoryError::Conflict),
+            Err(RepositoryError::NotFound) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    for (id, expected) in &post.tags {
+        let tag_id = TagId::parse(id).map_err(storage_error)?;
+        if load_tag(tx, tag_id).map_err(missing_as_conflict)? != *expected {
+            return Err(RepositoryError::Conflict);
+        }
+    }
+    if let Inverse::DeleteImport {
+        task_ids,
+        projects,
+        tags,
+    } = inverse
+    {
+        validate_import_catalog_ownership(tx, task_ids, projects, tags)?;
     }
     for id in &post.absent_comment_ids {
         match load_comment(tx, *id) {
@@ -331,6 +367,113 @@ pub(crate) struct InverseApply {
     pub detached: DetachedPlanning,
 }
 
+fn validate_import_catalog_ownership(
+    tx: &rusqlite::Transaction<'_>,
+    task_ids: &[TaskId],
+    projects: &[Project],
+    tags: &[Tag],
+) -> Result<(), RepositoryError> {
+    let owned_tasks = task_ids.iter().copied().collect::<HashSet<_>>();
+    for project in projects {
+        let mut statement = tx
+            .prepare("SELECT id FROM tasks WHERE project_id = ?1")
+            .map_err(storage_error)?;
+        let rows = statement
+            .query_map([project.id.to_string()], |row| row.get::<_, String>(0))
+            .map_err(storage_error)?;
+        for row in rows {
+            let id = TaskId::parse(&row.map_err(storage_error)?).map_err(storage_error)?;
+            if !owned_tasks.contains(&id) {
+                return Err(RepositoryError::Conflict);
+            }
+        }
+        let external_refs: i64 = tx
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM sections WHERE project_id = ?1) +
+                    (SELECT COUNT(*) FROM projects WHERE parent_id = ?1) +
+                    (SELECT COUNT(*) FROM templates WHERE project_id = ?1) +
+                    (SELECT COUNT(*) FROM time_slots WHERE project_id = ?1)",
+                [project.id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage_error)?;
+        if external_refs != 0 {
+            return Err(RepositoryError::Conflict);
+        }
+    }
+    for tag in tags {
+        let mut statement = tx
+            .prepare("SELECT task_id FROM task_tags WHERE tag_id = ?1")
+            .map_err(storage_error)?;
+        let rows = statement
+            .query_map([tag.id.to_string()], |row| row.get::<_, String>(0))
+            .map_err(storage_error)?;
+        for row in rows {
+            let id = TaskId::parse(&row.map_err(storage_error)?).map_err(storage_error)?;
+            if !owned_tasks.contains(&id) {
+                return Err(RepositoryError::Conflict);
+            }
+        }
+        let template_refs: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM template_tags WHERE tag_id = ?1",
+                [tag.id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage_error)?;
+        if template_refs != 0 {
+            return Err(RepositoryError::Conflict);
+        }
+    }
+    Ok(())
+}
+
+fn insert_import_project(
+    tx: &rusqlite::Transaction<'_>,
+    project: &Project,
+) -> Result<(), RepositoryError> {
+    tx.execute(
+        "INSERT INTO projects(id,name,color,icon,parent_id,favorite,archived,view_style,sort_order,created_at,updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        params![
+            project.id.to_string(),
+            project.name.as_str(),
+            project.color.as_str(),
+            project.icon.as_ref().map(ToString::to_string),
+            project.parent_id.map(|id| id.to_string()),
+            i64::from(project.favorite),
+            i64::from(project.archived),
+            match project.view {
+                junban_domain::ProjectView::List => "list",
+                junban_domain::ProjectView::Board => "board",
+                junban_domain::ProjectView::Calendar => "calendar",
+            },
+            project.sort_order.get(),
+            project.created_at.to_string(),
+            project.updated_at.to_string(),
+        ],
+    )
+    .map_err(|_| RepositoryError::Conflict)?;
+    Ok(())
+}
+
+fn insert_import_tag(tx: &rusqlite::Transaction<'_>, tag: &Tag) -> Result<(), RepositoryError> {
+    tx.execute(
+        "INSERT INTO tags(id,name,name_normalized,color,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6)",
+        params![
+            tag.id.to_string(),
+            tag.name.as_str(),
+            crate::rows::normalize_tag_name(tag.name.as_str()),
+            tag.color.as_str(),
+            tag.created_at.to_string(),
+            tag.updated_at.to_string(),
+        ],
+    )
+    .map_err(|_| RepositoryError::Conflict)?;
+    Ok(())
+}
+
 pub(crate) fn apply_inverse(
     tx: &rusqlite::Transaction<'_>,
     inverse: &Inverse,
@@ -380,6 +523,106 @@ pub(crate) fn apply_inverse(
                 snapshot: None,
                 resync: ResyncScope::TASKS,
                 detached,
+            })
+        }
+        Inverse::DeleteImport {
+            task_ids,
+            projects,
+            tags,
+        } => {
+            let mut affected = Vec::with_capacity(task_ids.len());
+            for id in task_ids {
+                if task_exists(tx, *id)? {
+                    affected.push(*id);
+                }
+            }
+            let planning = detach_planning_links_for_tasks(tx, &affected, now, revision)?;
+            let detached = DetachedPlanning {
+                slot_memberships: planning.slot_memberships,
+                block_links: planning.block_links,
+            };
+            let mut activity = Vec::with_capacity(affected.len());
+            for (index, id) in affected.iter().enumerate() {
+                delete_task_row(tx, *id)?;
+                activity.push(field_activity(
+                    revision,
+                    u32::try_from(index).unwrap_or(u32::MAX),
+                    operation_id,
+                    *id,
+                    TaskActivityAction::Deleted,
+                    None,
+                    None,
+                    None,
+                    now,
+                ));
+            }
+            for tag in tags {
+                tx.execute("DELETE FROM tags WHERE id = ?1", [tag.id.to_string()])
+                    .map_err(storage_error)?;
+            }
+            for project in projects {
+                tx.execute(
+                    "DELETE FROM projects WHERE id = ?1",
+                    [project.id.to_string()],
+                )
+                .map_err(storage_error)?;
+            }
+            Ok(InverseApply {
+                affected: AffectedIds {
+                    task_ids: affected,
+                    project_ids: projects.iter().map(|item| item.id).collect(),
+                    tag_ids: tags.iter().map(|item| item.id).collect(),
+                    time_slot_ids: planning.time_slot_ids,
+                    time_block_ids: planning.time_block_ids,
+                    ..AffectedIds::default()
+                },
+                activity,
+                snapshot: None,
+                resync: ResyncScope::BOTH,
+                detached,
+            })
+        }
+        Inverse::RestoreImport {
+            tasks,
+            projects,
+            tags,
+        } => {
+            for project in projects {
+                insert_import_project(tx, project)?;
+            }
+            for tag in tags {
+                insert_import_tag(tx, tag)?;
+            }
+            let mut activity = Vec::with_capacity(tasks.len());
+            for (index, task) in tasks.iter().enumerate() {
+                let mut restored = task.clone();
+                restored.revision = revision;
+                restored.updated_at = now;
+                validate_task_refs(tx, &restored).map_err(missing_as_conflict)?;
+                insert_task(tx, &restored)?;
+                activity.push(field_activity(
+                    revision,
+                    u32::try_from(index).unwrap_or(u32::MAX),
+                    operation_id,
+                    restored.id,
+                    TaskActivityAction::Restored,
+                    None,
+                    None,
+                    None,
+                    now,
+                ));
+            }
+            Ok(InverseApply {
+                affected: AffectedIds {
+                    task_ids: tasks.iter().map(|item| item.id).collect(),
+                    project_ids: projects.iter().map(|item| item.id).collect(),
+                    tag_ids: tags.iter().map(|item| item.id).collect(),
+                    ..AffectedIds::default()
+                },
+                activity,
+                snapshot: None,
+                resync: ResyncScope::BOTH,
+                detached: DetachedPlanning::default(),
             })
         }
         Inverse::RestoreClosure { closure } => {
@@ -722,6 +965,20 @@ fn capture_redo_post(
             redo_post.absent_task_ids.push(*id);
         }
     }
+    for id in &affected.project_ids {
+        if let Ok(project) = load_project(tx, *id) {
+            redo_post.projects.insert(project.id.to_string(), project);
+        } else {
+            redo_post.absent_project_ids.push(*id);
+        }
+    }
+    for id in &affected.tag_ids {
+        if let Ok(tag) = load_tag(tx, *id) {
+            redo_post.tags.insert(tag.id.to_string(), tag);
+        } else {
+            redo_post.absent_tag_ids.push(*id);
+        }
+    }
     for id in &affected.comment_ids {
         if let Ok(comment) = load_comment(tx, *id) {
             redo_post.comments.insert(comment.id.to_string(), comment);
@@ -769,6 +1026,20 @@ fn redo_inverse_for(
             detached.slot_memberships,
             detached.block_links,
         ),
+        Inverse::DeleteImport { projects, tags, .. } => Inverse::RestoreImport {
+            tasks: post.tasks.values().cloned().collect(),
+            projects: projects.clone(),
+            tags: tags.clone(),
+        },
+        Inverse::RestoreImport {
+            tasks,
+            projects,
+            tags,
+        } => Inverse::DeleteImport {
+            task_ids: tasks.iter().map(|item| item.id).collect(),
+            projects: projects.clone(),
+            tags: tags.clone(),
+        },
         Inverse::RestoreClosure { .. } => Inverse::DeleteTasks {
             task_ids: affected.task_ids.clone(),
         },

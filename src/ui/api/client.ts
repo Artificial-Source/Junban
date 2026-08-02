@@ -9,6 +9,7 @@ import type {
   AddRelationRequest,
   AppendTimeSlotTaskRequest,
   ApplyTemplateRequest,
+  AppSettingsResponse,
   BulkTasksRequest,
   CalendarTasksParams,
   CalendarTasksResponse,
@@ -27,11 +28,18 @@ import type {
   CreateTimeBlockRequest,
   CreateTimeSlotRequest,
   DailyPlanResponse,
+  DiagnosticsResponse,
   DopamineMenuResponse,
+  DownloadArtifact,
   EatTheFrogResponse,
   EndOfDayResponse,
   ErrorEnvelope,
+  ExportTasksParams,
   HealthResponse,
+  HostListRequest,
+  HostListResponse,
+  ImportApplyRequest,
+  ImportPreviewRequest,
   MarkOwnerLostRemindersRequest,
   MarkOwnerLostRemindersResponse,
   MoveTaskRequest,
@@ -46,6 +54,7 @@ import type {
   PatchProjectRequest,
   PatchSavedFilterRequest,
   PatchSectionRequest,
+  PatchSettingsRequest,
   PatchTagRequest,
   PatchTaskRequest,
   PatchTemplateRequest,
@@ -64,10 +73,12 @@ import type {
   ReplanTimeBlocksRequest,
   RescheduleReminderRequest,
   ResizeTimeBlockRequest,
+  RestoreResponse,
   SettleReminderDeliveredRequest,
   SettleReminderFailedRequest,
   StatsParams,
   StatsResponse,
+  SyncStateResponse,
   TaskActivityResponse,
   TaskJarResponse,
   TaskListParams,
@@ -78,6 +89,8 @@ import type {
   TimeBlockRangeParams,
   TimeSlotListResponse,
   TimeSlotRangeParams,
+  TokenRotationResponse,
+  TransferPreviewResponse,
   WeeklyReviewResponse,
 } from "./types";
 
@@ -546,6 +559,11 @@ export async function getHealth(): Promise<HealthResponse> {
 
 export async function getProfile(): Promise<ProfileResponse> {
   return getJson<ProfileResponse>("/api/v1/profile");
+}
+
+/** Atomic event-stream epoch and revision snapshot. */
+export async function getSyncState(): Promise<SyncStateResponse> {
+  return getJson<SyncStateResponse>("/api/v1/sync-state");
 }
 
 // ---------------------------------------------------------------------------
@@ -1095,6 +1113,159 @@ export async function markOwnerLostReminders(
 }
 
 // ---------------------------------------------------------------------------
+// Phase 4 settings / transfer / hosted operations
+// ---------------------------------------------------------------------------
+
+const BACKUP_REQUEST_TIMEOUT_MS = 60_000;
+
+function filenameFromContentDisposition(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+  const utf8 = /filename\*=(?:UTF-8''|utf-8'')([^;]+)/i.exec(header);
+  if (utf8?.[1]) {
+    try {
+      return decodeURIComponent(utf8[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      // fall through
+    }
+  }
+  const plain = /filename="([^"]+)"|filename=([^;]+)/i.exec(header);
+  const raw = plain?.[1] ?? plain?.[2];
+  if (raw) return raw.trim();
+  return fallback;
+}
+
+async function throwIfNotOk(response: Response): Promise<void> {
+  if (response.ok) return;
+  // parseResponse throws ApiError / NetworkError for error envelopes.
+  await parseResponse(response);
+}
+
+async function downloadAuthenticated(
+  path: string,
+  fallbackFilename: string,
+  options?: RawFetchOptions,
+): Promise<DownloadArtifact> {
+  return withNetworkRetry(async () => {
+    const response = await rawFetch(
+      path,
+      {
+        method: "GET",
+        headers: authHeaders(),
+      },
+      options,
+    );
+    await throwIfNotOk(response);
+    const blob = await response.blob();
+    const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+    const filename = filenameFromContentDisposition(
+      response.headers.get("content-disposition"),
+      fallbackFilename,
+    );
+    return { blob, filename, contentType };
+  });
+}
+
+/** Full typed settings aggregate. */
+export async function getSettings(): Promise<AppSettingsResponse> {
+  return getJson<AppSettingsResponse>("/api/v1/settings");
+}
+
+/** Patch one or more settings sections. Requires an Idempotency-Key. */
+export async function patchSettings(
+  body: PatchSettingsRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation("/api/v1/settings", {
+    method: "PATCH",
+    operationId,
+    body,
+  });
+}
+
+/** Preview a transfer import without writing. */
+export async function previewImport(body: ImportPreviewRequest): Promise<TransferPreviewResponse> {
+  return sendJsonNoIdempotency("/api/v1/imports/preview", { method: "POST", body });
+}
+
+/** Apply a previously previewed import (fingerprint must match). */
+export async function applyImport(
+  body: ImportApplyRequest,
+  operationId: string,
+): Promise<MutationResponse> {
+  return sendMutation("/api/v1/imports/apply", {
+    method: "POST",
+    operationId,
+    body,
+  });
+}
+
+/** Download tasks in a transfer format. */
+export async function exportTasks(params: ExportTasksParams): Promise<DownloadArtifact> {
+  const format = params.format || "json";
+  const fallback =
+    format === "csv"
+      ? "junban-tasks.csv"
+      : format === "markdown"
+        ? "junban-tasks.md"
+        : "junban-tasks.json";
+  return downloadAuthenticated(`/api/v1/exports/tasks${toSimpleQuery(params)}`, fallback);
+}
+
+/** Create a complete profile backup download. */
+export async function createBackup(): Promise<DownloadArtifact> {
+  return downloadAuthenticated("/api/v1/backup", "junban.junban-backup", {
+    timeoutMs: BACKUP_REQUEST_TIMEOUT_MS,
+  });
+}
+
+/** Restore a complete backup artifact. Server responds with restart_required. */
+export async function restoreBackup(body: Blob): Promise<RestoreResponse> {
+  return withNetworkRetry(async () => {
+    const response = await rawFetch(
+      "/api/v1/backup/restore",
+      {
+        method: "POST",
+        headers: {
+          ...authHeaders(),
+          "Content-Type": "application/octet-stream",
+        },
+        body,
+      },
+      { timeoutMs: BACKUP_REQUEST_TIMEOUT_MS },
+    );
+    return parseResponse<RestoreResponse>(response);
+  });
+}
+
+/** Effective Host allowlist (CLI + persisted). */
+export async function getHosts(): Promise<HostListResponse> {
+  return getJson<HostListResponse>("/api/v1/hosts");
+}
+
+/** Replace the persisted Host allowlist. */
+export async function putHosts(body: HostListRequest): Promise<HostListResponse> {
+  return sendJsonNoIdempotency("/api/v1/hosts", { method: "PUT", body });
+}
+
+/** Rotate the access token. The new token is shown once. */
+export async function rotateToken(operationId: string): Promise<TokenRotationResponse> {
+  return sendMutation("/api/v1/auth/rotate", {
+    method: "POST",
+    operationId,
+  });
+}
+
+/** Bounded diagnostic ring snapshot. */
+export async function getDiagnostics(): Promise<DiagnosticsResponse> {
+  return getJson<DiagnosticsResponse>("/api/v1/diagnostics");
+}
+
+/** Clear the diagnostic ring (returns 204). */
+export async function clearDiagnostics(): Promise<void> {
+  return sendJsonNoIdempotency("/api/v1/diagnostics", { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
 // Undo
 // ---------------------------------------------------------------------------
 
@@ -1125,10 +1296,12 @@ export type SseTerminalError = {
   message: string;
 };
 
+export type SseResyncScope = { tasks: boolean; catalog: boolean; settings?: boolean };
+
 export type SseSubscribeHandlers = {
   onEvent: (event: SseEvent) => void;
-  /** Called when the stream asks for a coalesced query/catalog refresh. */
-  onResync: (scope: { tasks: boolean; catalog: boolean }, reason: string) => void;
+  /** Called when the stream asks for a coalesced query/catalog/settings refresh. */
+  onResync: (scope: SseResyncScope, reason: string) => void | Promise<void>;
   onReconnect: () => void;
   onTerminal: (error: SseTerminalError) => void;
 };
@@ -1164,12 +1337,14 @@ export function subscribeToEvents(
   onReconnect: () => void,
   onTerminal: (error: SseTerminalError) => void,
   initialSince: number = 0,
-  onResync?: (scope: { tasks: boolean; catalog: boolean }, reason: string) => void,
+  onResync?: (scope: SseResyncScope, reason: string) => void | Promise<void>,
 ): () => void {
   const controller = new AbortController();
+  let eventEpoch: string | null = null;
   let lastRevision = initialSince;
-  let lastEventId: string | null = initialSince > 0 ? String(initialSince) : null;
+  let lastEventId = String(initialSince);
   let stopped = false;
+  let resetAttempted = false;
   let backoffMs = DEFAULT_SSE_BACKOFF_MS;
 
   const stopWithError = (error: SseTerminalError) => {
@@ -1179,21 +1354,36 @@ export function subscribeToEvents(
     controller.abort();
   };
 
-  const emitResync = (scope: { tasks: boolean; catalog: boolean }, reason: string) => {
-    if (onResync) onResync(scope, reason);
+  const emitResync = async (scope: SseResyncScope, reason: string) => {
+    if (onResync) await onResync(scope, reason);
     else onReconnect();
   };
 
   const connect = async () => {
     while (!stopped) {
       try {
-        const headers: Record<string, string> = { ...authHeaders() };
-        if (lastEventId) {
-          headers["Last-Event-ID"] = lastEventId;
+        if (eventEpoch === null) {
+          const sync = await getSyncState();
+          eventEpoch = sync.event_epoch;
         }
-        const since = lastRevision > 0 ? `?since=${lastRevision}` : "";
+        const currentEpoch = eventEpoch;
+        if (!currentEpoch) {
+          stopWithError({
+            kind: "protocol",
+            message: "Event synchronization state is unavailable.",
+          });
+          return;
+        }
+        const headers: Record<string, string> = {
+          ...authHeaders(),
+          "Last-Event-ID": lastEventId,
+        };
+        const query = new URLSearchParams({
+          event_epoch: currentEpoch,
+          since: String(lastRevision),
+        });
         const response = await rawFetch(
-          `/api/v1/events${since}`,
+          `/api/v1/events?${query.toString()}`,
           {
             headers,
             signal: controller.signal,
@@ -1203,6 +1393,24 @@ export function subscribeToEvents(
         if (response.status === 401 || response.status === 403) {
           stopWithError({ kind: "authentication", message: "Event stream authentication failed." });
           return;
+        }
+        // A reset is handled once: establish the new stream identity, reload all
+        // authoritative snapshots, then reconnect from the sampled head.
+        if (response.status === 409) {
+          if (resetAttempted) {
+            stopWithError({
+              kind: "protocol",
+              message: "Event stream reset could not converge.",
+            });
+            return;
+          }
+          resetAttempted = true;
+          const sync = await getSyncState();
+          await emitResync({ tasks: true, catalog: true, settings: true }, "event_reset_required");
+          eventEpoch = sync.event_epoch;
+          lastRevision = sync.revision;
+          lastEventId = String(sync.revision);
+          continue;
         }
         if (
           !response.ok ||
@@ -1216,8 +1424,9 @@ export function subscribeToEvents(
           return;
         }
 
-        // Successful open resets backoff.
+        // Successful open resets transient retry and reset handling.
         backoffMs = DEFAULT_SSE_BACKOFF_MS;
+        resetAttempted = false;
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -1273,13 +1482,19 @@ export function subscribeToEvents(
                 lastRevision = data.revision;
 
                 if (isResyncRequired(data.event_type)) {
-                  emitResync({ tasks: true, catalog: true }, "sync.resync_required");
+                  await emitResync(
+                    { tasks: true, catalog: true, settings: true },
+                    "sync.resync_required",
+                  );
                 } else if (!isKnownEventType(data.event_type)) {
                   // Unknown committed types are not fatal; request one coalesced resync.
                   const tasks = data.resync.tasks;
                   const catalog = data.resync.catalog;
-                  emitResync(
-                    tasks || catalog ? { tasks, catalog } : { tasks: true, catalog: true },
+                  const settings = Boolean(data.resync.settings);
+                  await emitResync(
+                    tasks || catalog || settings
+                      ? { tasks, catalog, settings }
+                      : { tasks: true, catalog: true, settings: true },
                     "unknown_event_type",
                   );
                 } else {
@@ -1303,8 +1518,22 @@ export function subscribeToEvents(
           await reconnectDelay(backoffMs, controller.signal);
           backoffMs = nextBackoff(backoffMs);
         }
-      } catch {
+      } catch (error) {
         if (stopped || controller.signal.aborted) break;
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+          stopWithError({
+            kind: "authentication",
+            message: "Event stream authentication failed.",
+          });
+          return;
+        }
+        if (resetAttempted) {
+          stopWithError({
+            kind: "protocol",
+            message: "Event stream reset could not converge.",
+          });
+          return;
+        }
         onReconnect();
         await reconnectDelay(backoffMs, controller.signal);
         backoffMs = nextBackoff(backoffMs);

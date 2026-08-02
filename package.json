@@ -29,6 +29,8 @@
     "bench:scale:quick": "python3 scripts/bench-hosted-server.py --mode scale --quick",
     "bench:temporal": "python3 scripts/bench-hosted-server.py --mode temporal",
     "bench:temporal:quick": "python3 scripts/bench-hosted-server.py --mode temporal --quick",
+    "bench:phase4": "python3 scripts/bench-hosted-server.py --mode phase4",
+    "bench:phase4:quick": "python3 scripts/bench-hosted-server.py --mode phase4 --quick",
     "bench:self-check": "python3 scripts/bench-hosted-server.py --self-check",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary"
   },

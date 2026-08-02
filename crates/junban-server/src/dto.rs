@@ -5,23 +5,27 @@ use junban_app::{
     AffectedIds, BulkAction, BulkSchedule, BulkTagChange, CatalogSnapshot, CommittedEvent,
     CommittedMutation, MoveTarget, OrderAnchor, ProjectDraft, ProjectPatch, ReorderScope,
     ResourceRef, ResourceSnapshot, ResourceType, ResyncScope, SavedFilterDraft, SavedFilterPatch,
-    SectionDraft, SectionPatch, TagDraft, TagPatch, TaskListPage, TaskPatch, TemplateApply,
-    TemplateDraft, TemplatePatch, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
+    SectionDraft, SectionPatch, SettingsPatch, TagDraft, TagPatch, TaskListPage, TaskPatch,
+    TemplateApply, TemplateDraft, TemplatePatch, TimeBlockPatch, TimeBlockRangePatch,
+    TimeSlotPatch,
 };
 use junban_domain::{
-    ActualMinutes, CivilTimeRange, Comment, CompletionTimeBucket, CompletionTimeBuckets,
-    DailyStatBucket, DreadLevel, EntityName, EstimatedMinutes, FilterQuery, HexColor, IconText,
-    LocalDueTime, MarkdownText, NeglectedProjectFact, NeglectedProjectReason, NudgeFacts,
-    NudgeRuleFacts, NudgeRuleKind, Priority, Project, ProjectId, ProjectView, QuickEntry,
-    RecurrenceRule, RelationKind, SavedFilter, Section, SectionId, SortOrder, StatsSummary, Tag,
-    TagId, TagName, Task, TaskActivity, TaskActivityAction, TaskDraft, TaskId, TaskQuery,
-    TaskRelation, TaskSort, TaskStatus, TaskTitle, TaskViewPreset, Template, TemplateId,
-    TextImportDraft, TimeBlock, TimeBlockDraft, TimeSlot, TimeSlotDraft, TimeSlotId, TimeZoneName,
-    UncompleteOutcome, ValidationError, WeekStart, WeeklyDayStats, WeeklyReviewSummary,
-    WeeklySuggestion,
+    ActualMinutes, AppSettings, AppearanceSettings, CalendarDefault, CivilTimeRange, Comment,
+    CompletionTimeBucket, CompletionTimeBuckets, DailyStatBucket, DateFormat, DateTimeSettings,
+    Density, DreadLevel, EntityName, EstimatedMinutes, FeatureSettings, FilterQuery, FontFamily,
+    FontSize, HexColor, IconText, ImportDraft, KeyboardShortcut, LocalDueTime, MarkdownText,
+    NeglectedProjectFact, NeglectedProjectReason, NotificationSettings, NudgeFacts, NudgeRuleFacts,
+    NudgeRuleKind, NudgeRuleSettings, PlanningSettings, Priority, Project, ProjectId, ProjectView,
+    QuickEntry, RecurrenceRule, RelationKind, ReminderChannelSet, SavedFilter, Section, SectionId,
+    SortOrder, StatsSummary, Tag, TagId, TagName, Task, TaskActivity, TaskActivityAction,
+    TaskDefaults, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort, TaskStatus, TaskTitle,
+    TaskViewPreset, Template, TemplateId, TextImportDraft, Theme, TimeBlock, TimeBlockDraft,
+    TimeFormat, TimeSlot, TimeSlotDraft, TimeSlotId, TimeZoneName, TransferApply, TransferFormat,
+    TransferPreview, TransferWarning, UncompleteOutcome, ValidationError, WeekStart,
+    WeeklyDayStats, WeeklyReviewSummary, WeeklySuggestion, WorkHours,
 };
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::RequestId;
 use crate::cursor::encode_task_cursor;
@@ -117,7 +121,7 @@ impl From<TaskSort> for TaskSortDto {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskViewPresetDto {
     Inbox,
@@ -139,6 +143,20 @@ impl From<TaskViewPresetDto> for TaskViewPreset {
             TaskViewPresetDto::Completed => Self::Completed,
             TaskViewPresetDto::Cancelled => Self::Cancelled,
             TaskViewPresetDto::Project => Self::Project,
+        }
+    }
+}
+
+impl From<TaskViewPreset> for TaskViewPresetDto {
+    fn from(value: TaskViewPreset) -> Self {
+        match value {
+            TaskViewPreset::Inbox => Self::Inbox,
+            TaskViewPreset::Today => Self::Today,
+            TaskViewPreset::Upcoming => Self::Upcoming,
+            TaskViewPreset::Someday => Self::Someday,
+            TaskViewPreset::Completed => Self::Completed,
+            TaskViewPreset::Cancelled => Self::Cancelled,
+            TaskViewPreset::Project => Self::Project,
         }
     }
 }
@@ -1320,6 +1338,7 @@ pub enum ResourceTypeDto {
     Operation,
     TimeBlock,
     TimeSlot,
+    Settings,
 }
 
 impl From<ResourceType> for ResourceTypeDto {
@@ -1336,6 +1355,7 @@ impl From<ResourceType> for ResourceTypeDto {
             ResourceType::Operation => Self::Operation,
             ResourceType::TimeBlock => Self::TimeBlock,
             ResourceType::TimeSlot => Self::TimeSlot,
+            ResourceType::Settings => Self::Settings,
         }
     }
 }
@@ -1879,6 +1899,7 @@ impl From<AffectedIds> for AffectedIdsDto {
 pub struct ResyncScopeDto {
     pub tasks: bool,
     pub catalog: bool,
+    pub settings: bool,
 }
 
 impl From<ResyncScope> for ResyncScopeDto {
@@ -1886,6 +1907,7 @@ impl From<ResyncScope> for ResyncScopeDto {
         Self {
             tasks: value.tasks,
             catalog: value.catalog,
+            settings: value.settings,
         }
     }
 }
@@ -1948,9 +1970,58 @@ pub struct HealthResponse {
     pub status: &'static str,
 }
 
+/// Process-wide maintenance barrier snapshot.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MaintenanceStatusResponse {
+    pub maintenance_active: bool,
+    pub restart_required: bool,
+    pub recovery_mode: bool,
+    pub admitted_requests: usize,
+}
+
+/// Narrow recovery-mode status (no auth).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RecoveryStatusResponse {
+    pub mode: &'static str,
+    pub restart_required: bool,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ProfileResponse {
     pub revision: u64,
+}
+
+/// Atomic event-stream identity and head revision snapshot.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SyncStateResponse {
+    pub event_epoch: String,
+    pub revision: u64,
+}
+
+/// One-time response after a successful access-token rotation.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TokenRotationResponse {
+    /// Fresh bearer token. Never logged or cached by intermediaries.
+    pub token: String,
+}
+
+/// Effective Host allowlist (CLI hosts plus persisted extras).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HostListResponse {
+    pub hosts: Vec<String>,
+}
+
+/// Replace the persisted Host allowlist (CLI hosts are always retained).
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HostListRequest {
+    pub hosts: Vec<String>,
+}
+
+/// Bounded diagnostic ring snapshot.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DiagnosticsResponse {
+    pub entries: Vec<crate::diagnostics::DiagnosticEntry>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -2401,11 +2472,12 @@ pub struct EndOfDayResponse {
     pub revision: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WeekStartDto {
     Sunday,
     Monday,
+    Saturday,
 }
 
 impl From<WeekStart> for WeekStartDto {
@@ -2413,6 +2485,17 @@ impl From<WeekStart> for WeekStartDto {
         match value {
             WeekStart::Sunday => Self::Sunday,
             WeekStart::Monday => Self::Monday,
+            WeekStart::Saturday => Self::Saturday,
+        }
+    }
+}
+
+impl From<WeekStartDto> for WeekStart {
+    fn from(value: WeekStartDto) -> Self {
+        match value {
+            WeekStartDto::Sunday => Self::Sunday,
+            WeekStartDto::Monday => Self::Monday,
+            WeekStartDto::Saturday => Self::Saturday,
         }
     }
 }
@@ -2695,7 +2778,7 @@ impl StatsResponse {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NudgeRuleKindDto {
     Overdue,
@@ -2713,6 +2796,18 @@ impl From<NudgeRuleKind> for NudgeRuleKindDto {
             NudgeRuleKind::StaleTask => Self::StaleTask,
             NudgeRuleKind::EmptyToday => Self::EmptyToday,
             NudgeRuleKind::OverloadedDay => Self::OverloadedDay,
+        }
+    }
+}
+
+impl From<NudgeRuleKindDto> for NudgeRuleKind {
+    fn from(value: NudgeRuleKindDto) -> Self {
+        match value {
+            NudgeRuleKindDto::Overdue => Self::Overdue,
+            NudgeRuleKindDto::ApproachingDeadline => Self::ApproachingDeadline,
+            NudgeRuleKindDto::StaleTask => Self::StaleTask,
+            NudgeRuleKindDto::EmptyToday => Self::EmptyToday,
+            NudgeRuleKindDto::OverloadedDay => Self::OverloadedDay,
         }
     }
 }
@@ -2782,6 +2877,574 @@ impl From<junban_app::TemporalSettings> for TemporalSettingsResponse {
     }
 }
 
+// ── settings ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeDto {
+    System,
+    Light,
+    Dark,
+    Nord,
+}
+
+impl From<Theme> for ThemeDto {
+    fn from(value: Theme) -> Self {
+        match value {
+            Theme::System => Self::System,
+            Theme::Light => Self::Light,
+            Theme::Dark => Self::Dark,
+            Theme::Nord => Self::Nord,
+        }
+    }
+}
+
+impl From<ThemeDto> for Theme {
+    fn from(value: ThemeDto) -> Self {
+        match value {
+            ThemeDto::System => Self::System,
+            ThemeDto::Light => Self::Light,
+            ThemeDto::Dark => Self::Dark,
+            ThemeDto::Nord => Self::Nord,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DensityDto {
+    Compact,
+    Default,
+    Comfortable,
+}
+
+impl From<Density> for DensityDto {
+    fn from(value: Density) -> Self {
+        match value {
+            Density::Compact => Self::Compact,
+            Density::Default => Self::Default,
+            Density::Comfortable => Self::Comfortable,
+        }
+    }
+}
+
+impl From<DensityDto> for Density {
+    fn from(value: DensityDto) -> Self {
+        match value {
+            DensityDto::Compact => Self::Compact,
+            DensityDto::Default => Self::Default,
+            DensityDto::Comfortable => Self::Comfortable,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FontSizeDto {
+    Small,
+    Medium,
+    Large,
+}
+
+impl From<FontSize> for FontSizeDto {
+    fn from(value: FontSize) -> Self {
+        match value {
+            FontSize::Small => Self::Small,
+            FontSize::Medium => Self::Medium,
+            FontSize::Large => Self::Large,
+        }
+    }
+}
+
+impl From<FontSizeDto> for FontSize {
+    fn from(value: FontSizeDto) -> Self {
+        match value {
+            FontSizeDto::Small => Self::Small,
+            FontSizeDto::Medium => Self::Medium,
+            FontSizeDto::Large => Self::Large,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FontFamilyDto {
+    Outfit,
+    Inter,
+    System,
+}
+
+impl From<FontFamily> for FontFamilyDto {
+    fn from(value: FontFamily) -> Self {
+        match value {
+            FontFamily::Outfit => Self::Outfit,
+            FontFamily::Inter => Self::Inter,
+            FontFamily::System => Self::System,
+        }
+    }
+}
+
+impl From<FontFamilyDto> for FontFamily {
+    fn from(value: FontFamilyDto) -> Self {
+        match value {
+            FontFamilyDto::Outfit => Self::Outfit,
+            FontFamilyDto::Inter => Self::Inter,
+            FontFamilyDto::System => Self::System,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CalendarDefaultDto {
+    Day,
+    Week,
+    Month,
+}
+
+impl From<CalendarDefault> for CalendarDefaultDto {
+    fn from(value: CalendarDefault) -> Self {
+        match value {
+            CalendarDefault::Day => Self::Day,
+            CalendarDefault::Week => Self::Week,
+            CalendarDefault::Month => Self::Month,
+        }
+    }
+}
+
+impl From<CalendarDefaultDto> for CalendarDefault {
+    fn from(value: CalendarDefaultDto) -> Self {
+        match value {
+            CalendarDefaultDto::Day => Self::Day,
+            CalendarDefaultDto::Week => Self::Week,
+            CalendarDefaultDto::Month => Self::Month,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DateFormatDto {
+    Relative,
+    Short,
+    Long,
+    Iso,
+}
+
+impl From<DateFormat> for DateFormatDto {
+    fn from(value: DateFormat) -> Self {
+        match value {
+            DateFormat::Relative => Self::Relative,
+            DateFormat::Short => Self::Short,
+            DateFormat::Long => Self::Long,
+            DateFormat::Iso => Self::Iso,
+        }
+    }
+}
+
+impl From<DateFormatDto> for DateFormat {
+    fn from(value: DateFormatDto) -> Self {
+        match value {
+            DateFormatDto::Relative => Self::Relative,
+            DateFormatDto::Short => Self::Short,
+            DateFormatDto::Long => Self::Long,
+            DateFormatDto::Iso => Self::Iso,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TimeFormatDto {
+    H24,
+    H12,
+}
+
+impl From<TimeFormat> for TimeFormatDto {
+    fn from(value: TimeFormat) -> Self {
+        match value {
+            TimeFormat::H24 => Self::H24,
+            TimeFormat::H12 => Self::H12,
+        }
+    }
+}
+
+impl From<TimeFormatDto> for TimeFormat {
+    fn from(value: TimeFormatDto) -> Self {
+        match value {
+            TimeFormatDto::H24 => Self::H24,
+            TimeFormatDto::H12 => Self::H12,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkHoursDto {
+    pub start_minute: u16,
+    pub end_minute: u16,
+}
+
+impl From<WorkHours> for WorkHoursDto {
+    fn from(value: WorkHours) -> Self {
+        Self {
+            start_minute: value.start_minute,
+            end_minute: value.end_minute,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NudgeRuleSettingsDto {
+    pub kind: NudgeRuleKindDto,
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<u32>,
+}
+
+impl From<NudgeRuleSettings> for NudgeRuleSettingsDto {
+    fn from(value: NudgeRuleSettings) -> Self {
+        Self {
+            kind: value.kind.into(),
+            enabled: value.enabled,
+            threshold: value.threshold,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KeyboardShortcutDto {
+    pub action: String,
+    pub chord: String,
+}
+
+impl From<KeyboardShortcut> for KeyboardShortcutDto {
+    fn from(value: KeyboardShortcut) -> Self {
+        Self {
+            action: value.action,
+            chord: value.chord,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AppearanceSettingsDto {
+    pub theme: ThemeDto,
+    #[schema(pattern = r"^#[0-9A-Fa-f]{6}$")]
+    pub accent: String,
+    pub density: DensityDto,
+    pub font_size: FontSizeDto,
+    pub font_family: FontFamilyDto,
+    pub reduced_motion: bool,
+}
+
+impl From<AppearanceSettings> for AppearanceSettingsDto {
+    fn from(value: AppearanceSettings) -> Self {
+        Self {
+            theme: value.theme.into(),
+            accent: value.accent.to_string(),
+            density: value.density.into(),
+            font_size: value.font_size.into(),
+            font_family: value.font_family.into(),
+            reduced_motion: value.reduced_motion,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DateTimeSettingsDto {
+    pub week_start: WeekStartDto,
+    pub calendar_default: CalendarDefaultDto,
+    pub date_format: DateFormatDto,
+    pub time_format: TimeFormatDto,
+}
+
+impl From<DateTimeSettings> for DateTimeSettingsDto {
+    fn from(value: DateTimeSettings) -> Self {
+        Self {
+            week_start: value.week_start.into(),
+            calendar_default: value.calendar_default.into(),
+            date_format: value.date_format.into(),
+            time_format: value.time_format.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskDefaultsDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_priority: Option<u8>,
+    pub default_view: TaskViewPresetDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_estimated_minutes: Option<u32>,
+    pub confirm_before_delete: bool,
+}
+
+impl From<TaskDefaults> for TaskDefaultsDto {
+    fn from(value: TaskDefaults) -> Self {
+        Self {
+            default_priority: value.default_priority.map(Priority::get),
+            default_view: value.default_view.into(),
+            default_estimated_minutes: value.default_estimated_minutes.map(EstimatedMinutes::get),
+            confirm_before_delete: value.confirm_before_delete,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NotificationSettingsDto {
+    pub channels: Vec<ReminderChannelDto>,
+    pub sound_enabled: bool,
+    pub volume_percent: u8,
+    pub task_completed_sound: bool,
+    pub task_created_sound: bool,
+    pub task_deleted_sound: bool,
+    pub reminder_sound: bool,
+}
+
+impl From<NotificationSettings> for NotificationSettingsDto {
+    fn from(value: NotificationSettings) -> Self {
+        Self {
+            channels: value
+                .channels
+                .as_slice()
+                .iter()
+                .copied()
+                .map(Into::into)
+                .collect(),
+            sound_enabled: value.sound_enabled,
+            volume_percent: value.volume_percent.get(),
+            task_completed_sound: value.task_completed_sound,
+            task_created_sound: value.task_created_sound,
+            task_deleted_sound: value.task_deleted_sound,
+            reminder_sound: value.reminder_sound,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FeatureSettingsDto {
+    pub nudges_enabled: bool,
+    pub eat_the_frog_enabled: bool,
+    pub task_jar_enabled: bool,
+    pub focus_mode_enabled: bool,
+    pub daily_planning_enabled: bool,
+    pub weekly_review_enabled: bool,
+}
+
+impl From<FeatureSettings> for FeatureSettingsDto {
+    fn from(value: FeatureSettings) -> Self {
+        Self {
+            nudges_enabled: value.nudges_enabled,
+            eat_the_frog_enabled: value.eat_the_frog_enabled,
+            task_jar_enabled: value.task_jar_enabled,
+            focus_mode_enabled: value.focus_mode_enabled,
+            daily_planning_enabled: value.daily_planning_enabled,
+            weekly_review_enabled: value.weekly_review_enabled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlanningSettingsDto {
+    pub capacity_minutes: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_hours: Option<WorkHoursDto>,
+    pub nudge_rules: Vec<NudgeRuleSettingsDto>,
+}
+
+impl From<PlanningSettings> for PlanningSettingsDto {
+    fn from(value: PlanningSettings) -> Self {
+        Self {
+            capacity_minutes: value.capacity_minutes,
+            work_hours: value.work_hours.map(Into::into),
+            nudge_rules: value.nudge_rules.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AppSettingsResponse {
+    pub appearance: AppearanceSettingsDto,
+    pub date_time: DateTimeSettingsDto,
+    pub task_defaults: TaskDefaultsDto,
+    pub notifications: NotificationSettingsDto,
+    pub features: FeatureSettingsDto,
+    pub planning: PlanningSettingsDto,
+    pub keyboard_shortcuts: Vec<KeyboardShortcutDto>,
+}
+
+impl From<AppSettings> for AppSettingsResponse {
+    fn from(value: AppSettings) -> Self {
+        Self {
+            appearance: value.appearance.into(),
+            date_time: value.date_time.into(),
+            task_defaults: value.task_defaults.into(),
+            notifications: value.notifications.into(),
+            features: value.features.into(),
+            planning: value.planning.into(),
+            keyboard_shortcuts: value
+                .keyboard_shortcuts
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PatchSettingsRequest {
+    #[serde(default)]
+    pub appearance: Option<AppearanceSettingsDto>,
+    #[serde(default)]
+    pub date_time: Option<DateTimeSettingsDto>,
+    #[serde(default)]
+    pub task_defaults: Option<TaskDefaultsDto>,
+    #[serde(default)]
+    pub notifications: Option<NotificationSettingsDto>,
+    #[serde(default)]
+    pub features: Option<FeatureSettingsDto>,
+    #[serde(default)]
+    pub planning: Option<PlanningSettingsDto>,
+    #[serde(default)]
+    pub keyboard_shortcuts: Option<Vec<KeyboardShortcutDto>>,
+}
+
+impl PatchSettingsRequest {
+    pub fn into_patch(self, request_id: &RequestId) -> Result<SettingsPatch, ApiError> {
+        let appearance = self
+            .appearance
+            .map(|value| {
+                Ok(AppearanceSettings {
+                    theme: value.theme.into(),
+                    accent: HexColor::new(value.accent).map_err(|_| {
+                        validation_error(
+                            ValidationError::InvalidFormat {
+                                field: "accent",
+                                expected: "#RRGGBB",
+                            },
+                            request_id,
+                        )
+                    })?,
+                    density: value.density.into(),
+                    font_size: value.font_size.into(),
+                    font_family: value.font_family.into(),
+                    reduced_motion: value.reduced_motion,
+                })
+            })
+            .transpose()?;
+        let date_time = self.date_time.map(|value| DateTimeSettings {
+            week_start: value.week_start.into(),
+            calendar_default: value.calendar_default.into(),
+            date_format: value.date_format.into(),
+            time_format: value.time_format.into(),
+        });
+        let task_defaults = self
+            .task_defaults
+            .map(|value| {
+                Ok(TaskDefaults {
+                    default_priority: value
+                        .default_priority
+                        .map(Priority::new)
+                        .transpose()
+                        .map_err(|error| validation_error(error, request_id))?,
+                    default_view: value.default_view.into(),
+                    default_estimated_minutes: value
+                        .default_estimated_minutes
+                        .map(EstimatedMinutes::new)
+                        .transpose()
+                        .map_err(|error| validation_error(error, request_id))?,
+                    confirm_before_delete: value.confirm_before_delete,
+                })
+            })
+            .transpose()?;
+        let notifications = self
+            .notifications
+            .map(|value| {
+                let channels =
+                    ReminderChannelSet::new(value.channels.into_iter().map(Into::into).collect())
+                        .map_err(|error| validation_error(error, request_id))?;
+                let volume_percent = junban_domain::VolumePercent::new(value.volume_percent)
+                    .map_err(|error| validation_error(error, request_id))?;
+                Ok(NotificationSettings {
+                    channels,
+                    sound_enabled: value.sound_enabled,
+                    volume_percent,
+                    task_completed_sound: value.task_completed_sound,
+                    task_created_sound: value.task_created_sound,
+                    task_deleted_sound: value.task_deleted_sound,
+                    reminder_sound: value.reminder_sound,
+                })
+            })
+            .transpose()?;
+        let features = self.features.map(|value| FeatureSettings {
+            nudges_enabled: value.nudges_enabled,
+            eat_the_frog_enabled: value.eat_the_frog_enabled,
+            task_jar_enabled: value.task_jar_enabled,
+            focus_mode_enabled: value.focus_mode_enabled,
+            daily_planning_enabled: value.daily_planning_enabled,
+            weekly_review_enabled: value.weekly_review_enabled,
+        });
+        let planning = self
+            .planning
+            .map(|value| {
+                let work_hours = value
+                    .work_hours
+                    .map(|hours| WorkHours::new(hours.start_minute, hours.end_minute))
+                    .transpose()
+                    .map_err(|error| validation_error(error, request_id))?;
+                Ok(PlanningSettings {
+                    capacity_minutes: value.capacity_minutes,
+                    work_hours,
+                    nudge_rules: value
+                        .nudge_rules
+                        .into_iter()
+                        .map(|rule| NudgeRuleSettings {
+                            kind: rule.kind.into(),
+                            enabled: rule.enabled,
+                            threshold: rule.threshold,
+                        })
+                        .collect(),
+                })
+            })
+            .transpose()?;
+        let keyboard_shortcuts = self
+            .keyboard_shortcuts
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| {
+                        KeyboardShortcut::new(value.action, value.chord)
+                            .map_err(|error| validation_error(error, request_id))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
+        let patch = SettingsPatch {
+            appearance,
+            date_time,
+            task_defaults,
+            notifications,
+            features,
+            planning,
+            keyboard_shortcuts,
+        };
+        patch
+            .validate()
+            .map_err(|error| validation_error(error, request_id))?;
+        Ok(patch)
+    }
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct EatTheFrogResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2803,6 +3466,158 @@ pub struct DopamineMenuResponse {
     pub task_ids: Vec<String>,
     pub tasks: Vec<TaskDto>,
     pub revision: u64,
+}
+
+// ── import / export transfer ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferFormatDto {
+    Json,
+    Csv,
+    Markdown,
+    TodoistJson,
+}
+
+impl From<TransferFormat> for TransferFormatDto {
+    fn from(value: TransferFormat) -> Self {
+        match value {
+            TransferFormat::Json => Self::Json,
+            TransferFormat::Csv => Self::Csv,
+            TransferFormat::Markdown => Self::Markdown,
+            TransferFormat::TodoistJson => Self::TodoistJson,
+        }
+    }
+}
+
+impl TransferFormatDto {
+    pub fn into_domain(self) -> TransferFormat {
+        match self {
+            Self::Json => TransferFormat::Json,
+            Self::Csv => TransferFormat::Csv,
+            Self::Markdown => TransferFormat::Markdown,
+            Self::TodoistJson => TransferFormat::TodoistJson,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportPreviewRequest {
+    pub format: TransferFormatDto,
+    pub content: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ImportDraftDto {
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub due_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
+    pub tag_names: Vec<String>,
+    pub line: usize,
+}
+
+impl From<ImportDraft> for ImportDraftDto {
+    fn from(draft: ImportDraft) -> Self {
+        Self {
+            title: draft.title,
+            description: draft.description,
+            priority: draft.priority.map(Priority::get),
+            due_date: draft.due_date,
+            project_name: draft.project_name,
+            tag_names: draft.tag_names,
+            line: draft.line,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TransferWarningDto {
+    pub line: usize,
+    pub message: String,
+}
+
+impl From<TransferWarning> for TransferWarningDto {
+    fn from(warning: TransferWarning) -> Self {
+        Self {
+            line: warning.line,
+            message: warning.message,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TransferPreviewResponse {
+    pub format: TransferFormatDto,
+    pub drafts: Vec<ImportDraftDto>,
+    pub project_names: Vec<String>,
+    pub tag_names: Vec<String>,
+    pub warnings: Vec<TransferWarningDto>,
+    pub content_fingerprint: String,
+}
+
+impl From<TransferPreview> for TransferPreviewResponse {
+    fn from(preview: TransferPreview) -> Self {
+        Self {
+            format: preview.format.into(),
+            drafts: preview.drafts.into_iter().map(Into::into).collect(),
+            project_names: preview.project_names,
+            tag_names: preview.tag_names,
+            warnings: preview.warnings.into_iter().map(Into::into).collect(),
+            content_fingerprint: preview.content_fingerprint,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NameMappingDto {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportApplyRequest {
+    pub format: TransferFormatDto,
+    pub content: String,
+    pub fingerprint: String,
+    #[serde(default)]
+    pub project_name_mapping: Vec<NameMappingDto>,
+    #[serde(default)]
+    pub tag_name_mapping: Vec<NameMappingDto>,
+}
+
+impl ImportApplyRequest {
+    pub fn into_apply(self) -> TransferApply {
+        TransferApply {
+            format: self.format.into_domain(),
+            content: self.content,
+            fingerprint: self.fingerprint,
+            project_name_mapping: self
+                .project_name_mapping
+                .into_iter()
+                .map(|entry| (entry.from, entry.to))
+                .collect(),
+            tag_name_mapping: self
+                .tag_name_mapping
+                .into_iter()
+                .map(|entry| (entry.from, entry.to))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+pub struct ExportTasksQuery {
+    /// One of `json`, `csv`, or `markdown`.
+    pub format: String,
 }
 
 // ── optional/nullable helpers ──────────────────────────────────────────────
@@ -2991,4 +3806,42 @@ fn build_task_draft(
     }
     draft.recurrence_rule = recurrence_rule.map(RecurrenceRule::new).transpose()?;
     Ok(draft)
+}
+
+// ── complete backup / restore ──────────────────────────────────────────────
+
+/// Inventory snapshot embedded in a backup artifact (wire projection).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct BackupManifestDto {
+    pub artifact_version: u16,
+    pub schema_version: i64,
+    pub created_at: String,
+    pub payload_sha256: String,
+    pub task_count: u64,
+    pub project_count: u64,
+    pub tag_count: u64,
+    pub event_count: u64,
+    pub revision: u64,
+}
+
+impl From<junban_domain::BackupManifest> for BackupManifestDto {
+    fn from(value: junban_domain::BackupManifest) -> Self {
+        Self {
+            artifact_version: value.artifact_version,
+            schema_version: value.schema_version,
+            created_at: value.created_at,
+            payload_sha256: value.payload_sha256,
+            task_count: value.task_count,
+            project_count: value.project_count,
+            tag_count: value.tag_count,
+            event_count: value.event_count,
+            revision: value.revision,
+        }
+    }
+}
+
+/// Successful restore response; process must restart before normal traffic resumes.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RestoreResponse {
+    pub restart_required: bool,
 }

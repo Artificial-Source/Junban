@@ -15,6 +15,8 @@ base64 = { version = "0.22.1", default-features = false, features = ["alloc", "s
 clap = { version = "4.5.60", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
 fs4 = { version = "1.1.0", default-features = false, features = ["sync"] }
 futures-core = { version = "0.3.32", default-features = false, features = ["std"] }
+getrandom = "0.3.4"
+hmac = { version = "0.12.1", default-features = false }
 jiff = { version = "0.2.35", default-features = false, features = ["serde", "std", "tz-system"] }
 libc = { version = "0.2.189", default-features = false }
 proptest = "1.11"

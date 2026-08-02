@@ -11,14 +11,20 @@ use std::{
     sync::RwLock,
 };
 
+use hmac::{Hmac, Mac};
 use jiff::Timestamp;
 use junban_domain::{
     AI_SECRET_BYTES_MAX, AI_SECRETS_FILE, AI_SECRETS_FILE_VERSION, AI_SECRETS_MAX, AiCredentialId,
     AiSecretKind, AiSecretMetadata,
 };
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 
 use crate::atomic_replace_private_file;
+
+const VERIFICATION_KEY_BYTES: usize = 32;
+const VERIFICATION_KEY_HEX_BYTES: usize = VERIFICATION_KEY_BYTES * 2;
+const RECEIPT_VERIFIER_DOMAIN: &[u8] = b"junban-ai-secret-receipt-v1\0";
 
 /// Opaque secret material. Never implements Serialize or content-bearing Debug.
 #[derive(Clone)]
@@ -81,12 +87,15 @@ impl fmt::Debug for StoredAiSecret {
 #[serde(deny_unknown_fields)]
 struct AiSecretsFile {
     version: u32,
+    verification_key: String,
     secrets: Vec<StoredAiSecret>,
 }
 
 /// In-memory authority loaded from the durable private secrets file.
 pub struct AiSecretStore {
     path: PathBuf,
+    /// Stable profile-private HMAC key. `None` only when the file does not exist.
+    verification_key: Option<String>,
     /// Confirmed file contents. In-memory reads follow this map only.
     secrets: RwLock<BTreeMap<String, StoredAiSecret>>,
 }
@@ -106,19 +115,60 @@ impl fmt::Debug for AiSecretStore {
 }
 
 impl AiSecretStore {
-    /// Load secrets from the profile directory. Missing file yields an empty set.
-    /// Malformed content, unknown versions/fields/kinds, duplicates, and oversize fail closed.
+    /// Load secrets from the profile directory. Missing file yields an empty set
+    /// without creating an artifact. Malformed content, unknown versions/fields/kinds,
+    /// duplicates, invalid verification keys, and oversize fail closed.
     pub fn load(profile_dir: &Path) -> io::Result<Self> {
         let path = profile_dir.join(AI_SECRETS_FILE);
-        let secrets = match fs::read(&path) {
-            Ok(data) => parse_secrets_document(&data).map_err(io::Error::other)?,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => BTreeMap::new(),
+        let (verification_key, secrets) = match fs::read(&path) {
+            Ok(data) => {
+                let (key, secrets) = parse_secrets_document(&data).map_err(io::Error::other)?;
+                (Some(key), secrets)
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => (None, BTreeMap::new()),
             Err(error) => return Err(error),
         };
         Ok(Self {
             path,
+            verification_key,
             secrets: RwLock::new(secrets),
         })
+    }
+
+    /// Load the strict private authority, durably creating its random verifier key
+    /// when absent. Publication receipts may only be built from this constructor.
+    pub(crate) fn load_or_create(profile_dir: &Path) -> io::Result<Self> {
+        let mut store = Self::load(profile_dir)?;
+        if store.verification_key.is_none() {
+            let mut random = [0_u8; VERIFICATION_KEY_BYTES];
+            getrandom::fill(&mut random).map_err(|error| {
+                io::Error::other(format!("random key generation failed: {error}"))
+            })?;
+            let verification_key = hex_encode(&random);
+            let secrets = store.secrets.read().expect("ai secrets poisoned");
+            persist_secrets(&store.path, &verification_key, &secrets)?;
+            drop(secrets);
+            store.verification_key = Some(verification_key);
+        }
+        Ok(store)
+    }
+
+    /// Compute the keyed, domain-separated receipt verifier for secret request bytes.
+    pub(crate) fn receipt_verifier(
+        &self,
+        secret: &AiSecretBytes,
+    ) -> Result<String, AiSecretStoreError> {
+        let key = self
+            .verification_key
+            .as_deref()
+            .ok_or(AiSecretStoreError::Invalid(
+                "verification key is unavailable",
+            ))?;
+        let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes())
+            .map_err(|_| AiSecretStoreError::Invalid("verification key is invalid"))?;
+        mac.update(RECEIPT_VERIFIER_DOMAIN);
+        mac.update(secret.expose().as_bytes());
+        Ok(hex_encode(&mac.finalize().into_bytes()))
     }
 
     #[must_use]
@@ -176,7 +226,13 @@ impl AiSecretStore {
         }
         let mut next = guard.clone();
         next.insert(record.id.clone(), record);
-        persist_secrets(&self.path, &next)?;
+        let verification_key =
+            self.verification_key
+                .as_deref()
+                .ok_or(AiSecretStoreError::Invalid(
+                    "verification key is unavailable",
+                ))?;
+        persist_secrets(&self.path, verification_key, &next)?;
         *guard = next;
         Ok(id)
     }
@@ -189,7 +245,7 @@ impl AiSecretStore {
     fn delete_with(
         &self,
         id: &AiCredentialId,
-        persist: impl FnOnce(&Path, &BTreeMap<String, StoredAiSecret>) -> io::Result<()>,
+        persist: impl FnOnce(&Path, &str, &BTreeMap<String, StoredAiSecret>) -> io::Result<()>,
     ) -> Result<(), AiSecretStoreError> {
         let key = id.to_string();
         let mut guard = self.secrets.write().expect("ai secrets poisoned");
@@ -198,7 +254,13 @@ impl AiSecretStore {
         }
         let mut next = guard.clone();
         next.remove(&key);
-        persist(&self.path, &next)?;
+        let verification_key =
+            self.verification_key
+                .as_deref()
+                .ok_or(AiSecretStoreError::Invalid(
+                    "verification key is unavailable",
+                ))?;
+        persist(&self.path, verification_key, &next)?;
         *guard = next;
         Ok(())
     }
@@ -224,7 +286,13 @@ impl AiSecretStore {
         for id in &stale {
             next.remove(id);
         }
-        persist_secrets(&self.path, &next)?;
+        let verification_key =
+            self.verification_key
+                .as_deref()
+                .ok_or(AiSecretStoreError::Invalid(
+                    "verification key is unavailable",
+                ))?;
+        persist_secrets(&self.path, verification_key, &next)?;
         let removed = stale.len();
         *guard = next;
         Ok(removed)
@@ -243,7 +311,7 @@ impl AiSecretStore {
     pub(crate) fn delete_with_persist_for_test(
         &self,
         id: &AiCredentialId,
-        persist: impl FnOnce(&Path, &BTreeMap<String, StoredAiSecret>) -> io::Result<()>,
+        persist: impl FnOnce(&Path, &str, &BTreeMap<String, StoredAiSecret>) -> io::Result<()>,
     ) -> Result<(), AiSecretStoreError> {
         self.delete_with(id, persist)
     }
@@ -279,7 +347,9 @@ impl fmt::Display for AiSecretStoreError {
 
 impl std::error::Error for AiSecretStoreError {}
 
-fn parse_secrets_document(data: &[u8]) -> Result<BTreeMap<String, StoredAiSecret>, String> {
+fn parse_secrets_document(
+    data: &[u8],
+) -> Result<(String, BTreeMap<String, StoredAiSecret>), String> {
     let document: AiSecretsFile = serde_json::from_slice(data)
         .map_err(|error| format!("invalid ai-secrets.json: {error}"))?;
     if document.version != AI_SECRETS_FILE_VERSION {
@@ -287,6 +357,14 @@ fn parse_secrets_document(data: &[u8]) -> Result<BTreeMap<String, StoredAiSecret
             "unsupported ai-secrets.json version {}",
             document.version
         ));
+    }
+    if document.verification_key.len() != VERIFICATION_KEY_HEX_BYTES
+        || !document
+            .verification_key
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err("ai-secrets.json verification key is invalid".to_owned());
     }
     if document.secrets.len() > AI_SECRETS_MAX {
         return Err(format!(
@@ -309,17 +387,32 @@ fn parse_secrets_document(data: &[u8]) -> Result<BTreeMap<String, StoredAiSecret
             return Err("ai-secrets.json contains duplicate ids".to_owned());
         }
     }
-    Ok(map)
+    Ok((document.verification_key, map))
 }
 
-fn persist_secrets(path: &Path, secrets: &BTreeMap<String, StoredAiSecret>) -> io::Result<()> {
+fn persist_secrets(
+    path: &Path,
+    verification_key: &str,
+    secrets: &BTreeMap<String, StoredAiSecret>,
+) -> io::Result<()> {
     let document = AiSecretsFile {
         version: AI_SECRETS_FILE_VERSION,
+        verification_key: verification_key.to_owned(),
         secrets: secrets.values().cloned().collect(),
     };
     let mut json = serde_json::to_vec_pretty(&document).map_err(io::Error::other)?;
     json.push(b'\n');
     atomic_replace_private_file(path, &json)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
 }
 
 #[cfg(test)]
@@ -349,6 +442,7 @@ mod tests {
         fs::create_dir_all(&profile).unwrap();
         let store = AiSecretStore::load(&profile).unwrap();
         assert_eq!(store.list_metadata().len(), 0);
+        assert!(!profile.join(AI_SECRETS_FILE).exists());
         fs::remove_dir_all(profile).unwrap();
     }
 
@@ -357,23 +451,44 @@ mod tests {
         let profile = temp_profile();
         fs::create_dir_all(&profile).unwrap();
         let path = profile.join(AI_SECRETS_FILE);
+        let test_key = "00".repeat(VERIFICATION_KEY_BYTES);
 
-        fs::write(&path, br#"{"version":99,"secrets":[]}"#).unwrap();
-        assert!(AiSecretStore::load(&profile).is_err());
-
-        fs::write(&path, br#"{"version":1,"secrets":[],"extra":true}"#).unwrap();
+        fs::write(
+            &path,
+            format!(r#"{{"version":99,"verification_key":"{test_key}","secrets":[]}}"#),
+        )
+        .unwrap();
         assert!(AiSecretStore::load(&profile).is_err());
 
         fs::write(
             &path,
-            br#"{"version":1,"secrets":[{"id":"not-a-uuid","kind":"api_key","updated_at":"2026-01-01T00:00:00Z","secret":"x"}]}"#,
+            format!(r#"{{"version":1,"verification_key":"{test_key}","secrets":[],"extra":true}}"#),
+        )
+        .unwrap();
+        assert!(AiSecretStore::load(&profile).is_err());
+
+        fs::write(&path, r#"{"version":1,"secrets":[]}"#).unwrap();
+        assert!(AiSecretStore::load(&profile).is_err());
+
+        fs::write(
+            &path,
+            r#"{"version":1,"verification_key":"invalid","secrets":[]}"#,
+        )
+        .unwrap();
+        assert!(AiSecretStore::load(&profile).is_err());
+
+        fs::write(
+            &path,
+            format!(
+                r#"{{"version":1,"verification_key":"{test_key}","secrets":[{{"id":"not-a-uuid","kind":"api_key","updated_at":"2026-01-01T00:00:00Z","secret":"x"}}]}}"#
+            ),
         )
         .unwrap();
         assert!(AiSecretStore::load(&profile).is_err());
 
         let id = AiCredentialId::new().to_string();
         let dup = format!(
-            r#"{{"version":1,"secrets":[
+            r#"{{"version":1,"verification_key":"{test_key}","secrets":[
             {{"id":"{id}","kind":"api_key","updated_at":"2026-01-01T00:00:00Z","secret":"one"}},
             {{"id":"{id}","kind":"api_key","updated_at":"2026-01-01T00:00:00Z","secret":"two"}}
             ]}}"#
@@ -383,7 +498,7 @@ mod tests {
 
         let oversize = "x".repeat(AI_SECRET_BYTES_MAX + 1);
         let body = format!(
-            r#"{{"version":1,"secrets":[{{"id":"{}","kind":"api_key","updated_at":"2026-01-01T00:00:00Z","secret":"{oversize}"}}]}}"#,
+            r#"{{"version":1,"verification_key":"{test_key}","secrets":[{{"id":"{}","kind":"api_key","updated_at":"2026-01-01T00:00:00Z","secret":"{oversize}"}}]}}"#,
             AiCredentialId::new()
         );
         fs::write(&path, body).unwrap();
@@ -392,7 +507,7 @@ mod tests {
         fs::write(
             &path,
             format!(
-                r#"{{"version":1,"secrets":[{{"id":"{}","kind":"oauth_token","updated_at":"2026-01-01T00:00:00Z","secret":"x"}}]}}"#,
+                r#"{{"version":1,"verification_key":"{test_key}","secrets":[{{"id":"{}","kind":"oauth_token","updated_at":"2026-01-01T00:00:00Z","secret":"x"}}]}}"#,
                 AiCredentialId::new()
             ),
         )
@@ -403,10 +518,34 @@ mod tests {
     }
 
     #[test]
+    fn verifier_key_is_durable_and_stable_across_reload() {
+        let profile = temp_profile();
+        fs::create_dir_all(&profile).unwrap();
+        let secret = sample_secret();
+        let first = AiSecretStore::load_or_create(&profile).unwrap();
+        let first_verifier = first.receipt_verifier(&secret).unwrap();
+        let file_before = fs::read(profile.join(AI_SECRETS_FILE)).unwrap();
+
+        let reloaded = AiSecretStore::load_or_create(&profile).unwrap();
+        assert_eq!(reloaded.receipt_verifier(&secret).unwrap(), first_verifier);
+        assert_ne!(
+            reloaded
+                .receipt_verifier(&AiSecretBytes::new("different-fixture").unwrap())
+                .unwrap(),
+            first_verifier
+        );
+        assert_eq!(
+            fs::read(profile.join(AI_SECRETS_FILE)).unwrap(),
+            file_before
+        );
+        fs::remove_dir_all(profile).unwrap();
+    }
+
+    #[test]
     fn publish_list_get_delete_and_redaction() {
         let profile = temp_profile();
         fs::create_dir_all(&profile).unwrap();
-        let store = AiSecretStore::load(&profile).unwrap();
+        let store = AiSecretStore::load_or_create(&profile).unwrap();
         let now = Timestamp::from_second(1_700_000_000).unwrap();
         let id = store
             .publish(AiSecretKind::ApiKey, sample_secret(), now)
@@ -450,7 +589,7 @@ mod tests {
     fn publish_failure_leaves_prior_state() {
         let profile = temp_profile();
         fs::create_dir_all(&profile).unwrap();
-        let store = AiSecretStore::load(&profile).unwrap();
+        let store = AiSecretStore::load_or_create(&profile).unwrap();
         let now = Timestamp::from_second(1_700_000_000).unwrap();
         let first = store
             .publish(AiSecretKind::ApiKey, sample_secret(), now)
@@ -476,14 +615,14 @@ mod tests {
     fn delete_persist_failure_keeps_memory_and_durable() {
         let profile = temp_profile();
         fs::create_dir_all(&profile).unwrap();
-        let store = AiSecretStore::load(&profile).unwrap();
+        let store = AiSecretStore::load_or_create(&profile).unwrap();
         let now = Timestamp::from_second(1_700_000_000).unwrap();
         let id = store
             .publish(AiSecretKind::ApiKey, sample_secret(), now)
             .unwrap();
 
         let error = store
-            .delete_with_persist_for_test(&id, |_, _| {
+            .delete_with_persist_for_test(&id, |_, _, _| {
                 Err(io::Error::other("injected durability failure"))
             })
             .unwrap_err();
@@ -499,7 +638,7 @@ mod tests {
     fn reconcile_removes_only_unreferenced_ids() {
         let profile = temp_profile();
         fs::create_dir_all(&profile).unwrap();
-        let store = AiSecretStore::load(&profile).unwrap();
+        let store = AiSecretStore::load_or_create(&profile).unwrap();
         let now = Timestamp::from_second(1_700_000_000).unwrap();
         let keep = store
             .publish(AiSecretKind::ApiKey, sample_secret(), now)

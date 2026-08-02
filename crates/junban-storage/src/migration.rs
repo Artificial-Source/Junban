@@ -957,6 +957,10 @@ CREATE TABLE ai_run_state (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX idx_ai_run_state_session ON ai_run_state(session_id, state);
+-- Restore validation probes terminal approvals by approval_id; keep that path indexed.
+CREATE INDEX idx_ai_run_state_approval
+    ON ai_run_state(approval_id)
+    WHERE approval_id IS NOT NULL;
 
 CREATE TABLE ai_quota (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -2192,6 +2196,21 @@ mod tests {
             ),
             "expected time_slots range check, got {err:?}"
         );
+
+        let approval_index_sql: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master
+                 WHERE type = 'index' AND name = 'idx_ai_run_state_approval'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            approval_index_sql.contains("approval_id")
+                && approval_index_sql.contains("WHERE")
+                && approval_index_sql.contains("approval_id IS NOT NULL"),
+            "fresh schema v6 must include partial ai_run_state.approval_id index: {approval_index_sql}"
+        );
     }
 
     #[test]
@@ -3140,6 +3159,21 @@ DROP TABLE IF EXISTS ai_quota;
         assert_eq!(
             settings.ai.provider,
             Some(junban_domain::AiProviderPreset::OpenAi)
+        );
+
+        let approval_index_sql: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master
+                 WHERE type = 'index' AND name = 'idx_ai_run_state_approval'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            approval_index_sql.contains("approval_id")
+                && approval_index_sql.contains("WHERE")
+                && approval_index_sql.contains("approval_id IS NOT NULL"),
+            "v5→v6 must create partial ai_run_state.approval_id index: {approval_index_sql}"
         );
     }
 

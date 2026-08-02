@@ -37,7 +37,8 @@ enum Req<'a> {
     },
     BindAiCredential {
         target: &'a str,
-        credential_id: Option<String>,
+        kind: AiSecretKind,
+        secret_verifier: Option<String>,
     },
 }
 
@@ -110,96 +111,136 @@ pub(crate) fn bind_ai_credential(
     secret: Option<AiSecretBytes>,
     now: Timestamp,
 ) -> Result<(CommittedMutation, Option<AiCredentialId>), RepositoryError> {
-    let store = AiSecretStore::load(profile_dir)
-        .map_err(|error| RepositoryError::Storage(format!("ai-secrets load failed: {error}")))?;
-
-    let current = get_settings(connection)?;
-    let previous_id = match target {
-        AiCredentialBindingTarget::AiProvider => current.ai.credential_id,
-        AiCredentialBindingTarget::VoiceStt => current.voice.stt_credential_id,
-        AiCredentialBindingTarget::VoiceTts => current.voice.tts_credential_id,
-    };
-
-    let new_id = if let Some(secret) = secret {
-        Some(store.publish(kind, secret, now).map_err(map_secret_error)?)
-    } else {
-        None
-    };
-
-    let mut next = current.clone();
-    match target {
-        AiCredentialBindingTarget::AiProvider => {
-            next.ai.credential_id = new_id;
-        }
-        AiCredentialBindingTarget::VoiceStt => {
-            next.voice.stt_credential_id = new_id;
-            if new_id.is_some() {
-                next.voice.cloud_speech_enabled = true;
-            } else if next.voice.tts_credential_id.is_none() {
-                next.voice.cloud_speech_enabled = false;
-            }
-        }
-        AiCredentialBindingTarget::VoiceTts => {
-            next.voice.tts_credential_id = new_id;
-            if new_id.is_some() {
-                next.voice.cloud_speech_enabled = true;
-            } else if next.voice.stt_credential_id.is_none() {
-                next.voice.cloud_speech_enabled = false;
-            }
-        }
-    }
-    next.validate().map_err(validation)?;
-
     let target_name = match target {
         AiCredentialBindingTarget::AiProvider => "ai_provider",
         AiCredentialBindingTarget::VoiceStt => "voice_stt",
         AiCredentialBindingTarget::VoiceTts => "voice_tts",
     };
+    // Establish the profile-private verifier key durably before a receipt can
+    // reference it. The HMAC preserves exact-request mismatch protection without
+    // leaving an offline secret verifier in SQLite or complete backups.
+    let has_secret = secret.is_some();
+    let preloaded_store = secret
+        .as_ref()
+        .map(|_| AiSecretStore::load_or_create(profile_dir))
+        .transpose()
+        .map_err(|error| RepositoryError::Storage(format!("ai-secrets load failed: {error}")))?;
+    let secret_verifier = match (&preloaded_store, &secret) {
+        (Some(store), Some(secret)) => {
+            Some(store.receipt_verifier(secret).map_err(map_secret_error)?)
+        }
+        (None, None) => None,
+        _ => {
+            return Err(RepositoryError::Storage(
+                "AI secret verifier authority is inconsistent".to_owned(),
+            ));
+        }
+    };
     let request = canonical_json(&Req::BindAiCredential {
         target: target_name,
-        credential_id: new_id.map(|id| id.to_string()),
+        kind,
+        secret_verifier,
     })?;
 
-    let mutation = match mutate(connection, operation_id, request, now, {
-        let next = next.clone();
-        move |tx, _| {
-            let json = serde_json::to_string(&next).map_err(storage_error)?;
-            let updated = tx
-                .execute(
-                    "UPDATE app_settings SET value_json = ?1, updated_at = ?2 WHERE key = ?3",
-                    params![json, now.to_string(), SETTINGS_KEY],
-                )
-                .map_err(storage_error)?;
-            if updated != 1 {
-                return Err(RepositoryError::Storage(
-                    "settings_json row is missing".to_owned(),
-                ));
+    let mut published_id = None;
+    let mut previous_id = None;
+    let mutation = mutate(connection, operation_id, request, now, |tx, _| {
+        // Receipt replay returns before this closure, so a lost response can never
+        // publish another random credential entry.
+        let store = match preloaded_store {
+            Some(store) => store,
+            None => AiSecretStore::load(profile_dir).map_err(|error| {
+                RepositoryError::Storage(format!("ai-secrets load failed: {error}"))
+            })?,
+        };
+        let current = load_settings_tx(tx)?;
+        previous_id = Some(match target {
+            AiCredentialBindingTarget::AiProvider => current.ai.credential_id,
+            AiCredentialBindingTarget::VoiceStt => current.voice.stt_credential_id,
+            AiCredentialBindingTarget::VoiceTts => current.voice.tts_credential_id,
+        });
+        let new_id = secret
+            .map(|secret| store.publish(kind, secret, now).map_err(map_secret_error))
+            .transpose()?;
+        published_id = Some(new_id);
+
+        let mut next = current;
+        match target {
+            AiCredentialBindingTarget::AiProvider => {
+                next.ai.credential_id = new_id;
             }
-            Ok(MutationEffect {
-                event_type: EventType::new(EventType::SETTINGS_UPDATED),
-                primary: Some(ResourceRef::settings()),
-                snapshot: None,
-                affected: AffectedIds::default(),
-                resync: ResyncScope::SETTINGS,
-                task_activity: Vec::new(),
-                summary_subject: Some(("settings".into(), "settings".into())),
-                undo: None,
-                mark_undone: None,
-                uncomplete_outcome: None,
-            })
+            AiCredentialBindingTarget::VoiceStt => {
+                next.voice.stt_credential_id = new_id;
+                if new_id.is_some() {
+                    next.voice.cloud_speech_enabled = true;
+                } else if next.voice.tts_credential_id.is_none() {
+                    next.voice.cloud_speech_enabled = false;
+                }
+            }
+            AiCredentialBindingTarget::VoiceTts => {
+                next.voice.tts_credential_id = new_id;
+                if new_id.is_some() {
+                    next.voice.cloud_speech_enabled = true;
+                } else if next.voice.stt_credential_id.is_none() {
+                    next.voice.cloud_speech_enabled = false;
+                }
+            }
         }
-    }) {
-        Ok(mutation) => mutation,
-        Err(error) => {
-            // Failed DB binding leaves only an unreachable orphan secret.
-            return Err(error);
+        next.validate().map_err(validation)?;
+        let json = serde_json::to_string(&next).map_err(storage_error)?;
+        let updated = tx
+            .execute(
+                "UPDATE app_settings SET value_json = ?1, updated_at = ?2 WHERE key = ?3",
+                params![json, now.to_string(), SETTINGS_KEY],
+            )
+            .map_err(storage_error)?;
+        if updated != 1 {
+            return Err(RepositoryError::Storage(
+                "settings_json row is missing".to_owned(),
+            ));
         }
+        Ok(MutationEffect {
+            event_type: EventType::new(EventType::SETTINGS_UPDATED),
+            primary: Some(ResourceRef::settings()),
+            snapshot: None,
+            affected: AffectedIds::default(),
+            resync: ResyncScope::SETTINGS,
+            task_activity: Vec::new(),
+            summary_subject: Some(match new_id {
+                Some(id) => ("ai_credential".into(), id.to_string()),
+                None => ("settings".into(), "settings".into()),
+            }),
+            undo: None,
+            mark_undone: None,
+            uncomplete_outcome: None,
+        })
+    })?;
+
+    let new_id = if mutation.newly_committed {
+        published_id.flatten()
+    } else if has_secret {
+        let raw: String = connection
+            .query_row(
+                "SELECT subject_id FROM activity
+                 WHERE revision = ?1 AND operation_id = ?2 AND subject_type = 'ai_credential'",
+                params![
+                    i64::try_from(mutation.event.revision).map_err(storage_error)?,
+                    operation_id.to_string(),
+                ],
+                |row| row.get(0),
+            )
+            .map_err(storage_error)?;
+        Some(AiCredentialId::parse(&raw).map_err(storage_error)?)
+    } else {
+        None
     };
 
     // Remove superseded unreferenced secret after successful binding. Cleanup
     // failure is diagnostic-only because only the new ID is reachable.
-    if let Some(previous) = previous_id
+    if mutation.newly_committed
+        && let Some(previous) = previous_id.flatten()
         && Some(previous) != new_id
+        && let Ok(store) = AiSecretStore::load(profile_dir)
     {
         let _ = store.delete(&previous);
     }
@@ -216,12 +257,6 @@ pub(crate) fn clear_ai_credential_binding(
     target: AiCredentialBindingTarget,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
-    let current = get_settings(connection)?;
-    let previous_id = match target {
-        AiCredentialBindingTarget::AiProvider => current.ai.credential_id,
-        AiCredentialBindingTarget::VoiceStt => current.voice.stt_credential_id,
-        AiCredentialBindingTarget::VoiceTts => current.voice.tts_credential_id,
-    };
     let (mutation, _) = bind_ai_credential(
         connection,
         profile_dir,
@@ -231,12 +266,6 @@ pub(crate) fn clear_ai_credential_binding(
         None,
         now,
     )?;
-    if let Some(previous) = previous_id {
-        let store = AiSecretStore::load(profile_dir).map_err(|error| {
-            RepositoryError::Storage(format!("ai-secrets load failed: {error}"))
-        })?;
-        let _ = store.delete(&previous);
-    }
     Ok(mutation)
 }
 

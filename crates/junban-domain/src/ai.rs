@@ -45,6 +45,17 @@ pub const AI_ASSISTANT_TEXT_BYTES_MAX: usize = 512 * 1024;
 pub const AI_TOOL_ARGUMENTS_BYTES_MAX: usize = 128 * 1024;
 /// One tool result UTF-8 byte ceiling.
 pub const AI_TOOL_RESULT_BYTES_MAX: usize = 256 * 1024;
+/// Maximum canonical serialized bytes for one [`AiMessageContent`].
+///
+/// The bound covers the worst JSON string expansion for assistant text (six bytes
+/// per input byte for `\u00XX` escapes), two bytes per byte for embedded canonical
+/// tool JSON and the bounded tool name, plus fixed field names, punctuation, and
+/// the ten-byte briefing date with one KiB of conservative structural headroom.
+pub const AI_MESSAGE_CONTENT_JSON_BYTES_MAX: usize = AI_ASSISTANT_TEXT_BYTES_MAX * 6
+    + AI_TOOL_ARGUMENTS_BYTES_MAX * 2
+    + AI_TOOL_RESULT_BYTES_MAX * 2
+    + AI_PROVIDER_ID_BYTES_MAX * 2
+    + 1024;
 /// One memory UTF-8 byte ceiling.
 pub const AI_MEMORY_BYTES_MAX: usize = 10_000;
 /// Provider identifier UTF-8 byte ceiling.
@@ -927,6 +938,16 @@ impl AiMessageContent {
                 AI_PROVIDER_ID_BYTES_MAX,
             )?;
         }
+        if self
+            .briefing_date
+            .as_deref()
+            .is_some_and(|date| date.len() != 10 || date.parse::<jiff::civil::Date>().is_err())
+        {
+            return Err(ValidationError::InvalidFormat {
+                field: "ai_message.content.briefing_date",
+                expected: "YYYY-MM-DD",
+            });
+        }
         Ok(())
     }
 
@@ -1425,6 +1446,20 @@ mod tests {
         assert!(cleared.credential_id.is_none());
         assert_eq!(cleared.provider, Some(AiProviderPreset::OpenAi));
         assert_eq!(cleared.custom_instructions.as_str(), "be brief");
+    }
+
+    #[test]
+    fn canonical_message_content_fits_serialized_row_bound() {
+        let content = AiMessageContent {
+            text: "\0".repeat(AI_ASSISTANT_TEXT_BYTES_MAX),
+            tool_name: Some("\\".repeat(AI_PROVIDER_ID_BYTES_MAX)),
+            tool_arguments_json: Some("\\".repeat(AI_TOOL_ARGUMENTS_BYTES_MAX)),
+            tool_result_json: Some("\\".repeat(AI_TOOL_RESULT_BYTES_MAX)),
+            briefing_date: Some("9999-12-31".to_owned()),
+        };
+        let canonical = content.canonical_json().unwrap();
+        assert!(canonical.len() <= AI_MESSAGE_CONTENT_JSON_BYTES_MAX);
+        assert!(AI_MESSAGE_CONTENT_JSON_BYTES_MAX < AI_SESSION_CONTENT_BYTES_MAX as usize);
     }
 
     #[test]

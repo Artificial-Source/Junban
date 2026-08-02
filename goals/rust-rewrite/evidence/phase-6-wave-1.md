@@ -21,6 +21,7 @@ Atomic, idempotent v5→v6 migration adds:
 - `ai_sessions`, `ai_messages`, `ai_memories`, `ai_session_memories`
 - `ai_tool_approvals`, `ai_run_state`, `ai_quota`
 - FK/cascade/indexes and row CHECKs for frozen aggregate quotas and content bounds
+- an indexed approval/run binding used by bounded restore validation
 - Settings expansion that preserves v5 preferences and clears any hostile pre-v6 credential bindings
 
 Fresh profiles reach schema 6. Retry after a completed migrate is a no-op. Failed mid-migrate transactions roll back with the prior version marker.
@@ -28,14 +29,16 @@ Fresh profiles reach schema 6. Retry after a completed migrate is a no-op. Faile
 ### Storage primitives
 
 - Session create/rename/delete/clear, message upsert, memory CRUD/link, approval propose/status, and run-state upsert use the existing single-worker/transaction/event/receipt path.
+- Approval proposal, approval/run state transitions, cancellation, generation replacement, operation-ID assignment, and quota updates commit as one crash-valid transaction; normal open expires stale runtime authority before admission.
 - AI chat/memory/approval mutations set `undo: None` and never enter `operation_undo`.
 - Events are `ai.session.changed|deleted`, `ai.memory.changed|deleted`, and `ai.approval.changed` with ID/status material only (no transcript/secret bodies).
-- Session/profile/memory/approval quotas are transactionally maintained and recomputed on open, migration, restore, and focused corruption paths.
+- Session/profile/memory/approval quotas are transactionally maintained from actual UTF-8 lengths and recomputed on open, migration, restore, and focused corruption paths.
 
 ### Private secret authority
 
 - Versioned `ai-secrets.json` beside other profile security artifacts.
 - At most 32 credentials; 8 KiB per secret; random stable IDs; kind/update time/`present` metadata only on reads.
+- A random profile-private HMAC key permits exact receipt matching without storing an offline secret verifier in SQLite or complete backups.
 - Reuses Phase 5 `atomic_replace_private_file` (Unix `0600`, Windows owner-only DACL, durable replace).
 - Rejects unknown versions/fields/kinds, duplicates, oversize, and durability failure closed.
 - Receipt-first binding: publish unreferenced secret → commit settings binding/event under the operation ID → remove superseded unreferenced secret.
@@ -45,7 +48,8 @@ Fresh profiles reach schema 6. Retry after a completed migrate is a no-op. Faile
 ### Backup / restore
 
 - Complete backup is framed SQLite only and never includes `ai-secrets.json` bytes.
-- Candidate restore validation clears every credential-binding ID, forces AI/cloud speech disabled, expires pending approvals/runs, and preserves non-secret preferences/chat/memory/instructions.
+- Candidate restore validation checks canonical AI rows, actual byte counts and quotas, and both directions of every approval/run binding before loading or cutover; the exact historical approval lookup is indexed.
+- Candidate sanitization clears every credential-binding ID, forces AI/cloud speech disabled, expires pending approvals/runs, and preserves non-secret preferences/chat/memory/instructions.
 - Failed restore never touches the secret file; post-cutover open reconciliation removes now-unreferenced secrets.
 
 ## Validation commands and results
@@ -97,8 +101,9 @@ Focused coverage includes:
 - React AI/voice UI and browser inference (Wave 4)
 - Release memory/dogfood closure (Wave 5)
 
-## Remaining concerns
+## Review outcome and remaining integration work
 
-- AI repository methods are storage-level primitives in this wave; full `Repository` trait/service wiring for every AI operation is deferred to the Wave 3 API composition boundary.
+The Wave 1 database-dominant gate approved after `P6-DB-001`–`P6-DB-007` were fixed with focused regressions. The stable finding record is [`phase-6-review-ledger.md`](phase-6-review-ledger.md). No separate security gate was required: the credential-verifier concern was resolved inside the persistence boundary, and no distinct material security finding remains.
+
+- AI repository methods are storage-level primitives in this wave; full `Repository` trait/service wiring for every AI operation remains Wave 3 work.
 - HTTP settings patch still omits AI/voice sections by design for this wave; confirmed snapshots already deserialize AI/voice defaults when present in storage.
-- Specialist database/security boundary review is required before Wave 2 depends on this surface; this evidence does not claim that approval.

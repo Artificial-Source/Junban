@@ -3466,19 +3466,29 @@ fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
         )
     })?;
     migration::migrate(&mut connection, profile_dir)?;
-    // Recompute AI counters and expire stale runtime rows after every successful open.
-    // Secret reconciliation is best-effort/diagnostic-only when the private file is dirty.
-    if let Err(error) = ai_ops::recompute_ai_quotas(&connection) {
-        return Err(rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error {
-                code: rusqlite::ErrorCode::Unknown,
-                extended_code: 1,
-            },
-            Some(format!("ai quota recompute failed: {error}")),
-        ));
+    // Recover ephemeral AI authority before final quota reconciliation on every normal
+    // successful open. One timestamp makes the whole recovery transaction canonical;
+    // neither recovery step emits a global event or operation receipt.
+    let opened_at = Timestamp::now();
+    if let Err(error) = ai_ops::expire_ai_runtime_state(&connection, opened_at) {
+        return Err(ai_open_error("runtime expiration", error));
     }
+    if let Err(error) = ai_ops::recompute_ai_quotas(&connection) {
+        return Err(ai_open_error("quota recompute", error));
+    }
+    // Secret reconciliation is best-effort/diagnostic-only when the private file is dirty.
     let _ = reconcile_ai_secrets_on_open(&connection, profile_dir);
     Ok(connection)
+}
+
+fn ai_open_error(context: &str, error: RepositoryError) -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error {
+            code: rusqlite::ErrorCode::Unknown,
+            extended_code: 1,
+        },
+        Some(format!("AI {context} failed: {error}")),
+    )
 }
 
 fn reconcile_ai_secrets_on_open(

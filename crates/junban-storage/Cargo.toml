@@ -15,6 +15,8 @@ scale-bench = []
 
 [dependencies]
 fs4.workspace = true
+getrandom.workspace = true
+hmac.workspace = true
 jiff.workspace = true
 junban-app = { path = "../junban-app", version = "0.1.0" }
 junban-domain = { path = "../junban-domain", version = "0.1.0" }

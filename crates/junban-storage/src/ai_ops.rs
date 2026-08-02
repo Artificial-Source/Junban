@@ -416,9 +416,27 @@ pub(crate) fn upsert_ai_message(
     turn_id: AiTurnId,
     role: AiMessageRole,
     status: AiMessageStatus,
-    content: AiMessageContent,
+    mut content: AiMessageContent,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    canonicalize_optional_json(
+        &mut content.tool_arguments_json,
+        "ai_message.content.tool_arguments_json",
+        junban_domain::AI_TOOL_ARGUMENTS_BYTES_MAX,
+    )?;
+    canonicalize_optional_json(
+        &mut content.tool_result_json,
+        "ai_message.content.tool_result_json",
+        junban_domain::AI_TOOL_RESULT_BYTES_MAX,
+    )?;
+    if let Some(date) = &content.briefing_date {
+        date.parse::<jiff::civil::Date>().map_err(|_| {
+            validation(junban_domain::ValidationError::InvalidFormat {
+                field: "ai_message.content.briefing_date",
+                expected: "YYYY-MM-DD",
+            })
+        })?;
+    }
     let content_json = content.canonical_json().map_err(validation)?;
     let content_bytes = AiMessageContent::byte_len(&content_json);
     if role == AiMessageRole::User && content.text.len() > junban_domain::AI_USER_INPUT_BYTES_MAX {
@@ -438,12 +456,24 @@ pub(crate) fn upsert_ai_message(
     mutate(connection, operation_id, request, now, move |tx, _| {
         let existing = tx
             .query_row(
-                "SELECT content_bytes, sequence FROM ai_messages WHERE id = ?1",
+                "SELECT session_id, content_bytes, sequence FROM ai_messages WHERE id = ?1",
                 [message_id.to_string()],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
             )
             .optional()
             .map_err(storage_error)?;
+        if existing
+            .as_ref()
+            .is_some_and(|(durable_session, _, _)| durable_session != &session_id.to_string())
+        {
+            return Err(RepositoryError::Conflict);
+        }
 
         let (session_messages, session_bytes): (i64, i64) = tx
             .query_row(
@@ -456,9 +486,14 @@ pub(crate) fn upsert_ai_message(
             .ok_or(RepositoryError::NotFound)?;
 
         let mut quota = load_quota(tx)?;
-        let (sequence, delta_bytes, new_message) = if let Some((old_bytes, sequence)) = existing {
+        let (sequence, delta_bytes, new_message) = if let Some((_, old_bytes, sequence)) = existing
+        {
             let delta = content_bytes as i64 - old_bytes;
-            (sequence as u32, delta, false)
+            (
+                u32::try_from(sequence).map_err(storage_error)?,
+                delta,
+                false,
+            )
         } else {
             if session_messages as u32 >= AI_MESSAGES_PER_SESSION_MAX {
                 return Err(quota_err("ai_messages"));
@@ -467,7 +502,10 @@ pub(crate) fn upsert_ai_message(
             (next_sequence, content_bytes as i64, true)
         };
 
-        let next_session_bytes = (session_bytes + delta_bytes) as u64;
+        let next_session_bytes = session_bytes
+            .checked_add(delta_bytes)
+            .and_then(|value| u64::try_from(value).ok())
+            .ok_or_else(|| RepositoryError::Storage("invalid AI session byte counter".into()))?;
         if next_session_bytes > AI_SESSION_CONTENT_BYTES_MAX {
             return Err(quota_err("ai_session.content_bytes"));
         }
@@ -506,44 +544,52 @@ pub(crate) fn upsert_ai_message(
             )
             .map_err(storage_error)?;
         } else {
-            tx.execute(
-                "UPDATE ai_messages SET turn_id = ?1, role = ?2, status = ?3,
-                    content_json = ?4, content_bytes = ?5, updated_at = ?6
-                 WHERE id = ?7 AND session_id = ?8",
-                params![
-                    turn_id.to_string(),
-                    role.as_str(),
-                    status.as_str(),
-                    content_json,
-                    content_bytes as i64,
-                    now.to_string(),
-                    message_id.to_string(),
-                    session_id.to_string(),
-                ],
-            )
-            .map_err(storage_error)?;
+            let updated = tx
+                .execute(
+                    "UPDATE ai_messages SET turn_id = ?1, role = ?2, status = ?3,
+                        content_json = ?4, content_bytes = ?5, updated_at = ?6
+                     WHERE id = ?7 AND session_id = ?8",
+                    params![
+                        turn_id.to_string(),
+                        role.as_str(),
+                        status.as_str(),
+                        content_json,
+                        content_bytes as i64,
+                        now.to_string(),
+                        message_id.to_string(),
+                        session_id.to_string(),
+                    ],
+                )
+                .map_err(storage_error)?;
+            if updated != 1 {
+                return Err(RepositoryError::Conflict);
+            }
         }
 
-        tx.execute(
-            "UPDATE ai_sessions SET
+        let updated_session = tx
+            .execute(
+                "UPDATE ai_sessions SET
                 message_count = ?1,
                 content_bytes = ?2,
                 updated_at = ?3,
                 last_message_at = ?4
              WHERE id = ?5",
-            params![
-                if new_message {
-                    session_messages + 1
-                } else {
-                    session_messages
-                },
-                next_session_bytes as i64,
-                now.to_string(),
-                now.to_string(),
-                session_id.to_string(),
-            ],
-        )
-        .map_err(storage_error)?;
+                params![
+                    if new_message {
+                        session_messages + 1
+                    } else {
+                        session_messages
+                    },
+                    next_session_bytes as i64,
+                    now.to_string(),
+                    now.to_string(),
+                    session_id.to_string(),
+                ],
+            )
+            .map_err(storage_error)?;
+        if updated_session != 1 {
+            return Err(RepositoryError::Conflict);
+        }
 
         quota.total_content_bytes = next_profile_bytes;
         save_quota(tx, &quota)?;
@@ -795,6 +841,10 @@ pub(crate) fn link_ai_session_memory(
     })
 }
 
+/// Create pending approval authority and bind its exact running generation atomically.
+///
+/// Callers create the run in `Running` first. A successful proposal already moves it to
+/// `AwaitingApproval`; callers must not perform a second run-state bind mutation.
 pub(crate) fn propose_ai_approval(
     connection: &mut Connection,
     operation_id: OperationId,
@@ -807,18 +857,27 @@ pub(crate) fn propose_ai_approval(
     arguments_json: String,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
-    if tool_name.is_empty() || tool_name.len() > junban_domain::AI_PROVIDER_ID_BYTES_MAX {
+    if tool_name.is_empty()
+        || tool_name.len() > junban_domain::AI_PROVIDER_ID_BYTES_MAX
+        || tool_name.chars().any(char::is_control)
+        || tool_name != tool_name.trim()
+    {
         return Err(validation(junban_domain::ValidationError::Invalid {
             field: "ai_approval.tool_name",
-            reason: "tool name is empty or too long",
+            reason: "tool name is invalid",
         }));
     }
-    if arguments_json.len() > junban_domain::AI_TOOL_ARGUMENTS_BYTES_MAX {
-        return Err(validation(junban_domain::ValidationError::TooLong {
-            field: "ai_approval.arguments_json",
-            max: junban_domain::AI_TOOL_ARGUMENTS_BYTES_MAX,
-        }));
-    }
+    let arguments_json = canonicalize_json(
+        arguments_json,
+        "ai_approval.arguments_json",
+        junban_domain::AI_TOOL_ARGUMENTS_BYTES_MAX,
+    )?;
+    let generation = i64::try_from(generation).map_err(|_| {
+        validation(junban_domain::ValidationError::Invalid {
+            field: "ai_approval.generation",
+            reason: "generation is too large",
+        })
+    })?;
     let arguments_bytes = arguments_json.len() as u64;
     let action_hash = sha256_hex(
         format!("{tool_name}\n{arguments_json}\n{session_id}\n{turn_id}\n{generation}").as_bytes(),
@@ -829,7 +888,7 @@ pub(crate) fn propose_ai_approval(
         session_id: session_id.to_string(),
         turn_id: turn_id.to_string(),
         run_id: run_id.to_string(),
-        generation,
+        generation: generation as u64,
         tool_name: &tool_name,
         arguments_json: &arguments_json,
     })?;
@@ -866,7 +925,7 @@ pub(crate) fn propose_ai_approval(
                 session_id.to_string(),
                 turn_id.to_string(),
                 run_id.to_string(),
-                generation as i64,
+                generation,
                 tool_name,
                 arguments_json,
                 arguments_bytes as i64,
@@ -877,6 +936,29 @@ pub(crate) fn propose_ai_approval(
             ],
         )
         .map_err(storage_error)?;
+        // The insert deliberately precedes the compare-and-swap: transaction rollback
+        // removes it if the exact run generation is no longer Running and unbound.
+        let run_updated = tx
+            .execute(
+                "UPDATE ai_run_state
+                 SET state = ?1, approval_id = ?2, updated_at = ?3
+                 WHERE run_id = ?4 AND session_id = ?5 AND turn_id = ?6
+                   AND generation = ?7 AND state = ?8 AND approval_id IS NULL",
+                params![
+                    AiRunPhase::AwaitingApproval.as_str(),
+                    approval_id.to_string(),
+                    now.to_string(),
+                    run_id.to_string(),
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    generation,
+                    AiRunPhase::Running.as_str(),
+                ],
+            )
+            .map_err(storage_error)?;
+        if run_updated != 1 {
+            return Err(RepositoryError::Conflict);
+        }
         quota.pending_approval_count += 1;
         quota.pending_approval_content_bytes = next_bytes;
         save_quota(tx, &quota)?;
@@ -897,6 +979,30 @@ pub(crate) fn set_ai_approval_status(
     dispatch_operation_id: Option<String>,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    let dispatch_operation_id = match (status, dispatch_operation_id) {
+        (AiApprovalStatus::Consumed, Some(raw)) => {
+            let parsed = OperationId::parse(&raw).map_err(validation)?;
+            if parsed.to_string() != raw {
+                return Err(validation(junban_domain::ValidationError::InvalidId {
+                    field: "operation_id",
+                }));
+            }
+            Some(raw)
+        }
+        (AiApprovalStatus::Consumed, None) => {
+            return Err(validation(junban_domain::ValidationError::Invalid {
+                field: "operation_id",
+                reason: "consuming an approval requires a dispatch operation ID",
+            }));
+        }
+        (_, Some(_)) => {
+            return Err(validation(junban_domain::ValidationError::Invalid {
+                field: "operation_id",
+                reason: "dispatch operation ID is only valid when consuming an approval",
+            }));
+        }
+        (_, None) => None,
+    };
     let request = canonical_json(&Req::SetAiApprovalStatus {
         approval_id: approval_id.to_string(),
         status: status.as_str(),
@@ -905,35 +1011,183 @@ pub(crate) fn set_ai_approval_status(
     mutate(connection, operation_id, request, now, move |tx, _| {
         let row = tx
             .query_row(
-                "SELECT status, arguments_bytes FROM ai_tool_approvals WHERE id = ?1",
+                "SELECT session_id, turn_id, run_id, generation, tool_name, arguments_json,
+                        arguments_bytes, action_hash, status, expires_at
+                 FROM ai_tool_approvals WHERE id = ?1",
                 [approval_id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                    ))
+                },
             )
             .optional()
             .map_err(storage_error)?
             .ok_or(RepositoryError::NotFound)?;
-        let previous = AiApprovalStatus::parse(&row.0).map_err(storage_error)?;
-        if previous == status {
-            // Idempotent exact status replay still emits no second mutation if receipt matches.
+        let previous = AiApprovalStatus::parse(&row.8).map_err(storage_error)?;
+        let expires_at: Timestamp = row.9.parse().map_err(storage_error)?;
+        let session_id = AiSessionId::parse(&row.0).map_err(storage_error)?;
+        let turn_id = AiTurnId::parse(&row.1).map_err(storage_error)?;
+        let run_id = AiRunId::parse(&row.2).map_err(storage_error)?;
+        let generation = u64::try_from(row.3).map_err(storage_error)?;
+        let canonical_arguments = canonicalize_json(
+            row.5.clone(),
+            "ai_approval.arguments_json",
+            junban_domain::AI_TOOL_ARGUMENTS_BYTES_MAX,
+        )?;
+        let expected_hash = sha256_hex(
+            format!(
+                "{}\n{}\n{}\n{}\n{}",
+                row.4, row.5, session_id, turn_id, generation
+            )
+            .as_bytes(),
+        );
+        if row.4.is_empty()
+            || row.4.len() > junban_domain::AI_PROVIDER_ID_BYTES_MAX
+            || row.4 != row.4.trim()
+            || row.4.chars().any(char::is_control)
+            || session_id.to_string() != row.0
+            || turn_id.to_string() != row.1
+            || run_id.to_string() != row.2
+            || canonical_arguments != row.5
+            || expected_hash != row.7
+            || usize::try_from(row.6).ok() != Some(row.5.len())
+        {
+            return Err(RepositoryError::Storage(
+                "AI approval binding is inconsistent".into(),
+            ));
         }
-        tx.execute(
-            "UPDATE ai_tool_approvals SET status = ?1, operation_id = COALESCE(?2, operation_id),
-                updated_at = ?3
-             WHERE id = ?4",
-            params![
-                status.as_str(),
-                dispatch_operation_id,
-                now.to_string(),
-                approval_id.to_string()
-            ],
-        )
-        .map_err(storage_error)?;
-        if previous.is_pending() && !status.is_pending() {
+
+        let legal = matches!(
+            (previous, status),
+            (AiApprovalStatus::Pending, AiApprovalStatus::Approved)
+                | (AiApprovalStatus::Pending, AiApprovalStatus::Rejected)
+                | (AiApprovalStatus::Pending, AiApprovalStatus::Expired)
+                | (AiApprovalStatus::Approved, AiApprovalStatus::Consumed)
+                | (AiApprovalStatus::Approved, AiApprovalStatus::Expired)
+        );
+        if !legal {
+            return Err(RepositoryError::Conflict);
+        }
+        if matches!(
+            status,
+            AiApprovalStatus::Approved | AiApprovalStatus::Consumed
+        ) && now >= expires_at
+        {
+            return Err(RepositoryError::Conflict);
+        }
+        let run = tx
+            .query_row(
+                "SELECT session_id, turn_id, generation, state, approval_id
+                 FROM ai_run_state WHERE run_id = ?1",
+                [&row.2],
+                |run| {
+                    Ok((
+                        run.get::<_, String>(0)?,
+                        run.get::<_, String>(1)?,
+                        run.get::<_, i64>(2)?,
+                        run.get::<_, String>(3)?,
+                        run.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(storage_error)?
+            .ok_or(RepositoryError::Conflict)?;
+        let phase = AiRunPhase::parse(&run.3).map_err(storage_error)?;
+        let approval_key = approval_id.to_string();
+        // Every legal approval transition is a compare-and-swap against the exact
+        // bound awaiting run. The approval and resulting crash-valid run pair are
+        // committed by this one transaction.
+        if run.0 != row.0
+            || run.1 != row.1
+            || run.2 != row.3
+            || run.4.as_deref() != Some(approval_key.as_str())
+            || phase != AiRunPhase::AwaitingApproval
+        {
+            return Err(RepositoryError::Conflict);
+        }
+
+        let updated = tx
+            .execute(
+                "UPDATE ai_tool_approvals
+                 SET status = ?1, operation_id = ?2, updated_at = ?3
+                 WHERE id = ?4 AND status = ?5
+                   AND session_id = ?6 AND turn_id = ?7 AND run_id = ?8
+                   AND generation = ?9",
+                params![
+                    status.as_str(),
+                    dispatch_operation_id,
+                    now.to_string(),
+                    approval_id.to_string(),
+                    previous.as_str(),
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    run_id.to_string(),
+                    row.3,
+                ],
+            )
+            .map_err(storage_error)?;
+        if updated != 1 {
+            return Err(RepositoryError::Conflict);
+        }
+        let next_run_phase = match status {
+            AiApprovalStatus::Approved => None,
+            AiApprovalStatus::Rejected => Some(AiRunPhase::Running),
+            AiApprovalStatus::Expired => Some(AiRunPhase::Cancelled),
+            AiApprovalStatus::Consumed => Some(AiRunPhase::Dispatching),
+            AiApprovalStatus::Pending => return Err(RepositoryError::Conflict),
+        };
+        if let Some(next_run_phase) = next_run_phase {
+            let retain_binding = status == AiApprovalStatus::Consumed;
+            let run_updated = tx
+                .execute(
+                    "UPDATE ai_run_state
+                     SET state = ?1,
+                         approval_id = CASE WHEN ?2 THEN approval_id ELSE NULL END,
+                         updated_at = ?3
+                     WHERE run_id = ?4
+                       AND session_id = ?5
+                       AND turn_id = ?6
+                       AND generation = ?7
+                       AND state = ?8
+                       AND approval_id = ?9",
+                    params![
+                        next_run_phase.as_str(),
+                        retain_binding,
+                        now.to_string(),
+                        run_id.to_string(),
+                        session_id.to_string(),
+                        turn_id.to_string(),
+                        row.3,
+                        AiRunPhase::AwaitingApproval.as_str(),
+                        approval_id.to_string(),
+                    ],
+                )
+                .map_err(storage_error)?;
+            if run_updated != 1 {
+                return Err(RepositoryError::Conflict);
+            }
+        }
+        if previous.is_pending() {
             let mut quota = load_quota(tx)?;
-            quota.pending_approval_count = quota.pending_approval_count.saturating_sub(1);
+            quota.pending_approval_count = quota
+                .pending_approval_count
+                .checked_sub(1)
+                .ok_or_else(|| RepositoryError::Storage("invalid pending approval quota".into()))?;
             quota.pending_approval_content_bytes = quota
                 .pending_approval_content_bytes
-                .saturating_sub(row.1 as u64);
+                .checked_sub(u64::try_from(row.6).map_err(storage_error)?)
+                .ok_or_else(|| RepositoryError::Storage("invalid pending approval quota".into()))?;
             save_quota(tx, &quota)?;
         }
         Ok(ai_effect(
@@ -950,40 +1204,177 @@ pub(crate) fn upsert_ai_run_state(
     state: AiRunState,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    let generation = i64::try_from(state.generation).map_err(|_| {
+        validation(junban_domain::ValidationError::Invalid {
+            field: "ai_run.generation",
+            reason: "generation is too large",
+        })
+    })?;
+    if state.created_at > now || state.updated_at > now {
+        return Err(validation(junban_domain::ValidationError::Invalid {
+            field: "ai_run.timestamps",
+            reason: "run timestamps cannot be in the future",
+        }));
+    }
+    let approval_id = state.approval_id.map(|id| id.to_string());
     let request = canonical_json(&Req::UpsertAiRunState {
         run_id: state.run_id.to_string(),
         session_id: state.session_id.to_string(),
         turn_id: state.turn_id.to_string(),
         generation: state.generation,
         state: state.state.as_str(),
-        approval_id: state.approval_id.map(|id| id.to_string()).as_deref(),
+        approval_id: approval_id.as_deref(),
     })?;
-    let approval_id = state.approval_id.map(|id| id.to_string());
     mutate(connection, operation_id, request, now, move |tx, _| {
-        tx.execute(
-            "INSERT INTO ai_run_state(
-                run_id, session_id, turn_id, generation, state, approval_id, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT(run_id) DO UPDATE SET
-                generation = excluded.generation,
-                state = excluded.state,
-                approval_id = excluded.approval_id,
-                updated_at = excluded.updated_at",
-            params![
-                state.run_id.to_string(),
-                state.session_id.to_string(),
-                state.turn_id.to_string(),
-                state.generation as i64,
-                state.state.as_str(),
-                approval_id,
-                state.created_at.to_string(),
-                now.to_string(),
-            ],
-        )
-        .map_err(storage_error)?;
+        let session_exists: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM ai_sessions WHERE id = ?1)",
+                [state.session_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage_error)?;
+        if !session_exists {
+            return Err(RepositoryError::NotFound);
+        }
+        validate_run_approval_binding(
+            tx,
+            state.run_id,
+            state.session_id,
+            state.turn_id,
+            generation,
+            state.state,
+            approval_id.as_deref(),
+        )?;
+
+        let existing = tx
+            .query_row(
+                "SELECT session_id, turn_id, generation, state, approval_id
+                 FROM ai_run_state WHERE run_id = ?1",
+                [state.run_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(storage_error)?;
+
+        let durable_session =
+            if let Some((session, turn, old_generation, old_phase, old_approval_id)) = existing {
+                if session != state.session_id.to_string() || turn != state.turn_id.to_string() {
+                    return Err(RepositoryError::Conflict);
+                }
+                let old_phase = AiRunPhase::parse(&old_phase).map_err(storage_error)?;
+                if old_phase.is_terminal() || generation < old_generation {
+                    return Err(RepositoryError::Conflict);
+                }
+                let replacing_generation = generation > old_generation;
+                let legal = if replacing_generation {
+                    state.state == AiRunPhase::Running && approval_id.is_none()
+                } else {
+                    legal_run_transition(old_phase, state.state)
+                };
+                if !legal || (replacing_generation && old_phase == AiRunPhase::Dispatching) {
+                    return Err(RepositoryError::Conflict);
+                }
+                if replacing_generation {
+                    match old_phase {
+                        AiRunPhase::AwaitingApproval => {
+                            let prior_approval = old_approval_id
+                                .as_deref()
+                                .ok_or(RepositoryError::Conflict)?;
+                            expire_bound_run_approval(
+                                tx,
+                                prior_approval,
+                                state.run_id,
+                                state.session_id,
+                                state.turn_id,
+                                old_generation,
+                                now,
+                            )?;
+                        }
+                        AiRunPhase::Running if old_approval_id.is_none() => {}
+                        _ => return Err(RepositoryError::Conflict),
+                    }
+                } else if old_phase == AiRunPhase::AwaitingApproval
+                    && matches!(state.state, AiRunPhase::Failed | AiRunPhase::Cancelled)
+                {
+                    if approval_id.is_some() {
+                        return Err(RepositoryError::Conflict);
+                    }
+                    let prior_approval = old_approval_id
+                        .as_deref()
+                        .ok_or(RepositoryError::Conflict)?;
+                    // Expire authority first, release pending quota when needed, then CAS
+                    // the bound run terminal. Any failure rolls the entire mutation back.
+                    expire_bound_run_approval(
+                        tx,
+                        prior_approval,
+                        state.run_id,
+                        state.session_id,
+                        state.turn_id,
+                        old_generation,
+                        now,
+                    )?;
+                }
+                let updated = tx
+                    .execute(
+                        "UPDATE ai_run_state
+                     SET generation = ?1, state = ?2, approval_id = ?3, updated_at = ?4
+                     WHERE run_id = ?5 AND session_id = ?6 AND turn_id = ?7
+                       AND generation = ?8 AND state = ?9 AND approval_id IS ?10",
+                        params![
+                            generation,
+                            state.state.as_str(),
+                            approval_id,
+                            now.to_string(),
+                            state.run_id.to_string(),
+                            session,
+                            turn,
+                            old_generation,
+                            old_phase.as_str(),
+                            old_approval_id,
+                        ],
+                    )
+                    .map_err(storage_error)?;
+                if updated != 1 {
+                    return Err(RepositoryError::Conflict);
+                }
+                AiSessionId::parse(&session).map_err(storage_error)?
+            } else {
+                if state.state != AiRunPhase::Running || approval_id.is_some() {
+                    return Err(RepositoryError::Conflict);
+                }
+                let inserted = tx
+                    .execute(
+                        "INSERT INTO ai_run_state(
+                        run_id, session_id, turn_id, generation, state, approval_id,
+                        created_at, updated_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7)",
+                        params![
+                            state.run_id.to_string(),
+                            state.session_id.to_string(),
+                            state.turn_id.to_string(),
+                            generation,
+                            state.state.as_str(),
+                            state.created_at.to_string(),
+                            now.to_string(),
+                        ],
+                    )
+                    .map_err(storage_error)?;
+                if inserted != 1 {
+                    return Err(RepositoryError::Conflict);
+                }
+                state.session_id
+            };
         Ok(ai_effect(
             EventType::AI_SESSION_CHANGED,
-            ResourceRef::ai_session(state.session_id),
+            ResourceRef::ai_session(durable_session),
             ("ai_run", state.run_id.to_string()),
         ))
     })
@@ -1034,7 +1425,11 @@ pub(crate) fn get_ai_run_state(
         .ok_or(RepositoryError::NotFound)
 }
 
-/// Expire all pending approvals and mark non-terminal runs cancelled (restore/startup).
+/// Fail-closed startup/restore recovery for ephemeral AI runtime authority.
+///
+/// Pending and approved approvals become expired, every non-terminal run becomes
+/// cancelled and unbound, and consumed approvals remain legal terminal history beside
+/// their cancelled/unbound exact run. This transaction emits no event or receipt.
 pub(crate) fn expire_ai_runtime_state(
     connection: &Connection,
     now: Timestamp,
@@ -1042,12 +1437,13 @@ pub(crate) fn expire_ai_runtime_state(
     let tx = connection.unchecked_transaction().map_err(storage_error)?;
     tx.execute(
         "UPDATE ai_tool_approvals SET status = 'expired', updated_at = ?1
-         WHERE status = 'pending'",
+         WHERE status IN ('pending', 'approved')",
         [now.to_string()],
     )
     .map_err(storage_error)?;
     tx.execute(
-        "UPDATE ai_run_state SET state = 'cancelled', updated_at = ?1
+        "UPDATE ai_run_state
+         SET state = 'cancelled', approval_id = NULL, updated_at = ?1
          WHERE state IN ('running', 'awaiting_approval', 'dispatching')",
         [now.to_string()],
     )
@@ -1059,15 +1455,37 @@ pub(crate) fn expire_ai_runtime_state(
     Ok(())
 }
 
-/// Recompute session/profile AI byte counters from durable rows.
+/// Recompute session/profile AI byte counters from actual durable UTF-8 lengths.
 pub(crate) fn recompute_ai_quotas(connection: &Connection) -> Result<(), RepositoryError> {
     let tx = connection.unchecked_transaction().map_err(storage_error)?;
     ensure_quota_row(&tx)?;
+    tx.execute(
+        "UPDATE ai_messages
+         SET content_bytes = LENGTH(CAST(content_json AS BLOB))
+         WHERE content_bytes != LENGTH(CAST(content_json AS BLOB))",
+        [],
+    )
+    .map_err(storage_error)?;
+    tx.execute(
+        "UPDATE ai_memories
+         SET content_bytes = LENGTH(CAST(content AS BLOB))
+         WHERE content_bytes != LENGTH(CAST(content AS BLOB))",
+        [],
+    )
+    .map_err(storage_error)?;
+    tx.execute(
+        "UPDATE ai_tool_approvals
+         SET arguments_bytes = LENGTH(CAST(arguments_json AS BLOB))
+         WHERE arguments_bytes != LENGTH(CAST(arguments_json AS BLOB))",
+        [],
+    )
+    .map_err(storage_error)?;
 
     // Per-session counters.
     let mut statement = tx
         .prepare(
-            "SELECT session_id, COUNT(*), COALESCE(SUM(content_bytes), 0)
+            "SELECT session_id, COUNT(*),
+                    COALESCE(SUM(LENGTH(CAST(content_json AS BLOB))), 0)
              FROM ai_messages GROUP BY session_id",
         )
         .map_err(storage_error)?;
@@ -1120,7 +1538,7 @@ pub(crate) fn recompute_ai_quotas(connection: &Connection) -> Result<(), Reposit
         .map_err(storage_error)?;
     let memory_bytes: i64 = tx
         .query_row(
-            "SELECT COALESCE(SUM(content_bytes), 0) FROM ai_memories",
+            "SELECT COALESCE(SUM(LENGTH(CAST(content AS BLOB))), 0) FROM ai_memories",
             [],
             |row| row.get(0),
         )
@@ -1134,7 +1552,8 @@ pub(crate) fn recompute_ai_quotas(connection: &Connection) -> Result<(), Reposit
         .map_err(storage_error)?;
     let pending_bytes: i64 = tx
         .query_row(
-            "SELECT COALESCE(SUM(arguments_bytes), 0) FROM ai_tool_approvals WHERE status = 'pending'",
+            "SELECT COALESCE(SUM(LENGTH(CAST(arguments_json AS BLOB))), 0)
+             FROM ai_tool_approvals WHERE status = 'pending'",
             [],
             |row| row.get(0),
         )
@@ -1160,6 +1579,186 @@ pub(crate) fn recompute_ai_quotas(connection: &Connection) -> Result<(), Reposit
     )
     .map_err(storage_error)?;
     tx.commit().map_err(storage_error)?;
+    Ok(())
+}
+
+fn canonicalize_json(
+    value: String,
+    field: &'static str,
+    max: usize,
+) -> Result<String, RepositoryError> {
+    let parsed: serde_json::Value = serde_json::from_str(&value).map_err(|_| {
+        validation(junban_domain::ValidationError::Invalid {
+            field,
+            reason: "must be valid JSON",
+        })
+    })?;
+    let canonical = serde_json::to_string(&parsed).map_err(storage_error)?;
+    if canonical.len() > max {
+        return Err(validation(junban_domain::ValidationError::TooLong {
+            field,
+            max,
+        }));
+    }
+    Ok(canonical)
+}
+
+fn canonicalize_optional_json(
+    value: &mut Option<String>,
+    field: &'static str,
+    max: usize,
+) -> Result<(), RepositoryError> {
+    if let Some(raw) = value.take() {
+        *value = Some(canonicalize_json(raw, field, max)?);
+    }
+    Ok(())
+}
+
+fn expire_bound_run_approval(
+    tx: &rusqlite::Transaction<'_>,
+    approval_id: &str,
+    run_id: AiRunId,
+    session_id: AiSessionId,
+    turn_id: AiTurnId,
+    generation: i64,
+    now: Timestamp,
+) -> Result<(), RepositoryError> {
+    let approval = tx
+        .query_row(
+            "SELECT status, arguments_bytes
+             FROM ai_tool_approvals
+             WHERE id = ?1 AND run_id = ?2 AND session_id = ?3
+               AND turn_id = ?4 AND generation = ?5",
+            params![
+                approval_id,
+                run_id.to_string(),
+                session_id.to_string(),
+                turn_id.to_string(),
+                generation,
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()
+        .map_err(storage_error)?
+        .ok_or(RepositoryError::Conflict)?;
+    let previous = AiApprovalStatus::parse(&approval.0).map_err(storage_error)?;
+    if !matches!(
+        previous,
+        AiApprovalStatus::Pending | AiApprovalStatus::Approved
+    ) {
+        return Err(RepositoryError::Conflict);
+    }
+    let updated = tx
+        .execute(
+            "UPDATE ai_tool_approvals
+             SET status = 'expired', updated_at = ?1
+             WHERE id = ?2 AND run_id = ?3 AND session_id = ?4
+               AND turn_id = ?5 AND generation = ?6 AND status = ?7",
+            params![
+                now.to_string(),
+                approval_id,
+                run_id.to_string(),
+                session_id.to_string(),
+                turn_id.to_string(),
+                generation,
+                previous.as_str(),
+            ],
+        )
+        .map_err(storage_error)?;
+    if updated != 1 {
+        return Err(RepositoryError::Conflict);
+    }
+    if previous.is_pending() {
+        let mut quota = load_quota(tx)?;
+        quota.pending_approval_count = quota
+            .pending_approval_count
+            .checked_sub(1)
+            .ok_or_else(|| RepositoryError::Storage("invalid pending approval quota".into()))?;
+        quota.pending_approval_content_bytes = quota
+            .pending_approval_content_bytes
+            .checked_sub(u64::try_from(approval.1).map_err(storage_error)?)
+            .ok_or_else(|| RepositoryError::Storage("invalid pending approval quota".into()))?;
+        save_quota(tx, &quota)?;
+    }
+    Ok(())
+}
+
+fn legal_run_transition(from: AiRunPhase, to: AiRunPhase) -> bool {
+    matches!(
+        (from, to),
+        (AiRunPhase::Running, AiRunPhase::AwaitingApproval)
+            | (AiRunPhase::Running, AiRunPhase::Completed)
+            | (AiRunPhase::Running, AiRunPhase::Failed)
+            | (AiRunPhase::Running, AiRunPhase::Cancelled)
+            | (AiRunPhase::AwaitingApproval, AiRunPhase::Dispatching)
+            | (AiRunPhase::AwaitingApproval, AiRunPhase::Failed)
+            | (AiRunPhase::AwaitingApproval, AiRunPhase::Cancelled)
+            | (AiRunPhase::Dispatching, AiRunPhase::Completed)
+            | (AiRunPhase::Dispatching, AiRunPhase::Failed)
+            | (AiRunPhase::Dispatching, AiRunPhase::Cancelled)
+    )
+}
+
+fn validate_run_approval_binding(
+    tx: &rusqlite::Transaction<'_>,
+    run_id: AiRunId,
+    session_id: AiSessionId,
+    turn_id: AiTurnId,
+    generation: i64,
+    phase: AiRunPhase,
+    approval_id: Option<&str>,
+) -> Result<(), RepositoryError> {
+    if phase == AiRunPhase::Running && approval_id.is_some() {
+        return Err(RepositoryError::Conflict);
+    }
+    if matches!(
+        phase,
+        AiRunPhase::AwaitingApproval | AiRunPhase::Dispatching
+    ) && approval_id.is_none()
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    let Some(approval_id) = approval_id else {
+        return Ok(());
+    };
+    let approval = tx
+        .query_row(
+            "SELECT session_id, turn_id, run_id, generation, status, operation_id
+             FROM ai_tool_approvals WHERE id = ?1",
+            [approval_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(storage_error)?
+        .ok_or(RepositoryError::Conflict)?;
+    let status = AiApprovalStatus::parse(&approval.4).map_err(storage_error)?;
+    if approval.0 != session_id.to_string()
+        || approval.1 != turn_id.to_string()
+        || approval.2 != run_id.to_string()
+        || approval.3 != generation
+        || (phase == AiRunPhase::AwaitingApproval
+            && !matches!(
+                status,
+                AiApprovalStatus::Pending | AiApprovalStatus::Approved
+            ))
+        || (phase == AiRunPhase::Dispatching
+            && (status != AiApprovalStatus::Consumed || approval.5.is_none()))
+        || (phase.is_terminal() && status != AiApprovalStatus::Consumed)
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    if let Some(operation_id) = approval.5 {
+        OperationId::parse(&operation_id).map_err(storage_error)?;
+    }
     Ok(())
 }
 

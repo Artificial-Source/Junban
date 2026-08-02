@@ -69,7 +69,7 @@ type ClientBuilderFn = fn() -> Result<Client, ProviderError>;
 /// Process-local lazy factory. Safe to keep on the server startup path unused.
 #[derive(Debug, Default)]
 pub struct ProviderHttpFactory {
-    client: OnceLock<Client>,
+    client: OnceLock<Result<Client, ProviderError>>,
     /// Test/observation counter: increments exactly once per successful construction.
     constructed: AtomicBool,
     /// Optional construction hook counter for tests that inject builders.
@@ -99,29 +99,21 @@ impl ProviderHttpFactory {
 
     /// Borrow the lazily constructed client, building it on first use.
     pub fn client(&self) -> Result<&Client, ProviderError> {
-        if let Some(client) = self.client.get() {
-            return Ok(client);
-        }
-        let built = {
+        match self.client.get_or_init(|| {
             self.construct_calls.fetch_add(1, Ordering::SeqCst);
             let builder = self
                 .test_builder
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .unwrap_or(build_provider_client);
-            builder()?
-        };
-        match self.client.set(built) {
-            Ok(()) => {
+            builder()
+        }) {
+            Ok(client) => {
                 self.constructed.store(true, Ordering::SeqCst);
+                Ok(client)
             }
-            Err(_) => {
-                // Lost the race; another caller constructed first.
-            }
+            Err(error) => Err(error.clone()),
         }
-        self.client.get().ok_or_else(|| {
-            ProviderError::connect("provider HTTP client missing after construction")
-        })
     }
 
     /// Install a test-only builder. Must be called before first [`Self::client`].
@@ -143,6 +135,21 @@ mod tests {
         let factory = ProviderHttpFactory::new();
         assert!(!factory.is_client_constructed());
         assert_eq!(factory.construct_calls(), 0);
+    }
+
+    #[test]
+    fn concurrent_first_use_constructs_exactly_one_client() {
+        let factory = std::sync::Arc::new(ProviderHttpFactory::new());
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let factory = std::sync::Arc::clone(&factory);
+                scope.spawn(move || {
+                    factory.client().unwrap();
+                });
+            }
+        });
+        assert!(factory.is_client_constructed());
+        assert_eq!(factory.construct_calls(), 1);
     }
 
     #[test]

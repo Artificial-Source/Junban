@@ -95,19 +95,19 @@ mod tests {
             RetryDecision::DoNotRetry
         );
 
-        let too_many = ProviderError::http_status(429, "slow down", Some(120_000));
+        let too_many = ProviderError::http_status(429, Some(120_000));
         assert_eq!(
             classify_retry(RequestBodyPhase::PreBody, &too_many, 1),
             RetryDecision::RetryAfter(MAX_RETRY_AFTER)
         );
 
-        let unauthorized = ProviderError::http_status(401, "nope", None);
+        let unauthorized = ProviderError::http_status(401, None);
         assert_eq!(
             classify_retry(RequestBodyPhase::PreBody, &unauthorized, 1),
             RetryDecision::DoNotRetry
         );
 
-        let server = ProviderError::http_status(503, "busy", None);
+        let server = ProviderError::http_status(503, None);
         assert_eq!(
             classify_retry(RequestBodyPhase::PreBody, &server, 3),
             RetryDecision::DoNotRetry

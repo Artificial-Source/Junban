@@ -20,6 +20,8 @@ use crate::error::ProviderError;
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// Default connect timeout for provider calls.
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default idle pool timeout for provider connections.
+pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Build the shared provider HTTP client policy.
 pub fn build_provider_client() -> Result<Client, ProviderError> {
@@ -28,6 +30,7 @@ pub fn build_provider_client() -> Result<Client, ProviderError> {
         .no_proxy()
         .timeout(DEFAULT_REQUEST_TIMEOUT)
         .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+        .pool_idle_timeout(DEFAULT_IDLE_TIMEOUT)
         .pool_max_idle_per_host(2)
         .build()
         .map_err(|error| ProviderError::connect(error.to_string()))

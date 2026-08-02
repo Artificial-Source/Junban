@@ -118,13 +118,13 @@ impl SseDecoder {
 
     fn push_text(&mut self, text: &str) -> Result<Vec<SseEvent>, ProviderError> {
         let mut events = Vec::new();
-        let mut rest = text;
+        // Normalize CR LF / lone CR into LF so fragmented CRLF never leaves a
+        // bare `\r` field name across chunk boundaries.
+        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+        let mut rest = normalized.as_str();
         while let Some(newline_at) = rest.find('\n') {
             let mut line = rest[..newline_at].to_owned();
             rest = &rest[newline_at + 1..];
-            if line.ends_with('\r') {
-                line.pop();
-            }
             if !self.line_carry.is_empty() {
                 self.line_carry.push_str(&line);
                 line = std::mem::take(&mut self.line_carry);

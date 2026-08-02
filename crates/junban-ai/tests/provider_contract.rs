@@ -62,6 +62,7 @@ data: [DONE]\n\n";
     assert_eq!(
         events,
         vec![
+            NormalizedStreamEvent::RunStarted,
             NormalizedStreamEvent::TextDelta {
                 text: "Hello ".into()
             },
@@ -198,7 +199,7 @@ async fn cancel_stops_stream_before_late_effects() {
 
 #[tokio::test]
 async fn no_retry_after_body_acceptance_and_retry_after_is_capped() {
-    let pre_body = ProviderError::http_status(429, "slow", Some(120_000));
+    let pre_body = ProviderError::http_status(429, Some(120_000));
     assert_eq!(
         classify_retry(RequestBodyPhase::PreBody, &pre_body, 1),
         RetryDecision::RetryAfter(MAX_RETRY_AFTER)

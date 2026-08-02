@@ -22,3 +22,15 @@ pub const MAX_PROVIDER_ID_BYTES: usize = 64;
 
 /// Maximum accepted length for a model identifier.
 pub const MAX_MODEL_ID_BYTES: usize = 256;
+
+/// Maximum accepted length for a provider base URL.
+pub const MAX_BASE_URL_BYTES: usize = 2_048;
+
+/// Maximum discovered models retained/returned from one listing.
+pub const MAX_DISCOVERED_MODELS: usize = 1_000;
+
+/// Maximum UTF-8 bytes accepted for one tool-call arguments JSON blob.
+pub const MAX_TOOL_ARGUMENTS_BYTES: usize = 128 * 1024;
+
+/// Maximum UTF-8 bytes accepted for one text delta fragment after normalization.
+pub const MAX_TEXT_DELTA_BYTES: usize = 64 * 1024;

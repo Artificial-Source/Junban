@@ -1,4 +1,10 @@
 //! Bounded provider errors with structural secret redaction.
+//!
+//! Public [`ProviderError`] / [`AiError`] values never carry arbitrary vendor
+//! response bodies. HTTP failures expose only status, optional short vendor
+//! code, and retry timing. Pattern redaction remains for connect/stream
+//! diagnostics; active request credentials must be scrubbed by callers via
+//! [`scrub_active_secret`] before construction when a message is retained.
 
 use std::fmt;
 
@@ -17,7 +23,7 @@ pub enum ProviderErrorKind {
     Unavailable,
 }
 
-/// Provider-layer failure. Display and debug forms are redacted.
+/// Provider-layer failure. Display and debug forms never include vendor bodies.
 #[derive(Clone, PartialEq, Eq, Error)]
 pub enum ProviderError {
     #[error("provider connect failed: {message}")]
@@ -26,10 +32,11 @@ pub enum ProviderError {
     Timeout,
     #[error("provider run cancelled")]
     Cancelled,
+    /// HTTP failure. `code` is an optional short vendor error code only.
     #[error("provider HTTP {status}")]
     HttpStatus {
         status: u16,
-        message: String,
+        code: Option<String>,
         retry_after_ms: Option<u64>,
     },
     #[error("provider stream error: {message}")]
@@ -65,15 +72,35 @@ impl ProviderError {
         }
     }
 
+    /// Stable stream failure without embedding vendor body text.
     #[must_use]
-    pub fn http_status(
-        status: u16,
-        message: impl Into<String>,
-        retry_after_ms: Option<u64>,
-    ) -> Self {
+    pub fn stream_failed() -> Self {
+        Self::Stream {
+            message: "provider stream failed".to_owned(),
+        }
+    }
+
+    /// HTTP status failure. Never accepts arbitrary vendor body text.
+    #[must_use]
+    pub fn http_status(status: u16, retry_after_ms: Option<u64>) -> Self {
         Self::HttpStatus {
             status,
-            message: redact_sensitive(&message.into()),
+            code: None,
+            retry_after_ms,
+        }
+    }
+
+    /// HTTP status failure with an optional short vendor code (not a body dump).
+    #[must_use]
+    pub fn http_status_code(
+        status: u16,
+        code: Option<String>,
+        retry_after_ms: Option<u64>,
+    ) -> Self {
+        let code = code.and_then(|raw| sanitize_vendor_code(&raw));
+        Self::HttpStatus {
+            status,
+            code,
             retry_after_ms,
         }
     }
@@ -106,11 +133,43 @@ impl ProviderError {
     }
 
     #[must_use]
+    pub fn vendor_code(&self) -> Option<&str> {
+        match self {
+            Self::HttpStatus { code, .. } => code.as_deref(),
+            _ => None,
+        }
+    }
+
+    #[must_use]
     pub fn retry_after_ms(&self) -> Option<u64> {
         match self {
             Self::HttpStatus { retry_after_ms, .. } => *retry_after_ms,
             _ => None,
         }
+    }
+
+    /// Scrub an active request credential from any retained message fields.
+    #[must_use]
+    pub fn scrub_secret(mut self, secret: &str) -> Self {
+        if secret.is_empty() {
+            return self;
+        }
+        match &mut self {
+            Self::Connect { message } | Self::Stream { message } => {
+                *message = scrub_active_secret(message, secret);
+            }
+            Self::HttpStatus { code, .. } => {
+                if let Some(value) = code.as_mut() {
+                    *value = scrub_active_secret(value, secret);
+                }
+            }
+            Self::Timeout
+            | Self::Cancelled
+            | Self::BoundExceeded { .. }
+            | Self::Invalid { .. }
+            | Self::Unavailable { .. } => {}
+        }
+        self
     }
 }
 
@@ -125,12 +184,12 @@ impl fmt::Debug for ProviderError {
             Self::Cancelled => formatter.write_str("Cancelled"),
             Self::HttpStatus {
                 status,
-                message,
+                code,
                 retry_after_ms,
             } => formatter
                 .debug_struct("HttpStatus")
                 .field("status", status)
-                .field("message", &redact_sensitive(message))
+                .field("code", code)
                 .field("retry_after_ms", retry_after_ms)
                 .finish(),
             Self::Stream { message } => formatter
@@ -152,6 +211,71 @@ impl fmt::Debug for ProviderError {
                 .finish(),
         }
     }
+}
+
+/// Maximum UTF-8 bytes retained for a vendor error code token.
+const MAX_VENDOR_CODE_BYTES: usize = 64;
+
+/// Keep only a short, non-sensitive vendor code token.
+#[must_use]
+pub fn sanitize_vendor_code(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.len() > MAX_VENDOR_CODE_BYTES {
+        return None;
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/'))
+    {
+        return None;
+    }
+    // Reject values that look like secrets even if short.
+    if trimmed.len() >= 16
+        && trimmed
+            .chars()
+            .any(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
+        && !trimmed.contains('.')
+        && trimmed.contains('-')
+    {
+        // still allow codes like `invalid-api-key`
+    }
+    if starts_with_ignore_ascii_case(trimmed, "sk-")
+        || starts_with_ignore_ascii_case(trimmed, "sk_")
+        || starts_with_ignore_ascii_case(trimmed, "bearer")
+    {
+        return None;
+    }
+    Some(trimmed.to_owned())
+}
+
+/// Extract a short vendor code from a bounded JSON/text error body, if present.
+#[must_use]
+pub fn extract_vendor_code(body: &str) -> Option<String> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed)
+        && let Some(code) = value
+            .pointer("/error/code")
+            .or_else(|| value.pointer("/error/type"))
+            .or_else(|| value.pointer("/code"))
+            .or_else(|| value.pointer("/type"))
+            .and_then(|item| item.as_str())
+    {
+        return sanitize_vendor_code(code);
+    }
+    None
+}
+
+/// Remove every occurrence of an active credential from text.
+#[must_use]
+pub fn scrub_active_secret(input: &str, secret: &str) -> String {
+    if secret.is_empty() || !input.contains(secret) {
+        return redact_sensitive(input);
+    }
+    let scrubbed = input.replace(secret, "[REDACTED]");
+    redact_sensitive(&scrubbed)
 }
 
 /// Structurally redact bearer tokens, API keys, and common secret prefixes.
@@ -233,5 +357,28 @@ mod tests {
         let rendered = format!("{error:?}");
         assert!(!rendered.contains("super-secret-token-value"));
         assert!(rendered.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn http_status_never_embeds_vendor_body() {
+        let error = ProviderError::http_status_code(401, Some("invalid_api_key".into()), None);
+        let display = error.to_string();
+        let debug = format!("{error:?}");
+        assert_eq!(display, "provider HTTP 401");
+        assert!(!display.contains("invalid"));
+        assert!(debug.contains("invalid_api_key"));
+        assert_eq!(error.vendor_code(), Some("invalid_api_key"));
+    }
+
+    #[test]
+    fn scrub_active_secret_removes_arbitrary_reflection() {
+        let secret = "synth-credential-fixture-zz99";
+        let reflected = format!("upstream said nope: {secret} in the middle");
+        let error = ProviderError::stream(reflected).scrub_secret(secret);
+        let display = error.to_string();
+        let debug = format!("{error:?}");
+        assert!(!display.contains(secret));
+        assert!(!debug.contains(secret));
+        assert!(display.contains("[REDACTED]") || debug.contains("[REDACTED]"));
     }
 }

@@ -24,6 +24,7 @@
     "check:docs": "node scripts/check-docs.mjs",
     "check:runtime-boundary": "node scripts/check-runtime-boundary.mjs",
     "check:local-voice-assets": "node scripts/check-local-voice-assets.mjs --require-dist",
+    "check:phase6-legacy-visual": "node scripts/check-phase6-legacy-visual-baseline.mjs",
     "bench:hosted-server": "python3 scripts/bench-hosted-server.py",
     "bench:hosted-server:quick": "python3 scripts/bench-hosted-server.py --quick",
     "bench:scale": "python3 scripts/bench-hosted-server.py --mode scale",
@@ -36,7 +37,7 @@
     "bench:phase5:quick": "python3 scripts/check-phase5-automation-budget.py --quick",
     "conformance:phase5": "python3 scripts/check-phase5-conformance.py --authoritative",
     "bench:self-check": "python3 scripts/bench-hosted-server.py --self-check",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary && pnpm check:local-voice-assets"
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary && pnpm check:local-voice-assets && pnpm check:phase6-legacy-visual"
   },
   "dependencies": {
     "@diffusionstudio/piper-wasm": "1.0.0",

@@ -161,6 +161,23 @@ pub enum AiProviderPreset {
 }
 
 impl AiProviderPreset {
+    /// All built-in presets in stable display / inventory order.
+    pub const ALL: [Self; 13] = [
+        Self::OpenAi,
+        Self::Anthropic,
+        Self::OpenRouter,
+        Self::Ollama,
+        Self::LmStudio,
+        Self::DeepSeek,
+        Self::Gemini,
+        Self::Mistral,
+        Self::Kimi,
+        Self::DashScope,
+        Self::Groq,
+        Self::ZAi,
+        Self::Custom,
+    ];
+
     pub fn parse(value: &str) -> Result<Self, ValidationError> {
         match value {
             "openai" => Ok(Self::OpenAi),
@@ -168,13 +185,16 @@ impl AiProviderPreset {
             "gemini" => Ok(Self::Gemini),
             "openrouter" => Ok(Self::OpenRouter),
             "ollama" => Ok(Self::Ollama),
-            "lm_studio" | "lmstudio" => Ok(Self::LmStudio),
+            // Canonical wire ID is `lm_studio`; accept common aliases on input only.
+            "lm_studio" | "lmstudio" | "lm-studio" => Ok(Self::LmStudio),
             "deepseek" => Ok(Self::DeepSeek),
             "mistral" => Ok(Self::Mistral),
-            "kimi" => Ok(Self::Kimi),
+            // Canonical wire ID is `kimi`; `moonshot` is a safe input alias.
+            "kimi" | "moonshot" => Ok(Self::Kimi),
             "dashscope" => Ok(Self::DashScope),
             "groq" => Ok(Self::Groq),
-            "z_ai" | "zai" => Ok(Self::ZAi),
+            // Canonical wire ID is `z_ai`; `zai` / `glm` are safe input aliases.
+            "z_ai" | "zai" | "glm" => Ok(Self::ZAi),
             "custom" => Ok(Self::Custom),
             _ => Err(ValidationError::InvalidFormat {
                 field: "ai.provider",
@@ -183,6 +203,7 @@ impl AiProviderPreset {
         }
     }
 
+    /// Canonical persisted / wire identity (snake_case).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -202,20 +223,43 @@ impl AiProviderPreset {
         }
     }
 
+    /// Operator-facing display label for settings and registry surfaces.
+    #[must_use]
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::OpenAi => "OpenAI",
+            Self::Anthropic => "Anthropic",
+            Self::Gemini => "Gemini",
+            Self::OpenRouter => "OpenRouter",
+            Self::Ollama => "Ollama",
+            Self::LmStudio => "LM Studio",
+            Self::DeepSeek => "DeepSeek",
+            Self::Mistral => "Mistral",
+            Self::Kimi => "Kimi / Moonshot",
+            Self::DashScope => "DashScope",
+            Self::Groq => "Groq",
+            Self::ZAi => "Z.AI / GLM",
+            Self::Custom => "Custom",
+        }
+    }
+
     /// Frozen official origin for built-in presets. `Custom` has no fixed origin.
     #[must_use]
     pub const fn official_base_url(self) -> Option<&'static str> {
         match self {
             Self::OpenAi => Some("https://api.openai.com/v1"),
             Self::Anthropic => Some("https://api.anthropic.com"),
-            Self::Gemini => Some("https://generativelanguage.googleapis.com"),
+            // Official Gemini REST base includes the `v1beta` version segment.
+            Self::Gemini => Some("https://generativelanguage.googleapis.com/v1beta"),
             Self::OpenRouter => Some("https://openrouter.ai/api/v1"),
             Self::Ollama => Some("http://127.0.0.1:11434/v1"),
             Self::LmStudio => Some("http://127.0.0.1:1234/v1"),
             Self::DeepSeek => Some("https://api.deepseek.com"),
             Self::Mistral => Some("https://api.mistral.ai/v1"),
             Self::Kimi => Some("https://api.moonshot.ai/v1"),
-            Self::DashScope => Some("https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            // Built-in uses the international compatible-mode origin; workspace-specific
+            // regional domains remain available through the explicit Custom provider path.
+            Self::DashScope => Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
             Self::Groq => Some("https://api.groq.com/openai/v1"),
             Self::ZAi => Some("https://api.z.ai/api/paas/v4"),
             Self::Custom => None,
@@ -1420,6 +1464,72 @@ mod tests {
         assert!(
             ProviderBaseUrl::for_provider(AiProviderPreset::Ollama, "http://127.0.0.1:11434/v1")
                 .is_ok()
+        );
+        assert!(
+            ProviderBaseUrl::for_provider(
+                AiProviderPreset::Gemini,
+                "https://generativelanguage.googleapis.com/v1beta",
+            )
+            .is_ok()
+        );
+        assert!(
+            ProviderBaseUrl::for_provider(
+                AiProviderPreset::Gemini,
+                "https://generativelanguage.googleapis.com",
+            )
+            .is_err()
+        );
+        assert!(
+            ProviderBaseUrl::for_provider(
+                AiProviderPreset::DashScope,
+                "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            )
+            .is_ok()
+        );
+        assert!(
+            ProviderBaseUrl::for_provider(
+                AiProviderPreset::DashScope,
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            )
+            .is_err()
+        );
+        assert!(
+            ProviderBaseUrl::for_provider(AiProviderPreset::DeepSeek, "https://api.deepseek.com",)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn provider_preset_canonical_identity_and_aliases() {
+        assert_eq!(AiProviderPreset::ALL.len(), 13);
+        assert_eq!(AiProviderPreset::LmStudio.as_str(), "lm_studio");
+        assert_eq!(AiProviderPreset::ZAi.as_str(), "z_ai");
+        assert_eq!(AiProviderPreset::DeepSeek.display_name(), "DeepSeek");
+        assert_eq!(
+            AiProviderPreset::parse("lmstudio").unwrap().as_str(),
+            "lm_studio"
+        );
+        assert_eq!(
+            AiProviderPreset::parse("lm-studio").unwrap().as_str(),
+            "lm_studio"
+        );
+        assert_eq!(AiProviderPreset::parse("zai").unwrap().as_str(), "z_ai");
+        assert_eq!(AiProviderPreset::parse("glm").unwrap().as_str(), "z_ai");
+        assert_eq!(
+            AiProviderPreset::parse("moonshot").unwrap(),
+            AiProviderPreset::Kimi
+        );
+        assert!(AiProviderPreset::parse("xai").is_err());
+        assert!(AiProviderPreset::ALL.contains(&AiProviderPreset::DeepSeek));
+        assert!(!AiProviderPreset::ALL.iter().any(|p| p.as_str() == "xai"));
+
+        let lm = serde_json::to_string(&AiProviderPreset::LmStudio).unwrap();
+        assert_eq!(lm, "\"lm_studio\"");
+        let zai = serde_json::to_string(&AiProviderPreset::ZAi).unwrap();
+        assert_eq!(zai, "\"z_ai\"");
+        assert_eq!(
+            serde_json::from_str::<AiProviderPreset>("\"lm_studio\"").unwrap(),
+            AiProviderPreset::LmStudio
         );
     }
 

@@ -931,6 +931,7 @@ dependencies = [
 name = "junban-ai"
 version = "0.1.0"
 dependencies = [
+ "junban-domain",
  "reqwest",
  "serde",
  "serde_json",

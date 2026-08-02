@@ -3,7 +3,8 @@
 //! Wave 0 established provider-neutral identifiers, bounded SSE decoding,
 //! retry classification, generation cancellation, and a lazy HTTP client
 //! factory. Wave 2 adds the typed provider registry, four wire adapters,
-//! model discovery, and fixture-driven runtime tests.
+//! model discovery, fixture-driven runtime tests, and provider-neutral
+//! speech data contracts (no HTTP speech adapters or routes yet).
 //!
 //! This crate performs no global runtime initialization. Constructing the
 //! default [`ProviderHttpFactory`] or [`ProviderRuntime`] must not create a
@@ -24,6 +25,7 @@ mod request;
 mod retry;
 mod runtime;
 mod secret;
+mod speech;
 mod sse;
 mod stream;
 mod transport;
@@ -34,7 +36,8 @@ pub use auth::{ANTHROPIC_VERSION, AuthScheme, build_auth_headers};
 pub use bounds::{
     MAX_BASE_URL_BYTES, MAX_DISCOVERED_MODELS, MAX_PROVIDER_ERROR_BODY_BYTES,
     MAX_PROVIDER_RESPONSE_BYTES, MAX_PROVIDER_STREAM_FRAME_BYTES, MAX_RETRY_AFTER,
-    MAX_RETRY_ATTEMPTS, MAX_TEXT_DELTA_BYTES, MAX_TOOL_ARGUMENTS_BYTES,
+    MAX_RETRY_ATTEMPTS, MAX_SPEECH_AUDIO_BYTES, MAX_SPEECH_SYNTHESIS_TEXT_BYTES,
+    MAX_SPEECH_TRANSCRIPTION_TEXT_BYTES, MAX_TEXT_DELTA_BYTES, MAX_TOOL_ARGUMENTS_BYTES,
 };
 pub use cancel::{Generation, GenerationFence, RunCancel, RunId};
 pub use capabilities::{ProviderCapabilities, ProviderCapability};
@@ -50,6 +53,7 @@ pub use error::{
 /// Contract alias used by higher layers; identical to [`ProviderError`].
 pub type AiError = ProviderError;
 pub use ids::{ModelId, ProviderId, ProviderKind};
+pub use junban_domain::{AiProviderPreset, SpeechProviderPreset};
 pub use normalize::{
     FrameNormalizer, NormalizedProviderFrame, bound_redact_error_body,
     normalize_openai_compatible_data,
@@ -65,6 +69,11 @@ pub use retry::{
 };
 pub use runtime::ProviderRuntime;
 pub use secret::SecretString;
+pub use speech::{
+    SpeechAudio, SpeechAudioFormat, SpeechCapability, SpeechPreset, SpeechProviderCapabilities,
+    SpeechRuntimeOwner, SpeechVoiceId, SynthesisRequest, SynthesisResult, SynthesisText,
+    TranscriptionRequest, TranscriptionResult, TranscriptionText,
+};
 pub use sse::{SseDecoder, SseEvent};
 pub use stream::NormalizedStreamEvent;
 pub use transport::{

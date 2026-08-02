@@ -34,3 +34,12 @@ pub const MAX_TOOL_ARGUMENTS_BYTES: usize = 128 * 1024;
 
 /// Maximum UTF-8 bytes accepted for one text delta fragment after normalization.
 pub const MAX_TEXT_DELTA_BYTES: usize = 64 * 1024;
+
+/// Cloud speech request/response audio ceiling (Phase 6 context map).
+pub const MAX_SPEECH_AUDIO_BYTES: usize = 25 * 1024 * 1024;
+
+/// Transcription text ceiling — frozen user-input bound.
+pub const MAX_SPEECH_TRANSCRIPTION_TEXT_BYTES: usize = junban_domain::AI_USER_INPUT_BYTES_MAX;
+
+/// Synthesis input text ceiling — frozen assistant-text bound.
+pub const MAX_SPEECH_SYNTHESIS_TEXT_BYTES: usize = junban_domain::AI_ASSISTANT_TEXT_BYTES_MAX;

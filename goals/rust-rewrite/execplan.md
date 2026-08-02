@@ -721,7 +721,8 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 6 legacy/current context and official provider/local-browser dependency research completed; four provider wire families, exact lazy local-voice pins, schema/settings/secrets/tool/cancel authority, interface scenes, and disabled/enabled release budgets are frozen in `evidence/phase-6-context-map.md`. The high-risk planning gate approved after `P6-PLAN-001`–`P6-PLAN-005` were fixed.
 - [x] Phase 6 Wave 0 dependency/contract authorities: lazy provider client/SSE/error/cancel foundation in `junban-ai`; exact-pinned browser-only Whisper, Kokoro, Piper, and VAD packages behind dynamic workers; bounded hash-verified OPFS admission with same-origin support assets; and sixteen immutable legacy-rendered AI/voice authorities.
 - [x] Phase 6 Wave 1 schema-v6 persistence and secret authority: typed `AiSettings`/`VoiceSettings`, atomic v5→v6 AI tables/quotas, crash-valid approval/run transitions, bounded bidirectional restore validation, private receipt-first `ai-secrets.json`, restore credential clearing, focused failure-injection coverage, and approved database gate with `P6-DB-001`–`P6-DB-007` fixed (see `evidence/phase-6-wave-1.md` and `evidence/phase-6-review-ledger.md`).
-- [ ] Phase 6 Waves 2–5 provider runtime, tools, preserved UI/voice, evidence, reviews and closure.
+- [x] Phase 6 Wave 2 provider runtime: one domain-owned preset authority, approved named providers over four wire families, lazy model discovery/retry/cancel/redaction, bounded provider-neutral speech contracts, and deterministic loopback fixture coverage (see `evidence/phase-6-provider-adapters.md`).
+- [ ] Phase 6 Waves 3–5 orchestration/tools/API, preserved React AI/voice, evidence, reviews and closure.
 - [ ] Phase 7 implementation.
 - [ ] Phase 8 implementation.
 - [ ] Phase 9 implementation.

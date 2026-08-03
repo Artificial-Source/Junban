@@ -173,7 +173,17 @@ pub fn classified_routes() -> &'static [ClassifiedRoute] {
             path: "/api/v1/backup/restore",
             access: RouteAccess::OperatorOnly,
         },
-        // AI/provider configuration and credential control plane — operator only.
+        // Cloud speech and AI/provider control planes — operator only.
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/voice/transcriptions",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/voice/speech",
+            access: RouteAccess::OperatorOnly,
+        },
         ClassifiedRoute {
             method: "GET",
             path: "/api/v1/ai/providers",

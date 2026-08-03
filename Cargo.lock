@@ -931,6 +931,9 @@ dependencies = [
 name = "junban-ai"
 version = "0.1.0"
 dependencies = [
+ "base64",
+ "bytes",
+ "futures-util",
  "junban-domain",
  "reqwest",
  "serde",

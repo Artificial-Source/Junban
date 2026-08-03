@@ -28,6 +28,7 @@ mod retry;
 mod runtime;
 mod secret;
 mod speech;
+mod speech_http;
 mod sse;
 mod stream;
 mod transport;
@@ -75,6 +76,10 @@ pub use speech::{
     SpeechAudio, SpeechAudioFormat, SpeechCapability, SpeechPreset, SpeechProviderCapabilities,
     SpeechRuntimeOwner, SpeechVoiceId, SynthesisRequest, SynthesisResult, SynthesisText,
     TranscriptionRequest, TranscriptionResult, TranscriptionText,
+};
+pub use speech_http::{
+    MAX_INWORLD_AUDIO_BYTES, SpeechCredential, SpeechRuntime, validate_synthesis_request,
+    validate_transcription_request,
 };
 pub use sse::{SseDecoder, SseEvent};
 pub use stream::NormalizedStreamEvent;

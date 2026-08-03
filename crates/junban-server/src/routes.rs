@@ -3909,8 +3909,8 @@ pub async fn restore_backup(
     // Its storage commit therefore finishes before permanent AI authority is established.
     let _ai_reconfigure = Arc::clone(&state.ai_reconfigure).lock_owned().await;
     let deadline = tokio::time::Instant::now() + crate::RESTORE_DRAIN_DEADLINE;
-    // Cancel and drain AI before SSE/request/reminder quiescence so provider work cannot
-    // outlive cutover. Timeout keeps restart-required/maintenance and skips cutover.
+    // Cancel and drain AI and cloud speech before SSE/request/reminder quiescence so
+    // provider work cannot outlive cutover. Timeout keeps restart-required/maintenance.
     if !state
         .drain_ai_runtime(deadline.saturating_duration_since(tokio::time::Instant::now()))
         .await
@@ -3918,7 +3918,7 @@ pub async fn restore_backup(
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "maintenance_ai_timeout",
-            "could not drain AI work before restore",
+            "could not drain AI or speech work before restore",
             false,
             &request_id,
         ));

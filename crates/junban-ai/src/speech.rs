@@ -1,13 +1,14 @@
 //! Provider-neutral speech data contracts for cloud STT/TTS adapters.
 //!
-//! Wave 2 freezes request/response shapes, audio/text bounds, content-type
-//! validation, and explicit provider capability/ownership metadata. No HTTP
-//! speech adapters, server routes, or browser runtime are implemented here.
-//! Browser speech remains frontend-owned; Rust network adapters are implied
-//! only for the cloud presets that declare [`SpeechRuntimeOwner::RustNetworkAdapter`].
+//! Provider-neutral request/response shapes, audio/text bounds, content-type
+//! validation, and explicit provider capability/ownership metadata live here.
+//! Browser speech remains frontend-owned; the bounded cloud HTTP implementation
+//! is isolated in `speech_http` for presets that declare
+//! [`SpeechRuntimeOwner::RustNetworkAdapter`].
 
 use std::fmt;
 
+use bytes::Bytes;
 use junban_domain::SpeechProviderPreset;
 
 use crate::bounds::{
@@ -47,7 +48,7 @@ impl SpeechCapability {
 pub enum SpeechRuntimeOwner {
     /// Web Speech API / lazy local browser engines. No Rust network adapter.
     BrowserFrontend,
-    /// Server-side thin HTTP clients (Wave 4).
+    /// Server-side bounded HTTP clients.
     RustNetworkAdapter,
 }
 
@@ -212,7 +213,7 @@ impl SpeechAudioFormat {
     pub const fn content_type(self) -> &'static str {
         match self {
             Self::Wav => "audio/wav",
-            Self::Mp3 => "audio/mp3",
+            Self::Mp3 => "audio/mpeg",
             Self::Mp4 => "audio/mp4",
             Self::Mpeg => "audio/mpeg",
             Self::Mpga => "audio/mpga",
@@ -270,7 +271,7 @@ impl fmt::Display for SpeechVoiceId {
 #[derive(Clone, PartialEq, Eq)]
 pub struct SpeechAudio {
     format: SpeechAudioFormat,
-    bytes: Vec<u8>,
+    bytes: Bytes,
 }
 
 impl SpeechAudio {
@@ -280,6 +281,20 @@ impl SpeechAudio {
         bytes: impl Into<Vec<u8>>,
     ) -> Result<Self, ProviderError> {
         let bytes = bytes.into();
+        if bytes.is_empty() {
+            return Err(ProviderError::invalid("speech_audio", "must not be empty"));
+        }
+        if bytes.len() > MAX_SPEECH_AUDIO_BYTES {
+            return Err(ProviderError::bound("speech_audio_bytes"));
+        }
+        Ok(Self {
+            format,
+            bytes: Bytes::from(bytes),
+        })
+    }
+
+    /// Build audio from an already-owned shared byte region without copying.
+    pub fn from_bytes(format: SpeechAudioFormat, bytes: Bytes) -> Result<Self, ProviderError> {
         if bytes.is_empty() {
             return Err(ProviderError::invalid("speech_audio", "must not be empty"));
         }
@@ -323,9 +338,15 @@ impl SpeechAudio {
         self.bytes.is_empty()
     }
 
-    /// Consume the payload for adapter request construction only.
+    /// Clone the shared payload handle without copying audio bytes.
     #[must_use]
-    pub fn into_bytes(self) -> Vec<u8> {
+    pub fn bytes(&self) -> Bytes {
+        self.bytes.clone()
+    }
+
+    /// Consume the payload for a binary response without copying audio bytes.
+    #[must_use]
+    pub fn into_bytes(self) -> Bytes {
         self.bytes
     }
 }

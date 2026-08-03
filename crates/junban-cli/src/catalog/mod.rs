@@ -46,7 +46,7 @@ const EXCLUDED_OPERATION_IDS: &[&str] = &[
     "settle_reminder_delivered",
     "settle_reminder_failed",
     "mark_owner_lost_reminders",
-    // Phase 6 operator-only AI APIs remain outside the frozen 87-tool catalog.
+    // Phase 6 operator-only AI and voice APIs remain outside the frozen 87-tool catalog.
     "list_ai_providers",
     "get_ai_config",
     "put_ai_config",
@@ -75,6 +75,8 @@ const EXCLUDED_OPERATION_IDS: &[&str] = &[
     "get_ai_memory",
     "patch_ai_memory",
     "delete_ai_memory",
+    "create_voice_transcription",
+    "create_voice_speech",
     // Raw automation secrets are accepted only by the reviewed `auth create
     // --write-token` ambiguity protocol, never by generic tool input.
     "create_automation_credential",
@@ -285,10 +287,7 @@ pub fn build_catalog() -> Result<ToolCatalog, String> {
     let mut seen_operation_ids = BTreeSet::new();
     let mut openapi_ops: BTreeMap<String, openapi::OpenApiOperation> = BTreeMap::new();
 
-    for operation in openapi::iter_operations(&doc)? {
-        if EXCLUDED_OPERATION_IDS.contains(&operation.operation_id.as_str()) {
-            continue;
-        }
+    for operation in openapi::iter_operations(&doc, EXCLUDED_OPERATION_IDS)? {
         if !seen_operation_ids.insert(operation.operation_id.clone()) {
             return Err(format!(
                 "duplicate OpenAPI operationId '{}'",

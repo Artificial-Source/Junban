@@ -264,7 +264,7 @@ impl LocalApiOwner {
             match RuntimeMetadataFile::create(&profile_dir, address, &instance_id) {
                 Ok(metadata) => metadata,
                 Err(error) => {
-                    // Revoke AI before general shutdown and before awaiting Axum.
+                    // Revoke AI and speech before general shutdown and before awaiting Axum.
                     state.begin_ai_shutdown();
                     shutdown.cancel();
                     serve_handle.abort();

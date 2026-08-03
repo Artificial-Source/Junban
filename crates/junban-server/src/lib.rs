@@ -22,6 +22,8 @@ mod routes;
 mod routes_ai;
 mod routes_ai_approvals;
 mod routes_ai_turns;
+mod routes_voice;
+mod speech_runtime;
 mod sse;
 
 use std::{
@@ -103,6 +105,7 @@ use crate::routes_ai_approvals::{approve_ai_approval, get_ai_approval, reject_ai
 use crate::routes_ai_turns::{
     create_ai_daily_briefing, edit_ai_response, regenerate_ai_response, retry_ai_response,
 };
+use crate::routes_voice::{create_voice_speech, create_voice_transcription};
 use crate::sse::{AppService, SseConnectionPermit};
 
 pub use crate::ai_runtime::{
@@ -133,6 +136,10 @@ pub use crate::owner_runtime::{
     resolve_default_profile_dir,
 };
 pub use crate::reminder_wake::{REMINDER_OVERDUE_WAKE_THROTTLE, REMINDER_WAKE_EVENT_TYPE};
+pub use crate::speech_runtime::{
+    MAX_ACTIVE_CLOUD_SPEECH, SpeechActivityGuard, SpeechActivityKind, SpeechActivitySupervisor,
+    SpeechRuntimeError,
+};
 
 /// Phase 2 HTTP body ceiling (matches frozen transport plan).
 pub const MAX_BODY_BYTES: usize = 512 * 1024;
@@ -152,6 +159,10 @@ pub const AI_RECONFIGURE_DRAIN_DEADLINE: Duration = Duration::from_secs(5);
 pub const MAX_AI_CONFIG_BODY_BYTES: usize = 32 * 1024;
 /// Strict ceiling for one basic AI response request body.
 pub const MAX_AI_RESPONSE_BODY_BYTES: usize = 32 * 1024;
+/// Strict JSON ceiling for one speech synthesis request.
+pub const MAX_SPEECH_SYNTHESIS_BODY_BYTES: usize = 32 * 1024;
+/// Multipart envelope ceiling around one independently bounded 25 MiB audio field.
+pub const MAX_SPEECH_MULTIPART_BODY_BYTES: usize = junban_ai::MAX_SPEECH_AUDIO_BYTES + 16 * 1024;
 const AUTH_ATTEMPTS: usize = 8;
 const AUTH_WINDOW: Duration = Duration::from_secs(30);
 pub const TOKEN_FILE: &str = "access-token";
@@ -438,6 +449,10 @@ pub struct ServerState {
     reminder_coordinator_stopped: Arc<AtomicBool>,
     /// Lazy AI provider runtime + live-run registry (normal owner only).
     ai_runtime: Arc<AiRuntimeSupervisor>,
+    /// Independent lazy cloud-speech activity and lifecycle authority.
+    speech_runtime: Arc<SpeechActivitySupervisor>,
+    /// Serializes atomic AI/speech lifecycle transitions against shutdown.
+    ai_speech_transition: Arc<Mutex<()>>,
     /// Serializes confirmed AI/voice reconfiguration and consistent config reads.
     pub(crate) ai_reconfigure: Arc<AsyncMutex<()>>,
     #[cfg(test)]
@@ -524,6 +539,8 @@ impl ServerState {
             reminder_coordinator: Arc::new(Mutex::new(None)),
             reminder_coordinator_stopped: Arc::new(AtomicBool::new(false)),
             ai_runtime: AiRuntimeSupervisor::new(),
+            speech_runtime: Arc::new(SpeechActivitySupervisor::new()),
+            ai_speech_transition: Arc::new(Mutex::new(())),
             ai_reconfigure: Arc::new(AsyncMutex::new(())),
             #[cfg(test)]
             ai_reconfigure_test_gate: Arc::new(AiReconfigureTestGate::default()),
@@ -551,10 +568,89 @@ impl ServerState {
         &self.ai_runtime
     }
 
+    /// Independent lazy cloud-speech activity authority.
+    #[must_use]
+    pub fn speech_runtime(&self) -> &Arc<SpeechActivitySupervisor> {
+        &self.speech_runtime
+    }
+
     /// Observation helper: provider HTTP client construction count at/after startup.
     #[must_use]
     pub fn ai_provider_client_construct_calls(&self) -> usize {
         self.ai_runtime.provider_client_construct_calls()
+    }
+
+    /// Observation helper for the independently lazy speech HTTP client.
+    #[must_use]
+    pub fn speech_provider_client_construct_calls(&self) -> usize {
+        self.speech_runtime.provider_client_construct_calls()
+    }
+
+    pub(crate) fn begin_ai_speech_reconfigure(
+        &self,
+    ) -> Result<(crate::ai_runtime::ReconfigureEpoch, u64), ()> {
+        let _transition = self
+            .ai_speech_transition
+            .lock()
+            .expect("AI/speech transition poisoned");
+        let ai_epoch = match self.ai_runtime.begin_reconfigure() {
+            Ok(epoch) => epoch,
+            Err(_) => {
+                self.ai_runtime.begin_permanent_drain();
+                self.speech_runtime.begin_permanent_drain();
+                return Err(());
+            }
+        };
+        match self.speech_runtime.begin_reconfigure() {
+            Ok(speech_epoch) => Ok((ai_epoch, speech_epoch)),
+            Err(_) => {
+                // This can occur only after a permanent speech drain. Invalidate
+                // the temporary AI epoch rather than allowing asymmetric resume.
+                self.ai_runtime.begin_permanent_drain();
+                self.speech_runtime.begin_permanent_drain();
+                Err(())
+            }
+        }
+    }
+
+    pub(crate) fn drop_ai_speech_reconfigure(
+        &self,
+        ai_epoch: crate::ai_runtime::ReconfigureEpoch,
+        speech_epoch: u64,
+    ) -> Result<(), ()> {
+        let _transition = self
+            .ai_speech_transition
+            .lock()
+            .expect("AI/speech transition poisoned");
+        self.ai_runtime
+            .drop_reconfigure_runtime(ai_epoch)
+            .map_err(|_| ())?;
+        self.speech_runtime
+            .drop_reconfigure_runtime(speech_epoch)
+            .map_err(|_| ())
+    }
+
+    pub(crate) fn finish_ai_speech_reconfigure(
+        &self,
+        ai_epoch: crate::ai_runtime::ReconfigureEpoch,
+        speech_epoch: u64,
+    ) -> Result<(), ()> {
+        let _transition = self
+            .ai_speech_transition
+            .lock()
+            .expect("AI/speech transition poisoned");
+        // Both exact dropped epochs are checked before either is resumed.
+        self.ai_runtime
+            .validate_finish_reconfigure(ai_epoch)
+            .map_err(|_| ())?;
+        self.speech_runtime
+            .validate_finish_reconfigure(speech_epoch)
+            .map_err(|_| ())?;
+        // Neither finish can race permanent drain while this lock is retained.
+        self.speech_runtime
+            .finish_reconfigure(speech_epoch)
+            .map_err(|_| ())?;
+        self.ai_runtime.finish_reconfigure(ai_epoch).map_err(|_| ())
     }
 
     /// Recover every exact consumed mutation approval before any normal service starts.
@@ -793,27 +889,49 @@ impl ServerState {
         }
     }
 
-    /// Synchronously close AI admission, invalidate any temporary epoch, and cancel all runs.
+    /// Synchronously close AI and cloud-speech admission and cancel all provider work.
     ///
-    /// Shutdown paths call this before general cancellation or waiting for Axum.
+    /// The shared transition lock prevents a temporary reconfiguration epoch from
+    /// reopening only one authority while shutdown begins.
     pub fn begin_ai_shutdown(&self) {
+        let _transition = self
+            .ai_speech_transition
+            .lock()
+            .expect("AI/speech transition poisoned");
         self.ai_runtime.begin_permanent_drain();
+        self.speech_runtime.begin_permanent_drain();
     }
 
-    /// Permanently cancel and drain AI work, then drop the lazy runtime on success.
+    /// Permanently cancel and drain AI and speech work, then drop both lazy runtimes.
     ///
-    /// On timeout, lifecycle stays permanently draining and fail-closed.
+    /// On timeout, both lifecycles stay permanently draining and fail-closed.
     pub async fn drain_ai_runtime(&self, deadline: Duration) -> bool {
-        self.ai_runtime.permanent_drain_and_drop(deadline).await
+        self.begin_ai_shutdown();
+        let started = tokio::time::Instant::now();
+        if !self.ai_runtime.wait_drained(deadline).await {
+            return false;
+        }
+        let remaining = deadline.saturating_sub(started.elapsed());
+        if !self.speech_runtime.wait_drained(remaining).await {
+            return false;
+        }
+        let _transition = self
+            .ai_speech_transition
+            .lock()
+            .expect("AI/speech transition poisoned");
+        self.ai_runtime.drop_permanent_runtime().is_ok()
+            && self.speech_runtime.drop_permanent_runtime().is_ok()
     }
 
-    /// Hosted-process AI teardown. A timeout may continue process exit, but AI
-    /// cancellation must already have begun before Axum graceful drain.
+    /// Hosted-process AI/speech teardown. A timeout may continue process exit,
+    /// but cancellation must already have begun before Axum graceful drain.
     pub async fn shutdown_ai_runtime(&self, deadline: Duration) {
-        if self.ai_runtime.permanent_drain_and_drop(deadline).await {
+        if self.drain_ai_runtime(deadline).await {
             return;
         }
-        tracing::warn!("AI runtime drain timed out during shutdown; continuing process shutdown");
+        tracing::warn!(
+            "AI or speech runtime drain timed out during shutdown; continuing process shutdown"
+        );
     }
 
     #[must_use]
@@ -1041,6 +1159,15 @@ fn api_route_table() -> Router<ServerState> {
         .route("/api/v1/nudges", get(nudges))
         .route("/api/v1/settings", get(get_settings).patch(patch_settings))
         .route("/api/v1/settings/temporal", get(get_temporal_settings))
+        .route(
+            "/api/v1/voice/transcriptions",
+            post(create_voice_transcription)
+                .layer(DefaultBodyLimit::max(MAX_SPEECH_MULTIPART_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/voice/speech",
+            post(create_voice_speech).layer(DefaultBodyLimit::max(MAX_SPEECH_SYNTHESIS_BODY_BYTES)),
+        )
         .route("/api/v1/ai/providers", get(list_ai_providers))
         .route(
             "/api/v1/ai/providers/{provider}/models",
@@ -1689,7 +1816,7 @@ fn secure_response(mut response: Response, request_id: &RequestId) -> Response {
     headers.insert(
         HeaderName::from_static("content-security-policy"),
         HeaderValue::from_static(
-            "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; connect-src 'self'",
+            "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://huggingface.co https://*.huggingface.co https://hf.co https://*.hf.co; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; manifest-src 'self'",
         ),
     );
     if let Ok(value) = HeaderValue::from_str(&request_id.0) {
@@ -1800,6 +1927,8 @@ impl Modify for SecurityAddon {
         routes::get_settings,
         routes::patch_settings,
         routes::get_temporal_settings,
+        routes_voice::create_voice_transcription,
+        routes_voice::create_voice_speech,
         routes_ai::list_ai_providers,
         routes_ai::get_ai_config,
         routes_ai::put_ai_config,
@@ -1991,6 +2120,10 @@ impl Modify for SecurityAddon {
         dto::AppSettingsResponse,
         dto::PatchSettingsRequest,
         dto::TemporalSettingsResponse,
+        routes_voice::SpeechTranscriptionMultipart,
+        routes_voice::SpeechBinaryResponse,
+        routes_voice::SpeechSynthesisRequest,
+        routes_voice::TranscriptionResponse,
         routes_ai::AiProviderPresetDto,
         routes_ai::SpeechProviderPresetDto,
         routes_ai::VoiceModeDto,

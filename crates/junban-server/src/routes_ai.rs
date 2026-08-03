@@ -2023,22 +2023,29 @@ where
     let worker_request_id = request_id.clone();
     let worker = tokio::spawn(async move {
         let _serial = serial;
-        let runtime = Arc::clone(worker_state.ai_runtime());
-        let epoch = runtime
-            .begin_reconfigure()
-            .map_err(|_| ai_runtime_unavailable(&worker_request_id))?;
-        if !runtime.wait_drained(AI_RECONFIGURE_DRAIN_DEADLINE).await {
+        let (ai_epoch, speech_epoch) = worker_state
+            .begin_ai_speech_reconfigure()
+            .map_err(|()| ai_runtime_unavailable(&worker_request_id))?;
+        let (ai_drained, speech_drained) = tokio::join!(
+            worker_state
+                .ai_runtime()
+                .wait_drained(AI_RECONFIGURE_DRAIN_DEADLINE),
+            worker_state
+                .speech_runtime()
+                .wait_drained(AI_RECONFIGURE_DRAIN_DEADLINE),
+        );
+        if !ai_drained || !speech_drained {
             return Err(ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "ai_reconfigure_timeout",
-                "AI runtime did not drain before the reconfiguration deadline",
+                "AI or speech runtime did not drain before the reconfiguration deadline",
                 true,
                 &worker_request_id,
             ));
         }
-        runtime
-            .drop_reconfigure_runtime(epoch)
-            .map_err(|_| ai_runtime_unavailable(&worker_request_id))?;
+        worker_state
+            .drop_ai_speech_reconfigure(ai_epoch, speech_epoch)
+            .map_err(|()| ai_runtime_unavailable(&worker_request_id))?;
 
         let result = commit.await;
         #[cfg(test)]
@@ -2046,9 +2053,9 @@ where
             .ai_reconfigure_test_gate
             .pause_after_commit()
             .await;
-        runtime
-            .finish_reconfigure(epoch)
-            .map_err(|_| ai_runtime_unavailable(&worker_request_id))?;
+        worker_state
+            .finish_ai_speech_reconfigure(ai_epoch, speech_epoch)
+            .map_err(|()| ai_runtime_unavailable(&worker_request_id))?;
         result
     });
     worker.await.map_err(|_| {

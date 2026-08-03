@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime_metadata = match RuntimeMetadataFile::create(&data_dir, address, &instance_id) {
         Ok(metadata) => metadata,
         Err(error) => {
-            // Rollback revokes AI before general shutdown and profile release.
+            // Rollback revokes provider work before general shutdown and profile release.
             state.begin_ai_shutdown();
             shutdown.cancel();
             state
@@ -113,8 +113,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     None,
                     "graceful shutdown signal received",
                 );
-                // Revoke AI provider authority before general cancellation and
-                // before Axum begins draining active responses.
+                // Revoke AI and speech provider authority before general cancellation
+                // and before Axum begins draining active responses.
                 state.begin_ai_shutdown();
                 shutdown.cancel();
             }

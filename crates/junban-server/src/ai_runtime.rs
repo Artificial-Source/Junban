@@ -853,8 +853,27 @@ impl AiRuntimeSupervisor {
         Ok(())
     }
 
+    pub(crate) fn validate_finish_reconfigure(
+        &self,
+        epoch: ReconfigureEpoch,
+    ) -> Result<(), AiRuntimeError> {
+        let inner = self.inner.lock().expect("AI runtime poisoned");
+        if inner.lifecycle
+            != (AiRuntimeLifecycle::Reconfiguring {
+                epoch,
+                runtime_dropped: true,
+            })
+            || inner.runtime.is_some()
+            || !inner.active.is_empty()
+        {
+            return Err(AiRuntimeError::InvalidLifecycle);
+        }
+        Ok(())
+    }
+
     /// Re-open admission only for the exact epoch whose runtime was successfully dropped.
     pub(crate) fn finish_reconfigure(&self, epoch: ReconfigureEpoch) -> Result<(), AiRuntimeError> {
+        self.validate_finish_reconfigure(epoch)?;
         let mut inner = self.inner.lock().expect("AI runtime poisoned");
         if inner.lifecycle
             != (AiRuntimeLifecycle::Reconfiguring {

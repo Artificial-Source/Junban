@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import type { TaskDto } from "../api/client";
 import { getTask } from "../api/client";
+import { useLocalVoiceAdapters } from "../voice/useLocalVoiceAdapters";
 import { AIChatNotConfigured } from "./AIChatNotConfigured";
 import { AIChatPanel, type AIChatPanelFixture } from "./AIChatPanel";
 import { isAiConfigured } from "./config-status";
@@ -61,6 +62,14 @@ export function AIChatRoute({
   const [focusedTaskId] = useState<string | null>(() => (fixture ? null : readFocusedTaskId()));
   const [launchPrompt] = useState<string | null>(() => (fixture ? null : readFocusedTaskPrompt()));
   const [focusedTask, setFocusedTask] = useState<TaskDto | null>(null);
+
+  const configuredReady =
+    !fixture && loadState.status === "ready" && isAiConfigured(loadState.config);
+  const localVoice = useLocalVoiceAdapters({
+    settings: configuredReady && loadState.status === "ready" ? loadState.config.voice : null,
+    // Fixtures and not-configured shells must not construct local adapters.
+    enabled: configuredReady,
+  });
 
   // Production: load confirmed config once on entry.
   useEffect(() => {
@@ -164,6 +173,8 @@ export function AIChatRoute({
         launchPrompt={launchPrompt}
         welcomeStats={welcomeStats}
         voiceSettings={loadState.config.voice}
+        localStt={localVoice.localStt}
+        localTts={localVoice.localTts}
         fixture={fixture}
       />
     </div>

@@ -8,7 +8,7 @@
 import { startBrowserStt } from "./browser-stt";
 import { isPermissionVoiceError, voiceError } from "./speech-errors";
 import { createVadSession, type VadSession } from "./vad-session";
-import { isCloudStt } from "./voice-capabilities";
+import { isCloudStt, isLocalSttSelected } from "./voice-capabilities";
 import { startCallTimer, type VoiceRuntime } from "./voice-runtime";
 import { speakText, submitTranscript } from "./voice-speech";
 import { transcribeBlob } from "./voice-ptt";
@@ -37,10 +37,11 @@ export function startCall(rt: VoiceRuntime, options: StartCallOptions): void {
   rt.setPhase("arming");
 
   const conf = rt.settings.current;
+  // Local STT selection uses VAD capture (WAV) — never the browser recognition loop.
   const useVad =
     conf.voice_mode === "hands_free" ||
     isCloudStt(conf) ||
-    rt.localStt?.status === "ready" ||
+    isLocalSttSelected(rt.localStt) ||
     conf.stt_provider !== "browser";
 
   void (async () => {
@@ -115,8 +116,9 @@ export function beginBrowserCallListenLoop(
   if (!options.isCallActive) return null;
   if (options.phase !== "listening") return null;
   const conf = rt.settings.current;
+  // Browser recognition loop only when no local adapter is selected.
   const useBrowserLoop =
-    conf.stt_provider === "browser" && !isCloudStt(conf) && rt.localStt?.status !== "ready";
+    conf.stt_provider === "browser" && !isCloudStt(conf) && !isLocalSttSelected(rt.localStt);
   if (!useBrowserLoop) return null;
   if (!options.browserSttAvailable) return null;
 

@@ -49,10 +49,22 @@ describe("settings AI/Voice lazy boundary", () => {
   it("Voice local model card imports manifest data only", () => {
     expect(localModelCardSource).toMatch(/voice\/local\/manifest/);
     expect(localModelCardSource).not.toMatch(
-      /voice\/local\/engines|worker-host|verify-fetch|opfs-store/,
+      /voice\/local\/engines|worker-host|verify-fetch|opfs-store|worker-client/,
     );
     expect(localModelCardSource).not.toMatch(
       /@huggingface\/transformers|kokoro-js|piper-tts-web|vad-web/,
     );
+  });
+
+  it("Voice tab does not statically import local engines or workers", async () => {
+    const voiceTabSource = (await import("../voice/VoiceTab.tsx?raw")).default as string;
+    const controllerSource = (await import("../voice/useLocalModelController.ts?raw"))
+      .default as string;
+    expect(voiceTabSource).not.toMatch(
+      /voice\/local\/engines|worker-host|@huggingface\/transformers/,
+    );
+    expect(controllerSource).toMatch(/import\("\.\.\/\.\.\/\.\.\/voice\/local\/index"\)/);
+    expect(controllerSource).not.toMatch(/from\s+["'].*voice\/local\/index["']/);
+    expect(controllerSource).not.toMatch(/worker-host|engines\/load-|new Worker/);
   });
 });

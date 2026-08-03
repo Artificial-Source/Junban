@@ -32,18 +32,34 @@ export function isCloudTts(settings: ConfirmedVoiceSettings): boolean {
   );
 }
 
+/**
+ * Local adapter present means the user explicitly selected a local package.
+ * Presence alone is not readiness — and must not fall back to Browser speech.
+ */
+export function isLocalSttSelected(localStt: LocalSttAdapter | null | undefined): boolean {
+  return localStt != null;
+}
+
+export function isLocalTtsSelected(localTts: LocalTtsAdapter | null | undefined): boolean {
+  return localTts != null;
+}
+
 export function resolveTtsAvailable(
   settings: ConfirmedVoiceSettings,
   localTts: LocalTtsAdapter | null | undefined,
   fixture: boolean,
 ): boolean {
-  const browserTtsAvailable = fixture ? true : isBrowserTtsAvailable();
-  return (
-    Boolean(settings.tts_enabled) &&
-    (isCloudTts(settings) ||
-      (settings.tts_provider === "browser" && browserTtsAvailable) ||
-      localTts?.status === "ready")
-  );
+  if (!settings.tts_enabled) return false;
+  // Cloud confirmed never consults local adapters (hook passes null).
+  if (isCloudTts(settings)) return true;
+  // Explicit local selection: available only when ready — never Browser fallback.
+  if (isLocalTtsSelected(localTts)) {
+    return localTts!.status === "ready";
+  }
+  if (settings.tts_provider === "browser") {
+    return fixture ? true : isBrowserTtsAvailable();
+  }
+  return false;
 }
 
 export function resolveSttReady(
@@ -51,12 +67,15 @@ export function resolveSttReady(
   localStt: LocalSttAdapter | null | undefined,
   fixture: boolean,
 ): boolean {
-  const browserSttAvailable = fixture ? true : isBrowserSttAvailable();
-  return (
-    isCloudStt(settings) ||
-    (settings.stt_provider === "browser" && browserSttAvailable) ||
-    localStt?.status === "ready"
-  );
+  if (isCloudStt(settings)) return true;
+  // Explicit local selection: ready only when adapter is ready — never Browser.
+  if (isLocalSttSelected(localStt)) {
+    return localStt!.status === "ready";
+  }
+  if (settings.stt_provider === "browser") {
+    return fixture ? true : isBrowserSttAvailable();
+  }
+  return false;
 }
 
 export function phaseToCallState(phase: VoicePhase): VoiceCallPresentationState | "idle" {

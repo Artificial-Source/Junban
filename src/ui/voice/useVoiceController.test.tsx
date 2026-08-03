@@ -176,4 +176,31 @@ describe("useVoiceController", () => {
     expect(serialized).not.toMatch(/sk-|Bearer |access_token/);
     expect(serialized).not.toContain("raw transcript secret");
   });
+
+  it("hides PTT when local STT is selected but not ready (no browser fallback)", () => {
+    render({
+      localStt: {
+        status: "loading",
+        async transcribe() {
+          return "should-not-run";
+        },
+        dispose() {},
+      },
+    });
+    expect(latest?.showPttButton).toBe(false);
+    expect(latest?.browserSttAvailable).toBeTypeOf("boolean");
+  });
+
+  it("enables PTT when local STT adapter is ready", () => {
+    render({
+      localStt: {
+        status: "ready",
+        async transcribe() {
+          return "ok";
+        },
+        dispose() {},
+      },
+    });
+    expect(latest?.showPttButton).toBe(true);
+  });
 });

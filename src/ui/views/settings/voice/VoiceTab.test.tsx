@@ -97,12 +97,21 @@ describe("VoiceTab", () => {
     expect(ttsValues).toEqual(["browser", "openai", "groq", "inworld"]);
   });
 
-  it("shows local model manifest metadata as not loaded", async () => {
+  it("shows local model manifest metadata and browser selection controls", async () => {
     await mount();
+    // Allow dynamic local module + status refresh.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(container.textContent).toContain("Local Models");
-    expect(container.textContent).toContain("Not loaded");
     expect(container.textContent).toMatch(/Whisper|Kokoro|Piper/i);
     expect(container.textContent).toMatch(/License/);
+    expect(container.textContent).toMatch(/Browser speech/i);
+    expect(container.querySelector("#local-stt-selection")).toBeTruthy();
+    expect(container.querySelector("#local-tts-selection")).toBeTruthy();
+    expect(container.textContent).not.toMatch(/connect in a later wave/i);
   });
 
   it("keeps microphone gated behind explicit permission control", async () => {

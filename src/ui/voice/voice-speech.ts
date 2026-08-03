@@ -9,7 +9,7 @@ import type { ChatMessageView } from "../ai/message-view";
 import { speakBrowserTts, whenBrowserVoicesReady } from "./browser-tts";
 import { createVoiceSpeech, playCloudAudioBlob } from "./cloud-speech";
 import { voiceError } from "./speech-errors";
-import { isCloudTts } from "./voice-capabilities";
+import { isCloudTts, isLocalTtsSelected } from "./voice-capabilities";
 import { resumeListeningOrIdle, type VoiceRuntime } from "./voice-runtime";
 
 /** Speak text under an exact response+call generation fence. */
@@ -30,13 +30,8 @@ export async function speakText(
   const conf = rt.settings.current;
   const localTts = rt.localTts;
   try {
-    if (localTts?.status === "ready") {
-      rt.resources.current.browserTtsCancel = () => localTts.cancel();
-      await localTts.speak(trimmed, {
-        signal: controller.signal,
-        voice: conf.tts_voice,
-      });
-    } else if (isCloudTts(conf)) {
+    // Cloud confirmed never yields to local.
+    if (isCloudTts(conf)) {
       const result = await createVoiceSpeech(trimmed, { signal: controller.signal });
       if (!rt.isLive({ response: responseGen, call: callGen })) return;
       if (result.status !== "ok") {
@@ -46,6 +41,15 @@ export async function speakText(
       const playback = playCloudAudioBlob(result.blob, { signal: controller.signal });
       rt.resources.current.cloudPlaybackStop = () => playback.stop();
       await playback.done;
+    } else if (localTts?.status === "ready") {
+      rt.resources.current.browserTtsCancel = () => localTts.cancel();
+      await localTts.speak(trimmed, {
+        signal: controller.signal,
+        voice: conf.tts_voice,
+      });
+    } else if (isLocalTtsSelected(localTts)) {
+      // Explicit local TTS selected but not ready — suppress Browser TTS.
+      return;
     } else if (conf.tts_provider === "browser" && conf.tts_enabled) {
       await whenBrowserVoicesReady();
       if (!rt.isLive({ response: responseGen, call: callGen })) return;

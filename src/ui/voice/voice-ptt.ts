@@ -10,7 +10,7 @@ import { createVoiceTranscription } from "./cloud-speech";
 import { createPttCapture, type PttCaptureHandle } from "./media-recorder";
 import { voiceError } from "./speech-errors";
 import type { VoiceError } from "./types";
-import { isCloudStt } from "./voice-capabilities";
+import { isCloudStt, isLocalSttSelected } from "./voice-capabilities";
 import { submitTranscript } from "./voice-speech";
 import type { VoiceRuntime } from "./voice-runtime";
 
@@ -31,9 +31,8 @@ export async function transcribeBlob(
   const localStt = rt.localStt;
   try {
     let text = "";
-    if (localStt?.status === "ready") {
-      text = await localStt.transcribe(blob, { signal: controller.signal });
-    } else if (isCloudStt(conf)) {
+    // Cloud confirmed never yields to local — even if a local adapter is ready.
+    if (isCloudStt(conf)) {
       const result = await createVoiceTranscription(blob, { signal: controller.signal });
       if (result.status !== "ok") {
         if (result.error.code !== "aborted" && rt.isLive({ utterance: utteranceGen })) {
@@ -44,6 +43,14 @@ export async function transcribeBlob(
         return;
       }
       text = result.text;
+    } else if (localStt?.status === "ready") {
+      text = await localStt.transcribe(blob, { signal: controller.signal });
+    } else if (isLocalSttSelected(localStt)) {
+      // Explicit local selection that is not ready — never Browser fallback.
+      rt.setError(voiceError("unsupported", "Local speech model is not ready."));
+      rt.setPhase(rt.callActive.current ? "listening" : "error");
+      if (rt.callActive.current) void rt.resources.current.vad?.resume();
+      return;
     } else {
       // Browser STT cannot transcribe blobs — should not reach here.
       rt.setError(voiceError("unsupported"));
@@ -51,9 +58,13 @@ export async function transcribeBlob(
       return;
     }
     await submitTranscript(rt, text, utteranceGen, callGen);
-  } catch {
+  } catch (error) {
     if (rt.isLive({ utterance: utteranceGen })) {
-      rt.setError(voiceError("unknown"));
+      if (error && typeof error === "object" && "code" in error && "message" in error) {
+        rt.setError(error as VoiceError);
+      } else {
+        rt.setError(voiceError("unknown"));
+      }
       rt.setPhase(rt.callActive.current ? "listening" : "error");
     }
   }
@@ -158,10 +169,14 @@ export function togglePushToTalk(rt: VoiceRuntime, options: TogglePttOptions): v
   if (!rt.enabled) return;
   if (rt.callActive.current) return;
 
+  const conf = rt.settings.current;
+  const useBrowserRecognition =
+    conf.stt_provider === "browser" && !isCloudStt(conf) && !isLocalSttSelected(rt.localStt);
+  const useBlobCapture = isCloudStt(conf) || isLocalSttSelected(rt.localStt);
+
   if (rt.phase.current === "listening" || rt.phase.current === "arming") {
     const utteranceGen = rt.generations.current.utterance;
-    const conf = rt.settings.current;
-    if (conf.stt_provider === "browser" && !isCloudStt(conf)) {
+    if (useBrowserRecognition) {
       // stop() flushes final; do not invalidate before requesting stop.
       rt.resources.current.recognition?.stop();
       return;
@@ -175,8 +190,19 @@ export function togglePushToTalk(rt: VoiceRuntime, options: TogglePttOptions): v
   rt.bump("utterance");
   const utteranceGen = rt.generations.current.utterance;
   rt.releasePhysical();
-  const conf = rt.settings.current;
-  if (conf.stt_provider === "browser" && !isCloudStt(conf)) {
+
+  // Explicit local selection: MediaRecorder capture only when ready — never Browser STT.
+  if (isLocalSttSelected(rt.localStt)) {
+    if (rt.localStt?.status !== "ready") {
+      rt.setError(voiceError("unsupported", "Local speech model is not ready."));
+      rt.setPhase("error");
+      return;
+    }
+    void startCloudPtt(rt, utteranceGen);
+    return;
+  }
+
+  if (useBrowserRecognition) {
     if (!options.browserSttAvailable) {
       rt.setError(voiceError("unsupported"));
       rt.setPhase("error");
@@ -185,5 +211,8 @@ export function togglePushToTalk(rt: VoiceRuntime, options: TogglePttOptions): v
     startBrowserListening(rt, utteranceGen, rt.generations.current.call, false);
     return;
   }
-  void startCloudPtt(rt, utteranceGen);
+
+  if (useBlobCapture) {
+    void startCloudPtt(rt, utteranceGen);
+  }
 }

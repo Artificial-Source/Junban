@@ -117,14 +117,21 @@ export function createVoiceGenerations(): VoiceGenerations {
 
 export type LocalAdapterStatus = "unavailable" | "idle" | "loading" | "ready" | "error";
 
-/** Injected later by local-engine waves — do not import Whisper here. */
+/**
+ * Injected by the AI-route local adapter hook after explicit local preference
+ * selection. Controllers must not import Whisper here. Adapter present means
+ * local is selected — not ready implies no Browser speech fallback.
+ */
 export type LocalSttAdapter = {
   readonly status: LocalAdapterStatus;
   transcribe(audio: Blob, options?: { signal?: AbortSignal }): Promise<string>;
   dispose(): void;
 };
 
-/** Injected later by local-engine waves — do not import Kokoro/Piper here. */
+/**
+ * Injected by the AI-route local adapter hook after explicit local preference
+ * selection. Controllers must not import Kokoro/Piper here.
+ */
 export type LocalTtsAdapter = {
   readonly status: LocalAdapterStatus;
   speak(text: string, options?: { signal?: AbortSignal; voice?: string | null }): Promise<void>;

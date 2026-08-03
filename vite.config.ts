@@ -63,6 +63,9 @@ export default defineConfig({
   },
   worker: {
     format: "es",
+    // Worker builds use a separate pipeline; without this plugin the
+    // `@junban/ort-*-wasm?url` ids fail to resolve inside engine workers.
+    plugins: () => [junbanBinaryAssetUrls()],
   },
   build: {
     // Enables scripts/check-local-voice-assets.mjs to walk the static import graph.

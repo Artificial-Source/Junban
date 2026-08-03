@@ -24,6 +24,7 @@ import {
 } from "./constants";
 import { LocalModelsSection } from "./LocalModelCard";
 import { MicrophoneSelector } from "./MicrophoneSelector";
+import { useLocalModelController } from "./useLocalModelController";
 
 function isCloudProvider(id: SpeechProviderPresetDto): boolean {
   return id !== "browser";
@@ -31,6 +32,7 @@ function isCloudProvider(id: SpeechProviderPresetDto): boolean {
 
 export function VoiceTab() {
   const controller = useAiConfigController();
+  const localModels = useLocalModelController();
   const {
     loading,
     saving,
@@ -381,7 +383,7 @@ export function VoiceTab() {
           </div>
         </fieldset>
 
-        <LocalModelsSection />
+        <LocalModelsSection controller={localModels} />
 
         <button
           type="button"

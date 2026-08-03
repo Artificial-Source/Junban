@@ -21,6 +21,8 @@ import type { VoiceSettingsDto } from "./types";
 import {
   VoiceCallOverlay,
   useVoiceController,
+  type LocalSttAdapter,
+  type LocalTtsAdapter,
   type VoiceFixture,
   type VoiceCallPresentationState,
 } from "../voice";
@@ -53,6 +55,9 @@ export interface AIChatPanelProps {
   welcomeStats?: WelcomeStats;
   /** Server-confirmed voice settings (never draft). */
   voiceSettings?: VoiceSettingsDto | null;
+  /** Injected local adapters from the route hook (null when browser/cloud). */
+  localStt?: LocalSttAdapter | null;
+  localTts?: LocalTtsAdapter | null;
   conversationOptions?: Omit<UseAiConversationOptions, "focusedTaskId" | "enabled">;
   /** Explicit fixture view-model only — production must not pass this. */
   fixture?: AIChatPanelFixture;
@@ -83,6 +88,8 @@ export function AIChatPanel({
   launchPrompt = null,
   welcomeStats,
   voiceSettings = null,
+  localStt = null,
+  localTts = null,
   conversationOptions,
   fixture,
 }: AIChatPanelProps) {
@@ -122,6 +129,8 @@ export function AIChatPanel({
     stopConversation: () => conversation.stop(),
     enabled: !fixture?.messages,
     fixture: fixture?.voice ?? null,
+    localStt: fixture ? null : localStt,
+    localTts: fixture ? null : localTts,
   });
 
   // Focused-task launch: prefill always; auto-send only with a concrete prompt.

@@ -906,7 +906,8 @@ export function AppLayout() {
                 {route.name === "ai-chat" && (
                   <Suspense fallback={<AIChatRouteFallback />}>
                     <AIChatRoute
-                      onOpenSettings={() => handleNavigate({ name: "settings" })}
+                      onOpenSettings={() => handleNavigate({ name: "settings", tab: "ai" })}
+                      onOpenVoiceSettings={() => handleNavigate({ name: "settings", tab: "voice" })}
                       onSelectTask={handleSelectTask}
                     />
                   </Suspense>

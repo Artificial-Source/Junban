@@ -1,23 +1,44 @@
 /**
- * Local model package card — manifest metadata + deferred controller hooks.
+ * Local model package card — manifest metadata + verified status/selection.
  *
- * Does not import engine packages, workers, or cache loaders. Initial state is
- * always "not loaded" unless a later controller supplies verified status.
+ * Does not import engine packages, workers, or cache loaders. Status and load
+ * actions come from the Voice-tab controller after dynamic local import.
  */
 
 import { useId, useState } from "react";
 import { AlertCircle, CheckCircle2, Download, Trash2 } from "lucide-react";
 import { LOCAL_VOICE_MANIFEST } from "../../../voice/local/manifest";
 import type { LocalVoicePackage } from "../../../voice/local/types";
+import {
+  isLocalSttPackageId,
+  isLocalTtsPackageId,
+  type LocalSttPreference,
+  type LocalTtsPreference,
+  type LocalVoicePreferences,
+} from "../../../voice/localPreferences";
 import { formatBytes, shortDigest } from "./constants";
 
 export type LocalModelVerifiedStatus = "not_loaded" | "ready" | "error";
 
+export type LocalModelLoadProgressView = {
+  packageId: string;
+  loaded: number;
+  total: number;
+};
+
 export type LocalModelController = {
-  /** Verified status supplied by a later worker controller. Defaults to not_loaded. */
   getStatus?: (packageId: string) => LocalModelVerifiedStatus;
   onConsentLoad?: (packageId: string) => void | Promise<void>;
   onRemove?: (packageId: string) => void | Promise<void>;
+  isSelected?: (packageId: string) => boolean;
+  onSelect?: (packageId: string) => void;
+  progressFor?: (packageId: string) => LocalModelLoadProgressView | null;
+  busyPackageId?: string | null;
+  preferences?: LocalVoicePreferences;
+  selectStt?: (value: LocalSttPreference) => void;
+  selectTts?: (value: LocalTtsPreference) => void;
+  error?: string | null;
+  clearError?: () => void;
 };
 
 function packageTotalBytes(pkg: LocalVoicePackage): number {
@@ -27,6 +48,15 @@ function packageTotalBytes(pkg: LocalVoicePackage): number {
 function primaryDigest(pkg: LocalVoicePackage): string {
   const largest = [...pkg.files].sort((a, b) => b.bytes - a.bytes)[0];
   return largest?.sha256 ?? "";
+}
+
+function progressLabel(progress: LocalModelLoadProgressView | null | undefined): string | null {
+  if (!progress) return null;
+  if (progress.total > 0) {
+    const pct = Math.min(100, Math.round((progress.loaded / progress.total) * 100));
+    return `Loading ${pct}%`;
+  }
+  return "Loading…";
 }
 
 export function LocalModelCard({
@@ -39,34 +69,34 @@ export function LocalModelCard({
   const consentId = useId();
   const [consented, setConsented] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const [busy, setBusy] = useState(false);
   const status = controller?.getStatus?.(pkg.id) ?? "not_loaded";
+  const selected = controller?.isSelected?.(pkg.id) ?? false;
+  const busy =
+    controller?.busyPackageId === pkg.id ||
+    (controller?.busyPackageId != null && controller.busyPackageId !== "");
+  const cardBusy = controller?.busyPackageId === pkg.id;
+  const progress = controller?.progressFor?.(pkg.id) ?? null;
   const total = packageTotalBytes(pkg);
   const digest = primaryDigest(pkg);
+  const loadAvailable = Boolean(controller?.onConsentLoad);
+  const removeAvailable = Boolean(controller?.onRemove);
+  const selectAvailable = Boolean(controller?.onSelect) && status === "ready";
 
   const handleLoad = async () => {
-    if (!consented || !controller?.onConsentLoad || busy) return;
-    setBusy(true);
-    try {
-      await controller.onConsentLoad(pkg.id);
-    } finally {
-      setBusy(false);
-    }
+    if (!consented || !controller?.onConsentLoad || cardBusy) return;
+    await controller.onConsentLoad(pkg.id);
   };
 
   const handleRemove = async () => {
-    if (!controller?.onRemove || busy) return;
+    if (!controller?.onRemove || cardBusy) return;
     setConfirmRemove(false);
-    setBusy(true);
-    try {
-      await controller.onRemove(pkg.id);
-    } finally {
-      setBusy(false);
-    }
+    await controller.onRemove(pkg.id);
   };
 
-  const loadAvailable = Boolean(controller?.onConsentLoad);
-  const removeAvailable = Boolean(controller?.onRemove);
+  const handleSelect = () => {
+    if (!selectAvailable || !controller?.onSelect || cardBusy) return;
+    controller.onSelect(pkg.id);
+  };
 
   return (
     <div
@@ -80,6 +110,11 @@ export function LocalModelCard({
             {pkg.engine.toUpperCase()}
           </span>
           <span className="text-[10px] text-on-surface-muted">{formatBytes(total)}</span>
+          {selected && status === "ready" && (
+            <span className="rounded bg-accent-action/15 px-1.5 py-0.5 text-[10px] text-accent-foreground">
+              Selected
+            </span>
+          )}
         </div>
         <p className="mt-0.5 truncate text-xs text-on-surface-muted">
           {pkg.repo} @ {pkg.revision.slice(0, 12)}
@@ -104,15 +139,21 @@ export function LocalModelCard({
               id={consentId}
               type="checkbox"
               checked={consented}
-              disabled={!loadAvailable || busy}
+              disabled={!loadAvailable || cardBusy || busy}
               onChange={(event) => setConsented(event.target.checked)}
               className="mt-0.5 accent-accent-action"
             />
             <span>
               I understand this downloads the pinned revision from Hugging Face and verifies SHA-256
-              before use. Browser speech remains available if load fails.
+              before use. Choose Browser speech explicitly to leave a local model.
             </span>
           </label>
+        )}
+
+        {cardBusy && (
+          <p className="mt-2 text-[11px] text-on-surface-muted" role="status" aria-live="polite">
+            {progressLabel(progress) ?? "Working…"}
+          </p>
         )}
 
         {confirmRemove && (
@@ -134,13 +175,6 @@ export function LocalModelCard({
             </button>
           </div>
         )}
-
-        {!loadAvailable && status === "not_loaded" && (
-          <p className="mt-2 text-[11px] text-on-surface-muted">
-            Load controls connect in a later wave. Manifest details are shown for review only — this
-            package is not loaded.
-          </p>
-        )}
       </div>
 
       <div className="ml-2 flex shrink-0 flex-col items-end gap-2">
@@ -150,11 +184,27 @@ export function LocalModelCard({
               <CheckCircle2 size={12} aria-hidden="true" />
               Ready
             </span>
+            {selectAvailable &&
+              (selected ? (
+                <span className="text-xs font-medium text-accent-foreground" aria-current="true">
+                  Selected
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  aria-label={`Use ${pkg.displayName}`}
+                  disabled={cardBusy}
+                  onClick={handleSelect}
+                  className="text-xs text-accent-foreground transition-colors hover:text-accent-foreground-hover disabled:opacity-50"
+                >
+                  Use
+                </button>
+              ))}
             {removeAvailable && (
               <button
                 type="button"
                 aria-label={`Remove ${pkg.displayName}`}
-                disabled={busy}
+                disabled={cardBusy}
                 onClick={() => setConfirmRemove(true)}
                 className="p-1 text-on-surface-muted transition-colors hover:text-error disabled:opacity-50"
               >
@@ -170,8 +220,9 @@ export function LocalModelCard({
         ) : loadAvailable ? (
           <button
             type="button"
-            disabled={!consented || busy}
+            disabled={!consented || cardBusy || Boolean(controller?.busyPackageId)}
             onClick={() => void handleLoad()}
+            aria-label={`Load ${pkg.displayName}`}
             className="flex items-center gap-1 text-xs text-accent-foreground transition-colors hover:text-accent-foreground-hover disabled:opacity-50"
           >
             <Download size={12} aria-hidden="true" />
@@ -187,15 +238,114 @@ export function LocalModelCard({
 
 export function LocalModelsSection({ controller }: { controller?: LocalModelController }) {
   const packages = LOCAL_VOICE_MANIFEST.packages;
+  const prefs = controller?.preferences;
+  const sttValue = prefs?.stt ?? "browser";
+  const ttsValue = prefs?.tts ?? "browser";
 
   return (
     <fieldset className="space-y-4" data-testid="local-models-section">
       <legend className="mb-2 text-sm font-semibold text-on-surface">Local Models</legend>
       <p className="-mt-2 text-xs text-on-surface-muted">
-        Local models run in your browser after an explicit load. Browser speech remains the
-        fallback. Packages are pinned by source, revision, license, size, and digest.
+        Local models run in your browser after an explicit load. Browser speech is used only when
+        you select it — local load or inference failure does not fall back automatically. Packages
+        are pinned by source, revision, license, size, and digest.
       </p>
-      <div className="space-y-3">
+
+      {controller?.error && (
+        <p role="alert" className="flex items-center gap-1.5 text-xs text-error">
+          <AlertCircle size={12} aria-hidden="true" />
+          <span>{controller.error}</span>
+          {controller.clearError && (
+            <button type="button" className="underline" onClick={controller.clearError}>
+              Dismiss
+            </button>
+          )}
+        </p>
+      )}
+
+      {(controller?.selectStt || controller?.selectTts) && (
+        <div className="space-y-3 rounded-lg border border-border bg-surface p-3">
+          <p className="text-xs font-medium text-on-surface-secondary">Active local selection</p>
+          {controller.selectStt && (
+            <div>
+              <label
+                htmlFor="local-stt-selection"
+                className="mb-1 block text-xs font-medium text-on-surface-secondary"
+              >
+                Speech-to-text
+              </label>
+              <select
+                id="local-stt-selection"
+                aria-label="Local speech-to-text selection"
+                value={sttValue}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === "browser" || isLocalSttPackageId(value)) {
+                    controller.selectStt?.(value);
+                  }
+                }}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface"
+              >
+                <option value="browser">Browser speech</option>
+                {packages
+                  .filter((pkg) => isLocalSttPackageId(pkg.id))
+                  .map((pkg) => (
+                    <option
+                      key={pkg.id}
+                      value={pkg.id}
+                      disabled={(controller.getStatus?.(pkg.id) ?? "not_loaded") !== "ready"}
+                    >
+                      {pkg.displayName}
+                      {(controller.getStatus?.(pkg.id) ?? "not_loaded") !== "ready"
+                        ? " (not loaded)"
+                        : ""}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          )}
+          {controller.selectTts && (
+            <div>
+              <label
+                htmlFor="local-tts-selection"
+                className="mb-1 block text-xs font-medium text-on-surface-secondary"
+              >
+                Text-to-speech
+              </label>
+              <select
+                id="local-tts-selection"
+                aria-label="Local text-to-speech selection"
+                value={ttsValue}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === "browser" || isLocalTtsPackageId(value)) {
+                    controller.selectTts?.(value);
+                  }
+                }}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface"
+              >
+                <option value="browser">Browser speech</option>
+                {packages
+                  .filter((pkg) => isLocalTtsPackageId(pkg.id))
+                  .map((pkg) => (
+                    <option
+                      key={pkg.id}
+                      value={pkg.id}
+                      disabled={(controller.getStatus?.(pkg.id) ?? "not_loaded") !== "ready"}
+                    >
+                      {pkg.displayName}
+                      {(controller.getStatus?.(pkg.id) ?? "not_loaded") !== "ready"
+                        ? " (not loaded)"
+                        : ""}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="space-y-3" aria-live="polite">
         {packages.map((pkg) => (
           <LocalModelCard key={pkg.id} pkg={pkg} controller={controller} />
         ))}

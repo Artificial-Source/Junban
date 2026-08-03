@@ -60,5 +60,28 @@ describe("voice module boundary", () => {
     expect(index).not.toContain("loadKokoroEngine");
     expect(index).not.toContain("loadPiperEngine");
     expect(index).not.toContain("/workers/");
+    expect(index).not.toContain("local-adapters");
+    expect(index).not.toContain("worker-client");
+  });
+
+  it("useLocalVoiceAdapters keeps local engines behind dynamic import", () => {
+    const source = readFileSync(path.join(voiceRoot, "useLocalVoiceAdapters.ts"), "utf8");
+    expect(source).toMatch(/import\("\.\/local-adapters"\)/);
+    expect(source).not.toMatch(/from\s+["']\.\/local-adapters["']/);
+    expect(source).not.toMatch(/from\s+["']\.\/local["']/);
+    expect(source).not.toContain("worker-host");
+    expect(source).not.toContain("loadWhisperEngine");
+    expect(source).not.toMatch(/@huggingface\/transformers|kokoro-js|piper-tts-web/);
+  });
+
+  it("AI chat route does not statically import local adapters or engines", () => {
+    const route = readFileSync(
+      path.resolve(import.meta.dirname, "../../src/ui/ai/AIChatRoute.tsx"),
+      "utf8",
+    );
+    expect(route).toMatch(/useLocalVoiceAdapters/);
+    expect(route).not.toMatch(/from\s+["'].*local-adapters["']/);
+    expect(route).not.toMatch(/voice\/local\/engines|worker-host|worker-client/);
+    expect(route).not.toMatch(/@huggingface\/transformers|kokoro-js|piper-tts-web/);
   });
 });

@@ -139,3 +139,28 @@ export {
   type MicPreferences,
   type MicrophoneDevice,
 } from "./micPreferences";
+
+export {
+  LOCAL_STT_PACKAGE_IDS,
+  LOCAL_TTS_PACKAGE_IDS,
+  LOCAL_VOICE_PREFERENCES_EVENT,
+  LOCAL_VOICE_PREFERENCES_MAX_BYTES,
+  LOCAL_VOICE_PREFERENCES_STORAGE_KEY,
+  isLocalSttPackageId,
+  isLocalTtsPackageId,
+  parseLocalVoicePreferences,
+  readLocalVoicePreferences,
+  subscribeLocalVoicePreferences,
+  writeLocalVoicePreferences,
+  type LocalSttPackageId,
+  type LocalSttPreference,
+  type LocalTtsPackageId,
+  type LocalTtsPreference,
+  type LocalVoicePreferences,
+} from "./localPreferences";
+
+export {
+  useLocalVoiceAdapters,
+  type UseLocalVoiceAdaptersOptions,
+  type UseLocalVoiceAdaptersResult,
+} from "./useLocalVoiceAdapters";

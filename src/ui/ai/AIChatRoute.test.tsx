@@ -180,6 +180,42 @@ describe("AIChatRoute", () => {
     expect(container.querySelector('[aria-label="AI chat"]')).toBeTruthy();
   });
 
+  it("fixture path performs no local adapter or worker work", async () => {
+    const workerSpy = vi.fn();
+    vi.stubGlobal(
+      "Worker",
+      class {
+        constructor(...args: unknown[]) {
+          workerSpy(...args);
+        }
+      },
+    );
+    localStorage.setItem(
+      "junban.voice.local.v1",
+      JSON.stringify({
+        version: 1,
+        stt: "whisper-tiny.en-q4",
+        tts: "kokoro-82m-v1-q8",
+      }),
+    );
+    await act(async () => {
+      root.render(
+        createElement(AIChatRoute, {
+          onOpenSettings: vi.fn(),
+          fixture: { forceWelcome: true, forceOnboarding: false, messages: [] },
+        }),
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(workerSpy).not.toHaveBeenCalled();
+    expect(getAiConfig).not.toHaveBeenCalled();
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
   it("configured fixture exposes live region status for streaming chrome", async () => {
     await act(async () => {
       root.render(

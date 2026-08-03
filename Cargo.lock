@@ -1023,6 +1023,7 @@ dependencies = [
  "junban-app",
  "junban-domain",
  "junban-storage",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",

@@ -459,6 +459,9 @@ pub struct ServerState {
     pub(crate) ai_reconfigure_test_gate: Arc<AiReconfigureTestGate>,
     #[cfg(test)]
     pub(crate) ai_response_setup_test_gate: Arc<AiResponseSetupTestGate>,
+    /// Counts successful post-drop allocator reclaim hooks (tests only).
+    #[cfg(test)]
+    pub(crate) allocator_reclaim_calls: Arc<AtomicUsize>,
     /// Random per-process instance id shared with runtime metadata and health.
     instance_id: Arc<str>,
 }
@@ -546,6 +549,8 @@ impl ServerState {
             ai_reconfigure_test_gate: Arc::new(AiReconfigureTestGate::default()),
             #[cfg(test)]
             ai_response_setup_test_gate: Arc::new(AiResponseSetupTestGate::default()),
+            #[cfg(test)]
+            allocator_reclaim_calls: Arc::new(AtomicUsize::new(0)),
             instance_id: Arc::from(generate_instance_id()),
         })
     }
@@ -618,16 +623,23 @@ impl ServerState {
         ai_epoch: crate::ai_runtime::ReconfigureEpoch,
         speech_epoch: u64,
     ) -> Result<(), ()> {
-        let _transition = self
-            .ai_speech_transition
-            .lock()
-            .expect("AI/speech transition poisoned");
-        self.ai_runtime
-            .drop_reconfigure_runtime(ai_epoch)
-            .map_err(|_| ())?;
-        self.speech_runtime
-            .drop_reconfigure_runtime(speech_epoch)
-            .map_err(|_| ())
+        {
+            let _transition = self
+                .ai_speech_transition
+                .lock()
+                .expect("AI/speech transition poisoned");
+            self.ai_runtime
+                .drop_reconfigure_runtime(ai_epoch)
+                .map_err(|_| ())?;
+            self.speech_runtime
+                .drop_reconfigure_runtime(speech_epoch)
+                .map_err(|_| ())?;
+        }
+        // Outside `ai_speech_transition`: glibc heap walks must not stall permanent drain.
+        reclaim_allocator_after_runtime_drop();
+        #[cfg(test)]
+        self.allocator_reclaim_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(())
     }
 
     pub(crate) fn finish_ai_speech_reconfigure(
@@ -651,6 +663,13 @@ impl ServerState {
             .finish_reconfigure(speech_epoch)
             .map_err(|_| ())?;
         self.ai_runtime.finish_reconfigure(ai_epoch).map_err(|_| ())
+    }
+
+    /// Test-only observation of successful post-drop allocator reclaim hooks.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn allocator_reclaim_calls(&self) -> usize {
+        self.allocator_reclaim_calls.load(Ordering::SeqCst)
     }
 
     /// Recover every exact consumed mutation approval before any normal service starts.
@@ -2387,6 +2406,170 @@ impl Drop for RuntimeMetadataFile {
 // Keep HeaderMap available for security_guard signature stability across refactors.
 #[allow(dead_code)]
 fn _touch_headers(_: &HeaderMap) {}
+
+/// Return freeable heap pages to the OS after optional AI/speech runtimes drop.
+///
+/// First reqwest/rustls/TTS use warms multi-MiB glibc arenas whose free lists
+/// stay in anonymous cgroup memory after Rust `Drop`. Call only after both
+/// supervisors confirm an exact-epoch runtime drop during clean temporary
+/// reconfiguration. Never call on disabled startup, per-request hot paths, or
+/// while holding [`ServerState::ai_speech_transition`] (which would stall
+/// permanent drain). Non-Linux-GNU targets are a documented no-op.
+fn reclaim_allocator_after_runtime_drop() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        // SAFETY: `malloc_trim` is a glibc extension that walks free heap chunks
+        // and returns unused pages to the OS. `pad == 0` trims as aggressively as
+        // glibc allows. It does not free live allocations, does not touch Junban
+        // locks or SQLite state, and is safe concurrent with other malloc/free.
+        // We never call it while holding `ai_speech_transition`.
+        #[allow(unsafe_code)]
+        unsafe {
+            let _released = libc::malloc_trim(0);
+        }
+    }
+}
+
+#[cfg(test)]
+mod allocator_reclaim_tests {
+    use super::reclaim_allocator_after_runtime_drop;
+    use junban_storage::ProfileOwner;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct Fixture {
+        root: PathBuf,
+        _owner: ProfileOwner,
+        state: super::ServerState,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "junban-alloc-reclaim-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+            ));
+            let profile = root.join("profile");
+            fs::create_dir_all(&profile).unwrap();
+            let owner = ProfileOwner::open(&profile).unwrap();
+            let state = super::ServerState::new(
+                owner.repository(),
+                "test-token".to_owned(),
+                ["127.0.0.1".to_owned()],
+                profile,
+            )
+            .unwrap();
+            Self {
+                root,
+                _owner: owner,
+                state,
+            }
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn disabled_startup_does_not_reclaim() {
+        let fixture = Fixture::new();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+        // Direct helper is a platform no-op or glibc trim; it must not touch lifecycle counts.
+        reclaim_allocator_after_runtime_drop();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+    }
+
+    #[test]
+    fn successful_exact_epoch_drop_reaches_reclaim_hook_once() {
+        let fixture = Fixture::new();
+        let (ai_epoch, speech_epoch) = fixture.state.begin_ai_speech_reconfigure().unwrap();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+        fixture
+            .state
+            .drop_ai_speech_reconfigure(ai_epoch, speech_epoch)
+            .unwrap();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 1);
+        fixture
+            .state
+            .finish_ai_speech_reconfigure(ai_epoch, speech_epoch)
+            .unwrap();
+        assert_eq!(
+            fixture.state.allocator_reclaim_calls(),
+            1,
+            "finish must not reclaim again"
+        );
+    }
+
+    #[test]
+    fn repeated_drop_of_same_epoch_does_not_reclaim_again() {
+        let fixture = Fixture::new();
+        let (ai_epoch, speech_epoch) = fixture.state.begin_ai_speech_reconfigure().unwrap();
+        fixture
+            .state
+            .drop_ai_speech_reconfigure(ai_epoch, speech_epoch)
+            .unwrap();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 1);
+        assert!(
+            fixture
+                .state
+                .drop_ai_speech_reconfigure(ai_epoch, speech_epoch)
+                .is_err()
+        );
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 1);
+    }
+
+    #[test]
+    fn asymmetric_speech_drop_failure_does_not_reclaim() {
+        let fixture = Fixture::new();
+        let (ai_epoch, speech_epoch) = fixture.state.begin_ai_speech_reconfigure().unwrap();
+        assert!(
+            fixture
+                .state
+                .drop_ai_speech_reconfigure(ai_epoch, speech_epoch.wrapping_add(1))
+                .is_err()
+        );
+        assert_eq!(
+            fixture.state.allocator_reclaim_calls(),
+            0,
+            "reclaim only after both AI and speech exact-epoch drops succeed"
+        );
+        // Permanent drain invalidates the temporary epoch; reclaim stays closed.
+        fixture.state.begin_ai_shutdown();
+        assert!(
+            fixture
+                .state
+                .drop_ai_speech_reconfigure(ai_epoch, speech_epoch)
+                .is_err()
+        );
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+    }
+
+    #[test]
+    fn permanent_drain_drop_path_does_not_use_reconfigure_reclaim() {
+        let fixture = Fixture::new();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+        // Permanent drain drops under a different lifecycle than temporary reconfigure.
+        let drained = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(
+                fixture
+                    .state
+                    .drain_ai_runtime(std::time::Duration::from_secs(1)),
+            );
+        assert!(drained);
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+    }
+}
 
 #[cfg(test)]
 #[path = "tests_api.rs"]

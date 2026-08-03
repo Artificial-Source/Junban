@@ -661,6 +661,56 @@ def cgroup_memory(unit: str) -> dict[str, int]:
     return {"current_bytes": current, "peak_bytes": peak}
 
 
+def parse_memory_stat(text: str, *, unit: str = "synthetic") -> dict[str, int]:
+    """Parse raw cgroup v2 memory.stat key/value pairs (bytes)."""
+    stats: dict[str, int] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        key, raw = parts
+        try:
+            stats[key] = int(raw)
+        except ValueError as error:
+            raise BenchError(f"invalid memory.stat line for {unit}: {line!r}") from error
+    if "anon" not in stats or "file" not in stats:
+        raise BenchError(f"memory.stat missing anon/file for {unit}")
+    return stats
+
+
+def read_cgroup_memory_stat(unit: str) -> dict[str, int]:
+    path = cgroup_path(unit) / "memory.stat"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise BenchError(f"cgroup memory.stat unavailable for {unit}: {error}") from error
+    return parse_memory_stat(text, unit=unit)
+
+
+def memory_stat_summary(stat: dict[str, int]) -> dict[str, Any]:
+    """Evidence-only anon/file composition view; never consulted by gates."""
+    return {
+        "anon_bytes": int(stat["anon"]),
+        "file_bytes": int(stat["file"]),
+        "anon_mib": mib(stat["anon"]),
+        "file_mib": mib(stat["file"]),
+    }
+
+
+def memory_snapshot(unit: str) -> dict[str, Any]:
+    """current/peak plus evidence-only memory.stat composition."""
+    memory = cgroup_memory(unit)
+    summary = memory_stat_summary(read_cgroup_memory_stat(unit))
+    return {
+        "current_bytes": memory["current_bytes"],
+        "peak_bytes": memory["peak_bytes"],
+        "memory_stat": summary,
+    }
+
+
 def process_snapshot(
     unit: str,
     server_name: str,
@@ -1428,15 +1478,15 @@ def run_profile(
         )
         session_id = configure_profile(base, host, token, secrets_list)
         time.sleep(SETTLE_SECONDS)
-        pre = cgroup_memory(unit)
+        pre = memory_snapshot(unit)
         monitor = MemoryMonitor(unit)
         monitor.start()
         workload = profile_workload(index, base, host, token, session_id, fixture)
         time.sleep(SETTLE_SECONDS)
-        post_session = cgroup_memory(unit)
+        post_session = memory_snapshot(unit)
         drain = drain_profile(base, host, token)
         time.sleep(SETTLE_SECONDS)
-        post_drain = cgroup_memory(unit)
+        post_drain = memory_snapshot(unit)
         measured_peak = monitor.stop()
         monitor = None
         if fixture.status().get("active_connections") != 0:
@@ -1449,10 +1499,12 @@ def run_profile(
                 "pre_session": {
                     "current_bytes": pre["current_bytes"],
                     "current_mib": mib(pre["current_bytes"]),
+                    "memory_stat": pre["memory_stat"],
                 },
                 "post_session": {
                     "current_bytes": post_session["current_bytes"],
                     "current_mib": mib(post_session["current_bytes"]),
+                    "memory_stat": post_session["memory_stat"],
                 },
                 "post_drain": {
                     "current_bytes": post_drain["current_bytes"],
@@ -1461,6 +1513,7 @@ def run_profile(
                     "growth_mib": round(
                         (post_drain["current_bytes"] - pre["current_bytes"]) / 1_048_576.0, 4
                     ),
+                    "memory_stat": post_drain["memory_stat"],
                 },
                 "memory_peak": measured_peak,
                 "workload": workload,
@@ -1647,6 +1700,41 @@ def metadata(repo: Path, server: Path, web_dir: Path) -> dict[str, Any]:
 
 def self_check(repo: Path) -> None:
     require_environment()
+    # Evidence-only memory.stat parsing/serialization (no cgroup, no gate changes).
+    parsed = parse_memory_stat(
+        "anon 1048576\nfile 2097152\ninactive_anon 0\n# comment ignored\nbogus\n"
+    )
+    assert parsed["anon"] == 1_048_576
+    assert parsed["file"] == 2_097_152
+    summary = memory_stat_summary(parsed)
+    assert summary == {
+        "anon_bytes": 1_048_576,
+        "file_bytes": 2_097_152,
+        "anon_mib": 1.0,
+        "file_mib": 2.0,
+    }
+    try:
+        parse_memory_stat("only_one_field\n")
+        raise AssertionError("missing anon/file must fail closed")
+    except BenchError:
+        pass
+    try:
+        parse_memory_stat("anon not-an-int\nfile 1\n")
+        raise AssertionError("invalid integer must fail closed")
+    except BenchError:
+        pass
+    encoded = json.dumps(
+        {
+            "pre_session": {"memory_stat": summary},
+            "post_session": {"memory_stat": summary},
+            "post_drain": {"memory_stat": summary},
+        },
+        sort_keys=True,
+    )
+    round_trip = json.loads(encoded)
+    assert round_trip["pre_session"]["memory_stat"]["anon_bytes"] == 1_048_576
+    assert round_trip["post_drain"]["memory_stat"]["file_mib"] == 2.0
+
     fixture_check = run_cmd([sys.executable, str(repo / FIXTURE_SCRIPT), "--self-check"])
     if "self-check passed" not in (fixture_check.stdout or ""):
         raise BenchError("standalone fixture self-check did not report success")

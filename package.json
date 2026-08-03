@@ -33,7 +33,7 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary"
   },
   "dependencies": {
-    "lucide-react": "^0.548.0",
+    "lucide-react": "^0.577.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "10.1.0",
@@ -41,19 +41,19 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.0",
-    "@playwright/test": "^1.55.0",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.3",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.4",
-    "jsdom": "30.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "jsdom": "30.0.1",
     "openapi-typescript": "7.13.0",
     "oxlint": "^1.76.0",
     "prettier": "^3.9.6",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
-    "vite": "^8.1.5",
+    "vite": "^8.2.0",
     "vitest": "^4.1.10"
   },
   "pnpm": {

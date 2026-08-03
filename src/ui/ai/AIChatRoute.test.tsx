@@ -5,6 +5,7 @@
 import { act, createElement, Suspense, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AIChatRoute } from "./AIChatRoute";
 import { AIChatRouteFallback } from "./AIChatRouteFallback";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -77,7 +78,6 @@ describe("AIChatRoute", () => {
     });
 
     const onOpenSettings = vi.fn();
-    const { AIChatRoute } = await import("./AIChatRoute");
 
     await act(async () => {
       root.render(createElement(AIChatRoute, { onOpenSettings }));
@@ -146,7 +146,6 @@ describe("AIChatRoute", () => {
   });
 
   it("fixture forceNotConfigured does not call network config", async () => {
-    const { AIChatRoute } = await import("./AIChatRoute");
     await act(async () => {
       root.render(
         createElement(AIChatRoute, {
@@ -160,7 +159,6 @@ describe("AIChatRoute", () => {
   });
 
   it("fixture welcome state renders greeting without network", async () => {
-    const { AIChatRoute } = await import("./AIChatRoute");
     await act(async () => {
       root.render(
         createElement(AIChatRoute, {
@@ -183,7 +181,6 @@ describe("AIChatRoute", () => {
   });
 
   it("configured fixture exposes live region status for streaming chrome", async () => {
-    const { AIChatRoute } = await import("./AIChatRoute");
     await act(async () => {
       root.render(
         createElement(AIChatRoute, {

@@ -103,6 +103,33 @@ vi.mock("../api/client", async () => {
   };
 });
 
+vi.mock("../ai/transport", async () => {
+  const actual = await vi.importActual<typeof import("../ai/transport")>("../ai/transport");
+  return {
+    ...actual,
+    getAiConfig: vi.fn(async () => ({
+      ai: {
+        enabled: false,
+        provider: null,
+        model: null,
+        custom_instructions: "",
+        daily_briefing_enabled: false,
+        smart_endpoint: false,
+        auto_send: false,
+      },
+      voice: {
+        voice_mode: "push_to_talk",
+        grace_period_ms: 500,
+        cloud_speech_enabled: false,
+        stt_provider: "browser",
+        tts_enabled: false,
+        tts_provider: "browser",
+      },
+      credentials: {},
+    })),
+  };
+});
+
 vi.mock("../lib/sounds", () => ({
   playSound: vi.fn(),
 }));

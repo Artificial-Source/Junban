@@ -64,6 +64,7 @@ import { isVisualFixture } from "../lib/visualFixture";
 import { shouldApplyStartupDefaultView, startScreenFromDefaultView } from "../lib/startupView";
 import { shouldPlaySoundEvent, soundEventForTaskEvent } from "../lib/soundPolicy";
 import { playSound } from "../lib/sounds";
+import { aiChatFocusedTaskUrl } from "../ai/focused-task";
 
 const MOBILE_DRAWER_ID = "junban-mobile-nav-drawer";
 
@@ -335,6 +336,17 @@ export function AppLayout() {
       setDrawerOpen(false);
     },
     [navigate],
+  );
+
+  /** Thin focused-task AI launch — route authority stays in useRouting; query is attached after. */
+  const handleAskAi = useCallback(
+    (taskId: string) => {
+      setSelectedTaskId(null);
+      setDetailTask(null);
+      handleNavigate("ai-chat");
+      window.history.replaceState(null, "", aiChatFocusedTaskUrl(taskId));
+    },
+    [handleNavigate],
   );
 
   const handleAddTask = useCallback(() => {
@@ -893,7 +905,10 @@ export function AppLayout() {
                 )}
                 {route.name === "ai-chat" && (
                   <Suspense fallback={<AIChatRouteFallback />}>
-                    <AIChatRoute onOpenSettings={() => handleNavigate({ name: "settings" })} />
+                    <AIChatRoute
+                      onOpenSettings={() => handleNavigate({ name: "settings" })}
+                      onSelectTask={handleSelectTask}
+                    />
                   </Suspense>
                 )}
               </div>
@@ -970,6 +985,7 @@ export function AppLayout() {
               onEnterFocusMode={
                 focusModeEnabled ? (taskId) => handleEnterFocusMode(taskId) : undefined
               }
+              onAskAi={handleAskAi}
               phase3VisualFixture={phase3VisualFixture}
             />
           ))}

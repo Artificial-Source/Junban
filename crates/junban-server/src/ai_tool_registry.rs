@@ -31,6 +31,8 @@ pub const AI_TOOL_COUNT: usize = 48;
 pub const AI_TOOL_NAME_MAX_BYTES: usize = 64;
 /// Maximum entities retained in one tool result payload before truncation.
 pub const AI_TOOL_RESULT_ENTITY_MAX: usize = 500;
+/// Conservative ceiling for composite task-creation actions whose exact manifest must fit chat.
+pub const AI_TOOL_COMPOSITE_CREATE_MAX: usize = 100;
 /// Default accent used when a create-project/create-tag tool omits color.
 pub const AI_TOOL_DEFAULT_COLOR: &str = "#3b82f6";
 
@@ -875,7 +877,7 @@ fn validate_action_semantics(action: &ValidatedToolAction) -> Result<(), ToolVal
         }
         ValidatedToolAction::BreakDownTask(args) => {
             parse_task_id(&args.task_id)?;
-            validate_title_list(&args.subtasks, "subtasks")?;
+            validate_composite_title_list(&args.subtasks, "subtasks")?;
         }
         ValidatedToolAction::ExtractTasksFromText(args) => {
             if args.text.chars().count() > MAX_MARKDOWN_CHARS {
@@ -889,11 +891,11 @@ fn validate_action_semantics(action: &ValidatedToolAction) -> Result<(), ToolVal
             }
             if !args.dry_run {
                 let titles = extract_task_titles_from_text(&args.text);
-                validate_title_list(&titles, "titles")?;
+                validate_composite_title_list(&titles, "titles")?;
             }
         }
         ValidatedToolAction::BulkCreateTasks(args) => {
-            validate_title_list(&args.titles, "titles")?;
+            validate_composite_title_list(&args.titles, "titles")?;
             if let Some(project_id) = &args.project_id {
                 parse_project_id(project_id)?;
             }
@@ -1215,8 +1217,11 @@ fn validate_bulk_update_tasks_args(args: &BulkUpdateTasksArgs) -> Result<(), Too
     ))
 }
 
-fn validate_title_list(titles: &[String], field: &'static str) -> Result<(), ToolValidationError> {
-    if titles.is_empty() || titles.len() > MAX_BULK_IDS {
+fn validate_composite_title_list(
+    titles: &[String],
+    field: &'static str,
+) -> Result<(), ToolValidationError> {
+    if titles.is_empty() || titles.len() > AI_TOOL_COMPOSITE_CREATE_MAX {
         return Err(ToolValidationError::new(
             if field == "subtasks" {
                 "invalid_subtasks"
@@ -1224,9 +1229,9 @@ fn validate_title_list(titles: &[String], field: &'static str) -> Result<(), Too
                 "invalid_titles"
             },
             if field == "subtasks" {
-                "subtasks must contain 1..=500 titles"
+                "subtasks must contain 1..=100 titles"
             } else {
-                "titles must contain 1..=500 entries"
+                "titles must contain 1..=100 entries"
             },
         ));
     }
@@ -1886,7 +1891,7 @@ fn tool_parameters(name: &str) -> Value {
                     "type": "array",
                     "description": "Child task titles",
                     "minItems": 1,
-                    "maxItems": MAX_BULK_IDS,
+                    "maxItems": AI_TOOL_COMPOSITE_CREATE_MAX,
                     "items": string_prop("Subtask title", MAX_TASK_TITLE_CHARS),
                 }
             }),
@@ -1905,7 +1910,7 @@ fn tool_parameters(name: &str) -> Value {
                 "titles": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": MAX_BULK_IDS,
+                    "maxItems": AI_TOOL_COMPOSITE_CREATE_MAX,
                     "items": string_prop("Task title", MAX_TASK_TITLE_CHARS),
                 },
                 "project_id": uuid_prop("Optional shared project"),
@@ -2917,8 +2922,15 @@ mod tests {
         assert_eq!(query["limit"]["maximum"], i64::from(MAX_QUERY_PAGE_LIMIT));
 
         let bulk = &specs["bulk_create_tasks"].parameters["properties"];
-        assert_eq!(bulk["titles"]["maxItems"], MAX_BULK_IDS);
+        assert_eq!(bulk["titles"]["maxItems"], AI_TOOL_COMPOSITE_CREATE_MAX);
         assert_eq!(bulk["titles"]["minItems"], 1);
+        let breakdown = &specs["break_down_task"].parameters["properties"];
+        assert_eq!(
+            breakdown["subtasks"]["maxItems"],
+            AI_TOOL_COMPOSITE_CREATE_MAX
+        );
+        let bulk_complete = &specs["bulk_complete_tasks"].parameters["properties"];
+        assert_eq!(bulk_complete["task_ids"]["maxItems"], MAX_BULK_IDS);
 
         let recall = &specs["recall_memories"].parameters["properties"];
         assert_eq!(
@@ -2959,6 +2971,38 @@ mod tests {
                 "expected rejection for {name} args={args}"
             );
         }
+
+        let titles = (0..=AI_TOOL_COMPOSITE_CREATE_MAX)
+            .map(|index| format!("task-{index}"))
+            .collect::<Vec<_>>();
+        let bulk = json!({"titles": titles}).to_string();
+        assert!(validate_tool_call("bulk_create_tasks", &bulk).is_err());
+        let breakdown = json!({
+            "task_id": "00112233-4455-6677-8899-aabbccddeeff",
+            "subtasks": (0..=AI_TOOL_COMPOSITE_CREATE_MAX)
+                .map(|index| format!("task-{index}"))
+                .collect::<Vec<_>>(),
+        })
+        .to_string();
+        assert!(validate_tool_call("break_down_task", &breakdown).is_err());
+        let text = (0..=AI_TOOL_COMPOSITE_CREATE_MAX)
+            .map(|index| format!("- task-{index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            validate_tool_call(
+                "extract_tasks_from_text",
+                &json!({"text": text.clone(), "dry_run": false}).to_string(),
+            )
+            .is_err()
+        );
+        assert!(
+            validate_tool_call(
+                "extract_tasks_from_text",
+                &json!({"text": text, "dry_run": true}).to_string(),
+            )
+            .is_ok()
+        );
     }
 
     #[test]

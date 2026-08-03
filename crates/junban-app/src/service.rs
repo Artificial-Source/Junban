@@ -1595,6 +1595,7 @@ where
                     request.generation,
                     request.tool_name,
                     request.arguments_json,
+                    request.assistant_content,
                     Timestamp::now(),
                 )
                 .await,
@@ -1613,6 +1614,7 @@ where
                     request.approval_id,
                     request.status,
                     request.dispatch_operation_id.map(|id| id.to_string()),
+                    request.assistant_content,
                     Timestamp::now(),
                 )
                 .await,
@@ -1632,6 +1634,17 @@ where
     pub async fn list_dispatching_ai_approvals(&self) -> Result<Vec<AiToolApproval>, AppError> {
         self.repository
             .list_dispatching_ai_approvals()
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Replay trusted mutation receipt material without re-evaluating changed product state.
+    pub async fn recover_operation_receipt(
+        &self,
+        operation_id: OperationId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.repository
+            .recover_operation_receipt(operation_id)
             .await
             .map_err(AppError::from)
     }
@@ -3029,6 +3042,7 @@ mod tests {
             _: u64,
             _: String,
             _: String,
+            _: junban_domain::AiMessageContent,
             _: Timestamp,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("propose_ai_approval")
@@ -3039,6 +3053,7 @@ mod tests {
             _: AiApprovalId,
             _: junban_domain::AiApprovalStatus,
             _: Option<String>,
+            _: Option<junban_domain::AiMessageContent>,
             _: Timestamp,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("set_ai_approval_status")
@@ -3055,6 +3070,13 @@ mod tests {
                 .unwrap()
                 .push("list_dispatching_ai_approvals");
             Box::pin(async { Ok(Vec::new()) })
+        }
+        fn recover_operation_receipt(
+            &self,
+            _: OperationId,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.calls.lock().unwrap().push("recover_operation_receipt");
+            Box::pin(async { Err(RepositoryError::NotFound) })
         }
         fn upsert_ai_run_state(
             &self,

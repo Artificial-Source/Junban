@@ -53,17 +53,20 @@ pub const AI_ASSISTANT_TEXT_BYTES_MAX: usize = 512 * 1024;
 pub const AI_TOOL_ARGUMENTS_BYTES_MAX: usize = 128 * 1024;
 /// One tool result UTF-8 byte ceiling.
 pub const AI_TOOL_RESULT_BYTES_MAX: usize = 256 * 1024;
+/// Canonical durable local tool-event transcript ceiling per assistant message.
+pub const AI_TOOL_EVENT_TRANSCRIPT_BYTES_MAX: usize = 2 * 1024 * 1024;
 /// Maximum canonical serialized bytes for one [`AiMessageContent`].
 ///
 /// The bound covers the worst JSON string expansion for assistant text (six bytes
 /// per input byte for `\u00XX` escapes), two bytes per byte for embedded canonical
-/// tool JSON and the bounded tool name, plus fixed field names, punctuation, and
-/// the ten-byte briefing date with one KiB of conservative structural headroom.
+/// tool JSON and the bounded tool name, the already-serialized transcript ceiling,
+/// plus fixed field names, punctuation, and conservative structural headroom.
 pub const AI_MESSAGE_CONTENT_JSON_BYTES_MAX: usize = AI_ASSISTANT_TEXT_BYTES_MAX * 6
     + AI_TOOL_ARGUMENTS_BYTES_MAX * 2
     + AI_TOOL_RESULT_BYTES_MAX * 2
+    + AI_TOOL_EVENT_TRANSCRIPT_BYTES_MAX
     + AI_PROVIDER_ID_BYTES_MAX * 2
-    + 1024;
+    + 2048;
 /// One memory UTF-8 byte ceiling.
 pub const AI_MEMORY_BYTES_MAX: usize = 10_000;
 /// Provider identifier UTF-8 byte ceiling.
@@ -940,12 +943,206 @@ impl AiMessageStatus {
     }
 }
 
+/// Provider-neutral durable tool event types retained for exact local replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiToolEventType {
+    ToolProposed,
+    ToolApproved,
+    ToolRejected,
+    ToolResult,
+}
+
+impl AiToolEventType {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ToolProposed => "tool_proposed",
+            Self::ToolApproved => "tool_approved",
+            Self::ToolRejected => "tool_rejected",
+            Self::ToolResult => "tool_result",
+        }
+    }
+}
+
+/// One versioned durable local event positioned in assistant UTF-8 bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AiToolEvent {
+    pub version: u8,
+    pub assistant_utf8_offset: u32,
+    pub event_type: AiToolEventType,
+    pub payload: serde_json::Value,
+}
+
+impl AiToolEvent {
+    pub fn new(
+        assistant_utf8_offset: usize,
+        event_type: AiToolEventType,
+        payload: serde_json::Value,
+    ) -> Result<Self, ValidationError> {
+        let assistant_utf8_offset =
+            u32::try_from(assistant_utf8_offset).map_err(|_| ValidationError::Invalid {
+                field: "ai_message.content.tool_events.assistant_utf8_offset",
+                reason: "assistant UTF-8 offset is too large",
+            })?;
+        let event = Self {
+            version: 1,
+            assistant_utf8_offset,
+            event_type,
+            payload,
+        };
+        event.validate_payload()?;
+        Ok(event)
+    }
+
+    fn validate_payload(&self) -> Result<(), ValidationError> {
+        const FIELD: &str = "ai_message.content.tool_events.payload";
+        match self.event_type {
+            AiToolEventType::ToolProposed => {
+                let payload: ProposedToolEventPayload =
+                    serde_json::from_value(self.payload.clone())
+                        .map_err(|_| invalid_tool_event_payload())?;
+                validate_canonical_approval_id(&payload.approval_id)?;
+                validate_ai_tool_name(&payload.tool)?;
+                let canonical_arguments = serde_json::to_string(&payload.arguments)
+                    .map_err(|_| invalid_tool_event_payload())?;
+                if ai_approval_action_hash(&payload.tool, &canonical_arguments)?
+                    != payload.action_hash
+                    || !is_sha256_hex(&payload.action_hash)
+                {
+                    return Err(invalid_tool_event_payload());
+                }
+                let expires_at: Timestamp = payload
+                    .expires_at
+                    .parse()
+                    .map_err(|_| invalid_tool_event_payload())?;
+                if expires_at.to_string() != payload.expires_at {
+                    return Err(invalid_tool_event_payload());
+                }
+            }
+            AiToolEventType::ToolApproved | AiToolEventType::ToolRejected => {
+                let payload: ApprovalToolEventPayload =
+                    serde_json::from_value(self.payload.clone())
+                        .map_err(|_| invalid_tool_event_payload())?;
+                validate_canonical_approval_id(&payload.approval_id)?;
+            }
+            AiToolEventType::ToolResult => {
+                let payload: ToolResultEventPayload = serde_json::from_value(self.payload.clone())
+                    .map_err(|_| invalid_tool_event_payload())?;
+                validate_ai_tool_name(&payload.tool)?;
+                if !matches!(
+                    payload.outcome.as_str(),
+                    "success" | "error" | "unavailable"
+                ) {
+                    return Err(invalid_tool_event_payload());
+                }
+                if let Some(operation_id) = payload.operation_id {
+                    let parsed = crate::OperationId::parse(&operation_id)?;
+                    if parsed.to_string() != operation_id {
+                        return Err(invalid_tool_event_payload());
+                    }
+                }
+                if payload.revision == Some(0) || contains_private_result_key(&payload.data) {
+                    return Err(invalid_tool_event_payload());
+                }
+                let _ = payload.truncated;
+            }
+        }
+        if !self.payload.is_object() {
+            return Err(ValidationError::Invalid {
+                field: FIELD,
+                reason: "tool event payload must be a valid local event object",
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProposedToolEventPayload {
+    approval_id: String,
+    tool: String,
+    arguments: serde_json::Map<String, serde_json::Value>,
+    action_hash: String,
+    expires_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApprovalToolEventPayload {
+    approval_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ToolResultEventPayload {
+    tool: String,
+    outcome: String,
+    data: serde_json::Value,
+    truncated: bool,
+    #[serde(default)]
+    operation_id: Option<String>,
+    #[serde(default)]
+    revision: Option<u64>,
+}
+
+fn invalid_tool_event_payload() -> ValidationError {
+    ValidationError::Invalid {
+        field: "ai_message.content.tool_events.payload",
+        reason: "tool event payload does not match its canonical local schema",
+    }
+}
+
+fn validate_canonical_approval_id(raw: &str) -> Result<(), ValidationError> {
+    let id = AiApprovalId::parse(raw)?;
+    if id.to_string() != raw {
+        return Err(invalid_tool_event_payload());
+    }
+    Ok(())
+}
+
+fn is_sha256_hex(raw: &str) -> bool {
+    raw.len() == 64
+        && raw
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn contains_private_result_key(value: &serde_json::Value) -> bool {
+    const PRIVATE_KEYS: [&str; 12] = [
+        "dispatch_operation_id",
+        "provider_call_id",
+        "provider_call_ids",
+        "raw",
+        "raw_body",
+        "response_body",
+        "credential",
+        "secret",
+        "reasoning",
+        "chain_of_thought",
+        "chain-of-thought",
+        "chainOfThought",
+    ];
+    match value {
+        serde_json::Value::Object(object) => object.iter().any(|(key, value)| {
+            PRIVATE_KEYS.contains(&key.as_str()) || contains_private_result_key(value)
+        }),
+        serde_json::Value::Array(values) => values.iter().any(contains_private_result_key),
+        _ => false,
+    }
+}
+
 /// Bounded structured message content stored as canonical JSON text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiMessageContent {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub text: String,
+    /// Ordered provider-neutral tool cards for exact durable SSE reconstruction.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_events: Vec<AiToolEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -974,6 +1171,7 @@ impl AiMessageContent {
         }
         Ok(Self {
             text,
+            tool_events: Vec::new(),
             tool_name: None,
             tool_arguments_json: None,
             tool_result_json: None,
@@ -1011,6 +1209,33 @@ impl AiMessageContent {
                 "ai_message.content.tool_name",
                 AI_PROVIDER_ID_BYTES_MAX,
             )?;
+        }
+        let mut previous_offset = 0_usize;
+        for event in &self.tool_events {
+            let offset = event.assistant_utf8_offset as usize;
+            if event.version != 1
+                || offset < previous_offset
+                || offset > self.text.len()
+                || !self.text.is_char_boundary(offset)
+            {
+                return Err(ValidationError::Invalid {
+                    field: "ai_message.content.tool_events",
+                    reason: "tool events must be version 1 with ordered assistant UTF-8 offsets and valid local payloads",
+                });
+            }
+            event.validate_payload()?;
+            previous_offset = offset;
+        }
+        let transcript_bytes =
+            serde_json::to_vec(&self.tool_events).map_err(|_| ValidationError::Invalid {
+                field: "ai_message.content.tool_events",
+                reason: "tool events must be JSON-serializable",
+            })?;
+        if transcript_bytes.len() > AI_TOOL_EVENT_TRANSCRIPT_BYTES_MAX {
+            return Err(ValidationError::TooLong {
+                field: "ai_message.content.tool_events",
+                max: AI_TOOL_EVENT_TRANSCRIPT_BYTES_MAX,
+            });
         }
         if self
             .briefing_date
@@ -1696,6 +1921,21 @@ mod tests {
     fn canonical_message_content_fits_serialized_row_bound() {
         let content = AiMessageContent {
             text: "\0".repeat(AI_ASSISTANT_TEXT_BYTES_MAX),
+            tool_events: vec![
+                AiToolEvent::new(
+                    AI_ASSISTANT_TEXT_BYTES_MAX,
+                    AiToolEventType::ToolResult,
+                    serde_json::json!({
+                        "tool": "query_tasks",
+                        "outcome": "success",
+                        "data": {
+                            "value": "x".repeat(AI_TOOL_EVENT_TRANSCRIPT_BYTES_MAX - 256)
+                        },
+                        "truncated": false
+                    }),
+                )
+                .unwrap(),
+            ],
             tool_name: Some("\\".repeat(AI_PROVIDER_ID_BYTES_MAX)),
             tool_arguments_json: Some("\\".repeat(AI_TOOL_ARGUMENTS_BYTES_MAX)),
             tool_result_json: Some("\\".repeat(AI_TOOL_RESULT_BYTES_MAX)),
@@ -1705,6 +1945,75 @@ mod tests {
         let canonical = content.canonical_json().unwrap();
         assert!(canonical.len() <= AI_MESSAGE_CONTENT_JSON_BYTES_MAX);
         assert!(AI_MESSAGE_CONTENT_JSON_BYTES_MAX < AI_SESSION_CONTENT_BYTES_MAX as usize);
+    }
+
+    #[test]
+    fn durable_tool_events_require_ordered_utf8_offsets_and_semantic_payloads() {
+        let approval_id = AiApprovalId::new();
+        let arguments = r#"{"title":"x"}"#;
+        let mut content = AiMessageContent::text("a📅b").unwrap();
+        content.tool_events.push(
+            AiToolEvent::new(
+                1,
+                AiToolEventType::ToolProposed,
+                serde_json::json!({
+                    "approval_id": approval_id.to_string(),
+                    "tool": "create_task",
+                    "arguments": {"title": "x"},
+                    "action_hash": ai_approval_action_hash("create_task", arguments).unwrap(),
+                    "expires_at": "2026-04-01T00:00:00Z"
+                }),
+            )
+            .unwrap(),
+        );
+        content.tool_events.push(
+            AiToolEvent::new(
+                5,
+                AiToolEventType::ToolResult,
+                serde_json::json!({
+                    "tool": "create_task",
+                    "outcome": "success",
+                    "data": {"primary": {"kind": "task", "id": crate::TaskId::new()}},
+                    "truncated": false
+                }),
+            )
+            .unwrap(),
+        );
+        assert!(content.validate().is_ok());
+
+        let mut split_utf8 = content.clone();
+        split_utf8.tool_events[1].assistant_utf8_offset = 2;
+        assert!(split_utf8.validate().is_err());
+        let mut out_of_order = content.clone();
+        out_of_order.tool_events[1].assistant_utf8_offset = 0;
+        assert!(out_of_order.validate().is_err());
+        let mut unknown_version = content;
+        unknown_version.tool_events[0].version = 2;
+        assert!(unknown_version.validate().is_err());
+        assert!(
+            AiToolEvent::new(0, AiToolEventType::ToolResult, serde_json::json!([1, 2])).is_err()
+        );
+        assert!(
+            AiToolEvent::new(
+                0,
+                AiToolEventType::ToolApproved,
+                serde_json::json!({"approval_id": approval_id, "unknown": true}),
+            )
+            .is_err()
+        );
+        assert!(
+            AiToolEvent::new(
+                0,
+                AiToolEventType::ToolResult,
+                serde_json::json!({
+                    "tool": "create_task",
+                    "outcome": "success",
+                    "data": {"nested": [{"provider_call_id": "private"}]},
+                    "truncated": false
+                }),
+            )
+            .is_err()
+        );
     }
 
     #[test]

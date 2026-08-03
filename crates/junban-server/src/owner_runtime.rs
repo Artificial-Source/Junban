@@ -214,20 +214,27 @@ impl Drop for LocalOwnerCleanup {
 }
 
 impl LocalApiOwner {
-    /// Acquire the profile lock, bind loopback, serve the normal API, then publish metadata.
+    /// Acquire the profile lock, recover dispatches, bind loopback, then publish metadata.
     pub async fn start(profile_dir: impl Into<PathBuf>) -> Result<Self, LocalApiOwnerError> {
         let profile_dir = profile_dir.into();
         // Lock before any database open — ProfileOwner enforces this ordering.
         let owner = ProfileOwner::open(&profile_dir)?;
         let token = load_or_create_token(&profile_dir)?;
+        let state = ServerState::new(
+            owner.repository(),
+            token,
+            Vec::<String>::new(),
+            &profile_dir,
+        )?;
+        state.recover_ai_dispatches().await?;
+
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await?;
         let address = listener.local_addr()?;
-
-        let mut cli_hosts = vec![address.to_string()];
+        let mut listener_hosts = vec![address.to_string()];
         if address.ip().is_loopback() {
-            cli_hosts.push(format!("localhost:{}", address.port()));
+            listener_hosts.push(format!("localhost:{}", address.port()));
         }
-        let state = ServerState::new(owner.repository(), token, cli_hosts, &profile_dir)?;
+        state.add_cli_hosts(listener_hosts);
         let instance_id = state.instance_id().to_owned();
         let shutdown = state.shutdown_token();
         assert!(

@@ -71,6 +71,12 @@ entity_id!(TimeSlotId, "time_slot_id");
 pub struct OperationId(Uuid);
 
 impl OperationId {
+    /// Generate a cryptographically random operation authority.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
     pub fn parse(value: &str) -> Result<Self, ValidationError> {
         let uuid = Uuid::parse_str(value).map_err(|_| ValidationError::InvalidId {
             field: "operation_id",
@@ -81,6 +87,12 @@ impl OperationId {
     #[must_use]
     pub const fn as_uuid(self) -> Uuid {
         self.0
+    }
+}
+
+impl Default for OperationId {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

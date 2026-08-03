@@ -5843,9 +5843,13 @@ async fn seed_ai_response_preflight(
 }
 
 async fn fragmented_chat_fixture(listener: tokio::net::TcpListener, chunks: &[&str]) -> String {
+    let (socket, _) = listener.accept().await.unwrap();
+    fragmented_chat_socket(socket, chunks).await
+}
+
+async fn fragmented_chat_socket(mut socket: tokio::net::TcpStream, chunks: &[&str]) -> String {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let (mut socket, _) = listener.accept().await.unwrap();
     let mut request = Vec::new();
     let header_end = loop {
         let mut bytes = [0_u8; 1024];
@@ -8828,6 +8832,39 @@ async fn ai_json_routes_report_exact_32kib_body_limit() {
     assert!(!denied_body.to_string().contains(&"x".repeat(64)));
 }
 
+#[tokio::test]
+async fn ai_approval_decisions_enforce_four_kib_limit_after_authorization() {
+    let context = TestContext::new();
+    let approval = Uuid::now_v7();
+    let path = format!("/api/v1/ai/approvals/{approval}/approve");
+    let oversized = vec![b'x'; 5 * 1024];
+    let denied = context
+        .request(
+            request(Method::POST, &path)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(oversized.clone()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let limited = context
+        .request(
+            operation_header(authenticated(Method::POST, &path))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(oversized))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(limited.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let body = json(limited).await;
+    assert_eq!(body["error"]["code"], "body_too_large");
+    assert_eq!(
+        body["error"]["message"],
+        "request body must not exceed 4096 bytes"
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn ai_session_delete_timeout_leaves_durable_state_unchanged() {
     let context = TestContext::new();
@@ -9070,6 +9107,12 @@ async fn durable_dispatch_finish_wins_queued_cancel_and_emits_one_exact_bounded_
                 generation: 1,
                 tool_name: "create_task".into(),
                 arguments_json: r#"{"title":"from approval"}"#.into(),
+                assistant_content: {
+                    let mut content = junban_domain::AiMessageContent::text("").unwrap();
+                    content.tool_name = Some("create_task".into());
+                    content.tool_arguments_json = Some(r#"{"title":"from approval"}"#.into());
+                    content
+                },
             },
         )
         .await
@@ -9083,10 +9126,24 @@ async fn durable_dispatch_finish_wins_queued_cancel_and_emits_one_exact_bounded_
                 approval_id,
                 status: junban_domain::AiApprovalStatus::Approved,
                 dispatch_operation_id: None,
+                assistant_content: None,
             },
         )
         .await
         .unwrap();
+    let mut approved_content = context
+        .state
+        .service
+        .get_ai_message(assistant_message_id)
+        .await
+        .unwrap()
+        .content;
+    crate::ai_tool_transcript::push_tool_event(
+        &mut approved_content,
+        junban_domain::AiToolEventType::ToolApproved,
+        json!({"approval_id": approval_id.to_string()}),
+    )
+    .unwrap();
     let dispatch_operation_id = OperationId::parse(&Uuid::new_v4().to_string()).unwrap();
     context
         .state
@@ -9097,6 +9154,7 @@ async fn durable_dispatch_finish_wins_queued_cancel_and_emits_one_exact_bounded_
                 approval_id,
                 status: junban_domain::AiApprovalStatus::Consumed,
                 dispatch_operation_id: Some(dispatch_operation_id),
+                assistant_content: Some(approved_content.clone()),
             },
         )
         .await
@@ -9144,7 +9202,11 @@ async fn durable_dispatch_finish_wins_queued_cancel_and_emits_one_exact_bounded_
     .await;
     assert_eq!(
         tool_result.operation_id.as_deref(),
-        Some(dispatch_operation_id.to_string().as_str())
+        Some(
+            crate::derive_child_operation_id(dispatch_operation_id, "mutation", 0)
+                .to_string()
+                .as_str()
+        )
     );
     let payload = crate::AiDecisionPayload::from_tool_result(
         dispatch_operation_id,
@@ -9153,14 +9215,14 @@ async fn durable_dispatch_finish_wins_queued_cancel_and_emits_one_exact_bounded_
     )
     .unwrap();
     assert!(payload.tool_result_json().len() <= crate::MAX_AI_DECISION_PAYLOAD_BYTES);
-    let content = junban_domain::AiMessageContent {
-        text: String::new(),
-        tool_name: Some("create_task".into()),
-        tool_arguments_json: None,
-        tool_result_json: Some(payload.tool_result_json().to_owned()),
-        briefing_date: None,
-        focused_task_id: None,
-    };
+    let mut content = approved_content;
+    crate::ai_tool_transcript::push_tool_event(
+        &mut content,
+        junban_domain::AiToolEventType::ToolResult,
+        serde_json::from_str(payload.tool_result_json()).unwrap(),
+    )
+    .unwrap();
+    content.tool_result_json = Some(payload.tool_result_json().to_owned());
     let finish_operation_id = OperationId::parse(&Uuid::new_v4().to_string()).unwrap();
     let finish_request = junban_app::FinishAiResponseRequest {
         assistant_message_id,
@@ -9257,4 +9319,762 @@ async fn durable_dispatch_finish_wins_queued_cancel_and_emits_one_exact_bounded_
         .drop_reconfigure_runtime(epoch)
         .unwrap();
     context.state.ai_runtime.finish_reconfigure(epoch).unwrap();
+}
+
+#[tokio::test]
+async fn ai_response_executes_read_tool_and_continues_with_exact_registry() {
+    use tokio::net::TcpListener;
+
+    let context = TestContext::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        let (first, _) = listener.accept().await.unwrap();
+        let first = fragmented_chat_socket(
+            first,
+            &[
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"provider-call-1\",\"function\":{\"name\":\"list_projects\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+        )
+        .await;
+        let (second, _) = listener.accept().await.unwrap();
+        let second = fragmented_chat_socket(
+            second,
+            &[
+                "data: {\"choices\":[{\"delta\":{\"content\":\"There are no projects.\"}}]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+        )
+        .await;
+        (first, second)
+    });
+    let session_id = configure_loopback_ai_session(&context, address).await;
+    let operation_key = Uuid::new_v4().to_string();
+    let response = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &operation_key,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"message":"List projects"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let envelopes = ai_sse_envelopes(&response_bytes(response).await);
+    let (first, second) = fixture.await.unwrap();
+    let first: Value = serde_json::from_str(&first).unwrap();
+    let second: Value = serde_json::from_str(&second).unwrap();
+    assert_eq!(first["tools"].as_array().unwrap().len(), 48);
+    assert_eq!(second["tools"].as_array().unwrap().len(), 48);
+    assert!(
+        second["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| {
+                message["role"] == "tool"
+                    && message["tool_call_id"] == "provider-call-1"
+                    && message["content"]
+                        .as_str()
+                        .unwrap()
+                        .contains("list_projects")
+            })
+    );
+    assert_eq!(
+        envelopes
+            .iter()
+            .filter(|event| event["type"] == "tool_result")
+            .count(),
+        1
+    );
+    assert_eq!(envelopes.last().unwrap()["type"], "run_completed");
+    assert_eq!(
+        envelopes
+            .iter()
+            .filter(|event| event["type"] == "text_delta")
+            .map(|event| event["payload"]["text"].as_str().unwrap())
+            .collect::<String>(),
+        "There are no projects."
+    );
+    assert!(
+        !serde_json::to_string(&envelopes)
+            .unwrap()
+            .contains("provider-call-1")
+    );
+
+    let assistant_message_id = envelopes.last().unwrap()["payload"]["assistant_message_id"]
+        .as_str()
+        .unwrap();
+    let assistant = context
+        .state
+        .service
+        .get_ai_message(junban_domain::AiMessageId::parse(assistant_message_id).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(assistant.content.tool_events.len(), 1);
+    assert_eq!(assistant.content.tool_events[0].assistant_utf8_offset, 0);
+    assert_eq!(
+        assistant.content.tool_events[0].event_type,
+        junban_domain::AiToolEventType::ToolResult
+    );
+    assert_eq!(
+        assistant.content.tool_events[0].payload,
+        envelopes[1]["payload"]
+    );
+
+    let replay = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &operation_key,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"message":"List projects"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    let replay_envelopes = ai_sse_envelopes(&response_bytes(replay).await);
+    assert_eq!(&replay_envelopes[1..], &envelopes[1..]);
+}
+
+#[tokio::test]
+async fn ai_mutation_approval_dispatches_detached_and_terminalizes_exactly_once() {
+    use tokio::net::TcpListener;
+
+    let context = TestContext::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let expected_titles = (0..crate::ai_tool_registry::AI_TOOL_COMPOSITE_CREATE_MAX)
+        .map(|index| format!("Approved task {index}"))
+        .collect::<Vec<_>>();
+    let tool_arguments = json!({"titles": expected_titles}).to_string();
+    let provider_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "private-provider-id",
+                        "function": {
+                            "name": "bulk_create_tasks",
+                            "arguments": tool_arguments,
+                        },
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+        })
+    );
+    let fixture = tokio::spawn(async move {
+        fragmented_chat_fixture(listener, &[provider_frame.as_str(), "data: [DONE]\n\n"]).await
+    });
+    let session_id = configure_loopback_ai_session(&context, address).await;
+    let response_operation = Uuid::new_v4().to_string();
+    let response = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &response_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"message":"Create it"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut response_body = response.into_body();
+    let mut streamed = Vec::new();
+    let proposal = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let frame = response_body.frame().await.unwrap().unwrap();
+            if let Ok(data) = frame.into_data() {
+                streamed.extend_from_slice(&data);
+            }
+            if let Some(proposal) = ai_sse_envelopes(&streamed)
+                .into_iter()
+                .find(|event| event["type"] == "tool_proposed")
+            {
+                break proposal;
+            }
+        }
+    })
+    .await
+    .expect("durable proposal must stream");
+    let approval_id = proposal["payload"]["approval_id"].as_str().unwrap();
+    let action_hash = proposal["payload"]["action_hash"].as_str().unwrap();
+    let decision_operation = Uuid::now_v7().to_string();
+    let decision_body = json!({"action_hash":action_hash}).to_string();
+    let approved = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/approvals/{approval_id}/approve"),
+                ),
+                &decision_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(decision_body.clone()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(approved.status(), StatusCode::OK);
+    let approved_json = json(approved).await;
+    assert_eq!(approved_json["approval"]["status"], "consumed");
+    assert_eq!(approved_json["run"]["state"], "completed");
+    assert_eq!(approved_json["result"]["outcome"], "success");
+    let result_created = approved_json["result"]["data"]["created"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        result_created.len(),
+        crate::ai_tool_registry::AI_TOOL_COMPOSITE_CREATE_MAX
+    );
+    assert!(result_created.iter().all(|row| {
+        row["task_id"].as_str().is_some()
+            && row["operation_id"].as_str().is_some()
+            && row["revision"].as_u64().is_some()
+            && row["event_type"].as_str().is_some()
+            && row.get("title").is_none()
+    }));
+    let durable_approval = context
+        .state
+        .service
+        .get_ai_approval(junban_domain::AiApprovalId::parse(approval_id).unwrap())
+        .await
+        .unwrap();
+    let dispatch_root = durable_approval
+        .operation_id
+        .as_deref()
+        .expect("consumed approval has private dispatch authority");
+    assert_eq!(
+        Uuid::parse_str(dispatch_root).unwrap().get_version_num(),
+        4,
+        "trusted dispatch root must be cryptographically random rather than approval-derived",
+    );
+    assert_ne!(
+        approved_json["result"]["operation_id"].as_str(),
+        Some(dispatch_root)
+    );
+    let durable_events = approved_json["message"]["content"]["tool_events"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        durable_events
+            .iter()
+            .map(|event| event["event_type"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["tool_proposed", "tool_approved", "tool_result"]
+    );
+    let sqlite_result: Value = serde_json::from_str(
+        approved_json["message"]["content"]["tool_result_json"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        sqlite_result["data"]["created"].as_array().unwrap().len(),
+        crate::ai_tool_registry::AI_TOOL_COMPOSITE_CREATE_MAX
+    );
+    assert_eq!(
+        durable_events.last().unwrap()["payload"]["data"]["created"]
+            .as_array()
+            .unwrap()
+            .len(),
+        crate::ai_tool_registry::AI_TOOL_COMPOSITE_CREATE_MAX
+    );
+
+    streamed.extend_from_slice(&response_body.collect().await.unwrap().to_bytes());
+    let envelopes = ai_sse_envelopes(&streamed);
+    assert_eq!(envelopes.last().unwrap()["type"], "run_completed");
+    assert_eq!(
+        envelopes
+            .iter()
+            .filter(|event| event["type"] == "tool_approved")
+            .count(),
+        1
+    );
+    assert_eq!(
+        envelopes
+            .iter()
+            .filter(|event| event["type"] == "tool_result")
+            .count(),
+        1
+    );
+    assert_eq!(
+        envelopes
+            .iter()
+            .find(|event| event["type"] == "tool_result")
+            .unwrap()["payload"]["data"]["created"]
+            .as_array()
+            .unwrap()
+            .len(),
+        crate::ai_tool_registry::AI_TOOL_COMPOSITE_CREATE_MAX
+    );
+    assert!(!String::from_utf8_lossy(&streamed).contains("private-provider-id"));
+    assert!(!String::from_utf8_lossy(&streamed).contains(dispatch_root));
+    assert!(
+        !serde_json::to_string(&approved_json)
+            .unwrap()
+            .contains(dispatch_root)
+    );
+    let _provider_request = fixture.await.unwrap();
+
+    let tasks = context
+        .request(
+            authenticated(Method::GET, "/api/v1/tasks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(tasks.status(), StatusCode::OK);
+    assert_eq!(
+        json(tasks).await["tasks"].as_array().unwrap().len(),
+        crate::ai_tool_registry::AI_TOOL_COMPOSITE_CREATE_MAX
+    );
+
+    let response_replay = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &response_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"message":"Create it"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(response_replay.status(), StatusCode::OK);
+    let response_replay = ai_sse_envelopes(&response_bytes(response_replay).await);
+    assert_eq!(&response_replay[1..], &envelopes[1..]);
+
+    let replay = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/approvals/{approval_id}/approve"),
+                ),
+                &decision_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(decision_body.clone()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(json(replay).await, approved_json);
+
+    let wrong_key = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                &format!("/api/v1/ai/approvals/{approval_id}/approve"),
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(decision_body))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(wrong_key.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn startup_recovers_consumed_ai_dispatch_without_provider_egress_or_duplicate_effect() {
+    let context = TestContext::new();
+    let created = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/ai/sessions"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"title":"Recovery"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session_id =
+        junban_domain::AiSessionId::parse(json(created).await["session"]["id"].as_str().unwrap())
+            .unwrap();
+    let source = OperationId::parse(&Uuid::now_v7().to_string()).unwrap();
+    let identity = crate::ai_identity::AiResponseIdentity::derive(source);
+    let round = identity.round(1);
+    let (_, canonical_arguments) = crate::ai_tool_registry::validate_tool_call(
+        "create_task",
+        r#"{"title":"Recovered dispatch"}"#,
+    )
+    .unwrap();
+    let mut content = junban_domain::AiMessageContent::text("I will create it.").unwrap();
+    content.tool_name = Some("create_task".to_owned());
+    content.tool_arguments_json = Some(canonical_arguments.clone());
+    context
+        .state
+        .service
+        .upsert_ai_message(
+            round.assistant_tool_update_operation_id,
+            junban_app::UpsertAiMessageRequest {
+                message_id: identity.assistant_message_id,
+                session_id,
+                turn_id: identity.turn_id,
+                role: junban_domain::AiMessageRole::Assistant,
+                status: junban_domain::AiMessageStatus::Streaming,
+                content: content.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let now = Timestamp::now();
+    context
+        .state
+        .service
+        .upsert_ai_run_state(
+            identity.running_run_operation_id,
+            junban_app::UpsertAiRunStateRequest {
+                state: junban_domain::AiRunState {
+                    run_id: identity.run_id,
+                    session_id,
+                    turn_id: identity.turn_id,
+                    assistant_message_id: identity.assistant_message_id,
+                    generation: 1,
+                    state: junban_domain::AiRunPhase::Running,
+                    approval_id: None,
+                    created_at: now,
+                    updated_at: now,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    context
+        .state
+        .service
+        .propose_ai_approval(
+            round.propose_operation_id,
+            junban_app::ProposeAiApprovalRequest {
+                approval_id: round.approval_id,
+                session_id,
+                turn_id: identity.turn_id,
+                run_id: identity.run_id,
+                generation: 1,
+                tool_name: "create_task".to_owned(),
+                arguments_json: canonical_arguments.clone(),
+                assistant_content: content,
+            },
+        )
+        .await
+        .unwrap();
+    let decision = crate::ai_identity::AiApprovalDecisionIdentity::derive(round.approval_id);
+    context
+        .state
+        .service
+        .set_ai_approval_status(
+            decision.approved_operation_id,
+            junban_app::SetAiApprovalStatusRequest {
+                approval_id: round.approval_id,
+                status: junban_domain::AiApprovalStatus::Approved,
+                dispatch_operation_id: None,
+                assistant_content: None,
+            },
+        )
+        .await
+        .unwrap();
+    let mut approved_content = context
+        .state
+        .service
+        .get_ai_message(identity.assistant_message_id)
+        .await
+        .unwrap()
+        .content;
+    crate::ai_tool_transcript::push_tool_event(
+        &mut approved_content,
+        junban_domain::AiToolEventType::ToolApproved,
+        json!({"approval_id": round.approval_id.to_string()}),
+    )
+    .unwrap();
+    let dispatch_operation_id = OperationId::new();
+    context
+        .state
+        .service
+        .set_ai_approval_status(
+            decision.consume_operation_id,
+            junban_app::SetAiApprovalStatusRequest {
+                approval_id: round.approval_id,
+                status: junban_domain::AiApprovalStatus::Consumed,
+                dispatch_operation_id: Some(dispatch_operation_id),
+                assistant_content: Some(approved_content),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+    context.state.recover_ai_dispatches().await.unwrap();
+    context.state.recover_ai_dispatches().await.unwrap();
+    assert_eq!(context.state.ai_provider_client_construct_calls(), 0);
+    assert!(!context.state.ai_runtime().has_runtime());
+    let run = context
+        .state
+        .service
+        .get_ai_run_state(identity.run_id)
+        .await
+        .unwrap();
+    assert_eq!(run.state, junban_domain::AiRunPhase::Completed);
+    let assistant = context
+        .state
+        .service
+        .get_ai_message(identity.assistant_message_id)
+        .await
+        .unwrap();
+    assert_eq!(assistant.status, junban_domain::AiMessageStatus::Completed);
+    let result_json = assistant.content.tool_result_json.as_deref().unwrap();
+    assert!(result_json.contains("success"));
+    assert!(!result_json.contains(&dispatch_operation_id.to_string()));
+    assert_eq!(
+        assistant
+            .content
+            .tool_events
+            .iter()
+            .map(|event| event.event_type)
+            .collect::<Vec<_>>(),
+        vec![
+            junban_domain::AiToolEventType::ToolProposed,
+            junban_domain::AiToolEventType::ToolApproved,
+            junban_domain::AiToolEventType::ToolResult,
+        ]
+    );
+    let tasks = context
+        .request(
+            authenticated(Method::GET, "/api/v1/tasks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(
+        json(tasks).await["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|task| task["title"] == "Recovered dispatch")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn rejected_ai_mutation_returns_stable_result_and_continues_provider_loop() {
+    use tokio::net::TcpListener;
+
+    let context = TestContext::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        let (first, _) = listener.accept().await.unwrap();
+        let first = fragmented_chat_socket(
+            first,
+            &[
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"reject-call\",\"function\":{\"name\":\"create_task\",\"arguments\":\"{\\\"title\\\":\\\"Must not exist\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+        )
+        .await;
+        let (second, _) = listener.accept().await.unwrap();
+        let second = fragmented_chat_socket(
+            second,
+            &[
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Understood.\"}}]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+        )
+        .await;
+        (first, second)
+    });
+    let session_id = configure_loopback_ai_session(&context, address).await;
+    let response_operation = Uuid::now_v7().to_string();
+    let response = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &response_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"message":"Try then accept rejection"}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    let mut body = response.into_body();
+    let mut streamed = Vec::new();
+    let proposal = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let frame = body.frame().await.unwrap().unwrap();
+            if let Ok(data) = frame.into_data() {
+                streamed.extend_from_slice(&data);
+            }
+            if let Some(event) = ai_sse_envelopes(&streamed)
+                .into_iter()
+                .find(|event| event["type"] == "tool_proposed")
+            {
+                break event;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let approval_id = proposal["payload"]["approval_id"].as_str().unwrap();
+    let action_hash = proposal["payload"]["action_hash"].as_str().unwrap();
+    let reject_operation = Uuid::new_v4().to_string();
+    let reject_body = json!({"action_hash":action_hash}).to_string();
+    let rejected = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/approvals/{approval_id}/reject"),
+                ),
+                &reject_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(reject_body.clone()))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(rejected.status(), StatusCode::OK);
+    let rejected_json = json(rejected).await;
+    assert_eq!(rejected_json["result"]["data"]["code"], "tool_rejected");
+    streamed.extend_from_slice(&body.collect().await.unwrap().to_bytes());
+    let envelopes = ai_sse_envelopes(&streamed);
+    assert_eq!(envelopes.last().unwrap()["type"], "run_completed");
+    assert_eq!(
+        envelopes
+            .iter()
+            .filter(|event| event["type"] == "tool_rejected")
+            .count(),
+        1
+    );
+    assert_eq!(
+        envelopes
+            .iter()
+            .find(|event| event["type"] == "tool_result")
+            .unwrap()["payload"]["data"]["code"],
+        "tool_rejected"
+    );
+    let (_first, second) = fixture.await.unwrap();
+    let second: Value = serde_json::from_str(&second).unwrap();
+    let tool_message = second["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .unwrap();
+    assert_eq!(tool_message["tool_call_id"], "reject-call");
+    assert!(
+        tool_message["content"]
+            .as_str()
+            .unwrap()
+            .contains("tool_rejected")
+    );
+
+    let identity = crate::ai_identity::AiResponseIdentity::derive(
+        OperationId::parse(&response_operation).unwrap(),
+    );
+    let assistant = context
+        .state
+        .service
+        .get_ai_message(identity.assistant_message_id)
+        .await
+        .unwrap();
+    assert_eq!(assistant.content.tool_name.as_deref(), Some("create_task"));
+    assert!(
+        assistant
+            .content
+            .tool_result_json
+            .as_deref()
+            .unwrap()
+            .contains("tool_rejected")
+    );
+    assert_eq!(
+        assistant
+            .content
+            .tool_events
+            .iter()
+            .map(|event| event.event_type)
+            .collect::<Vec<_>>(),
+        vec![
+            junban_domain::AiToolEventType::ToolProposed,
+            junban_domain::AiToolEventType::ToolRejected,
+            junban_domain::AiToolEventType::ToolResult,
+        ]
+    );
+    let replay = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &response_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"message":"Try then accept rejection"}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    let replay = ai_sse_envelopes(&response_bytes(replay).await);
+    assert_eq!(&replay[1..], &envelopes[1..]);
+
+    let decision_replay = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/approvals/{approval_id}/reject"),
+                ),
+                &reject_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(reject_body))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(decision_replay.status(), StatusCode::OK);
+    assert_eq!(
+        json(decision_replay).await["result"],
+        rejected_json["result"]
+    );
+
+    let tasks = context
+        .request(
+            authenticated(Method::GET, "/api/v1/tasks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert!(
+        json(tasks).await["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|task| task["title"] != "Must not exist")
+    );
 }

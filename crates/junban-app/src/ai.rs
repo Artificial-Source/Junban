@@ -214,6 +214,8 @@ pub struct ProposeAiApprovalRequest {
     pub generation: u64,
     pub tool_name: String,
     pub arguments_json: String,
+    /// Assistant text and prior durable tool events checkpointed with the proposal.
+    pub assistant_content: AiMessageContent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -222,6 +224,8 @@ pub struct SetAiApprovalStatusRequest {
     pub status: AiApprovalStatus,
     /// Required only when consuming an approved tool call.
     pub dispatch_operation_id: Option<OperationId>,
+    /// Exact assistant checkpoint required for rejection or consumption atomics.
+    pub assistant_content: Option<AiMessageContent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

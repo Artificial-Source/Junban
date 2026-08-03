@@ -4,6 +4,54 @@
  */
 
 export interface paths {
+  "/api/v1/ai/approvals/{approval_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_ai_approval"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/approvals/{approval_id}/approve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["approve_ai_approval"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/approvals/{approval_id}/reject": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["reject_ai_approval"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/ai/config": {
     parameters: {
       query?: never;
@@ -1488,6 +1536,54 @@ export interface components {
       time_block_ids?: string[];
       time_slot_ids?: string[];
     };
+    AiApprovalDecisionRequest: {
+      action_hash: string;
+    };
+    AiApprovalDto: {
+      action_hash: string;
+      arguments: unknown;
+      created_at: string;
+      expires_at: string;
+      /** Format: int64 */
+      generation: number;
+      id: string;
+      run_id: string;
+      session_id: string;
+      status: string;
+      tool_name: string;
+      turn_id: string;
+      updated_at: string;
+    };
+    AiApprovalMessageDto: {
+      content: unknown;
+      created_at: string;
+      id: string;
+      role: string;
+      /** Format: int32 */
+      sequence: number;
+      session_id: string;
+      status: string;
+      turn_id: string;
+      updated_at: string;
+    };
+    AiApprovalResponse: {
+      approval: components["schemas"]["AiApprovalDto"];
+      message: components["schemas"]["AiApprovalMessageDto"];
+      result?: unknown;
+      run: components["schemas"]["AiApprovalRunDto"];
+    };
+    AiApprovalRunDto: {
+      approval_id?: string | null;
+      assistant_message_id: string;
+      created_at: string;
+      /** Format: int64 */
+      generation: number;
+      id: string;
+      session_id: string;
+      state: string;
+      turn_id: string;
+      updated_at: string;
+    };
     AiConfigInput: {
       auto_send: boolean;
       base_url?: string | null;
@@ -1564,6 +1660,7 @@ export interface components {
       focused_task_id?: string | null;
       text?: string;
       tool_arguments_json?: string | null;
+      tool_events?: components["schemas"]["AiToolEventDto"][];
       tool_name?: string | null;
       tool_result_json?: string | null;
     };
@@ -1626,6 +1723,10 @@ export interface components {
       | "text_delta"
       | "reasoning_status"
       | "usage"
+      | "tool_proposed"
+      | "tool_approved"
+      | "tool_rejected"
+      | "tool_result"
       | "run_completed"
       | "run_cancelled"
       | "run_failed";
@@ -1683,6 +1784,14 @@ export interface components {
       model?: string | null;
       provider?: null | components["schemas"]["AiProviderPresetDto"];
       smart_endpoint: boolean;
+    };
+    AiToolEventDto: {
+      /** Format: int32 */
+      assistant_utf8_offset: number;
+      event_type: string;
+      payload: unknown;
+      /** Format: int32 */
+      version: number;
     };
     AppSettingsResponse: {
       appearance: components["schemas"]["AppearanceSettingsDto"];
@@ -3145,6 +3254,217 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  get_ai_approval: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        approval_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiApprovalResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  approve_ai_approval: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        approval_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AiApprovalDecisionRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiApprovalResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  reject_ai_approval: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        approval_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AiApprovalDecisionRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiApprovalResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   get_ai_config: {
     parameters: {
       query?: never;

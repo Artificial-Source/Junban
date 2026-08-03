@@ -20,9 +20,10 @@ use junban_app::{
 use junban_domain::{
     AI_CONTEXT_MEMORIES_MAX, AI_SECRETS_FILE, AiApprovalId, AiApprovalStatus, AiMemoryId,
     AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus, AiProviderPreset, AiRunId,
-    AiRunPhase, AiRunState, AiSecretKind, AiSessionId, AiTurnId, OperationId, ProviderBaseUrl,
-    SettingsPatch,
+    AiRunPhase, AiRunState, AiSecretKind, AiSessionId, AiToolEvent, AiToolEventType, AiTurnId,
+    OperationId, ProviderBaseUrl, SettingsPatch,
 };
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::{AiSecretStore, ProfileOwner, SqliteRepository};
@@ -770,6 +771,12 @@ async fn approval_propose_consume_and_run_state_use_wave1_atomics_through_servic
                 generation: 1,
                 tool_name: "create_task".into(),
                 arguments_json: r#"{"title":"x"}"#.into(),
+                assistant_content: {
+                    let mut content = AiMessageContent::text("").unwrap();
+                    content.tool_name = Some("create_task".into());
+                    content.tool_arguments_json = Some(r#"{"title":"x"}"#.into());
+                    content
+                },
             },
         )
         .await
@@ -785,24 +792,92 @@ async fn approval_propose_consume_and_run_state_use_wave1_atomics_through_servic
                 approval_id,
                 status: AiApprovalStatus::Approved,
                 dispatch_operation_id: None,
+                assistant_content: None,
             },
         )
         .await
         .unwrap();
+    let mut approved_content = service
+        .get_ai_message(assistant_message_id)
+        .await
+        .unwrap()
+        .content;
+    approved_content.tool_events.push(
+        AiToolEvent::new(
+            approved_content.text.len(),
+            AiToolEventType::ToolApproved,
+            json!({"approval_id": approval_id.to_string()}),
+        )
+        .unwrap(),
+    );
     let dispatch_op = op();
+    let consume_op = op();
     service
         .set_ai_approval_status(
-            op(),
+            consume_op,
             SetAiApprovalStatusRequest {
                 approval_id,
                 status: AiApprovalStatus::Consumed,
                 dispatch_operation_id: Some(dispatch_op),
+                assistant_content: Some(approved_content.clone()),
             },
         )
         .await
         .unwrap();
+    assert!(
+        !service
+            .set_ai_approval_status(
+                consume_op,
+                SetAiApprovalStatusRequest {
+                    approval_id,
+                    status: AiApprovalStatus::Consumed,
+                    dispatch_operation_id: Some(dispatch_op),
+                    assistant_content: Some(approved_content.clone()),
+                },
+            )
+            .await
+            .unwrap()
+            .newly_committed
+    );
+    let mut mismatched_checkpoint = approved_content.clone();
+    mismatched_checkpoint.text.push('x');
+    assert_eq!(
+        service
+            .set_ai_approval_status(
+                consume_op,
+                SetAiApprovalStatusRequest {
+                    approval_id,
+                    status: AiApprovalStatus::Consumed,
+                    dispatch_operation_id: Some(dispatch_op),
+                    assistant_content: Some(mismatched_checkpoint),
+                },
+            )
+            .await
+            .unwrap_err(),
+        junban_app::AppError::IdempotencyMismatch
+    );
     let dispatching = service.get_ai_run_state(run_id).await.unwrap();
     assert_eq!(dispatching.state, AiRunPhase::Dispatching);
+    let stopped_after_consume = service.get_ai_message(assistant_message_id).await.unwrap();
+    assert_eq!(stopped_after_consume.content, approved_content);
+    assert_eq!(
+        stopped_after_consume
+            .content
+            .tool_events
+            .iter()
+            .filter(|event| event.event_type == AiToolEventType::ToolApproved)
+            .count(),
+        1
+    );
+    assert_eq!(
+        stopped_after_consume
+            .content
+            .tool_events
+            .last()
+            .unwrap()
+            .payload,
+        json!({"approval_id": approval_id.to_string()})
+    );
     let approval = service.get_ai_approval(approval_id).await.unwrap();
     assert_eq!(approval.status, AiApprovalStatus::Consumed);
     assert_eq!(
@@ -911,6 +986,12 @@ async fn cancel_ai_response_service_replays_and_rejects_mismatch() {
                 generation: 1,
                 tool_name: "create_task".into(),
                 arguments_json: r#"{"title":"x"}"#.into(),
+                assistant_content: {
+                    let mut content = AiMessageContent::text("").unwrap();
+                    content.tool_name = Some("create_task".into());
+                    content.tool_arguments_json = Some(r#"{"title":"x"}"#.into());
+                    content
+                },
             },
         )
         .await
@@ -922,6 +1003,7 @@ async fn cancel_ai_response_service_replays_and_rejects_mismatch() {
                 approval_id,
                 status: AiApprovalStatus::Approved,
                 dispatch_operation_id: None,
+                assistant_content: None,
             },
         )
         .await

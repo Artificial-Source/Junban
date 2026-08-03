@@ -54,16 +54,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     ensure_separate_profile_and_web(&data_dir, &config.web_dir)?;
     let token = load_or_create_token(&data_dir)?;
+    // Recover consumed AI dispatch authority before opening any normal listener.
+    let state = ServerState::new(
+        owner.repository(),
+        token,
+        config.additional_hosts,
+        &data_dir,
+    )?;
+    state.recover_ai_dispatches().await?;
+
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
     let address = listener.local_addr()?;
-
-    let mut cli_hosts = config.additional_hosts;
-    cli_hosts.push(address.to_string());
+    let mut listener_hosts = vec![address.to_string()];
     if address.ip().is_loopback() {
-        cli_hosts.push(format!("localhost:{}", address.port()));
+        listener_hosts.push(format!("localhost:{}", address.port()));
     }
-    // CLI hosts merge with any persisted Tailnet hostnames under the profile dir.
-    let state = ServerState::new(owner.repository(), token, cli_hosts, &data_dir)?;
+    state.add_cli_hosts(listener_hosts);
     let instance_id = state.instance_id().to_owned();
     let shutdown = state.shutdown_token();
     // Exactly one process-global reminder coordinator; not started by router tests.

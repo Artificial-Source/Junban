@@ -34,6 +34,7 @@ use junban_domain::{
     SpeechProviderPreset, VoiceMode, VoiceSettings,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::sync::OwnedMutexGuard;
 use utoipa::{IntoParams, ToSchema};
 
@@ -1224,9 +1225,19 @@ impl From<junban_domain::AiMessageStatus> for AiMessageStatusDto {
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AiToolEventDto {
+    pub version: u8,
+    pub assistant_utf8_offset: u32,
+    pub event_type: String,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AiMessageContentDto {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_events: Vec<AiToolEventDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1244,6 +1255,16 @@ impl From<AiMessageContent> for AiMessageContentDto {
     fn from(value: AiMessageContent) -> Self {
         Self {
             text: value.text,
+            tool_events: value
+                .tool_events
+                .into_iter()
+                .map(|event| AiToolEventDto {
+                    version: event.version,
+                    assistant_utf8_offset: event.assistant_utf8_offset,
+                    event_type: event.event_type.as_str().to_owned(),
+                    payload: event.payload,
+                })
+                .collect(),
             tool_name: value.tool_name,
             tool_arguments_json: value.tool_arguments_json,
             tool_result_json: value.tool_result_json,

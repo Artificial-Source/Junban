@@ -20,11 +20,12 @@ use junban_domain::{
     AI_PROFILE_CONTENT_BYTES_MAX, AI_SESSION_CONTENT_BYTES_MAX, AI_SESSION_PAGE_MAX,
     AI_SESSIONS_PER_PROFILE_MAX, AiApprovalId, AiApprovalStatus, AiMemory, AiMemoryId, AiMessage,
     AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus, AiRunId, AiRunPhase, AiRunState,
-    AiSession, AiSessionId, AiSessionStatus, AiToolApproval, AiTurnId, OperationId,
-    ai_approval_action_hash, validate_ai_tool_name,
+    AiSession, AiSessionId, AiSessionStatus, AiToolApproval, AiToolEvent, AiToolEventType,
+    AiTurnId, OperationId, ai_approval_action_hash, validate_ai_tool_name,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
+use serde_json::{Value, json};
 
 use crate::helpers::validation;
 use crate::rows::storage_error;
@@ -78,11 +79,13 @@ enum Req<'a> {
         generation: u64,
         tool_name: &'a str,
         arguments_json: &'a str,
+        assistant_content_json: &'a str,
     },
     SetAiApprovalStatus {
         approval_id: String,
         status: &'a str,
         operation_id: Option<&'a str>,
+        assistant_content_sha256: Option<&'a str>,
     },
     UpsertAiRunState {
         run_id: String,
@@ -204,6 +207,93 @@ fn quota_err(field: &'static str) -> RepositoryError {
         field,
         reason: "aggregate AI quota exceeded",
     })
+}
+
+fn replace_streaming_assistant_content(
+    tx: &rusqlite::Transaction<'_>,
+    assistant_message_id: &str,
+    session_id: AiSessionId,
+    turn_id: AiTurnId,
+    content_json: &str,
+    content_bytes: u64,
+    now: Timestamp,
+    quota: &mut AiQuota,
+) -> Result<(), RepositoryError> {
+    let old_bytes = tx
+        .query_row(
+            "SELECT content_bytes FROM ai_messages
+             WHERE id = ?1 AND session_id = ?2 AND turn_id = ?3
+               AND role = 'assistant' AND status = 'streaming'",
+            params![
+                assistant_message_id,
+                session_id.to_string(),
+                turn_id.to_string()
+            ],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(storage_error)?
+        .ok_or(RepositoryError::Conflict)?;
+    let session_bytes = tx
+        .query_row(
+            "SELECT content_bytes FROM ai_sessions WHERE id = ?1",
+            [session_id.to_string()],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(storage_error)?
+        .ok_or(RepositoryError::NotFound)?;
+    let delta_bytes = content_bytes as i64 - old_bytes;
+    let next_session_bytes = session_bytes
+        .checked_add(delta_bytes)
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| RepositoryError::Storage("invalid AI session byte counter".into()))?;
+    if next_session_bytes > AI_SESSION_CONTENT_BYTES_MAX {
+        return Err(quota_err("ai_session.content_bytes"));
+    }
+    let next_profile_bytes = if delta_bytes >= 0 {
+        quota
+            .total_content_bytes
+            .checked_add(delta_bytes as u64)
+            .ok_or_else(|| quota_err("ai_profile.content_bytes"))?
+    } else {
+        quota
+            .total_content_bytes
+            .saturating_sub((-delta_bytes) as u64)
+    };
+    if next_profile_bytes > AI_PROFILE_CONTENT_BYTES_MAX {
+        return Err(quota_err("ai_profile.content_bytes"));
+    }
+    let updated = tx
+        .execute(
+            "UPDATE ai_messages SET content_json = ?1, content_bytes = ?2, updated_at = ?3
+             WHERE id = ?4 AND session_id = ?5 AND turn_id = ?6
+               AND role = 'assistant' AND status = 'streaming'",
+            params![
+                content_json,
+                content_bytes as i64,
+                now.to_string(),
+                assistant_message_id,
+                session_id.to_string(),
+                turn_id.to_string(),
+            ],
+        )
+        .map_err(storage_error)?;
+    if updated != 1 {
+        return Err(RepositoryError::Conflict);
+    }
+    tx.execute(
+        "UPDATE ai_sessions SET content_bytes = ?1, updated_at = ?2, last_message_at = ?2
+         WHERE id = ?3",
+        params![
+            next_session_bytes as i64,
+            now.to_string(),
+            session_id.to_string()
+        ],
+    )
+    .map_err(storage_error)?;
+    quota.total_content_bytes = next_profile_bytes;
+    Ok(())
 }
 
 pub(crate) fn create_ai_session(
@@ -926,6 +1016,59 @@ pub(crate) fn propose_ai_approval(
     arguments_json: String,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    let assistant_message_id = connection
+        .query_row(
+            "SELECT assistant_message_id FROM ai_run_state WHERE run_id = ?1",
+            [run_id.to_string()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(storage_error)?;
+    let mut assistant_content = match assistant_message_id {
+        Some(assistant_message_id) => {
+            get_ai_message(
+                connection,
+                AiMessageId::parse(&assistant_message_id).map_err(storage_error)?,
+            )?
+            .content
+        }
+        None => AiMessageContent::text("").map_err(validation)?,
+    };
+    assistant_content.tool_name = Some(tool_name.clone());
+    assistant_content.tool_arguments_json = Some(canonicalize_json_object(
+        arguments_json.clone(),
+        "ai_approval.arguments_json",
+        junban_domain::AI_TOOL_ARGUMENTS_BYTES_MAX,
+    )?);
+    assistant_content.tool_result_json = None;
+    propose_ai_approval_with_content(
+        connection,
+        operation_id,
+        approval_id,
+        session_id,
+        turn_id,
+        run_id,
+        generation,
+        tool_name,
+        arguments_json,
+        assistant_content,
+        now,
+    )
+}
+
+pub(crate) fn propose_ai_approval_with_content(
+    connection: &mut Connection,
+    operation_id: OperationId,
+    approval_id: AiApprovalId,
+    session_id: AiSessionId,
+    turn_id: AiTurnId,
+    run_id: AiRunId,
+    generation: u64,
+    tool_name: String,
+    arguments_json: String,
+    mut assistant_content: AiMessageContent,
+    now: Timestamp,
+) -> Result<CommittedMutation, RepositoryError> {
     validate_ai_tool_name(&tool_name).map_err(validation)?;
     let arguments_json = canonicalize_json_object(
         arguments_json,
@@ -941,6 +1084,23 @@ pub(crate) fn propose_ai_approval(
     let arguments_bytes = arguments_json.len() as u64;
     let action_hash = ai_approval_action_hash(&tool_name, &arguments_json).map_err(validation)?;
     let expires_at = now + AI_APPROVAL_LIFETIME_SECS.seconds();
+    canonicalize_optional_json(
+        &mut assistant_content.tool_arguments_json,
+        "ai_message.content.tool_arguments_json",
+        junban_domain::AI_TOOL_ARGUMENTS_BYTES_MAX,
+    )?;
+    canonicalize_optional_json(
+        &mut assistant_content.tool_result_json,
+        "ai_message.content.tool_result_json",
+        junban_domain::AI_TOOL_RESULT_BYTES_MAX,
+    )?;
+    if assistant_content.tool_name.as_deref() != Some(tool_name.as_str())
+        || assistant_content.tool_arguments_json.as_deref() != Some(arguments_json.as_str())
+        || assistant_content.tool_result_json.is_some()
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    let base_content_json = assistant_content.canonical_json().map_err(validation)?;
     let request = canonical_json(&Req::ProposeAiApproval {
         approval_id: approval_id.to_string(),
         session_id: session_id.to_string(),
@@ -949,7 +1109,25 @@ pub(crate) fn propose_ai_approval(
         generation: generation as u64,
         tool_name: &tool_name,
         arguments_json: &arguments_json,
+        assistant_content_json: &base_content_json,
     })?;
+    let arguments: Value = serde_json::from_str(&arguments_json).map_err(storage_error)?;
+    assistant_content.tool_events.push(
+        AiToolEvent::new(
+            assistant_content.text.len(),
+            AiToolEventType::ToolProposed,
+            json!({
+                "approval_id": approval_id.to_string(),
+                "tool": tool_name.clone(),
+                "arguments": arguments,
+                "action_hash": action_hash.clone(),
+                "expires_at": expires_at,
+            }),
+        )
+        .map_err(validation)?,
+    );
+    let assistant_content_json = assistant_content.canonical_json().map_err(validation)?;
+    let assistant_content_bytes = AiMessageContent::byte_len(&assistant_content_json);
     mutate(connection, operation_id, request, now, move |tx, _| {
         let session_exists: bool = tx
             .query_row(
@@ -1023,6 +1201,23 @@ pub(crate) fn propose_ai_approval(
         if run_updated != 1 {
             return Err(RepositoryError::Conflict);
         }
+        let assistant_message_id: String = tx
+            .query_row(
+                "SELECT assistant_message_id FROM ai_run_state WHERE run_id = ?1",
+                [run_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage_error)?;
+        replace_streaming_assistant_content(
+            tx,
+            &assistant_message_id,
+            session_id,
+            turn_id,
+            &assistant_content_json,
+            assistant_content_bytes,
+            now,
+            &mut quota,
+        )?;
         quota.pending_approval_count += 1;
         quota.pending_approval_content_bytes = next_bytes;
         save_quota(tx, &quota)?;
@@ -1034,6 +1229,85 @@ pub(crate) fn propose_ai_approval(
     })
 }
 
+fn rejection_tool_result(tool_name: &str) -> Value {
+    json!({
+        "tool": tool_name,
+        "outcome": "error",
+        "data": {
+            "code": "tool_rejected",
+            "message": "the operator rejected this tool action",
+        },
+        "truncated": false,
+    })
+}
+
+fn exact_proposal_payload(approval: &AiToolApproval) -> Result<Value, RepositoryError> {
+    let arguments: Value = serde_json::from_str(&approval.arguments_json).map_err(storage_error)?;
+    Ok(json!({
+        "approval_id": approval.id.to_string(),
+        "tool": approval.tool_name,
+        "arguments": arguments,
+        "action_hash": approval.action_hash,
+        "expires_at": approval.expires_at,
+    }))
+}
+
+fn decision_checkpoint_content(
+    connection: &Connection,
+    approval: &AiToolApproval,
+    status: AiApprovalStatus,
+) -> Result<AiMessageContent, RepositoryError> {
+    let assistant_message_id: String = connection
+        .query_row(
+            "SELECT assistant_message_id FROM ai_run_state WHERE run_id = ?1",
+            [approval.run_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    let mut content = get_ai_message(
+        connection,
+        AiMessageId::parse(&assistant_message_id).map_err(storage_error)?,
+    )?
+    .content;
+    if content.tool_name.as_deref() != Some(approval.tool_name.as_str())
+        || content.tool_arguments_json.as_deref() != Some(approval.arguments_json.as_str())
+        || content.tool_result_json.is_some()
+        || content.tool_events.last().is_none_or(|event| {
+            event.event_type != AiToolEventType::ToolProposed
+                || exact_proposal_payload(approval).map_or(true, |payload| event.payload != payload)
+        })
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    let event_type = match status {
+        AiApprovalStatus::Consumed => AiToolEventType::ToolApproved,
+        AiApprovalStatus::Rejected => AiToolEventType::ToolRejected,
+        _ => return Err(RepositoryError::Conflict),
+    };
+    content.tool_events.push(
+        AiToolEvent::new(
+            content.text.len(),
+            event_type,
+            json!({"approval_id": approval.id.to_string()}),
+        )
+        .map_err(validation)?,
+    );
+    if status == AiApprovalStatus::Rejected {
+        let result = rejection_tool_result(&approval.tool_name);
+        content.tool_events.push(
+            AiToolEvent::new(
+                content.text.len(),
+                AiToolEventType::ToolResult,
+                result.clone(),
+            )
+            .map_err(validation)?,
+        );
+        content.tool_result_json = Some(serde_json::to_string(&result).map_err(storage_error)?);
+    }
+    content.canonical_json().map_err(validation)?;
+    Ok(content)
+}
+
 #[allow(dead_code)]
 pub(crate) fn set_ai_approval_status(
     connection: &mut Connection,
@@ -1043,6 +1317,74 @@ pub(crate) fn set_ai_approval_status(
     dispatch_operation_id: Option<String>,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    let assistant_content = if matches!(
+        status,
+        AiApprovalStatus::Rejected | AiApprovalStatus::Consumed
+    ) {
+        let approval = load_validated_ai_approval(connection, approval_id)?;
+        Some(decision_checkpoint_content(connection, &approval, status)?)
+    } else {
+        None
+    };
+    set_ai_approval_status_with_content(
+        connection,
+        operation_id,
+        approval_id,
+        status,
+        dispatch_operation_id,
+        assistant_content,
+        now,
+    )
+}
+
+pub(crate) fn set_ai_approval_status_with_content(
+    connection: &mut Connection,
+    operation_id: OperationId,
+    approval_id: AiApprovalId,
+    status: AiApprovalStatus,
+    dispatch_operation_id: Option<String>,
+    assistant_content: Option<AiMessageContent>,
+    now: Timestamp,
+) -> Result<CommittedMutation, RepositoryError> {
+    let assistant_content = match (status, assistant_content) {
+        (AiApprovalStatus::Rejected | AiApprovalStatus::Consumed, Some(mut content)) => {
+            canonicalize_optional_json(
+                &mut content.tool_arguments_json,
+                "ai_message.content.tool_arguments_json",
+                junban_domain::AI_TOOL_ARGUMENTS_BYTES_MAX,
+            )?;
+            canonicalize_optional_json(
+                &mut content.tool_result_json,
+                "ai_message.content.tool_result_json",
+                junban_domain::AI_TOOL_RESULT_BYTES_MAX,
+            )?;
+            Some(content)
+        }
+        (AiApprovalStatus::Rejected | AiApprovalStatus::Consumed, None) => {
+            return Err(validation(junban_domain::ValidationError::Invalid {
+                field: "ai_approval.assistant_content",
+                reason: "rejecting or consuming an approval requires exact durable assistant content",
+            }));
+        }
+        (_, Some(_)) => {
+            return Err(validation(junban_domain::ValidationError::Invalid {
+                field: "ai_approval.assistant_content",
+                reason: "assistant content is only valid when rejecting or consuming an approval",
+            }));
+        }
+        (_, None) => None,
+    };
+    let assistant_content_json = assistant_content
+        .as_ref()
+        .map(AiMessageContent::canonical_json)
+        .transpose()
+        .map_err(validation)?;
+    let assistant_content_bytes = assistant_content_json
+        .as_deref()
+        .map(AiMessageContent::byte_len);
+    let assistant_content_sha256 = assistant_content_json
+        .as_deref()
+        .map(|content| junban_domain::sha256_hex(content.as_bytes()));
     let dispatch_operation_id = match (status, dispatch_operation_id) {
         (AiApprovalStatus::Consumed, Some(raw)) => {
             let parsed = OperationId::parse(&raw).map_err(validation)?;
@@ -1071,6 +1413,7 @@ pub(crate) fn set_ai_approval_status(
         approval_id: approval_id.to_string(),
         status: status.as_str(),
         operation_id: dispatch_operation_id.as_deref(),
+        assistant_content_sha256: assistant_content_sha256.as_deref(),
     })?;
     mutate(connection, operation_id, request, now, move |tx, _| {
         let dispatching_count = validate_ai_approval_authority(tx)?;
@@ -1139,7 +1482,7 @@ pub(crate) fn set_ai_approval_status(
         }
         if matches!(
             status,
-            AiApprovalStatus::Approved | AiApprovalStatus::Consumed
+            AiApprovalStatus::Approved | AiApprovalStatus::Rejected | AiApprovalStatus::Consumed
         ) && now >= expires_at
         {
             return Err(RepositoryError::Conflict);
@@ -1185,6 +1528,15 @@ pub(crate) fn set_ai_approval_status(
             || !assistant_bound
         {
             return Err(RepositoryError::Conflict);
+        }
+        if matches!(
+            status,
+            AiApprovalStatus::Rejected | AiApprovalStatus::Consumed
+        ) {
+            let expected = decision_checkpoint_content(tx, &validated, status)?;
+            if assistant_content.as_ref() != Some(&expected) {
+                return Err(RepositoryError::Conflict);
+            }
         }
 
         let updated = tx
@@ -1250,8 +1602,22 @@ pub(crate) fn set_ai_approval_status(
                 return Err(RepositoryError::Conflict);
             }
         }
+        let mut quota = load_quota(tx)?;
+        if let (Some(content_json), Some(content_bytes)) =
+            (assistant_content_json.as_deref(), assistant_content_bytes)
+        {
+            replace_streaming_assistant_content(
+                tx,
+                &run.2,
+                session_id,
+                turn_id,
+                content_json,
+                content_bytes,
+                now,
+                &mut quota,
+            )?;
+        }
         if previous.is_pending() {
-            let mut quota = load_quota(tx)?;
             quota.pending_approval_count = quota
                 .pending_approval_count
                 .checked_sub(1)
@@ -1260,8 +1626,8 @@ pub(crate) fn set_ai_approval_status(
                 .pending_approval_content_bytes
                 .checked_sub(u64::try_from(row.6).map_err(storage_error)?)
                 .ok_or_else(|| RepositoryError::Storage("invalid pending approval quota".into()))?;
-            save_quota(tx, &quota)?;
         }
+        save_quota(tx, &quota)?;
         Ok(ai_effect(
             EventType::AI_APPROVAL_CHANGED,
             ResourceRef::ai_approval(approval_id),
@@ -1661,6 +2027,47 @@ pub(crate) fn cancel_ai_response(
     })
 }
 
+fn validate_dispatch_finish_content(
+    connection: &Connection,
+    assistant_message_id: AiMessageId,
+    approval: &AiToolApproval,
+    dispatch_operation_id: &str,
+    content: &AiMessageContent,
+) -> Result<(), RepositoryError> {
+    let mut expected = get_ai_message(connection, assistant_message_id)?.content;
+    if expected.tool_name.as_deref() != Some(approval.tool_name.as_str())
+        || expected.tool_arguments_json.as_deref() != Some(approval.arguments_json.as_str())
+        || expected.tool_result_json.is_some()
+        || expected.tool_events.last().is_none_or(|event| {
+            event.event_type != AiToolEventType::ToolApproved
+                || event.payload != json!({"approval_id": approval.id.to_string()})
+        })
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    let result_event = content
+        .tool_events
+        .last()
+        .filter(|event| event.event_type == AiToolEventType::ToolResult)
+        .ok_or(RepositoryError::Conflict)?;
+    if result_event.payload.get("tool").and_then(Value::as_str) != Some(approval.tool_name.as_str())
+        || result_event
+            .payload
+            .get("operation_id")
+            .and_then(Value::as_str)
+            == Some(dispatch_operation_id)
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    let result_json = serde_json::to_string(&result_event.payload).map_err(storage_error)?;
+    expected.tool_events.push(result_event.clone());
+    expected.tool_result_json = Some(result_json);
+    if content != &expected {
+        return Err(RepositoryError::Conflict);
+    }
+    Ok(())
+}
+
 /// Atomically finalize a reserved assistant placeholder and its exact run generation.
 pub(crate) fn finish_ai_response(
     connection: &mut Connection,
@@ -1789,26 +2196,24 @@ pub(crate) fn finish_ai_response(
         ) {
             (AiRunPhase::Running, None, None) => {}
             (AiRunPhase::Dispatching, Some(approval_id), Some(dispatch_operation_id)) => {
-                let exact_consumed: bool = tx
-                    .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM ai_tool_approvals
-                         WHERE id = ?1 AND session_id = ?2 AND turn_id = ?3
-                           AND run_id = ?4 AND generation = ?5 AND status = 'consumed'
-                           AND operation_id = ?6)",
-                        params![
-                            approval_id,
-                            session_id.to_string(),
-                            turn_id.to_string(),
-                            run_id.to_string(),
-                            run_generation,
-                            dispatch_operation_id,
-                        ],
-                        |row| row.get(0),
-                    )
-                    .map_err(storage_error)?;
-                if !exact_consumed {
+                let approval_id = AiApprovalId::parse(approval_id).map_err(storage_error)?;
+                let approval = load_validated_ai_approval(tx, approval_id)?;
+                if approval.session_id != session_id
+                    || approval.turn_id != turn_id
+                    || approval.run_id != run_id
+                    || approval.generation != generation
+                    || approval.status != AiApprovalStatus::Consumed
+                    || approval.operation_id.as_deref() != Some(dispatch_operation_id)
+                {
                     return Err(RepositoryError::Conflict);
                 }
+                validate_dispatch_finish_content(
+                    tx,
+                    assistant_message_id,
+                    &approval,
+                    dispatch_operation_id,
+                    &content,
+                )?;
             }
             _ => return Err(RepositoryError::Conflict),
         }
@@ -2055,6 +2460,8 @@ pub(crate) fn validate_ai_approval_authority(
                  OR LENGTH(CAST(COALESCE(operation_id, '') AS BLOB)) > 64
                  OR LENGTH(CAST(created_at AS BLOB)) > 64
                  OR LENGTH(CAST(updated_at AS BLOB)) > 64)
+             OR EXISTS(SELECT 1 FROM ai_messages WHERE
+                 LENGTH(CAST(content_json AS BLOB)) > ?3)
              OR EXISTS(SELECT 1 FROM ai_run_state WHERE
                  LENGTH(CAST(run_id AS BLOB)) > 64
                  OR LENGTH(CAST(session_id AS BLOB)) > 64
@@ -2067,6 +2474,8 @@ pub(crate) fn validate_ai_approval_authority(
             params![
                 i64::try_from(junban_domain::AI_PROVIDER_ID_BYTES_MAX).map_err(storage_error)?,
                 i64::try_from(junban_domain::AI_TOOL_ARGUMENTS_BYTES_MAX).map_err(storage_error)?,
+                i64::try_from(junban_domain::AI_MESSAGE_CONTENT_JSON_BYTES_MAX)
+                    .map_err(storage_error)?,
             ],
             |row| row.get(0),
         )
@@ -2266,7 +2675,219 @@ pub(crate) fn validate_ai_approval_authority(
             "dispatching AI approval recovery bound is exceeded".into(),
         ));
     }
+    validate_ai_tool_transcripts(connection, &approval_ids)?;
     Ok(dispatching_count)
+}
+
+#[derive(Clone, Copy)]
+enum TranscriptApprovalState {
+    Proposed(AiApprovalId),
+    Approved(AiApprovalId),
+    Rejected(AiApprovalId),
+}
+
+fn event_approval_id(event: &AiToolEvent) -> Result<AiApprovalId, RepositoryError> {
+    let raw = event
+        .payload
+        .get("approval_id")
+        .and_then(Value::as_str)
+        .ok_or_else(invalid_approval_authority)?;
+    let id = AiApprovalId::parse(raw).map_err(storage_error)?;
+    if id.to_string() != raw {
+        return Err(invalid_approval_authority());
+    }
+    Ok(id)
+}
+
+fn validate_ai_tool_transcripts(
+    connection: &Connection,
+    approval_ids: &[String],
+) -> Result<(), RepositoryError> {
+    let rows = {
+        let mut statement = connection
+            .prepare(
+                "SELECT id, session_id, turn_id, content_json
+                 FROM ai_messages ORDER BY session_id, sequence",
+            )
+            .map_err(storage_error)?;
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(storage_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(storage_error)?
+    };
+    let mut seen_approvals = HashSet::new();
+    let mut completed_approvals = HashSet::new();
+    let mut approved_checkpoints = HashSet::new();
+    for (message_id, session_id, turn_id, content_json) in rows {
+        let message_id = AiMessageId::parse(&message_id).map_err(storage_error)?;
+        let session_id = AiSessionId::parse(&session_id).map_err(storage_error)?;
+        let turn_id = AiTurnId::parse(&turn_id).map_err(storage_error)?;
+        let content: AiMessageContent =
+            serde_json::from_str(&content_json).map_err(storage_error)?;
+        content.validate().map_err(storage_error)?;
+        let mut state = None;
+        for event in &content.tool_events {
+            match event.event_type {
+                AiToolEventType::ToolProposed => {
+                    if state.is_some() {
+                        return Err(invalid_approval_authority());
+                    }
+                    let approval_id = event_approval_id(event)?;
+                    let approval = load_validated_ai_approval(connection, approval_id)?;
+                    let bound_assistant: bool = connection
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM ai_run_state
+                             WHERE run_id = ?1 AND session_id = ?2 AND turn_id = ?3
+                               AND assistant_message_id = ?4
+                               AND (?6 = 'expired' OR generation = ?5))",
+                            params![
+                                approval.run_id.to_string(),
+                                session_id.to_string(),
+                                turn_id.to_string(),
+                                message_id.to_string(),
+                                i64::try_from(approval.generation).map_err(storage_error)?,
+                                approval.status.as_str(),
+                            ],
+                            |row| row.get(0),
+                        )
+                        .map_err(storage_error)?;
+                    if approval.session_id != session_id
+                        || approval.turn_id != turn_id
+                        || !bound_assistant
+                        || event.payload != exact_proposal_payload(&approval)?
+                        || !seen_approvals.insert(approval_id)
+                    {
+                        return Err(invalid_approval_authority());
+                    }
+                    state = Some(TranscriptApprovalState::Proposed(approval_id));
+                }
+                AiToolEventType::ToolApproved | AiToolEventType::ToolRejected => {
+                    let approval_id = event_approval_id(event)?;
+                    if !matches!(state, Some(TranscriptApprovalState::Proposed(id)) if id == approval_id)
+                    {
+                        return Err(invalid_approval_authority());
+                    }
+                    let approval = load_validated_ai_approval(connection, approval_id)?;
+                    state = match event.event_type {
+                        AiToolEventType::ToolApproved
+                            if approval.status == AiApprovalStatus::Consumed =>
+                        {
+                            Some(TranscriptApprovalState::Approved(approval_id))
+                        }
+                        AiToolEventType::ToolRejected
+                            if approval.status == AiApprovalStatus::Rejected =>
+                        {
+                            Some(TranscriptApprovalState::Rejected(approval_id))
+                        }
+                        _ => return Err(invalid_approval_authority()),
+                    };
+                }
+                AiToolEventType::ToolResult => match state {
+                    Some(TranscriptApprovalState::Approved(approval_id))
+                    | Some(TranscriptApprovalState::Rejected(approval_id)) => {
+                        let approval = load_validated_ai_approval(connection, approval_id)?;
+                        if event.payload.get("tool").and_then(Value::as_str)
+                            != Some(approval.tool_name.as_str())
+                            || approval
+                                .operation_id
+                                .as_deref()
+                                .is_some_and(|private_root| {
+                                    event.payload.get("operation_id").and_then(Value::as_str)
+                                        == Some(private_root)
+                                })
+                            || !completed_approvals.insert(approval_id)
+                        {
+                            return Err(invalid_approval_authority());
+                        }
+                        state = None;
+                    }
+                    Some(TranscriptApprovalState::Proposed(_)) => {
+                        return Err(invalid_approval_authority());
+                    }
+                    None => {}
+                },
+            }
+        }
+        match state {
+            Some(TranscriptApprovalState::Proposed(approval_id)) => {
+                let approval = load_validated_ai_approval(connection, approval_id)?;
+                if !matches!(
+                    approval.status,
+                    AiApprovalStatus::Pending
+                        | AiApprovalStatus::Approved
+                        | AiApprovalStatus::Expired
+                ) {
+                    return Err(invalid_approval_authority());
+                }
+            }
+            Some(TranscriptApprovalState::Approved(approval_id)) => {
+                let approval = load_validated_ai_approval(connection, approval_id)?;
+                let run = get_ai_run_state(connection, approval.run_id)?;
+                if approval.status != AiApprovalStatus::Consumed
+                    || run.state != AiRunPhase::Dispatching
+                    || run.approval_id != Some(approval_id)
+                    || !approved_checkpoints.insert(approval_id)
+                {
+                    return Err(invalid_approval_authority());
+                }
+            }
+            Some(TranscriptApprovalState::Rejected(_)) => {
+                return Err(invalid_approval_authority());
+            }
+            None => {}
+        }
+        if let Some(result_json) = content.tool_result_json.as_deref() {
+            let result_event = content
+                .tool_events
+                .last()
+                .filter(|event| event.event_type == AiToolEventType::ToolResult)
+                .ok_or_else(invalid_approval_authority)?;
+            if serde_json::to_string(&result_event.payload).map_err(storage_error)? != result_json {
+                return Err(invalid_approval_authority());
+            }
+        }
+    }
+    if seen_approvals.len() != approval_ids.len()
+        || approval_ids.iter().any(|raw| {
+            AiApprovalId::parse(raw).map_or(true, |approval_id| {
+                if !seen_approvals.contains(&approval_id) {
+                    return true;
+                }
+                let approval = match load_validated_ai_approval(connection, approval_id) {
+                    Ok(approval) => approval,
+                    Err(_) => return true,
+                };
+                match approval.status {
+                    AiApprovalStatus::Rejected => !completed_approvals.contains(&approval_id),
+                    AiApprovalStatus::Consumed => {
+                        let run = match get_ai_run_state(connection, approval.run_id) {
+                            Ok(run) => run,
+                            Err(_) => return true,
+                        };
+                        if run.state == AiRunPhase::Dispatching {
+                            !approved_checkpoints.contains(&approval_id)
+                        } else {
+                            !run.state.is_terminal() || !completed_approvals.contains(&approval_id)
+                        }
+                    }
+                    AiApprovalStatus::Pending
+                    | AiApprovalStatus::Approved
+                    | AiApprovalStatus::Expired => false,
+                }
+            })
+        })
+    {
+        return Err(invalid_approval_authority());
+    }
+    Ok(())
 }
 
 fn invalid_approval_authority() -> RepositoryError {

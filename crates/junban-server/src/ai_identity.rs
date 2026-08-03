@@ -8,6 +8,7 @@ const ID_DOMAIN: &[u8] = b"junban.ai.response.v1\0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AiResponseIdentity {
+    pub source_operation_id: OperationId,
     pub turn_id: AiTurnId,
     pub run_id: AiRunId,
     pub user_message_id: AiMessageId,
@@ -22,6 +23,7 @@ impl AiResponseIdentity {
     #[must_use]
     pub fn derive(operation_id: OperationId) -> Self {
         Self {
+            source_operation_id: operation_id,
             turn_id: derive(operation_id, b"turn", AiTurnId::parse),
             run_id: derive(operation_id, b"run", AiRunId::parse),
             user_message_id: derive(operation_id, b"message.user", AiMessageId::parse),
@@ -48,11 +50,94 @@ impl AiResponseIdentity {
             ),
         }
     }
+
+    #[must_use]
+    pub fn round(self, round: u8) -> AiRoundIdentity {
+        let label = |suffix: &str| format!("round.{round}.{suffix}");
+        AiRoundIdentity {
+            assistant_tool_update_operation_id: derive(
+                self.source_operation_id,
+                label("operation.message.assistant.tool").as_bytes(),
+                OperationId::parse,
+            ),
+            approval_id: derive(
+                self.source_operation_id,
+                label("approval").as_bytes(),
+                junban_domain::AiApprovalId::parse,
+            ),
+            propose_operation_id: derive(
+                self.source_operation_id,
+                label("operation.approval.propose").as_bytes(),
+                OperationId::parse,
+            ),
+            expire_operation_id: derive(
+                self.source_operation_id,
+                label("operation.response.expire").as_bytes(),
+                OperationId::parse,
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AiRoundIdentity {
+    pub assistant_tool_update_operation_id: OperationId,
+    pub approval_id: junban_domain::AiApprovalId,
+    pub propose_operation_id: OperationId,
+    pub expire_operation_id: OperationId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AiHttpDecisionIdentity {
+    pub receipt_operation_id: OperationId,
+}
+
+impl AiHttpDecisionIdentity {
+    #[must_use]
+    pub fn derive(operation_id: OperationId) -> Self {
+        Self {
+            receipt_operation_id: derive(
+                operation_id,
+                b"approval.http.decision.receipt",
+                OperationId::parse,
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AiApprovalDecisionIdentity {
+    pub approved_operation_id: OperationId,
+    pub rejected_operation_id: OperationId,
+    pub consume_operation_id: OperationId,
+    pub finish_operation_id: OperationId,
+}
+
+impl AiApprovalDecisionIdentity {
+    #[must_use]
+    pub fn derive(approval_id: junban_domain::AiApprovalId) -> Self {
+        let source = OperationId::parse(&approval_id.to_string())
+            .expect("approval UUID is a valid operation UUID derivation source");
+        Self {
+            approved_operation_id: derive(
+                source,
+                b"approval.operation.approved",
+                OperationId::parse,
+            ),
+            rejected_operation_id: derive(
+                source,
+                b"approval.operation.rejected",
+                OperationId::parse,
+            ),
+            consume_operation_id: derive(source, b"approval.operation.consume", OperationId::parse),
+            finish_operation_id: derive(source, b"approval.operation.finish", OperationId::parse),
+        }
+    }
 }
 
 fn derive<T>(
     operation_id: OperationId,
-    label: &'static [u8],
+    label: &[u8],
     parse: impl FnOnce(&str) -> Result<T, junban_domain::ValidationError>,
 ) -> T {
     let mut hasher = Sha256::new();
@@ -121,6 +206,38 @@ mod tests {
             }
         }
         assert_eq!(seen.len(), 1_024 * 8);
+    }
+
+    #[test]
+    fn round_and_decision_labels_are_stable_distinct_version_eight_ids() {
+        let source = OperationId::parse("00112233-4455-6677-8899-aabbccddeeff").unwrap();
+        let response = AiResponseIdentity::derive(source);
+        let mut seen = all_values(response).into_iter().collect::<HashSet<_>>();
+        for round_number in 1..=8 {
+            let round = response.round(round_number);
+            for value in [
+                round.assistant_tool_update_operation_id.to_string(),
+                round.approval_id.to_string(),
+                round.propose_operation_id.to_string(),
+                round.expire_operation_id.to_string(),
+            ] {
+                assert!(seen.insert(value.clone()), "round identity collision");
+                let uuid = Uuid::parse_str(&value).unwrap();
+                assert_eq!(uuid.get_variant(), uuid::Variant::RFC4122);
+                assert_eq!(uuid.get_version_num(), 8);
+            }
+            let decision = AiApprovalDecisionIdentity::derive(round.approval_id);
+            for value in [
+                decision.approved_operation_id.to_string(),
+                decision.rejected_operation_id.to_string(),
+                decision.consume_operation_id.to_string(),
+                decision.finish_operation_id.to_string(),
+            ] {
+                assert!(seen.insert(value), "decision identity collision");
+            }
+        }
+        let http = AiHttpDecisionIdentity::derive(source);
+        assert!(seen.insert(http.receipt_operation_id.to_string()));
     }
 
     fn all_values(identity: AiResponseIdentity) -> Vec<String> {

@@ -13,11 +13,12 @@ use junban_app::{
 use junban_domain::{
     AI_SECRETS_FILE, AI_SESSION_CONTENT_BYTES_MAX, AI_SESSIONS_PER_PROFILE_MAX, AiApprovalId,
     AiApprovalStatus, AiMemoryId, AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus,
-    AiProviderPreset, AiRunId, AiRunPhase, AiRunState, AiSecretKind, AiSessionId, AiTurnId,
-    OperationId, ProviderBaseUrl, SettingsPatch, ai_approval_action_hash, frame_backup_envelope,
-    parse_backup_envelope, sha256_hex,
+    AiProviderPreset, AiRunId, AiRunPhase, AiRunState, AiSecretKind, AiSessionId, AiToolEvent,
+    AiToolEventType, AiTurnId, OperationId, ProviderBaseUrl, SettingsPatch,
+    ai_approval_action_hash, frame_backup_envelope, parse_backup_envelope, sha256_hex,
 };
 use rusqlite::{Connection, params};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::ProfileOwner;
@@ -387,6 +388,37 @@ fn create_awaiting_approval(
     // Proposal itself atomically moves the exact run generation to AwaitingApproval
     // and binds the new authority; callers never issue a second run-state mutation.
     (run_id, turn_id, approval_id)
+}
+
+fn dispatch_result_content(
+    connection: &Connection,
+    assistant_message_id: AiMessageId,
+    tool: &str,
+    outcome: &str,
+) -> AiMessageContent {
+    let mut content = ai_ops::get_ai_message(connection, assistant_message_id)
+        .unwrap()
+        .content;
+    let result = json!({
+        "tool": tool,
+        "outcome": outcome,
+        "data": if outcome == "success" {
+            json!({"applied": true})
+        } else {
+            json!({"code": "dispatch_failed", "message": "dispatch failed"})
+        },
+        "truncated": false,
+    });
+    content.tool_events.push(
+        AiToolEvent::new(
+            content.text.len(),
+            AiToolEventType::ToolResult,
+            result.clone(),
+        )
+        .unwrap(),
+    );
+    content.tool_result_json = Some(serde_json::to_string(&result).unwrap());
+    content
 }
 
 fn revision(connection: &Connection) -> i64 {
@@ -760,6 +792,45 @@ fn approval_consumption_atomically_dispatches_bound_run() {
     assert_eq!(run.generation, 1);
     assert_eq!(revision(&connection), before_revision + 1);
     assert_eq!(pending_quota(&connection), (0, 0));
+
+    // Receipts created after a dispatch starts remain recoverable even after their
+    // ordinary TTL. Cleanup triggered by another mutation must not erase exact
+    // effect authority while the bound run is still Dispatching.
+    let protected_operation_id = op();
+    ai_ops::rename_ai_session(
+        &mut connection,
+        protected_operation_id,
+        session_id,
+        "dispatch effect".into(),
+        now(),
+    )
+    .unwrap();
+    connection
+        .execute(
+            "UPDATE operation_receipts SET expires_at = '2000-01-01T00:00:00Z'
+             WHERE operation_id = ?1",
+            [protected_operation_id.to_string()],
+        )
+        .unwrap();
+    ai_ops::rename_ai_session(
+        &mut connection,
+        op(),
+        session_id,
+        "cleanup trigger".into(),
+        now(),
+    )
+    .unwrap();
+    let retained: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM operation_receipts WHERE operation_id = ?1)",
+            [protected_operation_id.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        retained,
+        "dispatch recovery receipt was cleaned before replay"
+    );
     fs::remove_dir_all(profile).unwrap();
 }
 
@@ -2467,6 +2538,8 @@ fn dispatching_finish_requires_exact_consumed_operation_and_replays() {
         ai_ops::list_dispatching_ai_approvals(&connection).unwrap()[0].id,
         approval_id
     );
+    let completed_content =
+        dispatch_result_content(&connection, assistant_id, "create_task", "success");
     assert!(matches!(
         ai_ops::cancel_ai_response(
             &mut connection,
@@ -2491,7 +2564,7 @@ fn dispatching_finish_requires_exact_consumed_operation_and_replays() {
             run_id,
             1,
             AiMessageStatus::Completed,
-            AiMessageContent::text("done").unwrap(),
+            completed_content.clone(),
             AiRunPhase::Completed,
             Some(op().to_string()),
             now()
@@ -2508,7 +2581,7 @@ fn dispatching_finish_requires_exact_consumed_operation_and_replays() {
         run_id,
         1,
         AiMessageStatus::Completed,
-        AiMessageContent::text("done").unwrap(),
+        completed_content.clone(),
         AiRunPhase::Completed,
         Some(dispatch.to_string()),
         now(),
@@ -2525,7 +2598,7 @@ fn dispatching_finish_requires_exact_consumed_operation_and_replays() {
             run_id,
             1,
             AiMessageStatus::Completed,
-            AiMessageContent::text("done").unwrap(),
+            completed_content,
             AiRunPhase::Completed,
             Some(dispatch.to_string()),
             now()
@@ -2621,6 +2694,8 @@ fn dispatching_finish_requires_exact_consumed_operation_and_replays() {
         now(),
     )
     .unwrap();
+    let failed_content =
+        dispatch_result_content(&connection, failed_assistant, "create_task", "error");
     ai_ops::finish_ai_response(
         &mut connection,
         op(),
@@ -2630,7 +2705,7 @@ fn dispatching_finish_requires_exact_consumed_operation_and_replays() {
         failed_run,
         1,
         AiMessageStatus::Failed,
-        AiMessageContent::text("").unwrap(),
+        failed_content,
         AiRunPhase::Failed,
         Some(failed_dispatch.to_string()),
         now(),
@@ -2794,14 +2869,36 @@ fn insert_dispatching_fixture(
     let assistant_message_id = AiMessageId::new();
     let approval_id = AiApprovalId::new();
     let dispatch_operation_id = op();
-    let content_json = AiMessageContent::text("")
-        .unwrap()
-        .canonical_json()
-        .unwrap();
     let arguments_json = "{}";
     let action_hash = ai_approval_action_hash("create_task", arguments_json).unwrap();
     let created_at = now();
     let expires_at = created_at + junban_domain::AI_APPROVAL_LIFETIME_SECS.seconds();
+    let mut content = AiMessageContent::text("").unwrap();
+    content.tool_name = Some("create_task".into());
+    content.tool_arguments_json = Some(arguments_json.into());
+    content.tool_events.push(
+        AiToolEvent::new(
+            0,
+            AiToolEventType::ToolProposed,
+            json!({
+                "approval_id": approval_id.to_string(),
+                "tool": "create_task",
+                "arguments": {},
+                "action_hash": action_hash.clone(),
+                "expires_at": expires_at,
+            }),
+        )
+        .unwrap(),
+    );
+    content.tool_events.push(
+        AiToolEvent::new(
+            0,
+            AiToolEventType::ToolApproved,
+            json!({"approval_id": approval_id.to_string()}),
+        )
+        .unwrap(),
+    );
+    let content_json = content.canonical_json().unwrap();
     connection
         .execute(
             "INSERT INTO ai_messages(
@@ -3197,6 +3294,171 @@ async fn restore_preflight_rejects_mutated_consumed_arguments_with_stale_hash() 
         repo.prepare_restore(hostile).await,
         Err(RepositoryError::Validation(_))
     ));
+    drop(repo);
+    drop(owner);
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[test]
+fn normal_open_rejects_unknown_private_and_mismatched_tool_events() {
+    for rewrite in 0_u8..3 {
+        let profile = temp_profile();
+        let mut connection = open_migrated(&profile);
+        let session_id = AiSessionId::new();
+        ai_ops::create_ai_session(
+            &mut connection,
+            op(),
+            session_id,
+            "semantic open".into(),
+            now(),
+        )
+        .unwrap();
+        let (run_id, turn_id, assistant_message_id, approval_id) =
+            insert_dispatching_fixture(&connection, session_id, 1);
+        let approval = ai_ops::get_ai_approval(&connection, approval_id).unwrap();
+        let dispatch = OperationId::parse(approval.operation_id.as_deref().unwrap()).unwrap();
+        let content =
+            dispatch_result_content(&connection, assistant_message_id, "create_task", "success");
+        ai_ops::finish_ai_response(
+            &mut connection,
+            op(),
+            assistant_message_id,
+            session_id,
+            turn_id,
+            run_id,
+            1,
+            AiMessageStatus::Completed,
+            content,
+            AiRunPhase::Completed,
+            Some(dispatch.to_string()),
+            now(),
+        )
+        .unwrap();
+        let raw: String = connection
+            .query_row(
+                "SELECT content_json FROM ai_messages WHERE id = ?1",
+                [assistant_message_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut content: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        match rewrite {
+            0 => content["tool_events"][1]["payload"]["unknown"] = json!(true),
+            1 => {
+                content["tool_events"][2]["payload"]["data"]["nested"] =
+                    json!([{"provider_call_id": "private"}]);
+            }
+            2 => {
+                content["tool_events"][1]["payload"]["approval_id"] =
+                    json!(AiApprovalId::new().to_string());
+            }
+            _ => unreachable!(),
+        }
+        let content = serde_json::to_string(&content).unwrap();
+        connection
+            .execute(
+                "UPDATE ai_messages SET content_json = ?1, content_bytes = ?2 WHERE id = ?3",
+                params![
+                    content,
+                    content.len() as i64,
+                    assistant_message_id.to_string()
+                ],
+            )
+            .unwrap();
+        drop(connection);
+
+        assert!(matches!(
+            ProfileOwner::open(&profile),
+            Err(crate::OpenError::Database(_))
+        ));
+        fs::remove_dir_all(profile).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn restore_preflight_rejects_unknown_and_private_tool_event_fields() {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    ai_ops::create_ai_session(
+        &mut connection,
+        op(),
+        session_id,
+        "semantic restore".into(),
+        now(),
+    )
+    .unwrap();
+    let (run_id, turn_id, assistant_message_id, approval_id) =
+        insert_dispatching_fixture(&connection, session_id, 1);
+    let approval = ai_ops::get_ai_approval(&connection, approval_id).unwrap();
+    let dispatch = OperationId::parse(approval.operation_id.as_deref().unwrap()).unwrap();
+    let content =
+        dispatch_result_content(&connection, assistant_message_id, "create_task", "success");
+    ai_ops::finish_ai_response(
+        &mut connection,
+        op(),
+        assistant_message_id,
+        session_id,
+        turn_id,
+        run_id,
+        1,
+        AiMessageStatus::Completed,
+        content,
+        AiRunPhase::Completed,
+        Some(dispatch.to_string()),
+        now(),
+    )
+    .unwrap();
+    let backup = crate::backup_ops::create_backup(&connection, &profile).unwrap();
+    drop(connection);
+    let owner = ProfileOwner::open(&profile).unwrap();
+    let repo = owner.repository();
+
+    for (label, rewrite) in [
+        ("unknown-approved-field", 0_u8),
+        ("private-result-field", 1_u8),
+        ("mismatched-approved-card", 2_u8),
+    ] {
+        let hostile = reframe_backup_with(&profile, &backup, label, |candidate| {
+            let raw: String = candidate
+                .query_row(
+                    "SELECT content_json FROM ai_messages WHERE id = ?1",
+                    [assistant_message_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let mut content: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            match rewrite {
+                0 => content["tool_events"][1]["payload"]["unknown"] = json!(true),
+                1 => {
+                    content["tool_events"][2]["payload"]["data"]["nested"] =
+                        json!([{"raw_body": "private"}]);
+                }
+                2 => {
+                    content["tool_events"][1]["payload"]["approval_id"] =
+                        json!(AiApprovalId::new().to_string());
+                }
+                _ => unreachable!(),
+            }
+            let content = serde_json::to_string(&content).unwrap();
+            candidate
+                .execute(
+                    "UPDATE ai_messages SET content_json = ?1, content_bytes = ?2 WHERE id = ?3",
+                    params![
+                        content,
+                        content.len() as i64,
+                        assistant_message_id.to_string()
+                    ],
+                )
+                .unwrap();
+            ai_ops::recompute_ai_quotas(candidate).unwrap();
+        });
+        assert!(
+            repo.prepare_restore(hostile).await.is_err(),
+            "{label} reached restore cutover"
+        );
+    }
+
     drop(repo);
     drop(owner);
     fs::remove_dir_all(profile).unwrap();

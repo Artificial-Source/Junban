@@ -13,13 +13,13 @@ use jiff::{
 };
 use junban_app::Repository;
 use junban_app::{
-    AppError, BulkAction, BulkSchedule, BulkTagChange, CreateAiMemoryRequest,
-    DeleteAiMemoryRequest, EventSink, JunbanService, MoveTarget, ProjectDraft, ProjectPatch,
-    ReplanPastBlocksAction, SelectAiMemoriesRequest, TaskListAsOf, TaskPatch, TemporalContext,
-    TimeBlockPatch, TimeBlockRangePatch,
+    AppError, BulkAction, BulkSchedule, BulkTagChange, CommittedMutation, CreateAiMemoryRequest,
+    DeleteAiMemoryRequest, EventSink, EventType, JunbanService, MoveTarget, ProjectDraft,
+    ProjectPatch, ReplanPastBlocksAction, SelectAiMemoriesRequest, TaskListAsOf, TaskPatch,
+    TemporalContext, TimeBlockPatch, TimeBlockRangePatch,
 };
 use junban_domain::{
-    AI_CONTEXT_MEMORIES_MAX, CivilTimeRange, MAX_BULK_IDS, MAX_QUERY_PAGE_LIMIT, MAX_TAGS_PER_TASK,
+    AI_CONTEXT_MEMORIES_MAX, AppSettings, CivilTimeRange, MAX_QUERY_PAGE_LIMIT, MAX_TAGS_PER_TASK,
     OperationId, ProjectView, SortOrder, Tag, Task, TaskDraft, TaskQuery, TaskSort, TaskStatus,
     TimeBlockDraft, TimeZoneName, WorkHours, parse_filter,
 };
@@ -28,10 +28,10 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::ai_tool_registry::{
-    AI_TOOL_DEFAULT_COLOR, AI_TOOL_RESULT_ENTITY_MAX, AnalyzeRangeArgs, BulkCreateTasksArgs,
-    BulkUpdateTasksArgs, CreateProjectArgs, CreateTaskArgs, EstimateTaskDurationArgs,
-    ExtractTasksFromTextArgs, FindSimilarTasksArgs, ListRemindersArgs, OptionalDateArgs,
-    QueryTasksArgs, RecallMemoriesArgs, SaveMemoryArgs, SuggestTagsArgs,
+    AI_TOOL_COMPOSITE_CREATE_MAX, AI_TOOL_DEFAULT_COLOR, AI_TOOL_RESULT_ENTITY_MAX,
+    AnalyzeRangeArgs, BulkCreateTasksArgs, BulkUpdateTasksArgs, CreateProjectArgs, CreateTaskArgs,
+    EstimateTaskDurationArgs, ExtractTasksFromTextArgs, FindSimilarTasksArgs, ListRemindersArgs,
+    OptionalDateArgs, QueryTasksArgs, RecallMemoriesArgs, SaveMemoryArgs, SuggestTagsArgs,
     TimeblockingCreateBlockArgs, TimeblockingRangeArgs, TimeblockingReplanDayArgs,
     TimeblockingScheduleTaskArgs, TimeblockingSetRecurrenceArgs, TimeblockingUpdateBlockArgs,
     ToolEffect, ToolResultEnvelope, ToolValidationError, UpdateProjectArgs, UpdateTaskArgs,
@@ -48,6 +48,7 @@ const CHILD_OP_DOMAIN: &[u8] = b"junban.ai.tool.child.v1\0";
 #[derive(Debug, Clone)]
 pub struct ToolExecContext {
     pub now: Zoned,
+    confirmed_work_hours: Option<Option<WorkHours>>,
 }
 
 impl ToolExecContext {
@@ -55,12 +56,27 @@ impl ToolExecContext {
     #[must_use]
     #[allow(dead_code)] // public constructor for later orchestration wiring
     pub fn sample_now() -> Self {
-        Self { now: Zoned::now() }
+        Self {
+            now: Zoned::now(),
+            confirmed_work_hours: None,
+        }
     }
 
     #[must_use]
     pub fn new(now: Zoned) -> Self {
-        Self { now }
+        Self {
+            now,
+            confirmed_work_hours: None,
+        }
+    }
+
+    /// Freeze the confirmed settings and local clock used by one tool invocation.
+    #[must_use]
+    pub fn with_confirmed_settings(now: Zoned, settings: &AppSettings) -> Self {
+        Self {
+            now,
+            confirmed_work_hours: Some(settings.planning.work_hours),
+        }
     }
 
     #[must_use]
@@ -103,6 +119,96 @@ where
     R: Repository,
     E: EventSink,
 {
+    execute_tool_mode(
+        service,
+        action,
+        ctx,
+        root_operation_id,
+        ToolExecutionMode::Initial,
+    )
+    .await
+}
+
+/// Trusted startup recovery path. Existing root receipts are returned before any
+/// state-dependent pre-validation, so a committed effect cannot be repeated merely
+/// because its target changed after the effect.
+pub(crate) async fn execute_tool_recovery<R, E>(
+    service: &JunbanService<R, E>,
+    action: &ValidatedToolAction,
+    ctx: &ToolExecContext,
+    root_operation_id: OperationId,
+) -> Result<ToolResultEnvelope, AppError>
+where
+    R: Repository,
+    E: EventSink,
+{
+    if !is_composite_mutation(action) {
+        let mutation_operation_id = derive_child_operation_id(root_operation_id, "mutation", 0);
+        match service
+            .recover_operation_receipt(mutation_operation_id)
+            .await
+        {
+            Ok(mutation) => return format_direct_mutation_receipt(action, mutation),
+            Err(AppError::NotFound) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    let result = execute_tool_mode(
+        service,
+        action,
+        ctx,
+        Some(root_operation_id),
+        ToolExecutionMode::Recovery,
+    )
+    .await;
+    if result.data.get("code").and_then(Value::as_str) == Some("idempotency_mismatch") {
+        return Err(AppError::IdempotencyMismatch);
+    }
+    Ok(result)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolExecutionMode {
+    Initial,
+    Recovery,
+}
+
+fn format_direct_mutation_receipt(
+    action: &ValidatedToolAction,
+    mutation: CommittedMutation,
+) -> Result<ToolResultEnvelope, AppError> {
+    if action.effect() != ToolEffect::ApprovalRequired || is_composite_mutation(action) {
+        return Err(AppError::Conflict);
+    }
+    // Every non-composite mutation receipt uses exactly the same formatter as its
+    // initial execution. Action identity contributes only the canonical tool name;
+    // no action-specific augmentation can diverge on receipt recovery.
+    Ok(mutation_result(action.name(), Ok(mutation)).finalize_bounded())
+}
+
+fn is_composite_mutation(action: &ValidatedToolAction) -> bool {
+    matches!(
+        action,
+        ValidatedToolAction::BreakDownTask(_)
+            | ValidatedToolAction::BulkCreateTasks(_)
+            | ValidatedToolAction::ExtractTasksFromText(ExtractTasksFromTextArgs {
+                dry_run: false,
+                ..
+            })
+    )
+}
+
+async fn execute_tool_mode<R, E>(
+    service: &JunbanService<R, E>,
+    action: &ValidatedToolAction,
+    ctx: &ToolExecContext,
+    root_operation_id: Option<OperationId>,
+    mode: ToolExecutionMode,
+) -> ToolResultEnvelope
+where
+    R: Repository,
+    E: EventSink,
+{
     let tool = action.name();
     if action.effect() == ToolEffect::ApprovalRequired && root_operation_id.is_none() {
         return ToolResultEnvelope::error(
@@ -112,6 +218,16 @@ where
         )
         .finalize_bounded();
     }
+
+    // The durable dispatch root is a secret recovery authority. Public mutation
+    // results carry only a one-way-derived operation ID; composites derive each child.
+    let root_operation_id = root_operation_id.map(|root| {
+        if is_composite_mutation(action) {
+            root
+        } else {
+            derive_child_operation_id(root, "mutation", 0)
+        }
+    });
 
     let result = match action {
         ValidatedToolAction::CreateTask(args) => {
@@ -145,14 +261,15 @@ where
                 args.task_id.as_str(),
                 &args.subtasks,
                 root_operation_id.unwrap(),
+                mode,
             )
             .await
         }
         ValidatedToolAction::ExtractTasksFromText(args) => {
-            exec_extract(service, args, root_operation_id).await
+            exec_extract(service, args, root_operation_id, mode).await
         }
         ValidatedToolAction::BulkCreateTasks(args) => {
-            exec_bulk_create(service, args, root_operation_id.unwrap()).await
+            exec_bulk_create(service, args, root_operation_id.unwrap(), mode).await
         }
         ValidatedToolAction::BulkCompleteTasks(args) => match parse_task_ids(&args.task_ids) {
             Ok(task_ids) => mutation_result(
@@ -560,17 +677,18 @@ async fn exec_break_down<R: Repository, E: EventSink>(
     parent_raw: &str,
     subtasks: &[String],
     root: OperationId,
+    mode: ToolExecutionMode,
 ) -> ToolResultEnvelope {
     // Pre-validate every element before the first effect.
     let parent_id = match parse_task_id(parent_raw) {
         Ok(id) => id,
         Err(error) => return validation_error("break_down_task", error),
     };
-    if subtasks.is_empty() || subtasks.len() > MAX_BULK_IDS {
+    if subtasks.is_empty() || subtasks.len() > AI_TOOL_COMPOSITE_CREATE_MAX {
         return ToolResultEnvelope::error(
             "break_down_task",
             "invalid_subtasks",
-            "subtasks must contain 1..=500 titles",
+            "subtasks must contain 1..=100 titles",
         );
     }
     let mut titles = Vec::with_capacity(subtasks.len());
@@ -580,7 +698,7 @@ async fn exec_break_down<R: Repository, E: EventSink>(
             Err(error) => return validation_error("break_down_task", error),
         }
     }
-    if service.get_task(parent_id).await.is_err() {
+    if mode == ToolExecutionMode::Initial && service.get_task(parent_id).await.is_err() {
         return ToolResultEnvelope::error(
             "break_down_task",
             "not_found",
@@ -589,35 +707,21 @@ async fn exec_break_down<R: Repository, E: EventSink>(
     }
     let mut created = Vec::new();
     for (index, title) in titles.into_iter().enumerate() {
-        let title_raw = subtasks[index].as_str();
         let mut draft = TaskDraft::new(title);
         draft.parent_id = Some(parent_id);
         let child_op = derive_child_operation_id(root, "break_down_task", index as u32);
-        match service.create_task(child_op, draft).await {
-            Ok(mutation) => {
-                let task_id = mutation_primary_id(&mutation).or_else(|| {
-                    mutation
-                        .event
-                        .affected
-                        .task_ids
-                        .first()
-                        .map(ToString::to_string)
-                });
-                created.push(json!({
-                    "task_id": task_id,
-                    "operation_id": child_op.to_string(),
-                    "revision": mutation.event.revision,
-                    "event_type": mutation.event.event_type.as_str(),
-                    "title": title_raw,
-                }));
-            }
+        match create_composite_task(service, child_op, draft, mode).await {
+            Ok(mutation) => created.push(composite_created_entry(&mutation, child_op)),
             Err(error) => {
                 return partial_composite_outcome(
                     "break_down_task",
                     created,
                     index,
                     error,
-                    json!({ "parent_id": parent_id.to_string() }),
+                    json!({
+                        "parent_id": parent_id.to_string(),
+                        "failed_operation_id": child_op.to_string(),
+                    }),
                 );
             }
         }
@@ -636,6 +740,7 @@ async fn exec_extract<R: Repository, E: EventSink>(
     service: &JunbanService<R, E>,
     args: &ExtractTasksFromTextArgs,
     root: Option<OperationId>,
+    mode: ToolExecutionMode,
 ) -> ToolResultEnvelope {
     let titles = extract_task_titles_from_text(&args.text);
     if args.dry_run {
@@ -662,7 +767,7 @@ async fn exec_extract<R: Repository, E: EventSink>(
         due_date: None,
     };
     // Reuse bulk create under the extract tool name.
-    let mut result = exec_bulk_create(service, &bulk, root).await;
+    let mut result = exec_bulk_create(service, &bulk, root, mode).await;
     result.tool = "extract_tasks_from_text".to_owned();
     if let Some(data) = result.data.as_object_mut() {
         data.insert("dry_run".to_owned(), Value::Bool(false));
@@ -674,13 +779,14 @@ async fn exec_bulk_create<R: Repository, E: EventSink>(
     service: &JunbanService<R, E>,
     args: &BulkCreateTasksArgs,
     root: OperationId,
+    mode: ToolExecutionMode,
 ) -> ToolResultEnvelope {
     // Pre-validate every element before the first effect.
-    if args.titles.is_empty() || args.titles.len() > MAX_BULK_IDS {
+    if args.titles.is_empty() || args.titles.len() > AI_TOOL_COMPOSITE_CREATE_MAX {
         return ToolResultEnvelope::error(
             "bulk_create_tasks",
             "invalid_titles",
-            "titles must contain 1..=500 entries",
+            "titles must contain 1..=100 entries",
         );
     }
     let project_id = match &args.project_id {
@@ -704,7 +810,8 @@ async fn exec_bulk_create<R: Repository, E: EventSink>(
             Err(error) => return validation_error("bulk_create_tasks", error),
         }
     }
-    if let Some(project_id) = project_id
+    if mode == ToolExecutionMode::Initial
+        && let Some(project_id) = project_id
         && service.get_project(project_id).await.is_err()
     {
         return ToolResultEnvelope::error(
@@ -715,36 +822,19 @@ async fn exec_bulk_create<R: Repository, E: EventSink>(
     }
     let mut created = Vec::new();
     for (index, title) in titles.into_iter().enumerate() {
-        let title_raw = args.titles[index].as_str();
         let mut draft = TaskDraft::new(title);
         draft.project_id = project_id;
         draft.due_date = due_date;
         let child_op = derive_child_operation_id(root, "bulk_create_tasks", index as u32);
-        match service.create_task(child_op, draft).await {
-            Ok(mutation) => {
-                let task_id = mutation_primary_id(&mutation).or_else(|| {
-                    mutation
-                        .event
-                        .affected
-                        .task_ids
-                        .first()
-                        .map(ToString::to_string)
-                });
-                created.push(json!({
-                    "task_id": task_id,
-                    "operation_id": child_op.to_string(),
-                    "revision": mutation.event.revision,
-                    "event_type": mutation.event.event_type.as_str(),
-                    "title": title_raw,
-                }));
-            }
+        match create_composite_task(service, child_op, draft, mode).await {
+            Ok(mutation) => created.push(composite_created_entry(&mutation, child_op)),
             Err(error) => {
                 return partial_composite_outcome(
                     "bulk_create_tasks",
                     created,
                     index,
                     error,
-                    json!({}),
+                    json!({ "failed_operation_id": child_op.to_string() }),
                 );
             }
         }
@@ -1642,19 +1732,7 @@ async fn exec_save_memory<R: Repository, E: EventSink>(
             },
         )
         .await;
-    match result {
-        Ok(mutation) => {
-            let memory_id = mutation_primary_id(&mutation);
-            let mut envelope = mutation_result("save_memory", Ok(mutation));
-            if let Some(memory_id) = memory_id
-                && let Some(object) = envelope.data.as_object_mut()
-            {
-                object.insert("memory_id".to_owned(), Value::String(memory_id));
-            }
-            envelope
-        }
-        Err(error) => map_app_error("save_memory", error),
-    }
+    mutation_result("save_memory", result)
 }
 
 async fn exec_recall_memories<R: Repository, E: EventSink>(
@@ -1702,9 +1780,13 @@ const DEFAULT_WORK_HOURS_END_MINUTE: u16 = 17 * 60;
 
 async fn load_work_hours_snapshot<R: Repository, E: EventSink>(
     service: &JunbanService<R, E>,
+    ctx: &ToolExecContext,
 ) -> Result<(WorkHours, bool), AppError> {
-    let settings = service.get_settings().await?;
-    match settings.planning.work_hours {
+    let configured = match ctx.confirmed_work_hours {
+        Some(configured) => configured,
+        None => service.get_settings().await?.planning.work_hours,
+    };
+    match configured {
         Some(hours) => Ok((hours, false)),
         None => Ok((
             WorkHours::new(
@@ -1728,7 +1810,7 @@ async fn exec_schedule_preview<R: Repository, E: EventSink>(
         Ok(date) => date,
         Err(error) => return validation_error(tool, error),
     };
-    let (work_hours, work_hours_defaulted) = match load_work_hours_snapshot(service).await {
+    let (work_hours, work_hours_defaulted) = match load_work_hours_snapshot(service, ctx).await {
         Ok(value) => value,
         Err(error) => return map_app_error(tool, error),
     };
@@ -2157,7 +2239,7 @@ async fn exec_availability<R: Repository, E: EventSink>(
         Ok(date) => date,
         Err(error) => return validation_error("timeblocking_get_availability", error),
     };
-    let (work_hours, work_hours_defaulted) = match load_work_hours_snapshot(service).await {
+    let (work_hours, work_hours_defaulted) = match load_work_hours_snapshot(service, ctx).await {
         Ok(value) => value,
         Err(error) => return map_app_error("timeblocking_get_availability", error),
     };
@@ -2246,6 +2328,39 @@ async fn exec_replan_day<R: Repository, E: EventSink>(
 }
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
+
+async fn create_composite_task<R: Repository, E: EventSink>(
+    service: &JunbanService<R, E>,
+    child_operation_id: OperationId,
+    draft: TaskDraft,
+    mode: ToolExecutionMode,
+) -> Result<CommittedMutation, AppError> {
+    let mutation = if mode == ToolExecutionMode::Recovery {
+        match service.recover_operation_receipt(child_operation_id).await {
+            Ok(mutation) => mutation,
+            Err(AppError::NotFound) => service.create_task(child_operation_id, draft).await?,
+            Err(error) => return Err(error),
+        }
+    } else {
+        service.create_task(child_operation_id, draft).await?
+    };
+    if mutation.event.operation_id != child_operation_id
+        || mutation.event.event_type.as_str() != EventType::TASK_CREATED
+        || mutation_primary_id(&mutation).is_none()
+    {
+        return Err(AppError::Storage);
+    }
+    Ok(mutation)
+}
+
+fn composite_created_entry(mutation: &CommittedMutation, child_operation_id: OperationId) -> Value {
+    json!({
+        "task_id": mutation_primary_id(mutation).expect("validated task-create receipt"),
+        "operation_id": child_operation_id.to_string(),
+        "revision": mutation.event.revision,
+        "event_type": mutation.event.event_type.as_str(),
+    })
+}
 
 async fn load_pending_tasks<R: Repository, E: EventSink>(
     service: &JunbanService<R, E>,
@@ -2552,7 +2667,7 @@ mod tests {
 
     use jiff::civil::date;
     use junban_app::{CommittedEvent, EventSink};
-    use junban_domain::OperationId;
+    use junban_domain::{OperationId, TaskId};
     use junban_storage::{ProfileOwner, SqliteRepository};
     use uuid::Uuid;
 
@@ -2634,6 +2749,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn recovery_replays_receipt_before_state_dependent_prevalidation() {
+        let (_owner, service, profile) = open_service();
+        let ctx = fixed_ctx();
+        let (create, _) =
+            validate_tool_call("create_task", r#"{"title":"Schedule then delete"}"#).unwrap();
+        let created = execute_tool(&service, &create, &ctx, Some(op())).await;
+        let task_id = TaskId::parse(created.data["primary"]["id"].as_str().unwrap()).unwrap();
+        let (schedule, _) = validate_tool_call(
+            "timeblocking_schedule_task",
+            &json!({
+                "task_id": task_id.to_string(),
+                "date": "2026-08-02",
+                "start": "13:00",
+                "end": "14:00"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let dispatch = op();
+        let initial = execute_tool(&service, &schedule, &ctx, Some(dispatch)).await;
+        assert_eq!(initial.outcome, ToolOutcome::Success);
+        service.delete_task(op(), task_id).await.unwrap();
+
+        let recovered = execute_tool_recovery(&service, &schedule, &ctx, dispatch)
+            .await
+            .unwrap();
+        assert_eq!(recovered, initial);
+        let _ = fs::remove_dir_all(profile);
+    }
+
+    #[tokio::test]
     async fn create_and_query_round_trip_through_service() {
         let (_owner, service, profile) = open_service();
         let ctx = fixed_ctx();
@@ -2688,6 +2834,44 @@ mod tests {
             .map(|row| row["operation_id"].as_str().unwrap().to_owned())
             .collect();
         assert_eq!(first_ops, second_ops);
+        assert!(
+            first.data["created"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row.get("title").is_none())
+        );
+        let _ = fs::remove_dir_all(profile);
+    }
+
+    #[tokio::test]
+    async fn hundred_child_manifest_is_complete_chat_bounded_and_exactly_recoverable() {
+        let (_owner, service, profile) = open_service();
+        let ctx = fixed_ctx();
+        let root = OperationId::new();
+        let titles = (0..AI_TOOL_COMPOSITE_CREATE_MAX)
+            .map(|index| format!("child-{index}"))
+            .collect::<Vec<_>>();
+        let (action, _) =
+            validate_tool_call("bulk_create_tasks", &json!({"titles": titles}).to_string())
+                .unwrap();
+        let first = execute_tool(&service, &action, &ctx, Some(root)).await;
+        assert_eq!(first.outcome, ToolOutcome::Success);
+        let created = first.data["created"].as_array().unwrap();
+        assert_eq!(created.len(), AI_TOOL_COMPOSITE_CREATE_MAX);
+        assert!(created.iter().all(|row| {
+            row["task_id"].as_str().is_some()
+                && row["operation_id"].as_str().is_some()
+                && row["revision"].as_u64().is_some()
+                && row["event_type"].as_str().is_some()
+                && row.get("title").is_none()
+        }));
+        assert!(serde_json::to_vec(&first).unwrap().len() <= 30 * 1024);
+
+        let recovered = execute_tool_recovery(&service, &action, &ctx, root)
+            .await
+            .unwrap();
+        assert_eq!(recovered, first);
         let _ = fs::remove_dir_all(profile);
     }
 
@@ -2879,9 +3063,14 @@ mod tests {
         // Ensure the table covers every registry name either above or in the
         // dedicated follow-up mutations that need created block/memory ids.
         let mut seen = BTreeSet::new();
+        let mut direct_receipts = BTreeSet::new();
+        let mut recovered_direct_receipts = BTreeSet::new();
         for (name, args, needs_op) in &samples {
             seen.insert(*name);
             let (action, _) = validate_tool_call(name, args).unwrap();
+            if action.effect() == ToolEffect::ApprovalRequired && !is_composite_mutation(&action) {
+                direct_receipts.insert(*name);
+            }
             let root = if *needs_op { Some(op()) } else { None };
             let result = execute_tool(&service, &action, &ctx, root).await;
             assert!(
@@ -2892,6 +3081,19 @@ mod tests {
                 "tool {name} produced unexpected outcome {:?}",
                 result.outcome
             );
+            if let Some(root) = root
+                && action.effect() == ToolEffect::ApprovalRequired
+                && !is_composite_mutation(&action)
+            {
+                let recovered = execute_tool_recovery(&service, &action, &ctx, root)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    recovered, result,
+                    "direct receipt formatter drifted for {name}"
+                );
+                recovered_direct_receipts.insert(*name);
+            }
             // No raw receipt or token material.
             let encoded = serde_json::to_string(&result).unwrap();
             assert!(!encoded.contains("access_token"));
@@ -2937,6 +3139,9 @@ mod tests {
         ] {
             seen.insert(name);
             let (action, _) = validate_tool_call(name, &args).unwrap();
+            if action.effect() == ToolEffect::ApprovalRequired && !is_composite_mutation(&action) {
+                direct_receipts.insert(name);
+            }
             let root = if needs_op { Some(op()) } else { None };
             let result = execute_tool(&service, &action, &ctx, root).await;
             assert!(
@@ -2947,6 +3152,19 @@ mod tests {
                 "tool {name} failed closed unexpectedly: {:?}",
                 result
             );
+            if let Some(root) = root
+                && action.effect() == ToolEffect::ApprovalRequired
+                && !is_composite_mutation(&action)
+            {
+                let recovered = execute_tool_recovery(&service, &action, &ctx, root)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    recovered, result,
+                    "direct receipt formatter drifted for {name}"
+                );
+                recovered_direct_receipts.insert(name);
+            }
         }
 
         // forget_memory needs a memory id from list.
@@ -2964,8 +3182,17 @@ mod tests {
             &format!(r#"{{"memory_id":"{memory_id}"}}"#),
         )
         .unwrap();
-        let forgot = execute_tool(&service, &forget, &ctx, Some(op())).await;
+        let forget_root = op();
+        let forgot = execute_tool(&service, &forget, &ctx, Some(forget_root)).await;
         assert_eq!(forgot.outcome, ToolOutcome::Success);
+        direct_receipts.insert("forget_memory");
+        assert_eq!(
+            execute_tool_recovery(&service, &forget, &ctx, forget_root)
+                .await
+                .unwrap(),
+            forgot
+        );
+        recovered_direct_receipts.insert("forget_memory");
 
         // extract apply path
         seen.insert("extract_tasks_from_text");
@@ -2987,6 +3214,10 @@ mod tests {
             expected,
             "missing tools in coverage: {:?}",
             expected.difference(&seen).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            recovered_direct_receipts, direct_receipts,
+            "every sampled non-composite mutation must prove exact formatter equality"
         );
 
         let _ = fs::remove_dir_all(profile);
@@ -3041,6 +3272,8 @@ mod tests {
         assert!(created[0]["task_id"].as_str().is_some());
         assert!(created[0]["revision"].as_u64().is_some());
         assert!(created[0]["event_type"].as_str().is_some());
+        assert!(created[0].get("title").is_none());
+        assert_eq!(partial.data["failed_operation_id"], poison.to_string());
         assert!(partial.operation_id.is_none());
         assert!(partial.revision.is_none());
         crate::ai_runtime::AiDecisionPayload::from_tool_result(
@@ -3352,7 +3585,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mutation_primary_and_save_memory_id_survive_exact_replay() {
+    async fn save_memory_initial_and_receipt_recovery_are_exactly_equal_and_apply_once() {
         let (_owner, service, profile) = open_service();
         let ctx = fixed_ctx();
         let root = op();
@@ -3360,16 +3593,24 @@ mod tests {
         let (save, _) = validate_tool_call("save_memory", r#"{"content":"durable note"}"#).unwrap();
         let first = execute_tool(&service, &save, &ctx, Some(root)).await;
         assert_eq!(first.outcome, ToolOutcome::Success);
-        let memory_id = first.data["memory_id"].as_str().unwrap().to_owned();
         assert_eq!(first.data["primary"]["kind"], "ai_memory");
-        assert_eq!(first.data["primary"]["id"], memory_id);
+        assert!(first.data.get("memory_id").is_none());
 
-        let second = execute_tool(&service, &save, &ctx, Some(root)).await;
-        assert_eq!(second.outcome, ToolOutcome::Success);
-        assert_eq!(second.data["memory_id"], memory_id);
-        assert_eq!(second.data["primary"]["id"], memory_id);
-        assert_eq!(second.operation_id, first.operation_id);
-        assert_eq!(second.revision, first.revision);
+        let recovered = execute_tool_recovery(&service, &save, &ctx, root)
+            .await
+            .unwrap();
+        assert_eq!(recovered, first);
+        assert_eq!(
+            service
+                .select_ai_memories_for_context(SelectAiMemoriesRequest {
+                    session_id: None,
+                    limit: Some(10),
+                })
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
         let _ = fs::remove_dir_all(profile);
     }

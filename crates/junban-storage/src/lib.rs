@@ -2128,6 +2128,7 @@ impl Repository for SqliteRepository {
         generation: u64,
         tool_name: String,
         arguments_json: String,
+        assistant_content: AiMessageContent,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation> {
         mut_cmd!(
@@ -2141,6 +2142,7 @@ impl Repository for SqliteRepository {
                 generation,
                 tool_name,
                 arguments_json,
+                assistant_content,
                 now
             }
         )
@@ -2152,6 +2154,7 @@ impl Repository for SqliteRepository {
         approval_id: AiApprovalId,
         status: AiApprovalStatus,
         dispatch_operation_id: Option<String>,
+        assistant_content: Option<AiMessageContent>,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation> {
         mut_cmd!(
@@ -2161,6 +2164,7 @@ impl Repository for SqliteRepository {
                 approval_id,
                 status,
                 dispatch_operation_id,
+                assistant_content,
                 now
             }
         )
@@ -2172,6 +2176,13 @@ impl Repository for SqliteRepository {
 
     fn list_dispatching_ai_approvals(&self) -> RepositoryFuture<'_, Vec<AiToolApproval>> {
         mut_cmd!(self, ListDispatchingAiApprovals {})
+    }
+
+    fn recover_operation_receipt(
+        &self,
+        operation_id: OperationId,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(self, RecoverOperationReceipt { operation_id })
     }
 
     fn upsert_ai_run_state(
@@ -2874,6 +2885,7 @@ enum Command {
         generation: u64,
         tool_name: String,
         arguments_json: String,
+        assistant_content: AiMessageContent,
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
@@ -2882,6 +2894,7 @@ enum Command {
         approval_id: AiApprovalId,
         status: AiApprovalStatus,
         dispatch_operation_id: Option<String>,
+        assistant_content: Option<AiMessageContent>,
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
@@ -2891,6 +2904,10 @@ enum Command {
     },
     ListDispatchingAiApprovals {
         reply: oneshot::Sender<Result<Vec<AiToolApproval>, RepositoryError>>,
+    },
+    RecoverOperationReceipt {
+        operation_id: OperationId,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
     UpsertAiRunState {
         operation_id: OperationId,
@@ -4038,10 +4055,11 @@ fn run_worker(
                 generation,
                 tool_name,
                 arguments_json,
+                assistant_content,
                 now,
                 reply,
             } => {
-                let _ = reply.send(ai_ops::propose_ai_approval(
+                let _ = reply.send(ai_ops::propose_ai_approval_with_content(
                     connection,
                     operation_id,
                     approval_id,
@@ -4051,6 +4069,7 @@ fn run_worker(
                     generation,
                     tool_name,
                     arguments_json,
+                    assistant_content,
                     now,
                 ));
             }
@@ -4059,15 +4078,17 @@ fn run_worker(
                 approval_id,
                 status,
                 dispatch_operation_id,
+                assistant_content,
                 now,
                 reply,
             } => {
-                let _ = reply.send(ai_ops::set_ai_approval_status(
+                let _ = reply.send(ai_ops::set_ai_approval_status_with_content(
                     connection,
                     operation_id,
                     approval_id,
                     status,
                     dispatch_operation_id,
+                    assistant_content,
                     now,
                 ));
             }
@@ -4076,6 +4097,12 @@ fn run_worker(
             }
             Command::ListDispatchingAiApprovals { reply } => {
                 let _ = reply.send(ai_ops::list_dispatching_ai_approvals(connection));
+            }
+            Command::RecoverOperationReceipt {
+                operation_id,
+                reply,
+            } => {
+                let _ = reply.send(tx::recover_operation_receipt(connection, operation_id));
             }
             Command::UpsertAiRunState {
                 operation_id,

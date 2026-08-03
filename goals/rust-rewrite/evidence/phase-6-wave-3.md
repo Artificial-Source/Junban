@@ -167,7 +167,7 @@ The commands above completed successfully for the Wave 3d delta and are re-run f
 - AI `weekly_review` uses `weekly_review_bounded`: bounded analysis task snapshot plus exact `get_projects_by_ids` for referenced projects only (max 500 unique IDs, deterministic truncate + `projects_truncated`). Ordinary HTTP `weekly_review` still uses full `list_catalog`.
 - Analysis tools are conservative/local over existing planning/stats/catalog APIs (no nested LLM). Memory is content-only. Extraction is deterministic line/bullet parsing. Tags/projects are never silently created by name.
 - Scheduling preview and availability share one confirmed `settings.planning.work_hours` snapshot (documented 09:00–17:00 fallback when unset), merge clamped block **and** slot occupied intervals, and place a task only in a gap large enough for its full duration.
-- Generic mutation results include committed `event.primary` `{kind,id}`; `save_memory` also returns `memory_id`. Exact replay preserves primary identity.
+- Generic mutation results include committed `event.primary` `{kind,id}`. Initial execution and direct receipt recovery share the same pure formatter, so exact replay preserves the complete result, including `save_memory` identity.
 
 ### Focused tests
 
@@ -215,13 +215,29 @@ The independent authority gate approved after correction and exact-delta re-revi
 
 ### Non-claims for Wave 3f.2a
 
-- No provider tool loop, detached dispatch/recovery worker, public approval routes, OpenAPI changes, tool SSE envelopes, or UI wiring is included. The 3f.2a runtime/storage contract and service-backed ordering regression do not claim that 3f.2b worker delivery; those remain Wave 3f.2b.
+- No provider tool loop, detached dispatch/recovery worker, public approval routes, OpenAPI changes, tool SSE envelopes, or UI wiring is included. The 3f.2a runtime/storage contract and service-backed ordering regression do not claim that 3f.2b worker delivery; those remained Wave 3f.2b.
 - No new provider, credential, network, plugin, CLI, or MCP authority is added.
+
+## Wave 3f.2b — provider tool loop, public decisions, and exact recovery
+
+- Provider orchestration supports at most eight bounded rounds and at most one validated tool proposal per round. Read tools execute immediately through `JunbanService`; mutations stop at durable approval. Provider call IDs remain internal only, and provider frames, raw bodies, credentials, internal dispatch roots, and hidden reasoning never enter local SSE, durable transcripts, model continuation messages, logs, or public approval DTOs.
+- Version-1 local SSE adds `tool_proposed`, `tool_approved`, `tool_rejected`, and `tool_result`. `AiMessageContent` retains one canonical, bounded, provider-neutral tool-event transcript with assistant UTF-8 offsets. Exact retries interleave durable text and every retained tool card before the terminal event without provider egress.
+- Authenticated operator-only `GET /api/v1/ai/approvals/{id}`, `POST .../approve`, and `POST .../reject` enforce Host/Origin, body, idempotency, exact action-hash, generation, expiry, and state authority. The generated OpenAPI/TypeScript contract includes these routes while the Phase 5 CLI/MCP catalog remains exactly 87 tools.
+- A private non-HTTP approval-dispatch module owns detached decision authorization, approve/reject workers, random server-only UUID-v4 dispatch roots, tool execution, startup recovery, transcript checkpoints, terminal persistence, and runtime completion. HTTP routes own transport/DTO/error mapping only. A separate private transcript module owns the 30 KiB chat-result boundary, complete-composite fail-closed policy, event append validation, and stable rejection result.
+- Approval consumption atomically persists `Consumed` + `Dispatching`, the private dispatch root, and exactly one `tool_approved` checkpoint. Rejection atomically persists authority plus `tool_rejected`/`tool_result`. Terminal finish atomically appends the bounded result and terminalizes the bound assistant/run. Handler drop, cancellation, expiry, lifecycle drain, and backpressure cannot authorize a second effect or overwrite a committed dispatch winner.
+- AI composite creation is capped at 100 children while the product-wide mutation ceiling remains 500. Every committed child retains resource, one-way child-operation, revision, and event identity; partial results retain `failed_index` and static failure context. Oversized authoritative manifests fail closed rather than truncating committed effects.
+- Startup recovery runs before listener admission and never constructs a provider, credential, or runtime. It validates every consumed/dispatching pair, reuses the private dispatch root, protects exact receipts from age cleanup while recovery is pending, and either reproduces the exact bounded result once or leaves the run `Dispatching` and fails startup. Unrelated or mismatched receipts cannot become successful tool results.
+- Normal open and restore preflight enforce event-specific transcript payload schemas, unknown/private-key rejection, canonical IDs/timestamps/hashes, approval/card/tool/arguments/expiry cross-binding, and private dispatch-root non-exposure.
+
+### Tool-run, recovery, and quality validation
+
+The final correction pass ran the complete domain, application, storage, and server package suites; focused 100-child success/partial authority, exact receipt recovery, save-memory result equivalence, stop-after-consume, detached decision, cancellation ordering, startup recovery, live-versus-replay transcript, UTF-8 offset, and malformed normal-open/restore regressions; denied-warning workspace Clippy; Rust and repository formatting; contract generation/drift; documentation; and diff checks. The final server recheck passed 232 library tests and six process-lifecycle tests; the restore/reconfigure timing regression additionally passed 20 focused repetitions. The security gate approved `P6-TOOLRUN-001`–`P6-TOOLRUN-003`, and the Rust architecture/DX gate approved `P6-QUALITY-001` after the non-HTTP dispatch/transcript ownership extraction.
 
 ## Non-claims
 
-- No provider-wired tool dispatch loop, tool approval HTTP surface, daily briefing, edit/regenerate, multi-round autonomous loop, or hidden reasoning exposure. Wave 3f.1 adds only the offline registry/validator/executor foundation above.
-- No arbitrary message upsert HTTP route; message creation remains owned by the basic response orchestrator.
+- No daily briefing route/worker or response edit/regenerate flow.
+- No schedule-apply mutation or model-supplied preview/apply authority.
+- No arbitrary message upsert HTTP route; message creation remains owned by response orchestration.
 - No manual memory-link HTTP route.
 - No voice audio/STT/TTS HTTP routes, browser media path, cloud speech adapter, or local inference.
 - No React AI/voice/settings UI.

@@ -685,6 +685,7 @@ pub trait Repository: Send + Sync + 'static {
         generation: u64,
         tool_name: String,
         arguments_json: String,
+        assistant_content: junban_domain::AiMessageContent,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation>;
 
@@ -694,6 +695,7 @@ pub trait Repository: Send + Sync + 'static {
         approval_id: AiApprovalId,
         status: AiApprovalStatus,
         dispatch_operation_id: Option<String>,
+        assistant_content: Option<junban_domain::AiMessageContent>,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation>;
 
@@ -701,6 +703,15 @@ pub trait Repository: Send + Sync + 'static {
 
     /// Bounded exact consumed-approval rows whose run is durably dispatching.
     fn list_dispatching_ai_approvals(&self) -> RepositoryFuture<'_, Vec<AiToolApproval>>;
+
+    /// Trusted recovery-only lookup of a committed mutation by its server-owned operation ID.
+    ///
+    /// This deliberately does not accept caller request bytes and must never be exposed through
+    /// an HTTP, CLI, MCP, provider, or plugin surface.
+    fn recover_operation_receipt(
+        &self,
+        operation_id: OperationId,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
 
     fn upsert_ai_run_state(
         &self,

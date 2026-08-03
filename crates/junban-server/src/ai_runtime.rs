@@ -15,7 +15,10 @@ use junban_ai::{
 };
 use junban_domain::{AiApprovalId, AiRunId, OperationId};
 
-use crate::ai_tool_registry::{ToolResultEnvelope, registration};
+use crate::{
+    ai_tool_executor::derive_child_operation_id,
+    ai_tool_registry::{ToolResultEnvelope, registration},
+};
 use tokio::sync::Notify;
 
 /// Hard concurrent ceiling for in-flight AI provider runs in one process.
@@ -100,9 +103,10 @@ impl AiDecisionPayload {
         terminal_outcome: AiTerminalOutcome,
         tool_result: &ToolResultEnvelope,
     ) -> Result<Self, AiRuntimeError> {
+        let public_operation_id = derive_child_operation_id(dispatch_operation_id, "mutation", 0);
         let result_operation_matches = tool_result.operation_id.as_deref().is_none_or(|raw| {
             OperationId::parse(raw)
-                .is_ok_and(|parsed| parsed == dispatch_operation_id && parsed.to_string() == raw)
+                .is_ok_and(|parsed| parsed == public_operation_id && parsed.to_string() == raw)
         });
         if terminal_outcome == AiTerminalOutcome::Cancelled
             || registration(&tool_result.tool).is_none()
@@ -111,12 +115,25 @@ impl AiDecisionPayload {
         {
             return Err(AiRuntimeError::InvalidDecisionPayload);
         }
+        let created_manifest = tool_result.data.get("created").cloned();
         let bounded = tool_result.clone().finalize_bounded();
+        if created_manifest.is_some()
+            && (bounded.truncated || bounded.data.get("created") != created_manifest.as_ref())
+        {
+            return Err(AiRuntimeError::InvalidDecisionPayload);
+        }
         let mut value =
             serde_json::to_value(&bounded).map_err(|_| AiRuntimeError::InvalidDecisionPayload)?;
         let mut tool_result_json =
             serde_json::to_string(&value).map_err(|_| AiRuntimeError::InvalidDecisionPayload)?;
         if tool_result_json.len() > MAX_AI_DECISION_PAYLOAD_BYTES {
+            if bounded
+                .data
+                .get("created")
+                .is_some_and(serde_json::Value::is_array)
+            {
+                return Err(AiRuntimeError::InvalidDecisionPayload);
+            }
             value = serde_json::to_value(ToolResultEnvelope::error(
                 &bounded.tool,
                 "result_too_large",
@@ -291,6 +308,12 @@ impl AiRunGuard {
     pub fn await_approval(&self, approval_id: AiApprovalId) -> Result<(), AiRuntimeError> {
         self.supervisor
             .await_approval(self.run_id, self.generation, approval_id)
+    }
+
+    /// Roll back only a process-local approval transition whose durable proposal failed.
+    pub fn abandon_approval(&self, approval_id: AiApprovalId) -> Result<(), AiRuntimeError> {
+        self.supervisor
+            .abandon_approval(self.run_id, self.generation, approval_id)
     }
 
     /// Wait without polling for this approval's decision or a winning cancellation.
@@ -566,6 +589,31 @@ impl AiRuntimeSupervisor {
         }
         entry.phase = ActiveRunPhase::AwaitingApproval(approval_id);
         Ok(())
+    }
+
+    fn abandon_approval(
+        &self,
+        run_id: AiRunId,
+        generation: u64,
+        approval_id: AiApprovalId,
+    ) -> Result<(), AiRuntimeError> {
+        let mut inner = self.inner.lock().expect("AI runtime poisoned");
+        let entry = inner
+            .active
+            .get_mut(&run_id)
+            .ok_or(AiRuntimeError::NotFound)?;
+        if entry.generation != generation {
+            return Err(AiRuntimeError::DecisionIdentityMismatch);
+        }
+        match entry.phase {
+            ActiveRunPhase::AwaitingApproval(bound) if bound == approval_id => {
+                entry.phase = ActiveRunPhase::Running;
+                Ok(())
+            }
+            ActiveRunPhase::AwaitingApproval(_) => Err(AiRuntimeError::DecisionIdentityMismatch),
+            ActiveRunPhase::CancelRequested => Ok(()),
+            _ => Err(AiRuntimeError::DecisionUnavailable),
+        }
     }
 
     pub fn begin_decision(
@@ -1504,6 +1552,31 @@ mod tests {
         .unwrap();
         assert!(bounded.tool_result_json().len() <= MAX_AI_DECISION_PAYLOAD_BYTES);
         assert!(bounded.tool_result_json().contains("result_too_large"));
+
+        let oversized_manifest = ToolResultEnvelope::success(
+            "bulk_create_tasks",
+            serde_json::json!({
+                "created": [{
+                    "task_id": "x".repeat(MAX_AI_DECISION_PAYLOAD_BYTES * 10),
+                    "operation_id": "child",
+                    "revision": 1,
+                    "event_type": "task.created",
+                }],
+            }),
+        );
+        assert_eq!(
+            crate::ai_tool_transcript::bound_chat_result(oversized_manifest.clone()).unwrap_err(),
+            junban_app::AppError::ResultLimitExceeded
+        );
+        assert_eq!(
+            AiDecisionPayload::from_tool_result(
+                operation_id,
+                AiTerminalOutcome::Completed,
+                &oversized_manifest,
+            )
+            .unwrap_err(),
+            AiRuntimeError::InvalidDecisionPayload
+        );
 
         let other_operation_id =
             OperationId::parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb").unwrap();

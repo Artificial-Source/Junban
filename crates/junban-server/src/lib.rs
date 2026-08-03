@@ -1,11 +1,13 @@
 //! Axum router, HTTP contract, authentication, static serving, and SSE delivery.
 
+mod ai_approval_dispatch;
 mod ai_chat;
 mod ai_context;
 mod ai_identity;
 mod ai_runtime;
 mod ai_tool_executor;
 mod ai_tool_registry;
+mod ai_tool_transcript;
 mod authz;
 mod credentials;
 mod cursor;
@@ -17,6 +19,7 @@ mod owner_runtime;
 mod reminder_wake;
 mod routes;
 mod routes_ai;
+mod routes_ai_approvals;
 mod sse;
 
 use std::{
@@ -92,6 +95,7 @@ use crate::routes_ai::{
     list_ai_messages, list_ai_providers, list_ai_sessions, patch_ai_memory, patch_ai_session,
     put_ai_config, put_ai_credential,
 };
+use crate::routes_ai_approvals::{approve_ai_approval, get_ai_approval, reject_ai_approval};
 use crate::sse::{AppService, SseConnectionPermit};
 
 pub use crate::ai_runtime::{
@@ -364,7 +368,7 @@ pub struct ServerState {
     maintenance: Arc<MaintenanceGate>,
     bearer_token: Arc<RwLock<Arc<str>>>,
     /// Hosts supplied at process start (CLI / bind address); never removed via API.
-    cli_hosts: Arc<Vec<String>>,
+    cli_hosts: Arc<RwLock<Vec<String>>>,
     allowed_hosts: Arc<RwLock<HashSet<String>>>,
     pub(crate) profile_dir: PathBuf,
     auth_limiter: Arc<AuthLimiter>,
@@ -454,7 +458,7 @@ impl ServerState {
             reminder_wakes,
             maintenance: MaintenanceGate::new(),
             bearer_token: Arc::new(RwLock::new(Arc::from(bearer_token))),
-            cli_hosts: Arc::new(cli_hosts),
+            cli_hosts: Arc::new(RwLock::new(cli_hosts)),
             allowed_hosts: Arc::new(RwLock::new(allowed_hosts)),
             profile_dir,
             auth_limiter: Arc::new(AuthLimiter::new()),
@@ -498,6 +502,14 @@ impl ServerState {
     #[must_use]
     pub fn ai_provider_client_construct_calls(&self) -> usize {
         self.ai_runtime.provider_client_construct_calls()
+    }
+
+    /// Recover every exact consumed mutation approval before any normal service starts.
+    ///
+    /// Thin lifecycle delegate; validation, execution, transcript, and terminalization
+    /// live in [`ai_approval_dispatch`]. Never constructs a provider runtime.
+    pub async fn recover_ai_dispatches(&self) -> io::Result<()> {
+        ai_approval_dispatch::recover_ai_dispatches(self).await
     }
 
     /// Cancelled when the process begins graceful shutdown.
@@ -546,13 +558,26 @@ impl ServerState {
     }
 
     /// Replace persisted hosts and refresh the effective allowlist.
+    /// Add listener-derived hosts after startup recovery and listener binding.
+    pub fn add_cli_hosts(&self, hosts: impl IntoIterator<Item = String>) {
+        let mut cli_hosts = self.cli_hosts.write().expect("CLI hosts poisoned");
+        let mut allowed_hosts = self.allowed_hosts.write().expect("allowed hosts poisoned");
+        for host in hosts {
+            allowed_hosts.insert(host.clone());
+            if !cli_hosts.contains(&host) {
+                cli_hosts.push(host);
+            }
+        }
+    }
+
     pub(crate) fn set_persisted_hosts(
         &self,
         persisted: Vec<String>,
     ) -> io::Result<HashSet<String>> {
-        let mut effective: HashSet<String> = self.cli_hosts.iter().cloned().collect();
+        let cli_hosts = self.cli_hosts.read().expect("CLI hosts poisoned");
+        let mut effective: HashSet<String> = cli_hosts.iter().cloned().collect();
         effective.extend(persisted);
-        save_allowed_hosts(&self.profile_dir, &effective, self.cli_hosts.as_slice())?;
+        save_allowed_hosts(&self.profile_dir, &effective, cli_hosts.as_slice())?;
         *self.allowed_hosts.write().expect("allowed hosts poisoned") = effective.clone();
         self.diagnostics.log(
             DiagnosticSeverity::Info,
@@ -1003,6 +1028,15 @@ fn api_route_table() -> Router<ServerState> {
             post(create_ai_response).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
         )
         .route("/api/v1/ai/runs/{run_id}/cancel", post(cancel_ai_run))
+        .route("/api/v1/ai/approvals/{approval_id}", get(get_ai_approval))
+        .route(
+            "/api/v1/ai/approvals/{approval_id}/approve",
+            post(approve_ai_approval).layer(DefaultBodyLimit::max(4 * 1024)),
+        )
+        .route(
+            "/api/v1/ai/approvals/{approval_id}/reject",
+            post(reject_ai_approval).layer(DefaultBodyLimit::max(4 * 1024)),
+        )
         .route(
             "/api/v1/ai/sessions/{session_id}/clear",
             post(clear_ai_session),
@@ -1712,6 +1746,9 @@ impl Modify for SecurityAddon {
         routes_ai::list_ai_messages,
         routes_ai::create_ai_response,
         routes_ai::cancel_ai_run,
+        routes_ai_approvals::get_ai_approval,
+        routes_ai_approvals::approve_ai_approval,
+        routes_ai_approvals::reject_ai_approval,
         routes_ai::clear_ai_session,
         routes_ai::list_ai_memories,
         routes_ai::create_ai_memory,
@@ -1923,6 +1960,11 @@ impl Modify for SecurityAddon {
         routes_ai::AiMemoryListResponse,
         routes_ai::AiSessionMutationResponse,
         routes_ai::AiMemoryMutationResponse,
+        routes_ai_approvals::AiApprovalDecisionRequest,
+        routes_ai_approvals::AiApprovalDto,
+        routes_ai_approvals::AiApprovalMessageDto,
+        routes_ai_approvals::AiApprovalRunDto,
+        routes_ai_approvals::AiApprovalResponse,
         dto::EatTheFrogResponse,
         dto::TaskJarResponse,
         dto::DopamineMenuResponse,

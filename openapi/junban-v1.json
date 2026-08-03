@@ -10,6 +10,316 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/v1/ai/approvals/{approval_id}": {
+      "get": {
+        "tags": ["routes_ai_approvals"],
+        "operationId": "get_ai_approval",
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiApprovalResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/approvals/{approval_id}/approve": {
+      "post": {
+        "tags": ["routes_ai_approvals"],
+        "operationId": "approve_ai_approval",
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiApprovalDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiApprovalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/approvals/{approval_id}/reject": {
+      "post": {
+        "tags": ["routes_ai_approvals"],
+        "operationId": "reject_ai_approval",
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiApprovalDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiApprovalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/ai/config": {
       "get": {
         "tags": ["routes_ai"],
@@ -11132,6 +11442,174 @@
           }
         }
       },
+      "AiApprovalDecisionRequest": {
+        "type": "object",
+        "required": ["action_hash"],
+        "properties": {
+          "action_hash": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AiApprovalDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "turn_id",
+          "run_id",
+          "generation",
+          "tool_name",
+          "arguments",
+          "action_hash",
+          "status",
+          "expires_at",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "action_hash": {
+            "type": "string"
+          },
+          "arguments": {},
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "AiApprovalMessageDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "turn_id",
+          "role",
+          "status",
+          "content",
+          "sequence",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "content": {},
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "AiApprovalResponse": {
+        "type": "object",
+        "required": ["approval", "message", "run"],
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/AiApprovalDto"
+          },
+          "message": {
+            "$ref": "#/components/schemas/AiApprovalMessageDto"
+          },
+          "result": {},
+          "run": {
+            "$ref": "#/components/schemas/AiApprovalRunDto"
+          }
+        }
+      },
+      "AiApprovalRunDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "turn_id",
+          "assistant_message_id",
+          "generation",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "approval_id": {
+            "type": ["string", "null"]
+          },
+          "assistant_message_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
       "AiConfigInput": {
         "type": "object",
         "required": [
@@ -11402,6 +11880,12 @@
           "tool_arguments_json": {
             "type": ["string", "null"]
           },
+          "tool_events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiToolEventDto"
+            }
+          },
           "tool_name": {
             "type": ["string", "null"]
           },
@@ -11560,6 +12044,10 @@
           "text_delta",
           "reasoning_status",
           "usage",
+          "tool_proposed",
+          "tool_approved",
+          "tool_rejected",
+          "tool_result",
           "run_completed",
           "run_cancelled",
           "run_failed"
@@ -11725,6 +12213,26 @@
           },
           "smart_endpoint": {
             "type": "boolean"
+          }
+        }
+      },
+      "AiToolEventDto": {
+        "type": "object",
+        "required": ["version", "assistant_utf8_offset", "event_type", "payload"],
+        "properties": {
+          "assistant_utf8_offset": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "payload": {},
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           }
         }
       },

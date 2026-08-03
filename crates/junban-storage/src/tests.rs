@@ -6316,6 +6316,20 @@ async fn release_cached_memory_runs_on_worker_without_mutating_data_or_revision(
     let before_task = repository.get_task(task_id).await.unwrap();
     let before_sync = repository.get_sync_state().await.unwrap();
 
+    let db_path = directory.0.join(DATABASE_FILE);
+    let wal_path = directory.0.join(format!("{DATABASE_FILE}-wal"));
+    let shm_path = directory.0.join(format!("{DATABASE_FILE}-shm"));
+    assert!(db_path.is_file(), "live main database must exist");
+    // A committed write under WAL journal_mode creates sidecars the release path covers.
+    assert!(
+        wal_path.is_file(),
+        "expected WAL sidecar after a committed write so release covers created sidecars"
+    );
+    assert!(
+        shm_path.is_file(),
+        "expected SHM sidecar after a committed write (release leaves it untouched)"
+    );
+
     repository.release_cached_memory().await.unwrap();
 
     let after = repository.diagnostics().await.unwrap();
@@ -6329,4 +6343,52 @@ async fn release_cached_memory_runs_on_worker_without_mutating_data_or_revision(
     assert_eq!(after.activity, before.activity);
     assert_eq!(after_task, before_task);
     assert_eq!(after_sync, before_sync);
+
+    // Missing optional sidecars are success; required main DB still advises cleanly.
+    let missing_wal = directory.0.join("absent-sidecar.sqlite3-wal");
+    assert!(!missing_wal.exists());
+    advise_sqlite_file_pages(&missing_wal, false).unwrap();
+    let scratch_db = directory.0.join("scratch-page-cache.sqlite3");
+    fs::write(&scratch_db, vec![0x5a; 8192]).unwrap();
+    advise_live_sqlite_page_cache(&scratch_db).unwrap();
+
+    // Second release after the same durable snapshot remains invariant.
+    repository.release_cached_memory().await.unwrap();
+    let again = repository.diagnostics().await.unwrap();
+    assert_eq!(again.revision, before.revision);
+    assert_eq!(again.events, before.events);
+    assert_eq!(again.receipts, before.receipts);
+    assert_eq!(repository.get_task(task_id).await.unwrap(), before_task);
+    assert_eq!(repository.get_sync_state().await.unwrap(), before_sync);
+}
+
+#[test]
+fn advise_sqlite_file_pages_tolerates_missing_optional_sidecar() {
+    let directory = TestDir::new();
+    let missing = directory.0.join("no-such-wal");
+    assert!(!missing.exists());
+    advise_sqlite_file_pages(&missing, false)
+        .expect("optional missing sidecar must not be an error");
+
+    let required_missing = directory.0.join("no-such-main");
+    let error = advise_sqlite_file_pages(&required_missing, true).unwrap_err();
+    match error {
+        RepositoryError::Storage(message) => {
+            assert!(
+                message.contains("page-cache open failed"),
+                "unexpected storage error: {message}"
+            );
+            assert!(
+                !message.contains(required_missing.to_string_lossy().as_ref()),
+                "profile paths must stay out of page-cache error strings: {message}"
+            );
+        }
+        other => panic!("expected storage error, got {other:?}"),
+    }
+
+    let present = directory.0.join("present-pages");
+    fs::write(&present, vec![0u8; 4096]).unwrap();
+    advise_sqlite_file_pages(&present, true).expect("existing file advice must succeed");
+    // Bytes unchanged — advice is cache-only.
+    assert_eq!(fs::read(&present).unwrap(), vec![0u8; 4096]);
 }

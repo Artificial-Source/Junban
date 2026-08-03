@@ -802,9 +802,10 @@ pub trait Repository: Send + Sync + 'static {
     /// Best-effort release of SQLite connection page cache / heap retained by the pager.
     ///
     /// Production storage overrides this to run `PRAGMA shrink_memory` on the single
-    /// profile worker. It must not mutate durable data, advance revision, open another
-    /// connection, or checkpoint/truncate the WAL. Default is a no-op so test doubles
-    /// need not implement it.
+    /// profile worker and, on Linux, advise DONTNEED for clean pages of the live main
+    /// database and WAL files. It must not mutate durable data, advance revision, open
+    /// another connection, or checkpoint/truncate the WAL. Default is a no-op so test
+    /// doubles need not implement it.
     fn release_cached_memory(&self) -> RepositoryFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }

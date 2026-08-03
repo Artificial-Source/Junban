@@ -760,11 +760,13 @@ fn protect_file_owner_only_windows(file: &File) -> io::Result<()> {
 
 /// Advise the kernel that clean pages for `file` may leave the page cache.
 ///
-/// Restore keeps a private rollback snapshot durable on disk until apply finishes.
-/// Once that snapshot is fsync'd, its pages need not stay resident: Linux cgroup
-/// memory includes page cache, and holding candidate + rollback + live images at
-/// once is what pushed peak restore over the frozen budget. This is a
-/// Linux-authoritative optimization; other targets are a documented no-op.
+/// Used after restore stages a private rollback snapshot (fsync'd, then dropped
+/// from cache so candidate + rollback + live images do not multiply cgroup file
+/// charge) and after AI/speech reconfigure drains, when `PRAGMA shrink_memory`
+/// has already released SQLite's heap pager cache but the kernel may still hold
+/// clean DB/WAL pages. This is a Linux-authoritative optimization; other targets
+/// are a documented no-op. Callers must not `sync_all` merely to enable advice:
+/// DONTNEED discards clean pages and leaves dirty pages intact.
 ///
 /// # Errors
 ///
@@ -791,6 +793,52 @@ pub(crate) fn advise_dont_need_pages(file: &File) -> io::Result<()> {
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn advise_dont_need_pages(_file: &File) -> io::Result<()> {
     Ok(())
+}
+
+/// Release SQLite heap pager state, then drop clean live DB/WAL page-cache pages.
+///
+/// Does not checkpoint, truncate, sync, or open another connection. Profile paths
+/// never appear in returned error strings.
+fn release_cached_connection_memory(connection: &Connection) -> Result<(), RepositoryError> {
+    connection
+        .execute_batch("PRAGMA shrink_memory")
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    let Some(db_path) = connection.path().filter(|path| !path.is_empty()) else {
+        return Ok(());
+    };
+    advise_live_sqlite_page_cache(Path::new(db_path))
+}
+
+/// Issue DONTNEED against the live main database and its `-wal` sidecar.
+///
+/// The main database file must exist. A missing WAL is normal (pre-write or after
+/// truncate). `-shm` is intentionally skipped: it is small, actively mmap'd by the
+/// live connection, and advising it only forces immediate refaults. No `sync_all`.
+fn advise_live_sqlite_page_cache(db_path: &Path) -> Result<(), RepositoryError> {
+    advise_sqlite_file_pages(db_path, true)?;
+    let mut wal_path = db_path.as_os_str().to_os_string();
+    wal_path.push("-wal");
+    advise_sqlite_file_pages(Path::new(&wal_path), false)?;
+    Ok(())
+}
+
+fn advise_sqlite_file_pages(path: &Path, required: bool) -> Result<(), RepositoryError> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if !required && error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(RepositoryError::Storage(format!(
+                "live database page-cache open failed: {}",
+                error.kind()
+            )));
+        }
+    };
+    advise_dont_need_pages(&file).map_err(|error| {
+        RepositoryError::Storage(format!(
+            "live database page-cache advice failed: {}",
+            error.kind()
+        ))
+    })
 }
 
 #[derive(Clone)]
@@ -4352,10 +4400,10 @@ fn run_worker(
                 ));
             }
             Command::ReleaseCachedMemory { reply } => {
-                // sqlite3_db_release_memory via PRAGMA; no durable writes or WAL truncate.
-                let result = connection
-                    .execute_batch("PRAGMA shrink_memory")
-                    .map_err(|error| RepositoryError::Storage(error.to_string()));
+                // sqlite3_db_release_memory via PRAGMA, then Linux DONTNEED on the
+                // live main DB + WAL page cache. No durable writes, checkpoint, or
+                // WAL truncate; missing WAL is normal.
+                let result = release_cached_connection_memory(connection);
                 let _ = reply.send(result);
             }
             #[cfg(test)]

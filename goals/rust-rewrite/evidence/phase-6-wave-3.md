@@ -1,7 +1,7 @@
 # Phase 6 Wave 3 — application, lifecycle, and operator configuration evidence
 
 - **Date:** 2026-08-02
-- **Base:** clean Wave 3g base `4e31903` (earlier Wave 3a–3f bases retained below)
+- **Base:** Wave 3g implementation `070e357` from clean base `4e31903` (earlier Wave 3a–3f bases retained below)
 - **Scope:** implemented Wave 3a–3g behavior
 - **Claim boundary:** durable AI resources, lazy runtime lifecycle, provider configuration, chat/tool/approval orchestration, exact dispatch recovery, daily briefing, and typed edit/retry/regenerate HTTP/SSE actions. This document does not claim a briefing scheduler, schedule apply, React, voice delivery, or Phase 6 memory/visual closure.
 - **Review status:** prior chat/tool-run gates are approved; the Wave 3g daily/rewrite findings and focused regressions are recorded in the Phase 6 review ledger.

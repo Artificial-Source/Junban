@@ -48,16 +48,11 @@ export function VoiceButton({
     speaking: "AI speaking",
   }[visualState];
 
-  const phase6Chrome =
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).has("phase6-visual");
-  const iconSize = phase6Chrome ? 14 : 16;
-
   const icon = {
-    idle: <Mic size={iconSize} aria-hidden="true" />,
-    listening: <Mic size={iconSize} aria-hidden="true" />,
-    transcribing: <Loader2 size={iconSize} className="animate-spin" aria-hidden="true" />,
-    speaking: <Volume2 size={iconSize} className="animate-pulse" aria-hidden="true" />,
+    idle: <Mic size={16} aria-hidden="true" />,
+    listening: <Mic size={16} aria-hidden="true" />,
+    transcribing: <Loader2 size={16} className="animate-spin" aria-hidden="true" />,
+    speaking: <Volume2 size={16} className="animate-pulse" aria-hidden="true" />,
   }[visualState];
 
   const colorClass = {
@@ -71,9 +66,8 @@ export function VoiceButton({
   const controlDisabled =
     visualState !== "listening" && (disabled || visualState === "transcribing");
 
-  // Phase 6 immutable PTT error capture froze neutral (non-error-tinted) alert chrome.
-  const phase6PttError =
-    typeof window !== "undefined" && window.location.search.includes("ptt-error");
+  // PTT error fixture composition lives in Phase6VisualRoot — never gate normal
+  // VoiceButton chrome/alert visibility on arbitrary URL query params.
 
   return (
     <div className="flex flex-col items-start gap-2">
@@ -88,11 +82,11 @@ export function VoiceButton({
         title={title}
         data-testid="voice-button"
         data-state={state === "error" ? "error" : visualState}
-        className={`shrink-0 ${phase6Chrome ? "p-1.5" : "px-2 py-2"} text-sm rounded-lg border disabled:opacity-50 transition-colors ${colorClass}`}
+        className={`shrink-0 px-2 py-2 text-sm rounded-lg border disabled:opacity-50 transition-colors ${colorClass}`}
       >
         {icon}
       </button>
-      {resolvedPermission && !phase6PttError && (
+      {resolvedPermission && (
         <div
           id={permissionAlertId}
           role="alert"

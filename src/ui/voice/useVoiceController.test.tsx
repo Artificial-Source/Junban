@@ -116,8 +116,11 @@ describe("useVoiceController", () => {
     act(() => latest?.stop());
     act(() => latest?.stop());
     expect(stopConversation).toHaveBeenCalled();
+    const afterStop = stopConversation.mock.calls.length;
     act(() => latest?.endCall());
     act(() => latest?.endCall());
+    // End Call must durable-cancel even when Stop already ran.
+    expect(stopConversation.mock.calls.length).toBeGreaterThan(afterStop);
     expect(latest?.isCallActive).toBe(false);
     expect(latest?.phase).toBe("idle");
   });

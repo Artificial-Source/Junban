@@ -7,6 +7,7 @@ import {
   createVoiceRuntimeShell,
   endCall,
   fullCleanup,
+  resumeListeningOrIdle,
   stopVoiceActivity,
 } from "./voice-runtime";
 import type { ConfirmedVoiceSettings } from "./types";
@@ -91,20 +92,74 @@ describe("voice-runtime generation and cleanup authority", () => {
     expect(rt.isLive({ utterance: beforeUtterance, response: beforeResponse })).toBe(false);
   });
 
-  it("endCall and fullCleanup invalidate call generation and release resources", () => {
-    const { rt, shell, setCallActive, setPhase } = makeRuntime();
+  it("endCall durable-cancels an in-flight call turn before releasing resources", () => {
+    const order: string[] = [];
+    const stopConversation = vi.fn(() => {
+      order.push("stopConversation");
+    });
+    const { rt, shell, setCallActive, setPhase } = makeRuntime({ stopConversation });
     shell.callActive.current = true;
-    const destroy = vi.fn(async () => undefined);
+    rt.awaitResponse.current = {
+      responseGen: rt.generations.current.response,
+      callGen: rt.generations.current.call,
+      seenIds: new Set(),
+    };
+    const destroy = vi.fn(async () => {
+      order.push("releasePhysical");
+    });
     rt.resources.current.vad = { destroy, pause: vi.fn(), start: vi.fn() } as never;
     const callBefore = rt.generations.current.call;
+    const utteranceBefore = rt.generations.current.utterance;
+    const responseBefore = rt.generations.current.response;
 
     endCall(rt);
+
+    expect(stopConversation).toHaveBeenCalledTimes(1);
+    expect(order.indexOf("stopConversation")).toBeLessThan(order.indexOf("releasePhysical"));
     expect(rt.generations.current.call).toBeGreaterThan(callBefore);
+    expect(rt.generations.current.utterance).toBeGreaterThan(utteranceBefore);
+    expect(rt.generations.current.response).toBeGreaterThan(responseBefore);
+    expect(rt.awaitResponse.current).toBeNull();
     expect(setCallActive).toHaveBeenCalledWith(false);
     expect(setPhase).toHaveBeenCalledWith("idle");
     expect(destroy).toHaveBeenCalled();
     expect(rt.callActive.current).toBe(false);
+    // Late completion fences must reject after End Call.
+    expect(rt.isLive({ call: callBefore, response: responseBefore })).toBe(false);
+  });
 
+  it("endCall is idempotent when idle and does not resume after a late fence check", () => {
+    const stopConversation = vi.fn();
+    const { rt, setPhase, setCallActive } = makeRuntime({ stopConversation });
+    // Idle end — no active call resources.
+    endCall(rt);
+    endCall(rt);
+
+    expect(stopConversation).toHaveBeenCalledTimes(2);
+    expect(rt.callActive.current).toBe(false);
+    expect(rt.awaitResponse.current).toBeNull();
+    expect(setPhase).toHaveBeenLastCalledWith("idle");
+    expect(setCallActive).toHaveBeenLastCalledWith(false);
+    expect(rt.phase.current).toBe("idle");
+    // Even after two ends, stale pre-end generations stay dead.
+    expect(rt.isLive({ call: 0, utterance: 0, response: 0 })).toBe(false);
+
+    // A late speech completion must not re-enter listening after End Call.
+    const resume = vi.fn(async () => undefined);
+    rt.resources.current.vad = {
+      resume,
+      pause: vi.fn(),
+      start: vi.fn(),
+      destroy: vi.fn(async () => undefined),
+    } as never;
+    setPhase.mockClear();
+    resumeListeningOrIdle(rt);
+    expect(setPhase).toHaveBeenCalledWith("idle");
+    expect(resume).not.toHaveBeenCalled();
+  });
+
+  it("fullCleanup invalidates surface generation after endCall fences", () => {
+    const { rt } = makeRuntime();
     const surfaceBefore = rt.generations.current.surface;
     fullCleanup(rt);
     expect(rt.generations.current.surface).toBeGreaterThan(surfaceBefore);

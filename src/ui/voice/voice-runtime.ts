@@ -278,10 +278,19 @@ export function stopVoiceActivity(rt: VoiceRuntime): void {
   }
 }
 
+/**
+ * End Call path: fence generations, durable-cancel the in-flight chat run
+ * exactly once, then release media/VAD/TTS and settle ended state.
+ * Idempotent — repeated ends re-fence and re-cancel safely without resuming.
+ */
 export function endCall(rt: VoiceRuntime): void {
   rt.bump("call");
   rt.bump("utterance");
   rt.bump("response");
+  rt.awaitResponse.current = null;
+  // Cancel durable AI conversation before tearing down physical resources so
+  // a late assistant/tool completion cannot persist after End Call.
+  void rt.stopConversation();
   rt.releasePhysical();
   endLogicalCall(rt);
   rt.setError(null);

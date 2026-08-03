@@ -141,24 +141,38 @@ export async function loadKokoroEngine(
 
   const kokoro = (await import("kokoro-js")) as unknown as KokoroModule;
   if (kokoro.env && typeof kokoro.env === "object") {
+    // kokoro-js historically accepted a directory string; pass mjs URL directory
+    // only as a last-resort hint — transformers backends below are authoritative.
     kokoro.env.wasmPaths = assets.ortWasmBaseUrl;
   }
 
   // Bind the transformers instance Kokoro shares when reachable.
   try {
     const transformers = await import("@huggingface/transformers");
+    // allowLocalModels required for custom-cache reads; remote stays denied.
     transformers.env.allowRemoteModels = false;
+    transformers.env.allowLocalModels = true;
     transformers.env.useBrowserCache = false;
     transformers.env.useCustomCache = true;
     transformers.env.customCache = createVerifiedTransformersCache(KOKORO_PACKAGE_ID);
     const backends = transformers.env.backends as {
-      onnx?: { wasm?: { wasmPaths?: string | Record<string, string> } };
+      onnx?: {
+        wasm?: {
+          wasmPaths?: string | { mjs?: string; wasm?: string };
+          numThreads?: number;
+        };
+      };
     };
     if (!backends.onnx) {
-      backends.onnx = { wasm: { wasmPaths: assets.ortWasmBaseUrl } };
-    } else {
-      backends.onnx.wasm = backends.onnx.wasm ?? {};
-      backends.onnx.wasm.wasmPaths = assets.ortWasmBaseUrl;
+      backends.onnx = { wasm: {} };
+    }
+    backends.onnx.wasm = backends.onnx.wasm ?? {};
+    backends.onnx.wasm.wasmPaths = {
+      mjs: assets.ortWasmPaths.mjs,
+      wasm: assets.ortWasmPaths.wasm,
+    };
+    if (typeof SharedArrayBuffer === "undefined") {
+      backends.onnx.wasm.numThreads = 1;
     }
   } catch {
     // If transformers is only reachable inside kokoro's bundle, the verified
@@ -171,6 +185,7 @@ export async function loadKokoroEngine(
 
   let tts: KokoroTTSInstance;
   try {
+    // kokoro-js does not forward revision; verified cache maps resolve/main → pin.
     tts = await kokoro.KokoroTTS.from_pretrained(pkg.repo, {
       dtype: KOKORO_DTYPE,
       device: KOKORO_DEVICE,

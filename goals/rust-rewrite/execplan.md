@@ -724,7 +724,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 6 Wave 2 provider runtime: one domain-owned preset authority, approved named providers over four wire families, lazy model discovery/retry/cancel/redaction, bounded provider-neutral speech contracts, and deterministic loopback fixture coverage (see `evidence/phase-6-provider-adapters.md`).
 - [x] Phase 6 Wave 3 orchestration/tools/API complete, including durable chat, approvals, dispatch recovery, daily briefing, edit/retry/regenerate, and the exact-head security/API gate.
 - [x] Phase 6 Wave 4 preserved React AI/voice implementation: canonical lazy chat/settings, browser/cloud/local speech, half-duplex call UX, exact-manifest local workers, sixteen immutable visual comparisons, browser functional coverage, axe/keyboard coverage, and the integrated frontend/accessibility gate are complete; `P6-W4-REV-001` and `P6-W4-REV-002` are fixed.
-- [ ] Phase 6 Wave 5 enabled-runtime evidence, dogfood, specialist review closure, and final squash.
+- [ ] Phase 6 Wave 5 enabled-runtime evidence, dogfood, specialist review closure, and final squash. Real-browser local-voice + lazy-network acceptance harness and passed evidence are recorded in `evidence/phase-6-wave-5-local-voice-acceptance.json` (remaining Wave 5: enabled-runtime memory/mock budgets, dogfood, exact-head review, squash).
 - [ ] Phase 7 implementation.
 - [ ] Phase 8 implementation.
 - [ ] Phase 9 implementation.

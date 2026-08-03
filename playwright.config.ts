@@ -84,5 +84,14 @@ export default defineConfig({
         viewport: { width: 1440, height: 900 },
       },
     },
+    {
+      name: "lazy-network-phase-6",
+      testMatch: /lazy-network-phase-6\.spec\.ts/,
+      timeout: 120_000,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 900 },
+      },
+    },
   ],
 });

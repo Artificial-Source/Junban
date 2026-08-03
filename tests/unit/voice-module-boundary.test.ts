@@ -84,4 +84,26 @@ describe("voice module boundary", () => {
     expect(route).not.toMatch(/voice\/local\/engines|worker-host|worker-client/);
     expect(route).not.toMatch(/@huggingface\/transformers|kokoro-js|piper-tts-web/);
   });
+
+  it("Wave 5 acceptance seam stays dynamic and engine-free at module top level", () => {
+    const acceptanceDir = path.join(voiceRoot, "acceptance");
+    const files = readdirSync(acceptanceDir)
+      .filter((name) => /\.(ts|tsx)$/.test(name) && !name.endsWith(".test.ts"))
+      .map((name) => path.join(acceptanceDir, name));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const source = readFileSync(file, "utf8");
+      expect(source).not.toMatch(/from\s+["']@huggingface\/transformers["']/);
+      expect(source).not.toMatch(/from\s+["']kokoro-js["']/);
+      expect(source).not.toMatch(/from\s+["']@mintplex-labs\/piper-tts-web["']/);
+      expect(source).not.toMatch(/from\s+["']@ricky0123\/vad-web["']/);
+    }
+    const root = readFileSync(path.join(acceptanceDir, "LocalVoiceAcceptanceRoot.tsx"), "utf8");
+    expect(root).toMatch(/import\("\.\/runLocalVoiceAcceptance\.ts"\)/);
+    expect(root).not.toMatch(/from\s+["']\.\/runLocalVoiceAcceptance/);
+    const runner = readFileSync(path.join(acceptanceDir, "runLocalVoiceAcceptance.ts"), "utf8");
+    expect(runner).toMatch(/import\("\.\.\/local\/index"\)/);
+    expect(runner).not.toMatch(/from\s+["']\.\.\/local\/index["']/);
+    expect(runner).not.toMatch(/from\s+["']\.\.\/local\/engines\//);
+  });
 });

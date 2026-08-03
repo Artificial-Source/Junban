@@ -10,18 +10,27 @@ vi.mock("kokoro-js", () => ({
   env: kokoroEnv,
 }));
 
+const transformersEnv = {
+  allowRemoteModels: true,
+  allowLocalModels: false,
+  useBrowserCache: true,
+  useCustomCache: false,
+  customCache: null as unknown,
+  backends: { onnx: { wasm: { wasmPaths: "/sentinel/" } } },
+};
+
 vi.mock("@huggingface/transformers", () => ({
-  env: {
-    allowRemoteModels: true,
-    useBrowserCache: true,
-    useCustomCache: false,
-    customCache: null as unknown,
-    backends: { onnx: { wasm: { wasmPaths: "/sentinel/" } } },
-  },
+  env: transformersEnv,
 }));
 
 vi.mock("../same-origin-assets.ts", () => ({
-  loadKokoroRuntimeAssets: async () => ({ ortWasmBaseUrl: "/assets/ort-kokoro/" }),
+  loadKokoroRuntimeAssets: async () => ({
+    ortWasmBaseUrl: "/assets/ort-kokoro/",
+    ortWasmPaths: {
+      mjs: "/assets/ort-kokoro/ort-wasm-simd-threaded.jsep.mjs",
+      wasm: "/assets/ort-kokoro/ort-wasm-simd-threaded.jsep.wasm",
+    },
+  }),
 }));
 
 describe("kokoro engine owner", () => {
@@ -93,6 +102,9 @@ describe("kokoro engine owner", () => {
     expect(handle.voiceId).toBe("af_heart");
     expect(KOKORO_VOICE_ID).toBe("af_heart");
     expect(kokoroEnv.wasmPaths).toBe("/assets/ort-kokoro/");
+    expect(transformersEnv.allowRemoteModels).toBe(false);
+    expect(transformersEnv.allowLocalModels).toBe(true);
+    expect(transformersEnv.useCustomCache).toBe(true);
 
     const audio = await handle.synthesize("Hello there");
     expect(generate).toHaveBeenCalledWith("Hello there", { voice: "af_heart" });

@@ -23,39 +23,16 @@ export function matchManifestUrl(
   requestUrl: string,
   manifest: LocalVoiceManifest = LOCAL_VOICE_MANIFEST,
 ): VerifiedCacheLookup | null {
-  let url: URL;
-  try {
-    url = new URL(requestUrl);
-  } catch {
-    return null;
-  }
   for (const pkg of manifest.packages) {
-    for (const file of pkg.files) {
-      if (file.url === requestUrl) {
-        return { packageId: pkg.id, filePath: file.path };
-      }
-      // Allow same repo/revision/path even if the request used a CDN final URL
-      // that no longer equals the manifest URL — only exact manifest URLs are
-      // served here; engines must request via the pinned manifest URL.
-    }
-    // Kokoro voice seed after package patch:
-    if (pkg.engine === "kokoro") {
-      const voicePrefix = `https://huggingface.co/${pkg.repo}/resolve/junban-blocked/`;
-      if (requestUrl.startsWith(voicePrefix)) {
-        const rest = requestUrl.slice(voicePrefix.length);
-        const hit = pkg.files.find((file) => file.path === rest);
-        if (hit) return { packageId: pkg.id, filePath: hit.path };
-      }
-    }
+    const path = matchPackageFileUrl(pkg, requestUrl);
+    if (path) return { packageId: pkg.id, filePath: path };
   }
-  void url;
   return null;
 }
 
 /**
  * Build a Transformers.js-compatible custom cache that only returns verified
- * OPFS objects. put() is rejected so engines cannot silently cache unverified
- * network bytes through this mediator.
+ * OPFS objects. put() is a no-op so engines cannot admit unverified bytes.
  */
 export function createVerifiedTransformersCache(
   packageId: string,
@@ -84,23 +61,74 @@ export function createVerifiedTransformersCache(
       });
     },
     async put() {
-      throw new Error(
-        "Junban verified model cache refuses put(); only ensureVerifiedFile may admit bytes",
-      );
+      // Transformers.js may call put() after a successful match. Never admit new
+      // bytes here — OPFS admission is solely ensureVerifiedFile (size+SHA).
+      return;
     },
   };
 }
 
-function matchPackageFileUrl(pkg: LocalVoicePackage, url: string): string | null {
+/**
+ * Resolve a transformers.js cache key to a verified package-relative path.
+ *
+ * Keys observed from transformers.js / kokoro-js:
+ * - exact pinned HF resolve/<revision>/<path> (manifest URL)
+ * - HF resolve/main/<path> when a library omits revision (kokoro-js default)
+ * - junban-blocked voice seed URLs (patched kokoro voice loader)
+ * - localModelPath forms: /models/<repo>/<path> and models/<repo>/<path>
+ */
+export function matchPackageFileUrl(pkg: LocalVoicePackage, url: string): string | null {
   for (const file of pkg.files) {
     if (file.url === url) return file.path;
   }
-  if (pkg.engine === "kokoro") {
-    const voicePrefix = `https://huggingface.co/${pkg.repo}/resolve/junban-blocked/`;
-    if (url.startsWith(voicePrefix)) {
-      const rest = url.slice(voicePrefix.length);
-      if (pkg.files.some((file) => file.path === rest)) return rest;
+
+  // Strip query/hash if a full URL was passed with tracking noise.
+  let pathname = url;
+  try {
+    if (url.includes("://")) {
+      pathname = new URL(url).pathname;
     }
+  } catch {
+    pathname = url;
+  }
+
+  const hfPinnedPrefix = `/${pkg.repo}/resolve/${pkg.revision}/`;
+  const hfMainPrefix = `/${pkg.repo}/resolve/main/`;
+  const hfBlockedPrefix = `/${pkg.repo}/resolve/junban-blocked/`;
+  const localPrefixA = `/models/${pkg.repo}/`;
+  const localPrefixB = `models/${pkg.repo}/`;
+
+  let rest: string | null = null;
+  if (pathname.startsWith(hfPinnedPrefix)) {
+    rest = pathname.slice(hfPinnedPrefix.length);
+  } else if (pathname.startsWith(hfMainPrefix)) {
+    // kokoro-js does not forward revision; map main → pinned verified bytes only.
+    rest = pathname.slice(hfMainPrefix.length);
+  } else if (pkg.engine === "kokoro" && pathname.startsWith(hfBlockedPrefix)) {
+    rest = pathname.slice(hfBlockedPrefix.length);
+  } else if (pathname.startsWith(localPrefixA)) {
+    rest = pathname.slice(localPrefixA.length);
+  } else if (pathname.startsWith(localPrefixB)) {
+    rest = pathname.slice(localPrefixB.length);
+  } else if (!url.includes("://") && !url.startsWith("/")) {
+    // requestURL style: "<repo>/<file>" without models/ prefix
+    const repoPrefix = `${pkg.repo}/`;
+    if (url.startsWith(repoPrefix)) {
+      rest = url.slice(repoPrefix.length);
+    }
+  }
+
+  if (rest == null || rest.length === 0 || rest.includes("..")) {
+    return null;
+  }
+  // decodeURI in case path segments were encoded
+  try {
+    rest = decodeURIComponent(rest);
+  } catch {
+    return null;
+  }
+  if (pkg.files.some((file) => file.path === rest)) {
+    return rest;
   }
   return null;
 }

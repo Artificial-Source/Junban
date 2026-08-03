@@ -118,7 +118,8 @@ export async function loadPiperEngine(options: PiperLoadOptions = {}): Promise<P
   const piper = (await import("@mintplex-labs/piper-tts-web")) as unknown as PiperModule;
 
   const wasmPaths = {
-    onnxWasm: assets.onnxWasmBaseUrl,
+    // Object form required under Vite content-hashing (directory prefixes 404).
+    onnxWasm: assets.ortWasmPaths as unknown as string,
     piperData: assets.piperDataUrl,
     piperWasm: assets.piperWasmUrl,
   };

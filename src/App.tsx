@@ -5,6 +5,7 @@ import { useRouting } from "./ui/hooks/useRouting";
 import { WorkspaceProvider } from "./ui/context/WorkspaceContext";
 import { AppLayout } from "./ui/app/AppLayout";
 import { ConnectionScreen } from "./ui/components/ConnectionScreen";
+import { isPhase6LocalVoiceAcceptance } from "./ui/lib/phase6LocalVoiceAcceptance";
 import { readPhase6VisualScene } from "./ui/lib/phase6VisualFixture";
 
 // Lazy so Phase 6 harness / voice presentation never enter the ordinary startup graph.
@@ -14,10 +15,18 @@ const Phase6VisualRoot = lazy(() =>
   })),
 );
 
+// Opt-in Wave 5 local-voice acceptance only — never in the ordinary chunk graph until gated.
+const LocalVoiceAcceptanceRoot = lazy(() =>
+  import("./ui/voice/acceptance/LocalVoiceAcceptanceRoot").then((module) => ({
+    default: module.LocalVoiceAcceptanceRoot,
+  })),
+);
+
 export default function App() {
   const [authenticated, setAuthenticated] = useState(false);
   // Pin fixture identity at first paint so later navigations cannot arm side effects.
   const [phase6Scene] = useState(() => readPhase6VisualScene());
+  const [localVoiceAcceptance] = useState(() => isPhase6LocalVoiceAcceptance());
 
   // Initialize the theme and accept connection links on first load or same-page navigation.
   useEffect(() => {
@@ -46,6 +55,18 @@ export default function App() {
     return (
       <Suspense fallback={null}>
         <Phase6VisualRoot scene={phase6Scene} />
+      </Suspense>
+    );
+  }
+
+  // Explicit opt-in local-voice acceptance — authenticated shell without ordinary chrome.
+  if (localVoiceAcceptance) {
+    if (!authenticated) {
+      return <ConnectionScreen />;
+    }
+    return (
+      <Suspense fallback={null}>
+        <LocalVoiceAcceptanceRoot />
       </Suspense>
     );
   }

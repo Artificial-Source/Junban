@@ -30,6 +30,10 @@ vi.mock("@mintplex-labs/piper-tts-web", () => ({
 vi.mock("../same-origin-assets.ts", () => ({
   loadPiperRuntimeAssets: async () => ({
     onnxWasmBaseUrl: "/assets/ort-piper/",
+    ortWasmPaths: {
+      mjs: "/assets/ort-piper/ort-wasm-simd-threaded.mjs",
+      wasm: "/assets/ort-piper/ort-wasm-simd-threaded.wasm",
+    },
     piperDataUrl: "/assets/piper_phonemize.data",
     piperWasmUrl: "/assets/piper_phonemize.wasm",
   }),
@@ -76,7 +80,10 @@ describe("piper engine owner", () => {
     expect(createSession).toHaveBeenCalledWith({
       voiceId: "en_US-ljspeech-medium",
       wasmPaths: {
-        onnxWasm: "/assets/ort-piper/",
+        onnxWasm: {
+          mjs: "/assets/ort-piper/ort-wasm-simd-threaded.mjs",
+          wasm: "/assets/ort-piper/ort-wasm-simd-threaded.wasm",
+        },
         piperData: "/assets/piper_phonemize.data",
         piperWasm: "/assets/piper_phonemize.wasm",
       },

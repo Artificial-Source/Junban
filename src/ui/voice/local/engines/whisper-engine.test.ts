@@ -4,6 +4,7 @@ const pipelineMock = vi.fn();
 const disposeMock = vi.fn(async () => undefined);
 const env = {
   allowRemoteModels: true,
+  allowLocalModels: false,
   useBrowserCache: true,
   useCustomCache: false,
   customCache: null as unknown,
@@ -17,7 +18,13 @@ vi.mock("@huggingface/transformers", () => ({
 }));
 
 vi.mock("../same-origin-assets.ts", () => ({
-  loadWhisperRuntimeAssets: async () => ({ ortWasmBaseUrl: "/assets/ort-whisper/" }),
+  loadWhisperRuntimeAssets: async () => ({
+    ortWasmBaseUrl: "/assets/ort-whisper/",
+    ortWasmPaths: {
+      mjs: "/assets/ort-whisper/ort-wasm-simd-threaded.jsep.mjs",
+      wasm: "/assets/ort-whisper/ort-wasm-simd-threaded.jsep.wasm",
+    },
+  }),
 }));
 
 describe("whisper engine owner", () => {
@@ -26,6 +33,7 @@ describe("whisper engine owner", () => {
     pipelineMock.mockReset();
     disposeMock.mockReset();
     env.allowRemoteModels = true;
+    env.allowLocalModels = false;
     env.useBrowserCache = true;
     env.useCustomCache = false;
     env.customCache = null;
@@ -65,9 +73,13 @@ describe("whisper engine owner", () => {
       device: "wasm",
     });
     expect(env.allowRemoteModels).toBe(false);
+    expect(env.allowLocalModels).toBe(true);
     expect(env.useBrowserCache).toBe(false);
     expect(env.useCustomCache).toBe(true);
-    expect(env.backends.onnx.wasm.wasmPaths).toBe("/assets/ort-whisper/");
+    expect(env.backends.onnx.wasm.wasmPaths).toEqual({
+      mjs: "/assets/ort-whisper/ort-wasm-simd-threaded.jsep.mjs",
+      wasm: "/assets/ort-whisper/ort-wasm-simd-threaded.jsep.wasm",
+    });
 
     const text = await handle.transcribe(new Float32Array([0.1, 0.2, 0.0]));
     expect(text).toBe("hello world");

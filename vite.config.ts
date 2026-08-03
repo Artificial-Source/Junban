@@ -14,6 +14,7 @@ function resolveFrom(specifier: string, fromPackage: string): string {
 // Transitive ORT assets stay unpinned in package.json; Vite only needs absolute
 // paths so dynamic voice loaders can emit same-origin URLs.
 const ortVadWasm = resolveFrom("onnxruntime-web/ort-wasm-simd-threaded.wasm", "@ricky0123/vad-web");
+const ortVadMjs = resolveFrom("onnxruntime-web/ort-wasm-simd-threaded.mjs", "@ricky0123/vad-web");
 const ortVadWasmDir = path.dirname(ortVadWasm);
 
 const transformersRoot = path.dirname(path.dirname(require.resolve("@huggingface/transformers")));
@@ -25,16 +26,23 @@ const transformersOrtWasm = path.join(
   "dist",
   "ort-wasm-simd-threaded.jsep.wasm",
 );
+const transformersOrtMjs = path.join(
+  transformersPackageRoot,
+  "dist",
+  "ort-wasm-simd-threaded.jsep.mjs",
+);
 const transformersWeb = path.join(transformersPackageRoot, "dist", "transformers.web.js");
 
 /**
  * Rolldown does not reliably apply string aliases when the import carries `?url`
- * for absolute binary assets. Force those junban asset ids to `path?url`.
+ * for absolute binary/asset paths. Force those junban asset ids to `path?url`.
  */
 function junbanBinaryAssetUrls(): Plugin {
   const assets = new Map<string, string>([
     ["@junban/ort-vad-wasm", ortVadWasm],
+    ["@junban/ort-vad-mjs", ortVadMjs],
     ["@junban/ort-transformers-wasm", transformersOrtWasm],
+    ["@junban/ort-transformers-mjs", transformersOrtMjs],
   ]);
   return {
     name: "junban-binary-asset-urls",
@@ -44,7 +52,7 @@ function junbanBinaryAssetUrls(): Plugin {
       const bare = q === -1 ? id : id.slice(0, q);
       const target = assets.get(bare);
       if (!target) return null;
-      // Always emit as a URL string — these are wasm binaries, not JS modules.
+      // Always emit as a URL string — wasm binaries and ORT mjs glue, not app modules.
       return `${target}?url`;
     },
   };
@@ -55,8 +63,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@junban/ort-vad-wasm": ortVadWasm,
+      "@junban/ort-vad-mjs": ortVadMjs,
       "@junban/ort-vad-wasm-dir": ortVadWasmDir,
       "@junban/ort-transformers-wasm": transformersOrtWasm,
+      "@junban/ort-transformers-mjs": transformersOrtMjs,
       // Always the browser build (CDN-neutralized). Avoid the Node export map.
       "@huggingface/transformers": transformersWeb,
     },

@@ -46,6 +46,7 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-6-wave-3.md`](../goals/rust-rewrite/evidence/phase-6-wave-3.md): Wave 3 application wiring, lazy lifecycle, operator configuration/model-discovery API, and durable session/message/memory HTTP evidence
 - [`../goals/rust-rewrite/evidence/phase-6-wave-4.md`](../goals/rust-rewrite/evidence/phase-6-wave-4.md): completed preserved React AI/voice, browser/cloud/local speech, immutable visual, browser-functional, accessibility, and reviewed frontend boundary
 - [`../goals/rust-rewrite/evidence/phase-6-wave-4c.md`](../goals/rust-rewrite/evidence/phase-6-wave-4c.md): bounded lazy Rust cloud speech adapters, lifecycle, routes, CSP, and deterministic provider evidence
+- [`../goals/rust-rewrite/evidence/phase-6-wave-5-local-voice-acceptance-protocol.md`](../goals/rust-rewrite/evidence/phase-6-wave-5-local-voice-acceptance-protocol.md): opt-in real-browser hash-verified Whisper/Kokoro/Piper acceptance protocol and result
 - [`../goals/rust-rewrite/evidence/phase-6-review-ledger.md`](../goals/rust-rewrite/evidence/phase-6-review-ledger.md): Phase 6 specialist findings and closure evidence
 - [`../goals/rust-rewrite/evidence/phase-6-legacy-visual-baseline/README.md`](../goals/rust-rewrite/evidence/phase-6-legacy-visual-baseline/README.md): independent legacy-rendered Phase 6 AI/voice visual authorities and manifest
 - [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings

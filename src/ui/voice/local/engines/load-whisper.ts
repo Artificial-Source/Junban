@@ -69,22 +69,37 @@ export async function loadWhisperEngine(
   options.onProgress?.(pkg.files.length, pkg.files.length);
 
   const transformers = await import("@huggingface/transformers");
-  // Fail closed: no remote model fetch; only the verified custom cache may serve.
+  // Fail closed: no remote or loose /models filesystem fetch. Custom cache alone
+  // serves verified OPFS bytes (transformers requires allowLocalModels OR
+  // allowRemoteModels true at config-check time — local stays true but every
+  // lookup is satisfied by customCache before getFile runs).
   transformers.env.allowRemoteModels = false;
+  transformers.env.allowLocalModels = true;
   transformers.env.useBrowserCache = false;
   transformers.env.useCustomCache = true;
   transformers.env.customCache = createVerifiedTransformersCache(WHISPER_PACKAGE_ID);
 
   // Import succeeds with the package's same-origin inert wasmPaths sentinel; overwrite
-  // it with Vite-emitted assets before any pipeline/session is created.
+  // it with Vite-emitted hashed mjs+wasm URLs before any pipeline/session is created.
   const backends = transformers.env.backends as {
-    onnx?: { wasm?: { wasmPaths?: string | Record<string, string> } };
+    onnx?: {
+      wasm?: {
+        wasmPaths?: string | { mjs?: string; wasm?: string };
+        numThreads?: number;
+      };
+    };
   };
   if (!backends.onnx) {
-    backends.onnx = { wasm: { wasmPaths: assets.ortWasmBaseUrl } };
-  } else {
-    backends.onnx.wasm = backends.onnx.wasm ?? {};
-    backends.onnx.wasm.wasmPaths = assets.ortWasmBaseUrl;
+    backends.onnx = { wasm: {} };
+  }
+  backends.onnx.wasm = backends.onnx.wasm ?? {};
+  backends.onnx.wasm.wasmPaths = {
+    mjs: assets.ortWasmPaths.mjs,
+    wasm: assets.ortWasmPaths.wasm,
+  };
+  // Fail closed to single-thread when SharedArrayBuffer is unavailable (no COOP/COEP).
+  if (typeof SharedArrayBuffer === "undefined") {
+    backends.onnx.wasm.numThreads = 1;
   }
 
   if (options.signal?.aborted) {

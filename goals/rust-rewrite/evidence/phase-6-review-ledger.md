@@ -1,7 +1,7 @@
 # Phase 6 review ledger
 
 - **Date:** 2026-08-03
-- **Current gate:** integrated Wave 3 backend security/API gate approved at exact head `4602447`; the user-requested current-Phase-6 Rust quality/DX checkpoint is complete
+- **Current gate:** Wave 4 implementation is active; the high-risk Wave 4 plan corrections are frozen and Wave 3's exact-head backend security/API gate remains approved
 - **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, Wave 3d from `c543b7f`, Wave 3e from `c689099`, Wave 3f.1 from `1f6de1a`, Wave 3f.2a from `918633c`, Wave 3f.2b at `33e4c65`, Wave 3g at `070e357` (from clean base `4e31903`), and integrated Wave 3 at `4602447`
 - **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`; resource API approved after `P6-API-001`–`P6-API-003`; basic chat approved after `P6-CHAT-001`–`P6-CHAT-003`; direct tool boundary approved after `P6-3F1-001`–`P6-3F1-007`; durable approval/dispatch authority approved after `P6-AUTH-001`–`P6-AUTH-004`; tool-run security corrected after `P6-TOOLRUN-001`–`P6-TOOLRUN-003`; quality follow-up `P6-QUALITY-001` fixed without reopening tool-run authority; Wave 3g review findings `P6-3G-DB-001`–`002`, `P6-3G-QUALITY-001`–`002`, and `P6-3G-CHAT-001` fixed with focused regressions; integrated Wave 3 security/API review approved with no material finding
 
@@ -119,6 +119,17 @@ No schema v7, dependency, or UI change was introduced for those corrections. The
 ## Integrated Wave 3 backend security/API gate
 
 The required security-dominant exact-head review approved commit `4602447` with no material finding. It covered operator-versus-automation authorization, Host/Origin and body admission, provider egress/redirect/proxy/credential boundaries, secret redaction, untrusted provider/model/tool material, approval and private dispatch-root authority, SSE replay/backpressure/cancellation, reconfiguration/restore, daily/history rewrite tombstones, backup/open validation, quotas, generated public contracts, and the frozen 87-tool CLI/MCP exclusion under the documented threat model.
+
+## Wave 4 high-risk plan gate
+
+| ID               | Severity | Status | Resolution                                                                                                                                                                                                                                                           |
+| ---------------- | -------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `P6-W4-PLAN-001` | High     | fixed  | `/ai-chat` is the sole canonical route; parse/serialize, direct-load, desktop, and mobile regressions reject an `/ai` alias.                                                                                                                                         |
+| `P6-W4-PLAN-002` | High     | fixed  | The exact CSP permits only self plus immutable Hugging Face model origins for `connect-src`, same-origin workers, and `wasm-unsafe-eval`. Generic HTTPS, `unsafe-eval`, blob workers, provider origins, runtime CDN scripts, and a Rust model relay remain excluded. |
+| `P6-W4-PLAN-003` | High     | fixed  | A small speech supervisor remains separate from AI run state while reconfiguration, restore, and shutdown close and drain both authorities under one transition serialization boundary.                                                                              |
+| `P6-W4-PLAN-004` | High     | fixed  | One Junban cloud TTS request causes at most one provider request. Provider Unicode limits reject before secret resolution or egress; no chunking, truncation, automatic retry, or privacy-changing fallback is allowed.                                              |
+
+The planning recheck stated that no further plan revision is required after these corrections. Wave 4 implementation, functional tests, immutable visual parity, accessibility, security review, and exact-head closure remain open.
 
 ## Validation used by the gates
 

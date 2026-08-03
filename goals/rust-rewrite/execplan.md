@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 5 are complete. Phase 6 is in progress; its provider registry, provider adapters, durable chat, exhaustive tool boundary, public approval decisions, multi-round provider loop, exact dispatch recovery, and Rust code-quality/DX checkpoint are complete. Durable daily briefing and typed edit/retry/regenerate actions are complete. React AI/voice integration, enabled-runtime evidence, and final Phase 6 closure remain.
+**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 5 are complete. Phase 6 is in progress; its provider registry/adapters, durable chat/tool/approval/recovery/daily/rewrite boundary, Rust code-quality/DX checkpoint, canonical lazy AI shell/transport, preserved text chat and AI/Voice Settings, and bounded cloud speech runtime are complete. Browser/local voice execution, immutable visual/accessibility closure, enabled-runtime evidence, and final Phase 6 closure remain.
 
 ## Purpose and user-visible outcome
 
@@ -722,7 +722,9 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 6 Wave 0 dependency/contract authorities: lazy provider client/SSE/error/cancel foundation in `junban-ai`; exact-pinned browser-only Whisper, Kokoro, Piper, and VAD packages behind dynamic workers; bounded hash-verified OPFS admission with same-origin support assets; and sixteen immutable legacy-rendered AI/voice authorities.
 - [x] Phase 6 Wave 1 schema-v6 persistence and secret authority: typed `AiSettings`/`VoiceSettings`, atomic v5→v6 AI tables/quotas, crash-valid approval/run transitions, bounded bidirectional restore validation, private receipt-first `ai-secrets.json`, restore credential clearing, focused failure-injection coverage, and approved database gate with `P6-DB-001`–`P6-DB-007` fixed (see `evidence/phase-6-wave-1.md` and `evidence/phase-6-review-ledger.md`).
 - [x] Phase 6 Wave 2 provider runtime: one domain-owned preset authority, approved named providers over four wire families, lazy model discovery/retry/cancel/redaction, bounded provider-neutral speech contracts, and deterministic loopback fixture coverage (see `evidence/phase-6-provider-adapters.md`).
-- [ ] Phase 6 Waves 3–5 orchestration/tools/API, preserved React AI/voice, evidence, reviews and closure.
+- [x] Phase 6 Wave 3 orchestration/tools/API complete, including durable chat, approvals, dispatch recovery, daily briefing, edit/retry/regenerate, and the exact-head security/API gate.
+- [ ] Phase 6 Wave 4 preserved React AI/voice implementation active: canonical lazy chat/settings and cloud speech are complete; browser/local voice plus immutable visual/accessibility closure remain.
+- [ ] Phase 6 Wave 5 enabled-runtime evidence, dogfood, specialist review closure, and final squash.
 - [ ] Phase 7 implementation.
 - [ ] Phase 8 implementation.
 - [ ] Phase 9 implementation.

@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-03
 - **Current gate:** Wave 3f.2b tool-run security corrections; quality follow-up `P6-QUALITY-001` fixed
-- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, Wave 3d from `c543b7f`, Wave 3e from `c689099`, Wave 3f.1 from `1f6de1a`, Wave 3f.2a from `918633c`, then the current Wave 3f.2b working-tree delta
+- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, Wave 3d from `c543b7f`, Wave 3e from `c689099`, Wave 3f.1 from `1f6de1a`, Wave 3f.2a from `918633c`, and Wave 3f.2b at `33e4c65`
 - **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`; resource API approved after `P6-API-001`–`P6-API-003`; basic chat approved after `P6-CHAT-001`–`P6-CHAT-003`; direct tool boundary approved after `P6-3F1-001`–`P6-3F1-007`; durable approval/dispatch authority approved after `P6-AUTH-001`–`P6-AUTH-004`; tool-run security corrected after `P6-TOOLRUN-001`–`P6-TOOLRUN-003`; quality follow-up `P6-QUALITY-001` fixed without reopening tool-run authority
 
 ## Wave 1 database gate

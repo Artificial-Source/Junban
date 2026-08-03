@@ -2,65 +2,56 @@
 
 /**
  * Piper worker entry. The Piper package is dynamic-imported only after load.
+ * Seeds verified LJ Speech into patched OPFS and owns one TtsSession.
  */
 
-export type PiperWorkerRequest = { type: "ping" } | { type: "load" } | { type: "dispose" };
-
-export type PiperWorkerResponse =
-  | { type: "pong" }
-  | {
-      type: "load-complete";
-      packageId: string;
-      voiceId: string;
-      revision: string;
-      wasmPaths: {
-        onnxWasm: string;
-        piperData: string;
-        piperWasm: string;
-      };
-    }
-  | { type: "load-error"; error: string }
-  | { type: "disposed" };
+import { LocalVoiceClientError } from "../protocol.ts";
+import { installLocalVoiceWorker } from "./worker-runtime.ts";
 
 const ctx: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
 
-let disposeHandle: (() => void) | null = null;
-
-ctx.onmessage = async (event: MessageEvent<PiperWorkerRequest>) => {
-  const message = event.data;
-  try {
-    switch (message.type) {
-      case "ping":
-        ctx.postMessage({ type: "pong" } satisfies PiperWorkerResponse);
-        return;
-      case "dispose":
-        disposeHandle?.();
-        disposeHandle = null;
-        ctx.postMessage({ type: "disposed" } satisfies PiperWorkerResponse);
-        return;
-      case "load": {
-        const { loadPiperEngine } = await import("../engines/load-piper.ts");
-        const handle = await loadPiperEngine();
-        disposeHandle = handle.dispose;
-        ctx.postMessage({
-          type: "load-complete",
-          packageId: handle.packageId,
-          voiceId: handle.voiceId,
-          revision: handle.revision,
-          wasmPaths: handle.wasmPaths,
-        } satisfies PiperWorkerResponse);
-        return;
-      }
-      default:
-        ctx.postMessage({
-          type: "load-error",
-          error: "Unknown piper worker message",
-        } satisfies PiperWorkerResponse);
-    }
-  } catch (error) {
-    ctx.postMessage({
-      type: "load-error",
-      error: error instanceof Error ? error.message : String(error),
-    } satisfies PiperWorkerResponse);
-  }
+type PiperHandle = {
+  packageId: string;
+  voiceId: string;
+  revision: string;
+  synthesize: (text: string) => Promise<{
+    wav: ArrayBuffer;
+    sampleRate: number;
+    channels: number;
+  }>;
+  dispose: () => Promise<void>;
 };
+
+let handle: PiperHandle | null = null;
+
+installLocalVoiceWorker(ctx, {
+  async load() {
+    const { loadPiperEngine } = await import("../engines/load-piper.ts");
+    handle = await loadPiperEngine();
+    return {
+      packageId: handle.packageId,
+      modelId: handle.voiceId,
+      revision: handle.revision,
+      voiceId: handle.voiceId,
+    };
+  },
+  async synthesize(text) {
+    if (!handle) {
+      throw new LocalVoiceClientError("not_loaded");
+    }
+    const audio = await handle.synthesize(text);
+    return {
+      format: "wav" as const,
+      wav: audio.wav,
+      sampleRate: audio.sampleRate,
+      channels: audio.channels,
+    };
+  },
+  async dispose() {
+    const current = handle;
+    handle = null;
+    if (current) {
+      await current.dispose();
+    }
+  },
+});

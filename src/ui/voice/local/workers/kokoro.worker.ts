@@ -1,55 +1,58 @@
 /// <reference lib="webworker" />
 
 /**
- * Kokoro worker entry. kokoro-js is dynamic-imported only after a load message.
+ * Kokoro worker entry. kokoro-js is dynamic-imported only after load.
+ * Owns one q8 model and serves protocol synthesize requests for af_heart only.
  */
 
-export type KokoroWorkerRequest = { type: "ping" } | { type: "load" } | { type: "dispose" };
-
-export type KokoroWorkerResponse =
-  | { type: "pong" }
-  | { type: "load-complete"; packageId: string; modelId: string; revision: string }
-  | { type: "load-error"; error: string }
-  | { type: "disposed" };
+import { LocalVoiceClientError } from "../protocol.ts";
+import { installLocalVoiceWorker } from "./worker-runtime.ts";
 
 const ctx: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
 
-let disposeHandle: (() => void) | null = null;
-
-ctx.onmessage = async (event: MessageEvent<KokoroWorkerRequest>) => {
-  const message = event.data;
-  try {
-    switch (message.type) {
-      case "ping":
-        ctx.postMessage({ type: "pong" } satisfies KokoroWorkerResponse);
-        return;
-      case "dispose":
-        disposeHandle?.();
-        disposeHandle = null;
-        ctx.postMessage({ type: "disposed" } satisfies KokoroWorkerResponse);
-        return;
-      case "load": {
-        const { loadKokoroEngine } = await import("../engines/load-kokoro.ts");
-        const handle = await loadKokoroEngine();
-        disposeHandle = handle.dispose;
-        ctx.postMessage({
-          type: "load-complete",
-          packageId: handle.packageId,
-          modelId: handle.modelId,
-          revision: handle.revision,
-        } satisfies KokoroWorkerResponse);
-        return;
-      }
-      default:
-        ctx.postMessage({
-          type: "load-error",
-          error: "Unknown kokoro worker message",
-        } satisfies KokoroWorkerResponse);
-    }
-  } catch (error) {
-    ctx.postMessage({
-      type: "load-error",
-      error: error instanceof Error ? error.message : String(error),
-    } satisfies KokoroWorkerResponse);
-  }
+type KokoroHandle = {
+  packageId: string;
+  modelId: string;
+  revision: string;
+  voiceId: string;
+  synthesize: (text: string) => Promise<{
+    transferable: ArrayBuffer;
+    sampleRate: number;
+    channels: number;
+  }>;
+  dispose: () => Promise<void>;
 };
+
+let handle: KokoroHandle | null = null;
+
+installLocalVoiceWorker(ctx, {
+  async load() {
+    const { loadKokoroEngine } = await import("../engines/load-kokoro.ts");
+    handle = await loadKokoroEngine();
+    return {
+      packageId: handle.packageId,
+      modelId: handle.modelId,
+      revision: handle.revision,
+      voiceId: handle.voiceId,
+    };
+  },
+  async synthesize(text) {
+    if (!handle) {
+      throw new LocalVoiceClientError("not_loaded");
+    }
+    const audio = await handle.synthesize(text);
+    return {
+      format: "pcm-f32" as const,
+      pcm: audio.transferable,
+      sampleRate: audio.sampleRate,
+      channels: audio.channels,
+    };
+  },
+  async dispose() {
+    const current = handle;
+    handle = null;
+    if (current) {
+      await current.dispose();
+    }
+  },
+});

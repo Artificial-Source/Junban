@@ -5,6 +5,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AppLayout } from "./AppLayout";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -138,7 +139,6 @@ describe("AppLayout ai-chat route seam", () => {
   it("lazy-renders the AI not-configured shell for a direct /ai-chat load", async () => {
     // Warm the lazy module so Suspense can resolve under act without a flaky race.
     await import("../ai/AIChatRoute");
-    const { AppLayout } = await import("./AppLayout");
 
     await act(async () => {
       root.render(createElement(AppLayout));

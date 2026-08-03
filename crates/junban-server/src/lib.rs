@@ -4,6 +4,8 @@ mod ai_chat;
 mod ai_context;
 mod ai_identity;
 mod ai_runtime;
+mod ai_tool_executor;
+mod ai_tool_registry;
 mod authz;
 mod credentials;
 mod cursor;
@@ -94,6 +96,13 @@ use crate::sse::{AppService, SseConnectionPermit};
 
 pub use crate::ai_runtime::{
     AiRunGuard, AiRuntimeError, AiRuntimeSupervisor, AiTerminalOutcome, MAX_ACTIVE_AI_RUNS,
+};
+pub use crate::ai_tool_executor::{ToolExecContext, derive_child_operation_id, execute_tool};
+pub use crate::ai_tool_registry::{
+    AI_TOOL_COUNT, AI_TOOL_DEFAULT_COLOR, AI_TOOL_NAME_MAX_BYTES, AI_TOOL_RESULT_ENTITY_MAX,
+    ToolEffect, ToolOutcome, ToolRegistration, ToolResultEnvelope, ToolValidationError,
+    ValidatedToolAction, extract_task_titles_from_text, forbidden_argument_names, registration,
+    tool_registrations, tool_specs, validate_tool_call,
 };
 pub use crate::authz::{
     AutomationScope, ClassifiedRoute, Principal as RequestPrincipal, RouteAccess, classified_routes,

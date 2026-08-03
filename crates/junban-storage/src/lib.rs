@@ -42,22 +42,23 @@ use jiff::{Timestamp, civil::Date};
 use junban_app::{
     AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
     AiSessionCursor, AiSessionListPage, AppSettings, BulkAction, CatalogSnapshot, CommentPatch,
-    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, ProjectDraft, ProjectPatch,
-    ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError,
-    RepositoryFuture, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch,
-    SettingsPatch, StagedFile, SyncState, TagDraft, TagPatch, TaskListAsOf, TaskListPage,
-    TaskPatch, TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TimeBlockPatch,
-    TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
+    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, ProjectDraft, ProjectListPage,
+    ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository,
+    RepositoryError, RepositoryFuture, SavedFilterDraft, SavedFilterPatch, SectionDraft,
+    SectionPatch, SettingsPatch, StagedFile, SyncState, TagDraft, TagListPage, TagPatch,
+    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
+    TimeblockingRangeQuery,
 };
 use junban_domain::{
     AiApprovalId, AiApprovalStatus, AiCredentialId, AiMemory, AiMemoryId, AiMessage,
     AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus, AiRunId, AiRunState,
     AiSecretKind, AiSecretMetadata, AiSession, AiSessionId, AiToolApproval, AiTurnId,
-    ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
-    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
-    ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
-    TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId,
-    TransferApply, TransferFormat, TransferPreview,
+    ClaimedReminder, Comment, CommentBody, CommentId, EntityName, OperationId, Project, ProjectId,
+    RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    ReminderOccurrence, SavedFilterId, SectionId, Tag, TagId, TagName, Task, TaskActivity,
+    TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId,
+    TimeSlotDraft, TimeSlotId, TransferApply, TransferFormat, TransferPreview,
 };
 use rusqlite::Connection;
 use thiserror::Error;
@@ -1086,6 +1087,27 @@ impl Repository for SqliteRepository {
     }
     fn list_catalog(&self) -> RepositoryFuture<'_, CatalogSnapshot> {
         self.request(Command::ListCatalog)
+    }
+    fn list_projects_bounded(&self, limit: u32) -> RepositoryFuture<'_, ProjectListPage> {
+        mut_cmd!(self, ListProjectsBounded { limit })
+    }
+    fn list_tags_bounded(&self, limit: u32) -> RepositoryFuture<'_, TagListPage> {
+        mut_cmd!(self, ListTagsBounded { limit })
+    }
+    fn get_project(&self, project_id: ProjectId) -> RepositoryFuture<'_, Project> {
+        mut_cmd!(self, GetProject { project_id })
+    }
+    fn get_projects_by_ids(
+        &self,
+        project_ids: Vec<ProjectId>,
+    ) -> RepositoryFuture<'_, ProjectListPage> {
+        mut_cmd!(self, GetProjectsByIds { project_ids })
+    }
+    fn get_project_by_name(&self, name: EntityName) -> RepositoryFuture<'_, Project> {
+        mut_cmd!(self, GetProjectByName { name })
+    }
+    fn resolve_tags_by_names(&self, names: Vec<TagName>) -> RepositoryFuture<'_, Vec<Tag>> {
+        mut_cmd!(self, ResolveTagsByNames { names })
     }
     fn create_project(
         &self,
@@ -2330,6 +2352,30 @@ enum Command {
         reply: oneshot::Sender<Result<TaskListPage, RepositoryError>>,
     },
     ListCatalog(oneshot::Sender<Result<CatalogSnapshot, RepositoryError>>),
+    ListProjectsBounded {
+        limit: u32,
+        reply: oneshot::Sender<Result<ProjectListPage, RepositoryError>>,
+    },
+    ListTagsBounded {
+        limit: u32,
+        reply: oneshot::Sender<Result<TagListPage, RepositoryError>>,
+    },
+    GetProject {
+        project_id: ProjectId,
+        reply: oneshot::Sender<Result<Project, RepositoryError>>,
+    },
+    GetProjectsByIds {
+        project_ids: Vec<ProjectId>,
+        reply: oneshot::Sender<Result<ProjectListPage, RepositoryError>>,
+    },
+    GetProjectByName {
+        name: EntityName,
+        reply: oneshot::Sender<Result<Project, RepositoryError>>,
+    },
+    ResolveTagsByNames {
+        names: Vec<TagName>,
+        reply: oneshot::Sender<Result<Vec<Tag>, RepositoryError>>,
+    },
     CreateProject {
         operation_id: OperationId,
         project_id: ProjectId,
@@ -3032,6 +3078,24 @@ fn run_worker(
             }
             Command::ListCatalog(reply) => {
                 let _ = reply.send(catalog_ops::list_catalog(connection));
+            }
+            Command::ListProjectsBounded { limit, reply } => {
+                let _ = reply.send(catalog_ops::list_projects_bounded(connection, limit));
+            }
+            Command::ListTagsBounded { limit, reply } => {
+                let _ = reply.send(catalog_ops::list_tags_bounded(connection, limit));
+            }
+            Command::GetProject { project_id, reply } => {
+                let _ = reply.send(catalog_ops::get_project(connection, project_id));
+            }
+            Command::GetProjectsByIds { project_ids, reply } => {
+                let _ = reply.send(catalog_ops::get_projects_by_ids(connection, &project_ids));
+            }
+            Command::GetProjectByName { name, reply } => {
+                let _ = reply.send(catalog_ops::get_project_by_name(connection, &name));
+            }
+            Command::ResolveTagsByNames { names, reply } => {
+                let _ = reply.send(catalog_ops::resolve_tags_by_names(connection, &names));
             }
             Command::CreateProject {
                 operation_id,

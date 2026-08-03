@@ -8,15 +8,15 @@ use junban_domain::{
     AiRunState, AiSecretMetadata, AiSession, AiSessionId, AiToolApproval, AppSettings,
     ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
     DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName,
-    FilterQuery, HexColor, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS,
-    MarkdownText, NudgeRuleKind, OperationId, ProjectId, RelationKind, ReminderChannel,
-    ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence,
-    SavedFilterId, SectionId, SettingsPatch, TagId, TagName, Task, TaskActivity, TaskDraft, TaskId,
-    TaskQuery, TaskRelation, TaskSort, TaskStatus, TaskTitle, TemplateId, TimeBlock,
-    TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft, TimeSlotId, TransferApply, TransferError,
-    TransferFormat, TransferPreview, ValidationError, WeekStart, civil_occurrences_in_range,
-    daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges,
-    preview_transfer, select_eat_the_frog, stats_summary, task_jar_candidates,
+    FilterQuery, HexColor, MAX_BULK_IDS, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT,
+    MAX_TIMEBLOCK_RANGE_ITEMS, MarkdownText, NudgeRuleKind, OperationId, ProjectId, RelationKind,
+    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    ReminderOccurrence, SavedFilterId, SectionId, SettingsPatch, TagId, TagName, Task,
+    TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort, TaskStatus, TaskTitle,
+    TemplateId, TimeBlock, TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft, TimeSlotId,
+    TransferApply, TransferError, TransferFormat, TransferPreview, ValidationError, WeekStart,
+    civil_occurrences_in_range, daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary,
+    evaluate_nudges, preview_transfer, select_eat_the_frog, stats_summary, task_jar_candidates,
     validate_calendar_date_range, validate_owner_lost_mark_limit, validate_preview_matches_apply,
     validate_reminder_claim_limit, validate_reminder_lease_secs, validate_stats_date_range,
     validate_timeblock_date_range, weekly_review_summary,
@@ -388,6 +388,78 @@ where
 
     pub async fn list_catalog(&self) -> Result<CatalogSnapshot, AppError> {
         self.repository.list_catalog().await.map_err(Into::into)
+    }
+
+    /// Bounded project page (`limit` clamped into `1..=MAX_BULK_IDS`).
+    pub async fn list_projects_bounded(
+        &self,
+        limit: u32,
+    ) -> Result<crate::ProjectListPage, AppError> {
+        let limit = limit.clamp(1, MAX_BULK_IDS as u32);
+        self.repository
+            .list_projects_bounded(limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Bounded tag page (`limit` clamped into `1..=MAX_BULK_IDS`).
+    pub async fn list_tags_bounded(&self, limit: u32) -> Result<crate::TagListPage, AppError> {
+        let limit = limit.clamp(1, MAX_BULK_IDS as u32);
+        self.repository
+            .list_tags_bounded(limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Exact project lookup by id.
+    pub async fn get_project(
+        &self,
+        project_id: junban_domain::ProjectId,
+    ) -> Result<junban_domain::Project, AppError> {
+        self.repository
+            .get_project(project_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Exact multi-project lookup by id (≤ [`MAX_BULK_IDS`] unique IDs).
+    pub async fn get_projects_by_ids(
+        &self,
+        project_ids: Vec<ProjectId>,
+    ) -> Result<crate::ProjectListPage, AppError> {
+        if project_ids.len() > MAX_BULK_IDS {
+            return Err(AppError::Validation(ValidationError::TooMany {
+                field: "project_ids",
+                count: project_ids.len(),
+                max: MAX_BULK_IDS,
+            }));
+        }
+        self.repository
+            .get_projects_by_ids(project_ids)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Exact project lookup by name.
+    pub async fn get_project_by_name(
+        &self,
+        name: junban_domain::EntityName,
+    ) -> Result<junban_domain::Project, AppError> {
+        self.repository
+            .get_project_by_name(name)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Resolve tags by exact normalized names without loading the full catalog.
+    pub async fn resolve_tags_by_names(
+        &self,
+        names: Vec<junban_domain::TagName>,
+    ) -> Result<Vec<junban_domain::Tag>, AppError> {
+        self.repository
+            .resolve_tags_by_names(names)
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn create_project(
@@ -1741,6 +1813,44 @@ where
         Self::weekly_from_parts(collected, &catalog.projects, date, week_start, zone)
     }
 
+    /// AI/tool weekly review: bounded task snapshot + exact lookup of referenced projects only.
+    ///
+    /// Does not call `list_catalog`. When unique referenced project IDs exceed
+    /// [`MAX_BULK_IDS`], the ID set is truncated deterministically and
+    /// `projects_truncated` is set.
+    pub async fn weekly_review_bounded(
+        &self,
+        date: Date,
+        week_start: Option<WeekStart>,
+        zone: &TimeZone,
+    ) -> Result<(WeeklyReviewPage, bool), AppError> {
+        let settings = self.get_settings().await?;
+        let week_start = week_start.unwrap_or(settings.date_time.week_start);
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let (project_ids, projects_truncated) = referenced_project_ids(&collected.tasks);
+        let projects_page = self.get_projects_by_ids(project_ids).await?;
+        if projects_page.revision != collected.revision {
+            let collected = self.load_analysis_tasks(as_of).await?;
+            let (project_ids, projects_truncated) = referenced_project_ids(&collected.tasks);
+            let projects_page = self.get_projects_by_ids(project_ids).await?;
+            if projects_page.revision != collected.revision {
+                return Err(AppError::Conflict);
+            }
+            let page = Self::weekly_from_parts(
+                collected,
+                &projects_page.projects,
+                date,
+                week_start,
+                zone,
+            )?;
+            return Ok((page, projects_truncated));
+        }
+        let page =
+            Self::weekly_from_parts(collected, &projects_page.projects, date, week_start, zone)?;
+        Ok((page, projects_truncated))
+    }
+
     fn weekly_from_parts(
         collected: CollectedTasks,
         projects: &[junban_domain::Project],
@@ -1898,6 +2008,21 @@ fn tasks_for_ids(tasks: &[Task], ids: &[TaskId]) -> Vec<Task> {
         .collect()
 }
 
+/// Unique project IDs referenced by tasks, sorted by UUID, capped at [`MAX_BULK_IDS`].
+fn referenced_project_ids(tasks: &[Task]) -> (Vec<ProjectId>, bool) {
+    let mut ids = tasks
+        .iter()
+        .filter_map(|task| task.project_id)
+        .collect::<Vec<_>>();
+    ids.sort_by_key(|id| id.as_uuid());
+    ids.dedup();
+    let truncated = ids.len() > MAX_BULK_IDS;
+    if truncated {
+        ids.truncate(MAX_BULK_IDS);
+    }
+    (ids, truncated)
+}
+
 fn map_transfer_error(error: TransferError) -> AppError {
     match error {
         TransferError::ValidationError(error) => AppError::Validation(error),
@@ -1976,6 +2101,7 @@ mod tests {
         /// When set, `list_tasks` pops pages in order (for collect-helper tests).
         list_pages: Mutex<Vec<TaskListPage>>,
         timeblocking_page: Mutex<TimeblockingRangePage>,
+        projects_by_ids: Mutex<crate::ProjectListPage>,
     }
 
     impl FakeRepository {
@@ -1988,6 +2114,11 @@ mod tests {
                     blocks: Vec::new(),
                     slots: Vec::new(),
                     revision: 0,
+                }),
+                projects_by_ids: Mutex::new(crate::ProjectListPage {
+                    projects: Vec::new(),
+                    revision: 0,
+                    truncated: false,
                 }),
             }
         }
@@ -2002,6 +2133,11 @@ mod tests {
                     slots: Vec::new(),
                     revision: 0,
                 }),
+                projects_by_ids: Mutex::new(crate::ProjectListPage {
+                    projects: Vec::new(),
+                    revision: 0,
+                    truncated: false,
+                }),
             }
         }
 
@@ -2011,6 +2147,11 @@ mod tests {
                 calls: Mutex::new(Vec::new()),
                 list_pages: Mutex::new(Vec::new()),
                 timeblocking_page: Mutex::new(page),
+                projects_by_ids: Mutex::new(crate::ProjectListPage {
+                    projects: Vec::new(),
+                    revision: 0,
+                    truncated: false,
+                }),
             }
         }
 
@@ -2160,6 +2301,48 @@ mod tests {
             })
         }
         fn list_catalog(&self) -> crate::RepositoryFuture<'_, CatalogSnapshot> {
+            self.calls.lock().unwrap().push("list_catalog");
+            Box::pin(async {
+                Ok(CatalogSnapshot {
+                    projects: Vec::new(),
+                    sections: Vec::new(),
+                    tags: Vec::new(),
+                    templates: Vec::new(),
+                    saved_filters: Vec::new(),
+                    revision: 0,
+                })
+            })
+        }
+        fn list_projects_bounded(
+            &self,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, crate::ProjectListPage> {
+            unimplemented!()
+        }
+        fn list_tags_bounded(&self, _: u32) -> crate::RepositoryFuture<'_, crate::TagListPage> {
+            unimplemented!()
+        }
+        fn get_project(&self, _: ProjectId) -> crate::RepositoryFuture<'_, junban_domain::Project> {
+            unimplemented!()
+        }
+        fn get_projects_by_ids(
+            &self,
+            _: Vec<ProjectId>,
+        ) -> crate::RepositoryFuture<'_, crate::ProjectListPage> {
+            self.calls.lock().unwrap().push("get_projects_by_ids");
+            let page = self.projects_by_ids.lock().unwrap().clone();
+            Box::pin(async move { Ok(page) })
+        }
+        fn get_project_by_name(
+            &self,
+            _: junban_domain::EntityName,
+        ) -> crate::RepositoryFuture<'_, junban_domain::Project> {
+            unimplemented!()
+        }
+        fn resolve_tags_by_names(
+            &self,
+            _: Vec<junban_domain::TagName>,
+        ) -> crate::RepositoryFuture<'_, Vec<junban_domain::Tag>> {
             unimplemented!()
         }
         fn create_project(
@@ -3486,6 +3669,88 @@ mod tests {
             .unwrap();
         assert!(!replay.mutation.newly_committed);
         assert_eq!(sink.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn weekly_review_bounded_uses_projects_by_ids_not_list_catalog() {
+        let now: Timestamp = "2026-08-02T12:00:00Z".parse().unwrap();
+        let project_a = ProjectId::new();
+        let project_b = ProjectId::new();
+        let mut task_a = sample_task("A", 3);
+        task_a.project_id = Some(project_a);
+        let mut task_b = sample_task("B", 3);
+        task_b.project_id = Some(project_b);
+        let mut task_none = sample_task("C", 3);
+        task_none.project_id = None;
+
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![list_page(
+            vec![task_a, task_b, task_none],
+            3,
+            None,
+        )]));
+        *repository.projects_by_ids.lock().unwrap() = crate::ProjectListPage {
+            projects: vec![
+                junban_domain::Project::new(
+                    project_a,
+                    EntityName::new("Alpha").unwrap(),
+                    HexColor::new("#112233").unwrap(),
+                    now,
+                ),
+                junban_domain::Project::new(
+                    project_b,
+                    EntityName::new("Beta").unwrap(),
+                    HexColor::new("#223344").unwrap(),
+                    now,
+                ),
+            ],
+            revision: 3,
+            truncated: false,
+        };
+
+        let sink = Arc::new(RecordingSink::default());
+        let service = JunbanService::new(Arc::clone(&repository), sink);
+        let zone = TimeZone::UTC;
+        let (page, truncated) = service
+            .weekly_review_bounded(date(2026, 8, 2), None, &zone)
+            .await
+            .unwrap();
+
+        assert!(!truncated);
+        assert_eq!(page.revision, 3);
+        let calls = repository.calls.lock().unwrap().clone();
+        assert!(
+            calls.contains(&"get_projects_by_ids"),
+            "expected get_projects_by_ids in {calls:?}"
+        );
+        assert!(
+            !calls.contains(&"list_catalog"),
+            "weekly_review_bounded must not call list_catalog: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn referenced_project_ids_are_unique_sorted_and_bounded() {
+        let mut tasks = Vec::new();
+        for index in 0..(MAX_BULK_IDS + 25) {
+            let mut task = sample_task(&format!("t{index}"), 1);
+            // Deterministic UUID payload via repeated construction is fine; uniqueness comes
+            // from ProjectId::new(). Force duplicates for the first ids to exercise dedupe.
+            task.project_id = Some(if index < 10 {
+                // ten tasks share one project id via fixed parse
+                ProjectId::parse("00112233-4455-6677-8899-aabbccddeeff").unwrap()
+            } else {
+                ProjectId::new()
+            });
+            tasks.push(task);
+        }
+        let (ids, truncated) = referenced_project_ids(&tasks);
+        assert!(truncated);
+        assert_eq!(ids.len(), MAX_BULK_IDS);
+        let mut sorted = ids.clone();
+        sorted.sort_by_key(|id| id.as_uuid());
+        assert_eq!(ids, sorted);
+        let unique = ids.iter().collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(unique.len(), ids.len());
     }
 
     fn date(year: i16, month: i8, day: i8) -> Date {

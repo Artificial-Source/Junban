@@ -314,6 +314,22 @@ pub struct CatalogSnapshot {
     pub revision: u64,
 }
 
+/// Bounded project page for callers that must not load the full catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectListPage {
+    pub projects: Vec<Project>,
+    pub revision: u64,
+    pub truncated: bool,
+}
+
+/// Bounded tag page for callers that must not load the full catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TagListPage {
+    pub tags: Vec<Tag>,
+    pub revision: u64,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectDraft {
     pub name: EntityName,

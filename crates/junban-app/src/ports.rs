@@ -7,22 +7,22 @@ use junban_domain::{
     AiApprovalId, AiApprovalStatus, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiMessageId,
     AiMessageRole, AiMessageStatus, AiRunId, AiRunState, AiSecretKind, AiSecretMetadata, AiSession,
     AiSessionId, AiToolApproval, AiTurnId, AppSettings, ClaimedReminder, Comment, CommentBody,
-    CommentId, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
-    ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId,
-    SettingsPatch, TagId, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation,
-    TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId, TransferApply,
-    TransferFormat, TransferPreview,
+    CommentId, EntityName, OperationId, Project, ProjectId, RelationKind, ReminderChannel,
+    ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence,
+    SavedFilterId, SectionId, SettingsPatch, Tag, TagId, TagName, Task, TaskActivity, TaskDraft,
+    TaskId, TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft,
+    TimeSlotId, TransferApply, TransferFormat, TransferPreview,
 };
 
 use crate::{
     AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
     AiSecretBytes, AiSessionCursor, AiSessionListPage, BulkAction, CatalogSnapshot, CommentPatch,
-    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, ProjectDraft, ProjectPatch,
-    ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview, RepositoryError,
-    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, StagedFile, TagDraft, TagPatch,
-    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
-    TimeblockingRangeQuery,
+    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, ProjectDraft, ProjectListPage,
+    ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview, RepositoryError,
+    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, StagedFile, TagDraft,
+    TagListPage, TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft,
+    TemplatePatch, TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
+    TimeblockingRangePage, TimeblockingRangeQuery,
 };
 
 pub type RepositoryFuture<'a, T> =
@@ -127,6 +127,30 @@ pub trait Repository: Send + Sync + 'static {
     fn list_analysis_tasks(&self, as_of: TaskListAsOf) -> RepositoryFuture<'_, TaskListPage>;
 
     fn list_catalog(&self) -> RepositoryFuture<'_, CatalogSnapshot>;
+
+    /// Bounded project list ordered by `sort_order`, id. `limit` is `1..=MAX_BULK_IDS`.
+    fn list_projects_bounded(&self, limit: u32) -> RepositoryFuture<'_, ProjectListPage>;
+
+    /// Bounded tag list ordered by `name_normalized`. `limit` is `1..=MAX_BULK_IDS`.
+    fn list_tags_bounded(&self, limit: u32) -> RepositoryFuture<'_, TagListPage>;
+
+    /// Exact project lookup by primary key.
+    fn get_project(&self, project_id: ProjectId) -> RepositoryFuture<'_, Project>;
+
+    /// Exact multi-project lookup by primary key.
+    ///
+    /// Accepts at most [`junban_domain::MAX_BULK_IDS`] unique IDs. Missing IDs are
+    /// omitted. Results are ordered by `sort_order`, id and share one revision.
+    fn get_projects_by_ids(
+        &self,
+        project_ids: Vec<ProjectId>,
+    ) -> RepositoryFuture<'_, ProjectListPage>;
+
+    /// Exact project lookup by name (first `sort_order`, id match).
+    fn get_project_by_name(&self, name: EntityName) -> RepositoryFuture<'_, Project>;
+
+    /// Resolve existing tags by exact normalized names. Missing names are `NotFound`.
+    fn resolve_tags_by_names(&self, names: Vec<TagName>) -> RepositoryFuture<'_, Vec<Tag>>;
 
     fn create_project(
         &self,

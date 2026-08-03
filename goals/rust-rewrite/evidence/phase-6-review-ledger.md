@@ -1,9 +1,9 @@
 # Phase 6 review ledger
 
 - **Date:** 2026-08-03
-- **Current gate:** Wave 3e basic no-tool streaming chat vertical
-- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, Wave 3d from `c543b7f`, then the Wave 3e delta from `c689099`
-- **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`; resource API approved after `P6-API-001`–`P6-API-003`; basic chat approved after `P6-CHAT-001`–`P6-CHAT-003`
+- **Current gate:** Wave 3f.1 Rust-owned tool registry and direct executor
+- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, Wave 3d from `c543b7f`, Wave 3e from `c689099`, then the Wave 3f.1 delta from `1f6de1a`
+- **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`; resource API approved after `P6-API-001`–`P6-API-003`; basic chat approved after `P6-CHAT-001`–`P6-CHAT-003`; direct tool boundary approved after `P6-3F1-001`–`P6-3F1-007`
 
 ## Wave 1 database gate
 
@@ -66,6 +66,20 @@ The exact-delta API recheck approved all three findings and found no regression 
 
 The exact-delta security recheck approved all three findings. No provider callback can cross a winning cancellation fence, no partial assistant/run terminal can commit, and silent inference retains the authenticated stream.
 
+## Wave 3f.1 direct-tool gate
+
+| ID           | Severity | Status | Resolution and focused regression                                                                                                                                                                                                                                  |
+| ------------ | -------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `P6-3F1-001` | High     | fixed  | Composite mutation inputs fully validate before the first effect. An unavoidable concurrent later failure returns the exact committed prefix with child resource/operation/revision identity and failure index, and exact retry replays the same child operations. |
+| `P6-3F1-002` | Medium   | fixed  | Scheduling and availability use one confirmed work-hours snapshot plus clamped, merged block-and-slot occupancy. Full-duration gap, overlap, adjacency, boundary, and insufficient-space regressions pass.                                                         |
+| `P6-3F1-003` | Medium   | fixed  | AI tag add/remove dispatches the existing transactional `BulkAction::Tag`; an interleaving regression proves an unrelated concurrent tag survives.                                                                                                                 |
+| `P6-3F1-004` | Medium   | fixed  | Provider schemas and exhaustive semantic validation share domain bounds. Unknown, duplicate, forbidden, malformed, empty, conflicting, out-of-range, and invalid-ID arguments fail before effect classification or approval.                                       |
+| `P6-3F1-005` | Medium   | fixed  | Tool execution no longer calls unbounded catalog reads. Indexed bounded/exact project and tag queries serve the registry, while the AI weekly review loads only bounded referenced projects; ordinary product review behavior remains unchanged.                   |
+| `P6-3F1-006` | Medium   | fixed  | One recursive aggregate budget retains at most 500 elements across every result array, and a deterministic binary-search byte limiter avoids repeated full-payload clone/serialize work. Mixed/nested and large-description regressions pass.                      |
+| `P6-3F1-007` | Medium   | fixed  | Structured mutation results retain the committed primary resource identity. `save_memory` returns the exact memory ID on first execution and receipt replay.                                                                                                       |
+
+The final exact-delta recheck reported no material finding. The 48-tool boundary remains offline from providers in this subwave and exposes no security, recovery, export, network, file, plugin, settings, or credential authority.
+
 ## Validation used by the gates
 
 ```text
@@ -80,4 +94,4 @@ cargo deny check
 git diff --check
 ```
 
-The final Wave 1 focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The Wave 3a gate additionally ran `cargo test --locked -p junban-app -p junban-storage --all-targets` (23 app and 168 storage tests), both crates' all-target/all-feature clippy with denied warnings, and downstream server/CLI/MCP checks. The Wave 3b gate ran all `junban-ai` and `junban-server` targets/features, compile-fail doctests, focused owner lock-retention and restore/shutdown tests, workspace clippy/check, audit, and deny. The Wave 3c gate ran 61 AI tests, 155 server library tests, focused secret/authority/overlap checks, generated-contract and frontend type checks, workspace validation, audit, and deny. The Wave 3d gate ran 163 server library tests plus process lifecycle, focused concurrency/query/body-limit checks, generated-contract/type checks, clippy, and workspace validation. The Wave 3e gate ran 184 server unit/API tests, six process-lifecycle tests, 175 storage tests, 69 AI tests, focused cancellation/backpressure/atomic-finish/replay/keepalive regressions, and the full contract, clippy, workspace, audit, and deny checks. No material reviewed persistence, secret, lifecycle, provider-configuration security, resource API, or basic-chat finding remains.
+The final Wave 1 focused index recheck also ran the exact query-plan regression and fresh/v5→v6 migration tests. The Wave 3a gate additionally ran `cargo test --locked -p junban-app -p junban-storage --all-targets` (23 app and 168 storage tests), both crates' all-target/all-feature clippy with denied warnings, and downstream server/CLI/MCP checks. The Wave 3b gate ran all `junban-ai` and `junban-server` targets/features, compile-fail doctests, focused owner lock-retention and restore/shutdown tests, workspace clippy/check, audit, and deny. The Wave 3c gate ran 61 AI tests, 155 server library tests, focused secret/authority/overlap checks, generated-contract and frontend type checks, workspace validation, audit, and deny. The Wave 3d gate ran 163 server library tests plus process lifecycle, focused concurrency/query/body-limit checks, generated-contract/type checks, clippy, and workspace validation. The Wave 3e gate ran 184 server unit/API tests, six process-lifecycle tests, 175 storage tests, 69 AI tests, focused cancellation/backpressure/atomic-finish/replay/keepalive regressions, and the full contract, clippy, workspace, audit, and deny checks. The Wave 3f.1 gate ran 28 focused server tool tests, the 210-test server library suite, 23 app tests, 172 storage tests, indexed/bounded catalog regressions, clippy/workspace/contract/audit/deny checks, and the unchanged 87-tool automation catalog suite. No material reviewed persistence, secret, lifecycle, provider-configuration security, resource API, basic-chat, or direct-tool-boundary finding remains.

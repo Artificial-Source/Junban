@@ -18,7 +18,8 @@ use junban_domain::{
     MAX_ANALYSIS_TASK_READ, MAX_BULK_IDS, MAX_REMINDER_CLAIM_LIMIT, MarkdownText, OperationId,
     Priority, ProjectId, RelationKind, ReminderChannel, ReminderFailureCode,
     ReminderOccurrenceState, SortOrder, TagId, TagName, TaskCursor, TaskDraft, TaskId, TaskQuery,
-    TaskSort, TaskStatus, TaskTitle, TaskViewPreset, TemplateId, WeekStart, weekly_review_summary,
+    TaskSort, TaskStatus, TaskTitle, TaskViewPreset, TemplateId, ValidationError, WeekStart,
+    weekly_review_summary,
 };
 use uuid::Uuid;
 
@@ -6105,4 +6106,200 @@ fn load_and_save_allowed_hosts_merges_cli_and_persisted() {
             0o600
         );
     }
+}
+
+#[tokio::test]
+async fn bounded_catalog_reads_do_not_require_full_snapshot() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    for index in 0..5 {
+        repo.create_project(
+            operation(),
+            ProjectId::new(),
+            ProjectDraft {
+                name: EntityName::new(format!("Project {index}")).unwrap(),
+                color: HexColor::new("#3b82f6").unwrap(),
+                icon: None,
+                parent_id: None,
+                favorite: false,
+                archived: false,
+                view: Default::default(),
+                sort_order: SortOrder::new(index as i64),
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+        repo.create_tag(
+            operation(),
+            TagId::new(),
+            TagDraft {
+                name: TagName::new(format!("tag-{index}")).unwrap(),
+                color: HexColor::new("#3b82f6").unwrap(),
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+    }
+
+    let projects = repo.list_projects_bounded(2).await.unwrap();
+    assert_eq!(projects.projects.len(), 2);
+    assert!(projects.truncated);
+    assert_eq!(projects.projects[0].name.as_str(), "Project 0");
+
+    let tags = repo.list_tags_bounded(2).await.unwrap();
+    assert_eq!(tags.tags.len(), 2);
+    assert!(tags.truncated);
+
+    let by_name = repo
+        .get_project_by_name(EntityName::new("Project 3").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(by_name.name.as_str(), "Project 3");
+    let by_id = repo.get_project(by_name.id).await.unwrap();
+    assert_eq!(by_id.id, by_name.id);
+
+    let multi = repo
+        .get_projects_by_ids(vec![
+            projects.projects[0].id,
+            projects.projects[1].id,
+            projects.projects[0].id,
+        ])
+        .await
+        .unwrap();
+    assert_eq!(multi.projects.len(), 2);
+    assert!(!multi.truncated);
+
+    let resolved = repo
+        .resolve_tags_by_names(vec![
+            TagName::new("tag-1").unwrap(),
+            TagName::new("tag-4").unwrap(),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(resolved.len(), 2);
+    assert!(resolved.iter().any(|tag| tag.name.as_str() == "tag-1"));
+
+    // Full catalog still works and remains complete.
+    let full = repo.list_catalog().await.unwrap();
+    assert_eq!(full.projects.len(), 5);
+    assert_eq!(full.tags.len(), 5);
+}
+
+#[tokio::test]
+async fn get_projects_by_ids_is_bounded_and_exact() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let mut created = Vec::new();
+    for index in 0..8 {
+        let id = ProjectId::new();
+        repo.create_project(
+            operation(),
+            id,
+            ProjectDraft {
+                name: EntityName::new(format!("Bulk {index}")).unwrap(),
+                color: HexColor::new("#3b82f6").unwrap(),
+                icon: None,
+                parent_id: None,
+                favorite: false,
+                archived: false,
+                view: Default::default(),
+                sort_order: SortOrder::new(index as i64),
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+        created.push(id);
+    }
+    let missing = ProjectId::new();
+    let page = repo
+        .get_projects_by_ids(vec![created[7], missing, created[0], created[7]])
+        .await
+        .unwrap();
+    assert_eq!(page.projects.len(), 2);
+    assert_eq!(page.projects[0].id, created[0]);
+    assert_eq!(page.projects[1].id, created[7]);
+    assert!(!page.truncated);
+
+    let too_many = (0..=MAX_BULK_IDS)
+        .map(|_| ProjectId::new())
+        .collect::<Vec<_>>();
+    let err = repo.get_projects_by_ids(too_many).await.unwrap_err();
+    assert!(matches!(
+        err,
+        RepositoryError::Validation(ValidationError::TooMany { .. })
+    ));
+}
+
+#[test]
+fn bounded_catalog_sql_is_indexed_and_limited() {
+    let directory = TestDir::new();
+    let mut connection = rusqlite::Connection::open(directory.0.join("junban.sqlite3")).unwrap();
+    connection
+        .pragma_update(None, "foreign_keys", true)
+        .unwrap();
+    crate::migration::migrate(&mut connection, &directory.0).unwrap();
+
+    let plan = |sql: &str| -> String {
+        let mut statement = connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap();
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .map(|row| row.unwrap())
+            .collect::<Vec<_>>();
+        rows.join(" | ")
+    };
+
+    let projects_plan = plan("SELECT id FROM projects ORDER BY sort_order, id LIMIT 10");
+    assert!(
+        projects_plan.contains("idx_projects_sort") || projects_plan.contains("USING INDEX"),
+        "projects bounded list should use sort index: {projects_plan}"
+    );
+    assert!(
+        !projects_plan.to_ascii_lowercase().contains("scan projects")
+            || projects_plan.contains("INDEX"),
+        "projects bounded list should not plain-scan: {projects_plan}"
+    );
+
+    let tags_plan = plan("SELECT id FROM tags ORDER BY name_normalized LIMIT 10");
+    // name_normalized has a UNIQUE index; ORDER BY that column should prefer it.
+    assert!(
+        tags_plan.contains("name_normalized")
+            || tags_plan.contains("USING INDEX")
+            || tags_plan.contains("INDEX"),
+        "tags bounded list should use name index: {tags_plan}"
+    );
+
+    let project_id_plan =
+        plan("SELECT id FROM projects WHERE id = '00112233-4455-6677-8899-aabbccddeeff'");
+    assert!(
+        project_id_plan.contains("PRIMARY") || project_id_plan.contains("SEARCH"),
+        "project id lookup must be indexed: {project_id_plan}"
+    );
+
+    let multi_plan = plan(
+        "SELECT id FROM projects WHERE id IN ('00112233-4455-6677-8899-aabbccddeeff','aabbccdd-eeff-0011-2233-445566778899') ORDER BY sort_order, id",
+    );
+    assert!(
+        multi_plan.contains("PRIMARY")
+            || multi_plan.contains("SEARCH")
+            || multi_plan.contains("idx_projects_sort")
+            || multi_plan.contains("USING INDEX"),
+        "multi project id lookup must be indexed: {multi_plan}"
+    );
+
+    let tag_name_plan = plan("SELECT id FROM tags WHERE name_normalized = 'focus'");
+    assert!(
+        tag_name_plan.contains("name_normalized")
+            || tag_name_plan.contains("SEARCH")
+            || tag_name_plan.contains("INDEX"),
+        "tag name resolve must be indexed: {tag_name_plan}"
+    );
 }

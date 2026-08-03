@@ -132,9 +132,65 @@ git diff --check
 
 The commands above completed successfully for the Wave 3d delta and are re-run for Wave 3e. Wave 3e additionally runs focused `ai_chat`, `ai_context`, `ai_identity`, runtime-authority, fragmented-loopback response/cancel/disconnect/reflection/restart, body-policy, contract, and 87-tool catalog regressions.
 
+## Wave 3f.1 — authoritative AI tool registry and direct executor
+
+- **Date:** 2026-08-02
+- **Base:** clean Wave 3e HEAD `1f6de1a`
+- **Scope:** Rust-owned AI tool registry, strict validation/classification, bounded structured result model, and direct `JunbanService` executor only.
+- **Modules:** `crates/junban-server/src/ai_tool_registry.rs`, `crates/junban-server/src/ai_tool_executor.rs`
+
+### Inventory and classification
+
+- Exactly **48** unique legacy-parity tool names, each ≤64 bytes, in deterministic registry order from `create_task` through `timeblocking_replan_day`.
+- Registry returns existing `junban_ai::ToolSpec` values with closed JSON object schemas (`additionalProperties: false`), hard item/string/range bounds, and descriptions that tell providers only one call is accepted per round.
+- Default effect snapshot: **24 read** / **24 approval-required** registrations. `extract_tasks_from_text` is dynamic: `dry_run` default `true` is read; `dry_run: false` is approval-required.
+- `auto_schedule_day` and `reschedule_day` are always preview reads in this subwave. Results set `preview_only: true` and `apply_supported: false`. No model-authored apply/hash authority is accepted.
+
+### Validation and result model
+
+- Model calls parse into a private exhaustive `ValidatedToolAction` enum. Argument DTOs use `serde(deny_unknown_fields)`.
+- Rejected before execution: unknown names/fields, duplicate JSON keys, malformed/non-object JSON, forbidden fields (operation/approval IDs, URLs, paths, credentials, revisions, preview/apply authorities, tokens), disallowed control characters, and arguments over the existing 128 KiB bound after canonicalization.
+- `validate_tool_call` runs exhaustive semantic validation immediately after deserialize (domain parsers, min/max/item/string limits, nonempty composites, date/time/range ordering, recurrence, enums). Invalid calls never become `ValidatedToolAction`.
+- Tag array ceilings use `MAX_TAGS_PER_TASK` (100), not 500. Query/result limits reject `0` rather than silently clamping. Advertised JSON schemas use the same constants.
+- `ToolResultEnvelope` is structured/trusted: tool name, outcome, data, truncated flag; optional `operation_id`/`revision` only for approved executor mutations. No receipts, request headers, access tokens, provider/vendor IDs, raw errors, Debug payloads, or arbitrary HTML.
+- Canonical result JSON is bounded to 256 KiB with one recursive aggregate 500-array-element budget over every JSON array in the payload (including nested arrays, ID arrays, `task_jar`/`dopamine_menu`, blocks/slots), preserving object/scalar fields and marking truncation, then a deterministic binary-search byte-budget pass. Scalar oversize returns a stable `result_too_large` error.
+
+### Executor
+
+- Executes only through current `JunbanService` methods. No direct SQLite/file/network/provider/plugin/recovery/settings/backup/export/import/secret authority.
+- One sampled server-local date/time/zone per `ToolExecContext`.
+- Mutations require a caller-supplied server-owned root `OperationId` at the executor boundary and fail closed without it.
+- Composite actions (`bulk_create_tasks`, `break_down_task`, extract apply) pre-validate every element before the first effect, derive deterministic child operation IDs from the approved root (`junban.ai.tool.child.v1`), and on unavoidable later concurrent failure return a bounded partial outcome (committed child resource IDs, child operation IDs, revision/event type, failed index, static error code) rather than a plain error that hides effects.
+- Tag add/remove resolves bounded names first via `resolve_tags_by_names`, then applies `BulkAction::Tag` for a one-task vector (transactional CAS; no stale read-modify-write).
+- Catalog AI tools use bounded/exact repository reads (`list_projects_bounded`, `list_tags_bounded`, `get_project`, `get_projects_by_ids`, `get_project_by_name`, `resolve_tags_by_names`) with indexed/LIMIT SQL; they do not call unbounded `list_catalog`. Full `list_catalog` remains for non-AI catalog surfaces.
+- `bulk_update_tasks` semantic validation rejects empty `task_ids`, missing update groups, and conflicting groups before returning `ValidatedToolAction`; provider schema advertises `minItems: 1` and mutually exclusive group descriptions matching executor reality.
+- AI `weekly_review` uses `weekly_review_bounded`: bounded analysis task snapshot plus exact `get_projects_by_ids` for referenced projects only (max 500 unique IDs, deterministic truncate + `projects_truncated`). Ordinary HTTP `weekly_review` still uses full `list_catalog`.
+- Analysis tools are conservative/local over existing planning/stats/catalog APIs (no nested LLM). Memory is content-only. Extraction is deterministic line/bullet parsing. Tags/projects are never silently created by name.
+- Scheduling preview and availability share one confirmed `settings.planning.work_hours` snapshot (documented 09:00–17:00 fallback when unset), merge clamped block **and** slot occupied intervals, and place a task only in a gap large enough for its full duration.
+- Generic mutation results include committed `event.primary` `{kind,id}`; `save_memory` also returns `memory_id`. Exact replay preserves primary identity.
+
+### Focused tests
+
+- Registry snapshot/count/names/effects and closed schemas without operation/approval IDs.
+- Strict argument rejection, bounds, duplicate keys, forbidden-name fuzz corpus, schema/parser agreement, invalid mutation table, bulk_update_tasks table-driven group validation, recursive aggregate array budget (blocks+slots, nested/energy keys), and large-description byte-budget performance.
+- Mutation-without-root failure, deterministic child IDs/replay, composite pre-validation + partial failure/retry identity, tag CAS interleaving survival, schedule gap/slot/merge/boundary/insufficient-gap, work-hours settings snapshot, mutation primary + save_memory exact replay, bounded catalog reads, weekly_review_bounded no-`list_catalog` spy + referenced-project bound, extract dry-run vs apply classification, schedule preview non-mutation, and one in-memory pass covering all 48 tools against declared service capabilities or stable error/unavailable outcomes.
+- Storage: bounded project/tag pages, exact project lookup, multi-id project lookup bound/index checks, multi-tag-name resolve, unchanged full `list_catalog`, and EXPLAIN QUERY PLAN index/LIMIT checks.
+- Phase 5 CLI/MCP catalog remains intentionally unchanged at **87** tools.
+
+### Independent Wave 3f.1 review
+
+The direct tool-boundary gate approved after focused correction and exact-delta re-review of `P6-3F1-001`–`P6-3F1-007`. The review ledger records each fixed finding and its regression authority.
+
+### Non-claims for Wave 3f.1
+
+- Not wired to provider orchestration, tool-call streaming, multi-round loops, or chat SSE tool envelopes.
+- No approval propose/consume routes, startup recovery of dispatching approvals, daily briefing, edit/regenerate, or React AI/tool UI.
+- No schedule apply mutation and no model-supplied preview/apply hash authority.
+- No CLI/MCP AI tools and no Phase 6 release/memory/visual acceptance claim.
+
 ## Non-claims
 
-- No tool dispatch/execution, tool approval, daily briefing, edit/regenerate, multi-round autonomous loop, or hidden reasoning exposure.
+- No provider-wired tool dispatch loop, tool approval HTTP surface, daily briefing, edit/regenerate, multi-round autonomous loop, or hidden reasoning exposure. Wave 3f.1 adds only the offline registry/validator/executor foundation above.
 - No arbitrary message upsert HTTP route; message creation remains owned by the basic response orchestrator.
 - No manual memory-link HTTP route.
 - No voice audio/STT/TTS HTTP routes, browser media path, cloud speech adapter, or local inference.

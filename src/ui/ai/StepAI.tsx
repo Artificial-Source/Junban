@@ -65,7 +65,13 @@ export function StepAI({ onSetWantsAI, onNext }: StepAIProps) {
                 : "min-w-0 max-w-[280px] rounded-tl-sm rounded-tr-xl rounded-br-xl rounded-bl-xl bg-surface px-2 py-2.5 min-[240px]:px-3.5"
             }
           >
-            <p className={phase6 ? "text-xs text-on-surface leading-snug" : "text-[13px] text-on-surface leading-snug"}>
+            <p
+              className={
+                phase6
+                  ? "text-xs text-on-surface leading-snug"
+                  : "text-[13px] text-on-surface leading-snug"
+              }
+            >
               Good morning! You have 3 tasks due today. Want me to help prioritize them?
             </p>
           </div>
@@ -78,11 +84,7 @@ export function StepAI({ onSetWantsAI, onNext }: StepAIProps) {
                 : "bg-accent-action rounded-tl-xl rounded-tr-sm rounded-br-xl rounded-bl-xl px-3.5 py-2.5"
             }
           >
-            <p
-              className={
-                phase6 ? "text-xs text-on-surface" : "text-[13px] text-on-accent-action"
-              }
-            >
+            <p className={phase6 ? "text-xs text-on-surface" : "text-[13px] text-on-accent-action"}>
               Yes, plan my day!
             </p>
           </div>

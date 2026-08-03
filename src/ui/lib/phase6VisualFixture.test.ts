@@ -16,9 +16,9 @@ describe("phase6VisualFixture", () => {
   });
 
   it("rejects other fixtures, missing scene, and unknown scene ids", () => {
-    expect(readPhase6VisualScene("?visual-fixture=phase-4&scene=ai-welcome-briefing-desktop-light")).toBe(
-      null,
-    );
+    expect(
+      readPhase6VisualScene("?visual-fixture=phase-4&scene=ai-welcome-briefing-desktop-light"),
+    ).toBe(null);
     expect(readPhase6VisualScene("?visual-fixture=phase-6")).toBe(null);
     expect(readPhase6VisualScene("?visual-fixture=phase-6&scene=not-a-scene")).toBe(null);
     expect(isPhase6VisualFixture("")).toBe(false);

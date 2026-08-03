@@ -723,7 +723,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 6 Wave 1 schema-v6 persistence and secret authority: typed `AiSettings`/`VoiceSettings`, atomic v5→v6 AI tables/quotas, crash-valid approval/run transitions, bounded bidirectional restore validation, private receipt-first `ai-secrets.json`, restore credential clearing, focused failure-injection coverage, and approved database gate with `P6-DB-001`–`P6-DB-007` fixed (see `evidence/phase-6-wave-1.md` and `evidence/phase-6-review-ledger.md`).
 - [x] Phase 6 Wave 2 provider runtime: one domain-owned preset authority, approved named providers over four wire families, lazy model discovery/retry/cancel/redaction, bounded provider-neutral speech contracts, and deterministic loopback fixture coverage (see `evidence/phase-6-provider-adapters.md`).
 - [x] Phase 6 Wave 3 orchestration/tools/API complete, including durable chat, approvals, dispatch recovery, daily briefing, edit/retry/regenerate, and the exact-head security/API gate.
-- [ ] Phase 6 Wave 4 preserved React AI/voice implementation active: canonical lazy chat/settings and cloud speech are complete; browser/local voice plus immutable visual/accessibility closure remain.
+- [x] Phase 6 Wave 4 preserved React AI/voice implementation: canonical lazy chat/settings, browser/cloud/local speech, half-duplex call UX, exact-manifest local workers, sixteen immutable visual comparisons, browser functional coverage, axe/keyboard coverage, and the integrated frontend/accessibility gate are complete; `P6-W4-REV-001` and `P6-W4-REV-002` are fixed.
 - [ ] Phase 6 Wave 5 enabled-runtime evidence, dogfood, specialist review closure, and final squash.
 - [ ] Phase 7 implementation.
 - [ ] Phase 8 implementation.

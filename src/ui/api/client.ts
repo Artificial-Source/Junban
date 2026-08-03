@@ -568,9 +568,7 @@ export type AuthenticatedRequestOptions = {
   retryNetwork?: boolean;
 };
 
-function buildAuthenticatedHeaders(
-  options: AuthenticatedRequestOptions,
-): Record<string, string> {
+function buildAuthenticatedHeaders(options: AuthenticatedRequestOptions): Record<string, string> {
   const headers: Record<string, string> = {
     ...authHeaders(),
     ...(options.headers ?? {}),

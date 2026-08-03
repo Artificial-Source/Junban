@@ -1,9 +1,9 @@
 # Phase 6 review ledger
 
 - **Date:** 2026-08-03
-- **Current gate:** Wave 4 implementation is active; the high-risk Wave 4 plan corrections are frozen and Wave 3's exact-head backend security/API gate remains approved
-- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, Wave 3d from `c543b7f`, Wave 3e from `c689099`, Wave 3f.1 from `1f6de1a`, Wave 3f.2a from `918633c`, Wave 3f.2b at `33e4c65`, Wave 3g at `070e357` (from clean base `4e31903`), and integrated Wave 3 at `4602447`
-- **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`; resource API approved after `P6-API-001`–`P6-API-003`; basic chat approved after `P6-CHAT-001`–`P6-CHAT-003`; direct tool boundary approved after `P6-3F1-001`–`P6-3F1-007`; durable approval/dispatch authority approved after `P6-AUTH-001`–`P6-AUTH-004`; tool-run security corrected after `P6-TOOLRUN-001`–`P6-TOOLRUN-003`; quality follow-up `P6-QUALITY-001` fixed without reopening tool-run authority; Wave 3g review findings `P6-3G-DB-001`–`002`, `P6-3G-QUALITY-001`–`002`, and `P6-3G-CHAT-001` fixed with focused regressions; integrated Wave 3 security/API review approved with no material finding
+- **Current gate:** Wave 4 frontend/browser/local/cloud voice implementation is complete and reviewed; Wave 5 enabled-runtime evidence, dogfood, exact-head specialist closure, and final squash remain active
+- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, Wave 3d from `c543b7f`, Wave 3e from `c689099`, Wave 3f.1 from `1f6de1a`, Wave 3f.2a from `918633c`, Wave 3f.2b at `33e4c65`, Wave 3g at `070e357` (from clean base `4e31903`), integrated Wave 3 at `4602447`, and integrated Wave 4 at `975b513`
+- **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`; resource API approved after `P6-API-001`–`P6-API-003`; basic chat approved after `P6-CHAT-001`–`P6-CHAT-003`; direct tool boundary approved after `P6-3F1-001`–`P6-3F1-007`; durable approval/dispatch authority approved after `P6-AUTH-001`–`P6-AUTH-004`; tool-run security corrected after `P6-TOOLRUN-001`–`P6-TOOLRUN-003`; quality follow-up `P6-QUALITY-001` fixed without reopening tool-run authority; Wave 3g review findings `P6-3G-DB-001`–`002`, `P6-3G-QUALITY-001`–`002`, and `P6-3G-CHAT-001` fixed with focused regressions; integrated Wave 3 security/API review approved with no material finding; integrated Wave 4 frontend/accessibility review approved after `P6-W4-REV-001` and `P6-W4-REV-002` were fixed
 
 ## Wave 1 database gate
 
@@ -129,7 +129,16 @@ The required security-dominant exact-head review approved commit `4602447` with 
 | `P6-W4-PLAN-003` | High     | fixed  | A small speech supervisor remains separate from AI run state while reconfiguration, restore, and shutdown close and drain both authorities under one transition serialization boundary.                                                                              |
 | `P6-W4-PLAN-004` | High     | fixed  | One Junban cloud TTS request causes at most one provider request. Provider Unicode limits reject before secret resolution or egress; no chunking, truncation, automatic retry, or privacy-changing fallback is allowed.                                              |
 
-The planning recheck stated that no further plan revision is required after these corrections. Wave 4 implementation, functional tests, immutable visual parity, accessibility, security review, and exact-head closure remain open.
+The planning recheck stated that no further plan revision is required after these corrections.
+
+## Wave 4 frontend/accessibility gate
+
+| ID              | Severity | Status | Resolution and focused regression                                                                                                                                                                                                                                                                                                                |
+| --------------- | -------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `P6-W4-REV-001` | High     | fixed  | End Call now fences call, utterance, and response generations; clears pending response authority; cancels the exact durable conversation before physical media/VAD/TTS release; and settles idle idempotently. Focused runtime/controller tests prove exactly one cancellation and that stale completions cannot resume output or later effects. |
+| `P6-W4-REV-002` | Medium   | fixed  | Removed ad-hoc `phase6-visual` and `ptt-error` URL checks from `VoiceButton`. Ordinary `?ptt-error` retains the accessible alert, retry action, and valid `aria-describedby`; the immutable PTT scene remains behind the exact allowlisted fixture gate and explicit fixture composition.                                                        |
+
+The narrow exact-delta recheck approved both findings. All sixteen immutable scenes pass at `maxDiffPixelRatio: 0.01`, all fifteen axe/keyboard checks pass, and six fake-media/Web-Speech browser scenarios pass. No material Wave 4 finding remains; Wave 5 owns real enabled-runtime/model/device evidence and the final exact-head security gate.
 
 ## Validation used by the gates
 

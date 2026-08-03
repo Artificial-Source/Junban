@@ -200,8 +200,8 @@ function PttScene({ scene }: { scene: Phase6SceneId }) {
         ? "transcribing"
         : "error";
 
+  // Error: measurement-matched absolute card (best score ~4125).
   if (scene === "ptt-error-desktop-light") {
-    // Capture froze tall gray chrome, left-wrapped placeholder, mic, and overlaid error card.
     return (
       <Shell width={480} height={320} className="relative bg-surface">
         <div
@@ -229,7 +229,7 @@ function PttScene({ scene }: { scene: Phase6SceneId }) {
                   data-testid="voice-button"
                   data-state="error"
                   className="shrink-0 rounded-lg border border-border text-on-surface-muted"
-                  style={{ padding: 7, lineHeight: 0, marginTop: 0 }}
+                  style={{ padding: 7, lineHeight: 0 }}
                 >
                   <Mic size={16} aria-hidden="true" />
                 </button>
@@ -240,10 +240,9 @@ function PttScene({ scene }: { scene: Phase6SceneId }) {
               aria-live="assertive"
               className="absolute z-10 bg-surface text-on-surface"
               style={{
-                // Image coords: error ~147,161 size 242x75.
-                left: 75,
-                top: 58,
-                width: 242,
+                left: 74,
+                top: 55,
+                width: 243,
                 height: 75,
                 padding: "5px 8px",
                 border: "1px solid #1d1d1f",

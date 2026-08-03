@@ -21,7 +21,7 @@ const TTS_OPTIONS = [
 ] as const;
 
 /** Synthetic masked presence only — never a real secret. */
-const MASKED_KEY = "••••••••••••mask";
+const MASKED_KEY = "";
 
 export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisualState }) {
   void fixtureVoiceConfig(state);
@@ -38,18 +38,18 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
   const ttsNeedsKey = tts !== "browser";
   // Dark cloud capture froze quieter field chrome than default border tokens.
   const fieldClass = isCloud
-    ? "w-full px-3 py-2 text-sm border border-white/10 rounded-lg bg-surface text-on-surface"
+    ? "w-full px-3 py-1.5 text-sm border border-transparent rounded-lg bg-surface text-on-surface h-9"
     : "w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface";
 
   return (
-    <section className="mb-8">
+    <section className="mb-8" style={isCloud ? { fontSize: "11px" } : undefined}>
       <h2 className="text-lg font-semibold mb-1 text-on-surface">Voice</h2>
       <p className="text-xs text-on-surface-muted mb-3">
         Configure speech-to-text, text-to-speech, microphone, and voice interaction mode.
       </p>
 
       {/* Cloud capture is denser; browser-defaults capture matches space-y-8. */}
-      <div className={`${isCloud ? "space-y-3" : "space-y-8"} max-w-lg`}>
+      <div className={`${isCloud ? "flex flex-col gap-[15px]" : "space-y-8"} max-w-lg`}>
         <div>
           <h3 className="text-sm font-semibold text-on-surface mb-1">Microphone</h3>
           <p className="text-xs text-on-surface-muted mb-2">
@@ -57,14 +57,14 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
           </p>
           <button
             type="button"
-            className="inline-flex items-center gap-2 text-sm text-on-surface-secondary hover:text-on-surface"
+            className="inline-flex items-center gap-2 text-sm text-on-surface-muted hover:text-on-surface"
           >
             <Mic size={14} aria-hidden="true" />
             Allow microphone access
           </button>
         </div>
 
-        <fieldset className={isCloud ? "space-y-1.5" : "space-y-2"}>
+        <fieldset className={isCloud ? "space-y-4" : "space-y-2"}>
           <legend className="text-sm font-semibold text-on-surface mb-1">Speech-to-Text</legend>
           <div>
             <label
@@ -110,7 +110,7 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
           )}
         </fieldset>
 
-        <fieldset className={isCloud ? "space-y-1.5" : "space-y-2"}>
+        <fieldset className={isCloud ? "space-y-4" : "space-y-2"}>
           <legend className="text-sm font-semibold text-on-surface mb-1">Text-to-Speech</legend>
           <div>
             <label
@@ -139,7 +139,6 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
                 className="block text-xs font-medium text-on-surface-secondary mb-1"
               >
                 API Key
-                <span className="font-normal text-on-surface-secondary">Set</span>
               </label>
               <input
                 id="voice-tts-key"
@@ -162,11 +161,7 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
                 Voice
               </label>
               {/* Capture froze voice without a Preview control. */}
-              <select
-                id="voice-tts-voice"
-                defaultValue="alloy"
-                className={fieldClass}
-              >
+              <select id="voice-tts-voice" defaultValue="alloy" className={fieldClass}>
                 <option value="alloy">Alloy</option>
                 <option value="verse">Verse</option>
               </select>
@@ -182,9 +177,9 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
           </label>
         </fieldset>
 
-        <fieldset className={isCloud ? "space-y-1.5" : "space-y-2"}>
+        <fieldset className={isCloud ? "space-y-4" : "space-y-2"}>
           <legend className="text-sm font-semibold text-on-surface mb-1">Interaction Mode</legend>
-          <div className={isCloud ? "flex gap-1.5" : "flex gap-2"}>
+          <div className={isCloud ? "flex flex-wrap gap-x-0 gap-y-0" : "flex gap-2"}>
             {(
               [
                 { id: "off", label: "Off" },
@@ -192,7 +187,7 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
                 { id: "vad", label: "VAD (Hands-free)" },
               ] as const
             ).map((option) => (
-              <label key={option.id} className="flex items-center gap-1 text-sm text-on-surface">
+              <label key={option.id} className="flex items-center gap-0 text-sm text-on-surface">
                 <input
                   type="radio"
                   name="voiceMode"

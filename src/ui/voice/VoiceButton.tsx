@@ -92,27 +92,19 @@ export function VoiceButton({
       >
         {icon}
       </button>
-      {resolvedPermission && (
+      {resolvedPermission && !phase6PttError && (
         <div
           id={permissionAlertId}
           role="alert"
           aria-live="assertive"
-          className={
-            phase6PttError
-              ? "max-w-xs rounded border border-on-surface/80 bg-surface p-2 text-xs text-on-surface shadow-sm"
-              : "max-w-xs rounded-lg border border-error/40 bg-error/10 p-2 text-xs text-error"
-          }
+          className="max-w-xs rounded-lg border border-error/40 bg-error/10 p-2 text-xs text-error"
         >
           <p>{resolvedPermission}</p>
           <button
             type="button"
             onClick={onRetry ?? onToggle}
             disabled={disabled || visualState === "transcribing"}
-            className={
-              phase6PttError
-                ? "mt-2 rounded border border-on-surface/80 px-2 py-1 font-medium disabled:opacity-50"
-                : "mt-2 rounded border border-error/50 px-2 py-1 font-medium hover:bg-error/10 disabled:opacity-50"
-            }
+            className="mt-2 rounded border border-error/50 px-2 py-1 font-medium hover:bg-error/10 disabled:opacity-50"
           >
             Retry microphone access
           </button>

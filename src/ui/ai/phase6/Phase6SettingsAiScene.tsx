@@ -63,7 +63,10 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
 
           {provider && (
             <>
-              <div className="mb-1">
+              <div
+                className="mb-1"
+                style={configured ? { marginTop: -11, paddingBottom: 11 } : undefined}
+              >
                 <p className="block text-xs font-medium text-on-surface-secondary mb-1">
                   Authentication
                 </p>
@@ -101,18 +104,21 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
                     htmlFor="ai-api-key"
                     className="block text-xs font-medium text-on-surface-secondary mb-1"
                   >
-                    API Key
-                    {hasKey && (
-                      <span
-                        className={
-                          configured
-                            ? "font-normal text-on-surface-secondary"
-                            : "font-normal text-success ml-2"
-                        }
-                      >
-                        {configured ? " Set" : "Set"}
-                      </span>
-                    )}
+                    {hasKey
+                      ? [
+                          "API Key",
+                          <span
+                            key="set"
+                            className={
+                              configured
+                                ? "font-normal text-on-surface-secondary"
+                                : "ml-2 font-normal text-success"
+                            }
+                          >
+                            {configured ? "Set" : " Set"}
+                          </span>,
+                        ]
+                      : "API Key"}
                   </label>
                   <input
                     id="ai-api-key"
@@ -223,9 +229,7 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
         <label
           htmlFor="ai-custom-instructions"
           className={
-            configured
-              ? "block text-xs font-medium text-on-surface-secondary mb-1"
-              : "sr-only"
+            configured ? "block text-xs font-medium text-on-surface-secondary mb-1" : "sr-only"
           }
         >
           Custom Instructions

@@ -10,11 +10,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Closed Phase 4 Settings tab identifiers (URL segments). */
+/** Closed Settings tab identifiers (URL segments). */
 export type SettingsTabId =
   | "essentials"
   | "appearance"
   | "features"
+  | "ai"
+  | "voice"
   | "keyboard"
   | "templates"
   | "data"
@@ -25,6 +27,8 @@ export const SETTINGS_TAB_IDS: readonly SettingsTabId[] = [
   "essentials",
   "appearance",
   "features",
+  "ai",
+  "voice",
   "keyboard",
   "templates",
   "data",

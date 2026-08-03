@@ -12,6 +12,8 @@ const SETTINGS_TAB_LABELS = [
   "Essentials",
   "Appearance",
   "Features",
+  "AI",
+  "Voice",
   "Keyboard",
   "Templates",
   "Data",
@@ -145,7 +147,7 @@ describe("SettingsDialog", () => {
     container.remove();
   });
 
-  it("renders desktop tab rail without hidden legacy tabs", () => {
+  it("renders desktop tab rail including AI and Voice without other legacy tabs", () => {
     act(() => {
       root.render(createElement(Harness));
     });
@@ -155,9 +157,8 @@ describe("SettingsDialog", () => {
       btn.textContent?.trim(),
     );
     expect(labels).toEqual(SETTINGS_TAB_LABELS);
-    expect(container.textContent).not.toContain("\nAI\n");
-    expect(labels).not.toContain("AI");
-    expect(labels).not.toContain("Voice");
+    expect(labels).toContain("AI");
+    expect(labels).toContain("Voice");
     expect(labels).not.toContain("Extensions");
     expect(labels).not.toContain("About");
   });

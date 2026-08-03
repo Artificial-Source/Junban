@@ -19,6 +19,8 @@ export type AiConfigResponse = Schemas["AiConfigResponse"];
 export type AiSettingsDto = Schemas["AiSettingsDto"];
 export type VoiceConfigInput = Schemas["VoiceConfigInput"];
 export type VoiceSettingsDto = Schemas["VoiceSettingsDto"];
+export type SpeechProviderPresetDto = Schemas["SpeechProviderPresetDto"];
+export type VoiceModeDto = Schemas["VoiceModeDto"];
 
 export type AiCredentialTargetDto = Schemas["AiCredentialTargetDto"];
 export type AiCredentialBindingsDto = Schemas["AiCredentialBindingsDto"];

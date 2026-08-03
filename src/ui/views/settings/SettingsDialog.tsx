@@ -1,16 +1,18 @@
 /**
  * Settings modal shell — legacy desktop tab rail + mobile category index/detail.
- * Exact Phase 4 tabs: Essentials, Appearance, Features, Keyboard, Templates,
- * Data, Hosted, Diagnostics. AI/Voice/Extensions/About stay hidden.
+ * Tabs: Essentials, Appearance, Features, AI, Voice, Keyboard, Templates,
+ * Data, Hosted, Diagnostics. AI/Voice are lazy-loaded only when selected.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   ArrowLeft,
+  Bot,
   ChevronRight,
   Database,
   FileText,
   Keyboard,
+  Mic,
   Palette,
   Server,
   SlidersHorizontal,
@@ -30,6 +32,20 @@ import { HostedTab } from "./HostedTab";
 import { KeyboardTab } from "./KeyboardTab";
 import { MOBILE_SETTINGS_SECTIONS, SETTINGS_TAB_META } from "./settingsHelpers";
 import { TemplatesTab } from "./TemplatesTab";
+
+const AiTab = lazy(() => import("./ai/AiTab").then((mod) => ({ default: mod.AiTab })));
+const VoiceTab = lazy(() => import("./voice/VoiceTab").then((mod) => ({ default: mod.VoiceTab })));
+
+function SettingsTabFallback() {
+  return (
+    <div
+      role="status"
+      className="flex min-h-[240px] items-center justify-center text-sm text-on-surface-muted"
+    >
+      Loading…
+    </div>
+  );
+}
 
 type TabMeta = {
   id: SettingsTabId;
@@ -60,6 +76,18 @@ const TABS: TabMeta[] = SETTINGS_TAB_META.map((meta) => {
         ...meta,
         icon: <Sparkles {...iconProps} />,
         mobileIcon: <Sparkles {...mobileIconProps} />,
+      };
+    case "ai":
+      return {
+        ...meta,
+        icon: <Bot {...iconProps} />,
+        mobileIcon: <Bot {...mobileIconProps} />,
+      };
+    case "voice":
+      return {
+        ...meta,
+        icon: <Mic {...iconProps} />,
+        mobileIcon: <Mic {...mobileIconProps} />,
       };
     case "keyboard":
       return {
@@ -111,6 +139,18 @@ function renderTabContent(tab: SettingsTabId): ReactNode {
       return wrap(<AppearanceTab />);
     case "features":
       return wrap(<FeaturesTab />);
+    case "ai":
+      return wrap(
+        <Suspense fallback={<SettingsTabFallback />}>
+          <AiTab />
+        </Suspense>,
+      );
+    case "voice":
+      return wrap(
+        <Suspense fallback={<SettingsTabFallback />}>
+          <VoiceTab />
+        </Suspense>,
+      );
     case "keyboard":
       return wrap(<KeyboardTab />);
     case "templates":

@@ -4,7 +4,7 @@
 - **Base:** Wave 3g implementation `070e357` from clean base `4e31903` (earlier Wave 3a–3f bases retained below)
 - **Scope:** implemented Wave 3a–3g behavior
 - **Claim boundary:** durable AI resources, lazy runtime lifecycle, provider configuration, chat/tool/approval orchestration, exact dispatch recovery, daily briefing, and typed edit/retry/regenerate HTTP/SSE actions. This document does not claim a briefing scheduler, schedule apply, React, voice delivery, or Phase 6 memory/visual closure.
-- **Review status:** prior chat/tool-run gates are approved; the Wave 3g daily/rewrite findings and focused regressions are recorded in the Phase 6 review ledger.
+- **Review status:** the integrated security-dominant backend/API gate approved exact head `4602447` with no material finding after all prior chat, tool-run, approval, daily/rewrite, database, and Rust-quality corrections.
 
 ## Wave 3a — application and storage service boundary
 

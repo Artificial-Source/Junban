@@ -612,8 +612,20 @@ fn read_only_and_write_only_credentials_filter_tools_and_prompts() {
 
     let read_token_path = root.join("read.token");
     let write_token_path = root.join("write.token");
-    let _read_id = create_scoped_credential(&profile, &["read"], &read_token_path);
-    let _write_id = create_scoped_credential(&profile, &["write"], &write_token_path);
+    // Mint both credentials under one owner. Repeated owner churn is not part of
+    // this scope-filter contract and can introduce an unrelated lock race under
+    // a heavily parallel workspace test run.
+    runtime().block_on(async {
+        let owner = LocalApiOwner::start(profile.clone())
+            .await
+            .expect("start owner for credential create");
+        let base_url = owner.base_url();
+        let _read_id =
+            create_scoped_credential_at(&base_url, &profile, &["read"], &read_token_path).await;
+        let _write_id =
+            create_scoped_credential_at(&base_url, &profile, &["write"], &write_token_path).await;
+        owner.shutdown().await;
+    });
 
     let (mut holder_child, holder_stdin, holder_reader) = spawn_mcp_local(&profile);
     let deadline = Instant::now() + Duration::from_secs(45);

@@ -4,6 +4,7 @@ mod ai_approval_dispatch;
 mod ai_chat;
 mod ai_context;
 mod ai_identity;
+mod ai_response_actions;
 mod ai_runtime;
 mod ai_tool_executor;
 mod ai_tool_registry;
@@ -20,6 +21,7 @@ mod reminder_wake;
 mod routes;
 mod routes_ai;
 mod routes_ai_approvals;
+mod routes_ai_turns;
 mod sse;
 
 use std::{
@@ -49,6 +51,8 @@ use junban_storage::{
     save_allowed_hosts, write_private_file,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::sync::atomic::AtomicU8;
 use thiserror::Error;
 #[cfg(test)]
 use tokio::sync::Notify;
@@ -96,6 +100,9 @@ use crate::routes_ai::{
     put_ai_config, put_ai_credential,
 };
 use crate::routes_ai_approvals::{approve_ai_approval, get_ai_approval, reject_ai_approval};
+use crate::routes_ai_turns::{
+    create_ai_daily_briefing, edit_ai_response, regenerate_ai_response, retry_ai_response,
+};
 use crate::sse::{AppService, SseConnectionPermit};
 
 pub use crate::ai_runtime::{
@@ -360,6 +367,48 @@ impl AiReconfigureTestGate {
     }
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AiResponseSetupStage {
+    BeforeCommit = 1,
+    AfterCommit = 2,
+    AfterAdmission = 3,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct AiResponseSetupTestGate {
+    armed: AtomicU8,
+    reached: Notify,
+    release: Notify,
+}
+
+#[cfg(test)]
+impl AiResponseSetupTestGate {
+    pub(crate) fn arm(&self, stage: AiResponseSetupStage) {
+        self.armed.store(stage as u8, Ordering::Release);
+    }
+
+    pub(crate) async fn wait_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+
+    pub(crate) async fn pause(&self, stage: AiResponseSetupStage) {
+        if self
+            .armed
+            .compare_exchange(stage as u8, 0, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.reached.notify_one();
+            self.release.notified().await;
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ServerState {
     pub(crate) service: AppService,
@@ -393,6 +442,8 @@ pub struct ServerState {
     pub(crate) ai_reconfigure: Arc<AsyncMutex<()>>,
     #[cfg(test)]
     pub(crate) ai_reconfigure_test_gate: Arc<AiReconfigureTestGate>,
+    #[cfg(test)]
+    pub(crate) ai_response_setup_test_gate: Arc<AiResponseSetupTestGate>,
     /// Random per-process instance id shared with runtime metadata and health.
     instance_id: Arc<str>,
 }
@@ -476,6 +527,8 @@ impl ServerState {
             ai_reconfigure: Arc::new(AsyncMutex::new(())),
             #[cfg(test)]
             ai_reconfigure_test_gate: Arc::new(AiReconfigureTestGate::default()),
+            #[cfg(test)]
+            ai_response_setup_test_gate: Arc::new(AiResponseSetupTestGate::default()),
             instance_id: Arc::from(generate_instance_id()),
         })
     }
@@ -1026,6 +1079,22 @@ fn api_route_table() -> Router<ServerState> {
         .route(
             "/api/v1/ai/sessions/{session_id}/responses",
             post(create_ai_response).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/daily-briefing",
+            post(create_ai_daily_briefing).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/messages/{message_id}/edit",
+            post(edit_ai_response).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/messages/{message_id}/retry",
+            post(retry_ai_response).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/messages/{message_id}/regenerate",
+            post(regenerate_ai_response).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
         )
         .route("/api/v1/ai/runs/{run_id}/cancel", post(cancel_ai_run))
         .route("/api/v1/ai/approvals/{approval_id}", get(get_ai_approval))
@@ -1745,6 +1814,10 @@ impl Modify for SecurityAddon {
         routes_ai::delete_ai_session,
         routes_ai::list_ai_messages,
         routes_ai::create_ai_response,
+        routes_ai_turns::create_ai_daily_briefing,
+        routes_ai_turns::edit_ai_response,
+        routes_ai_turns::retry_ai_response,
+        routes_ai_turns::regenerate_ai_response,
         routes_ai::cancel_ai_run,
         routes_ai_approvals::get_ai_approval,
         routes_ai_approvals::approve_ai_approval,
@@ -1940,6 +2013,8 @@ impl Modify for SecurityAddon {
         routes_ai::DiscoveredModelDto,
         routes_ai::ModelDiscoveryResponse,
         routes_ai::CreateAiResponseRequest,
+        routes_ai_turns::EmptyAiResponseActionRequest,
+        routes_ai_turns::EditAiResponseRequest,
         routes_ai::CancelAiRunResponse,
         ai_chat::AiRunSseEnvelope,
         ai_chat::AiRunEventType,

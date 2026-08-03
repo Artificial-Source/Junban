@@ -17,7 +17,8 @@ pub use ai::{
     CancelAiResponseRequest, ClearAiCredentialRequest, ClearAiSessionRequest,
     CreateAiMemoryRequest, CreateAiSessionRequest, DeleteAiMemoryRequest, DeleteAiSessionRequest,
     FinishAiResponseRequest, LinkAiSessionMemoryRequest, ListAiMemoriesRequest,
-    ListAiMessagesRequest, ListAiSessionsRequest, ProposeAiApprovalRequest, RenameAiSessionRequest,
+    ListAiMessagesRequest, ListAiSessionsRequest, PreparedAiResponse, ProposeAiApprovalRequest,
+    RenameAiSessionRequest, ReserveDailyAiResponseRequest, RewriteAiResponseRequest,
     SelectAiMemoriesRequest, SetAiApprovalStatusRequest, UpdateAiMemoryRequest,
     UpsertAiMessageRequest, UpsertAiRunStateRequest,
 };

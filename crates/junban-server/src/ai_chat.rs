@@ -16,8 +16,8 @@ use junban_ai::{
     ProviderError, ProviderKind, SecretString, ToolCall, descriptor,
 };
 use junban_app::{
-    AppError, CancelAiResponseRequest, FinishAiResponseRequest, ProposeAiApprovalRequest,
-    UpsertAiMessageRequest, UpsertAiRunStateRequest,
+    AppError, CancelAiResponseRequest, FinishAiResponseRequest, PreparedAiResponse,
+    ProposeAiApprovalRequest, UpsertAiMessageRequest, UpsertAiRunStateRequest,
 };
 use junban_domain::{
     AI_ASSISTANT_TEXT_BYTES_MAX, AiMessage, AiMessageContent, AiMessageRole, AiMessageStatus,
@@ -32,8 +32,8 @@ use utoipa::ToSchema;
 use crate::{
     AiRunGuard, AiRuntimeSupervisor, AiTerminalOutcome, RequestId, ServerState,
     ai_context::{
-        AiContextError, AiContextMetadata, assemble_context, load_context_memories,
-        load_recent_messages,
+        AiContextError, AiContextMetadata, assemble_context, assemble_daily_briefing_context,
+        load_context_memories, load_recent_messages,
     },
     ai_identity::AiResponseIdentity,
     ai_tool_executor::{ToolExecContext, execute_tool},
@@ -45,7 +45,7 @@ use crate::{
 };
 
 pub const AI_RESPONSE_CHANNEL_CAPACITY: usize = 64;
-const RUN_GENERATION: u64 = 1;
+pub(crate) const RUN_GENERATION: u64 = 1;
 const STATIC_FAILED_CODE: &str = "ai_run_failed";
 const MAX_PROVIDER_ROUNDS: u8 = 8;
 const MAX_PROVIDER_CALL_ID_BYTES: usize = 256;
@@ -78,6 +78,8 @@ pub enum AiRunEventType {
     RunFailed,
 }
 
+pub type AiSse = Sse<KeepAliveStream<AiResponseStream>>;
+
 pub struct AiResponseStream {
     receiver: mpsc::Receiver<Result<SseEvent, Infallible>>,
     _permit: SseConnectionPermit,
@@ -100,6 +102,273 @@ impl Drop for AiResponseStream {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum PreparedPrompt<'a> {
+    User {
+        message: &'a str,
+        focused_task_id: Option<TaskId>,
+    },
+    DailyBriefing {
+        briefing_date: &'a str,
+    },
+}
+
+pub(crate) struct PreparedProviderResponse {
+    endpoint: ProviderEndpoint,
+    request: ProviderChatRequest,
+    metadata: AiContextMetadata,
+}
+
+pub(crate) async fn preflight_prepared_response(
+    state: &ServerState,
+    request_id: &RequestId,
+    session_id: AiSessionId,
+    history: &[AiMessage],
+    prompt: PreparedPrompt<'_>,
+) -> Result<PreparedProviderResponse, ApiError> {
+    let session = state
+        .service
+        .get_ai_session(session_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, request_id))?;
+    if session.status != AiSessionStatus::Active {
+        return Err(ApiError::new(
+            axum::http::StatusCode::CONFLICT,
+            "ai_session_inactive",
+            "AI session is not active",
+            false,
+            request_id,
+        ));
+    }
+    let settings = state
+        .service
+        .get_settings()
+        .await
+        .map_err(|error| ApiError::from_app(error, request_id))?;
+    let ai = settings.ai;
+    if !ai.enabled {
+        return Err(config_error(
+            "confirmed AI configuration is disabled",
+            request_id,
+        ));
+    }
+    if matches!(prompt, PreparedPrompt::DailyBriefing { .. }) && !ai.daily_briefing_enabled {
+        return Err(config_error(
+            "confirmed daily briefing configuration is disabled",
+            request_id,
+        ));
+    }
+    let provider = ai
+        .provider
+        .ok_or_else(|| config_error("confirmed AI provider is unavailable", request_id))?;
+    let model = ai
+        .model
+        .as_ref()
+        .ok_or_else(|| config_error("confirmed AI model is unavailable", request_id))?;
+    let base_url = ai
+        .base_url
+        .as_ref()
+        .ok_or_else(|| config_error("confirmed AI base URL is unavailable", request_id))?;
+    let memories = load_context_memories(&state.service, session_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, request_id))?;
+    let context = match prompt {
+        PreparedPrompt::User {
+            message,
+            focused_task_id,
+        } => {
+            validate_user_message(message, request_id)?;
+            let focused_task = match focused_task_id {
+                Some(task_id) => Some(
+                    state
+                        .service
+                        .get_task(task_id)
+                        .await
+                        .map_err(|error| ApiError::from_app(error, request_id))?,
+                ),
+                None => None,
+            };
+            assemble_context(
+                ai.custom_instructions.as_str(),
+                &memories,
+                focused_task.as_ref(),
+                history,
+                message,
+            )
+        }
+        PreparedPrompt::DailyBriefing { briefing_date } => assemble_daily_briefing_context(
+            ai.custom_instructions.as_str(),
+            &memories,
+            history,
+            briefing_date,
+            ai.default_energy,
+        ),
+    }
+    .map_err(|error| context_error(error, request_id))?;
+    let credential = match ai.credential_id {
+        Some(id) => Some(state.service.resolve_ai_secret(id).await.map_err(
+            |error| match error {
+                AppError::NotFound => {
+                    config_error("confirmed AI credential is unavailable", request_id)
+                }
+                other => ApiError::from_app(other, request_id),
+            },
+        )?),
+        None => None,
+    };
+    let endpoint = ProviderEndpoint::resolve(
+        descriptor(provider),
+        Some(base_url.as_str()),
+        credential
+            .as_ref()
+            .map(|secret| SecretString::new(secret.expose())),
+    )
+    .map_err(|_| config_error("confirmed AI endpoint is invalid", request_id))?;
+    let request = ProviderChatRequest {
+        model: ModelId::new(model.as_str())
+            .map_err(|_| config_error("confirmed AI model is invalid", request_id))?,
+        messages: context.messages,
+        tools: tool_specs().to_vec(),
+        max_output_tokens: None,
+    };
+    request
+        .validate_bounds()
+        .map_err(|_| config_error("assembled AI request is invalid", request_id))?;
+    Ok(PreparedProviderResponse {
+        endpoint,
+        request,
+        metadata: context.metadata,
+    })
+}
+
+pub(crate) async fn start_prepared_response<F>(
+    state: ServerState,
+    request_id: RequestId,
+    identity: AiResponseIdentity,
+    permit: SseConnectionPermit,
+    serial: tokio::sync::OwnedMutexGuard<()>,
+    prepared_provider: PreparedProviderResponse,
+    prepare: F,
+) -> Result<AiSse, ApiError>
+where
+    F: std::future::Future<Output = Result<PreparedAiResponse, AppError>> + Send + 'static,
+{
+    let (sender, receiver) = mpsc::channel(AI_RESPONSE_CHANNEL_CAPACITY);
+    let (ready_sender, ready_receiver) = tokio::sync::oneshot::channel();
+    let setup_state = state.clone();
+    let setup_request_id = request_id.clone();
+    tokio::spawn(async move {
+        #[cfg(test)]
+        setup_state
+            .ai_response_setup_test_gate
+            .pause(crate::AiResponseSetupStage::BeforeCommit)
+            .await;
+        let prepared = match prepare.await {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let _ = ready_sender.send(Err(ApiError::from_app(error, &setup_request_id)));
+                return;
+            }
+        };
+        if prepared.assistant_message.id != identity.assistant_message_id
+            || prepared.assistant_message.session_id != prepared.run.session_id
+            || prepared.assistant_message.turn_id != identity.turn_id
+            || prepared.assistant_message.status != AiMessageStatus::Streaming
+            || prepared.run.run_id != identity.run_id
+            || prepared.run.assistant_message_id != identity.assistant_message_id
+            || prepared.run.turn_id != identity.turn_id
+            || prepared.run.generation != RUN_GENERATION
+            || prepared.run.state != AiRunPhase::Running
+        {
+            let _ = ready_sender.send(Err(response_state_conflict(&setup_request_id)));
+            return;
+        }
+        let running = prepared.run;
+        #[cfg(test)]
+        setup_state
+            .ai_response_setup_test_gate
+            .pause(crate::AiResponseSetupStage::AfterCommit)
+            .await;
+        let guard = match setup_state
+            .ai_runtime()
+            .admit_run(identity.run_id, RUN_GENERATION)
+        {
+            Ok(guard) => guard,
+            Err(_) => {
+                let result = finish_response(
+                    &setup_state.service,
+                    identity,
+                    identity.finish_operation_id,
+                    &running,
+                    AiRunPhase::Failed,
+                    prepared.assistant_message.content,
+                )
+                .await;
+                let _ = ready_sender.send(match result {
+                    Ok(_) => Ok(permit),
+                    Err(error) => Err(ApiError::from_app(error, &setup_request_id)),
+                });
+                drop(serial);
+                let mut sequence = 0;
+                let _ = send_envelope(
+                    &sender,
+                    envelope(
+                        identity.run_id,
+                        1,
+                        AiRunEventType::RunStarted,
+                        json!({"replay": true}),
+                    ),
+                )
+                .await;
+                sequence += 1;
+                send_static_failed(
+                    &sender,
+                    identity.run_id,
+                    &mut sequence,
+                    Some(identity.assistant_message_id),
+                )
+                .await;
+                return;
+            }
+        };
+        #[cfg(test)]
+        setup_state
+            .ai_response_setup_test_gate
+            .pause(crate::AiResponseSetupStage::AfterAdmission)
+            .await;
+        let _ = ready_sender.send(Ok(permit));
+        drop(serial);
+        orchestrate(
+            DurableRun {
+                service: setup_state.service.clone(),
+                identity,
+                running,
+            },
+            guard,
+            prepared_provider.endpoint,
+            prepared_provider.request,
+            prepared_provider.metadata,
+            sender,
+        )
+        .await;
+    });
+
+    let permit = ready_receiver.await.map_err(|_| {
+        ApiError::new(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "ai_setup_unavailable",
+            "AI response setup is unavailable",
+            true,
+            &request_id,
+        )
+    })??;
+    Ok(sse(AiResponseStream {
+        receiver,
+        _permit: permit,
+        cancel: Some((Arc::clone(state.ai_runtime()), identity.run_id)),
+    }))
+}
+
 pub async fn start_response(
     state: ServerState,
     request_id: &RequestId,
@@ -108,7 +377,7 @@ pub async fn start_response(
     body: CreateAiResponseRequest,
     permit: SseConnectionPermit,
     serial: tokio::sync::OwnedMutexGuard<()>,
-) -> Result<Sse<KeepAliveStream<AiResponseStream>>, ApiError> {
+) -> Result<AiSse, ApiError> {
     validate_user_message(&body.message, request_id)?;
     let focused_task_id = body
         .focused_task_id
@@ -117,6 +386,11 @@ pub async fn start_response(
         .transpose()
         .map_err(|error| validation_error(error, request_id))?;
     let identity = AiResponseIdentity::derive(operation_id);
+    state
+        .service
+        .ensure_ai_response_current(identity.run_id)
+        .await
+        .map_err(|error| ApiError::from_app(error, request_id))?;
 
     match state.service.get_ai_run_state(identity.run_id).await {
         Ok(run) => {
@@ -177,99 +451,20 @@ pub async fn start_response(
         Err(error) => return Err(ApiError::from_app(error, request_id)),
     }
 
-    let session = state
-        .service
-        .get_ai_session(session_id)
-        .await
-        .map_err(|error| ApiError::from_app(error, request_id))?;
-    if session.status != AiSessionStatus::Active {
-        return Err(ApiError::new(
-            axum::http::StatusCode::CONFLICT,
-            "ai_session_inactive",
-            "AI session is not active",
-            false,
-            request_id,
-        ));
-    }
-
-    let settings = state
-        .service
-        .get_settings()
-        .await
-        .map_err(|error| ApiError::from_app(error, request_id))?;
-    let ai = settings.ai;
-    if !ai.enabled {
-        return Err(config_error(
-            "confirmed AI configuration is disabled",
-            request_id,
-        ));
-    }
-    let provider = ai
-        .provider
-        .ok_or_else(|| config_error("confirmed AI provider is unavailable", request_id))?;
-    let model = ai
-        .model
-        .as_ref()
-        .ok_or_else(|| config_error("confirmed AI model is unavailable", request_id))?;
-    let base_url = ai
-        .base_url
-        .as_ref()
-        .ok_or_else(|| config_error("confirmed AI base URL is unavailable", request_id))?;
-
-    let focused_task = match focused_task_id {
-        Some(task_id) => Some(
-            state
-                .service
-                .get_task(task_id)
-                .await
-                .map_err(|error| ApiError::from_app(error, request_id))?,
-        ),
-        None => None,
-    };
     let history = load_recent_messages(&state.service, session_id)
         .await
         .map_err(|error| ApiError::from_app(error, request_id))?;
-    let memories = load_context_memories(&state.service, session_id)
-        .await
-        .map_err(|error| ApiError::from_app(error, request_id))?;
-    let context = assemble_context(
-        ai.custom_instructions.as_str(),
-        &memories,
-        focused_task.as_ref(),
+    let provider = preflight_prepared_response(
+        &state,
+        request_id,
+        session_id,
         &history,
-        &body.message,
+        PreparedPrompt::User {
+            message: &body.message,
+            focused_task_id,
+        },
     )
-    .map_err(|error| context_error(error, request_id))?;
-
-    let credential = match ai.credential_id {
-        Some(id) => Some(state.service.resolve_ai_secret(id).await.map_err(
-            |error| match error {
-                AppError::NotFound => {
-                    config_error("confirmed AI credential is unavailable", request_id)
-                }
-                other => ApiError::from_app(other, request_id),
-            },
-        )?),
-        None => None,
-    };
-    let endpoint = ProviderEndpoint::resolve(
-        descriptor(provider),
-        Some(base_url.as_str()),
-        credential
-            .as_ref()
-            .map(|secret| SecretString::new(secret.expose())),
-    )
-    .map_err(|_| config_error("confirmed AI endpoint is invalid", request_id))?;
-    let request = ProviderChatRequest {
-        model: ModelId::new(model.as_str())
-            .map_err(|_| config_error("confirmed AI model is invalid", request_id))?,
-        messages: context.messages,
-        tools: tool_specs().to_vec(),
-        max_output_tokens: None,
-    };
-    request
-        .validate_bounds()
-        .map_err(|_| config_error("assembled AI request is invalid", request_id))?;
+    .await?;
 
     persist_user(&state, identity, session_id, &body.message, focused_task_id)
         .await
@@ -319,9 +514,9 @@ pub async fn start_response(
     tokio::spawn(orchestrate(
         durable,
         guard,
-        endpoint,
-        request,
-        context.metadata,
+        provider.endpoint,
+        provider.request,
+        provider.metadata,
         sender,
     ));
 
@@ -469,6 +664,28 @@ async fn reconcile_inactive_response(
     )
     .await?;
     state.service.get_ai_run_state(identity.run_id).await
+}
+
+pub(crate) async fn resume_prepared_response(
+    state: &ServerState,
+    identity: AiResponseIdentity,
+    mut run: AiRunState,
+    permit: SseConnectionPermit,
+    serial: tokio::sync::OwnedMutexGuard<()>,
+    request_id: &RequestId,
+) -> Result<Sse<KeepAliveStream<AiResponseStream>>, ApiError> {
+    if !run.state.is_terminal() {
+        if state
+            .ai_runtime()
+            .is_active_generation(identity.run_id, RUN_GENERATION)
+        {
+            return Err(active_duplicate(request_id));
+        }
+        run = reconcile_inactive_response(state, identity, &run)
+            .await
+            .map_err(|error| ApiError::from_app(error, request_id))?;
+    }
+    replay_response(state, identity, run, permit, serial, request_id).await
 }
 
 async fn replay_response(
@@ -1678,6 +1895,21 @@ mod tests {
     use junban_ai::{ProviderPreset, descriptor};
 
     use super::*;
+
+    #[test]
+    fn ai_sse_alias_is_owned_by_chat_without_a_route_dependency() {
+        let chat = include_str!("ai_chat.rs");
+        let actions = include_str!("ai_response_actions.rs");
+        let routes = include_str!("routes_ai_turns.rs");
+        let production_chat = chat.split_once("\n#[cfg(test)]").unwrap().0;
+        assert!(
+            production_chat.contains("pub type AiSse = Sse<KeepAliveStream<AiResponseStream>>;")
+        );
+        assert!(!production_chat.contains("routes_ai_turns"));
+        assert!(actions.contains("AiSse, PreparedPrompt"));
+        assert!(!actions.contains("crate::routes_ai_turns::AiSse"));
+        assert!(!routes.contains("pub type AiSse"));
+    }
 
     struct PendingStream;
 

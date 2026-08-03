@@ -1015,12 +1015,7 @@ pub async fn create_ai_response(
     Path(session_id): Path<String>,
     headers: HeaderMap,
     payload: Result<Json<CreateAiResponseRequest>, JsonRejection>,
-) -> Result<
-    axum::response::sse::Sse<
-        axum::response::sse::KeepAliveStream<crate::ai_chat::AiResponseStream>,
-    >,
-    ApiError,
-> {
+) -> Result<crate::ai_chat::AiSse, ApiError> {
     let session_id = parse_path_id(&session_id, AiSessionId::parse, &request_id)?;
     let operation_id = operation_id(&headers, &request_id)?;
     let payload = extract_json_with_limit(payload, &request_id, MAX_AI_RESPONSE_BODY_BYTES)?;

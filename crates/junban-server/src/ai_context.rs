@@ -101,10 +101,51 @@ pub fn assemble_context(
     history: &[AiMessage],
     current_user: &str,
 ) -> Result<AssembledAiContext, AiContextError> {
-    if current_user.trim().is_empty() {
+    assemble_context_inner(
+        custom_instructions,
+        memories,
+        focused_task,
+        history,
+        Some(current_user),
+    )
+}
+
+/// Build a daily context with one ephemeral server-owned user instruction.
+pub fn assemble_daily_briefing_context(
+    custom_instructions: &str,
+    memories: &[AiMemory],
+    history: &[AiMessage],
+    briefing_date: &str,
+    default_energy: Option<u8>,
+) -> Result<AssembledAiContext, AiContextError> {
+    let energy = default_energy
+        .map(|value| format!(" Confirmed default energy: {value}/5."))
+        .unwrap_or_default();
+    let prompt = format!(
+        "Prepare the Junban daily briefing for {briefing_date}. Call the read-only \
+         plan_my_day tool first for that date, then summarize the priorities and propose a \
+         practical plan. Do not apply or claim to apply schedule changes.{energy}"
+    );
+    assemble_context_inner(
+        custom_instructions,
+        memories,
+        None,
+        history,
+        Some(prompt.as_str()),
+    )
+}
+
+fn assemble_context_inner(
+    custom_instructions: &str,
+    memories: &[AiMemory],
+    focused_task: Option<&Task>,
+    history: &[AiMessage],
+    current_user: Option<&str>,
+) -> Result<AssembledAiContext, AiContextError> {
+    if current_user.is_some_and(|message| message.trim().is_empty()) {
         return Err(AiContextError::EmptyMessage);
     }
-    if current_user.len() > junban_domain::AI_USER_INPUT_BYTES_MAX {
+    if current_user.is_some_and(|message| message.len() > junban_domain::AI_USER_INPUT_BYTES_MAX) {
         return Err(AiContextError::MessageTooLarge);
     }
 
@@ -114,12 +155,12 @@ pub fn assemble_context(
             "Custom instructions:\n{custom_instructions}"
         )));
     }
-    let current = ChatMessage::user(current_user);
+    let current = current_user.map(ChatMessage::user);
     let required_bytes = required
         .iter()
         .map(message_bytes)
         .sum::<usize>()
-        .saturating_add(message_bytes(&current));
+        .saturating_add(current.as_ref().map(message_bytes).unwrap_or(0));
     if !fits(required_bytes) {
         return Err(AiContextError::RequiredContextTooLarge);
     }
@@ -177,7 +218,9 @@ pub fn assemble_context(
     }
     messages.extend(selected_memories.iter().cloned());
     messages.extend(selected_history.iter().cloned());
-    messages.push(current);
+    if let Some(current) = current {
+        messages.push(current);
+    }
 
     Ok(AssembledAiContext {
         messages,
@@ -323,6 +366,42 @@ mod tests {
         );
         assert!(first.metadata.utf8_bytes <= AI_CONTEXT_UTF8_BYTES_MAX);
         assert!(first.metadata.approximate_tokens <= AI_CONTEXT_TOKENS_MAX);
+    }
+
+    #[test]
+    fn daily_briefing_uses_one_ephemeral_server_user_instruction() {
+        let context = assemble_daily_briefing_context(
+            "Keep custom guidance.",
+            &[],
+            &[message(1, AiMessageRole::Assistant, "prior")],
+            "2026-08-04",
+            Some(4),
+        )
+        .unwrap();
+        let user_messages: Vec<_> = context
+            .messages
+            .iter()
+            .filter(|message| message.role == junban_ai::ChatRole::User)
+            .collect();
+        assert_eq!(user_messages.len(), 1);
+        let instruction = &user_messages[0].content;
+        assert!(instruction.contains("2026-08-04"));
+        assert!(instruction.contains("read-only plan_my_day tool first"));
+        assert!(instruction.contains("Do not apply or claim to apply"));
+        assert!(instruction.contains("4/5"));
+        assert!(
+            context
+                .messages
+                .iter()
+                .any(|message| message.role == junban_ai::ChatRole::System
+                    && message.content.contains("Keep custom guidance."))
+        );
+        assert!(
+            context
+                .messages
+                .iter()
+                .any(|message| message.content == "prior")
+        );
     }
 
     #[test]

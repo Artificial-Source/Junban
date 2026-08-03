@@ -294,6 +294,8 @@ fn cleanup_expired_receipts(
                       AND run.state = 'dispatching'
                       AND receipt.created_at >= approval.updated_at
                   )
+                UNION ALL
+                SELECT 1 FROM ai_response_invalidations WHERE expires_at <= ?1
             )",
             [&now],
             |row| row.get(0),
@@ -304,6 +306,12 @@ fn cleanup_expired_receipts(
     }
 
     let transaction = connection.transaction().map_err(storage_error)?;
+    transaction
+        .execute(
+            "DELETE FROM ai_response_invalidations WHERE expires_at <= ?1",
+            [&now],
+        )
+        .map_err(storage_error)?;
     // Remove expired undo rows first (by source or undone_by link) so FK RESTRICT cannot
     // pin open, undone, or undo-of-undo receipts past the retention window.
     transaction

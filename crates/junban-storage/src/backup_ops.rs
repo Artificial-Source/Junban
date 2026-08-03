@@ -349,6 +349,17 @@ fn open_and_validate_payload(
     connection
         .pragma_update(None, "foreign_keys", true)
         .map_err(storage_error)?;
+
+    // The framed payload and its hash have already been authenticated. Authenticate
+    // SQLite integrity before applying only the known in-place current-v6 response-
+    // authority correction; canonical schema and all semantic checks still follow.
+    assert_integrity(&connection).map_err(|_| invalid_backup())?;
+    let schema_version = read_schema_version(&connection).map_err(|_| invalid_backup())?;
+    if schema_version != manifest.schema_version || schema_version != CURRENT_SCHEMA_VERSION {
+        return Err(invalid_backup());
+    }
+    migration::repair_current_v6_ai_response_authority(&connection)
+        .map_err(|_| invalid_backup())?;
     validate_payload(&connection, manifest, profile_dir)?;
     Ok(connection)
 }
@@ -623,6 +634,11 @@ fn validate_ai_rows(tx: &Transaction<'_>) -> Result<(), RepositoryError> {
                     OR LENGTH(CAST(COALESCE(operation_id, '') AS BLOB)) > 64
                     OR LENGTH(CAST(created_at AS BLOB)) > 64
                     OR LENGTH(CAST(updated_at AS BLOB)) > 64)
+                OR EXISTS(SELECT 1 FROM ai_response_invalidations WHERE
+                    LENGTH(CAST(run_id AS BLOB)) > 64
+                    OR LENGTH(CAST(session_id AS BLOB)) > 64
+                    OR LENGTH(CAST(invalidating_operation_id AS BLOB)) > 64
+                    OR LENGTH(CAST(expires_at AS BLOB)) > 64)
                 OR EXISTS(SELECT 1 FROM ai_run_state WHERE
                     LENGTH(CAST(run_id AS BLOB)) > 64
                     OR LENGTH(CAST(session_id AS BLOB)) > 64
@@ -690,6 +706,7 @@ fn validate_ai_rows(tx: &Transaction<'_>) -> Result<(), RepositoryError> {
         ));
     }
 
+    crate::ai_ops::validate_ai_response_authority(tx)?;
     crate::ai_ops::validate_ai_approval_authority(tx)?;
 
     scan_text_ids(tx, "ai_sessions", |tx, raw| {
@@ -1858,7 +1875,10 @@ fn validate_subject(
             parse_canonical_ai_id(id, AiApprovalId::parse).map(|_| ())
         }
         (Some("ai_message"), Some(id)) => parse_canonical_ai_id(id, AiMessageId::parse).map(|_| ()),
-        (Some("ai_run"), Some(id)) => parse_canonical_ai_id(id, AiRunId::parse).map(|_| ()),
+        (Some("ai_run" | "ai_response"), Some(id)) => {
+            parse_canonical_ai_id(id, AiRunId::parse).map(|_| ())
+        }
+        (Some("ai_response_rewrite"), Some("edit" | "retry" | "regenerate")) => Ok(()),
         (Some("ai_session_memory"), Some(id)) => {
             let (session, memory) = id.split_once(':').ok_or_else(|| {
                 RepositoryError::Storage("invalid AI session-memory subject".to_owned())
@@ -2795,6 +2815,70 @@ mod tests {
         rewrite_backup_with(dir, backup, |connection| {
             connection.execute_batch(sql).unwrap();
         })
+    }
+
+    #[tokio::test]
+    async fn restore_repairs_only_known_pre_wave3g_schema_v6_objects() {
+        let (dir, owner) = temp_profile();
+        let repo = owner.repository();
+        let backup = repo.create_backup().await.unwrap();
+        let legacy = rewrite_backup_payload(
+            &dir,
+            &backup,
+            "DROP INDEX idx_ai_messages_daily_briefing_active;
+             DROP INDEX idx_ai_messages_briefing_date;
+             DROP TABLE ai_response_invalidations;",
+        );
+
+        let candidate = repo.prepare_restore(legacy).await.unwrap();
+        let repaired = Connection::open(candidate.path()).unwrap();
+        let repaired_objects: i64 = repaired
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name IN (
+                    'idx_ai_messages_daily_briefing_active',
+                    'idx_ai_messages_briefing_date',
+                    'ai_response_invalidations',
+                    'idx_ai_response_invalidations_session',
+                    'idx_ai_response_invalidations_expiry'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(repaired_objects, 5);
+        drop(repaired);
+        repo.restore_backup(candidate).await.unwrap();
+        drop(repo);
+        drop(owner);
+
+        let reopened = ProfileOwner::open(dir.path()).unwrap();
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        assert_canonical_schema(&connection, dir.path()).unwrap();
+        drop(connection);
+        drop(reopened);
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_conflicting_known_v6_repair_object() {
+        let (dir, owner) = temp_profile();
+        let repo = owner.repository();
+        let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;
+        let backup = repo.create_backup().await.unwrap();
+        let hostile = rewrite_backup_payload(
+            &dir,
+            &backup,
+            "DROP TABLE ai_response_invalidations;
+             CREATE TABLE ai_response_invalidations(run_id TEXT PRIMARY KEY);",
+        );
+
+        assert!(matches!(
+            repo.prepare_restore(hostile).await,
+            Err(RepositoryError::Validation(_))
+        ));
+        assert_eq!(
+            repo.get_sync_state().await.unwrap().event_epoch,
+            epoch_before
+        );
     }
 
     fn rewrite_backup_with(

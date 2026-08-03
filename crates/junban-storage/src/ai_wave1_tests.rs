@@ -119,13 +119,13 @@ fn fresh_migrate_reaches_v6_with_disabled_ai_defaults() {
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN (
                 'ai_sessions','ai_messages','ai_memories','ai_session_memories',
-                'ai_tool_approvals','ai_run_state','ai_quota'
+                'ai_tool_approvals','ai_run_state','ai_response_invalidations','ai_quota'
              )",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(tables, 7);
+    assert_eq!(tables, 8);
     let assistant_not_null: i64 = connection
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('ai_run_state')
@@ -149,6 +149,33 @@ fn fresh_migrate_reaches_v6_with_disabled_ai_defaults() {
             && approval_index_sql.contains("approval_id IS NOT NULL"),
         "fresh schema v6 must include partial ai_run_state.approval_id index: {approval_index_sql}"
     );
+    let daily_plan: Vec<String> = connection
+        .prepare(
+            "EXPLAIN QUERY PLAN SELECT 1 FROM ai_messages
+             WHERE role = 'assistant' AND status IN ('streaming', 'completed')
+               AND json_type(content_json, '$.briefing_date') = 'text'
+               AND json_extract(content_json, '$.briefing_date') = ?1",
+        )
+        .unwrap()
+        .query_map(["2026-08-04"], |row| row.get::<_, String>(3))
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect();
+    assert!(
+        daily_plan
+            .iter()
+            .any(|step| step.contains("idx_ai_messages_briefing_date")),
+        "daily reservation must search the partial date index: {}",
+        daily_plan.join(" | ")
+    );
+    let invalidation_foreign_keys: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_foreign_key_list('ai_response_invalidations')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(invalidation_foreign_keys, 0);
     fs::remove_dir_all(profile).unwrap();
 }
 
@@ -159,7 +186,31 @@ fn current_v6_repairs_and_uses_dispatch_recovery_index() {
     connection
         .execute("DROP INDEX idx_ai_run_state_state", [])
         .unwrap();
+    connection
+        .execute("DROP INDEX idx_ai_messages_daily_briefing_active", [])
+        .unwrap();
+    connection
+        .execute("DROP TABLE ai_response_invalidations", [])
+        .unwrap();
     migration::migrate(&mut connection, &profile).unwrap();
+    let repaired: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE (type = 'table' AND name = 'ai_response_invalidations')
+                OR (type = 'index' AND name = 'idx_ai_messages_daily_briefing_active')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(repaired, 2);
+    let invalidation_foreign_keys: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_foreign_key_list('ai_response_invalidations')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(invalidation_foreign_keys, 0);
     let plan: Vec<String> = connection
         .prepare(
             "EXPLAIN QUERY PLAN SELECT a.id
@@ -180,6 +231,87 @@ fn current_v6_repairs_and_uses_dispatch_recovery_index() {
         plan.join(" | ")
     );
     fs::remove_dir_all(profile).unwrap();
+}
+
+#[test]
+fn normal_open_rejects_malformed_response_invalidation_ids_and_timestamps() {
+    for (run_id, expires_at) in [
+        ("not-a-run".to_owned(), now().to_string()),
+        (AiRunId::new().to_string(), "not-a-timestamp".to_owned()),
+    ] {
+        let profile = temp_profile();
+        let mut connection = open_migrated(&profile);
+        let session_id = AiSessionId::new();
+        ai_ops::create_ai_session(
+            &mut connection,
+            op(),
+            session_id,
+            "invalidations".into(),
+            now(),
+        )
+        .unwrap();
+        connection
+            .execute(
+                "INSERT INTO ai_response_invalidations(
+                    run_id, session_id, invalidating_operation_id, expires_at
+                 ) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![run_id, session_id.to_string(), op().to_string(), expires_at,],
+            )
+            .unwrap();
+        drop(connection);
+        assert!(matches!(
+            ProfileOwner::open(&profile),
+            Err(crate::OpenError::Database(_))
+        ));
+        fs::remove_dir_all(profile).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn restore_preflight_rejects_malformed_response_invalidation_ids_and_timestamps() {
+    for (run_id, expires_at) in [
+        ("not-a-run".to_owned(), now().to_string()),
+        (AiRunId::new().to_string(), "not-a-timestamp".to_owned()),
+    ] {
+        let profile = temp_profile();
+        let mut connection = open_migrated(&profile);
+        let session_id = AiSessionId::new();
+        ai_ops::create_ai_session(
+            &mut connection,
+            op(),
+            session_id,
+            "restore invalidation".into(),
+            now(),
+        )
+        .unwrap();
+        let backup = crate::backup_ops::create_backup(&connection, &profile).unwrap();
+        let hostile =
+            reframe_backup_with(&profile, &backup, "response-invalidation", |candidate| {
+                candidate
+                    .execute(
+                        "INSERT INTO ai_response_invalidations(
+                            run_id, session_id, invalidating_operation_id, expires_at
+                         ) VALUES (?1, ?2, ?3, ?4)",
+                        rusqlite::params![
+                            run_id,
+                            session_id.to_string(),
+                            op().to_string(),
+                            expires_at,
+                        ],
+                    )
+                    .unwrap();
+            });
+        drop(connection);
+        let owner = ProfileOwner::open(&profile).unwrap();
+        let repo = owner.repository();
+        assert!(matches!(
+            repo.prepare_restore(hostile).await,
+            Err(RepositoryError::Validation(_))
+        ));
+        drop(repo);
+        drop(owner);
+        fs::remove_dir_all(profile).unwrap();
+    }
 }
 
 #[test]

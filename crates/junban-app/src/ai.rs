@@ -9,8 +9,9 @@ use jiff::Timestamp;
 use junban_domain::{
     AI_CONTEXT_MEMORIES_MAX, AI_MEMORY_PAGE_MAX, AI_MESSAGE_PAGE_MAX, AI_SECRET_BYTES_MAX,
     AI_SESSION_PAGE_MAX, AiApprovalId, AiApprovalStatus, AiCredentialId, AiMemory, AiMemoryId,
-    AiMessage, AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus, AiRunId, AiRunState,
-    AiSecretKind, AiSession, AiSessionId, AiTurnId, OperationId, ValidationError,
+    AiMessage, AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus,
+    AiResponseRewriteKind, AiRunId, AiRunState, AiSecretKind, AiSession, AiSessionId, AiTurnId,
+    OperationId, TaskId, ValidationError,
 };
 use serde::{Deserialize, Serialize};
 
@@ -231,6 +232,41 @@ pub struct SetAiApprovalStatusRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpsertAiRunStateRequest {
     pub state: AiRunState,
+}
+
+/// Deterministic identities and caller input for one assistant-only daily reservation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReserveDailyAiResponseRequest {
+    pub session_id: AiSessionId,
+    pub briefing_date: String,
+    pub turn_id: AiTurnId,
+    pub assistant_message_id: AiMessageId,
+    pub run_id: AiRunId,
+    pub generation: u64,
+}
+
+/// Deterministic identities and replacement input for one exact history rewrite.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RewriteAiResponseRequest {
+    pub kind: AiResponseRewriteKind,
+    pub session_id: AiSessionId,
+    pub target_message_id: AiMessageId,
+    pub message: String,
+    pub focused_task_id: Option<TaskId>,
+    pub turn_id: AiTurnId,
+    pub user_message_id: AiMessageId,
+    pub assistant_message_id: AiMessageId,
+    pub run_id: AiRunId,
+    pub generation: u64,
+}
+
+/// Durable response seed returned by daily reservation and suffix rewrite transactions.
+#[derive(Debug, Clone)]
+pub struct PreparedAiResponse {
+    pub mutation: CommittedMutation,
+    pub user_message: Option<AiMessage>,
+    pub assistant_message: AiMessage,
+    pub run: AiRunState,
 }
 
 /// Atomically cancel one reserved assistant response and its exact durable run.

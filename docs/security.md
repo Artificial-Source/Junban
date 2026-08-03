@@ -39,7 +39,9 @@ The profile directory is owner-only (`0700`) and its database, lock, access toke
 
 The Windows implementation follows the official [`GetSecurityInfo`](https://learn.microsoft.com/windows/win32/api/aclapi/nf-aclapi-getsecurityinfo), [`SetSecurityInfo`](https://learn.microsoft.com/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo), and [`MoveFileExW`](https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-movefileexw) contracts. `PROTECTED_DACL_SECURITY_INFORMATION` prevents inherited ACEs on the newly opened file, and `MOVEFILE_WRITE_THROUGH` requires the move to be flushed before success is reported.
 
-- Provider API keys and local tokens are secrets.
+- Provider API keys and local tokens are secrets. Confirmed provider/context/credential preflight completes before a daily or history-rewrite transaction; exact terminal action replay is provider-free.
+- Daily briefing and edit/retry/regenerate routes are operator-only. Strict bodies, deterministic action identities, 30-day removed-run tombstones, and one transaction per suffix rewrite prevent stale operation receipts from reviving deleted AI authority.
+- Daily provider prompts are ephemeral server-owned user messages that request the read-only `plan_my_day` tool first, include the exact date and confirmed default energy when configured, and prohibit schedule apply. They are not persisted and contain no profile/session/operation identifier or credential; custom instructions remain system messages.
 - Diagnostics and error logs must redact secrets and sensitive URLs.
 - Scoped automation credentials are private-file-backed and non-admin; the same-user local threat boundary is honest: filesystem access to the operator token remains full administrator authority.
 

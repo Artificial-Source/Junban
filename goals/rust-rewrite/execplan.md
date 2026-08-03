@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 5 are complete. Phase 6 is in progress; its provider registry, provider adapters, durable chat, exhaustive tool boundary, public approval decisions, multi-round provider loop, exact dispatch recovery, and Rust code-quality/DX checkpoint are complete. Daily briefing, edit/regenerate, React AI/voice integration, enabled-runtime evidence, and final Phase 6 closure remain.
+**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 5 are complete. Phase 6 is in progress; its provider registry, provider adapters, durable chat, exhaustive tool boundary, public approval decisions, multi-round provider loop, exact dispatch recovery, and Rust code-quality/DX checkpoint are complete. Durable daily briefing and typed edit/retry/regenerate actions are complete. React AI/voice integration, enabled-runtime evidence, and final Phase 6 closure remain.
 
 ## Purpose and user-visible outcome
 

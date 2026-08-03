@@ -30,9 +30,10 @@ use crate::{
     DeleteAiMemoryRequest, DeleteAiSessionRequest, DopamineMenuPage, EatTheFrogPage, EndOfDayPage,
     EventCatchUp, ExportFormat, FinishAiResponseRequest, LinkAiSessionMemoryRequest,
     ListAiMemoriesRequest, ListAiMessagesRequest, ListAiSessionsRequest, MoveTarget, NudgesPage,
-    ProjectDraft, ProjectPatch, ProposeAiApprovalRequest, RenameAiSessionRequest, ReorderScope,
-    ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError, SavedFilterDraft,
-    SavedFilterPatch, SectionDraft, SectionPatch, SelectAiMemoriesRequest,
+    PreparedAiResponse, ProjectDraft, ProjectPatch, ProposeAiApprovalRequest,
+    RenameAiSessionRequest, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    Repository, RepositoryError, ReserveDailyAiResponseRequest, RewriteAiResponseRequest,
+    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, SelectAiMemoriesRequest,
     SetAiApprovalStatusRequest, StagedFile, StatsPage, SyncState, TagDraft, TagPatch, TaskJarPage,
     TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
     TemporalContext, TemporalSettings, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
@@ -1668,6 +1669,55 @@ where
             .map_err(AppError::from)
     }
 
+    pub async fn get_ai_run_for_assistant(
+        &self,
+        assistant_message_id: AiMessageId,
+    ) -> Result<AiRunState, AppError> {
+        self.repository
+            .get_ai_run_for_assistant(assistant_message_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn ensure_ai_response_current(&self, run_id: AiRunId) -> Result<(), AppError> {
+        self.repository
+            .ensure_ai_response_current(run_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn reserve_daily_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: ReserveDailyAiResponseRequest,
+    ) -> Result<PreparedAiResponse, AppError> {
+        let result = self
+            .repository
+            .reserve_daily_ai_response(operation_id, request, Timestamp::now())
+            .await
+            .map_err(AppError::from)?;
+        if result.mutation.newly_committed {
+            self.events.publish(result.mutation.event.clone());
+        }
+        Ok(result)
+    }
+
+    pub async fn rewrite_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: RewriteAiResponseRequest,
+    ) -> Result<PreparedAiResponse, AppError> {
+        let result = self
+            .repository
+            .rewrite_ai_response(operation_id, request, Timestamp::now())
+            .await
+            .map_err(AppError::from)?;
+        if result.mutation.newly_committed {
+            self.events.publish(result.mutation.event.clone());
+        }
+        Ok(result)
+    }
+
     pub async fn cancel_ai_response(
         &self,
         operation_id: OperationId,
@@ -3088,6 +3138,35 @@ mod tests {
         }
         fn get_ai_run_state(&self, _: AiRunId) -> crate::RepositoryFuture<'_, AiRunState> {
             self.calls.lock().unwrap().push("get_ai_run_state");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn get_ai_run_for_assistant(
+            &self,
+            _: AiMessageId,
+        ) -> crate::RepositoryFuture<'_, AiRunState> {
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn ensure_ai_response_current(&self, _: AiRunId) -> crate::RepositoryFuture<'_, ()> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push("ensure_ai_response_current");
+            Box::pin(async { Ok(()) })
+        }
+        fn reserve_daily_ai_response(
+            &self,
+            _: OperationId,
+            _: ReserveDailyAiResponseRequest,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, PreparedAiResponse> {
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn rewrite_ai_response(
+            &self,
+            _: OperationId,
+            _: RewriteAiResponseRequest,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, PreparedAiResponse> {
             Box::pin(async { Err(RepositoryError::NotFound) })
         }
         fn cancel_ai_response(

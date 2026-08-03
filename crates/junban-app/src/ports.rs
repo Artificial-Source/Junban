@@ -17,12 +17,13 @@ use junban_domain::{
 use crate::{
     AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
     AiSecretBytes, AiSessionCursor, AiSessionListPage, BulkAction, CatalogSnapshot, CommentPatch,
-    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, ProjectDraft, ProjectListPage,
-    ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview, RepositoryError,
-    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, StagedFile, TagDraft,
-    TagListPage, TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft,
-    TemplatePatch, TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
-    TimeblockingRangePage, TimeblockingRangeQuery,
+    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, PreparedAiResponse, ProjectDraft,
+    ProjectListPage, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    RepositoryError, ReserveDailyAiResponseRequest, RewriteAiResponseRequest, SavedFilterDraft,
+    SavedFilterPatch, SectionDraft, SectionPatch, StagedFile, TagDraft, TagListPage, TagPatch,
+    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
+    TimeblockingRangeQuery,
 };
 
 pub type RepositoryFuture<'a, T> =
@@ -721,6 +722,28 @@ pub trait Repository: Send + Sync + 'static {
     ) -> RepositoryFuture<'_, CommittedMutation>;
 
     fn get_ai_run_state(&self, run_id: AiRunId) -> RepositoryFuture<'_, AiRunState>;
+
+    fn get_ai_run_for_assistant(
+        &self,
+        assistant_message_id: AiMessageId,
+    ) -> RepositoryFuture<'_, AiRunState>;
+
+    /// Fail closed when a run was tombstoned by a later history rewrite.
+    fn ensure_ai_response_current(&self, run_id: AiRunId) -> RepositoryFuture<'_, ()>;
+
+    fn reserve_daily_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: ReserveDailyAiResponseRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, PreparedAiResponse>;
+
+    fn rewrite_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: RewriteAiResponseRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, PreparedAiResponse>;
 
     #[allow(clippy::too_many_arguments)]
     fn cancel_ai_response(

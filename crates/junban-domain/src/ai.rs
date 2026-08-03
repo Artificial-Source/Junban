@@ -1380,6 +1380,26 @@ pub struct AiToolApproval {
     pub updated_at: Timestamp,
 }
 
+/// Typed history action that replaces one conversation suffix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiResponseRewriteKind {
+    Edit,
+    Retry,
+    Regenerate,
+}
+
+impl AiResponseRewriteKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Edit => "edit",
+            Self::Retry => "retry",
+            Self::Regenerate => "regenerate",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AiRunPhase {

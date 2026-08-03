@@ -38,6 +38,9 @@ use crate::reminder_wake::{
 };
 use crate::sse::{MAX_SSE_CONNECTIONS, send_event};
 
+#[path = "tests_api/ai_response_actions.rs"]
+mod ai_response_action_tests;
+
 const HOST: &str = "127.0.0.1:4219";
 static TEST_CONTEXT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const TOKEN: &str = "test-token-that-is-never-written-to-runtime-metadata";
@@ -6872,6 +6875,22 @@ async fn ai_routes_are_operator_only_before_body_parsing() {
         (
             Method::POST,
             format!("/api/v1/ai/sessions/{session}/responses"),
+        ),
+        (
+            Method::POST,
+            format!("/api/v1/ai/sessions/{session}/daily-briefing"),
+        ),
+        (
+            Method::POST,
+            format!("/api/v1/ai/sessions/{session}/messages/{memory}/edit"),
+        ),
+        (
+            Method::POST,
+            format!("/api/v1/ai/sessions/{session}/messages/{memory}/retry"),
+        ),
+        (
+            Method::POST,
+            format!("/api/v1/ai/sessions/{session}/messages/{memory}/regenerate"),
         ),
         (Method::POST, format!("/api/v1/ai/runs/{session}/cancel")),
         (Method::POST, format!("/api/v1/ai/sessions/{session}/clear")),

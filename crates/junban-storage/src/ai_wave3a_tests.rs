@@ -8,20 +8,21 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use jiff::Timestamp;
+use jiff::{Timestamp, ToSpan};
 use junban_app::{
     AiCredentialBindingTarget, AiSecretBytes, BindAiCredentialRequest, ClearAiCredentialRequest,
     ClearAiSessionRequest, CommittedEvent, CreateAiMemoryRequest, CreateAiSessionRequest,
-    EventSink, EventType, FinishAiResponseRequest, JunbanService, LinkAiSessionMemoryRequest,
-    ListAiMemoriesRequest, ListAiSessionsRequest, ProposeAiApprovalRequest,
+    DeleteAiSessionRequest, EventSink, EventType, FinishAiResponseRequest, JunbanService,
+    LinkAiSessionMemoryRequest, ListAiMemoriesRequest, ListAiSessionsRequest,
+    ProposeAiApprovalRequest, ReserveDailyAiResponseRequest, RewriteAiResponseRequest,
     SelectAiMemoriesRequest, SetAiApprovalStatusRequest, UpsertAiMessageRequest,
     UpsertAiRunStateRequest,
 };
 use junban_domain::{
     AI_CONTEXT_MEMORIES_MAX, AI_SECRETS_FILE, AiApprovalId, AiApprovalStatus, AiMemoryId,
-    AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus, AiProviderPreset, AiRunId,
-    AiRunPhase, AiRunState, AiSecretKind, AiSessionId, AiToolEvent, AiToolEventType, AiTurnId,
-    OperationId, ProviderBaseUrl, SettingsPatch,
+    AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus, AiProviderPreset,
+    AiResponseRewriteKind, AiRunId, AiRunPhase, AiRunState, AiSecretKind, AiSessionId, AiToolEvent,
+    AiToolEventType, AiTurnId, OperationId, ProviderBaseUrl, SettingsPatch,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -1055,5 +1056,451 @@ async fn cancel_ai_response_service_replays_and_rejects_mismatch() {
     drop(service);
     drop(sink);
     drop(owner);
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[tokio::test]
+async fn daily_reservation_is_profile_date_unique_replayable_and_preserves_date() {
+    let profile = temp_profile();
+    let (owner, service, sink) = open_service(&profile);
+    let created = service
+        .create_ai_session(
+            op(),
+            CreateAiSessionRequest {
+                title: "Daily".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let session_id = AiSessionId::parse(
+        created
+            .event
+            .primary
+            .as_ref()
+            .expect("session primary")
+            .id
+            .as_str(),
+    )
+    .unwrap();
+    let operation_id = op();
+    let request = ReserveDailyAiResponseRequest {
+        session_id,
+        briefing_date: "2026-08-04".into(),
+        turn_id: AiTurnId::new(),
+        assistant_message_id: AiMessageId::new(),
+        run_id: AiRunId::new(),
+        generation: 1,
+    };
+    let first = service
+        .reserve_daily_ai_response(operation_id, request.clone())
+        .await
+        .unwrap();
+    assert!(first.mutation.newly_committed);
+    assert!(first.user_message.is_none());
+    assert_eq!(
+        first.assistant_message.content.briefing_date.as_deref(),
+        Some("2026-08-04")
+    );
+    assert!(
+        !service
+            .reserve_daily_ai_response(operation_id, request.clone())
+            .await
+            .unwrap()
+            .mutation
+            .newly_committed
+    );
+    let duplicate = ReserveDailyAiResponseRequest {
+        turn_id: AiTurnId::new(),
+        assistant_message_id: AiMessageId::new(),
+        run_id: AiRunId::new(),
+        ..request.clone()
+    };
+    assert_eq!(
+        service
+            .reserve_daily_ai_response(op(), duplicate)
+            .await
+            .unwrap_err(),
+        junban_app::AppError::Conflict
+    );
+    service
+        .finish_ai_response(
+            op(),
+            FinishAiResponseRequest {
+                assistant_message_id: request.assistant_message_id,
+                session_id,
+                turn_id: request.turn_id,
+                run_id: request.run_id,
+                generation: 1,
+                message_status: AiMessageStatus::Failed,
+                content: AiMessageContent::text("").unwrap(),
+                run_phase: AiRunPhase::Failed,
+                dispatch_operation_id: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .get_ai_message(request.assistant_message_id)
+            .await
+            .unwrap()
+            .content
+            .briefing_date
+            .as_deref(),
+        Some("2026-08-04")
+    );
+    let next = ReserveDailyAiResponseRequest {
+        turn_id: AiTurnId::new(),
+        assistant_message_id: AiMessageId::new(),
+        run_id: AiRunId::new(),
+        ..request
+    };
+    service.reserve_daily_ai_response(op(), next).await.unwrap();
+    drop(service);
+    drop(sink);
+    drop(owner);
+    let reopened = ProfileOwner::open(&profile).unwrap();
+    drop(reopened);
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[tokio::test]
+async fn regenerate_replaces_exact_suffix_and_tombstones_old_run() {
+    let profile = temp_profile();
+    let (owner, service, sink) = open_service(&profile);
+    let created = service
+        .create_ai_session(
+            op(),
+            CreateAiSessionRequest {
+                title: "Rewrite".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let session_id = AiSessionId::parse(
+        created
+            .event
+            .primary
+            .as_ref()
+            .expect("session primary")
+            .id
+            .as_str(),
+    )
+    .unwrap();
+    let old_turn = AiTurnId::new();
+    let old_user = AiMessageId::new();
+    let old_assistant = AiMessageId::new();
+    let old_run = AiRunId::new();
+    service
+        .upsert_ai_message(
+            op(),
+            UpsertAiMessageRequest {
+                message_id: old_user,
+                session_id,
+                turn_id: old_turn,
+                role: AiMessageRole::User,
+                status: AiMessageStatus::Completed,
+                content: AiMessageContent::text("original").unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    service
+        .upsert_ai_message(
+            op(),
+            UpsertAiMessageRequest {
+                message_id: old_assistant,
+                session_id,
+                turn_id: old_turn,
+                role: AiMessageRole::Assistant,
+                status: AiMessageStatus::Streaming,
+                content: AiMessageContent::text("").unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    let started = Timestamp::now();
+    service
+        .upsert_ai_run_state(
+            op(),
+            UpsertAiRunStateRequest {
+                state: AiRunState {
+                    run_id: old_run,
+                    session_id,
+                    turn_id: old_turn,
+                    assistant_message_id: old_assistant,
+                    generation: 1,
+                    state: AiRunPhase::Running,
+                    approval_id: None,
+                    created_at: started,
+                    updated_at: started,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    service
+        .finish_ai_response(
+            op(),
+            FinishAiResponseRequest {
+                assistant_message_id: old_assistant,
+                session_id,
+                turn_id: old_turn,
+                run_id: old_run,
+                generation: 1,
+                message_status: AiMessageStatus::Completed,
+                content: AiMessageContent::text("old response").unwrap(),
+                run_phase: AiRunPhase::Completed,
+                dispatch_operation_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let operation_id = op();
+    let request = RewriteAiResponseRequest {
+        kind: AiResponseRewriteKind::Regenerate,
+        session_id,
+        target_message_id: old_assistant,
+        message: "original".into(),
+        focused_task_id: None,
+        turn_id: AiTurnId::new(),
+        user_message_id: AiMessageId::new(),
+        assistant_message_id: AiMessageId::new(),
+        run_id: AiRunId::new(),
+        generation: 1,
+    };
+    let fault = rusqlite::Connection::open(profile.join("junban.sqlite3")).unwrap();
+    fault
+        .execute_batch(
+            "CREATE TRIGGER fail_ai_rewrite_event
+             BEFORE INSERT ON events
+             WHEN NEW.event_type = 'ai.session.changed'
+             BEGIN SELECT RAISE(FAIL, 'injected AI rewrite failure'); END;",
+        )
+        .unwrap();
+    assert_eq!(
+        service
+            .rewrite_ai_response(operation_id, request.clone())
+            .await
+            .unwrap_err(),
+        junban_app::AppError::Storage
+    );
+    assert_eq!(
+        service
+            .get_ai_message(old_assistant)
+            .await
+            .unwrap()
+            .content
+            .text,
+        "old response"
+    );
+    service.ensure_ai_response_current(old_run).await.unwrap();
+    assert_eq!(
+        service.get_ai_run_state(request.run_id).await.unwrap_err(),
+        junban_app::AppError::NotFound
+    );
+    fault
+        .execute_batch("DROP TRIGGER fail_ai_rewrite_event")
+        .unwrap();
+    drop(fault);
+
+    let prepared = service
+        .rewrite_ai_response(operation_id, request.clone())
+        .await
+        .unwrap();
+    let regenerated_user = prepared.user_message.as_ref().unwrap().id;
+    let regenerated_assistant = prepared.assistant_message.id;
+    let regenerated_turn = prepared.run.turn_id;
+    let regenerated_run = prepared.run.run_id;
+    assert_eq!(prepared.user_message.as_ref().unwrap().sequence, 1);
+    assert_eq!(prepared.assistant_message.sequence, 2);
+    assert_eq!(
+        service
+            .ensure_ai_response_current(old_run)
+            .await
+            .unwrap_err(),
+        junban_app::AppError::Conflict
+    );
+    assert_eq!(
+        service.get_ai_message(old_assistant).await.unwrap_err(),
+        junban_app::AppError::NotFound
+    );
+    assert!(
+        !service
+            .rewrite_ai_response(operation_id, request.clone())
+            .await
+            .unwrap()
+            .mutation
+            .newly_committed
+    );
+    let mut mismatch = request;
+    mismatch.message = "changed".into();
+    assert_eq!(
+        service
+            .rewrite_ai_response(operation_id, mismatch)
+            .await
+            .unwrap_err(),
+        junban_app::AppError::IdempotencyMismatch
+    );
+    drop(service);
+    drop(sink);
+    drop(owner);
+    let reopened = ProfileOwner::open(&profile).unwrap();
+    drop(reopened);
+
+    let (owner, service, sink) = open_service(&profile);
+    assert_eq!(
+        service
+            .get_ai_run_state(regenerated_run)
+            .await
+            .unwrap()
+            .state,
+        AiRunPhase::Cancelled
+    );
+    let retry = service
+        .rewrite_ai_response(
+            op(),
+            RewriteAiResponseRequest {
+                kind: AiResponseRewriteKind::Retry,
+                session_id,
+                target_message_id: regenerated_assistant,
+                message: "original".into(),
+                focused_task_id: None,
+                turn_id: AiTurnId::new(),
+                user_message_id: AiMessageId::new(),
+                assistant_message_id: AiMessageId::new(),
+                run_id: AiRunId::new(),
+                generation: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert_ne!(retry.run.turn_id, regenerated_turn);
+    service
+        .finish_ai_response(
+            op(),
+            FinishAiResponseRequest {
+                assistant_message_id: retry.assistant_message.id,
+                session_id,
+                turn_id: retry.run.turn_id,
+                run_id: retry.run.run_id,
+                generation: 1,
+                message_status: AiMessageStatus::Completed,
+                content: AiMessageContent::text("retried").unwrap(),
+                run_phase: AiRunPhase::Completed,
+                dispatch_operation_id: None,
+            },
+        )
+        .await
+        .unwrap();
+    let edited = service
+        .rewrite_ai_response(
+            op(),
+            RewriteAiResponseRequest {
+                kind: AiResponseRewriteKind::Edit,
+                session_id,
+                target_message_id: retry.user_message.as_ref().unwrap().id,
+                message: "edited".into(),
+                focused_task_id: None,
+                turn_id: AiTurnId::new(),
+                user_message_id: AiMessageId::new(),
+                assistant_message_id: AiMessageId::new(),
+                run_id: AiRunId::new(),
+                generation: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(edited.user_message.unwrap().content.text, "edited");
+    assert_eq!(
+        service.get_ai_message(regenerated_user).await.unwrap_err(),
+        junban_app::AppError::NotFound
+    );
+
+    service
+        .delete_ai_session(op(), DeleteAiSessionRequest { session_id })
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .ensure_ai_response_current(old_run)
+            .await
+            .unwrap_err(),
+        junban_app::AppError::Conflict
+    );
+    let backup = service.create_backup().await.unwrap();
+    let candidate = service.prepare_restore(backup).await.unwrap();
+    service.restore_backup(candidate).await.unwrap();
+    assert_eq!(
+        service
+            .ensure_ai_response_current(old_run)
+            .await
+            .unwrap_err(),
+        junban_app::AppError::Conflict
+    );
+
+    drop(service);
+    drop(sink);
+    drop(owner);
+    let (reopened_owner, reopened_service, reopened_sink) = open_service(&profile);
+    assert_eq!(
+        reopened_service
+            .ensure_ai_response_current(old_run)
+            .await
+            .unwrap_err(),
+        junban_app::AppError::Conflict
+    );
+    drop(reopened_service);
+    drop(reopened_sink);
+    drop(reopened_owner);
+
+    let mut connection = rusqlite::Connection::open(profile.join("junban.sqlite3")).unwrap();
+    let (old_invalidation, sessions): (i64, i64) = connection
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM ai_response_invalidations WHERE run_id = ?1),
+                (SELECT COUNT(*) FROM ai_sessions)",
+            [old_run.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((old_invalidation, sessions), (1, 0));
+    let receipt_request: String = connection
+        .query_row(
+            "SELECT request_json FROM operation_receipts WHERE operation_id = ?1",
+            [operation_id.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(receipt_request.contains("message_sha256"));
+    assert!(!receipt_request.contains("original"));
+    for generated in [
+        regenerated_user.to_string(),
+        regenerated_assistant.to_string(),
+        regenerated_turn.to_string(),
+        regenerated_run.to_string(),
+    ] {
+        assert!(!receipt_request.contains(&generated));
+    }
+    crate::ai_ops::create_ai_session(
+        &mut connection,
+        op(),
+        AiSessionId::new(),
+        "cleanup".into(),
+        Timestamp::now().checked_add((31 * 24).hours()).unwrap(),
+    )
+    .unwrap();
+    let retained: i64 = connection
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM ai_response_invalidations)
+              + (SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?1)",
+            [operation_id.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, 0);
+    drop(connection);
     fs::remove_dir_all(profile).unwrap();
 }

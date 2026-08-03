@@ -11,25 +11,27 @@ use std::collections::HashSet;
 use jiff::{Timestamp, ToSpan};
 use junban_app::{
     AffectedIds, AiMemoryCursor, AiMemoryListPage, AiSessionCursor, AiSessionListPage,
-    CommittedMutation, EventType, RepositoryError, ResourceRef, ResyncScope,
+    CommittedMutation, EventType, PreparedAiResponse, RepositoryError,
+    ReserveDailyAiResponseRequest, ResourceRef, ResyncScope, RewriteAiResponseRequest,
 };
 use junban_domain::{
     AI_APPROVAL_LIFETIME_SECS, AI_CONTEXT_MEMORIES_MAX, AI_DISPATCHING_APPROVAL_RECOVERY_MAX,
     AI_MEMORIES_PER_PROFILE_MAX, AI_MEMORY_CONTENT_BYTES_MAX, AI_MEMORY_PAGE_MAX,
-    AI_MESSAGES_PER_SESSION_MAX, AI_PENDING_APPROVAL_CONTENT_BYTES_MAX, AI_PENDING_APPROVALS_MAX,
-    AI_PROFILE_CONTENT_BYTES_MAX, AI_SESSION_CONTENT_BYTES_MAX, AI_SESSION_PAGE_MAX,
-    AI_SESSIONS_PER_PROFILE_MAX, AiApprovalId, AiApprovalStatus, AiMemory, AiMemoryId, AiMessage,
-    AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus, AiRunId, AiRunPhase, AiRunState,
+    AI_MESSAGE_CONTENT_JSON_BYTES_MAX, AI_MESSAGES_PER_SESSION_MAX,
+    AI_PENDING_APPROVAL_CONTENT_BYTES_MAX, AI_PENDING_APPROVALS_MAX, AI_PROFILE_CONTENT_BYTES_MAX,
+    AI_SESSION_CONTENT_BYTES_MAX, AI_SESSION_PAGE_MAX, AI_SESSIONS_PER_PROFILE_MAX, AiApprovalId,
+    AiApprovalStatus, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiMessageId,
+    AiMessageRole, AiMessageStatus, AiResponseRewriteKind, AiRunId, AiRunPhase, AiRunState,
     AiSession, AiSessionId, AiSessionStatus, AiToolApproval, AiToolEvent, AiToolEventType,
     AiTurnId, OperationId, ai_approval_action_hash, validate_ai_tool_name,
 };
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::helpers::validation;
 use crate::rows::storage_error;
-use crate::tx::{MutationEffect, canonical_json, mutate};
+use crate::tx::{MutationEffect, RECEIPT_TTL_DAYS, canonical_json, mutate};
 
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -87,6 +89,17 @@ enum Req<'a> {
         operation_id: Option<&'a str>,
         assistant_content_sha256: Option<&'a str>,
     },
+    ReserveDailyAiResponse {
+        session_id: String,
+        briefing_date: &'a str,
+    },
+    RewriteAiResponse {
+        kind: &'a str,
+        session_id: String,
+        target_message_id: String,
+        message_sha256: String,
+        focused_task_id: Option<String>,
+    },
     UpsertAiRunState {
         run_id: String,
         session_id: String,
@@ -114,6 +127,18 @@ enum Req<'a> {
         content_json: &'a str,
         run_phase: &'a str,
         dispatch_operation_id: Option<&'a str>,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+enum ResponseInvalidationReceipt {
+    RewriteAiResponse {
+        kind: String,
+        session_id: String,
+        target_message_id: String,
+        message_sha256: String,
+        focused_task_id: Option<String>,
     },
 }
 
@@ -533,6 +558,9 @@ pub(crate) fn upsert_ai_message(
     mut content: AiMessageContent,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    if role == AiMessageRole::Assistant {
+        preserve_briefing_date(connection, message_id, session_id, &mut content)?;
+    }
     canonicalize_optional_json(
         &mut content.tool_arguments_json,
         "ai_message.content.tool_arguments_json",
@@ -544,12 +572,18 @@ pub(crate) fn upsert_ai_message(
         junban_domain::AI_TOOL_RESULT_BYTES_MAX,
     )?;
     if let Some(date) = &content.briefing_date {
-        date.parse::<jiff::civil::Date>().map_err(|_| {
+        let parsed = date.parse::<jiff::civil::Date>().map_err(|_| {
             validation(junban_domain::ValidationError::InvalidFormat {
                 field: "ai_message.content.briefing_date",
                 expected: "YYYY-MM-DD",
             })
         })?;
+        if parsed.to_string() != *date {
+            return Err(validation(junban_domain::ValidationError::InvalidFormat {
+                field: "ai_message.content.briefing_date",
+                expected: "YYYY-MM-DD",
+            }));
+        }
     }
     let content_json = content.canonical_json().map_err(validation)?;
     let content_bytes = AiMessageContent::byte_len(&content_json);
@@ -1069,6 +1103,23 @@ pub(crate) fn propose_ai_approval_with_content(
     mut assistant_content: AiMessageContent,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    ensure_ai_response_current(connection, run_id)?;
+    let durable_run = get_ai_run_state(connection, run_id).map_err(|error| match error {
+        RepositoryError::NotFound => RepositoryError::Conflict,
+        other => other,
+    })?;
+    if durable_run.session_id != session_id
+        || durable_run.turn_id != turn_id
+        || durable_run.generation != generation
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    preserve_briefing_date(
+        connection,
+        durable_run.assistant_message_id,
+        session_id,
+        &mut assistant_content,
+    )?;
     validate_ai_tool_name(&tool_name).map_err(validation)?;
     let arguments_json = canonicalize_json_object(
         arguments_json,
@@ -1343,9 +1394,37 @@ pub(crate) fn set_ai_approval_status_with_content(
     approval_id: AiApprovalId,
     status: AiApprovalStatus,
     dispatch_operation_id: Option<String>,
-    assistant_content: Option<AiMessageContent>,
+    mut assistant_content: Option<AiMessageContent>,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    if let Some(content) = assistant_content.as_mut() {
+        let binding = connection
+            .query_row(
+                "SELECT run.run_id, run.assistant_message_id, run.session_id
+                 FROM ai_tool_approvals approval
+                 JOIN ai_run_state run ON run.run_id = approval.run_id
+                 WHERE approval.id = ?1",
+                [approval_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(storage_error)?
+            .ok_or(RepositoryError::NotFound)?;
+        let run_id = AiRunId::parse(&binding.0).map_err(storage_error)?;
+        ensure_ai_response_current(connection, run_id)?;
+        preserve_briefing_date(
+            connection,
+            AiMessageId::parse(&binding.1).map_err(storage_error)?,
+            AiSessionId::parse(&binding.2).map_err(storage_error)?,
+            content,
+        )?;
+    }
     let assistant_content = match (status, assistant_content) {
         (AiApprovalStatus::Rejected | AiApprovalStatus::Consumed, Some(mut content)) => {
             canonicalize_optional_json(
@@ -1642,6 +1721,7 @@ pub(crate) fn upsert_ai_run_state(
     state: AiRunState,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    ensure_ai_response_current(connection, state.run_id)?;
     let generation = i64::try_from(state.generation).map_err(|_| {
         validation(junban_domain::ValidationError::Invalid {
             field: "ai_run.generation",
@@ -1833,6 +1913,31 @@ pub(crate) fn upsert_ai_run_state(
     })
 }
 
+fn preserve_briefing_date(
+    connection: &Connection,
+    assistant_message_id: AiMessageId,
+    session_id: AiSessionId,
+    content: &mut AiMessageContent,
+) -> Result<(), RepositoryError> {
+    let persisted_json = connection
+        .query_row(
+            "SELECT content_json FROM ai_messages
+             WHERE id = ?1 AND session_id = ?2 AND role = 'assistant'",
+            params![assistant_message_id.to_string(), session_id.to_string()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(storage_error)?;
+    if let Some(persisted_json) = persisted_json {
+        let persisted: AiMessageContent =
+            serde_json::from_str(&persisted_json).map_err(storage_error)?;
+        if persisted.briefing_date.is_some() {
+            content.briefing_date = persisted.briefing_date;
+        }
+    }
+    Ok(())
+}
+
 /// Atomically cancel a reserved assistant placeholder and its exact run generation.
 pub(crate) fn cancel_ai_response(
     connection: &mut Connection,
@@ -1845,6 +1950,8 @@ pub(crate) fn cancel_ai_response(
     mut content: AiMessageContent,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    ensure_ai_response_current(connection, run_id)?;
+    preserve_briefing_date(connection, assistant_message_id, session_id, &mut content)?;
     canonicalize_optional_json(
         &mut content.tool_arguments_json,
         "ai_message.content.tool_arguments_json",
@@ -2083,6 +2190,8 @@ pub(crate) fn finish_ai_response(
     dispatch_operation_id: Option<String>,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    ensure_ai_response_current(connection, run_id)?;
+    preserve_briefing_date(connection, assistant_message_id, session_id, &mut content)?;
     let matching_terminal = matches!(
         (message_status, run_phase),
         (AiMessageStatus::Completed, AiRunPhase::Completed)
@@ -2367,6 +2476,521 @@ pub(crate) fn get_ai_run_state(
         .ok_or(RepositoryError::NotFound)
 }
 
+pub(crate) fn get_ai_run_for_assistant(
+    connection: &Connection,
+    assistant_message_id: AiMessageId,
+) -> Result<AiRunState, RepositoryError> {
+    let run_id = connection
+        .query_row(
+            "SELECT run_id FROM ai_run_state WHERE assistant_message_id = ?1",
+            [assistant_message_id.to_string()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(storage_error)?
+        .ok_or(RepositoryError::NotFound)?;
+    get_ai_run_state(connection, AiRunId::parse(&run_id).map_err(storage_error)?)
+}
+
+pub(crate) fn ensure_ai_response_current(
+    connection: &Connection,
+    run_id: AiRunId,
+) -> Result<(), RepositoryError> {
+    let invalidated: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM ai_response_invalidations WHERE run_id = ?1)",
+            [run_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    if invalidated {
+        Err(RepositoryError::Conflict)
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn reserve_daily_ai_response(
+    connection: &mut Connection,
+    operation_id: OperationId,
+    request: ReserveDailyAiResponseRequest,
+    now: Timestamp,
+) -> Result<PreparedAiResponse, RepositoryError> {
+    ensure_ai_response_current(connection, request.run_id)?;
+    let date = request
+        .briefing_date
+        .parse::<jiff::civil::Date>()
+        .map_err(|_| {
+            validation(junban_domain::ValidationError::InvalidFormat {
+                field: "ai_message.content.briefing_date",
+                expected: "YYYY-MM-DD",
+            })
+        })?;
+    if date.to_string() != request.briefing_date || request.generation == 0 {
+        return Err(validation(junban_domain::ValidationError::Invalid {
+            field: "ai_response.daily",
+            reason: "daily response seed is invalid",
+        }));
+    }
+    let mut assistant_content = AiMessageContent::text("").map_err(validation)?;
+    assistant_content.briefing_date = Some(request.briefing_date.clone());
+    let content_json = assistant_content.canonical_json().map_err(validation)?;
+    let content_bytes = AiMessageContent::byte_len(&content_json);
+    let receipt_request = canonical_json(&Req::ReserveDailyAiResponse {
+        session_id: request.session_id.to_string(),
+        briefing_date: &request.briefing_date,
+    })?;
+    let seed = request.clone();
+    let mutation = mutate(
+        connection,
+        operation_id,
+        receipt_request,
+        now,
+        move |tx, _| {
+            let (status, message_count, session_bytes): (String, i64, i64) = tx
+                .query_row(
+                    "SELECT status, message_count, content_bytes FROM ai_sessions WHERE id = ?1",
+                    [seed.session_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .map_err(storage_error)?
+                .ok_or(RepositoryError::NotFound)?;
+            if status != AiSessionStatus::Active.as_str() {
+                return Err(RepositoryError::Conflict);
+            }
+            let already_active: bool = tx
+                .query_row(
+                    "SELECT EXISTS(
+                    SELECT 1 FROM ai_messages
+                    WHERE role = 'assistant' AND status IN ('streaming', 'completed')
+                      AND json_type(content_json, '$.briefing_date') = 'text'
+                      AND json_extract(content_json, '$.briefing_date') = ?1
+                 )",
+                    [&seed.briefing_date],
+                    |row| row.get(0),
+                )
+                .map_err(storage_error)?;
+            if already_active {
+                return Err(RepositoryError::Conflict);
+            }
+            if message_count >= i64::from(AI_MESSAGES_PER_SESSION_MAX) {
+                return Err(quota_err("ai_messages"));
+            }
+            let next_session_bytes = u64::try_from(session_bytes)
+                .map_err(storage_error)?
+                .checked_add(content_bytes)
+                .ok_or_else(|| quota_err("ai_session.content_bytes"))?;
+            if next_session_bytes > AI_SESSION_CONTENT_BYTES_MAX {
+                return Err(quota_err("ai_session.content_bytes"));
+            }
+            let mut quota = load_quota(tx)?;
+            let next_profile_bytes = quota
+                .total_content_bytes
+                .checked_add(content_bytes)
+                .ok_or_else(|| quota_err("ai_profile.content_bytes"))?;
+            if next_profile_bytes > AI_PROFILE_CONTENT_BYTES_MAX {
+                return Err(quota_err("ai_profile.content_bytes"));
+            }
+            let generation = i64::try_from(seed.generation).map_err(storage_error)?;
+            tx.execute(
+                "INSERT INTO ai_messages(
+                id, session_id, turn_id, sequence, role, status, content_json,
+                content_bytes, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, 'assistant', 'streaming', ?5, ?6, ?7, ?7)",
+                params![
+                    seed.assistant_message_id.to_string(),
+                    seed.session_id.to_string(),
+                    seed.turn_id.to_string(),
+                    message_count + 1,
+                    content_json,
+                    content_bytes as i64,
+                    now.to_string(),
+                ],
+            )
+            .map_err(storage_error)?;
+            tx.execute(
+                "INSERT INTO ai_run_state(
+                run_id, session_id, turn_id, assistant_message_id, generation, state,
+                approval_id, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, 'running', NULL, ?6, ?6)",
+                params![
+                    seed.run_id.to_string(),
+                    seed.session_id.to_string(),
+                    seed.turn_id.to_string(),
+                    seed.assistant_message_id.to_string(),
+                    generation,
+                    now.to_string(),
+                ],
+            )
+            .map_err(storage_error)?;
+            tx.execute(
+                "UPDATE ai_sessions
+             SET message_count = ?1, content_bytes = ?2, updated_at = ?3, last_message_at = ?3
+             WHERE id = ?4",
+                params![
+                    message_count + 1,
+                    next_session_bytes as i64,
+                    now.to_string(),
+                    seed.session_id.to_string(),
+                ],
+            )
+            .map_err(storage_error)?;
+            quota.total_content_bytes = next_profile_bytes;
+            save_quota(tx, &quota)?;
+            Ok(ai_effect(
+                EventType::AI_SESSION_CHANGED,
+                ResourceRef::ai_session(seed.session_id),
+                ("ai_daily_briefing", seed.briefing_date.clone()),
+            ))
+        },
+    )?;
+    Ok(PreparedAiResponse {
+        mutation,
+        user_message: None,
+        assistant_message: get_ai_message(connection, request.assistant_message_id)?,
+        run: get_ai_run_state(connection, request.run_id)?,
+    })
+}
+
+pub(crate) fn rewrite_ai_response(
+    connection: &mut Connection,
+    operation_id: OperationId,
+    request: RewriteAiResponseRequest,
+    now: Timestamp,
+) -> Result<PreparedAiResponse, RepositoryError> {
+    ensure_ai_response_current(connection, request.run_id)?;
+    if request.generation == 0 {
+        return Err(validation(junban_domain::ValidationError::Invalid {
+            field: "ai_response.generation",
+            reason: "generation must be positive",
+        }));
+    }
+    if request.message.trim().is_empty() {
+        return Err(validation(junban_domain::ValidationError::Empty {
+            field: "ai_message.content.text",
+        }));
+    }
+    if request.message.len() > junban_domain::AI_USER_INPUT_BYTES_MAX {
+        return Err(validation(junban_domain::ValidationError::TooLong {
+            field: "ai_message.content.text",
+            max: junban_domain::AI_USER_INPUT_BYTES_MAX,
+        }));
+    }
+    let mut user_content = AiMessageContent::text(request.message.clone()).map_err(validation)?;
+    user_content.focused_task_id = request.focused_task_id;
+    let user_json = user_content.canonical_json().map_err(validation)?;
+    let assistant_content = AiMessageContent::text("").map_err(validation)?;
+    let assistant_json = assistant_content.canonical_json().map_err(validation)?;
+    let assistant_bytes = AiMessageContent::byte_len(&assistant_json);
+    let receipt_request = canonical_json(&Req::RewriteAiResponse {
+        kind: request.kind.as_str(),
+        session_id: request.session_id.to_string(),
+        target_message_id: request.target_message_id.to_string(),
+        message_sha256: junban_domain::sha256_hex(request.message.as_bytes()),
+        focused_task_id: request.focused_task_id.map(|id| id.to_string()),
+    })?;
+    let seed = request.clone();
+    let mutation = mutate(
+        connection,
+        operation_id,
+        receipt_request,
+        now,
+        move |tx, _| {
+            let session_status: String = tx
+                .query_row(
+                    "SELECT status FROM ai_sessions WHERE id = ?1",
+                    [seed.session_id.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(storage_error)?
+                .ok_or(RepositoryError::NotFound)?;
+            if session_status != AiSessionStatus::Active.as_str() {
+                return Err(RepositoryError::Conflict);
+            }
+            let target: (String, String, i64, String, String, String) = tx
+                .query_row(
+                    "SELECT turn_id, role, sequence, status, content_json, id
+                 FROM ai_messages WHERE id = ?1 AND session_id = ?2",
+                    params![
+                        seed.target_message_id.to_string(),
+                        seed.session_id.to_string()
+                    ],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(storage_error)?
+                .ok_or(RepositoryError::NotFound)?;
+            let (start_sequence, replacement_source_json) = match seed.kind {
+                AiResponseRewriteKind::Edit => {
+                    if target.1 != AiMessageRole::User.as_str()
+                        || target.3 != AiMessageStatus::Completed.as_str()
+                    {
+                        return Err(RepositoryError::Conflict);
+                    }
+                    (target.2, None)
+                }
+                AiResponseRewriteKind::Retry | AiResponseRewriteKind::Regenerate => {
+                    if target.1 != AiMessageRole::Assistant.as_str()
+                        || (seed.kind == AiResponseRewriteKind::Retry
+                            && !matches!(target.3.as_str(), "failed" | "cancelled"))
+                        || (seed.kind == AiResponseRewriteKind::Regenerate
+                            && target.3 != AiMessageStatus::Completed.as_str())
+                    {
+                        return Err(RepositoryError::Conflict);
+                    }
+                    let target_content: AiMessageContent =
+                        serde_json::from_str(&target.4).map_err(storage_error)?;
+                    if target_content.briefing_date.is_some() {
+                        return Err(RepositoryError::Conflict);
+                    }
+                    let terminal_phase: String = tx
+                        .query_row(
+                            "SELECT state FROM ai_run_state
+                         WHERE assistant_message_id = ?1 AND session_id = ?2 AND turn_id = ?3",
+                            params![target.5, seed.session_id.to_string(), target.0],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(storage_error)?
+                        .ok_or(RepositoryError::Conflict)?;
+                    let expected_phase = match target.3.as_str() {
+                        "completed" => "completed",
+                        "cancelled" => "cancelled",
+                        "failed" => "failed",
+                        _ => return Err(RepositoryError::Conflict),
+                    };
+                    if terminal_phase != expected_phase {
+                        return Err(RepositoryError::Conflict);
+                    }
+                    let mut users = tx
+                        .prepare(
+                            "SELECT sequence, content_json FROM ai_messages
+                         WHERE session_id = ?1 AND turn_id = ?2
+                           AND role = 'user' AND status = 'completed'
+                         ORDER BY sequence ASC",
+                        )
+                        .map_err(storage_error)?;
+                    let source_rows = users
+                        .query_map(params![seed.session_id.to_string(), target.0], |row| {
+                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                        })
+                        .map_err(storage_error)?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(storage_error)?;
+                    let [(sequence, content)] = source_rows.as_slice() else {
+                        return Err(RepositoryError::Conflict);
+                    };
+                    let source: AiMessageContent =
+                        serde_json::from_str(content).map_err(storage_error)?;
+                    if source.text != seed.message || source.focused_task_id != seed.focused_task_id
+                    {
+                        return Err(RepositoryError::Conflict);
+                    }
+                    (*sequence, Some(content.clone()))
+                }
+            };
+            if start_sequence < 1 {
+                return Err(RepositoryError::Conflict);
+            }
+            let suffix_count: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM ai_messages WHERE session_id = ?1 AND sequence >= ?2",
+                    params![seed.session_id.to_string(), start_sequence],
+                    |row| row.get(0),
+                )
+                .map_err(storage_error)?;
+            if suffix_count == 0 || suffix_count > i64::from(AI_MESSAGES_PER_SESSION_MAX) {
+                return Err(RepositoryError::Conflict);
+            }
+            let mut statement = tx
+                .prepare(
+                    "SELECT run_id, state FROM ai_run_state
+                 WHERE session_id = ?1 AND assistant_message_id IN (
+                     SELECT id FROM ai_messages WHERE session_id = ?1 AND sequence >= ?2
+                 ) ORDER BY run_id",
+                )
+                .map_err(storage_error)?;
+            let suffix_runs = statement
+                .query_map(
+                    params![seed.session_id.to_string(), start_sequence],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .map_err(storage_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(storage_error)?;
+            if suffix_runs.iter().any(|(_, phase)| {
+                matches!(
+                    phase.as_str(),
+                    "running" | "awaiting_approval" | "dispatching"
+                )
+            }) {
+                return Err(RepositoryError::Conflict);
+            }
+            let expires_at = now
+                .checked_add((RECEIPT_TTL_DAYS * 24).hours())
+                .map_err(storage_error)?;
+            for (run_id, _) in &suffix_runs {
+                tx.execute(
+                    "INSERT INTO ai_response_invalidations(
+                    run_id, session_id, invalidating_operation_id, expires_at
+                 ) VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        run_id,
+                        seed.session_id.to_string(),
+                        operation_id.to_string(),
+                        expires_at.to_string(),
+                    ],
+                )
+                .map_err(storage_error)?;
+                tx.execute("DELETE FROM ai_tool_approvals WHERE run_id = ?1", [run_id])
+                    .map_err(storage_error)?;
+            }
+            tx.execute(
+                "DELETE FROM ai_run_state
+             WHERE session_id = ?1 AND assistant_message_id IN (
+                 SELECT id FROM ai_messages WHERE session_id = ?1 AND sequence >= ?2
+             )",
+                params![seed.session_id.to_string(), start_sequence],
+            )
+            .map_err(storage_error)?;
+            tx.execute(
+                "DELETE FROM ai_messages WHERE session_id = ?1 AND sequence >= ?2",
+                params![seed.session_id.to_string(), start_sequence],
+            )
+            .map_err(storage_error)?;
+            let durable_user_json = replacement_source_json.unwrap_or(user_json.clone());
+            let durable_user: AiMessageContent =
+                serde_json::from_str(&durable_user_json).map_err(storage_error)?;
+            if durable_user.text != seed.message
+                || durable_user.focused_task_id != seed.focused_task_id
+            {
+                return Err(RepositoryError::Conflict);
+            }
+            let durable_user_bytes = AiMessageContent::byte_len(&durable_user_json);
+            let generation = i64::try_from(seed.generation).map_err(storage_error)?;
+            tx.execute(
+                "INSERT INTO ai_messages(
+                id, session_id, turn_id, sequence, role, status, content_json,
+                content_bytes, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, 'user', 'completed', ?5, ?6, ?7, ?7)",
+                params![
+                    seed.user_message_id.to_string(),
+                    seed.session_id.to_string(),
+                    seed.turn_id.to_string(),
+                    start_sequence,
+                    durable_user_json,
+                    durable_user_bytes as i64,
+                    now.to_string(),
+                ],
+            )
+            .map_err(storage_error)?;
+            tx.execute(
+                "INSERT INTO ai_messages(
+                id, session_id, turn_id, sequence, role, status, content_json,
+                content_bytes, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, 'assistant', 'streaming', ?5, ?6, ?7, ?7)",
+                params![
+                    seed.assistant_message_id.to_string(),
+                    seed.session_id.to_string(),
+                    seed.turn_id.to_string(),
+                    start_sequence + 1,
+                    assistant_json,
+                    assistant_bytes as i64,
+                    now.to_string(),
+                ],
+            )
+            .map_err(storage_error)?;
+            tx.execute(
+                "INSERT INTO ai_run_state(
+                run_id, session_id, turn_id, assistant_message_id, generation, state,
+                approval_id, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, 'running', NULL, ?6, ?6)",
+                params![
+                    seed.run_id.to_string(),
+                    seed.session_id.to_string(),
+                    seed.turn_id.to_string(),
+                    seed.assistant_message_id.to_string(),
+                    generation,
+                    now.to_string(),
+                ],
+            )
+            .map_err(storage_error)?;
+            let (message_count, content_bytes): (i64, i64) = tx
+                .query_row(
+                    "SELECT COUNT(*), COALESCE(SUM(content_bytes), 0)
+                 FROM ai_messages WHERE session_id = ?1",
+                    [seed.session_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(storage_error)?;
+            if message_count > i64::from(AI_MESSAGES_PER_SESSION_MAX)
+                || u64::try_from(content_bytes).map_err(storage_error)?
+                    > AI_SESSION_CONTENT_BYTES_MAX
+            {
+                return Err(quota_err("ai_session.content_bytes"));
+            }
+            tx.execute(
+                "UPDATE ai_sessions
+             SET message_count = ?1, content_bytes = ?2, updated_at = ?3, last_message_at = ?3
+             WHERE id = ?4",
+                params![
+                    message_count,
+                    content_bytes,
+                    now.to_string(),
+                    seed.session_id.to_string()
+                ],
+            )
+            .map_err(storage_error)?;
+            let profile_bytes: i64 = tx
+                .query_row(
+                    "SELECT COALESCE(SUM(content_bytes), 0) FROM ai_messages",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(storage_error)?;
+            if u64::try_from(profile_bytes).map_err(storage_error)? > AI_PROFILE_CONTENT_BYTES_MAX {
+                return Err(quota_err("ai_profile.content_bytes"));
+            }
+            let (pending_count, pending_bytes): (i64, i64) = tx
+                .query_row(
+                    "SELECT COUNT(*), COALESCE(SUM(arguments_bytes), 0)
+                 FROM ai_tool_approvals WHERE status = 'pending'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(storage_error)?;
+            let mut quota = load_quota(tx)?;
+            quota.total_content_bytes = u64::try_from(profile_bytes).map_err(storage_error)?;
+            quota.pending_approval_count = u32::try_from(pending_count).map_err(storage_error)?;
+            quota.pending_approval_content_bytes =
+                u64::try_from(pending_bytes).map_err(storage_error)?;
+            save_quota(tx, &quota)?;
+            Ok(ai_effect(
+                EventType::AI_SESSION_CHANGED,
+                ResourceRef::ai_session(seed.session_id),
+                ("ai_response_rewrite", seed.kind.as_str().to_owned()),
+            ))
+        },
+    )?;
+    Ok(PreparedAiResponse {
+        mutation,
+        user_message: Some(get_ai_message(connection, request.user_message_id)?),
+        assistant_message: get_ai_message(connection, request.assistant_message_id)?,
+        run: get_ai_run_state(connection, request.run_id)?,
+    })
+}
+
 /// Fail-closed startup/restore recovery for ephemeral AI runtime authority.
 ///
 /// Running and awaiting-approval runs are cancelled together with any streaming
@@ -2435,6 +3059,185 @@ pub(crate) fn expire_ai_runtime_state(
     recompute_pending_approval_quota(&tx, &mut quota)?;
     save_quota(&tx, &quota)?;
     tx.commit().map_err(storage_error)?;
+    Ok(())
+}
+
+/// Validate daily metadata and rewrite tombstones before normal or restored use.
+pub(crate) fn validate_ai_response_authority(
+    connection: &Connection,
+) -> Result<(), RepositoryError> {
+    let oversized: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM ai_response_invalidations WHERE
+                 LENGTH(CAST(run_id AS BLOB)) > 64
+                 OR LENGTH(CAST(session_id AS BLOB)) > 64
+                 OR LENGTH(CAST(invalidating_operation_id AS BLOB)) > 64
+                 OR LENGTH(CAST(expires_at AS BLOB)) > 64)
+             OR EXISTS(SELECT 1 FROM ai_messages
+                 WHERE json_type(content_json, '$.briefing_date') IS NOT NULL
+                   AND LENGTH(CAST(content_json AS BLOB)) > ?1)",
+            [i64::try_from(AI_MESSAGE_CONTENT_JSON_BYTES_MAX).map_err(storage_error)?],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    if oversized {
+        return Err(RepositoryError::Storage(
+            "AI response invalidation exceeds bounds".to_owned(),
+        ));
+    }
+    let mut messages = connection
+        .prepare(
+            "SELECT id, session_id, turn_id, role, status, content_json FROM ai_messages
+             WHERE json_type(content_json, '$.briefing_date') IS NOT NULL",
+        )
+        .map_err(storage_error)?;
+    let rows = messages
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })
+        .map_err(storage_error)?;
+    for row in rows {
+        let (id, session_id, turn_id, role, status, content_json) = row.map_err(storage_error)?;
+        let message_id = AiMessageId::parse(&id).map_err(storage_error)?;
+        let parsed_session = AiSessionId::parse(&session_id).map_err(storage_error)?;
+        let parsed_turn = AiTurnId::parse(&turn_id).map_err(storage_error)?;
+        let parsed_status = AiMessageStatus::parse(&status).map_err(storage_error)?;
+        let content: AiMessageContent =
+            serde_json::from_str(&content_json).map_err(storage_error)?;
+        let date = content.briefing_date.ok_or_else(|| {
+            RepositoryError::Storage("AI briefing metadata is invalid".to_owned())
+        })?;
+        let parsed_date = date.parse::<jiff::civil::Date>().map_err(storage_error)?;
+        let run = get_ai_run_for_assistant(connection, message_id)?;
+        let turn_message_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM ai_messages WHERE session_id = ?1 AND turn_id = ?2",
+                params![&session_id, &turn_id],
+                |row| row.get(0),
+            )
+            .map_err(storage_error)?;
+        let phase_matches = match parsed_status {
+            AiMessageStatus::Pending => false,
+            AiMessageStatus::Streaming => matches!(
+                run.state,
+                AiRunPhase::Running | AiRunPhase::AwaitingApproval | AiRunPhase::Dispatching
+            ),
+            AiMessageStatus::Completed => run.state == AiRunPhase::Completed,
+            AiMessageStatus::Failed => run.state == AiRunPhase::Failed,
+            AiMessageStatus::Cancelled => run.state == AiRunPhase::Cancelled,
+        };
+        if role != AiMessageRole::Assistant.as_str()
+            || message_id.to_string() != id
+            || parsed_session.to_string() != session_id
+            || parsed_turn.to_string() != turn_id
+            || parsed_date.to_string() != date
+            || run.session_id != parsed_session
+            || run.turn_id != parsed_turn
+            || turn_message_count != 1
+            || !phase_matches
+        {
+            return Err(RepositoryError::Storage(
+                "AI briefing metadata is invalid".to_owned(),
+            ));
+        }
+    }
+
+    let mut invalidations = connection
+        .prepare(
+            "SELECT invalidation.run_id, invalidation.session_id,
+                    invalidation.invalidating_operation_id, invalidation.expires_at,
+                    receipt.request_json, receipt.expires_at,
+                    EXISTS(SELECT 1 FROM ai_run_state run
+                           WHERE run.run_id = invalidation.run_id)
+             FROM ai_response_invalidations invalidation
+             LEFT JOIN operation_receipts receipt
+               ON receipt.operation_id = invalidation.invalidating_operation_id
+             ORDER BY invalidation.run_id",
+        )
+        .map_err(storage_error)?;
+    let rows = invalidations
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, bool>(6)?,
+            ))
+        })
+        .map_err(storage_error)?;
+    for row in rows {
+        let (run_id, session_id, operation_id, expires_at, request_json, receipt_expiry, live_run) =
+            row.map_err(storage_error)?;
+        let parsed_run = AiRunId::parse(&run_id).map_err(storage_error)?;
+        let parsed_session = AiSessionId::parse(&session_id).map_err(storage_error)?;
+        let parsed_operation = OperationId::parse(&operation_id).map_err(storage_error)?;
+        let parsed_expiry = expires_at.parse::<Timestamp>().map_err(storage_error)?;
+        let request_json = request_json.ok_or_else(|| {
+            RepositoryError::Storage("AI response invalidation receipt is missing".to_owned())
+        })?;
+        let receipt_expiry = receipt_expiry.ok_or_else(|| {
+            RepositoryError::Storage("AI response invalidation receipt is missing".to_owned())
+        })?;
+        let ResponseInvalidationReceipt::RewriteAiResponse {
+            kind: request_kind,
+            session_id: request_session_id,
+            target_message_id,
+            message_sha256,
+            focused_task_id,
+        } = serde_json::from_str::<ResponseInvalidationReceipt>(&request_json)
+            .map_err(storage_error)?;
+        let kind = match request_kind.as_str() {
+            "edit" => AiResponseRewriteKind::Edit,
+            "retry" => AiResponseRewriteKind::Retry,
+            "regenerate" => AiResponseRewriteKind::Regenerate,
+            _ => {
+                return Err(RepositoryError::Storage(
+                    "AI response invalidation kind is invalid".to_owned(),
+                ));
+            }
+        };
+        let target = AiMessageId::parse(&target_message_id).map_err(storage_error)?;
+        let focused = focused_task_id
+            .as_deref()
+            .map(junban_domain::TaskId::parse)
+            .transpose()
+            .map_err(storage_error)?;
+        let hash_is_canonical = message_sha256.len() == 64
+            && message_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+        let canonical_request = canonical_json(&Req::RewriteAiResponse {
+            kind: kind.as_str(),
+            session_id: parsed_session.to_string(),
+            target_message_id: target.to_string(),
+            message_sha256,
+            focused_task_id: focused.map(|id| id.to_string()),
+        })?;
+        if parsed_run.to_string() != run_id
+            || parsed_session.to_string() != session_id
+            || parsed_operation.to_string() != operation_id
+            || parsed_expiry.to_string() != expires_at
+            || receipt_expiry != expires_at
+            || request_session_id != session_id
+            || !hash_is_canonical
+            || canonical_request != request_json
+            || live_run
+        {
+            return Err(RepositoryError::Storage(
+                "AI response invalidation is not canonical".to_owned(),
+            ));
+        }
+    }
     Ok(())
 }
 

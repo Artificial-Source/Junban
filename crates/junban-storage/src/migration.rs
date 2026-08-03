@@ -170,6 +170,7 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
     if applied == CURRENT_SCHEMA_VERSION {
         normalize_reminder_timestamp_text(connection)?;
         ensure_v6_ai_runtime_indexes(connection)?;
+        repair_current_v6_ai_response_authority(connection)?;
     }
 
     Ok(())
@@ -180,6 +181,44 @@ fn ensure_v6_ai_runtime_indexes(connection: &Connection) -> rusqlite::Result<()>
         "CREATE INDEX IF NOT EXISTS idx_ai_run_state_state
          ON ai_run_state(state, run_id);",
     )
+}
+
+/// Apply the idempotent current-v6 AI response-authority correction.
+///
+/// This is deliberately limited to the known indexes and invalidation table added
+/// in-place during schema v6. Conflicting objects fail here or during canonical
+/// schema validation rather than being replaced.
+pub(crate) fn repair_current_v6_ai_response_authority(
+    connection: &Connection,
+) -> rusqlite::Result<()> {
+    if current_version(connection)? != CURRENT_SCHEMA_VERSION {
+        return Ok(());
+    }
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute_batch(
+        r#"
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_messages_daily_briefing_active
+    ON ai_messages(json_extract(content_json, '$.briefing_date'))
+    WHERE role = 'assistant'
+      AND status IN ('streaming', 'completed')
+      AND json_type(content_json, '$.briefing_date') = 'text';
+CREATE INDEX IF NOT EXISTS idx_ai_messages_briefing_date
+    ON ai_messages(json_extract(content_json, '$.briefing_date'), status, id)
+    WHERE role = 'assistant'
+      AND json_type(content_json, '$.briefing_date') = 'text';
+CREATE TABLE IF NOT EXISTS ai_response_invalidations (
+    run_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    invalidating_operation_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_response_invalidations_session
+    ON ai_response_invalidations(session_id, run_id);
+CREATE INDEX IF NOT EXISTS idx_ai_response_invalidations_expiry
+    ON ai_response_invalidations(expires_at, run_id);
+"#,
+    )?;
+    transaction.commit()
 }
 
 /// Rewrite reminder comparison columns to fixed nine-fractional-digit UTC text.
@@ -972,6 +1011,27 @@ CREATE INDEX idx_ai_run_state_state ON ai_run_state(state, run_id);
 CREATE INDEX idx_ai_run_state_approval
     ON ai_run_state(approval_id)
     WHERE approval_id IS NOT NULL;
+
+CREATE UNIQUE INDEX idx_ai_messages_daily_briefing_active
+    ON ai_messages(json_extract(content_json, '$.briefing_date'))
+    WHERE role = 'assistant'
+      AND status IN ('streaming', 'completed')
+      AND json_type(content_json, '$.briefing_date') = 'text';
+CREATE INDEX idx_ai_messages_briefing_date
+    ON ai_messages(json_extract(content_json, '$.briefing_date'), status, id)
+    WHERE role = 'assistant'
+      AND json_type(content_json, '$.briefing_date') = 'text';
+
+CREATE TABLE IF NOT EXISTS ai_response_invalidations (
+    run_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    invalidating_operation_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_response_invalidations_session
+    ON ai_response_invalidations(session_id, run_id);
+CREATE INDEX IF NOT EXISTS idx_ai_response_invalidations_expiry
+    ON ai_response_invalidations(expires_at, run_id);
 
 CREATE TABLE ai_quota (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -1917,6 +1977,7 @@ mod tests {
             "ai_session_memories",
             "ai_tool_approvals",
             "ai_run_state",
+            "ai_response_invalidations",
             "ai_quota",
         ] {
             assert!(tables.contains(name), "missing table {name}");

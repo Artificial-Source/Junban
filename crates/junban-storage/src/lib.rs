@@ -42,12 +42,13 @@ use jiff::{Timestamp, civil::Date};
 use junban_app::{
     AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
     AiSessionCursor, AiSessionListPage, AppSettings, BulkAction, CatalogSnapshot, CommentPatch,
-    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, ProjectDraft, ProjectListPage,
-    ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository,
-    RepositoryError, RepositoryFuture, SavedFilterDraft, SavedFilterPatch, SectionDraft,
-    SectionPatch, SettingsPatch, StagedFile, SyncState, TagDraft, TagListPage, TagPatch,
-    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
+    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, PreparedAiResponse, ProjectDraft,
+    ProjectListPage, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    Repository, RepositoryError, RepositoryFuture, ReserveDailyAiResponseRequest,
+    RewriteAiResponseRequest, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch,
+    SettingsPatch, StagedFile, SyncState, TagDraft, TagListPage, TagPatch, TaskListAsOf,
+    TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch, TemporalContext,
+    TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
     TimeblockingRangeQuery,
 };
 use junban_domain::{
@@ -2205,6 +2206,54 @@ impl Repository for SqliteRepository {
         mut_cmd!(self, GetAiRunState { run_id })
     }
 
+    fn get_ai_run_for_assistant(
+        &self,
+        assistant_message_id: AiMessageId,
+    ) -> RepositoryFuture<'_, AiRunState> {
+        mut_cmd!(
+            self,
+            GetAiRunForAssistant {
+                assistant_message_id
+            }
+        )
+    }
+
+    fn ensure_ai_response_current(&self, run_id: AiRunId) -> RepositoryFuture<'_, ()> {
+        mut_cmd!(self, EnsureAiResponseCurrent { run_id })
+    }
+
+    fn reserve_daily_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: ReserveDailyAiResponseRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, PreparedAiResponse> {
+        mut_cmd!(
+            self,
+            ReserveDailyAiResponse {
+                operation_id,
+                request,
+                now
+            }
+        )
+    }
+
+    fn rewrite_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: RewriteAiResponseRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, PreparedAiResponse> {
+        mut_cmd!(
+            self,
+            RewriteAiResponse {
+                operation_id,
+                request,
+                now
+            }
+        )
+    }
+
     fn cancel_ai_response(
         &self,
         operation_id: OperationId,
@@ -2918,6 +2967,26 @@ enum Command {
     GetAiRunState {
         run_id: AiRunId,
         reply: oneshot::Sender<Result<AiRunState, RepositoryError>>,
+    },
+    GetAiRunForAssistant {
+        assistant_message_id: AiMessageId,
+        reply: oneshot::Sender<Result<AiRunState, RepositoryError>>,
+    },
+    EnsureAiResponseCurrent {
+        run_id: AiRunId,
+        reply: oneshot::Sender<Result<(), RepositoryError>>,
+    },
+    ReserveDailyAiResponse {
+        operation_id: OperationId,
+        request: ReserveDailyAiResponseRequest,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<PreparedAiResponse, RepositoryError>>,
+    },
+    RewriteAiResponse {
+        operation_id: OperationId,
+        request: RewriteAiResponseRequest,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<PreparedAiResponse, RepositoryError>>,
     },
     CancelAiResponse {
         operation_id: OperationId,
@@ -4120,6 +4189,44 @@ fn run_worker(
             Command::GetAiRunState { run_id, reply } => {
                 let _ = reply.send(ai_ops::get_ai_run_state(connection, run_id));
             }
+            Command::GetAiRunForAssistant {
+                assistant_message_id,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::get_ai_run_for_assistant(
+                    connection,
+                    assistant_message_id,
+                ));
+            }
+            Command::EnsureAiResponseCurrent { run_id, reply } => {
+                let _ = reply.send(ai_ops::ensure_ai_response_current(connection, run_id));
+            }
+            Command::ReserveDailyAiResponse {
+                operation_id,
+                request,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::reserve_daily_ai_response(
+                    connection,
+                    operation_id,
+                    request,
+                    now,
+                ));
+            }
+            Command::RewriteAiResponse {
+                operation_id,
+                request,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::rewrite_ai_response(
+                    connection,
+                    operation_id,
+                    request,
+                    now,
+                ));
+            }
             Command::CancelAiResponse {
                 operation_id,
                 assistant_message_id,
@@ -4506,6 +4613,9 @@ fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
     // successful open. One timestamp makes the whole recovery transaction canonical;
     // neither recovery step emits a global event or operation receipt.
     let opened_at = Timestamp::now();
+    if let Err(error) = ai_ops::validate_ai_response_authority(&connection) {
+        return Err(ai_open_error("response authority validation", error));
+    }
     if let Err(error) = ai_ops::expire_ai_runtime_state(&connection, opened_at) {
         return Err(ai_open_error("runtime expiration", error));
     }

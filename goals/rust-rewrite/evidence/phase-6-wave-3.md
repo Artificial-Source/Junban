@@ -1,10 +1,10 @@
 # Phase 6 Wave 3 — application, lifecycle, and operator configuration evidence
 
 - **Date:** 2026-08-02
-- **Base:** clean Wave 3e base `c689099` (earlier Wave 3a–3d bases retained below)
-- **Scope:** implemented Wave 3a–3e behavior
-- **Claim boundary:** durable application wiring, guard-owned lazy runtime lifecycle, operator-only provider/configuration/credential/model-discovery and durable AI resource APIs, plus one basic no-tool streaming chat round with cancellation and exact replay. This document does not claim tools/approvals, daily briefing, edit/regenerate, React, or voice delivery.
-- **Independent chat review status:** approved after focused correction and exact-delta re-review of `P6-CHAT-001`–`P6-CHAT-003`.
+- **Base:** clean Wave 3g base `4e31903` (earlier Wave 3a–3f bases retained below)
+- **Scope:** implemented Wave 3a–3g behavior
+- **Claim boundary:** durable AI resources, lazy runtime lifecycle, provider configuration, chat/tool/approval orchestration, exact dispatch recovery, daily briefing, and typed edit/retry/regenerate HTTP/SSE actions. This document does not claim a briefing scheduler, schedule apply, React, voice delivery, or Phase 6 memory/visual closure.
+- **Review status:** prior chat/tool-run gates are approved; the Wave 3g daily/rewrite findings and focused regressions are recorded in the Phase 6 review ledger.
 
 ## Wave 3a — application and storage service boundary
 
@@ -229,14 +229,28 @@ The independent authority gate approved after correction and exact-delta re-revi
 - Startup recovery runs before listener admission and never constructs a provider, credential, or runtime. It validates every consumed/dispatching pair, reuses the private dispatch root, protects exact receipts from age cleanup while recovery is pending, and either reproduces the exact bounded result once or leaves the run `Dispatching` and fails startup. Unrelated or mismatched receipts cannot become successful tool results.
 - Normal open and restore preflight enforce event-specific transcript payload schemas, unknown/private-key rejection, canonical IDs/timestamps/hashes, approval/card/tool/arguments/expiry cross-binding, and private dispatch-root non-exposure.
 
-### Tool-run, recovery, and quality validation
+## Wave 3g — durable daily briefing and typed response actions
+
+- Operator-only SSE routes add assistant-only daily briefing and typed edit/retry/regenerate actions without changing the 87-tool CLI/MCP catalog. Transport DTOs remain strict and generated OpenAPI/TypeScript artifacts cover all four routes.
+- Daily reservation reuses ordinary schema-v6 response history. One partial unique expression index enforces one streaming/completed assistant briefing per profile-local date; failed/cancelled attempts remain visible and may be retried. Provider context adds exactly one ephemeral server-owned user instruction with the exact date, read-only `plan_my_day`-first/no-apply language, and confirmed default energy as `N/5` when configured. Custom instructions remain system messages; only the assistant briefing is durable, and no internal identifier or secret enters the prompt.
+- Basic chat and edit/retry/regenerate now share one confirmed active-session/provider/model/base/context/focused-task/memory/credential/endpoint/request preflight under the existing reconfiguration admission mutex. The typed-action suffix transaction verifies receipt/invalidation authority first, retains the exact prefix, rejects active durable suffix runs, stores 30-day run tombstones, removes approvals/runs/messages safely, appends one deterministic replacement turn, and recomputes exact session/profile/pending-approval quotas.
+- Exact terminal retries verify the typed canonical request and replay durable SSE without provider setup, even after settings change. Removed generic or typed runs fail against tombstones before obsolete receipts or provider work. Invalidation session IDs remain historical metadata after session deletion and expire only with their exact receipt horizon.
+- Complete-restore preflight authenticates the framed manifest, payload hash, and SQLite integrity before applying only the known atomic/idempotent current-v6 response-authority correction to a writable v6 candidate. Canonical schema and semantic validation still reject conflicting objects or malformed data.
+- An owned setup task retains the SSE permit, sender, mutex, prepared request, state, and runtime admission across commit. Receiver-drop barriers before commit, after commit, and after admission prove durable terminalization and unrelated-run isolation while a deterministic fixture records zero accepted provider connections.
+
+### Wave 3g validation
+
+The initial Wave 3g complete locked workspace suite passed, including 191 storage tests, 236 server library tests, six server process-lifecycle tests, CLI/MCP catalog and process suites, and the domain/application/provider suites. Its denied-warning workspace Clippy, Rust formatting, diff checks, contract generation/drift, TypeScript typecheck, 373 frontend tests, production frontend build, documentation/runtime/local-voice boundary checks, Rust advisory/license/source policy, and production/full npm audits also passed.
+
+The material-review correction recheck covers authenticated current-v6 backup repair and conflicting-object rejection; no-FK historical tombstones across session deletion, stale-run rejection, backup/restore/reopen, and horizon cleanup; shared basic/action preflight equivalence; `AiSse` ownership; ephemeral daily user/default-energy provider context with assistant-only durability; and zero accepted provider connections across all three receiver-drop barriers. Its final executed checks are recorded in the Phase 6 review ledger. Loopback fixtures supplied provider traffic; no live vendor egress, UI visual run, global runtime reconfiguration, or memory-closure claim was made.
+
+### Prior tool-run, recovery, and quality validation
 
 The final correction pass ran the complete domain, application, storage, and server package suites; focused 100-child success/partial authority, exact receipt recovery, save-memory result equivalence, stop-after-consume, detached decision, cancellation ordering, startup recovery, live-versus-replay transcript, UTF-8 offset, and malformed normal-open/restore regressions; denied-warning workspace Clippy; Rust and repository formatting; contract generation/drift; documentation; and diff checks. The final server recheck passed 232 library tests and six process-lifecycle tests; the restore/reconfigure timing regression additionally passed 20 focused repetitions. The security gate approved `P6-TOOLRUN-001`–`P6-TOOLRUN-003`, and the Rust architecture/DX gate approved `P6-QUALITY-001` after the non-HTTP dispatch/transcript ownership extraction.
 
 ## Non-claims
 
-- No daily briefing route/worker or response edit/regenerate flow.
-- No schedule-apply mutation or model-supplied preview/apply authority.
+- No background daily briefing scheduler, schedule-apply mutation, or model-supplied preview/apply authority.
 - No arbitrary message upsert HTTP route; message creation remains owned by response orchestration.
 - No manual memory-link HTTP route.
 - No voice audio/STT/TTS HTTP routes, browser media path, cloud speech adapter, or local inference.

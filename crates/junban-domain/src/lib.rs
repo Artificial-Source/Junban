@@ -31,11 +31,12 @@ pub use ai::{
     AI_SESSIONS_PER_PROFILE_MAX, AI_TOOL_ARGUMENTS_BYTES_MAX, AI_TOOL_EVENT_TRANSCRIPT_BYTES_MAX,
     AI_TOOL_RESULT_BYTES_MAX, AI_USER_INPUT_BYTES_MAX, AiApprovalId, AiApprovalStatus,
     AiCredentialId, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiMessageId, AiMessageRole,
-    AiMessageStatus, AiModelId, AiProviderPreset, AiRunId, AiRunPhase, AiRunState, AiSecretKind,
-    AiSecretMetadata, AiSession, AiSessionId, AiSessionStatus, AiSettings, AiToolApproval,
-    AiToolEvent, AiToolEventType, AiTurnId, CustomInstructions, GracePeriodMs, ProviderBaseUrl,
-    SpeechProviderPreset, VoiceMode, VoiceSettings, ai_approval_action_hash,
-    referenced_ai_credential_ids, validate_ai_tool_name, validate_base_url,
+    AiMessageStatus, AiModelId, AiProviderPreset, AiResponseRewriteKind, AiRunId, AiRunPhase,
+    AiRunState, AiSecretKind, AiSecretMetadata, AiSession, AiSessionId, AiSessionStatus,
+    AiSettings, AiToolApproval, AiToolEvent, AiToolEventType, AiTurnId, CustomInstructions,
+    GracePeriodMs, ProviderBaseUrl, SpeechProviderPreset, VoiceMode, VoiceSettings,
+    ai_approval_action_hash, referenced_ai_credential_ids, validate_ai_tool_name,
+    validate_base_url,
 };
 pub use catalog::{
     Comment, Project, SavedFilter, Section, Tag, TaskActivity, TaskActivityAction, TaskRelation,

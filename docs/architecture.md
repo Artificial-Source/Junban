@@ -60,6 +60,14 @@ SSE clients subscribe before durable catch-up. Revision IDs deduplicate queued/l
 
 Reminder delivery adds one process-global Tokio wake coordinator (started only from `main`, cancelled with the same shutdown token) and an authenticated ephemeral `GET /api/v1/reminders/events` stream. The coordinator sleeps until `next_reminder_wake_at`, broadcasts a content-free `reminders_due` signal with a process-local sequence, and recomputes on `Notify` after committed user mutations and successful reminder control-plane routes. Overdue wakes throttle at 30 seconds unless notified. These wakes are not committed task events and never increment the global revision. They share the same 64-connection SSE cap as `/api/v1/events`.
 
+## Durable AI response authority
+
+AI chat uses ordinary schema-v6 session/message/run rows. Daily briefing durably reserves only one assistant streaming message carrying the server-local `briefing_date`; a partial unique expression index permits at most one streaming/completed briefing for a profile date while failed/cancelled attempts remain history. Provider context adds one ephemeral server-owned user instruction with the exact date, read-only `plan_my_day`-first/no-apply language, and confirmed default energy when configured. No scheduler table or durable synthetic user message is involved.
+
+Edit, retry, and regenerate are typed suffix rewrites. Basic chat and typed actions share the same provider/configuration/context/credential preflight under the AI reconfiguration admission mutex before one storage transaction preserves the exact prefix, rejects an active suffix, tombstones removed run IDs for the 30-day receipt horizon, deletes the suffix, appends one completed user plus streaming assistant/run seed, and recomputes quotas. Invalidation session IDs are historical metadata independent of live session deletion and expire only with their receipt horizon. The setup task owns the response sender, SSE permit, mutex, request, and runtime admission through commit, so a dropped handler still terminalizes its durable run without cancelling unrelated runs. Exact terminal retries replay the retained seed and SSE transcript without provider setup or egress.
+
+The four response-action routes are operator-only HTTP/SSE and intentionally do not extend the frozen CLI/MCP catalog.
+
 ## Frontend boundary
 
 - `src/` is React/Vite/Tailwind only.

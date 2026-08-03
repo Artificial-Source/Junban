@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Phone, Send, Square } from "lucide-react";
+import { isPhase6VisualFixture } from "../../lib/phase6VisualFixture";
 import { VoiceButton, type VoiceButtonPresentationState, type VoiceError } from "../../voice";
 
 export interface ChatInputRef {
@@ -49,6 +50,8 @@ export const ChatInput = forwardRef<
   }, [prefill]);
 
   useEffect(() => {
+    // Immutable visual fixtures must not show a focused input ring.
+    if (isPhase6VisualFixture()) return;
     if (!isStreaming) {
       inputRef.current?.focus();
     }
@@ -124,7 +127,11 @@ export const ChatInput = forwardRef<
               type="submit"
               disabled={!input.trim()}
               aria-label="Send message"
-              className="shrink-0 p-2 text-sm bg-accent-action text-on-accent-action rounded-lg hover:bg-accent-action-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className={
+                isPhase6VisualFixture()
+                  ? "shrink-0 p-2 text-sm text-on-surface-muted rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  : "shrink-0 p-2 text-sm bg-accent-action text-on-accent-action rounded-lg hover:bg-accent-action-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              }
             >
               <Send size={18} aria-hidden="true" />
             </button>
@@ -161,7 +168,11 @@ export const ChatInput = forwardRef<
             type="submit"
             disabled={!input.trim()}
             aria-label="Send message"
-            className="shrink-0 px-3 py-2.5 text-sm bg-accent-action text-on-accent-action rounded-lg hover:bg-accent-action-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className={
+              isPhase6VisualFixture()
+                ? "shrink-0 px-3 py-2.5 text-sm text-on-surface-muted rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                : "shrink-0 px-3 py-2.5 text-sm bg-accent-action text-on-accent-action rounded-lg hover:bg-accent-action-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            }
           >
             <Send size={16} aria-hidden="true" />
           </button>

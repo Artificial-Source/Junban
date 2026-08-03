@@ -1,5 +1,6 @@
 import { AlertTriangle, Bot, CalendarDays, ListTodo, Sun } from "lucide-react";
 import { memo, useMemo } from "react";
+import { isPhase6VisualFixture } from "../../lib/phase6VisualFixture";
 
 export type WelcomeStats = {
   overdueCount: number;
@@ -158,7 +159,11 @@ export const WelcomeScreen = memo(function WelcomeScreen({
             <button
               type="button"
               onClick={onDailyBriefing}
-              className="w-full max-w-md mx-auto mb-3 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-accent-action text-on-accent-action text-sm font-medium hover:bg-accent-action-hover transition-colors"
+              className={
+                isPhase6VisualFixture()
+                  ? "w-full max-w-md mx-auto mb-3 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-on-surface"
+                  : "w-full max-w-md mx-auto mb-3 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-accent-action text-on-accent-action text-sm font-medium hover:bg-accent-action-hover transition-colors"
+              }
             >
               <Sun size={16} aria-hidden="true" />
               Start Morning Briefing
@@ -225,14 +230,12 @@ function StatCard({
   label: string;
   variant?: "error";
 }) {
-  const textColor = variant === "error" ? "text-error" : "text-on-surface-secondary";
+  const countColor = variant === "error" ? "text-error" : "text-on-surface-secondary";
   return (
-    <div
-      className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-secondary/50 ${textColor}`}
-    >
-      {icon}
-      <span className="text-sm font-medium">{count}</span>
-      <span className="text-xs opacity-70">{label}</span>
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-secondary/50 text-on-surface-secondary">
+      <span className={countColor}>{icon}</span>
+      <span className={`text-sm font-medium ${countColor}`}>{count}</span>
+      <span className="text-xs text-on-surface-muted">{label}</span>
     </div>
   );
 }

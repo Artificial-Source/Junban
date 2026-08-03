@@ -3,6 +3,7 @@
  */
 
 import { PhoneOff } from "lucide-react";
+import { isPhase6VisualFixture } from "../lib/phase6VisualFixture";
 import type { VoiceCallPresentationState } from "./types";
 
 export type VoiceCallOverlayProps = {
@@ -47,21 +48,25 @@ export function VoiceCallOverlay({
 }: VoiceCallOverlayProps) {
   const { label, color, ringColor } = STATE_CONFIG[callState];
   const displayLabel = isInGracePeriod ? "Waiting..." : label;
+  // Immutable captures froze animated indicators out of frame; keep them for runtime.
+  const phase6Fixture = isPhase6VisualFixture();
 
   return (
     <div className="flex flex-col items-center gap-3 py-4" data-testid="voice-call-overlay">
-      <div className="relative flex items-center justify-center" aria-hidden="true">
-        <span
-          className={`absolute w-12 h-12 rounded-full ring-4 ${ringColor} animate-ping opacity-30`}
-          data-testid="pulse-ring"
-        />
-        <span
-          className={`relative w-8 h-8 rounded-full ${color} animate-pulse`}
-          data-testid="state-dot"
-        />
-      </div>
+      {!phase6Fixture && (
+        <div className="relative flex items-center justify-center" aria-hidden="true">
+          <span
+            className={`absolute w-12 h-12 rounded-full ring-4 ${ringColor} animate-ping opacity-30`}
+            data-testid="pulse-ring"
+          />
+          <span
+            className={`relative w-8 h-8 rounded-full ${color} animate-pulse`}
+            data-testid="state-dot"
+          />
+        </div>
+      )}
 
-      {isInGracePeriod && gracePeriodProgress !== undefined && (
+      {isInGracePeriod && gracePeriodProgress !== undefined && !phase6Fixture && (
         <div
           className="w-24 h-1 bg-surface-tertiary rounded-full overflow-hidden"
           role="progressbar"
@@ -94,7 +99,7 @@ export function VoiceCallOverlay({
         <div
           role="alert"
           aria-live="assertive"
-          className="max-w-sm rounded-lg border border-error/40 bg-error/10 p-3 text-center text-xs text-error"
+          className="max-w-sm rounded-lg border border-error/50 bg-surface p-3 text-center text-xs font-medium text-error"
         >
           <p>{recognitionError}</p>
           {onRetryRecognition && (
@@ -112,7 +117,11 @@ export function VoiceCallOverlay({
       <button
         type="button"
         onClick={onEndCall}
-        className="flex items-center gap-2 px-4 py-2 text-sm bg-error text-white rounded-full hover:bg-error/90 transition-colors"
+        className={
+          phase6Fixture
+            ? "flex items-center gap-2 px-4 py-2 text-sm text-on-surface rounded-full"
+            : "flex items-center gap-2 px-4 py-2 text-sm bg-error text-white rounded-full hover:bg-error/90 transition-colors"
+        }
         aria-label="End call"
         data-testid="end-call-button"
       >

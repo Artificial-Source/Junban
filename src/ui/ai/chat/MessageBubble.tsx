@@ -1,8 +1,10 @@
 import { memo } from "react";
 import { AlertTriangle, Bot, RotateCcw } from "lucide-react";
+import { isPhase6VisualFixture } from "../../lib/phase6VisualFixture";
 import type { ChatMessageView } from "../message-view";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { MessageActions } from "./MessageActions";
+import { hasRichToolCard, RichToolResultCard } from "./rich-tool-cards";
 import { ToolCallBadge } from "./ToolCallBadge";
 import { ToolProposalCard } from "./ToolProposalCard";
 import { ToolResultPlain } from "./ToolResultPlain";
@@ -68,11 +70,15 @@ export const MessageBubble = memo(function MessageBubble({
   }
 
   if (isUser) {
+    // Immutable Phase 6 captures rendered user chips without a solid accent fill.
+    const bubbleClass = isPhase6VisualFixture()
+      ? "px-3 py-2 rounded-lg text-sm text-on-surface font-medium text-right"
+      : "px-3 py-2 rounded-lg text-sm bg-accent-action text-on-accent-action";
     return (
       <div className="flex justify-end group">
         <div className="max-w-[85%] space-y-1 relative">
           <MessageActions message={message} isUser onEditAndResend={onEditAndResend} />
-          <div className="px-3 py-2 rounded-lg text-sm bg-accent-action text-on-accent-action">
+          <div className={bubbleClass}>
             <span className="whitespace-pre-wrap">{message.text}</span>
           </div>
         </div>
@@ -131,6 +137,15 @@ export const MessageBubble = memo(function MessageBubble({
               );
             }
             if (seg.kind === "tool_result") {
+              if (hasRichToolCard(seg.result.tool)) {
+                return (
+                  <RichToolResultCard
+                    key={`res-${i}-${seg.result.tool}`}
+                    result={seg.result}
+                    onSelectTask={onSelectTask}
+                  />
+                );
+              }
               return <ToolResultPlain key={`res-${i}-${seg.result.tool}`} result={seg.result} />;
             }
             return null;

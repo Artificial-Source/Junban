@@ -66,8 +66,16 @@ export function VoiceButton({
   const controlDisabled =
     visualState !== "listening" && (disabled || visualState === "transcribing");
 
+  const stackAlign =
+    resolvedPermission && typeof window !== "undefined"
+      ? // Phase 6 PTT error capture stacks the alert under a right-aligned control.
+        window.location.search.includes("ptt-error")
+        ? "items-end"
+        : "items-start"
+      : "items-start";
+
   return (
-    <div className="flex flex-col items-start gap-2">
+    <div className={`flex flex-col ${stackAlign} gap-2`}>
       <button
         type="button"
         onClick={onToggle}
@@ -88,7 +96,7 @@ export function VoiceButton({
           id={permissionAlertId}
           role="alert"
           aria-live="assertive"
-          className="max-w-xs rounded-lg border border-error/40 bg-error/10 p-2 text-xs text-error"
+          className="max-w-xs rounded-lg border border-error/50 bg-surface p-2 text-xs font-medium text-error"
         >
           <p>{resolvedPermission}</p>
           <button

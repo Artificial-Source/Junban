@@ -16,7 +16,7 @@ import {
 import { AiOnboarding } from "./AiOnboarding";
 import { dismissAiOnboarding, isAiOnboardingDismissed } from "./onboarding-dismissal";
 import { useAiConversation, type UseAiConversationOptions } from "./useAiConversation";
-import type { ChatMessageView } from "./message-view";
+import type { ChatMessageView, ChatSessionView } from "./message-view";
 import type { VoiceSettingsDto } from "./types";
 import {
   VoiceCallOverlay,
@@ -33,6 +33,9 @@ export type AIChatPanelFixture = {
   forceHistoryOpen?: boolean;
   forceMobile?: boolean;
   messages?: ChatMessageView[];
+  /** Explicit session list for history scenes (no network). */
+  sessions?: ChatSessionView[];
+  activeSessionId?: string | null;
   stats?: WelcomeStats;
   greetingOverride?: string;
   timeOfDayOverride?: "morning" | "afternoon" | "evening" | "night";
@@ -40,6 +43,10 @@ export type AIChatPanelFixture = {
   dailyBriefingEnabled?: boolean;
   /** Explicit voice fixture for immutable scenes 10–14. */
   voice?: VoiceFixture;
+  /** Panel chrome mode for component-sized harness scenes. */
+  mode?: "panel" | "view";
+  /** Hide floating history/clear chrome (harness provides its own). */
+  hideFloatingActions?: boolean;
 };
 
 export interface AIChatPanelProps {
@@ -93,10 +100,13 @@ export function AIChatPanel({
   conversationOptions,
   fixture,
 }: AIChatPanelProps) {
+  // Any fixture view-model disables conversation + local-voice side effects,
+  // not only fixtures that inject messages (prevents partial fixture leaks).
+  const fixtureActive = Boolean(fixture);
   const conversation = useAiConversation({
     ...conversationOptions,
     focusedTaskId,
-    enabled: !fixture?.messages,
+    enabled: !fixtureActive,
   });
 
   const chatInputRef = useRef<ChatInputRef>(null);
@@ -110,27 +120,30 @@ export function AIChatPanel({
   });
 
   const messages = fixture?.messages ?? conversation.messages;
-  const isStreaming = fixture?.messages ? false : conversation.isStreaming;
-  const sessions = conversation.sessions;
+  const isStreaming = fixtureActive ? false : conversation.isStreaming;
+  const sessions = fixture?.sessions ?? conversation.sessions;
+  const activeSessionId = fixture?.activeSessionId ?? conversation.activeSessionId;
   const stats = fixture?.stats ?? welcomeStats;
   const briefingEnabled = fixture?.dailyBriefingEnabled ?? dailyBriefingEnabled;
   const taskTitle = fixture?.focusedTaskTitle ?? focusedTaskTitle;
   const confirmedVoice = voiceSettings ?? DEFAULT_VOICE_SETTINGS;
+  const chatMode = fixture?.mode ?? "view";
+  const noop = () => undefined;
 
   const voice = useVoiceController({
     settings: confirmedVoice,
     autoSend,
     messages,
     isStreaming,
-    activeSessionId: conversation.activeSessionId,
+    activeSessionId,
     sendMessage: (text) => {
       void conversation.sendMessage(text);
     },
     stopConversation: () => conversation.stop(),
-    enabled: !fixture?.messages,
+    enabled: !fixtureActive,
     fixture: fixture?.voice ?? null,
-    localStt: fixture ? null : localStt,
-    localTts: fixture ? null : localTts,
+    localStt: fixtureActive ? null : localStt,
+    localTts: fixtureActive ? null : localTts,
   });
 
   // Focused-task launch: prefill always; auto-send only with a concrete prompt.
@@ -176,7 +189,7 @@ export function AIChatPanel({
 
   const showWelcome =
     fixture?.forceWelcome ||
-    (!fixture?.messages && messages.length === 0 && !conversation.messagesLoading);
+    (messages.length === 0 && (fixtureActive || !conversation.messagesLoading));
 
   const isMobileLayout = Boolean(fixture?.forceMobile);
 
@@ -190,22 +203,38 @@ export function AIChatPanel({
       {showHistory && sessions.length > 0 && (
         <ChatHistory
           sessions={sessions}
-          activeSessionId={conversation.activeSessionId}
-          onNewChat={conversation.createNewSession}
-          onSwitchSession={(id) => {
-            void conversation.selectSession(id);
-          }}
-          onDeleteSession={(id) => {
-            void conversation.deleteSession(id);
-          }}
-          onRenameSession={(id, title) => {
-            void conversation.renameSession(id, title);
-          }}
-          mode="view"
-          onLoadMore={() => {
-            void conversation.loadMoreSessions();
-          }}
-          hasMore={Boolean(conversation.sessionsCursor)}
+          activeSessionId={activeSessionId}
+          onNewChat={fixtureActive ? noop : conversation.createNewSession}
+          onSwitchSession={
+            fixtureActive
+              ? noop
+              : (id) => {
+                  void conversation.selectSession(id);
+                }
+          }
+          onDeleteSession={
+            fixtureActive
+              ? noop
+              : (id) => {
+                  void conversation.deleteSession(id);
+                }
+          }
+          onRenameSession={
+            fixtureActive
+              ? noop
+              : (id, title) => {
+                  void conversation.renameSession(id, title);
+                }
+          }
+          mode={chatMode === "panel" ? "panel" : "view"}
+          onLoadMore={
+            fixtureActive
+              ? undefined
+              : () => {
+                  void conversation.loadMoreSessions();
+                }
+          }
+          hasMore={fixtureActive ? false : Boolean(conversation.sessionsCursor)}
         />
       )}
 
@@ -225,33 +254,35 @@ export function AIChatPanel({
         )}
 
         {/* Floating actions */}
-        <div className="absolute top-4 right-4 z-10 flex items-center gap-1">
-          {(sessions.length > 0 || fixture?.forceHistoryOpen) && (
-            <button
-              type="button"
-              onClick={() => setShowHistory((v) => !v)}
-              title="Chat history"
-              aria-label={showHistory ? "Hide chat history" : "Show chat history"}
-              aria-pressed={showHistory}
-              className="text-on-surface-muted hover:text-on-surface-secondary p-2 rounded-lg hover:bg-surface-tertiary transition-colors text-xs"
-            >
-              {showHistory ? "Hide" : "History"}
-            </button>
-          )}
-          {messages.length > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                void conversation.clearSession();
-              }}
-              title="Clear chat"
-              aria-label="Clear chat"
-              className="text-on-surface-muted hover:text-on-surface-secondary p-2 rounded-lg hover:bg-surface-tertiary transition-colors"
-            >
-              <Trash2 size={18} aria-hidden="true" />
-            </button>
-          )}
-        </div>
+        {!fixture?.hideFloatingActions && (
+          <div className="absolute top-4 right-4 z-10 flex items-center gap-1">
+            {(sessions.length > 0 || fixture?.forceHistoryOpen) && (
+              <button
+                type="button"
+                onClick={() => setShowHistory((v) => !v)}
+                title="Chat history"
+                aria-label={showHistory ? "Hide chat history" : "Show chat history"}
+                aria-pressed={showHistory}
+                className="text-on-surface-muted hover:text-on-surface-secondary p-2 rounded-lg hover:bg-surface-tertiary transition-colors text-xs"
+              >
+                {showHistory ? "Hide" : "History"}
+              </button>
+            )}
+            {messages.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!fixtureActive) void conversation.clearSession();
+                }}
+                title="Clear chat"
+                aria-label="Clear chat"
+                className="text-on-surface-muted hover:text-on-surface-secondary p-2 rounded-lg hover:bg-surface-tertiary transition-colors"
+              >
+                <Trash2 size={18} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        )}
 
         {taskTitle && (
           <div
@@ -281,10 +312,10 @@ export function AIChatPanel({
 
         {showWelcome ? (
           <WelcomeScreen
-            mode="view"
+            mode={chatMode}
             onSend={handleSubmit}
             onDailyBriefing={() => {
-              void conversation.sendDailyBriefing();
+              if (!fixtureActive) void conversation.sendDailyBriefing();
             }}
             isStreaming={isStreaming}
             stats={stats}
@@ -294,7 +325,13 @@ export function AIChatPanel({
           />
         ) : (
           <div className="flex-1 overflow-auto">
-            <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+            <div
+              className={
+                chatMode === "panel"
+                  ? "px-3 py-3 space-y-3"
+                  : "max-w-3xl mx-auto px-4 py-6 space-y-4"
+              }
+            >
               {messages.map((msg, i) => {
                 const isLast = i === messages.length - 1;
                 return (
@@ -302,7 +339,7 @@ export function AIChatPanel({
                     key={msg.id}
                     message={msg}
                     onRetry={
-                      msg.isError && msg.retryable && isLast
+                      !fixtureActive && msg.isError && msg.retryable && isLast
                         ? () => {
                             void conversation.retryMessage(msg.id);
                           }
@@ -311,30 +348,42 @@ export function AIChatPanel({
                     onSelectTask={onSelectTask}
                     isLatest={isLast}
                     isStreaming={isStreaming}
-                    mode="view"
-                    onEditAndResend={(id, text) => {
-                      void conversation.editAndResend(id, text);
-                    }}
+                    mode={chatMode}
+                    onEditAndResend={
+                      fixtureActive
+                        ? undefined
+                        : (id, text) => {
+                            void conversation.editAndResend(id, text);
+                          }
+                    }
                     onRegenerate={
-                      msg.role === "assistant" && isLast && !isStreaming
+                      !fixtureActive && msg.role === "assistant" && isLast && !isStreaming
                         ? () => {
                             void conversation.regenerateMessage(msg.id);
                           }
                         : undefined
                     }
-                    onApprove={(approvalId, actionHash) => {
-                      void conversation.approveProposal(approvalId, actionHash);
-                    }}
-                    onReject={(approvalId, actionHash) => {
-                      void conversation.rejectProposal(approvalId, actionHash);
-                    }}
+                    onApprove={
+                      fixtureActive
+                        ? undefined
+                        : (approvalId, actionHash) => {
+                            void conversation.approveProposal(approvalId, actionHash);
+                          }
+                    }
+                    onReject={
+                      fixtureActive
+                        ? undefined
+                        : (approvalId, actionHash) => {
+                            void conversation.rejectProposal(approvalId, actionHash);
+                          }
+                    }
                   />
                 );
               })}
               {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
-                <TypingIndicator mode="view" status={conversation.reasoningStatus} />
+                <TypingIndicator mode={chatMode} status={conversation.reasoningStatus} />
               )}
-              {!isStreaming && messages.length > 0 && (
+              {!fixtureActive && !isStreaming && messages.length > 0 && (
                 <SuggestedActions
                   messages={messages}
                   onSend={handleSubmit}
@@ -370,7 +419,7 @@ export function AIChatPanel({
               voice.stop();
             }}
             isStreaming={isStreaming}
-            mode="view"
+            mode={chatMode}
             prefill={conversation.composerPrefill}
             voice={{
               buttonState: voice.buttonState,
@@ -379,7 +428,7 @@ export function AIChatPanel({
               error: voice.error,
               onRetryPermission: voice.retryRecognition,
               showPttButton: voice.showPttButton,
-              showCallButton: voice.showCallButton,
+              showCallButton: fixtureActive ? false : voice.showCallButton,
               onStartCall: voice.startCall,
             }}
           />

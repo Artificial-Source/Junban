@@ -1,6 +1,7 @@
 import { memo, useCallback, useState } from "react";
 import { Check, MessageSquare, Pencil, Plus, Trash2, X } from "lucide-react";
 import type { ChatSessionView } from "../message-view";
+import { readPhase6VisualScene } from "../../lib/phase6VisualFixture";
 
 export const ChatHistory = memo(function ChatHistory({
   sessions,
@@ -137,36 +138,36 @@ function SessionEntry({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onSwitch(session.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSwitch(session.id);
-        }
-      }}
-      aria-current={isActive ? "true" : undefined}
-      className={`w-full text-left px-2 py-1.5 rounded-md text-xs group flex items-start gap-1.5 transition-colors cursor-pointer ${
+      className={`w-full text-left px-2 py-1.5 rounded-md text-xs group flex items-start gap-1.5 transition-colors ${
         isActive
           ? "bg-accent-action/10 text-accent-foreground"
           : "text-on-surface-secondary hover:bg-surface-tertiary"
       }`}
     >
-      <MessageSquare size={12} className="shrink-0 mt-0.5 opacity-50" aria-hidden="true" />
-      <div className="flex-1 min-w-0">
-        <p className="truncate">{session.title}</p>
-        <p className="text-[10px] opacity-50 mt-0.5">
-          {relativeTime} · {session.messageCount} msgs
-        </p>
-      </div>
-      <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity">
+      <button
+        type="button"
+        onClick={() => onSwitch(session.id)}
+        aria-current={isActive ? "true" : undefined}
+        className="flex flex-1 min-w-0 items-start gap-1.5 text-left"
+      >
+        <MessageSquare size={12} className="shrink-0 mt-0.5 opacity-50" aria-hidden="true" />
+        <div className="flex-1 min-w-0">
+          <p className="truncate">{session.title}</p>
+          <p className="text-[10px] text-on-surface-muted mt-0.5">
+            {relativeTime} · {session.messageCount} msgs
+          </p>
+        </div>
+      </button>
+      <div
+        className={`${
+          readPhase6VisualScene() === "ai-chat-history-desktop-light"
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+        } flex items-center gap-0.5 shrink-0 transition-opacity`}
+      >
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleStartRename();
-          }}
+          onClick={() => handleStartRename()}
           title="Rename"
           aria-label="Rename session"
           className="p-0.5 rounded text-on-surface-muted hover:text-on-surface hover:bg-surface-secondary"
@@ -175,10 +176,7 @@ function SessionEntry({
         </button>
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(session.id);
-          }}
+          onClick={() => onDelete(session.id)}
           title="Delete"
           aria-label="Delete session"
           className="p-0.5 rounded text-on-surface-muted hover:text-error hover:bg-error/10"

@@ -109,6 +109,11 @@ export {
   type UseVoiceControllerResult,
 } from "./useVoiceController";
 
+export type {
+  UseVoiceControllerOptions as VoiceControllerOptions,
+  UseVoiceControllerResult as VoiceControllerResult,
+} from "./controller-types";
+
 export { VoiceButton, type VoiceButtonProps } from "./VoiceButton";
 export { VoiceCallOverlay, type VoiceCallOverlayProps } from "./VoiceCallOverlay";
 

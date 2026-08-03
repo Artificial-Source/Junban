@@ -56,7 +56,7 @@ jobs:
           toolchain: "1.93.0"
 
       - name: Install pinned supply-chain tools
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: cargo-audit@0.22.2,cargo-deny@0.20.2
           checksum: "true"

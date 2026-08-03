@@ -1,10 +1,22 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Send, Square } from "lucide-react";
+import { Phone, Send, Square } from "lucide-react";
+import { VoiceButton, type VoiceButtonPresentationState, type VoiceError } from "../../voice";
 
 export interface ChatInputRef {
   focus: () => void;
   setValue: (value: string) => void;
 }
+
+export type ChatInputVoiceProps = {
+  buttonState: VoiceButtonPresentationState;
+  onTogglePtt: () => void;
+  permissionError?: string | null;
+  error?: VoiceError | null;
+  onRetryPermission?: () => void;
+  showPttButton: boolean;
+  showCallButton: boolean;
+  onStartCall?: () => void;
+};
 
 export const ChatInput = forwardRef<
   ChatInputRef,
@@ -16,8 +28,13 @@ export const ChatInput = forwardRef<
     prefill?: string;
     /** Placeholder override (focused task, etc.). */
     placeholder?: string;
+    /** Optional voice controls (PTT + start call). */
+    voice?: ChatInputVoiceProps | null;
   }
->(function ChatInput({ onSubmit, onStop, isStreaming, mode, prefill = "", placeholder }, ref) {
+>(function ChatInput(
+  { onSubmit, onStop, isStreaming, mode, prefill = "", placeholder, voice = null },
+  ref,
+) {
   const [input, setInput] = useState(prefill);
   const inputRef = useRef<HTMLInputElement>(null);
   const isView = mode === "view";
@@ -47,6 +64,38 @@ export const ChatInput = forwardRef<
 
   const defaultPlaceholder = isView ? "Ask anything..." : "Ask about your tasks...";
 
+  const voiceControls = voice ? (
+    <>
+      {voice.showPttButton && (
+        <VoiceButton
+          onToggle={voice.onTogglePtt}
+          disabled={isStreaming}
+          state={voice.buttonState}
+          permissionError={voice.permissionError}
+          error={voice.error}
+          onRetry={voice.onRetryPermission}
+        />
+      )}
+      {voice.showCallButton && (
+        <button
+          type="button"
+          onClick={voice.onStartCall}
+          disabled={isStreaming}
+          aria-label="Start voice call"
+          title="Start voice call"
+          data-testid="start-voice-call"
+          className={
+            isView
+              ? "shrink-0 p-2 text-sm rounded-lg text-on-surface-muted hover:bg-surface-tertiary disabled:opacity-50 transition-colors"
+              : "shrink-0 px-2.5 py-2.5 text-sm rounded-lg border border-border text-on-surface-muted hover:bg-surface-secondary disabled:opacity-50 transition-colors"
+          }
+        >
+          <Phone size={isView ? 18 : 16} aria-hidden="true" />
+        </button>
+      )}
+    </>
+  ) : null;
+
   if (isView) {
     return (
       <form onSubmit={handleSubmit} className="max-w-3xl mx-auto w-full px-4 pb-6">
@@ -60,6 +109,7 @@ export const ChatInput = forwardRef<
             aria-label="Message"
             className="min-w-0 flex-1 bg-transparent text-base text-on-surface placeholder-on-surface-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded-sm"
           />
+          {voiceControls}
           {isStreaming ? (
             <button
               type="button"
@@ -96,6 +146,7 @@ export const ChatInput = forwardRef<
           aria-label="Message"
           className="min-w-0 flex-1 px-3 py-2.5 text-sm border border-border rounded-lg bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-2 focus:ring-focus"
         />
+        {voiceControls}
         {isStreaming ? (
           <button
             type="button"

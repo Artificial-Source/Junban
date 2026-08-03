@@ -17,6 +17,13 @@ import { AiOnboarding } from "./AiOnboarding";
 import { dismissAiOnboarding, isAiOnboardingDismissed } from "./onboarding-dismissal";
 import { useAiConversation, type UseAiConversationOptions } from "./useAiConversation";
 import type { ChatMessageView } from "./message-view";
+import type { VoiceSettingsDto } from "./types";
+import {
+  VoiceCallOverlay,
+  useVoiceController,
+  type VoiceFixture,
+  type VoiceCallPresentationState,
+} from "../voice";
 
 export type AIChatPanelFixture = {
   forceOnboarding?: boolean;
@@ -29,6 +36,8 @@ export type AIChatPanelFixture = {
   timeOfDayOverride?: "morning" | "afternoon" | "evening" | "night";
   focusedTaskTitle?: string | null;
   dailyBriefingEnabled?: boolean;
+  /** Explicit voice fixture for immutable scenes 10–14. */
+  voice?: VoiceFixture;
 };
 
 export interface AIChatPanelProps {
@@ -42,10 +51,26 @@ export interface AIChatPanelProps {
   /** Concrete prompt from launch query; only auto-sent when autoSend is true. */
   launchPrompt?: string | null;
   welcomeStats?: WelcomeStats;
+  /** Server-confirmed voice settings (never draft). */
+  voiceSettings?: VoiceSettingsDto | null;
   conversationOptions?: Omit<UseAiConversationOptions, "focusedTaskId" | "enabled">;
   /** Explicit fixture view-model only — production must not pass this. */
   fixture?: AIChatPanelFixture;
 }
+
+const DEFAULT_VOICE_SETTINGS: VoiceSettingsDto = {
+  cloud_speech_enabled: false,
+  grace_period_ms: 1000,
+  stt_provider: "browser",
+  stt_model: null,
+  tts_provider: "browser",
+  tts_model: null,
+  tts_voice: null,
+  stt_credential_id: null,
+  tts_credential_id: null,
+  tts_enabled: false,
+  voice_mode: "push_to_talk",
+};
 
 export function AIChatPanel({
   onOpenSettings,
@@ -57,6 +82,7 @@ export function AIChatPanel({
   autoSend = false,
   launchPrompt = null,
   welcomeStats,
+  voiceSettings = null,
   conversationOptions,
   fixture,
 }: AIChatPanelProps) {
@@ -82,6 +108,21 @@ export function AIChatPanel({
   const stats = fixture?.stats ?? welcomeStats;
   const briefingEnabled = fixture?.dailyBriefingEnabled ?? dailyBriefingEnabled;
   const taskTitle = fixture?.focusedTaskTitle ?? focusedTaskTitle;
+  const confirmedVoice = voiceSettings ?? DEFAULT_VOICE_SETTINGS;
+
+  const voice = useVoiceController({
+    settings: confirmedVoice,
+    autoSend,
+    messages,
+    isStreaming,
+    activeSessionId: conversation.activeSessionId,
+    sendMessage: (text) => {
+      void conversation.sendMessage(text);
+    },
+    stopConversation: () => conversation.stop(),
+    enabled: !fixture?.messages,
+    fixture: fixture?.voice ?? null,
+  });
 
   // Focused-task launch: prefill always; auto-send only with a concrete prompt.
   useEffect(() => {
@@ -296,16 +337,44 @@ export function AIChatPanel({
           </div>
         )}
 
-        <ChatInput
-          ref={chatInputRef}
-          onSubmit={handleSubmit}
-          onStop={() => {
-            void conversation.stop();
-          }}
-          isStreaming={isStreaming}
-          mode="view"
-          prefill={conversation.composerPrefill}
-        />
+        {voice.isCallActive ? (
+          <div className="max-w-3xl mx-auto w-full px-4 pb-6">
+            <VoiceCallOverlay
+              callState={
+                (voice.callState === "idle"
+                  ? "listening"
+                  : voice.callState) as VoiceCallPresentationState
+              }
+              callDuration={voice.callDuration}
+              onEndCall={voice.endCall}
+              isInGracePeriod={voice.isInGracePeriod}
+              gracePeriodProgress={voice.gracePeriodProgress}
+              recognitionError={voice.recognitionError}
+              onRetryRecognition={voice.retryRecognition}
+            />
+          </div>
+        ) : (
+          <ChatInput
+            ref={chatInputRef}
+            onSubmit={handleSubmit}
+            onStop={() => {
+              voice.stop();
+            }}
+            isStreaming={isStreaming}
+            mode="view"
+            prefill={conversation.composerPrefill}
+            voice={{
+              buttonState: voice.buttonState,
+              onTogglePtt: voice.togglePushToTalk,
+              permissionError: voice.recognitionError,
+              error: voice.error,
+              onRetryPermission: voice.retryRecognition,
+              showPttButton: voice.showPttButton,
+              showCallButton: voice.showCallButton,
+              onStartCall: voice.startCall,
+            }}
+          />
+        )}
       </div>
     </aside>
   );

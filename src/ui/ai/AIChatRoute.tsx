@@ -163,6 +163,7 @@ export function AIChatRoute({
         autoSend={loadState.config.ai.auto_send}
         launchPrompt={launchPrompt}
         welcomeStats={welcomeStats}
+        voiceSettings={loadState.config.voice}
         fixture={fixture}
       />
     </div>

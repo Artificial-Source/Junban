@@ -49,7 +49,8 @@ export type View =
   | "matrix"
   | "stats"
   | "dopamine-menu"
-  | "timeblocking";
+  | "timeblocking"
+  | "ai-chat";
 
 /** Structured application route (never the Settings overlay itself). */
 export type AppRoute =
@@ -68,7 +69,8 @@ export type AppRoute =
   | { name: "matrix" }
   | { name: "stats" }
   | { name: "dopamine-menu" }
-  | { name: "timeblocking" };
+  | { name: "timeblocking" }
+  | { name: "ai-chat" };
 
 /** Settings overlay location derived from the URL. */
 export type SettingsLocation =
@@ -182,6 +184,8 @@ export function parseRoute(path: string): AppRoute | null {
       return { name: "dopamine-menu" };
     case "/timeblocking":
       return { name: "timeblocking" };
+    case "/ai-chat":
+      return { name: "ai-chat" };
     default:
       break;
   }
@@ -258,6 +262,8 @@ export function routeToPath(route: AppRoute): string {
       return "/dopamine-menu";
     case "timeblocking":
       return "/timeblocking";
+    case "ai-chat":
+      return "/ai-chat";
   }
 }
 
@@ -277,6 +283,7 @@ export function viewToRoute(view: View): AppRoute | null {
     case "stats":
     case "dopamine-menu":
     case "timeblocking":
+    case "ai-chat":
       return { name: view };
     case "saved-filter":
     case "project":

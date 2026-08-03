@@ -125,3 +125,21 @@ describe("view helpers", () => {
     expect(pathToView("/settings")).toBe("today");
   });
 });
+
+describe("Wave 4a ai-chat route", () => {
+  it("parses and serializes the canonical /ai-chat path only", () => {
+    expect(parseRoute("/ai-chat")).toEqual({ name: "ai-chat" });
+    expect(parseRoute("/ai-chat/")).toEqual({ name: "ai-chat" });
+    expect(routeToPath({ name: "ai-chat" })).toBe("/ai-chat");
+    expect(viewToRoute("ai-chat")).toEqual({ name: "ai-chat" });
+    expect(viewToPath("ai-chat")).toBe("/ai-chat");
+    expect(pathToView("/ai-chat")).toBe("ai-chat");
+  });
+
+  it("rejects /ai alias and other non-canonical AI paths", () => {
+    expect(parseRoute("/ai")).toBeNull();
+    expect(parseRoute("/ai/")).toBeNull();
+    expect(parseRoute("/ai-chat/extra")).toBeNull();
+    expect(parseRoute("/AI-Chat")).toBeNull();
+  });
+});

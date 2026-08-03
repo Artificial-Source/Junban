@@ -1,9 +1,9 @@
 /**
  * Mobile bottom navigation bar.
  * Preserves the legacy layout with Inbox/Today on the left, Upcoming on the right,
- * and the center AI button absent (not disabled) until Phase 6.
+ * and the raised center AI control that navigates to /ai-chat.
  */
-import { Inbox, CalendarDays, Clock, Menu } from "lucide-react";
+import { Inbox, CalendarDays, Clock, Menu, MessageCircle } from "lucide-react";
 import type { View } from "../hooks/useRouting";
 
 interface BottomNavBarProps {
@@ -52,6 +52,7 @@ export function BottomNavBar({
     return (
       <button
         key={item.id}
+        type="button"
         onClick={() => onNavigate(item.id)}
         aria-current={isActive ? "page" : undefined}
         className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors ${
@@ -71,6 +72,8 @@ export function BottomNavBar({
     );
   };
 
+  const aiActive = currentView === "ai-chat";
+
   return (
     <nav
       aria-label="Mobile navigation"
@@ -79,8 +82,22 @@ export function BottomNavBar({
       <div className="flex items-stretch h-[--height-bottom-nav]">
         {LEFT_ITEMS.map(renderNavItem)}
 
-        {/* Center spacer — AI button is absent until Phase 6 */}
-        <div className="flex-1" aria-hidden="true" />
+        {/* Center AI button — raised accent orb (legacy mobile authority). */}
+        <div className="flex-1 flex items-center justify-center">
+          <button
+            type="button"
+            onClick={() => onNavigate("ai-chat")}
+            aria-label="AI Assistant"
+            aria-current={aiActive ? "page" : undefined}
+            className={`-mt-5 w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100 ${
+              aiActive
+                ? "bg-accent-action text-on-accent-action shadow-accent-action/30"
+                : "bg-accent-action text-on-accent-action shadow-accent-action/20"
+            }`}
+          >
+            <MessageCircle size={22} aria-hidden="true" />
+          </button>
+        </div>
 
         {RIGHT_ITEMS.map((item) => {
           const Icon = item.icon;
@@ -88,6 +105,7 @@ export function BottomNavBar({
           return (
             <button
               key={item.id}
+              type="button"
               onClick={() => onNavigate(item.id)}
               aria-current={isActive ? "page" : undefined}
               className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors ${

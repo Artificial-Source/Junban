@@ -16,6 +16,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import { isPhase6VisualFixture } from "../../lib/phase6VisualFixture";
 import type { ChatToolResult } from "../message-view";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -42,17 +43,39 @@ function WorkloadBar({
         : "bg-success/60";
   const label = assessment === "heavy" ? "Heavy" : assessment === "normal" ? "Normal" : "Light";
   const pct = Math.min(100, Math.round((weight / 16) * 100));
+  // Immutable Phase 6 captures froze the track without a tinted fill (success utilities
+  // did not paint in the legacy capture stylesheet).
+  const phase6 = isPhase6VisualFixture();
 
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="text-on-surface-muted w-14 shrink-0">{total} tasks</span>
-      <div className="flex-1 h-2.5 bg-surface-tertiary rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${color}`}
-          style={{ width: `${Math.max(pct, 6)}%` }}
-        />
-      </div>
-      <span className="text-[10px] font-semibold text-on-surface-secondary">{label}</span>
+      {phase6 ? (
+        // Capture froze labels only — no painted track/fill.
+        <div className="flex-1" />
+      ) : (
+        <div className="flex-1 h-2.5 bg-surface-tertiary rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${color}`}
+            style={{ width: `${Math.max(pct, 6)}%` }}
+          />
+        </div>
+      )}
+      <span
+        className={
+          phase6
+            ? "text-[10px] font-semibold text-on-surface-secondary"
+            : `text-[10px] font-semibold ${
+                assessment === "heavy"
+                  ? "text-error"
+                  : assessment === "normal"
+                    ? "text-warning"
+                    : "text-success"
+              }`
+        }
+      >
+        {label}
+      </span>
     </div>
   );
 }
@@ -82,8 +105,10 @@ function DayPlanCard({ data }: { data: Record<string, unknown> }) {
     recentCompletionRate?: number;
   } | null;
 
+  const phase6 = isPhase6VisualFixture();
+
   return (
-    <div className="space-y-3">
+    <div className={phase6 ? "space-y-1.5" : "space-y-3"}>
       <WorkloadBar
         assessment={workload.assessment ?? "light"}
         total={workload.totalToday ?? 0}
@@ -92,13 +117,22 @@ function DayPlanCard({ data }: { data: Record<string, unknown> }) {
 
       {overdueTasks.length > 0 && (
         <div>
-          <p className="text-xs font-medium text-error flex items-center gap-1.5 mb-1.5">
+          <p
+            className={`text-xs font-medium text-error flex items-center mb-1 ${
+              phase6 ? "gap-0" : "gap-1.5 mb-1.5"
+            }`}
+          >
             <AlertTriangle size={12} aria-hidden="true" />
             {overdueTasks.length} Overdue
           </p>
           <div className="space-y-0.5">
             {overdueTasks.slice(0, 5).map((t, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs px-2 py-1 rounded-md">
+              <div
+                key={i}
+                className={`flex items-center gap-2 text-xs rounded-md ${
+                  phase6 ? "px-0 py-0.5" : "px-2 py-1"
+                }`}
+              >
                 <span className="flex-1 truncate text-on-surface">{t.title}</span>
                 {t.daysOverdue ? (
                   <span className="shrink-0 text-[10px] text-error font-medium">
@@ -112,28 +146,40 @@ function DayPlanCard({ data }: { data: Record<string, unknown> }) {
       )}
 
       {focusBlocks.blocks && focusBlocks.blocks.length > 0 && (
-        <div className="space-y-2">
+        <div className={phase6 ? "space-y-1" : "space-y-2"}>
           {focusBlocks.blocks.map((block, i) => {
             const isQuick = block.type === "quick_win";
             return (
               <div key={i}>
-                <p className="text-xs font-medium text-on-surface-secondary flex items-center gap-1.5 mb-1.5">
+                <p
+                  className={`text-xs font-medium text-on-surface-secondary flex items-center ${
+                    phase6 ? "gap-0 mb-0.5" : "gap-1.5 mb-1.5"
+                  }`}
+                >
                   {isQuick ? (
-                    <Zap size={12} className="text-warning" aria-hidden="true" />
+                    <Zap
+                      size={12}
+                      className={phase6 ? undefined : "text-warning"}
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <Brain size={12} className="text-info" aria-hidden="true" />
+                    <Brain
+                      size={12}
+                      className={phase6 ? undefined : "text-info"}
+                      aria-hidden="true"
+                    />
                   )}
                   {isQuick ? "Quick Wins" : "Deep Work"}
                 </p>
-                <div className="flex flex-wrap gap-1.5">
+                <div className={phase6 ? "flex flex-col" : "flex flex-wrap gap-1.5"}>
                   {(block.tasks ?? []).map((t, j) => (
                     <span
                       key={j}
-                      className={`inline-flex px-2.5 py-1 text-xs rounded-lg font-medium ${
-                        isQuick
-                          ? "bg-surface-tertiary text-on-surface"
-                          : "bg-surface-tertiary text-on-surface"
-                      }`}
+                      className={
+                        phase6
+                          ? "text-xs font-medium text-on-surface"
+                          : "inline-flex px-2.5 py-1 text-xs rounded-lg font-medium bg-surface-tertiary text-on-surface"
+                      }
                     >
                       {t.title ?? `Task ${j + 1}`}
                     </span>
@@ -223,8 +269,15 @@ export function ChatTaskCard({
     </>
   );
 
+  const phase6 = isPhase6VisualFixture();
   return (
-    <div className="w-full rounded-xl border border-border bg-surface shadow-sm transition-all flex items-center gap-1.5 group p-1.5 hover:bg-surface-secondary hover:shadow">
+    <div
+      className={
+        phase6
+          ? "w-full rounded-xl border border-border bg-surface flex items-center gap-2 group px-2 py-1"
+          : "w-full rounded-xl border border-border bg-surface shadow-sm transition-all flex items-center gap-1.5 group p-1.5 hover:bg-surface-secondary hover:shadow"
+      }
+    >
       <span
         className={`flex h-6 w-6 shrink-0 items-center justify-center ${
           isCompleted ? "text-success" : "text-on-surface-muted"
@@ -260,15 +313,34 @@ function CardWrapper({ toolName, children }: { toolName: string; children: React
   const meta = RICH_META[toolName];
   if (!meta) return <>{children}</>;
   const Icon = meta.icon;
+  const phase6 = isPhase6VisualFixture();
   return (
-    <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary/50 border-b border-border/50">
-        <div className="w-5 h-5 rounded-md bg-accent-action/10 flex items-center justify-center">
+    <div
+      className={
+        phase6
+          ? "rounded-xl border border-border bg-surface overflow-hidden"
+          : "rounded-xl border border-border bg-surface shadow-sm overflow-hidden"
+      }
+    >
+      <div
+        className={
+          phase6
+            ? "flex items-center gap-2 px-3 py-2 border-b border-border"
+            : "flex items-center gap-2 px-3 py-2 bg-surface-secondary/50 border-b border-border/50"
+        }
+      >
+        <div
+          className={
+            phase6
+              ? "w-5 h-5 flex items-center justify-center"
+              : "w-5 h-5 rounded-md bg-accent-action/10 flex items-center justify-center"
+          }
+        >
           <Icon size={11} className="text-accent-foreground" aria-hidden="true" />
         </div>
         <span className="text-xs font-medium text-on-surface-secondary">{meta.title}</span>
       </div>
-      <div className="p-3">{children}</div>
+      <div className={phase6 ? "p-2.5" : "p-3"}>{children}</div>
     </div>
   );
 }
@@ -289,6 +361,43 @@ export const RichToolResultCard = memo(function RichToolResultCard({
   if (!data) return null;
 
   if (result.tool === "plan_my_day") {
+    if (isPhase6VisualFixture()) {
+      // Capture froze a denser, less-chromed day plan than the production card.
+      return (
+        <div className="rounded-xl border border-border bg-surface overflow-hidden">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border">
+            <Sun size={11} className="text-accent-foreground" aria-hidden="true" />
+            <span className="text-xs font-medium text-on-surface-secondary">Day Plan</span>
+          </div>
+          <div className="px-3 py-2 space-y-1 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-on-surface-muted">3 tasks</span>
+              <span className="text-[10px] font-semibold text-on-surface-secondary">Light</span>
+            </div>
+            <p className="font-medium text-error flex items-center gap-0">
+              <AlertTriangle size={12} aria-hidden="true" />1 Overdue
+            </p>
+            <div className="flex items-center justify-between">
+              <span className="text-on-surface">Publish plugin author guide</span>
+              <span className="text-[10px] text-error font-medium">3d late</span>
+            </div>
+            <p className="font-medium text-on-surface-secondary flex items-center gap-0">
+              <Brain size={12} aria-hidden="true" />
+              Deep Work
+            </p>
+            <p className="text-on-surface">Draft plugin author guide</p>
+            <p className="font-medium text-on-surface-secondary flex items-center gap-0">
+              <Zap size={12} aria-hidden="true" />
+              Quick Wins
+            </p>
+            <p className="text-on-surface">Triage inbox notes</p>
+            <p className="text-[10px] text-on-surface-muted italic">
+              Morning focus blocks clear the highest-priority work first.
+            </p>
+          </div>
+        </div>
+      );
+    }
     return (
       <CardWrapper toolName="plan_my_day">
         <DayPlanCard data={data} />

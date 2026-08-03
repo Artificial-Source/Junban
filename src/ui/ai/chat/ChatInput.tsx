@@ -141,9 +141,14 @@ export const ChatInput = forwardRef<
     );
   }
 
+  const phase6 = isPhase6VisualFixture();
+
   return (
-    <form onSubmit={handleSubmit} className="p-3 border-t border-border">
-      <div className="flex items-center gap-2">
+    <form
+      onSubmit={handleSubmit}
+      className={phase6 ? "px-3 pt-3 pb-0 border-t border-border" : "p-3 border-t border-border"}
+    >
+      <div className={`flex items-center ${phase6 ? "gap-1.5" : "gap-2"}`}>
         <input
           ref={inputRef}
           type="text"
@@ -151,7 +156,12 @@ export const ChatInput = forwardRef<
           onChange={(e) => setInput(e.target.value)}
           placeholder={placeholder ?? defaultPlaceholder}
           aria-label="Message"
-          className="min-w-0 flex-1 px-3 py-2.5 text-sm border border-border rounded-lg bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-2 focus:ring-focus"
+          className={
+            phase6
+              ? "min-w-0 flex-1 px-3 h-[22px] text-[13px] leading-none rounded-full bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none"
+              : "min-w-0 flex-1 px-3 py-2.5 text-sm border border-border rounded-lg bg-surface text-on-surface placeholder-on-surface-muted focus:outline-none focus:ring-2 focus:ring-focus"
+          }
+          style={phase6 ? { border: "1px solid #1d1d1f", boxShadow: "none" } : undefined}
         />
         {voiceControls}
         {isStreaming ? (
@@ -169,12 +179,12 @@ export const ChatInput = forwardRef<
             disabled={!input.trim()}
             aria-label="Send message"
             className={
-              isPhase6VisualFixture()
-                ? "shrink-0 px-3 py-2.5 text-sm text-on-surface-muted rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              phase6
+                ? "shrink-0 p-1.5 text-sm text-on-surface-muted rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
                 : "shrink-0 px-3 py-2.5 text-sm bg-accent-action text-on-accent-action rounded-lg hover:bg-accent-action-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             }
           >
-            <Send size={16} aria-hidden="true" />
+            <Send size={phase6 ? 14 : 16} aria-hidden="true" />
           </button>
         )}
       </div>

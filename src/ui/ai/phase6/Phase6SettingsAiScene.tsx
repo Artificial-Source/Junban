@@ -19,12 +19,26 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
   const hasKey = Boolean(config.credentials.ai_provider?.present);
   const configured = state === "configured";
 
+  // Unconfigured capture is denser; configured keeps roomier rhythm so later section
+  // headers stay near the frozen capture rows (Daily Briefing ~y485).
+  const sectionMb = configured ? "mb-8" : "mb-1";
+  const sectionMbMid = configured ? "mb-6" : "mb-2";
+
   return (
     <>
-      <section className="mb-8">
-        <h2 className="text-lg font-semibold mb-3 text-on-surface">AI Assistant</h2>
+      <section className={sectionMb}>
+        <h2
+          className={
+            configured
+              ? "text-lg font-bold mb-2 text-on-surface"
+              : "text-lg font-semibold mb-2 text-on-surface"
+          }
+          style={configured ? { letterSpacing: "-0.009em" } : undefined}
+        >
+          AI Assistant
+        </h2>
 
-        <div className="space-y-4 max-w-md">
+        <div className="space-y-3 max-w-md">
           <div>
             <label
               htmlFor="ai-provider"
@@ -49,33 +63,35 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
 
           {provider && (
             <>
-              <div className="mb-3">
+              <div className="mb-1">
                 <p className="block text-xs font-medium text-on-surface-secondary mb-1">
                   Authentication
                 </p>
-                <div className="inline-flex rounded-lg bg-surface-secondary p-0.5 gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setAuthType("api-key")}
-                    className={`px-3 py-1.5 text-xs rounded-md ${
-                      authType === "api-key"
-                        ? "bg-surface text-on-surface shadow-sm"
-                        : "text-on-surface-muted"
-                    }`}
-                  >
+                <div
+                  className={
+                    configured
+                      ? "flex items-center gap-4 rounded-lg bg-surface-secondary px-3 py-1.5 w-full"
+                      : "inline-flex items-center gap-4 rounded-lg bg-surface-secondary px-3 py-1.5"
+                  }
+                >
+                  <label className="flex items-center gap-1.5 text-sm text-on-surface">
+                    <input
+                      type="radio"
+                      name="ai-auth-type"
+                      checked={authType === "api-key"}
+                      onChange={() => setAuthType("api-key")}
+                    />
                     API Key
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAuthType("oauth")}
-                    className={`px-3 py-1.5 text-xs rounded-md ${
-                      authType === "oauth"
-                        ? "bg-surface text-on-surface shadow-sm"
-                        : "text-on-surface-muted"
-                    }`}
-                  >
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-on-surface">
+                    <input
+                      type="radio"
+                      name="ai-auth-type"
+                      checked={authType === "oauth"}
+                      onChange={() => setAuthType("oauth")}
+                    />
                     OAuth Token
-                  </button>
+                  </label>
                 </div>
               </div>
 
@@ -86,7 +102,17 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
                     className="block text-xs font-medium text-on-surface-secondary mb-1"
                   >
                     API Key
-                    {hasKey && <span className="font-normal text-success ml-2">Set</span>}
+                    {hasKey && (
+                      <span
+                        className={
+                          configured
+                            ? "font-normal text-on-surface-secondary"
+                            : "font-normal text-success ml-2"
+                        }
+                      >
+                        {configured ? " Set" : "Set"}
+                      </span>
+                    )}
                   </label>
                   <input
                     id="ai-api-key"
@@ -137,16 +163,13 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
                 </select>
               </div>
 
-              <button
-                type="button"
-                className="rounded-lg bg-accent-action px-4 py-2 text-sm font-medium text-on-accent-action"
-              >
+              <button type="button" className="px-0 py-2 text-sm text-on-surface">
                 Save
               </button>
 
               <p
                 role="status"
-                className={`text-xs ${configured ? "text-success" : "text-on-surface-muted"}`}
+                className={configured ? "text-xs text-success" : "text-xs text-on-surface"}
               >
                 {configured ? "Connected" : "Not configured"}
               </p>
@@ -155,12 +178,12 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
         </div>
       </section>
 
-      <section className="mb-8">
+      <section className={sectionMbMid}>
         <h2 className="text-lg font-semibold mb-1 text-on-surface">Daily Briefing</h2>
-        <p className="text-xs text-on-surface-muted mb-3">
+        <p className="text-xs text-on-surface-muted mb-2">
           Automatically start your morning with a day plan when you open the AI chat.
         </p>
-        <div className="space-y-3 max-w-md">
+        <div className="space-y-2 max-w-md">
           <label className="flex items-center gap-2 text-sm text-on-surface">
             <input
               type="checkbox"
@@ -192,39 +215,50 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
         </div>
       </section>
 
-      <section className="mb-8">
+      <section className={sectionMbMid}>
         <h2 className="text-lg font-semibold mb-1 text-on-surface">Custom Instructions</h2>
-        <p className="text-xs text-on-surface-muted mb-3">
+        <p className="text-xs text-on-surface-muted mb-2">
           Add instructions the AI will always follow. These are injected into every conversation.
         </p>
-        <label htmlFor="ai-custom-instructions" className="sr-only">
+        <label
+          htmlFor="ai-custom-instructions"
+          className={
+            configured
+              ? "block text-xs font-medium text-on-surface-secondary mb-1"
+              : "sr-only"
+          }
+        >
           Custom Instructions
         </label>
-        {/* Visible label matching legacy capture hierarchy */}
-        <p className="block text-xs font-medium text-on-surface-secondary mb-1">
-          Custom Instructions
-        </p>
+        {!configured && (
+          <p className="block text-xs font-medium text-on-surface-secondary mb-1">
+            Custom Instructions
+          </p>
+        )}
         <textarea
           id="ai-custom-instructions"
           value={instructions}
           onChange={(e) => setInstructions(e.target.value.slice(0, 2000))}
           placeholder="e.g., 'Always suggest time estimates', 'You're a project manager for a software team', 'Respond in Spanish'"
           rows={4}
-          className="w-full max-w-lg px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface resize-none"
+          className={
+            configured
+              ? "w-full max-w-lg px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
+              : "w-full max-w-2xl px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
+          }
         />
-        <div className="flex items-center gap-3 mt-2">
-          <button
-            type="button"
-            className="rounded-lg bg-on-surface px-3 py-1.5 text-xs text-surface transition-opacity hover:opacity-90"
-          >
+        <div className="flex items-center gap-3 mt-1">
+          <button type="button" className="px-0 py-1 text-xs text-on-surface">
             Save
           </button>
           <span className="text-xs text-on-surface-muted">{instructions.length}/2000</span>
         </div>
       </section>
 
-      <section className="mb-8">
-        <h2 className="text-lg font-semibold text-on-surface mb-3">Memory</h2>
+      <section className="mb-2" style={configured ? { marginTop: 20 } : undefined}>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold text-on-surface">Memory</h2>
+        </div>
         <p className="text-sm text-on-surface-muted">
           No memories yet. The AI will remember important things you share in conversations.
         </p>

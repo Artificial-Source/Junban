@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useMemo } from "react";
-import { Bot } from "lucide-react";
+import { Bot, Mic } from "lucide-react";
 import {
   applyPhase6VisualEnvironment,
   PHASE6_FIXTURE_COPY,
@@ -68,7 +68,13 @@ function ConversationScene({
       <div className="flex-1 bg-surface-secondary/30 border-r border-border p-6">
         <h1 className="text-lg font-semibold text-on-surface mb-2">Today</h1>
         {focused && (
-          <div className="rounded-lg border border-accent-action/30 bg-accent-action/5 px-3 py-2 text-sm text-on-surface mb-4">
+          <div
+            className="rounded-lg px-3 py-2 text-sm text-on-surface mb-4"
+            style={{
+              border: "1px solid rgb(220, 214, 232)",
+              backgroundColor: "rgb(244, 242, 247)",
+            }}
+          >
             Focused task: <strong>{PHASE6_FIXTURE_COPY.focusedTaskTitle}</strong>
           </div>
         )}
@@ -193,14 +199,92 @@ function PttScene({ scene }: { scene: Phase6SceneId }) {
       : scene === "ptt-transcribing-desktop-light"
         ? "transcribing"
         : "error";
+
+  if (scene === "ptt-error-desktop-light") {
+    // Capture froze tall gray chrome, left-wrapped placeholder, mic, and overlaid error card.
+    return (
+      <Shell width={480} height={320} className="relative bg-surface">
+        <div
+          className="absolute bg-surface border border-border rounded-xl shadow-sm"
+          style={{ left: 48, top: 45, width: 384, height: 230, padding: "22px 24px 16px" }}
+        >
+          <p className="text-sm font-medium text-on-surface" style={{ margin: "0 0 16px" }}>
+            Push-to-talk · error
+          </p>
+          <div className="relative" style={{ minHeight: 160 }}>
+            <div
+              className="bg-surface-secondary border border-border rounded-2xl"
+              style={{ padding: "14px 16px", height: 138, boxSizing: "border-box" }}
+            >
+              <div className="flex items-start gap-2">
+                <span
+                  className="text-sm text-on-surface-muted"
+                  style={{ width: 56, lineHeight: 1.3, flexShrink: 0 }}
+                >
+                  Ask about your tasks...
+                </span>
+                <button
+                  type="button"
+                  aria-label="Retry voice input"
+                  data-testid="voice-button"
+                  data-state="error"
+                  className="shrink-0 rounded-lg border border-border text-on-surface-muted"
+                  style={{ padding: 7, lineHeight: 0, marginTop: 0 }}
+                >
+                  <Mic size={16} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+            <div
+              role="alert"
+              aria-live="assertive"
+              className="absolute z-10 bg-surface text-on-surface"
+              style={{
+                // Image coords: error ~147,161 size 242x75.
+                left: 75,
+                top: 58,
+                width: 242,
+                height: 75,
+                padding: "5px 8px",
+                border: "1px solid #1d1d1f",
+                borderRadius: 4,
+                fontSize: 11,
+                lineHeight: 1.25,
+                boxSizing: "border-box",
+                overflow: "hidden",
+              }}
+            >
+              <p style={{ margin: 0 }}>
+                Microphone access was denied. Allow microphone access in your browser settings, then
+                retry.
+              </p>
+              <button
+                type="button"
+                className="font-medium bg-transparent text-on-surface"
+                style={{
+                  marginTop: 4,
+                  padding: "1px 6px",
+                  border: "1px solid #1d1d1f",
+                  borderRadius: 3,
+                  fontSize: 11,
+                  lineHeight: 1.2,
+                }}
+              >
+                Retry microphone access
+              </button>
+            </div>
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
   return (
     <Shell width={480} height={320} className="flex items-center justify-center p-8">
       <div className="rounded-xl border border-border bg-surface p-6 shadow-sm space-y-4 w-full max-w-sm">
         <p className="text-sm font-medium text-on-surface">Push-to-talk · {mode}</p>
-        <div className="flex items-start gap-3 rounded-2xl bg-surface-secondary border border-border px-4 py-3">
-          <span className="flex-1 text-sm text-on-surface-muted leading-snug pt-2">
-            Ask about your tasks...
-          </span>
+        <div className="flex items-center gap-3 rounded-2xl bg-surface-secondary border border-border px-4 py-3">
+          <span className="flex-1 text-sm text-on-surface-muted">Ask about your tasks...</span>
           <VoiceButton
             onToggle={() => undefined}
             disabled={false}
@@ -277,7 +361,7 @@ function SettingsChrome({ title, children }: { title: string; children: React.Re
                 key={label}
                 className={`px-3 py-2 rounded-lg text-sm ${
                   isActive
-                    ? "bg-surface-tertiary text-on-surface font-medium"
+                    ? "bg-accent-action/10 text-accent-foreground font-medium"
                     : "text-on-surface-secondary"
                 }`}
               >
@@ -384,7 +468,7 @@ export function Phase6VisualRoot({ scene }: { scene: Phase6SceneId }) {
             height={720}
             className="flex items-center justify-center p-8 bg-surface-secondary"
           >
-            <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-sm">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl">
               <StepAI onSetWantsAI={() => undefined} onNext={() => undefined} />
             </div>
           </Shell>

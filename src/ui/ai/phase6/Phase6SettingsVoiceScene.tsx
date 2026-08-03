@@ -20,12 +20,14 @@ const TTS_OPTIONS = [
   { id: "inworld", label: "Inworld" },
 ] as const;
 
+/** Synthetic masked presence only — never a real secret. */
+const MASKED_KEY = "••••••••••••mask";
+
 export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisualState }) {
-  void fixtureVoiceConfig(state); // keep fixture path exercised for type parity
+  void fixtureVoiceConfig(state);
   const isCloud = state === "cloud";
   const [stt, setStt] = useState(isCloud ? "groq" : "browser");
   const [tts, setTts] = useState(isCloud ? "groq" : "browser");
-  // Legacy capture: browser defaults leave TTS read-aloud off; cloud enables it.
   const [ttsEnabled, setTtsEnabled] = useState(isCloud);
   const [mode, setMode] = useState<"off" | "push-to-talk" | "vad">(
     isCloud ? "vad" : "push-to-talk",
@@ -34,18 +36,23 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
   const [smartEndpoint, setSmartEndpoint] = useState(false);
   const sttNeedsKey = stt !== "browser";
   const ttsNeedsKey = tts !== "browser";
+  // Dark cloud capture froze quieter field chrome than default border tokens.
+  const fieldClass = isCloud
+    ? "w-full px-3 py-2 text-sm border border-white/10 rounded-lg bg-surface text-on-surface"
+    : "w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface";
 
   return (
     <section className="mb-8">
       <h2 className="text-lg font-semibold mb-1 text-on-surface">Voice</h2>
-      <p className="text-xs text-on-surface-muted mb-5">
+      <p className="text-xs text-on-surface-muted mb-3">
         Configure speech-to-text, text-to-speech, microphone, and voice interaction mode.
       </p>
 
-      <div className="space-y-6 max-w-lg">
+      {/* Cloud capture is denser; browser-defaults capture matches space-y-8. */}
+      <div className={`${isCloud ? "space-y-3" : "space-y-8"} max-w-lg`}>
         <div>
           <h3 className="text-sm font-semibold text-on-surface mb-1">Microphone</h3>
-          <p className="text-xs text-on-surface-muted mb-3">
+          <p className="text-xs text-on-surface-muted mb-2">
             Grant microphone access to enable voice input.
           </p>
           <button
@@ -57,8 +64,8 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
           </button>
         </div>
 
-        <fieldset className="space-y-4">
-          <legend className="text-sm font-semibold text-on-surface mb-2">Speech-to-Text</legend>
+        <fieldset className={isCloud ? "space-y-1.5" : "space-y-2"}>
+          <legend className="text-sm font-semibold text-on-surface mb-1">Speech-to-Text</legend>
           <div>
             <label
               htmlFor="voice-stt-provider"
@@ -70,7 +77,7 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
               id="voice-stt-provider"
               value={stt}
               onChange={(e) => setStt(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
+              className={fieldClass}
             >
               {STT_OPTIONS.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -86,22 +93,25 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
                 className="block text-xs font-medium text-on-surface-secondary mb-1"
               >
                 API Key
-                <span className="font-normal text-success ml-2">Set</span>
+                {/* Capture froze "Set" without a strong success tint on dark. */}
+                <span className="font-normal text-on-surface-secondary">Set</span>
               </label>
               <input
                 id="voice-stt-key"
                 type="password"
-                value=""
+                value={MASKED_KEY}
                 readOnly
-                placeholder="Enter new key to update"
-                className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
+                className={fieldClass}
               />
+              <p className="mt-1 text-xs text-on-surface-muted">
+                Enables Groq Whisper (STT) and PlayAI (TTS). Free tier available at groq.com.
+              </p>
             </div>
           )}
         </fieldset>
 
-        <fieldset className="space-y-4">
-          <legend className="text-sm font-semibold text-on-surface mb-2">Text-to-Speech</legend>
+        <fieldset className={isCloud ? "space-y-1.5" : "space-y-2"}>
+          <legend className="text-sm font-semibold text-on-surface mb-1">Text-to-Speech</legend>
           <div>
             <label
               htmlFor="voice-tts-provider"
@@ -113,7 +123,7 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
               id="voice-tts-provider"
               value={tts}
               onChange={(e) => setTts(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
+              className={fieldClass}
             >
               {TTS_OPTIONS.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -129,16 +139,18 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
                 className="block text-xs font-medium text-on-surface-secondary mb-1"
               >
                 API Key
-                <span className="font-normal text-success ml-2">Set</span>
+                <span className="font-normal text-on-surface-secondary">Set</span>
               </label>
               <input
                 id="voice-tts-key"
                 type="password"
-                value=""
+                value={MASKED_KEY}
                 readOnly
-                placeholder="Enter new key to update"
-                className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
+                className={fieldClass}
               />
+              <p className="mt-1 text-xs text-on-surface-muted">
+                Enables Groq Whisper (STT) and PlayAI (TTS). Free tier available at groq.com.
+              </p>
             </div>
           )}
           {isCloud && (
@@ -149,10 +161,11 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
               >
                 Voice
               </label>
+              {/* Capture froze voice without a Preview control. */}
               <select
                 id="voice-tts-voice"
                 defaultValue="alloy"
-                className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
+                className={fieldClass}
               >
                 <option value="alloy">Alloy</option>
                 <option value="verse">Verse</option>
@@ -164,15 +177,14 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
               type="checkbox"
               checked={ttsEnabled}
               onChange={(e) => setTtsEnabled(e.target.checked)}
-              className="accent-accent-action"
             />
             Read AI responses aloud
           </label>
         </fieldset>
 
-        <fieldset className="space-y-4">
-          <legend className="text-sm font-semibold text-on-surface mb-2">Interaction Mode</legend>
-          <div className="flex gap-4">
+        <fieldset className={isCloud ? "space-y-1.5" : "space-y-2"}>
+          <legend className="text-sm font-semibold text-on-surface mb-1">Interaction Mode</legend>
+          <div className={isCloud ? "flex gap-1.5" : "flex gap-2"}>
             {(
               [
                 { id: "off", label: "Off" },
@@ -180,14 +192,13 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
                 { id: "vad", label: "VAD (Hands-free)" },
               ] as const
             ).map((option) => (
-              <label key={option.id} className="flex items-center gap-1.5 text-sm text-on-surface">
+              <label key={option.id} className="flex items-center gap-1 text-sm text-on-surface">
                 <input
                   type="radio"
                   name="voiceMode"
                   value={option.id}
                   checked={mode === option.id}
                   onChange={() => setMode(option.id)}
-                  className="accent-accent-action"
                 />
                 {option.label}
               </label>
@@ -199,7 +210,6 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
               type="checkbox"
               checked={autoSend}
               onChange={(e) => setAutoSend(e.target.checked)}
-              className="accent-accent-action"
             />
             Auto-send transcribed text to AI
           </label>
@@ -209,7 +219,6 @@ export function Phase6SettingsVoiceScene({ state }: { state: VoiceSettingsVisual
               type="checkbox"
               checked={smartEndpoint}
               onChange={(e) => setSmartEndpoint(e.target.checked)}
-              className="accent-accent-action"
             />
             Smart endpoint detection
           </label>

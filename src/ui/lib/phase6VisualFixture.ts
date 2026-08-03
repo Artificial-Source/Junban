@@ -190,19 +190,32 @@ export function applyPhase6VisualEnvironment(scene: Phase6SceneId): void {
   if (meta.theme === "dark") root.classList.add("dark");
   root.classList.add("reduce-motion");
   root.style.colorScheme = meta.theme === "dark" ? "dark" : "light";
-  // Match legacy capture tokens (purple accent-foreground for icons; muted action fills).
-  root.style.setProperty("--color-accent", PHASE6_LEGACY_ACCENT);
-  root.style.setProperty("--color-accent-hover", "#7620c2");
-  root.style.setProperty("--color-accent-action", PHASE6_LEGACY_ACCENT);
-  root.style.setProperty("--color-accent-action-hover", "#7620c2");
-  root.style.setProperty("--color-accent-foreground", "#7620c2");
-  root.style.setProperty("--color-accent-foreground-hover", "#6417a8");
-  root.style.setProperty("--color-focus", PHASE6_LEGACY_ACCENT);
-  root.style.setProperty("--color-on-accent-action", "#ffffff");
-  // Force system/Noto stack used by the immutable capture host.
+  // Only pin the base accent. Derived action/foreground tokens must come from the
+  // theme stylesheet's oklch() cascade — the immutable captures used those values,
+  // not the static hex fallbacks.
+  root.style.setProperty(
+    "--color-accent",
+    meta.theme === "dark" ? "#bf5af2" : PHASE6_LEGACY_ACCENT,
+  );
+  root.style.removeProperty("--color-accent-hover");
+  root.style.removeProperty("--color-accent-action");
+  root.style.removeProperty("--color-accent-action-hover");
+  root.style.removeProperty("--color-accent-foreground");
+  root.style.removeProperty("--color-accent-foreground-hover");
+  root.style.removeProperty("--color-focus");
+  root.style.removeProperty("--color-on-accent-action");
+  // Force the capture host stack: Noto Sans via system-ui (Phase 1/6 authority fonts).
   root.dataset.fontFamily = "system";
   root.dataset.fontSize = "medium";
   root.dataset.density = "comfortable";
+  root.style.setProperty(
+    "--font-sans",
+    '"Noto Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+  );
+  root.style.setProperty(
+    "--font-heading",
+    '"Noto Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+  );
   // Native checkbox/radio accent in the capture resolved to browser blue, not purple.
   root.style.setProperty("accent-color", "#3b82f6");
   document.body.classList.add("bg-surface", "text-on-surface", "antialiased");

@@ -12,7 +12,7 @@ export type StepAIProps = {
 };
 
 export function StepAI({ onSetWantsAI, onNext }: StepAIProps) {
-  // Immutable capture froze unfilled chrome (no solid accent chips on avatar/CTA).
+  // Immutable capture froze a compact, left-aligned chrome without solid accent fills.
   const phase6 = isPhase6VisualFixture();
 
   return (
@@ -22,7 +22,7 @@ export function StepAI({ onSetWantsAI, onNext }: StepAIProps) {
         data-onboarding-step-focus
         className={
           phase6
-            ? "text-xl font-bold text-on-surface text-left min-[240px]:text-[22px]"
+            ? "text-lg font-bold text-on-surface text-left"
             : "text-xl font-bold text-on-surface text-center min-[240px]:text-[22px]"
         }
       >
@@ -31,7 +31,7 @@ export function StepAI({ onSetWantsAI, onNext }: StepAIProps) {
       <p
         className={
           phase6
-            ? "mb-3 mt-1 text-left text-sm leading-relaxed text-on-surface-muted min-[240px]:mb-6"
+            ? "mb-2 mt-0.5 text-left text-sm leading-snug text-on-surface-muted"
             : "mb-3 mt-1 text-center text-sm leading-relaxed text-on-surface-muted min-[240px]:mb-6"
         }
       >
@@ -42,15 +42,15 @@ export function StepAI({ onSetWantsAI, onNext }: StepAIProps) {
       <div
         className={
           phase6
-            ? "mb-3 min-w-0 space-y-2.5 p-2 min-[240px]:mb-6 min-[240px]:p-0"
+            ? "mb-2 min-w-0 space-y-1.5 p-0"
             : "mb-3 min-w-0 space-y-2.5 rounded-[14px] bg-surface-secondary p-2 min-[240px]:mb-6 min-[240px]:p-4"
         }
       >
         <div className="flex items-start gap-2">
           {phase6 ? (
             <Bot
-              size={16}
-              className="text-on-surface-muted mt-1 flex-shrink-0"
+              size={14}
+              className="text-on-surface-muted mt-0.5 flex-shrink-0"
               aria-hidden="true"
             />
           ) : (
@@ -61,11 +61,11 @@ export function StepAI({ onSetWantsAI, onNext }: StepAIProps) {
           <div
             className={
               phase6
-                ? "min-w-0 max-w-[280px] px-0 py-0"
+                ? "min-w-0 max-w-[280px] bg-surface-secondary px-2 py-1"
                 : "min-w-0 max-w-[280px] rounded-tl-sm rounded-tr-xl rounded-br-xl rounded-bl-xl bg-surface px-2 py-2.5 min-[240px]:px-3.5"
             }
           >
-            <p className="text-[13px] text-on-surface leading-snug">
+            <p className={phase6 ? "text-xs text-on-surface leading-snug" : "text-[13px] text-on-surface leading-snug"}>
               Good morning! You have 3 tasks due today. Want me to help prioritize them?
             </p>
           </div>
@@ -80,7 +80,7 @@ export function StepAI({ onSetWantsAI, onNext }: StepAIProps) {
           >
             <p
               className={
-                phase6 ? "text-[13px] text-on-surface" : "text-[13px] text-on-accent-action"
+                phase6 ? "text-xs text-on-surface" : "text-[13px] text-on-accent-action"
               }
             >
               Yes, plan my day!
@@ -89,7 +89,7 @@ export function StepAI({ onSetWantsAI, onNext }: StepAIProps) {
         </div>
       </div>
 
-      <div className="flex flex-col gap-2.5">
+      <div className={phase6 ? "flex flex-col gap-1.5" : "flex flex-col gap-2.5"}>
         <button
           type="button"
           onClick={() => {
@@ -98,7 +98,7 @@ export function StepAI({ onSetWantsAI, onNext }: StepAIProps) {
           }}
           className={
             phase6
-              ? "w-full py-2.5 text-sm font-semibold text-on-surface"
+              ? "w-full py-1 text-sm font-semibold text-on-surface"
               : "w-full py-2.5 text-sm font-semibold bg-accent-action text-on-accent-action rounded-xl hover:bg-accent-action-hover transition-colors"
           }
         >
@@ -110,7 +110,11 @@ export function StepAI({ onSetWantsAI, onNext }: StepAIProps) {
             onSetWantsAI(false);
             onNext();
           }}
-          className="w-full py-2.5 text-sm font-medium text-on-surface-muted bg-surface-secondary rounded-xl hover:bg-surface-tertiary transition-colors"
+          className={
+            phase6
+              ? "w-full py-1.5 text-sm font-medium text-on-surface-muted bg-surface-secondary rounded-xl"
+              : "w-full py-2.5 text-sm font-medium text-on-surface-muted bg-surface-secondary rounded-xl hover:bg-surface-tertiary transition-colors"
+          }
         >
           Set up later
         </button>

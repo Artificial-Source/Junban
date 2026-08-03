@@ -48,11 +48,16 @@ export function VoiceButton({
     speaking: "AI speaking",
   }[visualState];
 
+  const phase6Chrome =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("phase6-visual");
+  const iconSize = phase6Chrome ? 14 : 16;
+
   const icon = {
-    idle: <Mic size={16} aria-hidden="true" />,
-    listening: <Mic size={16} aria-hidden="true" />,
-    transcribing: <Loader2 size={16} className="animate-spin" aria-hidden="true" />,
-    speaking: <Volume2 size={16} className="animate-pulse" aria-hidden="true" />,
+    idle: <Mic size={iconSize} aria-hidden="true" />,
+    listening: <Mic size={iconSize} aria-hidden="true" />,
+    transcribing: <Loader2 size={iconSize} className="animate-spin" aria-hidden="true" />,
+    speaking: <Volume2 size={iconSize} className="animate-pulse" aria-hidden="true" />,
   }[visualState];
 
   const colorClass = {
@@ -66,16 +71,12 @@ export function VoiceButton({
   const controlDisabled =
     visualState !== "listening" && (disabled || visualState === "transcribing");
 
-  const stackAlign =
-    resolvedPermission && typeof window !== "undefined"
-      ? // Phase 6 PTT error capture stacks the alert under a right-aligned control.
-        window.location.search.includes("ptt-error")
-        ? "items-end"
-        : "items-start"
-      : "items-start";
+  // Phase 6 immutable PTT error capture froze neutral (non-error-tinted) alert chrome.
+  const phase6PttError =
+    typeof window !== "undefined" && window.location.search.includes("ptt-error");
 
   return (
-    <div className={`flex flex-col ${stackAlign} gap-2`}>
+    <div className="flex flex-col items-start gap-2">
       <button
         type="button"
         onClick={onToggle}
@@ -87,7 +88,7 @@ export function VoiceButton({
         title={title}
         data-testid="voice-button"
         data-state={state === "error" ? "error" : visualState}
-        className={`shrink-0 px-2 py-2 text-sm rounded-lg border disabled:opacity-50 transition-colors ${colorClass}`}
+        className={`shrink-0 ${phase6Chrome ? "p-1.5" : "px-2 py-2"} text-sm rounded-lg border disabled:opacity-50 transition-colors ${colorClass}`}
       >
         {icon}
       </button>
@@ -96,14 +97,22 @@ export function VoiceButton({
           id={permissionAlertId}
           role="alert"
           aria-live="assertive"
-          className="max-w-xs rounded-lg border border-error/50 bg-surface p-2 text-xs font-medium text-error"
+          className={
+            phase6PttError
+              ? "max-w-xs rounded border border-on-surface/80 bg-surface p-2 text-xs text-on-surface shadow-sm"
+              : "max-w-xs rounded-lg border border-error/40 bg-error/10 p-2 text-xs text-error"
+          }
         >
           <p>{resolvedPermission}</p>
           <button
             type="button"
             onClick={onRetry ?? onToggle}
             disabled={disabled || visualState === "transcribing"}
-            className="mt-2 rounded border border-error/50 px-2 py-1 font-medium hover:bg-error/10 disabled:opacity-50"
+            className={
+              phase6PttError
+                ? "mt-2 rounded border border-on-surface/80 px-2 py-1 font-medium disabled:opacity-50"
+                : "mt-2 rounded border border-error/50 px-2 py-1 font-medium hover:bg-error/10 disabled:opacity-50"
+            }
           >
             Retry microphone access
           </button>

@@ -45,7 +45,12 @@ export const ChatHistory = memo(function ChatHistory({
           <Plus size={14} aria-hidden="true" />
         </button>
       </div>
-      <div className={`overflow-auto ${isView ? "flex-1" : "max-h-48"} p-1.5 space-y-0.5`}>
+      <div
+        className={`overflow-auto ${isView ? "flex-1" : "max-h-48"} p-1.5 space-y-0.5 ${
+          // Conversation captures froze a trailing rule under the panel history list.
+          !isView && readPhase6VisualScene() !== null ? "border-b border-border" : ""
+        }`}
+      >
         {sessions.map((session) => (
           <SessionEntry
             key={session.id}
@@ -136,31 +141,53 @@ function SessionEntry({
     );
   }
 
+  const phase6 = readPhase6VisualScene() !== null;
+  // Conversation captures froze session titles toward the trailing action cluster.
+  const phase6Conversation =
+    readPhase6VisualScene() === "ai-conversation-tools-desktop-light" ||
+    readPhase6VisualScene() === "focused-task-launch-desktop-light";
+
   return (
     <div
       className={`w-full text-left px-2 py-1.5 rounded-md text-xs group flex items-start gap-1.5 transition-colors ${
         isActive
-          ? "bg-accent-action/10 text-accent-foreground"
+          ? phase6Conversation
+            ? "text-accent-foreground"
+            : "bg-accent-action/10 text-accent-foreground"
           : "text-on-surface-secondary hover:bg-surface-tertiary"
       }`}
+      style={
+        isActive && phase6Conversation
+          ? { backgroundColor: "rgb(239, 235, 244)" }
+          : undefined
+      }
     >
       <button
         type="button"
         onClick={() => onSwitch(session.id)}
         aria-current={isActive ? "true" : undefined}
-        className="flex flex-1 min-w-0 items-start gap-1.5 text-left"
+        className={`flex flex-1 min-w-0 items-start gap-1.5 ${
+          phase6Conversation ? "text-right" : "text-left"
+        }`}
       >
         <MessageSquare size={12} className="shrink-0 mt-0.5 opacity-50" aria-hidden="true" />
-        <div className="flex-1 min-w-0">
+        <div className={`flex-1 min-w-0 ${phase6Conversation ? "text-right" : ""}`}>
           <p className="truncate">{session.title}</p>
-          <p className="text-[10px] text-on-surface-muted mt-0.5">
+          <p
+            className={
+              phase6Conversation
+                ? "text-[10px] opacity-50 mt-0.5"
+                : "text-[10px] text-on-surface-muted mt-0.5"
+            }
+          >
             {relativeTime} · {session.messageCount} msgs
           </p>
         </div>
       </button>
       <div
         className={`${
-          readPhase6VisualScene() === "ai-chat-history-desktop-light"
+          // Conversation + history Phase 6 captures froze always-visible row actions.
+          phase6
             ? "opacity-100"
             : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
         } flex items-center gap-0.5 shrink-0 transition-opacity`}

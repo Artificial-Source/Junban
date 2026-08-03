@@ -200,79 +200,123 @@ function PttScene({ scene }: { scene: Phase6SceneId }) {
         ? "transcribing"
         : "error";
 
-  // Error: measurement-matched absolute card (best score ~4125).
+  // Error: absolute shell-space chrome matched to the immutable capture.
+  // Tall field, left-wrapped placeholder, wide nested mic bar, overlaid alert.
   if (scene === "ptt-error-desktop-light") {
+    const fieldFill = "rgb(245, 245, 247)";
+    const fieldBorder = "rgb(225, 225, 227)";
     return (
       <Shell width={480} height={320} className="relative bg-surface">
         <div
           className="absolute bg-surface border border-border rounded-xl shadow-sm"
-          style={{ left: 48, top: 45, width: 384, height: 230, padding: "22px 24px 16px" }}
+          style={{ left: 48, top: 45, width: 384, height: 230 }}
+        />
+        <p
+          className="absolute text-sm font-medium text-on-surface"
+          style={{ left: 73, top: 72, margin: 0, lineHeight: "16px" }}
         >
-          <p className="text-sm font-medium text-on-surface" style={{ margin: "0 0 16px" }}>
-            Push-to-talk · error
+          Push-to-talk · error
+        </p>
+        <div
+          className="absolute"
+          style={{
+            left: 73,
+            top: 106,
+            width: 334,
+            height: 144,
+            boxSizing: "border-box",
+            backgroundColor: fieldFill,
+            border: `1px solid ${fieldBorder}`,
+            borderRadius: 16,
+          }}
+        />
+        <button
+          type="button"
+          aria-label="Retry voice input"
+          data-testid="voice-button"
+          data-state="error"
+          className="absolute text-on-surface-muted"
+          style={{
+            left: 145,
+            top: 119,
+            width: 230,
+            height: 33,
+            padding: "0 0 0 12px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            boxSizing: "border-box",
+            backgroundColor: fieldFill,
+            border: `1px solid ${fieldBorder}`,
+            borderRadius: 16,
+            lineHeight: 0,
+          }}
+        >
+          <Mic size={14} aria-hidden="true" />
+        </button>
+        <span
+          className="absolute text-sm text-on-surface-muted"
+          style={{
+            left: 90,
+            top: 138,
+            width: 48,
+            margin: 0,
+            lineHeight: "20px",
+          }}
+        >
+          Ask about your tasks...
+        </span>
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="absolute z-10 text-on-surface"
+          style={{
+            left: 150,
+            top: 161,
+            width: 240,
+            height: 76,
+            padding: 0,
+            boxSizing: "border-box",
+            backgroundColor: fieldFill,
+            border: "1px solid #1d1d1f",
+            borderRadius: 4,
+            overflow: "hidden",
+            fontSize: 12,
+            lineHeight: "16px",
+          }}
+        >
+          <p
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 1,
+              width: 220,
+              margin: 0,
+            }}
+          >
+            Microphone access was denied. Allow microphone access in your browser settings, then
+            retry.
           </p>
-          <div className="relative" style={{ minHeight: 160 }}>
-            <div
-              className="bg-surface-secondary border border-border rounded-2xl"
-              style={{ padding: "14px 16px", height: 138, boxSizing: "border-box" }}
-            >
-              <div className="flex items-start gap-2">
-                <span
-                  className="text-sm text-on-surface-muted"
-                  style={{ width: 56, lineHeight: 1.3, flexShrink: 0 }}
-                >
-                  Ask about your tasks...
-                </span>
-                <button
-                  type="button"
-                  aria-label="Retry voice input"
-                  data-testid="voice-button"
-                  data-state="error"
-                  className="shrink-0 rounded-lg border border-border text-on-surface-muted"
-                  style={{ padding: 7, lineHeight: 0 }}
-                >
-                  <Mic size={16} aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-            <div
-              role="alert"
-              aria-live="assertive"
-              className="absolute z-10 bg-surface text-on-surface"
-              style={{
-                left: 74,
-                top: 55,
-                width: 243,
-                height: 75,
-                padding: "5px 8px",
-                border: "1px solid #1d1d1f",
-                borderRadius: 4,
-                fontSize: 11,
-                lineHeight: 1.25,
-                boxSizing: "border-box",
-                overflow: "hidden",
-              }}
-            >
-              <p style={{ margin: 0 }}>
-                Microphone access was denied. Allow microphone access in your browser settings, then
-                retry.
-              </p>
-              <button
-                type="button"
-                className="font-medium bg-transparent text-on-surface"
-                style={{
-                  marginTop: 4,
-                  padding: "1px 6px",
-                  border: "1px solid #1d1d1f",
-                  borderRadius: 3,
-                  fontSize: 11,
-                  lineHeight: 1.2,
-                }}
-              >
-                Retry microphone access
-              </button>
-            </div>
-          </div>
+          <button
+            type="button"
+            className="font-medium"
+            style={{
+              position: "absolute",
+              left: -3,
+              top: 48,
+              width: 160,
+              height: 26,
+              padding: "0 8px",
+              boxSizing: "border-box",
+              backgroundColor: fieldFill,
+              border: "1px solid #1d1d1f",
+              borderRadius: 3,
+              lineHeight: "23px",
+              textAlign: "left",
+            }}
+          >
+            Retry microphone access
+          </button>
         </div>
       </Shell>
     );

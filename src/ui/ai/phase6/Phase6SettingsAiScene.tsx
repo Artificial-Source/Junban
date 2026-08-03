@@ -19,10 +19,12 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
   const hasKey = Boolean(config.credentials.ai_provider?.present);
   const configured = state === "configured";
 
-  // Unconfigured capture is denser; configured keeps roomier rhythm so later section
-  // headers stay near the frozen capture rows (Daily Briefing ~y485).
+  // Unconfigured capture is denser. Configured keeps a roomy provider block (mb-8) so
+  // Daily Briefing stays near the frozen row, then packs Custom/Memory tightly so the
+  // Memory footer remains on-canvas with the wide instructions field.
   const sectionMb = configured ? "mb-8" : "mb-1";
-  const sectionMbMid = configured ? "mb-6" : "mb-2";
+  const sectionMbBriefing = configured ? "mb-0" : "mb-2";
+  const sectionMbCustom = configured ? "mb-0" : "mb-2";
 
   return (
     <>
@@ -184,7 +186,7 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
         </div>
       </section>
 
-      <section className={sectionMbMid}>
+      <section className={sectionMbBriefing}>
         <h2 className="text-lg font-semibold mb-1 text-on-surface">Daily Briefing</h2>
         <p className="text-xs text-on-surface-muted mb-2">
           Automatically start your morning with a day plan when you open the AI chat.
@@ -221,7 +223,7 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
         </div>
       </section>
 
-      <section className={sectionMbMid}>
+      <section className={sectionMbCustom}>
         <h2 className="text-lg font-semibold mb-1 text-on-surface">Custom Instructions</h2>
         <p className="text-xs text-on-surface-muted mb-2">
           Add instructions the AI will always follow. These are injected into every conversation.
@@ -247,7 +249,7 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
           rows={4}
           className={
             configured
-              ? "w-full max-w-lg px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
+              ? "w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
               : "w-full max-w-2xl px-3 py-2 text-sm border border-border rounded-lg bg-surface text-on-surface"
           }
         />
@@ -259,7 +261,7 @@ export function Phase6SettingsAiScene({ state }: { state: AiSettingsVisualState 
         </div>
       </section>
 
-      <section className="mb-2" style={configured ? { marginTop: 20 } : undefined}>
+      <section className="mb-2">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold text-on-surface">Memory</h2>
         </div>

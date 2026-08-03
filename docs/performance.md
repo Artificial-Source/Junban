@@ -243,6 +243,18 @@ python3 scripts/check-phase5-automation-budget.py --quick
 pnpm bench:phase5:quick
 ```
 
+## Phase 6 schema-v6 conformance rerun (`junban-phase6-conformance-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-6-conformance-protocol.md`](../goals/rust-rewrite/evidence/phase-6-conformance-protocol.md). This is the same frozen 17-revision Phase 5 corpus and four-surface comparison, rerun against current optimized binaries with schema version 6 as the explicit head authority. It does not regenerate or weaken `phase-5-conformance.json`.
+
+```bash
+cargo build --locked --release -p junban-server -p junban-cli -p junban-mcp
+python3 scripts/check-phase5-conformance.py --phase6 --authoritative \
+  --output goals/rust-rewrite/evidence/phase-6-conformance.json
+```
+
+Or use `pnpm conformance:phase6`. Authoritative mode requires a clean tracked worktree and optimized binaries built from that tree. Runtime Node remains forbidden.
+
 ## Measurement rules
 
 - Optimized release binaries are authoritative. Development servers are not.

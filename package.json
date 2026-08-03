@@ -36,6 +36,7 @@
     "bench:phase5": "python3 scripts/check-phase5-automation-budget.py",
     "bench:phase5:quick": "python3 scripts/check-phase5-automation-budget.py --quick",
     "conformance:phase5": "python3 scripts/check-phase5-conformance.py --authoritative",
+    "conformance:phase6": "python3 scripts/check-phase5-conformance.py --phase6 --authoritative",
     "bench:self-check": "python3 scripts/bench-hosted-server.py --self-check",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary && pnpm check:local-voice-assets && pnpm check:phase6-legacy-visual"
   },

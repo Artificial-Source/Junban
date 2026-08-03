@@ -156,11 +156,7 @@ function SessionEntry({
             : "bg-accent-action/10 text-accent-foreground"
           : "text-on-surface-secondary hover:bg-surface-tertiary"
       }`}
-      style={
-        isActive && phase6Conversation
-          ? { backgroundColor: "rgb(239, 235, 244)" }
-          : undefined
-      }
+      style={isActive && phase6Conversation ? { backgroundColor: "rgb(239, 235, 244)" } : undefined}
     >
       <button
         type="button"
@@ -173,13 +169,7 @@ function SessionEntry({
         <MessageSquare size={12} className="shrink-0 mt-0.5 opacity-50" aria-hidden="true" />
         <div className={`flex-1 min-w-0 ${phase6Conversation ? "text-right" : ""}`}>
           <p className="truncate">{session.title}</p>
-          <p
-            className={
-              phase6Conversation
-                ? "text-[10px] opacity-50 mt-0.5"
-                : "text-[10px] text-on-surface-muted mt-0.5"
-            }
-          >
+          <p className="text-[10px] text-on-surface-muted mt-0.5">
             {relativeTime} · {session.messageCount} msgs
           </p>
         </div>
@@ -187,9 +177,7 @@ function SessionEntry({
       <div
         className={`${
           // Conversation + history Phase 6 captures froze always-visible row actions.
-          phase6
-            ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+          phase6 ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
         } flex items-center gap-0.5 shrink-0 transition-opacity`}
       >
         <button

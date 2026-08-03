@@ -37,7 +37,7 @@ Credential bytes remain in private in-memory wrappers, use sensitive authorizati
 
 ## Independent lifecycle authority
 
-`SpeechActivitySupervisor` is separate from `AiRuntimeSupervisor`. A speech guard owns one provider future and its cancellation fence. The route publishes a result only after the guard authorizes the exact generation; dropping the route/provider future cancels the guard and suppresses late publication.
+`SpeechActivitySupervisor` (`crates/junban-server/src/speech_runtime.rs`) is separate from `AiRuntimeSupervisor`. A speech guard owns one provider future and its cancellation fence. The route publishes a result only after the guard authorizes the exact generation; dropping the route/provider future cancels the guard and suppresses late publication.
 
 AI/voice configuration and credential mutations, restore cutover, recovery entry, and graceful shutdown close both admissions under one server transition lock, cancel active AI and speech work, wait for both drain conditions, and reopen only after a completed non-permanent transition. A timeout or partial drain is fail-closed. Speech admission cannot reopen between the AI and speech transition steps.
 
@@ -64,7 +64,7 @@ No cloud provider API origin is granted browser CSP authority.
 
 ## Deterministic regression coverage
 
-`crates/junban-ai/src/speech_http.rs` tests cover:
+`crates/junban-ai/src/speech_http/` tests cover:
 
 - zero-egress lazy startup and validation-before-client-construction;
 - credential/provider matrix validation and redacted debug/error behavior;
@@ -73,7 +73,7 @@ No cloud provider API origin is granted browser CSP authority.
 - provider Unicode limits, provider format/input ceilings, malformed JSON/base64/content type, decoded oversize, redirects, cancellation, and timeout;
 - exact official origin constants and disabled ambient proxy/redirect client policy inherited from `ProviderHttpFactory`.
 
-`crates/junban-server/src/routes_voice.rs` and `tests_api.rs` cover strict multipart parsing, auth-before-parse, disabled/missing configuration, validation before credential lookup/client construction, canonical audio response, exact CSP, synchronized OpenAPI/generated paths and binary schema, and exclusion from the 87-operation automation catalog.
+`crates/junban-server/src/routes_voice/` and `crates/junban-server/src/tests_api/tests_voice_api.rs` cover strict multipart parsing, auth-before-parse, disabled/missing configuration, validation before credential lookup/client construction, canonical audio response, exact CSP, synchronized OpenAPI/generated paths and binary schema, and exclusion from the 87-operation automation catalog.
 
 ## Validation
 

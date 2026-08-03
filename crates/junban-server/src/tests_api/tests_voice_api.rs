@@ -201,6 +201,7 @@ async fn speech_and_ai_reconfigure_drop_both_lazy_runtimes_even_when_commit_fail
         .unwrap();
     assert!(context.state.speech_runtime().runtime_constructed());
     drop(speech);
+    assert_eq!(context.state.pager_release_calls(), 0);
     let serial = Arc::clone(&context.state.ai_reconfigure).lock_owned().await;
     let request_id = RequestId("speech-reconfigure-failure".into());
     let result: Result<(), ApiError> =
@@ -219,10 +220,90 @@ async fn speech_and_ai_reconfigure_drop_both_lazy_runtimes_even_when_commit_fail
         "fixture_commit_failed"
     );
     assert!(!context.state.speech_runtime().runtime_constructed());
+    // Commit failure still reaches best-effort pager release after runtime drop.
+    assert_eq!(context.state.pager_release_calls(), 1);
+    assert_eq!(context.state.allocator_reclaim_calls(), 1);
     let fresh = context
         .state
         .speech_runtime()
         .admit(SpeechActivityKind::Transcription)
         .unwrap();
     assert!(fresh.commit_result(()).is_some());
+}
+
+#[tokio::test]
+async fn reconfigure_owned_releases_sqlite_pager_only_after_commit_future() {
+    use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+
+    let context = TestContext::new();
+    let seen_release_during_commit = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&seen_release_during_commit);
+    let state_for_commit = context.state.clone();
+
+    assert_eq!(context.state.pager_release_calls(), 0);
+    assert_eq!(context.state.allocator_reclaim_calls(), 0);
+
+    let serial = Arc::clone(&context.state.ai_reconfigure).lock_owned().await;
+    let request_id = RequestId("pager-release-order".into());
+    let result: Result<&'static str, ApiError> =
+        crate::routes_ai::reconfigure_owned(&context.state, &request_id, serial, async move {
+            // Drop already finished (allocator reclaim runs there). Pager release must not.
+            assert_eq!(state_for_commit.allocator_reclaim_calls(), 1);
+            flag.store(
+                state_for_commit.pager_release_calls() > 0,
+                AtomicOrdering::SeqCst,
+            );
+            Ok("committed")
+        })
+        .await;
+
+    assert_eq!(result.unwrap(), "committed");
+    assert!(
+        !seen_release_during_commit.load(AtomicOrdering::SeqCst),
+        "pager release must run only after the commit future completes"
+    );
+    assert_eq!(context.state.pager_release_calls(), 1);
+    assert_eq!(context.state.allocator_reclaim_calls(), 1);
+    // Finish reopened admission: a fresh temporary epoch must begin cleanly.
+    let (ai_epoch, speech_epoch) = context.state.begin_ai_speech_reconfigure().unwrap();
+    context
+        .state
+        .drop_ai_speech_reconfigure(ai_epoch, speech_epoch)
+        .unwrap();
+    context
+        .state
+        .finish_ai_speech_reconfigure(ai_epoch, speech_epoch)
+        .unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn reconfigure_timeout_before_drop_does_not_release_pager() {
+    let context = TestContext::new();
+    let guard = context
+        .state
+        .ai_runtime()
+        .admit_run(junban_domain::AiRunId::new(), 1)
+        .unwrap();
+
+    let serial = Arc::clone(&context.state.ai_reconfigure).lock_owned().await;
+    let request_id = RequestId("pager-release-timeout".into());
+    let state = context.state.clone();
+    let pending = tokio::spawn(async move {
+        crate::routes_ai::reconfigure_owned(&state, &request_id, serial, async { Ok(()) }).await
+    });
+
+    while guard.is_live() {
+        tokio::task::yield_now().await;
+    }
+    tokio::time::advance(AI_RECONFIGURE_DRAIN_DEADLINE).await;
+    tokio::task::yield_now().await;
+
+    let result = pending.await.unwrap();
+    assert_eq!(
+        result.unwrap_err().envelope.error.code,
+        "ai_reconfigure_timeout"
+    );
+    assert_eq!(context.state.pager_release_calls(), 0);
+    assert_eq!(context.state.allocator_reclaim_calls(), 0);
+    drop(guard);
 }

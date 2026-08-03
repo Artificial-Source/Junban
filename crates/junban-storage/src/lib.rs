@@ -2358,6 +2358,10 @@ impl Repository for SqliteRepository {
             }
         )
     }
+
+    fn release_cached_memory(&self) -> RepositoryFuture<'_, ()> {
+        self.request(|reply| Command::ReleaseCachedMemory { reply })
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -3033,6 +3037,9 @@ enum Command {
         target: AiCredentialBindingTarget,
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ReleaseCachedMemory {
+        reply: oneshot::Sender<Result<(), RepositoryError>>,
     },
     #[cfg(test)]
     Diagnostics(oneshot::Sender<Result<Diagnostics, RepositoryError>>),
@@ -4343,6 +4350,13 @@ fn run_worker(
                     target,
                     now,
                 ));
+            }
+            Command::ReleaseCachedMemory { reply } => {
+                // sqlite3_db_release_memory via PRAGMA; no durable writes or WAL truncate.
+                let result = connection
+                    .execute_batch("PRAGMA shrink_memory")
+                    .map_err(|error| RepositoryError::Storage(error.to_string()));
+                let _ = reply.send(result);
             }
             #[cfg(test)]
             Command::Diagnostics(reply) => {

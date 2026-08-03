@@ -42,6 +42,7 @@ use crate::cursor::{
     decode_ai_memory_cursor, decode_ai_session_cursor, encode_ai_memory_cursor,
     encode_ai_session_cursor,
 };
+use crate::diagnostics::DiagnosticSeverity;
 use crate::dto::{CommittedEventDto, MutationResponse};
 use crate::error::{
     ApiError, extract_json_with_limit, extract_query, operation_id, parse_path_id, validation_error,
@@ -2053,6 +2054,24 @@ where
             .ai_reconfigure_test_gate
             .pause_after_commit()
             .await;
+        // After runtime drop + durable commit: best-effort pager reclaim. Must not
+        // convert a committed settings mutation into an API failure. Allocator trim
+        // already ran inside drop_ai_speech_reconfigure.
+        match worker_state.service.release_cached_memory().await {
+            Ok(()) => {
+                #[cfg(test)]
+                worker_state.record_pager_release_success();
+            }
+            Err(_) => {
+                // Static, secret-free, non-authoritative diagnostic only.
+                worker_state.log_diagnostic(
+                    DiagnosticSeverity::Warning,
+                    "sqlite_pager_release_failed",
+                    Some(worker_request_id.0.as_str()),
+                    "best-effort SQLite pager release after AI/speech reconfigure failed",
+                );
+            }
+        }
         worker_state
             .finish_ai_speech_reconfigure(ai_epoch, speech_epoch)
             .map_err(|()| ai_runtime_unavailable(&worker_request_id))?;

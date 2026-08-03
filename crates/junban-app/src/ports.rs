@@ -798,4 +798,14 @@ pub trait Repository: Send + Sync + 'static {
         target: AiCredentialBindingTarget,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    /// Best-effort release of SQLite connection page cache / heap retained by the pager.
+    ///
+    /// Production storage overrides this to run `PRAGMA shrink_memory` on the single
+    /// profile worker. It must not mutate durable data, advance revision, open another
+    /// connection, or checkpoint/truncate the WAL. Default is a no-op so test doubles
+    /// need not implement it.
+    fn release_cached_memory(&self) -> RepositoryFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
 }

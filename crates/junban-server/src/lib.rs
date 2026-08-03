@@ -462,6 +462,9 @@ pub struct ServerState {
     /// Counts successful post-drop allocator reclaim hooks (tests only).
     #[cfg(test)]
     pub(crate) allocator_reclaim_calls: Arc<AtomicUsize>,
+    /// Counts successful post-commit SQLite pager release hooks (tests only).
+    #[cfg(test)]
+    pub(crate) pager_release_calls: Arc<AtomicUsize>,
     /// Random per-process instance id shared with runtime metadata and health.
     instance_id: Arc<str>,
 }
@@ -551,6 +554,8 @@ impl ServerState {
             ai_response_setup_test_gate: Arc::new(AiResponseSetupTestGate::default()),
             #[cfg(test)]
             allocator_reclaim_calls: Arc::new(AtomicUsize::new(0)),
+            #[cfg(test)]
+            pager_release_calls: Arc::new(AtomicUsize::new(0)),
             instance_id: Arc::from(generate_instance_id()),
         })
     }
@@ -670,6 +675,19 @@ impl ServerState {
     #[must_use]
     pub(crate) fn allocator_reclaim_calls(&self) -> usize {
         self.allocator_reclaim_calls.load(Ordering::SeqCst)
+    }
+
+    /// Test-only observation of successful post-commit SQLite pager release hooks.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn pager_release_calls(&self) -> usize {
+        self.pager_release_calls.load(Ordering::SeqCst)
+    }
+
+    /// Test-only counter for a successful `release_cached_memory` after reconfigure commit.
+    #[cfg(test)]
+    pub(crate) fn record_pager_release_success(&self) {
+        self.pager_release_calls.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Recover every exact consumed mutation approval before any normal service starts.

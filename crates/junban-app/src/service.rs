@@ -1816,6 +1816,16 @@ where
         )
     }
 
+    /// Best-effort SQLite pager cache release through the profile repository worker.
+    ///
+    /// Operational reclaim only: no events, receipts, or durable mutation.
+    pub async fn release_cached_memory(&self) -> Result<(), AppError> {
+        self.repository
+            .release_cached_memory()
+            .await
+            .map_err(AppError::from)
+    }
+
     /// Serialize transferable tasks into a private staged file using bounded storage pages.
     pub async fn export_tasks(&self, format: ExportFormat) -> Result<StagedFile, AppError> {
         self.repository

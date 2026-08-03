@@ -6303,3 +6303,30 @@ fn bounded_catalog_sql_is_indexed_and_limited() {
         "tag name resolve must be indexed: {tag_name_plan}"
     );
 }
+
+#[tokio::test]
+async fn release_cached_memory_runs_on_worker_without_mutating_data_or_revision() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repository = owner.repository();
+
+    let created = create_simple(&repository, "pager-release").await;
+    let task_id = created.task().unwrap().id;
+    let before = repository.diagnostics().await.unwrap();
+    let before_task = repository.get_task(task_id).await.unwrap();
+    let before_sync = repository.get_sync_state().await.unwrap();
+
+    repository.release_cached_memory().await.unwrap();
+
+    let after = repository.diagnostics().await.unwrap();
+    let after_task = repository.get_task(task_id).await.unwrap();
+    let after_sync = repository.get_sync_state().await.unwrap();
+
+    assert_eq!(after.revision, before.revision);
+    assert_eq!(after.tasks, before.tasks);
+    assert_eq!(after.events, before.events);
+    assert_eq!(after.receipts, before.receipts);
+    assert_eq!(after.activity, before.activity);
+    assert_eq!(after_task, before_task);
+    assert_eq!(after_sync, before_sync);
+}

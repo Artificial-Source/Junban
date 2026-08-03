@@ -588,8 +588,6 @@ async fn exec_break_down<R: Repository, E: EventSink>(
         );
     }
     let mut created = Vec::new();
-    let mut last_revision = None;
-    let mut last_op = None;
     for (index, title) in titles.into_iter().enumerate() {
         let title_raw = subtasks[index].as_str();
         let mut draft = TaskDraft::new(title);
@@ -597,8 +595,6 @@ async fn exec_break_down<R: Repository, E: EventSink>(
         let child_op = derive_child_operation_id(root, "break_down_task", index as u32);
         match service.create_task(child_op, draft).await {
             Ok(mutation) => {
-                last_revision = Some(mutation.event.revision);
-                last_op = Some(child_op);
                 let task_id = mutation_primary_id(&mutation).or_else(|| {
                     mutation
                         .event
@@ -621,25 +617,19 @@ async fn exec_break_down<R: Repository, E: EventSink>(
                     created,
                     index,
                     error,
-                    last_op,
-                    last_revision,
                     json!({ "parent_id": parent_id.to_string() }),
                 );
             }
         }
     }
-    let mut envelope = ToolResultEnvelope::success(
+    ToolResultEnvelope::success(
         "break_down_task",
         json!({
             "parent_id": parent_id.to_string(),
             "created": created,
             "count": subtasks.len(),
         }),
-    );
-    if let (Some(op), Some(revision)) = (last_op, last_revision) {
-        envelope = envelope.with_mutation_meta(op, revision);
-    }
-    envelope
+    )
 }
 
 async fn exec_extract<R: Repository, E: EventSink>(
@@ -724,8 +714,6 @@ async fn exec_bulk_create<R: Repository, E: EventSink>(
         );
     }
     let mut created = Vec::new();
-    let mut last_revision = None;
-    let mut last_op = None;
     for (index, title) in titles.into_iter().enumerate() {
         let title_raw = args.titles[index].as_str();
         let mut draft = TaskDraft::new(title);
@@ -734,8 +722,6 @@ async fn exec_bulk_create<R: Repository, E: EventSink>(
         let child_op = derive_child_operation_id(root, "bulk_create_tasks", index as u32);
         match service.create_task(child_op, draft).await {
             Ok(mutation) => {
-                last_revision = Some(mutation.event.revision);
-                last_op = Some(child_op);
                 let task_id = mutation_primary_id(&mutation).or_else(|| {
                     mutation
                         .event
@@ -758,24 +744,18 @@ async fn exec_bulk_create<R: Repository, E: EventSink>(
                     created,
                     index,
                     error,
-                    last_op,
-                    last_revision,
                     json!({}),
                 );
             }
         }
     }
-    let mut envelope = ToolResultEnvelope::success(
+    ToolResultEnvelope::success(
         "bulk_create_tasks",
         json!({
             "created": created,
             "count": args.titles.len(),
         }),
-    );
-    if let (Some(op), Some(revision)) = (last_op, last_revision) {
-        envelope = envelope.with_mutation_meta(op, revision);
-    }
-    envelope
+    )
 }
 
 async fn exec_bulk_update<R: Repository, E: EventSink>(
@@ -2377,8 +2357,6 @@ fn partial_composite_outcome(
     created: Vec<Value>,
     failed_index: usize,
     error: AppError,
-    last_op: Option<OperationId>,
-    last_revision: Option<u64>,
     extra: Value,
 ) -> ToolResultEnvelope {
     let code = app_error_code(&error);
@@ -2398,9 +2376,6 @@ fn partial_composite_outcome(
     }
     let mut envelope = ToolResultEnvelope::error(tool, code, "composite action partially applied");
     envelope.data = data;
-    if let (Some(op), Some(revision)) = (last_op, last_revision) {
-        envelope = envelope.with_mutation_meta(op, revision);
-    }
     envelope
 }
 
@@ -3066,6 +3041,28 @@ mod tests {
         assert!(created[0]["task_id"].as_str().is_some());
         assert!(created[0]["revision"].as_u64().is_some());
         assert!(created[0]["event_type"].as_str().is_some());
+        assert!(partial.operation_id.is_none());
+        assert!(partial.revision.is_none());
+        crate::ai_runtime::AiDecisionPayload::from_tool_result(
+            root,
+            crate::ai_runtime::AiTerminalOutcome::Failed,
+            &partial,
+        )
+        .expect("partial composite result must fit dispatch notification authority");
+
+        // Successful composite results also retain child receipt identities without
+        // pretending that one child operation is the approved dispatch root.
+        let success_root = op();
+        let success = execute_tool(&service, &action, &ctx, Some(success_root)).await;
+        assert_eq!(success.outcome, ToolOutcome::Success);
+        assert!(success.operation_id.is_none());
+        assert!(success.revision.is_none());
+        crate::ai_runtime::AiDecisionPayload::from_tool_result(
+            success_root,
+            crate::ai_runtime::AiTerminalOutcome::Completed,
+            &success,
+        )
+        .expect("successful composite result must fit dispatch notification authority");
 
         // Retry after removing the poison conflict is not possible (op consumed), but
         // replaying the committed child keeps the same identity.

@@ -188,6 +188,36 @@ The direct tool-boundary gate approved after focused correction and exact-delta 
 - No schedule apply mutation and no model-supplied preview/apply hash authority.
 - No CLI/MCP AI tools and no Phase 6 release/memory/visual acceptance claim.
 
+## Wave 3f.2a — durable cancellation/dispatch recovery primitives
+
+- `CancelAiResponseRequest` now drives one receipt-backed transaction that exact-matches the reserved streaming assistant and run generation. Running cancellation or a pending/approved awaiting-approval cancellation atomically terminalizes assistant/run, expires bound authority, preserves exact quota counters, and rejects a dispatching or terminal winner without changes. Cancelled partial assistant text is included in canonical receipt identity.
+- `finish_ai_response` accepts an optional dispatch operation identity. Ordinary running completion/failure requires it absent. A dispatching run completes/fails only when its exact bound approval is consumed and stores that same canonical operation identity. Cancellation no longer uses the finish path.
+- Schema v6 binds every run to one non-null, unique `assistant_message_id`. Fresh creation, canonical upsert receipt identity, every run CAS, proposal/cancel/finish, startup reconciliation, normal open, and restore preflight validate the exact session/turn/assistant/run/generation/message edge. Startup terminalizes only each run's bound streaming assistant; unrelated assistants and distinct same-turn runs are not conflated.
+- Normal open and restore-candidate sanitization fully validate every durable approval and approval/run edge before recovery, including typed/canonical IDs and statuses, UTF-8 and byte counts, canonical object arguments, canonical tool names, timestamps/expiry, dispatch operation IDs, assistant bindings, and recomputed action hashes. Approval action hashes use `junban.ai.approval.action.v1\0` plus length-framed canonical tool name and arguments; storage remains semantic-tool-agnostic while the server registry owns the allowlist and argument semantics.
+- Valid consumed/dispatching authority is preserved. The indexed recovery read returns every pair only when the total is at most 500; it never truncates. The 501st consume, normal open with 501 forged pairs, and restore preflight with 501 pairs fail atomically and closed.
+- `AiRuntimeSupervisor` owns approval wait, non-cloneable decision authorization, queued cancellation, permit-drop failure, and one exact dispatch notification under the existing short mutex. A dispatched payload carries the exact dispatch operation, completed/failed terminal outcome, and canonical provider-neutral `ToolResultEnvelope` JSON bounded to 32 KiB. Composite results retain exact child receipt metadata while omitting misleading top-level child metadata, so the payload separately retains the approved root dispatch identity. Waiters use stored state plus `Notify` without polling; queued cancellation stops further provider work but cannot overwrite a durably finished dispatch outcome, and lifecycle drain retains the permit and run guard through completion.
+- Focused storage/application tests cover cancellation replay/mismatch, both cancellation/consume race orders, dispatch completion/failure and operation mismatch, exact assistant cross-binding and same-turn multi-run startup behavior, restart/restore survival, corrupt-pair fail-closed open, exact 500/501 consume/open/restore boundaries, stale consumed-argument hashes, malformed approval field classes, and quota/event/receipt atomicity. Paused/barrier and service-backed runtime tests cover both authorization/cancel orders, queued failure, permit drop, durable approval reload plus server-registry validation and service execution, one exact persisted/emitted bounded result, terminal phase ownership, and drain through durable finish, permit completion, and guard drop.
+
+### Authority-hardening validation
+
+The P6-AUTH-001–004 correction pass completed focused regressions followed by:
+
+```text
+cargo test --locked -p junban-domain -p junban-app -p junban-storage -p junban-server --all-targets --all-features
+cargo clippy --locked -p junban-domain -p junban-app -p junban-storage -p junban-server --all-targets --all-features -- -D warnings
+cargo fmt --all -- --check
+node scripts/contract.mjs check
+node scripts/check-docs.mjs
+git diff --check
+```
+
+The independent authority gate approved after correction and exact-delta re-review of `P6-AUTH-001`–`P6-AUTH-004`.
+
+### Non-claims for Wave 3f.2a
+
+- No provider tool loop, detached dispatch/recovery worker, public approval routes, OpenAPI changes, tool SSE envelopes, or UI wiring is included. The 3f.2a runtime/storage contract and service-backed ordering regression do not claim that 3f.2b worker delivery; those remain Wave 3f.2b.
+- No new provider, credential, network, plugin, CLI, or MCP authority is added.
+
 ## Non-claims
 
 - No provider-wired tool dispatch loop, tool approval HTTP surface, daily briefing, edit/regenerate, multi-round autonomous loop, or hidden reasoning exposure. Wave 3f.1 adds only the offline registry/validator/executor foundation above.

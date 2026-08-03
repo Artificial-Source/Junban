@@ -35,6 +35,10 @@ pub const AI_MEMORIES_PER_PROFILE_MAX: u32 = 500;
 pub const AI_MEMORY_CONTENT_BYTES_MAX: u64 = 5 * 1024 * 1024;
 /// Pending approvals retained per profile.
 pub const AI_PENDING_APPROVALS_MAX: u32 = 128;
+/// Dispatching approval/run pairs offered for bounded startup recovery.
+pub const AI_DISPATCHING_APPROVAL_RECOVERY_MAX: u32 = 500;
+/// Domain separator for approval action hashes.
+pub const AI_APPROVAL_ACTION_HASH_DOMAIN: &[u8] = b"junban.ai.approval.action.v1\0";
 /// Total pending approval content bytes per profile.
 pub const AI_PENDING_APPROVAL_CONTENT_BYTES_MAX: u64 = 1024 * 1024;
 /// Session title UTF-8 byte ceiling.
@@ -1202,6 +1206,8 @@ pub struct AiRunState {
     pub run_id: AiRunId,
     pub session_id: AiSessionId,
     pub turn_id: AiTurnId,
+    /// Exact durable assistant placeholder owned by this run.
+    pub assistant_message_id: AiMessageId,
     pub generation: u64,
     pub state: AiRunPhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1221,6 +1227,69 @@ pub struct AiSecretMetadata {
     pub updated_at: Timestamp,
     /// Always true for listed entries; retained for stable API shape.
     pub present: bool,
+}
+
+/// Validate storage-level canonical tool-name syntax without assigning semantics.
+pub fn validate_ai_tool_name(value: &str) -> Result<(), ValidationError> {
+    validate_token(value, "ai_approval.tool_name", AI_PROVIDER_ID_BYTES_MAX)?;
+    let mut bytes = value.bytes();
+    if !bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
+        || bytes.any(|byte| !(byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'))
+    {
+        return Err(ValidationError::InvalidFormat {
+            field: "ai_approval.tool_name",
+            expected: "canonical lowercase snake_case token",
+        });
+    }
+    Ok(())
+}
+
+/// Hash one canonical approval action independent of run/session identities.
+///
+/// Length framing plus an explicit domain separator prevents ambiguous concatenation.
+pub fn ai_approval_action_hash(
+    tool_name: &str,
+    canonical_arguments_json: &str,
+) -> Result<String, ValidationError> {
+    validate_ai_tool_name(tool_name)?;
+    if canonical_arguments_json.len() > AI_TOOL_ARGUMENTS_BYTES_MAX {
+        return Err(ValidationError::TooLong {
+            field: "ai_approval.arguments_json",
+            max: AI_TOOL_ARGUMENTS_BYTES_MAX,
+        });
+    }
+    let arguments: serde_json::Value =
+        serde_json::from_str(canonical_arguments_json).map_err(|_| ValidationError::Invalid {
+            field: "ai_approval.arguments_json",
+            reason: "must be valid JSON",
+        })?;
+    if !arguments.is_object() {
+        return Err(ValidationError::Invalid {
+            field: "ai_approval.arguments_json",
+            reason: "must be a JSON object",
+        });
+    }
+    if serde_json::to_string(&arguments).ok().as_deref() != Some(canonical_arguments_json) {
+        return Err(ValidationError::Invalid {
+            field: "ai_approval.arguments_json",
+            reason: "must be canonical JSON",
+        });
+    }
+    let tool_len = u64::try_from(tool_name.len()).expect("tool name bound fits u64");
+    let arguments_len =
+        u64::try_from(canonical_arguments_json.len()).expect("tool arguments bound fits u64");
+    let mut material = Vec::with_capacity(
+        AI_APPROVAL_ACTION_HASH_DOMAIN.len()
+            + 16
+            + tool_name.len()
+            + canonical_arguments_json.len(),
+    );
+    material.extend_from_slice(AI_APPROVAL_ACTION_HASH_DOMAIN);
+    material.extend_from_slice(&tool_len.to_be_bytes());
+    material.extend_from_slice(tool_name.as_bytes());
+    material.extend_from_slice(&arguments_len.to_be_bytes());
+    material.extend_from_slice(canonical_arguments_json.as_bytes());
+    Ok(crate::sha256_hex(&material))
 }
 
 // ── Validation helpers ──────────────────────────────────────────────────────
@@ -1445,6 +1514,21 @@ pub fn referenced_ai_credential_ids(ai: &AiSettings, voice: &VoiceSettings) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approval_action_hash_has_stable_domain_separated_vector() {
+        assert_eq!(
+            ai_approval_action_hash("create_task", r#"{"title":"x"}"#).unwrap(),
+            "68758525b764c7d537de378915c8da97c9234b12e781d20ea0dfa7e1f1a945d3"
+        );
+        assert_ne!(
+            ai_approval_action_hash("create_task", r#"{"title":"x"}"#).unwrap(),
+            crate::sha256_hex(b"create_task\n{\"title\":\"x\"}")
+        );
+        assert!(ai_approval_action_hash("CreateTask", "{}").is_err());
+        assert!(ai_approval_action_hash("create_task", "[]").is_err());
+        assert!(ai_approval_action_hash("create_task", r#"{ "title": "x" }"#).is_err());
+    }
 
     #[test]
     fn disabled_ai_may_hold_an_unassigned_credential() {

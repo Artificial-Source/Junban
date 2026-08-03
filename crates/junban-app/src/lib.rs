@@ -14,10 +14,10 @@ mod service;
 pub use ai::{
     AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
     AiMessageListPage, AiSecretBytes, AiSessionCursor, AiSessionListPage, BindAiCredentialRequest,
-    ClearAiCredentialRequest, ClearAiSessionRequest, CreateAiMemoryRequest, CreateAiSessionRequest,
-    DeleteAiMemoryRequest, DeleteAiSessionRequest, FinishAiResponseRequest,
-    LinkAiSessionMemoryRequest, ListAiMemoriesRequest, ListAiMessagesRequest,
-    ListAiSessionsRequest, ProposeAiApprovalRequest, RenameAiSessionRequest,
+    CancelAiResponseRequest, ClearAiCredentialRequest, ClearAiSessionRequest,
+    CreateAiMemoryRequest, CreateAiSessionRequest, DeleteAiMemoryRequest, DeleteAiSessionRequest,
+    FinishAiResponseRequest, LinkAiSessionMemoryRequest, ListAiMemoriesRequest,
+    ListAiMessagesRequest, ListAiSessionsRequest, ProposeAiApprovalRequest, RenameAiSessionRequest,
     SelectAiMemoriesRequest, SetAiApprovalStatusRequest, UpdateAiMemoryRequest,
     UpsertAiMessageRequest, UpsertAiRunStateRequest,
 };

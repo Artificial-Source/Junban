@@ -13,11 +13,15 @@ use junban_ai::{
     DiscoveredModel, Generation, NormalizedStreamEvent, ProviderChatRequest, ProviderEndpoint,
     ProviderError, ProviderRuntime, RunCancel, RunId,
 };
-use junban_domain::AiRunId;
+use junban_domain::{AiApprovalId, AiRunId, OperationId};
+
+use crate::ai_tool_registry::{ToolResultEnvelope, registration};
 use tokio::sync::Notify;
 
 /// Hard concurrent ceiling for in-flight AI provider runs in one process.
 pub const MAX_ACTIVE_AI_RUNS: usize = 4;
+/// Strict process-local decision notification payload ceiling.
+pub const MAX_AI_DECISION_PAYLOAD_BYTES: usize = 32 * 1024;
 
 /// Stable AI runtime supervisor failures without run IDs or secret material.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -43,6 +47,15 @@ pub enum AiRuntimeError {
     /// The requested transition is not valid in the current lifecycle state.
     #[error("AI runtime lifecycle does not permit this operation")]
     InvalidLifecycle,
+    /// Approval decision identity does not match this exact run generation and approval.
+    #[error("AI approval decision identity does not match")]
+    DecisionIdentityMismatch,
+    /// Approval decision is not legal in the run's current process-local phase.
+    #[error("AI approval decision is not available")]
+    DecisionUnavailable,
+    /// A dispatch result is not an exact bounded trusted tool-result envelope.
+    #[error("AI dispatch result payload is invalid")]
+    InvalidDecisionPayload,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +76,103 @@ pub(crate) struct ReconfigureEpoch(u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveRunPhase {
     Running,
+    AwaitingApproval(AiApprovalId),
+    DecisionAuthorizing {
+        approval_id: AiApprovalId,
+        cancel_queued: bool,
+    },
+    CancelRequested,
+    Terminal(AiTerminalOutcome),
+}
+
+/// Exact trusted result retained only until the run consumes its dispatch notification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AiDecisionPayload {
+    dispatch_operation_id: OperationId,
+    terminal_outcome: AiTerminalOutcome,
+    tool_result_json: String,
+}
+
+impl AiDecisionPayload {
+    /// Freeze the exact provider-neutral result the worker must persist and emit.
+    pub fn from_tool_result(
+        dispatch_operation_id: OperationId,
+        terminal_outcome: AiTerminalOutcome,
+        tool_result: &ToolResultEnvelope,
+    ) -> Result<Self, AiRuntimeError> {
+        let result_operation_matches = tool_result.operation_id.as_deref().is_none_or(|raw| {
+            OperationId::parse(raw)
+                .is_ok_and(|parsed| parsed == dispatch_operation_id && parsed.to_string() == raw)
+        });
+        if terminal_outcome == AiTerminalOutcome::Cancelled
+            || registration(&tool_result.tool).is_none()
+            || tool_result.operation_id.is_some() != tool_result.revision.is_some()
+            || !result_operation_matches
+        {
+            return Err(AiRuntimeError::InvalidDecisionPayload);
+        }
+        let bounded = tool_result.clone().finalize_bounded();
+        let mut value =
+            serde_json::to_value(&bounded).map_err(|_| AiRuntimeError::InvalidDecisionPayload)?;
+        let mut tool_result_json =
+            serde_json::to_string(&value).map_err(|_| AiRuntimeError::InvalidDecisionPayload)?;
+        if tool_result_json.len() > MAX_AI_DECISION_PAYLOAD_BYTES {
+            value = serde_json::to_value(ToolResultEnvelope::error(
+                &bounded.tool,
+                "result_too_large",
+                "tool result exceeds the 32 KiB dispatch bound",
+            ))
+            .map_err(|_| AiRuntimeError::InvalidDecisionPayload)?;
+            tool_result_json = serde_json::to_string(&value)
+                .map_err(|_| AiRuntimeError::InvalidDecisionPayload)?;
+        }
+        if tool_result_json.len() > MAX_AI_DECISION_PAYLOAD_BYTES
+            || !serde_json::from_str::<serde_json::Value>(&tool_result_json)
+                .is_ok_and(|value| value.is_object())
+        {
+            return Err(AiRuntimeError::InvalidDecisionPayload);
+        }
+        Ok(Self {
+            dispatch_operation_id,
+            terminal_outcome,
+            tool_result_json,
+        })
+    }
+
+    #[must_use]
+    pub const fn dispatch_operation_id(&self) -> OperationId {
+        self.dispatch_operation_id
+    }
+
+    #[must_use]
+    pub const fn terminal_outcome(&self) -> AiTerminalOutcome {
+        self.terminal_outcome
+    }
+
+    #[must_use]
+    pub fn tool_result_json(&self) -> &str {
+        &self.tool_result_json
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AiDecisionNotification {
+    Rejected,
+    Dispatched(AiDecisionPayload),
+    CancelRequested,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AiDecisionCompletion {
+    Rejected,
+    Dispatched(AiDecisionPayload),
+    FailedBeforeDispatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiDecisionCompletionState {
+    Running,
+    AwaitingApproval,
     CancelRequested,
     Terminal(AiTerminalOutcome),
 }
@@ -79,6 +189,8 @@ struct ActiveRun {
     generation: u64,
     cancel: Arc<RunCancel>,
     phase: ActiveRunPhase,
+    decision_notify: Arc<Notify>,
+    decision_notification: Option<(AiApprovalId, AiDecisionNotification)>,
 }
 
 struct AiRuntimeInner {
@@ -101,6 +213,17 @@ struct AiRuntimeInner {
 pub struct AiRuntimeSupervisor {
     inner: Mutex<AiRuntimeInner>,
     drain_notify: Notify,
+}
+
+/// One-shot authority for an exact run-generation-approval decision.
+///
+/// Dropping without completion returns a non-cancelled run to the same approval wait.
+pub struct AiDecisionPermit {
+    supervisor: Arc<AiRuntimeSupervisor>,
+    run_id: AiRunId,
+    generation: u64,
+    approval_id: AiApprovalId,
+    completed: bool,
 }
 
 /// RAII authority for one admitted AI run generation.
@@ -162,6 +285,22 @@ impl AiRunGuard {
     pub fn may_emit_provider_output(&self) -> bool {
         self.supervisor
             .may_emit_provider_output(self.run_id, self.generation)
+    }
+
+    /// Move this exact running generation to one exact approval wait.
+    pub fn await_approval(&self, approval_id: AiApprovalId) -> Result<(), AiRuntimeError> {
+        self.supervisor
+            .await_approval(self.run_id, self.generation, approval_id)
+    }
+
+    /// Wait without polling for this approval's decision or a winning cancellation.
+    pub async fn wait_for_decision(
+        &self,
+        approval_id: AiApprovalId,
+    ) -> Result<AiDecisionNotification, AiRuntimeError> {
+        self.supervisor
+            .wait_for_decision(self.run_id, self.generation, approval_id)
+            .await
     }
 
     /// Wait for cancellation without exposing the underlying token.
@@ -236,6 +375,35 @@ impl AiRunGuard {
             .expect("admitted AI guard missing runtime")
             .discover_models(endpoint, self.cancel.as_ref())
             .await
+    }
+}
+
+impl AiDecisionPermit {
+    pub fn complete(
+        mut self,
+        completion: AiDecisionCompletion,
+    ) -> Result<AiDecisionCompletionState, AiRuntimeError> {
+        let result = self.supervisor.complete_decision(
+            self.run_id,
+            self.generation,
+            self.approval_id,
+            completion,
+        );
+        self.completed = result.is_ok();
+        result
+    }
+}
+
+impl Drop for AiDecisionPermit {
+    fn drop(&mut self) {
+        if !self.completed {
+            let _ = self.supervisor.complete_decision(
+                self.run_id,
+                self.generation,
+                self.approval_id,
+                AiDecisionCompletion::FailedBeforeDispatch,
+            );
+        }
     }
 }
 
@@ -341,6 +509,8 @@ impl AiRuntimeSupervisor {
                 generation,
                 cancel: Arc::clone(&cancel),
                 phase: ActiveRunPhase::Running,
+                decision_notify: Arc::new(Notify::new()),
+                decision_notification: None,
             },
         );
         Ok(AiRunGuard {
@@ -359,14 +529,197 @@ impl AiRuntimeSupervisor {
             return Err(AiRuntimeError::NotFound);
         };
         match entry.phase {
-            ActiveRunPhase::Running => {
+            ActiveRunPhase::Running | ActiveRunPhase::AwaitingApproval(_) => {
                 entry.phase = ActiveRunPhase::CancelRequested;
                 entry.cancel.cancel();
+                entry.decision_notify.notify_one();
+                Ok(())
+            }
+            ActiveRunPhase::DecisionAuthorizing { approval_id, .. } => {
+                entry.phase = ActiveRunPhase::DecisionAuthorizing {
+                    approval_id,
+                    cancel_queued: true,
+                };
                 Ok(())
             }
             ActiveRunPhase::CancelRequested => Ok(()),
             ActiveRunPhase::Terminal(_) => Err(AiRuntimeError::Terminal),
         }
+    }
+
+    fn await_approval(
+        &self,
+        run_id: AiRunId,
+        generation: u64,
+        approval_id: AiApprovalId,
+    ) -> Result<(), AiRuntimeError> {
+        let mut inner = self.inner.lock().expect("AI runtime poisoned");
+        let entry = inner
+            .active
+            .get_mut(&run_id)
+            .ok_or(AiRuntimeError::NotFound)?;
+        if entry.generation != generation {
+            return Err(AiRuntimeError::DecisionIdentityMismatch);
+        }
+        if entry.phase != ActiveRunPhase::Running || entry.decision_notification.is_some() {
+            return Err(AiRuntimeError::DecisionUnavailable);
+        }
+        entry.phase = ActiveRunPhase::AwaitingApproval(approval_id);
+        Ok(())
+    }
+
+    pub fn begin_decision(
+        self: &Arc<Self>,
+        run_id: AiRunId,
+        generation: u64,
+        approval_id: AiApprovalId,
+    ) -> Result<AiDecisionPermit, AiRuntimeError> {
+        let mut inner = self.inner.lock().expect("AI runtime poisoned");
+        let entry = inner
+            .active
+            .get_mut(&run_id)
+            .ok_or(AiRuntimeError::NotFound)?;
+        if entry.generation != generation {
+            return Err(AiRuntimeError::DecisionIdentityMismatch);
+        }
+        match entry.phase {
+            ActiveRunPhase::AwaitingApproval(bound) if bound == approval_id => {
+                entry.phase = ActiveRunPhase::DecisionAuthorizing {
+                    approval_id,
+                    cancel_queued: false,
+                };
+                Ok(AiDecisionPermit {
+                    supervisor: Arc::clone(self),
+                    run_id,
+                    generation,
+                    approval_id,
+                    completed: false,
+                })
+            }
+            ActiveRunPhase::AwaitingApproval(_) | ActiveRunPhase::DecisionAuthorizing { .. } => {
+                Err(AiRuntimeError::DecisionIdentityMismatch)
+            }
+            _ => Err(AiRuntimeError::DecisionUnavailable),
+        }
+    }
+
+    async fn wait_for_decision(
+        &self,
+        run_id: AiRunId,
+        generation: u64,
+        approval_id: AiApprovalId,
+    ) -> Result<AiDecisionNotification, AiRuntimeError> {
+        let notify = {
+            let inner = self.inner.lock().expect("AI runtime poisoned");
+            let entry = inner.active.get(&run_id).ok_or(AiRuntimeError::NotFound)?;
+            if entry.generation != generation {
+                return Err(AiRuntimeError::DecisionIdentityMismatch);
+            }
+            Arc::clone(&entry.decision_notify)
+        };
+        loop {
+            let notified = notify.notified();
+            {
+                let mut inner = self.inner.lock().expect("AI runtime poisoned");
+                let entry = inner
+                    .active
+                    .get_mut(&run_id)
+                    .ok_or(AiRuntimeError::NotFound)?;
+                if entry.generation != generation {
+                    return Err(AiRuntimeError::DecisionIdentityMismatch);
+                }
+                if entry
+                    .decision_notification
+                    .as_ref()
+                    .is_some_and(|(bound, _)| *bound != approval_id)
+                {
+                    return Err(AiRuntimeError::DecisionIdentityMismatch);
+                }
+                if let Some((_, notification)) = entry.decision_notification.take() {
+                    return Ok(notification);
+                }
+                match entry.phase {
+                    ActiveRunPhase::CancelRequested => {
+                        return Ok(AiDecisionNotification::CancelRequested);
+                    }
+                    ActiveRunPhase::AwaitingApproval(bound)
+                    | ActiveRunPhase::DecisionAuthorizing {
+                        approval_id: bound, ..
+                    } if bound == approval_id => {}
+                    ActiveRunPhase::AwaitingApproval(_)
+                    | ActiveRunPhase::DecisionAuthorizing { .. } => {
+                        return Err(AiRuntimeError::DecisionIdentityMismatch);
+                    }
+                    _ => return Err(AiRuntimeError::DecisionUnavailable),
+                }
+            }
+            notified.await;
+        }
+    }
+
+    fn complete_decision(
+        &self,
+        run_id: AiRunId,
+        generation: u64,
+        approval_id: AiApprovalId,
+        completion: AiDecisionCompletion,
+    ) -> Result<AiDecisionCompletionState, AiRuntimeError> {
+        let mut inner = self.inner.lock().expect("AI runtime poisoned");
+        let entry = inner
+            .active
+            .get_mut(&run_id)
+            .ok_or(AiRuntimeError::NotFound)?;
+        if entry.generation != generation {
+            return Err(AiRuntimeError::DecisionIdentityMismatch);
+        }
+        let cancel_queued = match entry.phase {
+            ActiveRunPhase::DecisionAuthorizing {
+                approval_id: bound,
+                cancel_queued,
+            } if bound == approval_id => cancel_queued,
+            ActiveRunPhase::DecisionAuthorizing { .. } => {
+                return Err(AiRuntimeError::DecisionIdentityMismatch);
+            }
+            _ => return Err(AiRuntimeError::DecisionUnavailable),
+        };
+        let state = match completion {
+            AiDecisionCompletion::Rejected if cancel_queued => {
+                entry.phase = ActiveRunPhase::CancelRequested;
+                entry.cancel.cancel();
+                entry.decision_notify.notify_one();
+                AiDecisionCompletionState::CancelRequested
+            }
+            AiDecisionCompletion::Rejected => {
+                entry.phase = ActiveRunPhase::Running;
+                entry.decision_notification = Some((approval_id, AiDecisionNotification::Rejected));
+                entry.decision_notify.notify_one();
+                AiDecisionCompletionState::Running
+            }
+            AiDecisionCompletion::Dispatched(payload) => {
+                let outcome = payload.terminal_outcome();
+                if cancel_queued {
+                    // Durable dispatch already won. Cancellation only prevents any
+                    // subsequent provider work and cannot overwrite that terminal result.
+                    entry.cancel.cancel();
+                }
+                entry.phase = ActiveRunPhase::Terminal(outcome);
+                entry.decision_notification =
+                    Some((approval_id, AiDecisionNotification::Dispatched(payload)));
+                entry.decision_notify.notify_one();
+                AiDecisionCompletionState::Terminal(outcome)
+            }
+            AiDecisionCompletion::FailedBeforeDispatch if cancel_queued => {
+                entry.phase = ActiveRunPhase::CancelRequested;
+                entry.cancel.cancel();
+                entry.decision_notify.notify_one();
+                AiDecisionCompletionState::CancelRequested
+            }
+            AiDecisionCompletion::FailedBeforeDispatch => {
+                entry.phase = ActiveRunPhase::AwaitingApproval(approval_id);
+                AiDecisionCompletionState::AwaitingApproval
+            }
+        };
+        Ok(state)
     }
 
     /// Begin one temporary reconfiguration epoch, closing admission and cancelling runs.
@@ -385,10 +738,7 @@ impl AiRuntimeSupervisor {
             runtime_dropped: false,
         };
         for entry in inner.active.values_mut() {
-            if entry.phase == ActiveRunPhase::Running {
-                entry.phase = ActiveRunPhase::CancelRequested;
-                entry.cancel.cancel();
-            }
+            request_cancel(entry);
         }
         Ok(epoch)
     }
@@ -400,10 +750,7 @@ impl AiRuntimeSupervisor {
             inner.lifecycle = AiRuntimeLifecycle::PermanentDraining;
         }
         for entry in inner.active.values_mut() {
-            if entry.phase == ActiveRunPhase::Running {
-                entry.phase = ActiveRunPhase::CancelRequested;
-                entry.cancel.cancel();
-            }
+            request_cancel(entry);
         }
     }
 
@@ -540,7 +887,9 @@ impl AiRuntimeSupervisor {
         let outcome = match entry.phase {
             ActiveRunPhase::Running => proposed,
             ActiveRunPhase::CancelRequested => AiTerminalOutcome::Cancelled,
-            ActiveRunPhase::Terminal(_) => return None,
+            ActiveRunPhase::AwaitingApproval(_)
+            | ActiveRunPhase::DecisionAuthorizing { .. }
+            | ActiveRunPhase::Terminal(_) => return None,
         };
         entry.phase = ActiveRunPhase::Terminal(outcome);
         Some(outcome)
@@ -566,6 +915,23 @@ impl AiRuntimeSupervisor {
         if should_notify {
             self.drain_notify.notify_waiters();
         }
+    }
+}
+
+fn request_cancel(entry: &mut ActiveRun) {
+    match entry.phase {
+        ActiveRunPhase::Running | ActiveRunPhase::AwaitingApproval(_) => {
+            entry.phase = ActiveRunPhase::CancelRequested;
+            entry.cancel.cancel();
+            entry.decision_notify.notify_one();
+        }
+        ActiveRunPhase::DecisionAuthorizing { approval_id, .. } => {
+            entry.phase = ActiveRunPhase::DecisionAuthorizing {
+                approval_id,
+                cancel_queued: true,
+            };
+        }
+        ActiveRunPhase::CancelRequested | ActiveRunPhase::Terminal(_) => {}
     }
 }
 
@@ -932,5 +1298,248 @@ mod tests {
         assert_eq!(supervisor.active_count(), 1);
         drop(first);
         assert_eq!(supervisor.active_count(), 0);
+    }
+
+    fn decision_payload() -> AiDecisionPayload {
+        let dispatch_operation_id =
+            OperationId::parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+        let result = ToolResultEnvelope::success(
+            "create_task",
+            serde_json::json!({"task_id":"00000000-0000-4000-8000-000000000001"}),
+        )
+        .finalize_bounded();
+        AiDecisionPayload::from_tool_result(
+            dispatch_operation_id,
+            AiTerminalOutcome::Completed,
+            &result,
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn cancellation_before_authorization_blocks_decision() {
+        let supervisor = AiRuntimeSupervisor::new();
+        let run_id = AiRunId::new();
+        let approval_id = AiApprovalId::new();
+        let guard = supervisor.admit_run(run_id, 3).unwrap();
+        guard.await_approval(approval_id).unwrap();
+        supervisor.cancel_run(run_id).unwrap();
+        assert_eq!(
+            supervisor
+                .begin_decision(run_id, 3, approval_id)
+                .err()
+                .unwrap(),
+            AiRuntimeError::DecisionUnavailable
+        );
+        assert_eq!(
+            guard.wait_for_decision(approval_id).await.unwrap(),
+            AiDecisionNotification::CancelRequested
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatched_authorization_notification_wins_over_queued_cancel() {
+        let supervisor = AiRuntimeSupervisor::new();
+        let run_id = AiRunId::new();
+        let approval_id = AiApprovalId::new();
+        let guard = supervisor.admit_run(run_id, 1).unwrap();
+        guard.await_approval(approval_id).unwrap();
+        let permit = supervisor.begin_decision(run_id, 1, approval_id).unwrap();
+        supervisor.cancel_run(run_id).unwrap();
+        assert!(
+            guard.is_live(),
+            "authorizing cancellation must remain queued"
+        );
+        assert_eq!(
+            permit
+                .complete(AiDecisionCompletion::Dispatched(decision_payload()))
+                .unwrap(),
+            AiDecisionCompletionState::Terminal(AiTerminalOutcome::Completed)
+        );
+        let notification = guard.wait_for_decision(approval_id).await.unwrap();
+        let AiDecisionNotification::Dispatched(payload) = notification else {
+            panic!("dispatch result was not delivered");
+        };
+        assert_eq!(payload.terminal_outcome(), AiTerminalOutcome::Completed);
+        assert!(payload.tool_result_json().contains("create_task"));
+        assert!(!guard.is_live());
+        assert!(guard.owns_terminal(AiTerminalOutcome::Completed));
+        assert_eq!(
+            guard.linearize_terminal(AiTerminalOutcome::Cancelled),
+            None,
+            "queued cancellation cannot overwrite durable dispatch completion"
+        );
+    }
+
+    #[tokio::test]
+    async fn authorization_failure_and_permit_drop_preserve_exact_cancel_semantics() {
+        let supervisor = AiRuntimeSupervisor::new();
+        let run_id = AiRunId::new();
+        let approval_id = AiApprovalId::new();
+        let guard = supervisor.admit_run(run_id, 2).unwrap();
+        guard.await_approval(approval_id).unwrap();
+        let permit = supervisor.begin_decision(run_id, 2, approval_id).unwrap();
+        supervisor.cancel_run(run_id).unwrap();
+        assert_eq!(
+            permit
+                .complete(AiDecisionCompletion::FailedBeforeDispatch)
+                .unwrap(),
+            AiDecisionCompletionState::CancelRequested
+        );
+        assert_eq!(
+            guard.wait_for_decision(approval_id).await.unwrap(),
+            AiDecisionNotification::CancelRequested
+        );
+
+        drop(guard);
+        let second_run = AiRunId::new();
+        let second_approval = AiApprovalId::new();
+        let second = supervisor.admit_run(second_run, 4).unwrap();
+        second.await_approval(second_approval).unwrap();
+        drop(
+            supervisor
+                .begin_decision(second_run, 4, second_approval)
+                .unwrap(),
+        );
+        let retry = supervisor
+            .begin_decision(second_run, 4, second_approval)
+            .unwrap();
+        assert_eq!(
+            retry.complete(AiDecisionCompletion::Rejected).unwrap(),
+            AiDecisionCompletionState::Running
+        );
+        assert_eq!(
+            second.wait_for_decision(second_approval).await.unwrap(),
+            AiDecisionNotification::Rejected
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dispatch_queued_cancel_completion_is_exact_terminal_and_blocks_drain_until_drop() {
+        let supervisor = AiRuntimeSupervisor::new();
+        let run_id = AiRunId::new();
+        let approval_id = AiApprovalId::new();
+        let guard = supervisor.admit_run(run_id, 1).unwrap();
+        guard.await_approval(approval_id).unwrap();
+        let permit = supervisor.begin_decision(run_id, 1, approval_id).unwrap();
+        // This models the detached worker after durable consume: reconfiguration
+        // queues cancellation while execution and atomic durable finish still own the permit.
+        let epoch = supervisor.begin_reconfigure().unwrap();
+        assert!(!supervisor.wait_drained(Duration::from_millis(1)).await);
+        let payload = decision_payload();
+        assert_eq!(
+            permit
+                .complete(AiDecisionCompletion::Dispatched(payload.clone()))
+                .unwrap(),
+            AiDecisionCompletionState::Terminal(AiTerminalOutcome::Completed)
+        );
+        assert!(guard.owns_terminal(AiTerminalOutcome::Completed));
+        assert_eq!(guard.linearize_terminal(AiTerminalOutcome::Cancelled), None);
+        assert_eq!(
+            guard.wait_for_decision(approval_id).await.unwrap(),
+            AiDecisionNotification::Dispatched(payload)
+        );
+        assert!(!supervisor.wait_drained(Duration::from_millis(1)).await);
+        drop(guard);
+        assert!(supervisor.wait_drained(Duration::from_secs(1)).await);
+        supervisor.drop_reconfigure_runtime(epoch).unwrap();
+        supervisor.finish_reconfigure(epoch).unwrap();
+    }
+
+    #[test]
+    fn cancel_and_authorization_linearize_under_one_barrier() {
+        for _ in 0..64 {
+            let supervisor = AiRuntimeSupervisor::new();
+            let run_id = AiRunId::new();
+            let approval_id = AiApprovalId::new();
+            let guard = supervisor.admit_run(run_id, 1).unwrap();
+            guard.await_approval(approval_id).unwrap();
+            let barrier = Arc::new(Barrier::new(2));
+            let cancel_supervisor = Arc::clone(&supervisor);
+            let cancel_barrier = Arc::clone(&barrier);
+            let cancel = std::thread::spawn(move || {
+                cancel_barrier.wait();
+                cancel_supervisor.cancel_run(run_id)
+            });
+            barrier.wait();
+            let decision = supervisor.begin_decision(run_id, 1, approval_id);
+            let cancelled = cancel.join().unwrap();
+            match (decision, cancelled) {
+                (Err(AiRuntimeError::DecisionUnavailable), Ok(())) => {}
+                (Ok(permit), Ok(())) => {
+                    assert_eq!(
+                        permit
+                            .complete(AiDecisionCompletion::Dispatched(decision_payload()))
+                            .unwrap(),
+                        AiDecisionCompletionState::Terminal(AiTerminalOutcome::Completed)
+                    );
+                }
+                _ => panic!("invalid cancel/decision linearization"),
+            }
+        }
+    }
+
+    #[test]
+    fn decision_payload_rejects_cancelled_and_bounds_more_than_32_kib() {
+        let operation_id = OperationId::parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+        let ordinary = ToolResultEnvelope::success("create_task", serde_json::json!({}));
+        assert_eq!(
+            AiDecisionPayload::from_tool_result(
+                operation_id,
+                AiTerminalOutcome::Cancelled,
+                &ordinary,
+            )
+            .unwrap_err(),
+            AiRuntimeError::InvalidDecisionPayload
+        );
+        let oversized = ToolResultEnvelope::success(
+            "create_task",
+            serde_json::json!({"text": "x".repeat(MAX_AI_DECISION_PAYLOAD_BYTES)}),
+        );
+        let bounded = AiDecisionPayload::from_tool_result(
+            operation_id,
+            AiTerminalOutcome::Completed,
+            &oversized,
+        )
+        .unwrap();
+        assert!(bounded.tool_result_json().len() <= MAX_AI_DECISION_PAYLOAD_BYTES);
+        assert!(bounded.tool_result_json().contains("result_too_large"));
+
+        let other_operation_id =
+            OperationId::parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb").unwrap();
+        let mismatched = ToolResultEnvelope::success("create_task", serde_json::json!({}))
+            .with_mutation_meta(other_operation_id, 1);
+        assert_eq!(
+            AiDecisionPayload::from_tool_result(
+                operation_id,
+                AiTerminalOutcome::Completed,
+                &mismatched,
+            )
+            .unwrap_err(),
+            AiRuntimeError::InvalidDecisionPayload
+        );
+    }
+
+    #[test]
+    fn decision_identity_mismatch_fails_closed() {
+        let supervisor = AiRuntimeSupervisor::new();
+        let run_id = AiRunId::new();
+        let approval_id = AiApprovalId::new();
+        let guard = supervisor.admit_run(run_id, 7).unwrap();
+        guard.await_approval(approval_id).unwrap();
+        assert_eq!(
+            supervisor
+                .begin_decision(run_id, 8, approval_id)
+                .err()
+                .unwrap(),
+            AiRuntimeError::DecisionIdentityMismatch
+        );
+        assert_eq!(
+            supervisor
+                .begin_decision(run_id, 7, AiApprovalId::new())
+                .err()
+                .unwrap(),
+            AiRuntimeError::DecisionIdentityMismatch
+        );
     }
 }

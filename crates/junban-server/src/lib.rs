@@ -95,7 +95,9 @@ use crate::routes_ai::{
 use crate::sse::{AppService, SseConnectionPermit};
 
 pub use crate::ai_runtime::{
-    AiRunGuard, AiRuntimeError, AiRuntimeSupervisor, AiTerminalOutcome, MAX_ACTIVE_AI_RUNS,
+    AiDecisionCompletion, AiDecisionCompletionState, AiDecisionNotification, AiDecisionPayload,
+    AiDecisionPermit, AiRunGuard, AiRuntimeError, AiRuntimeSupervisor, AiTerminalOutcome,
+    MAX_ACTIVE_AI_RUNS, MAX_AI_DECISION_PAYLOAD_BYTES,
 };
 pub use crate::ai_tool_executor::{ToolExecContext, derive_child_operation_id, execute_tool};
 pub use crate::ai_tool_registry::{

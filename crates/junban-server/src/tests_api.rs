@@ -5828,6 +5828,7 @@ async fn seed_ai_response_preflight(
                         run_id: identity.run_id,
                         session_id,
                         turn_id: identity.turn_id,
+                        assistant_message_id: identity.assistant_message_id,
                         generation: 1,
                         state: junban_domain::AiRunPhase::Running,
                         approval_id: None,
@@ -6606,7 +6607,7 @@ async fn ai_nonterminal_preflight_reconciles_after_reopen_without_provider_egres
             .await
             .unwrap()
             .state,
-        junban_domain::AiRunPhase::Running
+        junban_domain::AiRunPhase::Cancelled
     );
     let response = reopened
         .request(
@@ -8997,4 +8998,263 @@ async fn expired_automation_credential_is_rejected() {
         )
         .await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn durable_dispatch_finish_wins_queued_cancel_and_emits_one_exact_bounded_result() {
+    let context = TestContext::new();
+    let session = context
+        .state
+        .service
+        .create_ai_session(
+            OperationId::parse(&Uuid::new_v4().to_string()).unwrap(),
+            junban_app::CreateAiSessionRequest {
+                title: "dispatch worker".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let session_id = junban_domain::AiSessionId::parse(&session.event.primary.unwrap().id).unwrap();
+    let turn_id = junban_domain::AiTurnId::new();
+    let assistant_message_id = junban_domain::AiMessageId::new();
+    let run_id = junban_domain::AiRunId::new();
+    let approval_id = junban_domain::AiApprovalId::new();
+    context
+        .state
+        .service
+        .upsert_ai_message(
+            OperationId::parse(&Uuid::new_v4().to_string()).unwrap(),
+            junban_app::UpsertAiMessageRequest {
+                message_id: assistant_message_id,
+                session_id,
+                turn_id,
+                role: junban_domain::AiMessageRole::Assistant,
+                status: junban_domain::AiMessageStatus::Streaming,
+                content: junban_domain::AiMessageContent::text("").unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    let now = Timestamp::now();
+    context
+        .state
+        .service
+        .upsert_ai_run_state(
+            OperationId::parse(&Uuid::new_v4().to_string()).unwrap(),
+            junban_app::UpsertAiRunStateRequest {
+                state: junban_domain::AiRunState {
+                    run_id,
+                    session_id,
+                    turn_id,
+                    assistant_message_id,
+                    generation: 1,
+                    state: junban_domain::AiRunPhase::Running,
+                    approval_id: None,
+                    created_at: now,
+                    updated_at: now,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    context
+        .state
+        .service
+        .propose_ai_approval(
+            OperationId::parse(&Uuid::new_v4().to_string()).unwrap(),
+            junban_app::ProposeAiApprovalRequest {
+                approval_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation: 1,
+                tool_name: "create_task".into(),
+                arguments_json: r#"{"title":"from approval"}"#.into(),
+            },
+        )
+        .await
+        .unwrap();
+    context
+        .state
+        .service
+        .set_ai_approval_status(
+            OperationId::parse(&Uuid::new_v4().to_string()).unwrap(),
+            junban_app::SetAiApprovalStatusRequest {
+                approval_id,
+                status: junban_domain::AiApprovalStatus::Approved,
+                dispatch_operation_id: None,
+            },
+        )
+        .await
+        .unwrap();
+    let dispatch_operation_id = OperationId::parse(&Uuid::new_v4().to_string()).unwrap();
+    context
+        .state
+        .service
+        .set_ai_approval_status(
+            OperationId::parse(&Uuid::new_v4().to_string()).unwrap(),
+            junban_app::SetAiApprovalStatusRequest {
+                approval_id,
+                status: junban_domain::AiApprovalStatus::Consumed,
+                dispatch_operation_id: Some(dispatch_operation_id),
+            },
+        )
+        .await
+        .unwrap();
+
+    let guard = context.state.ai_runtime.admit_run(run_id, 1).unwrap();
+    guard.await_approval(approval_id).unwrap();
+    let permit = context
+        .state
+        .ai_runtime
+        .begin_decision(run_id, 1, approval_id)
+        .unwrap();
+    let epoch = context.state.ai_runtime.begin_reconfigure().unwrap();
+    assert!(
+        guard.is_live(),
+        "authorization queues cancellation until completion"
+    );
+    assert!(
+        !context
+            .state
+            .ai_runtime
+            .wait_drained(Duration::from_millis(1))
+            .await
+    );
+
+    let consumed = context
+        .state
+        .service
+        .get_ai_approval(approval_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        consumed.operation_id.as_deref(),
+        Some(dispatch_operation_id.to_string().as_str())
+    );
+    let (action, canonical_arguments) =
+        crate::validate_tool_call(&consumed.tool_name, &consumed.arguments_json).unwrap();
+    assert_eq!(canonical_arguments, consumed.arguments_json);
+    let tool_result = crate::execute_tool(
+        &context.state.service,
+        &action,
+        &crate::ToolExecContext::sample_now(),
+        Some(dispatch_operation_id),
+    )
+    .await;
+    assert_eq!(
+        tool_result.operation_id.as_deref(),
+        Some(dispatch_operation_id.to_string().as_str())
+    );
+    let payload = crate::AiDecisionPayload::from_tool_result(
+        dispatch_operation_id,
+        crate::AiTerminalOutcome::Completed,
+        &tool_result,
+    )
+    .unwrap();
+    assert!(payload.tool_result_json().len() <= crate::MAX_AI_DECISION_PAYLOAD_BYTES);
+    let content = junban_domain::AiMessageContent {
+        text: String::new(),
+        tool_name: Some("create_task".into()),
+        tool_arguments_json: None,
+        tool_result_json: Some(payload.tool_result_json().to_owned()),
+        briefing_date: None,
+        focused_task_id: None,
+    };
+    let finish_operation_id = OperationId::parse(&Uuid::new_v4().to_string()).unwrap();
+    let finish_request = junban_app::FinishAiResponseRequest {
+        assistant_message_id,
+        session_id,
+        turn_id,
+        run_id,
+        generation: 1,
+        message_status: junban_domain::AiMessageStatus::Completed,
+        content,
+        run_phase: junban_domain::AiRunPhase::Completed,
+        dispatch_operation_id: Some(dispatch_operation_id),
+    };
+    let committed = context
+        .state
+        .service
+        .finish_ai_response(finish_operation_id, finish_request.clone())
+        .await
+        .unwrap();
+    assert!(committed.newly_committed);
+    assert!(
+        !context
+            .state
+            .ai_runtime
+            .wait_drained(Duration::from_millis(1))
+            .await
+    );
+    assert_eq!(
+        permit
+            .complete(crate::AiDecisionCompletion::Dispatched(payload.clone()))
+            .unwrap(),
+        crate::AiDecisionCompletionState::Terminal(crate::AiTerminalOutcome::Completed)
+    );
+    assert!(
+        !guard.is_live(),
+        "queued cancellation stops further provider work"
+    );
+    assert!(guard.owns_terminal(crate::AiTerminalOutcome::Completed));
+    assert_eq!(
+        guard.wait_for_decision(approval_id).await.unwrap(),
+        crate::AiDecisionNotification::Dispatched(payload.clone())
+    );
+    assert_eq!(payload.dispatch_operation_id(), dispatch_operation_id);
+    assert_eq!(
+        guard.wait_for_decision(approval_id).await.unwrap_err(),
+        crate::AiRuntimeError::DecisionUnavailable,
+        "the exact dispatch result is consumable only once"
+    );
+    assert_eq!(
+        context
+            .state
+            .service
+            .get_ai_run_state(run_id)
+            .await
+            .unwrap()
+            .state,
+        junban_domain::AiRunPhase::Completed
+    );
+    assert_eq!(
+        context
+            .state
+            .service
+            .get_ai_message(assistant_message_id)
+            .await
+            .unwrap()
+            .content
+            .tool_result_json
+            .as_deref(),
+        Some(payload.tool_result_json())
+    );
+    assert!(
+        !context
+            .state
+            .service
+            .finish_ai_response(finish_operation_id, finish_request)
+            .await
+            .unwrap()
+            .newly_committed
+    );
+    assert_eq!(
+        guard.linearize_terminal(crate::AiTerminalOutcome::Cancelled),
+        None
+    );
+    drop(guard);
+    assert!(
+        context
+            .state
+            .ai_runtime
+            .wait_drained(Duration::from_secs(1))
+            .await
+    );
+    context
+        .state
+        .ai_runtime
+        .drop_reconfigure_runtime(epoch)
+        .unwrap();
+    context.state.ai_runtime.finish_reconfigure(epoch).unwrap();
 }

@@ -24,13 +24,13 @@ use junban_domain::{
 
 use crate::{
     AiCredentialBindResult, AiMemoryListPage, AiSessionListPage, AppError, BindAiCredentialRequest,
-    BulkAction, CalendarTasksPage, CatalogSnapshot, ClearAiCredentialRequest,
-    ClearAiSessionRequest, CollectedTasks, CommentPatch, CommittedEvent, CommittedMutation,
-    CreateAiMemoryRequest, CreateAiSessionRequest, DailyPlanPage, DeleteAiMemoryRequest,
-    DeleteAiSessionRequest, DopamineMenuPage, EatTheFrogPage, EndOfDayPage, EventCatchUp,
-    ExportFormat, FinishAiResponseRequest, LinkAiSessionMemoryRequest, ListAiMemoriesRequest,
-    ListAiMessagesRequest, ListAiSessionsRequest, MoveTarget, NudgesPage, ProjectDraft,
-    ProjectPatch, ProposeAiApprovalRequest, RenameAiSessionRequest, ReorderScope,
+    BulkAction, CalendarTasksPage, CancelAiResponseRequest, CatalogSnapshot,
+    ClearAiCredentialRequest, ClearAiSessionRequest, CollectedTasks, CommentPatch, CommittedEvent,
+    CommittedMutation, CreateAiMemoryRequest, CreateAiSessionRequest, DailyPlanPage,
+    DeleteAiMemoryRequest, DeleteAiSessionRequest, DopamineMenuPage, EatTheFrogPage, EndOfDayPage,
+    EventCatchUp, ExportFormat, FinishAiResponseRequest, LinkAiSessionMemoryRequest,
+    ListAiMemoriesRequest, ListAiMessagesRequest, ListAiSessionsRequest, MoveTarget, NudgesPage,
+    ProjectDraft, ProjectPatch, ProposeAiApprovalRequest, RenameAiSessionRequest, ReorderScope,
     ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError, SavedFilterDraft,
     SavedFilterPatch, SectionDraft, SectionPatch, SelectAiMemoriesRequest,
     SetAiApprovalStatusRequest, StagedFile, StatsPage, SyncState, TagDraft, TagPatch, TaskJarPage,
@@ -1629,6 +1629,13 @@ where
             .map_err(AppError::from)
     }
 
+    pub async fn list_dispatching_ai_approvals(&self) -> Result<Vec<AiToolApproval>, AppError> {
+        self.repository
+            .list_dispatching_ai_approvals()
+            .await
+            .map_err(AppError::from)
+    }
+
     pub async fn upsert_ai_run_state(
         &self,
         operation_id: OperationId,
@@ -1648,6 +1655,27 @@ where
             .map_err(AppError::from)
     }
 
+    pub async fn cancel_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: CancelAiResponseRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .cancel_ai_response(
+                    operation_id,
+                    request.assistant_message_id,
+                    request.session_id,
+                    request.turn_id,
+                    request.run_id,
+                    request.generation,
+                    request.content,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
     pub async fn finish_ai_response(
         &self,
         operation_id: OperationId,
@@ -1665,6 +1693,7 @@ where
                     request.message_status,
                     request.content,
                     request.run_phase,
+                    request.dispatch_operation_id.map(|id| id.to_string()),
                     Timestamp::now(),
                 )
                 .await,
@@ -3018,6 +3047,15 @@ mod tests {
             self.calls.lock().unwrap().push("get_ai_approval");
             Box::pin(async { Err(RepositoryError::NotFound) })
         }
+        fn list_dispatching_ai_approvals(
+            &self,
+        ) -> crate::RepositoryFuture<'_, Vec<AiToolApproval>> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push("list_dispatching_ai_approvals");
+            Box::pin(async { Ok(Vec::new()) })
+        }
         fn upsert_ai_run_state(
             &self,
             _: OperationId,
@@ -3030,6 +3068,19 @@ mod tests {
             self.calls.lock().unwrap().push("get_ai_run_state");
             Box::pin(async { Err(RepositoryError::NotFound) })
         }
+        fn cancel_ai_response(
+            &self,
+            _: OperationId,
+            _: junban_domain::AiMessageId,
+            _: AiSessionId,
+            _: junban_domain::AiTurnId,
+            _: AiRunId,
+            _: u64,
+            _: junban_domain::AiMessageContent,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("cancel_ai_response")
+        }
         fn finish_ai_response(
             &self,
             _: OperationId,
@@ -3041,6 +3092,7 @@ mod tests {
             _: junban_domain::AiMessageStatus,
             _: junban_domain::AiMessageContent,
             _: junban_domain::AiRunPhase,
+            _: Option<String>,
             _: Timestamp,
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("finish_ai_response")

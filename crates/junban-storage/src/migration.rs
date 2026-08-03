@@ -169,9 +169,17 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
     // SQL ordering matches instant order. Idempotent on already-canonical rows.
     if applied == CURRENT_SCHEMA_VERSION {
         normalize_reminder_timestamp_text(connection)?;
+        ensure_v6_ai_runtime_indexes(connection)?;
     }
 
     Ok(())
+}
+
+fn ensure_v6_ai_runtime_indexes(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_ai_run_state_state
+         ON ai_run_state(state, run_id);",
+    )
 }
 
 /// Rewrite reminder comparison columns to fixed nine-fractional-digit UTC text.
@@ -945,6 +953,7 @@ CREATE TABLE ai_run_state (
     run_id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES ai_sessions(id) ON DELETE CASCADE,
     turn_id TEXT NOT NULL,
+    assistant_message_id TEXT NOT NULL UNIQUE REFERENCES ai_messages(id) ON DELETE CASCADE,
     generation INTEGER NOT NULL CHECK (generation >= 0),
     state TEXT NOT NULL CHECK (
         state IN (
@@ -957,6 +966,8 @@ CREATE TABLE ai_run_state (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX idx_ai_run_state_session ON ai_run_state(session_id, state);
+-- Bounded startup dispatch recovery probes by state and stable run identity.
+CREATE INDEX idx_ai_run_state_state ON ai_run_state(state, run_id);
 -- Restore validation probes terminal approvals by approval_id; keep that path indexed.
 CREATE INDEX idx_ai_run_state_approval
     ON ai_run_state(approval_id)
@@ -3175,6 +3186,23 @@ DROP TABLE IF EXISTS ai_quota;
                 && approval_index_sql.contains("approval_id IS NOT NULL"),
             "v5→v6 must create partial ai_run_state.approval_id index: {approval_index_sql}"
         );
+        let assistant_not_null: i64 = connection
+            .query_row(
+                "SELECT \"notnull\" FROM pragma_table_info('ai_run_state')
+                 WHERE name = 'assistant_message_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(assistant_not_null, 1);
+        let run_schema: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ai_run_state'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(run_schema.contains("assistant_message_id TEXT NOT NULL UNIQUE"));
     }
 
     #[test]

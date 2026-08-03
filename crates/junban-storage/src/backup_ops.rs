@@ -26,8 +26,8 @@ use junban_domain::{
     OperationId, Priority, ProjectId, RecurrenceRule, ReminderFenceTerm, ReminderOccurrence,
     ReminderOccurrenceState, SavedFilterId, SectionId, TagId, TagName, Task, TaskId, TaskStatus,
     TaskTitle, TemplateId, TimeBlock, TimeBlockId, TimeSlot, TimeSlotId, TimeZoneName,
-    decode_sha256_hex, read_backup_header, sha256_bytes, sha256_hex, validate_backup_header,
-    validate_task_tags, write_backup_header,
+    ai_approval_action_hash, decode_sha256_hex, read_backup_header, sha256_bytes,
+    validate_backup_header, validate_task_tags, write_backup_header,
 };
 use rusqlite::{Connection, MAIN_DB, OptionalExtension, Transaction, backup::Backup, params};
 use sha2::{Digest, Sha256};
@@ -627,6 +627,7 @@ fn validate_ai_rows(tx: &Transaction<'_>) -> Result<(), RepositoryError> {
                     LENGTH(CAST(run_id AS BLOB)) > 64
                     OR LENGTH(CAST(session_id AS BLOB)) > 64
                     OR LENGTH(CAST(turn_id AS BLOB)) > 64
+                    OR LENGTH(CAST(assistant_message_id AS BLOB)) > 64
                     OR LENGTH(CAST(state AS BLOB)) > 32
                     OR LENGTH(CAST(COALESCE(approval_id, '') AS BLOB)) > 64
                     OR LENGTH(CAST(created_at AS BLOB)) > 64
@@ -688,6 +689,8 @@ fn validate_ai_rows(tx: &Transaction<'_>) -> Result<(), RepositoryError> {
             "AI aggregate quota is exceeded".to_owned(),
         ));
     }
+
+    crate::ai_ops::validate_ai_approval_authority(tx)?;
 
     scan_text_ids(tx, "ai_sessions", |tx, raw| {
         let id = parse_canonical_ai_id(raw, AiSessionId::parse)?;
@@ -867,22 +870,21 @@ fn validate_ai_rows(tx: &Transaction<'_>) -> Result<(), RepositoryError> {
         parse_canonical_ai_id(&row.0, AiSessionId::parse)?;
         parse_canonical_ai_id(&row.1, AiTurnId::parse)?;
         parse_canonical_ai_id(&row.2, AiRunId::parse)?;
-        let generation = u64::try_from(row.3).map_err(storage_error)?;
+        u64::try_from(row.3).map_err(storage_error)?;
         validate_ai_token(&row.4, AI_PROVIDER_ID_BYTES_MAX)?;
         let arguments: serde_json::Value = serde_json::from_str(&row.5).map_err(storage_error)?;
         let status = AiApprovalStatus::parse(&row.8).map_err(storage_error)?;
         let created = parse_timestamp(&row.11)?;
         let updated = parse_timestamp(&row.12)?;
         let expires = parse_timestamp(&row.9)?;
-        let expected_hash = sha256_hex(
-            format!("{}\n{}\n{}\n{}\n{}", row.4, row.5, row.0, row.1, generation).as_bytes(),
-        );
+        let expected_hash = ai_approval_action_hash(&row.4, &row.5).map_err(storage_error)?;
         let operation = row
             .10
             .as_deref()
             .map(|value| parse_canonical_operation_id(value).map(|_| value))
             .transpose()?;
-        if serde_json::to_string(&arguments).map_err(storage_error)? != row.5
+        if !arguments.is_object()
+            || serde_json::to_string(&arguments).map_err(storage_error)? != row.5
             || row.6 != i64::try_from(row.5.len()).map_err(storage_error)?
             || row.7 != expected_hash
             || created > updated
@@ -3225,10 +3227,7 @@ mod tests {
                 let turn_id = AiTurnId::new();
                 let run_id = AiRunId::new();
                 let generation = 1_u64;
-                let action_hash = sha256_hex(
-                    format!("create_task\n{arguments_json}\n{session_id}\n{turn_id}\n{generation}")
-                        .as_bytes(),
-                );
+                let action_hash = ai_approval_action_hash("create_task", &arguments_json).unwrap();
                 connection
                     .execute(
                         "INSERT INTO ai_tool_approvals(

@@ -699,6 +699,9 @@ pub trait Repository: Send + Sync + 'static {
 
     fn get_ai_approval(&self, approval_id: AiApprovalId) -> RepositoryFuture<'_, AiToolApproval>;
 
+    /// Bounded exact consumed-approval rows whose run is durably dispatching.
+    fn list_dispatching_ai_approvals(&self) -> RepositoryFuture<'_, Vec<AiToolApproval>>;
+
     fn upsert_ai_run_state(
         &self,
         operation_id: OperationId,
@@ -707,6 +710,19 @@ pub trait Repository: Send + Sync + 'static {
     ) -> RepositoryFuture<'_, CommittedMutation>;
 
     fn get_ai_run_state(&self, run_id: AiRunId) -> RepositoryFuture<'_, AiRunState>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn cancel_ai_response(
+        &self,
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        content: AiMessageContent,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
 
     #[allow(clippy::too_many_arguments)]
     fn finish_ai_response(
@@ -720,6 +736,7 @@ pub trait Repository: Send + Sync + 'static {
         message_status: AiMessageStatus,
         content: AiMessageContent,
         run_phase: junban_domain::AiRunPhase,
+        dispatch_operation_id: Option<String>,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation>;
 

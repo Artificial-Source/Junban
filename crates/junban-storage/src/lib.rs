@@ -2170,6 +2170,10 @@ impl Repository for SqliteRepository {
         mut_cmd!(self, GetAiApproval { approval_id })
     }
 
+    fn list_dispatching_ai_approvals(&self) -> RepositoryFuture<'_, Vec<AiToolApproval>> {
+        mut_cmd!(self, ListDispatchingAiApprovals {})
+    }
+
     fn upsert_ai_run_state(
         &self,
         operation_id: OperationId,
@@ -2190,6 +2194,32 @@ impl Repository for SqliteRepository {
         mut_cmd!(self, GetAiRunState { run_id })
     }
 
+    fn cancel_ai_response(
+        &self,
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        content: AiMessageContent,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CancelAiResponse {
+                operation_id,
+                assistant_message_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation,
+                content,
+                now
+            }
+        )
+    }
+
     fn finish_ai_response(
         &self,
         operation_id: OperationId,
@@ -2201,6 +2231,7 @@ impl Repository for SqliteRepository {
         message_status: AiMessageStatus,
         content: AiMessageContent,
         run_phase: junban_domain::AiRunPhase,
+        dispatch_operation_id: Option<String>,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation> {
         mut_cmd!(
@@ -2215,6 +2246,7 @@ impl Repository for SqliteRepository {
                 message_status,
                 content,
                 run_phase,
+                dispatch_operation_id,
                 now
             }
         )
@@ -2857,6 +2889,9 @@ enum Command {
         approval_id: AiApprovalId,
         reply: oneshot::Sender<Result<AiToolApproval, RepositoryError>>,
     },
+    ListDispatchingAiApprovals {
+        reply: oneshot::Sender<Result<Vec<AiToolApproval>, RepositoryError>>,
+    },
     UpsertAiRunState {
         operation_id: OperationId,
         state: AiRunState,
@@ -2866,6 +2901,17 @@ enum Command {
     GetAiRunState {
         run_id: AiRunId,
         reply: oneshot::Sender<Result<AiRunState, RepositoryError>>,
+    },
+    CancelAiResponse {
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        content: AiMessageContent,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
     FinishAiResponse {
         operation_id: OperationId,
@@ -2877,6 +2923,7 @@ enum Command {
         message_status: AiMessageStatus,
         content: AiMessageContent,
         run_phase: junban_domain::AiRunPhase,
+        dispatch_operation_id: Option<String>,
         now: Timestamp,
         reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
     },
@@ -4027,6 +4074,9 @@ fn run_worker(
             Command::GetAiApproval { approval_id, reply } => {
                 let _ = reply.send(ai_ops::get_ai_approval(connection, approval_id));
             }
+            Command::ListDispatchingAiApprovals { reply } => {
+                let _ = reply.send(ai_ops::list_dispatching_ai_approvals(connection));
+            }
             Command::UpsertAiRunState {
                 operation_id,
                 state,
@@ -4043,6 +4093,29 @@ fn run_worker(
             Command::GetAiRunState { run_id, reply } => {
                 let _ = reply.send(ai_ops::get_ai_run_state(connection, run_id));
             }
+            Command::CancelAiResponse {
+                operation_id,
+                assistant_message_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation,
+                content,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::cancel_ai_response(
+                    connection,
+                    operation_id,
+                    assistant_message_id,
+                    session_id,
+                    turn_id,
+                    run_id,
+                    generation,
+                    content,
+                    now,
+                ));
+            }
             Command::FinishAiResponse {
                 operation_id,
                 assistant_message_id,
@@ -4053,6 +4126,7 @@ fn run_worker(
                 message_status,
                 content,
                 run_phase,
+                dispatch_operation_id,
                 now,
                 reply,
             } => {
@@ -4067,6 +4141,7 @@ fn run_worker(
                     message_status,
                     content,
                     run_phase,
+                    dispatch_operation_id,
                     now,
                 ));
             }

@@ -600,6 +600,7 @@ async fn finish_ai_response_is_one_atomic_replayable_service_mutation() {
                     run_id,
                     session_id,
                     turn_id,
+                    assistant_message_id,
                     generation: 1,
                     state: AiRunPhase::Running,
                     approval_id: None,
@@ -621,6 +622,7 @@ async fn finish_ai_response_is_one_atomic_replayable_service_mutation() {
         message_status: AiMessageStatus::Completed,
         content: AiMessageContent::text("wrong").unwrap(),
         run_phase: AiRunPhase::Completed,
+        dispatch_operation_id: None,
     };
     assert_eq!(
         service
@@ -652,6 +654,7 @@ async fn finish_ai_response_is_one_atomic_replayable_service_mutation() {
         message_status: AiMessageStatus::Completed,
         content: AiMessageContent::text("done").unwrap(),
         run_phase: AiRunPhase::Completed,
+        dispatch_operation_id: None,
     };
     let committed = service
         .finish_ai_response(operation_id, request.clone())
@@ -721,11 +724,27 @@ async fn approval_propose_consume_and_run_state_use_wave1_atomics_through_servic
         AiSessionId::parse(&session.event.primary.as_ref().expect("session primary").id).unwrap();
     let turn_id = AiTurnId::new();
     let run_id = AiRunId::new();
+    let assistant_message_id = AiMessageId::new();
+    service
+        .upsert_ai_message(
+            op(),
+            UpsertAiMessageRequest {
+                message_id: assistant_message_id,
+                session_id,
+                turn_id,
+                role: AiMessageRole::Assistant,
+                status: AiMessageStatus::Streaming,
+                content: AiMessageContent::text("").unwrap(),
+            },
+        )
+        .await
+        .unwrap();
     let now = Timestamp::now();
     let run_state = AiRunState {
         run_id,
         session_id,
         turn_id,
+        assistant_message_id,
         generation: 1,
         state: AiRunPhase::Running,
         approval_id: None,
@@ -787,6 +806,10 @@ async fn approval_propose_consume_and_run_state_use_wave1_atomics_through_servic
     let approval = service.get_ai_approval(approval_id).await.unwrap();
     assert_eq!(approval.status, AiApprovalStatus::Consumed);
     assert_eq!(
+        service.list_dispatching_ai_approvals().await.unwrap(),
+        vec![approval.clone()]
+    );
+    assert_eq!(
         approval.operation_id.as_deref(),
         Some(dispatch_op.to_string().as_str())
     );
@@ -822,5 +845,133 @@ async fn approval_propose_consume_and_run_state_use_wave1_atomics_through_servic
         .query_row("SELECT COUNT(*) FROM operation_undo", [], |row| row.get(0))
         .unwrap();
     assert_eq!(undo_count, 0);
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[tokio::test]
+async fn cancel_ai_response_service_replays_and_rejects_mismatch() {
+    let profile = temp_profile();
+    let (owner, service, sink) = open_service(&profile);
+    let created = service
+        .create_ai_session(
+            op(),
+            CreateAiSessionRequest {
+                title: "cancel".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let session_id = AiSessionId::parse(&created.event.primary.unwrap().id).unwrap();
+    let assistant_message_id = AiMessageId::new();
+    let turn_id = AiTurnId::new();
+    let run_id = AiRunId::new();
+    service
+        .upsert_ai_message(
+            op(),
+            UpsertAiMessageRequest {
+                message_id: assistant_message_id,
+                session_id,
+                turn_id,
+                role: AiMessageRole::Assistant,
+                status: AiMessageStatus::Streaming,
+                content: AiMessageContent::text("").unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    let timestamp = Timestamp::now();
+    service
+        .upsert_ai_run_state(
+            op(),
+            UpsertAiRunStateRequest {
+                state: AiRunState {
+                    run_id,
+                    session_id,
+                    turn_id,
+                    assistant_message_id,
+                    generation: 1,
+                    state: AiRunPhase::Running,
+                    approval_id: None,
+                    created_at: timestamp,
+                    updated_at: timestamp,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    let approval_id = AiApprovalId::new();
+    service
+        .propose_ai_approval(
+            op(),
+            ProposeAiApprovalRequest {
+                approval_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation: 1,
+                tool_name: "create_task".into(),
+                arguments_json: r#"{"title":"x"}"#.into(),
+            },
+        )
+        .await
+        .unwrap();
+    service
+        .set_ai_approval_status(
+            op(),
+            SetAiApprovalStatusRequest {
+                approval_id,
+                status: AiApprovalStatus::Approved,
+                dispatch_operation_id: None,
+            },
+        )
+        .await
+        .unwrap();
+    sink.0.lock().unwrap().clear();
+    let operation_id = op();
+    let request = junban_app::CancelAiResponseRequest {
+        assistant_message_id,
+        session_id,
+        turn_id,
+        run_id,
+        generation: 1,
+        content: AiMessageContent::text("").unwrap(),
+    };
+    let committed = service
+        .cancel_ai_response(operation_id, request.clone())
+        .await
+        .unwrap();
+    assert!(committed.newly_committed);
+    assert_eq!(sink.0.lock().unwrap().len(), 1);
+    assert!(
+        !service
+            .cancel_ai_response(operation_id, request.clone())
+            .await
+            .unwrap()
+            .newly_committed
+    );
+    let mut mismatch = request;
+    mismatch.generation = 2;
+    assert_eq!(
+        service
+            .cancel_ai_response(operation_id, mismatch)
+            .await
+            .unwrap_err(),
+        junban_app::AppError::IdempotencyMismatch
+    );
+    assert_eq!(
+        service
+            .get_ai_message(assistant_message_id)
+            .await
+            .unwrap()
+            .status,
+        AiMessageStatus::Cancelled
+    );
+    assert_eq!(
+        service.get_ai_approval(approval_id).await.unwrap().status,
+        AiApprovalStatus::Expired
+    );
+    drop(service);
+    drop(sink);
+    drop(owner);
     fs::remove_dir_all(profile).unwrap();
 }

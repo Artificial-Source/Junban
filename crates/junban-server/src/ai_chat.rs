@@ -16,7 +16,8 @@ use junban_ai::{
     SecretString, descriptor,
 };
 use junban_app::{
-    AppError, FinishAiResponseRequest, UpsertAiMessageRequest, UpsertAiRunStateRequest,
+    AppError, CancelAiResponseRequest, FinishAiResponseRequest, UpsertAiMessageRequest,
+    UpsertAiRunStateRequest,
 };
 use junban_domain::{
     AI_ASSISTANT_TEXT_BYTES_MAX, AiMessage, AiMessageContent, AiMessageRole, AiMessageStatus,
@@ -390,6 +391,7 @@ async fn persist_running(
         run_id: identity.run_id,
         session_id,
         turn_id: identity.turn_id,
+        assistant_message_id: identity.assistant_message_id,
         generation: RUN_GENERATION,
         state: AiRunPhase::Running,
         approval_id: None,
@@ -417,6 +419,7 @@ fn validate_run_identity(
     if run.run_id != identity.run_id
         || run.session_id != session_id
         || run.turn_id != identity.turn_id
+        || run.assistant_message_id != identity.assistant_message_id
         || run.generation != RUN_GENERATION
     {
         return Err(response_state_conflict(request_id));
@@ -466,6 +469,7 @@ async fn replay_response(
 ) -> Result<Sse<KeepAliveStream<AiResponseStream>>, ApiError> {
     if run.run_id != identity.run_id
         || run.turn_id != identity.turn_id
+        || run.assistant_message_id != identity.assistant_message_id
         || run.generation != RUN_GENERATION
     {
         return Err(replay_unavailable(request_id));
@@ -539,6 +543,7 @@ fn validate_replay_message(
         }
     };
     if message.id != identity.assistant_message_id
+        || run.assistant_message_id != identity.assistant_message_id
         || message.session_id != run.session_id
         || message.turn_id != run.turn_id
         || message.role != AiMessageRole::Assistant
@@ -656,6 +661,22 @@ async fn finish_response(
     run_phase: AiRunPhase,
     assistant: String,
 ) -> Result<AiRunPhase, AppError> {
+    if run_phase == AiRunPhase::Cancelled {
+        service
+            .cancel_ai_response(
+                identity.finish_operation_id,
+                CancelAiResponseRequest {
+                    assistant_message_id: identity.assistant_message_id,
+                    session_id: running.session_id,
+                    turn_id: running.turn_id,
+                    run_id: running.run_id,
+                    generation: running.generation,
+                    content: AiMessageContent::text(assistant)?,
+                },
+            )
+            .await?;
+        return Ok(AiRunPhase::Cancelled);
+    }
     let message_status = message_status_for_phase(run_phase).ok_or(AppError::Conflict)?;
     let content = AiMessageContent::text(assistant.clone())?;
     let result = service
@@ -670,6 +691,7 @@ async fn finish_response(
                 message_status,
                 content,
                 run_phase,
+                dispatch_operation_id: None,
             },
         )
         .await;
@@ -690,6 +712,7 @@ async fn finish_response(
                         message_status: AiMessageStatus::Failed,
                         content: AiMessageContent::text("")?,
                         run_phase: AiRunPhase::Failed,
+                        dispatch_operation_id: None,
                     },
                 )
                 .await?;

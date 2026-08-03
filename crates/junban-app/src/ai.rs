@@ -229,6 +229,17 @@ pub struct UpsertAiRunStateRequest {
     pub state: AiRunState,
 }
 
+/// Atomically cancel one reserved assistant response and its exact durable run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CancelAiResponseRequest {
+    pub assistant_message_id: AiMessageId,
+    pub session_id: AiSessionId,
+    pub turn_id: AiTurnId,
+    pub run_id: AiRunId,
+    pub generation: u64,
+    pub content: AiMessageContent,
+}
+
 /// Atomically finalize one reserved assistant response and its exact durable run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FinishAiResponseRequest {
@@ -240,6 +251,8 @@ pub struct FinishAiResponseRequest {
     pub message_status: AiMessageStatus,
     pub content: AiMessageContent,
     pub run_phase: junban_domain::AiRunPhase,
+    /// Required only for a consumed approval's exact dispatch operation.
+    pub dispatch_operation_id: Option<OperationId>,
 }
 
 /// Bind or replace a settings credential reference after optional secret publication.

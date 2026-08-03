@@ -14,8 +14,8 @@ use junban_domain::{
     AI_SECRETS_FILE, AI_SESSION_CONTENT_BYTES_MAX, AI_SESSIONS_PER_PROFILE_MAX, AiApprovalId,
     AiApprovalStatus, AiMemoryId, AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus,
     AiProviderPreset, AiRunId, AiRunPhase, AiRunState, AiSecretKind, AiSessionId, AiTurnId,
-    OperationId, ProviderBaseUrl, SettingsPatch, frame_backup_envelope, parse_backup_envelope,
-    sha256_hex,
+    OperationId, ProviderBaseUrl, SettingsPatch, ai_approval_action_hash, frame_backup_envelope,
+    parse_backup_envelope, sha256_hex,
 };
 use rusqlite::{Connection, params};
 use uuid::Uuid;
@@ -65,6 +65,27 @@ fn open_migrated(profile: &Path) -> Connection {
     connection
 }
 
+fn create_assistant_placeholder(
+    connection: &mut Connection,
+    session_id: AiSessionId,
+    turn_id: AiTurnId,
+) -> AiMessageId {
+    let assistant_message_id = AiMessageId::new();
+    ai_ops::upsert_ai_message(
+        connection,
+        op(),
+        assistant_message_id,
+        session_id,
+        turn_id,
+        AiMessageRole::Assistant,
+        AiMessageStatus::Streaming,
+        AiMessageContent::text("").unwrap(),
+        now(),
+    )
+    .unwrap();
+    assistant_message_id
+}
+
 fn configure_openai(connection: &mut Connection, profile: &Path) {
     let _ = profile;
     let mut settings = settings_ops::get_settings(connection).unwrap();
@@ -104,6 +125,15 @@ fn fresh_migrate_reaches_v6_with_disabled_ai_defaults() {
         )
         .unwrap();
     assert_eq!(tables, 7);
+    let assistant_not_null: i64 = connection
+        .query_row(
+            "SELECT \"notnull\" FROM pragma_table_info('ai_run_state')
+             WHERE name = 'assistant_message_id'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(assistant_not_null, 1);
     let approval_index_sql: String = connection
         .query_row(
             "SELECT sql FROM sqlite_master
@@ -117,6 +147,36 @@ fn fresh_migrate_reaches_v6_with_disabled_ai_defaults() {
             && approval_index_sql.contains("WHERE")
             && approval_index_sql.contains("approval_id IS NOT NULL"),
         "fresh schema v6 must include partial ai_run_state.approval_id index: {approval_index_sql}"
+    );
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[test]
+fn current_v6_repairs_and_uses_dispatch_recovery_index() {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    connection
+        .execute("DROP INDEX idx_ai_run_state_state", [])
+        .unwrap();
+    migration::migrate(&mut connection, &profile).unwrap();
+    let plan: Vec<String> = connection
+        .prepare(
+            "EXPLAIN QUERY PLAN SELECT a.id
+             FROM ai_run_state AS r INDEXED BY idx_ai_run_state_state
+             JOIN ai_tool_approvals AS a ON a.id = r.approval_id
+             WHERE r.state = 'dispatching' AND a.status = 'consumed'
+             ORDER BY r.run_id LIMIT 500",
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(3))
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect();
+    assert!(
+        plan.iter()
+            .any(|step| { step.contains("idx_ai_run_state_state") && step.contains("SEARCH") }),
+        "dispatch recovery must search the state index: {}",
+        plan.join(" | ")
     );
     fs::remove_dir_all(profile).unwrap();
 }
@@ -242,13 +302,16 @@ fn session_delete_cascades_messages_approvals_and_updates_quota() {
     )
     .unwrap();
     create_awaiting_approval(&mut connection, session_id);
+    let turn_id = AiTurnId::new();
+    let assistant_message_id = create_assistant_placeholder(&mut connection, session_id, turn_id);
     ai_ops::upsert_ai_run_state(
         &mut connection,
         op(),
         AiRunState {
             run_id: AiRunId::new(),
             session_id,
-            turn_id: AiTurnId::new(),
+            turn_id,
+            assistant_message_id,
             generation: 1,
             state: AiRunPhase::Running,
             approval_id: None,
@@ -289,6 +352,7 @@ fn create_awaiting_approval(
 ) -> (AiRunId, AiTurnId, AiApprovalId) {
     let run_id = AiRunId::new();
     let turn_id = AiTurnId::new();
+    let assistant_message_id = create_assistant_placeholder(connection, session_id, turn_id);
     ai_ops::upsert_ai_run_state(
         connection,
         op(),
@@ -296,6 +360,7 @@ fn create_awaiting_approval(
             run_id,
             session_id,
             turn_id,
+            assistant_message_id,
             generation: 1,
             state: AiRunPhase::Running,
             approval_id: None,
@@ -377,6 +442,7 @@ fn proposal_atomically_binds_the_exact_running_generation() {
     ai_ops::create_ai_session(&mut connection, op(), session_id, "chat".into(), now()).unwrap();
     let run_id = AiRunId::new();
     let turn_id = AiTurnId::new();
+    let assistant_message_id = create_assistant_placeholder(&mut connection, session_id, turn_id);
     ai_ops::upsert_ai_run_state(
         &mut connection,
         op(),
@@ -384,6 +450,7 @@ fn proposal_atomically_binds_the_exact_running_generation() {
             run_id,
             session_id,
             turn_id,
+            assistant_message_id,
             generation: 7,
             state: AiRunPhase::Running,
             approval_id: None,
@@ -565,6 +632,9 @@ fn direct_awaiting_cancel_or_fail_expires_bound_authority_atomically() {
                 assert_ne!(pending_quota(&connection), (0, 0));
             }
             let before_revision = revision(&connection);
+            let assistant_message_id = ai_ops::get_ai_run_state(&connection, run_id)
+                .unwrap()
+                .assistant_message_id;
             ai_ops::upsert_ai_run_state(
                 &mut connection,
                 op(),
@@ -572,6 +642,7 @@ fn direct_awaiting_cancel_or_fail_expires_bound_authority_atomically() {
                     run_id,
                     session_id,
                     turn_id,
+                    assistant_message_id,
                     generation: 1,
                     state: terminal,
                     approval_id: None,
@@ -734,7 +805,8 @@ fn approval_consumption_failure_leaves_approval_and_run_unchanged() {
         now(),
     )
     .unwrap();
-    // Force the bound run out of awaiting_approval so consume CAS must fail closed.
+    // Force the bound run out of awaiting_approval so centralized authority
+    // validation must fail closed before the consume CAS.
     connection
         .execute(
             "UPDATE ai_run_state SET state = 'running' WHERE run_id = ?1",
@@ -751,7 +823,7 @@ fn approval_consumption_failure_leaves_approval_and_run_unchanged() {
             Some(op().to_string()),
             now(),
         ),
-        Err(RepositoryError::Conflict)
+        Err(RepositoryError::Storage(_))
     ));
     let approval = ai_ops::get_ai_approval(&connection, approval_id).unwrap();
     assert_eq!(approval.status, AiApprovalStatus::Approved);
@@ -820,10 +892,10 @@ async fn restore_preflight_accepts_consumed_dispatching_approval_pair() {
             approval.operation_id.as_deref(),
             Some(dispatch_operation_id.to_string().as_str())
         );
-        // Candidate sanitization cancels non-terminal runs after validation succeeds.
+        // Candidate sanitization retains consumed dispatch authority for restart recovery.
         let run = ai_ops::get_ai_run_state(&candidate, run_id).unwrap();
-        assert_eq!(run.state, AiRunPhase::Cancelled);
-        assert!(run.approval_id.is_none());
+        assert_eq!(run.state, AiRunPhase::Dispatching);
+        assert_eq!(run.approval_id, Some(approval_id));
     }
     drop(prepared);
     drop(repo);
@@ -926,17 +998,14 @@ async fn complete_backup_prepare_restore_accepts_and_sanitizes_all_approval_run_
             .status,
         AiApprovalStatus::Consumed
     );
-    for run_id in [
-        pending_run,
-        approved_run,
-        rejected_run,
-        expired_run,
-        consumed_run,
-    ] {
+    for run_id in [pending_run, approved_run, rejected_run, expired_run] {
         let run = ai_ops::get_ai_run_state(&candidate, run_id).unwrap();
         assert_eq!(run.state, AiRunPhase::Cancelled);
         assert!(run.approval_id.is_none());
     }
+    let consumed = ai_ops::get_ai_run_state(&candidate, consumed_run).unwrap();
+    assert_eq!(consumed.state, AiRunPhase::Dispatching);
+    assert_eq!(consumed.approval_id, Some(consumed_approval));
     assert_eq!(pending_quota(&candidate), (0, 0));
 
     drop(candidate);
@@ -1006,9 +1075,7 @@ async fn restore_preflight_rejects_orphan_and_cross_bound_active_approval_author
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
-            let action_hash = sha256_hex(
-                format!("{tool_name}\n{arguments_json}\n{session_id}\n{target_turn}\n1").as_bytes(),
-            );
+            let action_hash = ai_approval_action_hash(&tool_name, &arguments_json).unwrap();
             candidate
                 .execute(
                     "UPDATE ai_run_state
@@ -1120,6 +1187,7 @@ fn finish_ai_response_quota_failure_rolls_back_before_empty_failed_fallback() {
             run_id,
             session_id,
             turn_id,
+            assistant_message_id,
             generation: 1,
             state: AiRunPhase::Running,
             approval_id: None,
@@ -1152,6 +1220,7 @@ fn finish_ai_response_quota_failure_rolls_back_before_empty_failed_fallback() {
             AiMessageStatus::Completed,
             AiMessageContent::text("would exceed quota").unwrap(),
             AiRunPhase::Completed,
+            None,
             now(),
         ),
         Err(RepositoryError::Validation(_))
@@ -1178,6 +1247,7 @@ fn finish_ai_response_quota_failure_rolls_back_before_empty_failed_fallback() {
         AiMessageStatus::Failed,
         AiMessageContent::text("").unwrap(),
         AiRunPhase::Failed,
+        None,
         now(),
     )
     .unwrap();
@@ -1218,6 +1288,7 @@ fn normal_open_recovers_all_nonterminal_ai_authority_without_global_mutation() {
 
     let running_run = AiRunId::new();
     let running_turn = AiTurnId::new();
+    let running_assistant = create_assistant_placeholder(&mut connection, session_id, running_turn);
     ai_ops::upsert_ai_run_state(
         &mut connection,
         op(),
@@ -1225,6 +1296,7 @@ fn normal_open_recovers_all_nonterminal_ai_authority_without_global_mutation() {
             run_id: running_run,
             session_id,
             turn_id: running_turn,
+            assistant_message_id: running_assistant,
             generation: 1,
             state: AiRunPhase::Running,
             approval_id: None,
@@ -1283,11 +1355,14 @@ fn normal_open_recovers_all_nonterminal_ai_authority_without_global_mutation() {
             .status,
         AiApprovalStatus::Consumed
     );
-    for run_id in [pending_run, approved_run, running_run, dispatching_run] {
+    for run_id in [pending_run, approved_run, running_run] {
         let run = ai_ops::get_ai_run_state(&connection, run_id).unwrap();
         assert_eq!(run.state, AiRunPhase::Cancelled);
         assert!(run.approval_id.is_none());
     }
+    let dispatching = ai_ops::get_ai_run_state(&connection, dispatching_run).unwrap();
+    assert_eq!(dispatching.state, AiRunPhase::Dispatching);
+    assert_eq!(dispatching.approval_id, Some(consumed_approval));
     assert_eq!(pending_quota(&connection), (0, 0));
     assert_eq!(revision(&connection), before_revision);
     assert_eq!(
@@ -1381,10 +1456,12 @@ fn run_state_rejects_stale_generation_and_terminal_reopening() {
     ai_ops::create_ai_session(&mut connection, op(), session_id, "chat".into(), now()).unwrap();
     let run_id = AiRunId::new();
     let turn_id = AiTurnId::new();
+    let assistant_message_id = create_assistant_placeholder(&mut connection, session_id, turn_id);
     let state = |generation, phase| AiRunState {
         run_id,
         session_id,
         turn_id,
+        assistant_message_id,
         generation,
         state: phase,
         approval_id: None,
@@ -1445,6 +1522,9 @@ fn newer_generation_expires_bound_authority_and_rejects_dispatch_supersession() 
         } else {
             assert_ne!(pending_quota(&connection), (0, 0));
         }
+        let assistant_message_id = ai_ops::get_ai_run_state(&connection, run_id)
+            .unwrap()
+            .assistant_message_id;
         ai_ops::upsert_ai_run_state(
             &mut connection,
             op(),
@@ -1452,6 +1532,7 @@ fn newer_generation_expires_bound_authority_and_rejects_dispatch_supersession() 
                 run_id,
                 session_id,
                 turn_id,
+                assistant_message_id,
                 generation: 2,
                 state: AiRunPhase::Running,
                 approval_id: None,
@@ -1507,6 +1588,9 @@ fn newer_generation_expires_bound_authority_and_rejects_dispatch_supersession() 
         now(),
     )
     .unwrap();
+    let dispatching_assistant = ai_ops::get_ai_run_state(&connection, dispatching_run_id)
+        .unwrap()
+        .assistant_message_id;
     let before_dispatch_replacement = revision(&connection);
     assert!(matches!(
         ai_ops::upsert_ai_run_state(
@@ -1516,6 +1600,7 @@ fn newer_generation_expires_bound_authority_and_rejects_dispatch_supersession() 
                 run_id: dispatching_run_id,
                 session_id,
                 turn_id: dispatching_turn_id,
+                assistant_message_id: dispatching_assistant,
                 generation: 2,
                 state: AiRunPhase::Running,
                 approval_id: None,
@@ -1551,10 +1636,13 @@ fn run_identity_cannot_move_across_session_or_turn() {
     ai_ops::create_ai_session(&mut connection, op(), second_session, "two".into(), now()).unwrap();
     let run_id = AiRunId::new();
     let turn_id = AiTurnId::new();
+    let assistant_message_id =
+        create_assistant_placeholder(&mut connection, first_session, turn_id);
     let make = |session_id, turn_id| AiRunState {
         run_id,
         session_id,
         turn_id,
+        assistant_message_id,
         generation: 1,
         state: AiRunPhase::Running,
         approval_id: None,
@@ -1592,6 +1680,7 @@ fn proposal_cas_failure_rolls_back_approval_quota_and_mutation_material() {
     ai_ops::create_ai_session(&mut connection, op(), session_id, "chat".into(), now()).unwrap();
     let run_id = AiRunId::new();
     let turn_id = AiTurnId::new();
+    let assistant_message_id = create_assistant_placeholder(&mut connection, session_id, turn_id);
     ai_ops::upsert_ai_run_state(
         &mut connection,
         op(),
@@ -1599,6 +1688,7 @@ fn proposal_cas_failure_rolls_back_approval_quota_and_mutation_material() {
             run_id,
             session_id,
             turn_id,
+            assistant_message_id,
             generation: 1,
             state: AiRunPhase::Running,
             approval_id: None,
@@ -2155,6 +2245,1039 @@ async fn failed_restore_does_not_touch_secret_file() {
             .unwrap()
             .is_some()
     );
+    drop(repo);
+    drop(owner);
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[test]
+fn cancel_ai_response_is_atomic_replayable_and_wins_before_dispatch() {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    let turn_id = AiTurnId::new();
+    let run_id = AiRunId::new();
+    let assistant_id = AiMessageId::new();
+    ai_ops::create_ai_session(&mut connection, op(), session_id, "cancel".into(), now()).unwrap();
+    ai_ops::upsert_ai_message(
+        &mut connection,
+        op(),
+        assistant_id,
+        session_id,
+        turn_id,
+        AiMessageRole::Assistant,
+        AiMessageStatus::Streaming,
+        AiMessageContent::text("").unwrap(),
+        now(),
+    )
+    .unwrap();
+    ai_ops::upsert_ai_run_state(
+        &mut connection,
+        op(),
+        AiRunState {
+            run_id,
+            session_id,
+            turn_id,
+            assistant_message_id: assistant_id,
+            generation: 3,
+            state: AiRunPhase::Running,
+            approval_id: None,
+            created_at: now(),
+            updated_at: now(),
+        },
+        now(),
+    )
+    .unwrap();
+    let approval_id = AiApprovalId::new();
+    ai_ops::propose_ai_approval(
+        &mut connection,
+        op(),
+        approval_id,
+        session_id,
+        turn_id,
+        run_id,
+        3,
+        "create_task".into(),
+        r#"{"title":"x"}"#.into(),
+        now(),
+    )
+    .unwrap();
+    let before_mismatch = revision(&connection);
+    assert!(matches!(
+        ai_ops::cancel_ai_response(
+            &mut connection,
+            op(),
+            assistant_id,
+            session_id,
+            AiTurnId::new(),
+            run_id,
+            3,
+            AiMessageContent::text("").unwrap(),
+            now()
+        ),
+        Err(RepositoryError::Conflict)
+    ));
+    assert_eq!(revision(&connection), before_mismatch);
+    let operation_id = op();
+    let committed = ai_ops::cancel_ai_response(
+        &mut connection,
+        operation_id,
+        assistant_id,
+        session_id,
+        turn_id,
+        run_id,
+        3,
+        AiMessageContent::text("").unwrap(),
+        now(),
+    )
+    .unwrap();
+    assert!(committed.newly_committed);
+    assert_eq!(
+        ai_ops::get_ai_message(&connection, assistant_id)
+            .unwrap()
+            .status,
+        AiMessageStatus::Cancelled
+    );
+    assert_eq!(
+        ai_ops::get_ai_run_state(&connection, run_id).unwrap().state,
+        AiRunPhase::Cancelled
+    );
+    assert_eq!(
+        ai_ops::get_ai_approval(&connection, approval_id)
+            .unwrap()
+            .status,
+        AiApprovalStatus::Expired
+    );
+    assert_eq!(pending_quota(&connection), (0, 0));
+    assert!(
+        !ai_ops::cancel_ai_response(
+            &mut connection,
+            operation_id,
+            assistant_id,
+            session_id,
+            turn_id,
+            run_id,
+            3,
+            AiMessageContent::text("").unwrap(),
+            now()
+        )
+        .unwrap()
+        .newly_committed
+    );
+    assert!(matches!(
+        ai_ops::cancel_ai_response(
+            &mut connection,
+            operation_id,
+            assistant_id,
+            session_id,
+            AiTurnId::new(),
+            run_id,
+            3,
+            AiMessageContent::text("").unwrap(),
+            now()
+        ),
+        Err(RepositoryError::IdempotencyMismatch)
+    ));
+    assert!(matches!(
+        ai_ops::set_ai_approval_status(
+            &mut connection,
+            op(),
+            approval_id,
+            AiApprovalStatus::Consumed,
+            Some(op().to_string()),
+            now()
+        ),
+        Err(RepositoryError::Conflict)
+    ));
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[test]
+fn dispatching_finish_requires_exact_consumed_operation_and_replays() {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    let turn_id = AiTurnId::new();
+    let run_id = AiRunId::new();
+    let assistant_id = AiMessageId::new();
+    ai_ops::create_ai_session(&mut connection, op(), session_id, "dispatch".into(), now()).unwrap();
+    ai_ops::upsert_ai_message(
+        &mut connection,
+        op(),
+        assistant_id,
+        session_id,
+        turn_id,
+        AiMessageRole::Assistant,
+        AiMessageStatus::Streaming,
+        AiMessageContent::text("").unwrap(),
+        now(),
+    )
+    .unwrap();
+    ai_ops::upsert_ai_run_state(
+        &mut connection,
+        op(),
+        AiRunState {
+            run_id,
+            session_id,
+            turn_id,
+            assistant_message_id: assistant_id,
+            generation: 1,
+            state: AiRunPhase::Running,
+            approval_id: None,
+            created_at: now(),
+            updated_at: now(),
+        },
+        now(),
+    )
+    .unwrap();
+    let approval_id = AiApprovalId::new();
+    ai_ops::propose_ai_approval(
+        &mut connection,
+        op(),
+        approval_id,
+        session_id,
+        turn_id,
+        run_id,
+        1,
+        "create_task".into(),
+        r#"{"title":"x"}"#.into(),
+        now(),
+    )
+    .unwrap();
+    ai_ops::set_ai_approval_status(
+        &mut connection,
+        op(),
+        approval_id,
+        AiApprovalStatus::Approved,
+        None,
+        now(),
+    )
+    .unwrap();
+    let dispatch = op();
+    ai_ops::set_ai_approval_status(
+        &mut connection,
+        op(),
+        approval_id,
+        AiApprovalStatus::Consumed,
+        Some(dispatch.to_string()),
+        now(),
+    )
+    .unwrap();
+    assert_eq!(
+        ai_ops::list_dispatching_ai_approvals(&connection).unwrap()[0].id,
+        approval_id
+    );
+    assert!(matches!(
+        ai_ops::cancel_ai_response(
+            &mut connection,
+            op(),
+            assistant_id,
+            session_id,
+            turn_id,
+            run_id,
+            1,
+            AiMessageContent::text("").unwrap(),
+            now()
+        ),
+        Err(RepositoryError::Conflict)
+    ));
+    assert!(matches!(
+        ai_ops::finish_ai_response(
+            &mut connection,
+            op(),
+            assistant_id,
+            session_id,
+            turn_id,
+            run_id,
+            1,
+            AiMessageStatus::Completed,
+            AiMessageContent::text("done").unwrap(),
+            AiRunPhase::Completed,
+            Some(op().to_string()),
+            now()
+        ),
+        Err(RepositoryError::Conflict)
+    ));
+    let finish_op = op();
+    let committed = ai_ops::finish_ai_response(
+        &mut connection,
+        finish_op,
+        assistant_id,
+        session_id,
+        turn_id,
+        run_id,
+        1,
+        AiMessageStatus::Completed,
+        AiMessageContent::text("done").unwrap(),
+        AiRunPhase::Completed,
+        Some(dispatch.to_string()),
+        now(),
+    )
+    .unwrap();
+    assert!(committed.newly_committed);
+    assert!(
+        !ai_ops::finish_ai_response(
+            &mut connection,
+            finish_op,
+            assistant_id,
+            session_id,
+            turn_id,
+            run_id,
+            1,
+            AiMessageStatus::Completed,
+            AiMessageContent::text("done").unwrap(),
+            AiRunPhase::Completed,
+            Some(dispatch.to_string()),
+            now()
+        )
+        .unwrap()
+        .newly_committed
+    );
+    assert!(matches!(
+        ai_ops::finish_ai_response(
+            &mut connection,
+            finish_op,
+            assistant_id,
+            session_id,
+            turn_id,
+            run_id,
+            1,
+            AiMessageStatus::Failed,
+            AiMessageContent::text("").unwrap(),
+            AiRunPhase::Failed,
+            Some(dispatch.to_string()),
+            now()
+        ),
+        Err(RepositoryError::IdempotencyMismatch)
+    ));
+    assert!(
+        ai_ops::list_dispatching_ai_approvals(&connection)
+            .unwrap()
+            .is_empty()
+    );
+
+    let failed_turn = AiTurnId::new();
+    let failed_run = AiRunId::new();
+    let failed_assistant = AiMessageId::new();
+    ai_ops::upsert_ai_message(
+        &mut connection,
+        op(),
+        failed_assistant,
+        session_id,
+        failed_turn,
+        AiMessageRole::Assistant,
+        AiMessageStatus::Streaming,
+        AiMessageContent::text("").unwrap(),
+        now(),
+    )
+    .unwrap();
+    ai_ops::upsert_ai_run_state(
+        &mut connection,
+        op(),
+        AiRunState {
+            run_id: failed_run,
+            session_id,
+            turn_id: failed_turn,
+            assistant_message_id: failed_assistant,
+            generation: 1,
+            state: AiRunPhase::Running,
+            approval_id: None,
+            created_at: now(),
+            updated_at: now(),
+        },
+        now(),
+    )
+    .unwrap();
+    let failed_approval = AiApprovalId::new();
+    ai_ops::propose_ai_approval(
+        &mut connection,
+        op(),
+        failed_approval,
+        session_id,
+        failed_turn,
+        failed_run,
+        1,
+        "create_task".into(),
+        r#"{"title":"y"}"#.into(),
+        now(),
+    )
+    .unwrap();
+    ai_ops::set_ai_approval_status(
+        &mut connection,
+        op(),
+        failed_approval,
+        AiApprovalStatus::Approved,
+        None,
+        now(),
+    )
+    .unwrap();
+    let failed_dispatch = op();
+    ai_ops::set_ai_approval_status(
+        &mut connection,
+        op(),
+        failed_approval,
+        AiApprovalStatus::Consumed,
+        Some(failed_dispatch.to_string()),
+        now(),
+    )
+    .unwrap();
+    ai_ops::finish_ai_response(
+        &mut connection,
+        op(),
+        failed_assistant,
+        session_id,
+        failed_turn,
+        failed_run,
+        1,
+        AiMessageStatus::Failed,
+        AiMessageContent::text("").unwrap(),
+        AiRunPhase::Failed,
+        Some(failed_dispatch.to_string()),
+        now(),
+    )
+    .unwrap();
+    assert_eq!(
+        ai_ops::get_ai_run_state(&connection, failed_run)
+            .unwrap()
+            .state,
+        AiRunPhase::Failed
+    );
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[tokio::test]
+async fn normal_open_atomically_terminalizes_streaming_placeholders_and_fails_closed_on_corrupt_pair()
+ {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    ai_ops::create_ai_session(&mut connection, op(), session_id, "recover".into(), now()).unwrap();
+    let mut rows = Vec::new();
+    for awaiting in [false, true] {
+        let turn_id = AiTurnId::new();
+        let run_id = AiRunId::new();
+        let message_id = AiMessageId::new();
+        ai_ops::upsert_ai_message(
+            &mut connection,
+            op(),
+            message_id,
+            session_id,
+            turn_id,
+            AiMessageRole::Assistant,
+            AiMessageStatus::Streaming,
+            AiMessageContent::text("").unwrap(),
+            now(),
+        )
+        .unwrap();
+        ai_ops::upsert_ai_run_state(
+            &mut connection,
+            op(),
+            AiRunState {
+                run_id,
+                session_id,
+                turn_id,
+                assistant_message_id: message_id,
+                generation: 1,
+                state: AiRunPhase::Running,
+                approval_id: None,
+                created_at: now(),
+                updated_at: now(),
+            },
+            now(),
+        )
+        .unwrap();
+        let approval = if awaiting {
+            let id = AiApprovalId::new();
+            ai_ops::propose_ai_approval(
+                &mut connection,
+                op(),
+                id,
+                session_id,
+                turn_id,
+                run_id,
+                1,
+                "create_task".into(),
+                r#"{"title":"x"}"#.into(),
+                now(),
+            )
+            .unwrap();
+            Some(id)
+        } else {
+            None
+        };
+        rows.push((run_id, message_id, approval));
+    }
+    drop(connection);
+    let owner = ProfileOwner::open(&profile).unwrap();
+    let repo = owner.repository();
+    for (run_id, message_id, approval) in rows {
+        assert_eq!(
+            repo.get_ai_run_state(run_id).await.unwrap().state,
+            AiRunPhase::Cancelled
+        );
+        assert_eq!(
+            repo.get_ai_message(message_id).await.unwrap().status,
+            AiMessageStatus::Cancelled
+        );
+        if let Some(id) = approval {
+            assert_eq!(
+                repo.get_ai_approval(id).await.unwrap().status,
+                AiApprovalStatus::Expired
+            );
+        }
+    }
+    drop(repo);
+    drop(owner);
+
+    let mut connection = Connection::open(profile.join(crate::DATABASE_FILE)).unwrap();
+    connection
+        .pragma_update(None, "foreign_keys", true)
+        .unwrap();
+    let recovered_times: (String, String, String) = connection
+        .query_row(
+            "SELECT updated_at, last_message_at,
+                    (SELECT MAX(updated_at) FROM ai_messages WHERE session_id = ?1)
+             FROM ai_sessions WHERE id = ?1",
+            [session_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(recovered_times.0, recovered_times.2);
+    assert_eq!(recovered_times.1, recovered_times.2);
+    let session_id = AiSessionId::new();
+    ai_ops::create_ai_session(&mut connection, op(), session_id, "corrupt".into(), now()).unwrap();
+    let (run_id, _, approval_id) = create_awaiting_approval(&mut connection, session_id);
+    ai_ops::set_ai_approval_status(
+        &mut connection,
+        op(),
+        approval_id,
+        AiApprovalStatus::Approved,
+        None,
+        now(),
+    )
+    .unwrap();
+    ai_ops::set_ai_approval_status(
+        &mut connection,
+        op(),
+        approval_id,
+        AiApprovalStatus::Consumed,
+        Some(op().to_string()),
+        now(),
+    )
+    .unwrap();
+    connection
+        .execute(
+            "UPDATE ai_tool_approvals SET generation = 2 WHERE id = ?1",
+            [approval_id.to_string()],
+        )
+        .unwrap();
+    drop(connection);
+    assert!(matches!(
+        ProfileOwner::open(&profile),
+        Err(crate::OpenError::Database(_))
+    ));
+    let connection = Connection::open(profile.join(crate::DATABASE_FILE)).unwrap();
+    assert_eq!(
+        ai_ops::get_ai_run_state(&connection, run_id).unwrap().state,
+        AiRunPhase::Dispatching
+    );
+    fs::remove_dir_all(profile).unwrap();
+}
+
+fn insert_dispatching_fixture(
+    connection: &Connection,
+    session_id: AiSessionId,
+    sequence: i64,
+) -> (AiRunId, AiTurnId, AiMessageId, AiApprovalId) {
+    let turn_id = AiTurnId::new();
+    let run_id = AiRunId::new();
+    let assistant_message_id = AiMessageId::new();
+    let approval_id = AiApprovalId::new();
+    let dispatch_operation_id = op();
+    let content_json = AiMessageContent::text("")
+        .unwrap()
+        .canonical_json()
+        .unwrap();
+    let arguments_json = "{}";
+    let action_hash = ai_approval_action_hash("create_task", arguments_json).unwrap();
+    let created_at = now();
+    let expires_at = created_at + junban_domain::AI_APPROVAL_LIFETIME_SECS.seconds();
+    connection
+        .execute(
+            "INSERT INTO ai_messages(
+                id, session_id, turn_id, sequence, role, status, content_json,
+                content_bytes, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, 'assistant', 'streaming', ?5, ?6, ?7, ?7)",
+            params![
+                assistant_message_id.to_string(),
+                session_id.to_string(),
+                turn_id.to_string(),
+                sequence,
+                content_json,
+                content_json.len() as i64,
+                created_at.to_string(),
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO ai_tool_approvals(
+                id, session_id, turn_id, run_id, generation, tool_name, arguments_json,
+                arguments_bytes, action_hash, status, expires_at, operation_id,
+                created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, 1, 'create_task', ?5, ?6, ?7,
+                       'consumed', ?8, ?9, ?10, ?10)",
+            params![
+                approval_id.to_string(),
+                session_id.to_string(),
+                turn_id.to_string(),
+                run_id.to_string(),
+                arguments_json,
+                arguments_json.len() as i64,
+                action_hash,
+                expires_at.to_string(),
+                dispatch_operation_id.to_string(),
+                created_at.to_string(),
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO ai_run_state(
+                run_id, session_id, turn_id, assistant_message_id, generation, state,
+                approval_id, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, 1, 'dispatching', ?5, ?6, ?6)",
+            params![
+                run_id.to_string(),
+                session_id.to_string(),
+                turn_id.to_string(),
+                assistant_message_id.to_string(),
+                approval_id.to_string(),
+                created_at.to_string(),
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE ai_sessions
+             SET message_count = message_count + 1,
+                 content_bytes = content_bytes + ?1,
+                 updated_at = ?2,
+                 last_message_at = ?2
+             WHERE id = ?3",
+            params![
+                content_json.len() as i64,
+                created_at.to_string(),
+                session_id.to_string(),
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE ai_quota SET total_content_bytes = total_content_bytes + ?1
+             WHERE singleton = 1",
+            [content_json.len() as i64],
+        )
+        .unwrap();
+    (run_id, turn_id, assistant_message_id, approval_id)
+}
+
+#[test]
+fn run_assistant_binding_is_exact_and_startup_only_terminalizes_bound_placeholders() {
+    let profile = temp_profile();
+    let database_path = profile.join(crate::DATABASE_FILE);
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    let turn_id = AiTurnId::new();
+    ai_ops::create_ai_session(&mut connection, op(), session_id, "binding".into(), now()).unwrap();
+
+    let first_assistant = create_assistant_placeholder(&mut connection, session_id, turn_id);
+    let second_assistant = create_assistant_placeholder(&mut connection, session_id, turn_id);
+    let unrelated_assistant = create_assistant_placeholder(&mut connection, session_id, turn_id);
+    let first_run = AiRunId::new();
+    let second_run = AiRunId::new();
+    for (run_id, assistant_message_id) in
+        [(first_run, first_assistant), (second_run, second_assistant)]
+    {
+        ai_ops::upsert_ai_run_state(
+            &mut connection,
+            op(),
+            AiRunState {
+                run_id,
+                session_id,
+                turn_id,
+                assistant_message_id,
+                generation: 1,
+                state: AiRunPhase::Running,
+                approval_id: None,
+                created_at: now(),
+                updated_at: now(),
+            },
+            now(),
+        )
+        .unwrap();
+    }
+
+    let before = revision(&connection);
+    assert!(matches!(
+        ai_ops::finish_ai_response(
+            &mut connection,
+            op(),
+            second_assistant,
+            session_id,
+            turn_id,
+            first_run,
+            1,
+            AiMessageStatus::Completed,
+            AiMessageContent::text("wrong assistant").unwrap(),
+            AiRunPhase::Completed,
+            None,
+            now(),
+        ),
+        Err(RepositoryError::Conflict)
+    ));
+    assert_eq!(revision(&connection), before);
+    drop(connection);
+
+    let connection = crate::open_connection(&database_path).unwrap();
+    for (run_id, assistant_message_id) in
+        [(first_run, first_assistant), (second_run, second_assistant)]
+    {
+        let run = ai_ops::get_ai_run_state(&connection, run_id).unwrap();
+        assert_eq!(run.assistant_message_id, assistant_message_id);
+        assert_eq!(run.state, AiRunPhase::Cancelled);
+        assert_eq!(
+            ai_ops::get_ai_message(&connection, assistant_message_id)
+                .unwrap()
+                .status,
+            AiMessageStatus::Cancelled
+        );
+    }
+    assert_eq!(
+        ai_ops::get_ai_message(&connection, unrelated_assistant)
+            .unwrap()
+            .status,
+        AiMessageStatus::Streaming,
+        "startup must not terminalize every assistant in a shared turn"
+    );
+    drop(connection);
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[test]
+fn dispatch_recovery_accepts_500_and_rejects_501st_consume_atomically() {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    ai_ops::create_ai_session(
+        &mut connection,
+        op(),
+        session_id,
+        "dispatch cap".into(),
+        now(),
+    )
+    .unwrap();
+    for sequence in 1..=junban_domain::AI_DISPATCHING_APPROVAL_RECOVERY_MAX {
+        insert_dispatching_fixture(&connection, session_id, i64::from(sequence));
+    }
+    assert_eq!(
+        ai_ops::list_dispatching_ai_approvals(&connection)
+            .unwrap()
+            .len(),
+        junban_domain::AI_DISPATCHING_APPROVAL_RECOVERY_MAX as usize
+    );
+
+    let overflow_session_id = AiSessionId::new();
+    ai_ops::create_ai_session(
+        &mut connection,
+        op(),
+        overflow_session_id,
+        "overflow".into(),
+        now(),
+    )
+    .unwrap();
+    let (run_id, _, approval_id) = create_awaiting_approval(&mut connection, overflow_session_id);
+    ai_ops::set_ai_approval_status(
+        &mut connection,
+        op(),
+        approval_id,
+        AiApprovalStatus::Approved,
+        None,
+        now(),
+    )
+    .unwrap();
+    let before_revision = revision(&connection);
+    let before_quota = pending_quota(&connection);
+    assert!(matches!(
+        ai_ops::set_ai_approval_status(
+            &mut connection,
+            op(),
+            approval_id,
+            AiApprovalStatus::Consumed,
+            Some(op().to_string()),
+            now(),
+        ),
+        Err(RepositoryError::Validation(_))
+    ));
+    assert_eq!(revision(&connection), before_revision);
+    assert_eq!(pending_quota(&connection), before_quota);
+    assert_eq!(
+        ai_ops::get_ai_approval(&connection, approval_id)
+            .unwrap()
+            .status,
+        AiApprovalStatus::Approved
+    );
+    assert_eq!(
+        ai_ops::get_ai_run_state(&connection, run_id).unwrap().state,
+        AiRunPhase::AwaitingApproval
+    );
+    assert_eq!(
+        ai_ops::list_dispatching_ai_approvals(&connection)
+            .unwrap()
+            .len(),
+        junban_domain::AI_DISPATCHING_APPROVAL_RECOVERY_MAX as usize
+    );
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[test]
+fn forged_501st_dispatch_pair_fails_normal_open_closed() {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    ai_ops::create_ai_session(
+        &mut connection,
+        op(),
+        session_id,
+        "forged cap".into(),
+        now(),
+    )
+    .unwrap();
+    for sequence in 1..=junban_domain::AI_DISPATCHING_APPROVAL_RECOVERY_MAX {
+        insert_dispatching_fixture(&connection, session_id, i64::from(sequence));
+    }
+    let overflow_session_id = AiSessionId::new();
+    ai_ops::create_ai_session(
+        &mut connection,
+        op(),
+        overflow_session_id,
+        "overflow".into(),
+        now(),
+    )
+    .unwrap();
+    insert_dispatching_fixture(&connection, overflow_session_id, 1);
+    drop(connection);
+    assert!(matches!(
+        ProfileOwner::open(&profile),
+        Err(crate::OpenError::Database(_))
+    ));
+    let connection = Connection::open(profile.join(crate::DATABASE_FILE)).unwrap();
+    let dispatching: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM ai_run_state WHERE state = 'dispatching'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        dispatching,
+        i64::from(junban_domain::AI_DISPATCHING_APPROVAL_RECOVERY_MAX + 1),
+        "failed normal open must not partially terminalize over-limit authority"
+    );
+    drop(connection);
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[test]
+fn stale_consumed_action_hash_fails_listing_and_normal_open_closed() {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    ai_ops::create_ai_session(&mut connection, op(), session_id, "hash".into(), now()).unwrap();
+    let (_, _, _, approval_id) = insert_dispatching_fixture(&connection, session_id, 1);
+    connection
+        .execute(
+            "UPDATE ai_tool_approvals
+             SET arguments_json = '{\"title\":\"mutated\"}', arguments_bytes = 19
+             WHERE id = ?1",
+            [approval_id.to_string()],
+        )
+        .unwrap();
+    assert!(matches!(
+        ai_ops::list_dispatching_ai_approvals(&connection),
+        Err(RepositoryError::Storage(_))
+    ));
+    drop(connection);
+    assert!(matches!(
+        ProfileOwner::open(&profile),
+        Err(crate::OpenError::Database(_))
+    ));
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[tokio::test]
+async fn restore_preflight_rejects_501st_dispatch_recovery_pair() {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    let overflow_session_id = AiSessionId::new();
+    ai_ops::create_ai_session(
+        &mut connection,
+        op(),
+        session_id,
+        "restore cap".into(),
+        now(),
+    )
+    .unwrap();
+    ai_ops::create_ai_session(
+        &mut connection,
+        op(),
+        overflow_session_id,
+        "overflow".into(),
+        now(),
+    )
+    .unwrap();
+    for sequence in 1..=junban_domain::AI_DISPATCHING_APPROVAL_RECOVERY_MAX {
+        insert_dispatching_fixture(&connection, session_id, i64::from(sequence));
+    }
+    let before_revision = revision(&connection);
+    let backup = crate::backup_ops::create_backup(&connection, &profile).unwrap();
+    let hostile = reframe_backup_with(&profile, &backup, "dispatch-overflow", |candidate| {
+        insert_dispatching_fixture(candidate, overflow_session_id, 1);
+    });
+    drop(connection);
+    let owner = ProfileOwner::open(&profile).unwrap();
+    let repo = owner.repository();
+    assert!(matches!(
+        repo.prepare_restore(hostile).await,
+        Err(RepositoryError::Validation(_))
+    ));
+    assert_eq!(
+        repo.get_sync_state().await.unwrap().revision,
+        u64::try_from(before_revision).unwrap()
+    );
+    assert_eq!(
+        repo.list_dispatching_ai_approvals().await.unwrap().len(),
+        junban_domain::AI_DISPATCHING_APPROVAL_RECOVERY_MAX as usize
+    );
+    drop(repo);
+    drop(owner);
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[tokio::test]
+async fn restore_preflight_rejects_mutated_consumed_arguments_with_stale_hash() {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    ai_ops::create_ai_session(
+        &mut connection,
+        op(),
+        session_id,
+        "restore hash".into(),
+        now(),
+    )
+    .unwrap();
+    let (_, _, _, approval_id) = insert_dispatching_fixture(&connection, session_id, 1);
+    let backup = crate::backup_ops::create_backup(&connection, &profile).unwrap();
+    let hostile = reframe_backup_with(&profile, &backup, "stale-action-hash", |candidate| {
+        candidate
+            .execute(
+                "UPDATE ai_tool_approvals
+                 SET arguments_json = '{\"title\":\"mutated\"}', arguments_bytes = 19
+                 WHERE id = ?1",
+                [approval_id.to_string()],
+            )
+            .unwrap();
+    });
+    drop(connection);
+    let owner = ProfileOwner::open(&profile).unwrap();
+    let repo = owner.repository();
+    assert!(matches!(
+        repo.prepare_restore(hostile).await,
+        Err(RepositoryError::Validation(_))
+    ));
+    drop(repo);
+    drop(owner);
+    fs::remove_dir_all(profile).unwrap();
+}
+
+#[tokio::test]
+async fn restore_preflight_centrally_rejects_every_malformed_consumed_approval_field_class() {
+    let profile = temp_profile();
+    let mut connection = open_migrated(&profile);
+    let session_id = AiSessionId::new();
+    ai_ops::create_ai_session(
+        &mut connection,
+        op(),
+        session_id,
+        "approval rows".into(),
+        now(),
+    )
+    .unwrap();
+    insert_dispatching_fixture(&connection, session_id, 1);
+    let backup = crate::backup_ops::create_backup(&connection, &profile).unwrap();
+    drop(connection);
+    let owner = ProfileOwner::open(&profile).unwrap();
+    let repo = owner.repository();
+    let attacks = [
+        (
+            "id",
+            "PRAGMA foreign_keys=OFF;
+             UPDATE ai_tool_approvals SET id = 'not-a-uuid';",
+        ),
+        (
+            "status",
+            "PRAGMA ignore_check_constraints=ON;
+             UPDATE ai_tool_approvals SET status = 'unknown';",
+        ),
+        (
+            "utf8",
+            "UPDATE ai_tool_approvals SET tool_name = CAST(X'80' AS TEXT);",
+        ),
+        (
+            "arguments-shape",
+            "UPDATE ai_tool_approvals SET arguments_json = '[]', arguments_bytes = 2;",
+        ),
+        (
+            "arguments-canonical",
+            "UPDATE ai_tool_approvals
+             SET arguments_json = '{ \"title\": \"x\" }', arguments_bytes = 16;",
+        ),
+        (
+            "tool-name",
+            "UPDATE ai_tool_approvals SET tool_name = 'CreateTask';",
+        ),
+        (
+            "timestamp",
+            "UPDATE ai_tool_approvals SET updated_at = 'not-a-timestamp';",
+        ),
+        (
+            "expiry",
+            "UPDATE ai_tool_approvals SET expires_at = created_at;",
+        ),
+        (
+            "operation-id",
+            "UPDATE ai_tool_approvals SET operation_id = 'not-an-operation';",
+        ),
+        (
+            "action-hash",
+            "UPDATE ai_tool_approvals
+             SET action_hash = '0000000000000000000000000000000000000000000000000000000000000000';",
+        ),
+    ];
+    for (label, attack) in attacks {
+        let hostile = reframe_backup_with(&profile, &backup, label, |candidate| {
+            candidate.execute_batch(attack).unwrap();
+        });
+        assert!(
+            matches!(
+                repo.prepare_restore(hostile).await,
+                Err(RepositoryError::Validation(_))
+            ),
+            "malformed consumed approval field reached authority: {label}"
+        );
+    }
     drop(repo);
     drop(owner);
     fs::remove_dir_all(profile).unwrap();

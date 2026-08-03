@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  RetainedOperationId,
-  createAiOperationId,
-  resolveOperationId,
-} from "./operation-id";
+import { RetainedOperationId, createAiOperationId, resolveOperationId } from "./operation-id";
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 describe("operation-id", () => {
   it("mints UUID operation ids", () => {

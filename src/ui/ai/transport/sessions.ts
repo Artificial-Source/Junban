@@ -45,14 +45,11 @@ export async function getAiSession(
   sessionId: string,
   options: Pick<AiTransportOptions, "signal"> = {},
 ): Promise<AiSessionDto> {
-  return authenticatedJson<AiSessionDto>(
-    `/api/v1/ai/sessions/${encodeURIComponent(sessionId)}`,
-    {
-      method: "GET",
-      signal: options.signal,
-      retryNetwork: false,
-    },
-  );
+  return authenticatedJson<AiSessionDto>(`/api/v1/ai/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "GET",
+    signal: options.signal,
+    retryNetwork: false,
+  });
 }
 
 export async function updateAiSession(

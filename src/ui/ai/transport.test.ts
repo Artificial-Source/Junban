@@ -308,9 +308,7 @@ describe("AI transport request shapes", () => {
     expect(calls[0]?.init.method).toBe("POST");
     expect(headersOf(calls[0]?.init)).toMatchObject({ "Idempotency-Key": OP });
     expect(calls[1]?.url).toBe("/api/v1/ai/sessions?limit=10&cursor=abc");
-    expect(calls[2]?.url).toBe(
-      `/api/v1/ai/sessions/${SESSION}/messages?after_sequence=2&limit=50`,
-    );
+    expect(calls[2]?.url).toBe(`/api/v1/ai/sessions/${SESSION}/messages?after_sequence=2&limit=50`);
     expect(calls[3]?.init.method).toBe("PATCH");
   });
 

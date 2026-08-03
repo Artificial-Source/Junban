@@ -117,7 +117,20 @@ describe("AiRunSseReducer", () => {
 
   it("binds identity, accumulates text, usage, tools, and one terminal", () => {
     const reducer = reduceAll([
-      sseData(envelope(1, "run_started", { context: { truncated: false, utf8_bytes: 1, approximate_tokens: 1, focused_task_included: false, history_messages_included: 0, history_rows_loaded: 0, memories_considered: 0, memories_included: 0 } })),
+      sseData(
+        envelope(1, "run_started", {
+          context: {
+            truncated: false,
+            utf8_bytes: 1,
+            approximate_tokens: 1,
+            focused_task_included: false,
+            history_messages_included: 0,
+            history_rows_loaded: 0,
+            memories_considered: 0,
+            memories_included: 0,
+          },
+        }),
+      ),
       sseData(envelope(2, "text_delta", { text: "Hel" })),
       sseData(envelope(3, "text_delta", { text: "lo" })),
       sseData(envelope(4, "reasoning_status", { status: "thinking" })),
@@ -131,7 +144,9 @@ describe("AiRunSseReducer", () => {
           expires_at: "2026-08-01T00:00:00Z",
         }),
       ),
-      sseData(envelope(7, "tool_approved", { approval_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" })),
+      sseData(
+        envelope(7, "tool_approved", { approval_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }),
+      ),
       sseData(
         envelope(8, "tool_result", {
           tool: "create_task",
@@ -187,7 +202,12 @@ describe("AiRunSseReducer", () => {
       reducer.pushFrame({
         event: null,
         id: "2",
-        data: envelope(2, "text_delta", { text: "x" }, { run_id: "22222222-2222-4222-8222-222222222222" }),
+        data: envelope(
+          2,
+          "text_delta",
+          { text: "x" },
+          { run_id: "22222222-2222-4222-8222-222222222222" },
+        ),
         frameBytes: 1,
       }),
     ).toThrowError(expect.objectContaining({ code: "identity" }));

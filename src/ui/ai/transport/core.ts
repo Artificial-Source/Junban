@@ -95,11 +95,7 @@ export async function streamAiPost(
  * guards unexpected DOMException/TypeError strings from fetch.
  */
 export function sanitizeTransportError(error: unknown): Error {
-  if (
-    error instanceof AiSseError ||
-    error instanceof ApiError ||
-    error instanceof NetworkError
-  ) {
+  if (error instanceof AiSseError || error instanceof ApiError || error instanceof NetworkError) {
     return error;
   }
   if (error instanceof Error) {

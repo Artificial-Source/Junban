@@ -63,9 +63,7 @@ export async function putAiConfig(
   });
 }
 
-export async function deleteAiConfig(
-  options: AiTransportOptions = {},
-): Promise<AiConfigResponse> {
+export async function deleteAiConfig(options: AiTransportOptions = {}): Promise<AiConfigResponse> {
   const operationId = resolveOperationId(options.operationId);
   return authenticatedJson<AiConfigResponse>("/api/v1/ai/config", {
     method: "DELETE",

@@ -4,11 +4,7 @@
 
 import { authenticatedJson } from "../../api/client";
 import { resolveOperationId } from "../operation-id";
-import type {
-  CancelAiRunResponse,
-  CreateAiResponseRequest,
-  EditAiResponseRequest,
-} from "../types";
+import type { CancelAiRunResponse, CreateAiResponseRequest, EditAiResponseRequest } from "../types";
 import {
   streamAiPost,
   type AiStreamResult,

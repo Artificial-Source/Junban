@@ -4,11 +4,7 @@
  * Transport/state only — no React context, routing, or view mounting.
  */
 
-export {
-  createAiOperationId,
-  resolveOperationId,
-  RetainedOperationId,
-} from "./operation-id";
+export { createAiOperationId, resolveOperationId, RetainedOperationId } from "./operation-id";
 
 export {
   AiSseDecoder,

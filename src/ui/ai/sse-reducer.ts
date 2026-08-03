@@ -29,14 +29,7 @@ import {
 
 const KNOWN_EVENT_TYPE_SET = new Set<string>(AI_RUN_EVENT_TYPES);
 
-const ENVELOPE_KEYS = new Set([
-  "version",
-  "run_id",
-  "generation",
-  "sequence",
-  "type",
-  "payload",
-]);
+const ENVELOPE_KEYS = new Set(["version", "run_id", "generation", "sequence", "type", "payload"]);
 
 /** Vendor/provider wire keys that must never appear on local envelopes/payloads. */
 const VENDOR_FIELD_REJECT = new Set([
@@ -145,10 +138,7 @@ export class AiRunSseReducer {
     for (const key of Object.keys(envelope)) {
       if (!ENVELOPE_KEYS.has(key)) {
         if (VENDOR_FIELD_REJECT.has(key)) {
-          throw new AiSseError(
-            "vendor_field",
-            "AI SSE envelope contained a provider vendor field",
-          );
+          throw new AiSseError("vendor_field", "AI SSE envelope contained a provider vendor field");
         }
         throw new AiSseError("payload", "AI SSE envelope contained an unknown field");
       }
@@ -498,10 +488,7 @@ function assertOnlyKeys(object: Record<string, unknown>, allowed: string[]): voi
 
 function boundDiagnostic(value: string): string {
   if (utf8Bytes(value) > AI_DIAGNOSTIC_STRING_BYTES_MAX) {
-    throw new AiSseError(
-      "diagnostic_bound",
-      "diagnostic string exceeds the configured byte bound",
-    );
+    throw new AiSseError("diagnostic_bound", "diagnostic string exceeds the configured byte bound");
   }
   return value;
 }

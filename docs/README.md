@@ -32,6 +32,7 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-5-context-map.md`](../goals/rust-rewrite/evidence/phase-5-context-map.md): approved CLI/MCP authority, credential, catalog, lifecycle, and evidence contract
 - [`../goals/rust-rewrite/evidence/phase-5-conformance-protocol.md`](../goals/rust-rewrite/evidence/phase-5-conformance-protocol.md): frozen 17-revision CLI/MCP conformance corpus (immutable Phase 5 authority)
 - [`../goals/rust-rewrite/evidence/phase-6-conformance-protocol.md`](../goals/rust-rewrite/evidence/phase-6-conformance-protocol.md): Phase 6 schema-v6 head rerun of the same 17-revision corpus
+- [`../goals/rust-rewrite/evidence/phase-6-enabled-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-6-enabled-benchmark-protocol.md): Phase 6 enabled local-mock chat/tool/STT/TTS release benchmark protocol
 - [`../goals/rust-rewrite/evidence/phase-5-automation-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-5-automation-benchmark-protocol.md): frozen CLI/MCP latency, memory, lifecycle, and no-Node budgets
 - [`../goals/rust-rewrite/evidence/phase-5-review-ledger.md`](../goals/rust-rewrite/evidence/phase-5-review-ledger.md): closed credential-security, catalog, MCP, and human-output findings
 - [`../goals/rust-rewrite/evidence/phase-5-conformance.json`](../goals/rust-rewrite/evidence/phase-5-conformance.json): authoritative Phase 5 cross-surface corpus result (immutable)

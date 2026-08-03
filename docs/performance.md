@@ -255,6 +255,23 @@ python3 scripts/check-phase5-conformance.py --phase6 --authoritative \
 
 Or use `pnpm conformance:phase6`. Authoritative mode requires a clean tracked worktree and optimized binaries built from that tree. Runtime Node remains forbidden.
 
+## Phase 6 enabled local-mock release evidence (`junban-phase6-enabled-local-mock-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-6-enabled-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-6-enabled-benchmark-protocol.md). Measures the exact optimized `junban-server` against a standalone OpenAI-compatible TLS fixture outside the server cgroup. The production `api.openai.com` origin is preserved via an ephemeral CA (`SSL_CERT_FILE`) and a benchmark-only `LD_PRELOAD` resolver/connect shim; no privileged bind, system trust, `/etc/hosts`, proxy, or shipped binary change is used. Authoritative acceptance requires an idle host and is not claimed from contended preliminary runs.
+
+```bash
+python3 scripts/check-phase6-enabled-benchmark.py --self-check
+cargo build --locked --release -p junban-server
+pnpm build
+python3 scripts/check-phase6-enabled-benchmark.py \
+  --build \
+  --authoritative \
+  --idle-host-confirmed \
+  --output goals/rust-rewrite/evidence/phase-6-enabled-bench.json
+```
+
+Or use `pnpm bench:phase6-enabled:self-check` for the interception preflight. Do not retain contended-host result JSON as accepted evidence.
+
 ## Measurement rules
 
 - Optimized release binaries are authoritative. Development servers are not.

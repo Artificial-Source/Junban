@@ -172,11 +172,13 @@ fn interrupted_recovery_cutover_is_reconciled_before_process_can_open_sqlite() {
     fs::copy(candidate.path(), &staged).unwrap();
     let candidate_bytes = fs::read(&staged).unwrap();
     let connection = rusqlite::Connection::open(&staged).unwrap();
-    let event_epoch: String = connection
+    let (event_epoch, schema_version): (String, i64) = connection
         .query_row(
-            "SELECT event_epoch FROM app_state WHERE singleton = 1",
+            "SELECT app_state.event_epoch, MAX(schema_migrations.version)
+             FROM app_state CROSS JOIN schema_migrations
+             WHERE app_state.singleton = 1",
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
     drop(connection);
@@ -196,7 +198,7 @@ fn interrupted_recovery_cutover_is_reconciled_before_process_can_open_sqlite() {
             "rollback_dir": rollback_relative,
             "candidate_len": candidate_bytes.len(),
             "candidate_sha256": sha256_hex(&candidate_bytes),
-            "schema_version": 6,
+            "schema_version": schema_version,
             "event_epoch": event_epoch,
         }))
         .unwrap(),

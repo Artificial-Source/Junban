@@ -8,6 +8,7 @@ mod detail_ops;
 mod helpers;
 mod migration;
 mod ops_types;
+mod plugin_validation;
 mod query_ops;
 mod reminder_ops;
 mod rows;

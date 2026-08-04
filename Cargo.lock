@@ -1163,6 +1163,7 @@ dependencies = [
  "jiff",
  "junban-app",
  "junban-domain",
+ "junban-plugin-sdk",
  "libc",
  "rusqlite",
  "serde",

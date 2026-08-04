@@ -51,6 +51,7 @@ pub(crate) fn create_backup(
     assert_integrity(connection)?;
     assert_foreign_keys_clean(connection)?;
     assert_canonical_schema(connection, profile_dir)?;
+    validate_authoritative_rows(connection)?;
 
     let inventory = read_inventory(connection)?;
     let schema_version = read_schema_version(connection)?;
@@ -81,6 +82,7 @@ pub(crate) fn create_backup(
     assert_integrity(&snapshot)?;
     assert_foreign_keys_clean(&snapshot)?;
     assert_canonical_schema(&snapshot, profile_dir)?;
+    validate_authoritative_rows(&snapshot)?;
     let normalized_inventory = read_inventory(&snapshot)?;
     drop(snapshot);
 
@@ -212,6 +214,7 @@ pub(crate) fn prepare_restore(
     // Candidate restore validation clears credential bindings and forces AI/cloud
     // speech disabled while preserving non-secret preferences/chat/memory data.
     sanitize_restored_ai_state(&validated)?;
+    sanitize_restored_plugin_state(&validated, &event_epoch)?;
     checkpoint_wal(&validated)?;
     validate_payload(&validated, &manifest, profile_dir)?;
     drop(validated);
@@ -496,6 +499,7 @@ fn validate_authoritative_rows(connection: &Connection) -> Result<(), Repository
     validate_event_rows(&tx, head)?;
     validate_receipt_rows(&tx, head)?;
     validate_graph_invariants(&tx)?;
+    crate::plugin_validation::validate_plugin_authority(&tx)?;
     tx.commit().map_err(storage_error)
 }
 
@@ -2424,6 +2428,61 @@ fn normalize_runtime_state(connection: &Connection) -> Result<(), RepositoryErro
     Ok(())
 }
 
+/// Disable and invalidate persisted plugin runtime authority on a restore candidate.
+/// This never reads package/component files or constructs a plugin host.
+fn sanitize_restored_plugin_state(
+    connection: &Connection,
+    event_epoch: &str,
+) -> Result<(), RepositoryError> {
+    let transaction = connection.unchecked_transaction().map_err(storage_error)?;
+    let exhausted: bool = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM plugins WHERE activation_epoch = ?1)",
+            [i64::MAX],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    if exhausted {
+        return Err(RepositoryError::Storage(
+            "plugin activation epoch exhausted while sanitizing restore candidate".to_owned(),
+        ));
+    }
+    let now = Timestamp::now().to_string();
+    // Invocation rows fence the old activation epoch, so remove them before advancing
+    // plugin epochs in this same transaction.
+    transaction
+        .execute("DELETE FROM plugin_invocations", [])
+        .map_err(storage_error)?;
+    transaction
+        .execute(
+            "UPDATE plugins
+             SET desired_enabled = 0,
+                 activation_epoch = activation_epoch + 1,
+                 runtime_state = 'reverify_required',
+                 failure_count = 0,
+                 last_error_code = NULL,
+                 next_retry_at = NULL,
+                 updated_at = ?1",
+            [&now],
+        )
+        .map_err(storage_error)?;
+    let head: i64 = transaction
+        .query_row(
+            "SELECT global_revision FROM app_state WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    transaction
+        .execute(
+            "UPDATE plugin_event_cursors
+             SET event_epoch = ?1, revision = ?2, resync_required = 1, updated_at = ?3",
+            params![event_epoch, head, now],
+        )
+        .map_err(storage_error)?;
+    transaction.commit().map_err(storage_error)
+}
+
 /// Clear credential bindings, force AI/cloud speech disabled, and recover ephemeral
 /// approval/run authority on a restore candidate. Never touches `ai-secrets.json`.
 fn sanitize_restored_ai_state(connection: &Connection) -> Result<(), RepositoryError> {
@@ -2750,6 +2809,10 @@ mod tests {
     use junban_domain::{
         OperationId, TaskDraft, TaskTitle, frame_backup_envelope, parse_backup_envelope, sha256_hex,
     };
+    use junban_plugin_sdk::{
+        Capability, Permission, PermissionScope, Publisher, RuntimeManifest, RuntimeProfile,
+        UnscopedPermission, WitAuthority, scope_hash,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_profile() -> (TempDir, ProfileOwner) {
@@ -2809,6 +2872,152 @@ mod tests {
             "the copied database already has the rotated epoch at the old post-copy boundary"
         );
         assert!(dir.path().join("junban.sqlite3").exists());
+    }
+
+    #[tokio::test]
+    async fn complete_backup_rejects_malformed_plugin_authority_without_truncation() {
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, 2);
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        connection
+            .execute(
+                "UPDATE plugins SET manifest_json = manifest_json || ' '",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+        let repo = owner.repository();
+        assert!(repo.create_backup().await.is_err());
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        let retained: String = connection
+            .query_row(
+                "SELECT manifest_json FROM plugins WHERE plugin_id = 'restore-plugin'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(retained.ends_with(' '));
+    }
+
+    #[tokio::test]
+    async fn restore_disables_and_reverifies_plugins_without_constructing_runtime() {
+        let _serial = RESTORE_FAULT_TEST_LOCK.lock().await;
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, 9);
+        let repo = owner.repository();
+        let backup = repo.create_backup().await.unwrap();
+        let candidate = repo.prepare_restore(backup).await.unwrap();
+        let connection = Connection::open(candidate.path()).unwrap();
+        let plugin: (i64, i64, String, i64, Option<String>, Option<String>) = connection
+            .query_row(
+                "SELECT desired_enabled, activation_epoch, runtime_state, failure_count,
+                        last_error_code, next_retry_at
+                 FROM plugins WHERE plugin_id = 'restore-plugin'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(plugin, (0, 10, "reverify_required".into(), 0, None, None));
+        let invocation_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM plugin_invocations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(invocation_count, 0);
+        let (epoch, head): (String, i64) = connection
+            .query_row(
+                "SELECT event_epoch, global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let cursor: (String, i64, i64) = connection
+            .query_row(
+                "SELECT event_epoch, revision, resync_required
+                 FROM plugin_event_cursors WHERE plugin_id = 'restore-plugin'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(cursor, (epoch, head, 1));
+        let preserved: (i64, i64, i64, Vec<u8>, i64, i64) = connection
+            .query_row(
+                "SELECT p.package_generation, s.next_package_generation,
+                        policy.community_enabled, kv.value,
+                        (SELECT COUNT(*) FROM plugin_grants),
+                        (SELECT COUNT(*) FROM plugin_publisher_trust)
+                 FROM plugins AS p
+                 CROSS JOIN plugin_profile_state AS s
+                 CROSS JOIN plugin_policy AS policy
+                 JOIN plugin_kv AS kv ON kv.plugin_id = p.plugin_id
+                 WHERE p.plugin_id = 'restore-plugin'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(preserved, (1, 2, 1, vec![1, 2], 1, 1));
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_plugin_activation_epoch_overflow_before_cutover() {
+        let _serial = RESTORE_FAULT_TEST_LOCK.lock().await;
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, i64::MAX);
+        let repo = owner.repository();
+        let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;
+        let backup = repo.create_backup().await.unwrap();
+        assert!(repo.prepare_restore(backup).await.is_err());
+        assert_eq!(
+            repo.get_sync_state().await.unwrap().event_epoch,
+            epoch_before
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_malformed_plugin_authority_without_truncating_live() {
+        let _serial = RESTORE_FAULT_TEST_LOCK.lock().await;
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, 3);
+        let repo = owner.repository();
+        let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;
+        let backup = repo.create_backup().await.unwrap();
+        let hostile = rewrite_backup_payload(
+            &dir,
+            &backup,
+            "UPDATE plugins SET manifest_json = manifest_json || ' ';",
+        );
+        assert!(matches!(
+            repo.prepare_restore(hostile).await,
+            Err(RepositoryError::Validation(_))
+        ));
+        assert_eq!(
+            repo.get_sync_state().await.unwrap().event_epoch,
+            epoch_before
+        );
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM plugins", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     fn rewrite_backup_payload(dir: &TempDir, backup: &StagedFile, sql: &str) -> StagedFile {
@@ -2911,6 +3120,153 @@ mod tests {
             Timestamp::now(),
             1,
         )
+    }
+
+    fn seed_plugin_backup_rows(dir: &TempDir, activation_epoch: i64) {
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        let manifest = RuntimeManifest {
+            schema_version: 1,
+            id: "restore-plugin".into(),
+            name: "Restore plugin".into(),
+            description: "Backup restore fixture".into(),
+            version: "1.0.0".into(),
+            publisher: Publisher {
+                id: "restore-publisher".into(),
+                name: "Restore Publisher".into(),
+                key_id: "22".repeat(32),
+            },
+            license: "MIT".into(),
+            junban_compatibility: "^0.1".into(),
+            wit: WitAuthority {
+                package: "junban:plugin".into(),
+                world: "plugin".into(),
+                version: "0.1.0".into(),
+            },
+            runtime_profile: RuntimeProfile::Typescript,
+            component_sha256: "11".repeat(32),
+            permissions: vec![Permission {
+                capability: Capability::Storage,
+                scope: PermissionScope::Unscoped(UnscopedPermission::default()),
+            }],
+            dependencies: Vec::new(),
+            commands: Vec::new(),
+            subscriptions: Vec::new(),
+            surfaces: Vec::new(),
+            settings: Vec::new(),
+            services: Vec::new(),
+        };
+        let manifest_json = String::from_utf8(manifest.canonical_bytes().unwrap()).unwrap();
+        let permission_hash = {
+            let bytes = manifest.permission_hash().unwrap();
+            bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        let (event_epoch, head): (String, i64) = connection
+            .query_row(
+                "SELECT event_epoch, global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE plugin_profile_state
+                 SET next_package_generation = 2, updated_at = '2020-08-04T12:00:00Z'",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute("UPDATE plugin_policy SET community_enabled = 1", [])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO plugins(
+                    plugin_id, package_generation, activation_epoch, package_sha256,
+                    component_sha256, publisher_key_id, version, manifest_json,
+                    permission_hash, compatibility, desired_enabled, runtime_state,
+                    failure_count, last_error_code, next_retry_at, installed_at, updated_at
+                 ) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, 'failed', 2,
+                    'guest_trap', '2020-08-04T12:01:00Z', ?10, ?10)",
+                params![
+                    manifest.id,
+                    activation_epoch,
+                    "33".repeat(32),
+                    manifest.component_sha256,
+                    manifest.publisher.key_id,
+                    manifest.version,
+                    manifest_json,
+                    permission_hash,
+                    manifest.junban_compatibility,
+                    "2020-08-04T12:00:00Z",
+                ],
+            )
+            .unwrap();
+        let permission = &manifest.permissions[0];
+        let scope_json = serde_json::to_string(&permission.scope).unwrap();
+        let scope_hash = scope_hash(permission)
+            .unwrap()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        connection
+            .execute(
+                "INSERT INTO plugin_grants(
+                    plugin_id, package_generation, capability, scope_json, scope_hash,
+                    permission_hash, granted_at
+                 ) VALUES ('restore-plugin', 1, 'storage', ?1, ?2, ?3,
+                    '2020-08-04T12:00:00Z')",
+                params![scope_json, scope_hash, permission_hash],
+            )
+            .unwrap();
+        let public_key = vec![9_u8; 32];
+        connection
+            .execute(
+                "INSERT INTO plugin_publisher_trust(
+                    key_id, public_key, status, trusted_at, revoked_at
+                 ) VALUES (?1, ?2, 'active', '2020-08-04T12:00:00Z', NULL)",
+                params![sha256_hex(&public_key), public_key],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO plugin_kv(plugin_id, key, value, updated_at)
+                 VALUES ('restore-plugin', 'preserved', X'0102', '2020-08-04T12:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO plugin_event_cursors(
+                    plugin_id, event_epoch, revision, resync_required, updated_at
+                 ) VALUES ('restore-plugin', ?1, ?2, 0, '2020-08-04T12:00:00Z')",
+                params![event_epoch, head],
+            )
+            .unwrap();
+        if activation_epoch != i64::MAX {
+            connection
+                .execute(
+                    "INSERT INTO plugin_invocations(
+                        operation_id, plugin_id, package_generation, activation_epoch,
+                        hook_kind, entry_id, request_hash, delivery_id, state,
+                        created_at, updated_at, retain_until
+                     ) VALUES (?1, 'restore-plugin', 1, ?2, 'resync', 'resync', ?3, ?4,
+                        'reserved', '2020-08-04T12:00:00Z', '2020-08-04T12:00:00Z',
+                        '2030-08-05T12:00:00Z')",
+                    params![
+                        uuid::Uuid::new_v4().to_string(),
+                        activation_epoch,
+                        "44".repeat(32),
+                        uuid::Uuid::new_v4().to_string(),
+                    ],
+                )
+                .unwrap();
+        }
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
     }
 
     fn seed_ai_backup_rows(dir: &TempDir) {

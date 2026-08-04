@@ -14,17 +14,26 @@ use rusqlite::{
 use crate::ops_types::{Inverse, PostImage};
 
 /// Highest schema version applied by this crate.
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 6;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 7;
 
 /// Live database file name under a profile directory.
 const DATABASE_FILE: &str = "junban.sqlite3";
 /// Directory (under the profile) holding verified pre-migration snapshots.
 const PRE_MIGRATION_BACKUP_DIR: &str = "backups/pre-migration";
-/// Filename prefix for backups taken before leaving schema v2.
+/// Filename prefixes for verified snapshots taken before irreversible schema changes.
 const PRE_V2_BACKUP_PREFIX: &str = "pre-v2-";
-const PRE_V2_BACKUP_SUFFIX: &str = ".sqlite3";
-/// Keep only the newest verified pre-migration backups after a successful v2→v3 migrate.
+const PRE_V7_BACKUP_PREFIX: &str = "pre-v7-";
+const PRE_MIGRATION_BACKUP_SUFFIX: &str = ".sqlite3";
+#[cfg(test)]
+const PRE_V2_BACKUP_SUFFIX: &str = PRE_MIGRATION_BACKUP_SUFFIX;
+/// Keep only the newest bounded set of each verified pre-migration snapshot kind.
 const PRE_MIGRATION_BACKUP_RETAIN: usize = 3;
+
+// Preserve the exact SQL text emitted by schema v1; canonical v6 profiles contain it.
+const MIGRATIONS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        );";
 
 const V1_SCHEMA: &str = "
 CREATE TABLE app_state (
@@ -67,25 +76,29 @@ CREATE TABLE events (
 
 /// Apply all pending forward migrations.
 ///
-/// `profile_dir` is the owned profile directory that contains `junban.sqlite3`.
-/// Existing schema-v2 profiles receive a verified private backup under
-/// `backups/pre-migration/` before the v3 transaction runs. Fresh profiles
-/// advance v1→v2→v3 in-process and do not create a pre-migration backup.
-///
-/// Callers must hold the profile owner lock before invoking this function.
+/// Existing profiles opened at v6 receive a verified private online snapshot before
+/// the atomic v7 transaction. A profile first created by this call advances directly
+/// through v1…v7 without a redundant snapshot. Callers hold the profile owner lock.
 pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqlite::Result<()> {
-    connection.execute_batch(
-        "CREATE TABLE IF NOT EXISTS schema_migrations (
-            version INTEGER PRIMARY KEY,
-            applied_at TEXT NOT NULL
-        );",
-    )?;
+    connection.execute_batch(MIGRATIONS_SCHEMA)?;
 
     let starting_version = current_version(connection)?;
-    let mut pre_migration_backup = None;
     if starting_version > CURRENT_SCHEMA_VERSION {
         return Err(unsupported_schema(starting_version));
     }
+
+    // A later successful canonical v7 open is the first point at which a retained
+    // pre-v7 snapshot may be pruned. Housekeeping is deliberately non-fatal.
+    if starting_version == CURRENT_SCHEMA_VERSION {
+        normalize_reminder_timestamp_text(connection)?;
+        ensure_v6_ai_runtime_indexes(connection)?;
+        repair_current_v6_ai_response_authority(connection)?;
+        assert_v7_authority(connection)?;
+        let _ = prune_pre_migration_backups(profile_dir, PRE_V7_BACKUP_PREFIX);
+        return Ok(());
+    }
+
+    let mut pre_v2_backup = None;
     if starting_version < 1 {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         apply_v1(&transaction)?;
@@ -93,8 +106,7 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
         transaction.commit()?;
     }
 
-    let current = current_version(connection)?;
-    if current < 2 {
+    if current_version(connection)? < 2 {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         apply_v2(&transaction)?;
         assert_foreign_keys_clean(&transaction)?;
@@ -102,16 +114,17 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
         transaction.commit()?;
     }
 
-    let current = current_version(connection)?;
-    if current < 3 {
-        // Only profiles that opened already at v2 need a recoverable pre-v3 snapshot.
-        // Fresh installs that just applied v1/v2 above skip backup creation.
-        pre_migration_backup = if starting_version == 2 {
-            Some(create_verified_pre_v2_backup(connection, profile_dir)?)
+    if current_version(connection)? < 3 {
+        pre_v2_backup = if starting_version == 2 {
+            Some(create_verified_pre_migration_backup(
+                connection,
+                profile_dir,
+                2,
+                PRE_V2_BACKUP_PREFIX,
+            )?)
         } else {
             None
         };
-
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         apply_v3(&transaction)?;
         assert_foreign_keys_clean(&transaction)?;
@@ -119,8 +132,7 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
         transaction.commit()?;
     }
 
-    let current = current_version(connection)?;
-    if current < 4 {
+    if current_version(connection)? < 4 {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         apply_v4(&transaction)?;
         assert_foreign_keys_clean(&transaction)?;
@@ -128,8 +140,7 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
         transaction.commit()?;
     }
 
-    let current = current_version(connection)?;
-    if current < 5 {
+    if current_version(connection)? < 5 {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         apply_v5(&transaction)?;
         assert_foreign_keys_clean(&transaction)?;
@@ -137,8 +148,7 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
         transaction.commit()?;
     }
 
-    let current = current_version(connection)?;
-    if current < 6 {
+    if current_version(connection)? < 6 {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         apply_v6(&transaction)?;
         assert_foreign_keys_clean(&transaction)?;
@@ -146,40 +156,47 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
         transaction.commit()?;
     }
 
-    if let Some(backup_path) = pre_migration_backup {
-        // Prune only after the new backup and the fully migrated DB both reopen cleanly.
-        finalize_successful_v2_to_v3(profile_dir, &backup_path)?;
+    if let Some(backup_path) = pre_v2_backup {
+        // The old v2 boundary is finalized before v7. No fallible work follows a
+        // successful v7 commit.
+        verify_pre_migration_backup(&backup_path, 2)?;
+        verify_database(profile_dir, 6)?;
+        prune_pre_migration_backups(profile_dir, PRE_V2_BACKUP_PREFIX)?;
     }
 
-    let applied = current_version(connection)?;
-    if applied < CURRENT_SCHEMA_VERSION {
-        return Err(rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error {
-                code: rusqlite::ErrorCode::Unknown,
-                extended_code: 1,
-            },
-            Some(format!(
-                "schema migration incomplete: at version {applied}, expected {CURRENT_SCHEMA_VERSION}"
-            )),
-        ));
-    }
+    let pre_v7_backup = if starting_version == 6 {
+        Some(create_verified_pre_migration_backup(
+            connection,
+            profile_dir,
+            6,
+            PRE_V7_BACKUP_PREFIX,
+        )?)
+    } else {
+        None
+    };
 
-    // Schema v3 is active but unreleased. Coherently rewrite any variable-width
-    // reminder comparison text written by the immediately preceding v3 build so
-    // SQL ordering matches instant order. Idempotent on already-canonical rows.
-    if applied == CURRENT_SCHEMA_VERSION {
-        normalize_reminder_timestamp_text(connection)?;
-        ensure_v6_ai_runtime_indexes(connection)?;
-        repair_current_v6_ai_response_authority(connection)?;
-    }
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    apply_v7(&transaction)?;
+    record_version(&transaction, 7)?;
+    assert_v7_authority(&transaction)?;
+    assert_foreign_keys_clean(&transaction)?;
+    assert_integrity_clean(&transaction)?;
+    fail_before_v7_commit_if_injected()?;
+    transaction.commit()?;
 
+    // Commit is the last reported fallible migration operation. The verified snapshot
+    // is retained for recovery and is considered for pruning only by a later v7 open.
+    let _ = pre_v7_backup;
+    #[cfg(test)]
+    {
+        let _ = post_v7_commit_diagnostics();
+    }
     Ok(())
 }
 
 fn ensure_v6_ai_runtime_indexes(connection: &Connection) -> rusqlite::Result<()> {
     connection.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_ai_run_state_state
-         ON ai_run_state(state, run_id);",
+        "CREATE INDEX IF NOT EXISTS idx_ai_run_state_state ON ai_run_state(state, run_id);",
     )
 }
 
@@ -191,7 +208,7 @@ fn ensure_v6_ai_runtime_indexes(connection: &Connection) -> rusqlite::Result<()>
 pub(crate) fn repair_current_v6_ai_response_authority(
     connection: &Connection,
 ) -> rusqlite::Result<()> {
-    if current_version(connection)? != CURRENT_SCHEMA_VERSION {
+    if !matches!(current_version(connection)?, 6 | 7) {
         return Ok(());
     }
     let transaction = connection.unchecked_transaction()?;
@@ -915,6 +932,211 @@ CREATE INDEX idx_time_slot_tasks_task ON time_slot_tasks(task_id);
     Ok(())
 }
 
+/// Add normalized schema-v7 portable-plugin persistence authority.
+fn apply_v7(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
+    transaction.execute_batch(
+        r#"
+CREATE TABLE plugin_profile_state (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    next_package_generation INTEGER NOT NULL CHECK (next_package_generation >= 1),
+    updated_at TEXT NOT NULL CHECK (length(updated_at) BETWEEN 20 AND 35)
+);
+
+CREATE TABLE plugins (
+    plugin_id TEXT PRIMARY KEY CHECK (
+        length(CAST(plugin_id AS BLOB)) BETWEEN 1 AND 64
+        AND plugin_id = lower(plugin_id)
+        AND plugin_id NOT GLOB '*[^a-z0-9-]*'
+        AND plugin_id NOT LIKE '-%' AND plugin_id NOT LIKE '%-'
+        AND plugin_id NOT LIKE '%--%'
+    ),
+    package_generation INTEGER NOT NULL UNIQUE CHECK (package_generation >= 1),
+    activation_epoch INTEGER NOT NULL CHECK (activation_epoch >= 0),
+    package_sha256 TEXT NOT NULL UNIQUE CHECK (
+        length(package_sha256) = 64
+        AND package_sha256 = lower(package_sha256)
+        AND package_sha256 NOT GLOB '*[^0-9a-f]*'
+    ),
+    component_sha256 TEXT NOT NULL CHECK (
+        length(component_sha256) = 64
+        AND component_sha256 = lower(component_sha256)
+        AND component_sha256 NOT GLOB '*[^0-9a-f]*'
+    ),
+    publisher_key_id TEXT NOT NULL CHECK (
+        length(publisher_key_id) = 64
+        AND publisher_key_id = lower(publisher_key_id)
+        AND publisher_key_id NOT GLOB '*[^0-9a-f]*'
+    ),
+    version TEXT NOT NULL CHECK (length(CAST(version AS BLOB)) BETWEEN 1 AND 64),
+    manifest_json TEXT NOT NULL CHECK (
+        length(CAST(manifest_json AS BLOB)) BETWEEN 1 AND 65536
+    ),
+    permission_hash TEXT NOT NULL CHECK (
+        length(permission_hash) = 64
+        AND permission_hash = lower(permission_hash)
+        AND permission_hash NOT GLOB '*[^0-9a-f]*'
+    ),
+    compatibility TEXT NOT NULL CHECK (
+        length(CAST(compatibility AS BLOB)) BETWEEN 1 AND 128
+    ),
+    desired_enabled INTEGER NOT NULL CHECK (desired_enabled IN (0, 1)),
+    runtime_state TEXT NOT NULL CHECK (runtime_state IN (
+        'disabled', 'starting', 'active', 'degraded', 'failed', 'suspended',
+        'reverify_required'
+    )),
+    failure_count INTEGER NOT NULL CHECK (failure_count BETWEEN 0 AND 3),
+    last_error_code TEXT CHECK (
+        last_error_code IS NULL OR length(last_error_code) BETWEEN 1 AND 64
+    ),
+    next_retry_at TEXT CHECK (
+        next_retry_at IS NULL OR length(next_retry_at) BETWEEN 20 AND 35
+    ),
+    installed_at TEXT NOT NULL CHECK (length(installed_at) BETWEEN 20 AND 35),
+    updated_at TEXT NOT NULL CHECK (length(updated_at) BETWEEN 20 AND 35),
+    UNIQUE (plugin_id, package_generation),
+    UNIQUE (plugin_id, package_generation, permission_hash),
+    UNIQUE (plugin_id, package_generation, package_sha256),
+    UNIQUE (plugin_id, package_generation, activation_epoch)
+);
+CREATE INDEX idx_plugins_runtime ON plugins(desired_enabled, runtime_state, plugin_id);
+CREATE INDEX idx_plugins_publisher ON plugins(publisher_key_id, plugin_id);
+
+CREATE TABLE plugin_grants (
+    plugin_id TEXT NOT NULL,
+    package_generation INTEGER NOT NULL CHECK (package_generation >= 1),
+    capability TEXT NOT NULL CHECK (length(capability) BETWEEN 1 AND 32),
+    scope_json TEXT NOT NULL CHECK (length(CAST(scope_json AS BLOB)) BETWEEN 2 AND 65536),
+    scope_hash TEXT NOT NULL CHECK (
+        length(scope_hash) = 64 AND scope_hash = lower(scope_hash)
+        AND scope_hash NOT GLOB '*[^0-9a-f]*'
+    ),
+    permission_hash TEXT NOT NULL CHECK (
+        length(permission_hash) = 64 AND permission_hash = lower(permission_hash)
+        AND permission_hash NOT GLOB '*[^0-9a-f]*'
+    ),
+    granted_at TEXT NOT NULL CHECK (length(granted_at) BETWEEN 20 AND 35),
+    PRIMARY KEY (plugin_id, capability, scope_hash),
+    FOREIGN KEY (plugin_id, package_generation, permission_hash)
+        REFERENCES plugins(plugin_id, package_generation, permission_hash) ON DELETE CASCADE
+);
+CREATE INDEX idx_plugin_grants_generation
+    ON plugin_grants(plugin_id, package_generation, permission_hash);
+
+CREATE TABLE plugin_publisher_trust (
+    key_id TEXT PRIMARY KEY CHECK (
+        length(key_id) = 64 AND key_id = lower(key_id)
+        AND key_id NOT GLOB '*[^0-9a-f]*'
+    ),
+    public_key BLOB NOT NULL CHECK (length(public_key) = 32),
+    status TEXT NOT NULL CHECK (status IN ('active', 'revoked')),
+    trusted_at TEXT NOT NULL CHECK (length(trusted_at) BETWEEN 20 AND 35),
+    revoked_at TEXT CHECK (revoked_at IS NULL OR length(revoked_at) BETWEEN 20 AND 35),
+    CHECK ((status = 'active' AND revoked_at IS NULL)
+        OR (status = 'revoked' AND revoked_at IS NOT NULL))
+);
+CREATE INDEX idx_plugin_publisher_trust_status
+    ON plugin_publisher_trust(status, key_id);
+
+CREATE TABLE plugin_policy (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    community_enabled INTEGER NOT NULL DEFAULT 0 CHECK (community_enabled IN (0, 1)),
+    updated_at TEXT NOT NULL CHECK (length(updated_at) BETWEEN 20 AND 35)
+);
+
+CREATE TABLE plugin_settings (
+    plugin_id TEXT NOT NULL REFERENCES plugins(plugin_id) ON DELETE CASCADE,
+    setting_key TEXT NOT NULL CHECK (
+        length(CAST(setting_key AS BLOB)) BETWEEN 1 AND 64
+        AND setting_key = lower(setting_key)
+        AND setting_key NOT GLOB '*[^a-z0-9-]*'
+        AND setting_key NOT LIKE '-%' AND setting_key NOT LIKE '%-'
+        AND setting_key NOT LIKE '%--%'
+    ),
+    value_json TEXT NOT NULL CHECK (length(CAST(value_json AS BLOB)) <= 65536),
+    updated_at TEXT NOT NULL CHECK (length(updated_at) BETWEEN 20 AND 35),
+    PRIMARY KEY (plugin_id, setting_key)
+);
+
+CREATE TABLE plugin_kv (
+    plugin_id TEXT NOT NULL REFERENCES plugins(plugin_id) ON DELETE CASCADE,
+    key TEXT NOT NULL CHECK (length(CAST(key AS BLOB)) BETWEEN 1 AND 128),
+    value BLOB NOT NULL CHECK (length(value) <= 65536),
+    updated_at TEXT NOT NULL CHECK (length(updated_at) BETWEEN 20 AND 35),
+    PRIMARY KEY (plugin_id, key)
+);
+
+CREATE TABLE plugin_event_cursors (
+    plugin_id TEXT PRIMARY KEY REFERENCES plugins(plugin_id) ON DELETE CASCADE,
+    event_epoch TEXT NOT NULL CHECK (length(event_epoch) = 36),
+    revision INTEGER NOT NULL CHECK (revision >= 0),
+    resync_required INTEGER NOT NULL CHECK (resync_required IN (0, 1)),
+    updated_at TEXT NOT NULL CHECK (length(updated_at) BETWEEN 20 AND 35)
+);
+CREATE INDEX idx_plugin_event_cursors_resync
+    ON plugin_event_cursors(resync_required, plugin_id);
+
+CREATE TABLE plugin_dependency_locks (
+    plugin_id TEXT NOT NULL REFERENCES plugins(plugin_id) ON DELETE CASCADE,
+    dependency_id TEXT NOT NULL REFERENCES plugins(plugin_id) ON DELETE RESTRICT,
+    version_requirement TEXT NOT NULL CHECK (
+        length(CAST(version_requirement AS BLOB)) BETWEEN 1 AND 128
+    ),
+    resolved_version TEXT NOT NULL CHECK (
+        length(CAST(resolved_version AS BLOB)) BETWEEN 1 AND 64
+    ),
+    dependency_package_generation INTEGER NOT NULL CHECK (dependency_package_generation >= 1),
+    dependency_package_sha256 TEXT NOT NULL CHECK (
+        length(dependency_package_sha256) = 64
+        AND dependency_package_sha256 = lower(dependency_package_sha256)
+        AND dependency_package_sha256 NOT GLOB '*[^0-9a-f]*'
+    ),
+    updated_at TEXT NOT NULL CHECK (length(updated_at) BETWEEN 20 AND 35),
+    PRIMARY KEY (plugin_id, dependency_id),
+    CHECK (plugin_id <> dependency_id),
+    FOREIGN KEY (dependency_id, dependency_package_generation, dependency_package_sha256)
+        REFERENCES plugins(plugin_id, package_generation, package_sha256) ON DELETE RESTRICT
+);
+CREATE INDEX idx_plugin_dependency_locks_dependency
+    ON plugin_dependency_locks(dependency_id, plugin_id);
+
+CREATE TABLE plugin_invocations (
+    operation_id TEXT PRIMARY KEY CHECK (length(operation_id) = 36),
+    plugin_id TEXT NOT NULL,
+    package_generation INTEGER NOT NULL CHECK (package_generation >= 1),
+    activation_epoch INTEGER NOT NULL CHECK (activation_epoch > 0),
+    hook_kind TEXT NOT NULL CHECK (
+        hook_kind IN ('invoke_command', 'handle_event', 'handle_surface_action', 'resync')
+    ),
+    entry_id TEXT NOT NULL CHECK (length(CAST(entry_id AS BLOB)) BETWEEN 1 AND 64),
+    request_hash TEXT NOT NULL CHECK (
+        length(request_hash) = 64 AND request_hash = lower(request_hash)
+        AND request_hash NOT GLOB '*[^0-9a-f]*'
+    ),
+    delivery_id TEXT NOT NULL CHECK (length(delivery_id) = 36),
+    state TEXT NOT NULL CHECK (state IN (
+        'reserved', 'dispatching_http', 'effect_committing', 'ambiguous_http'
+    )),
+    error_code TEXT CHECK (error_code IS NULL OR length(error_code) BETWEEN 1 AND 64),
+    created_at TEXT NOT NULL CHECK (length(created_at) BETWEEN 20 AND 35),
+    updated_at TEXT NOT NULL CHECK (length(updated_at) BETWEEN 20 AND 35),
+    retain_until TEXT NOT NULL CHECK (length(retain_until) BETWEEN 20 AND 35),
+    FOREIGN KEY (plugin_id, package_generation, activation_epoch)
+        REFERENCES plugins(plugin_id, package_generation, activation_epoch) ON DELETE CASCADE
+);
+CREATE INDEX idx_plugin_invocations_plugin_state
+    ON plugin_invocations(plugin_id, state, operation_id);
+CREATE INDEX idx_plugin_invocations_retention
+    ON plugin_invocations(retain_until, operation_id);
+
+INSERT INTO plugin_profile_state(singleton, next_package_generation, updated_at)
+VALUES (1, 1, '1970-01-01T00:00:00Z');
+INSERT INTO plugin_policy(singleton, community_enabled, updated_at)
+VALUES (1, 0, '1970-01-01T00:00:00Z');
+"#,
+    )?;
+    Ok(())
+}
+
 /// Add schema-v6 AI chat/memory/approval tables and expand settings with AI/voice defaults.
 fn apply_v6(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
     use junban_domain::AppSettings;
@@ -1436,29 +1658,27 @@ fn reconcile_task_snapshot(
     Ok(true)
 }
 
-/// WAL-safe online backup of an existing v2 profile, verified before migration.
-fn create_verified_pre_v2_backup(
+/// WAL-safe online backup of an existing profile, fully verified before migration.
+fn create_verified_pre_migration_backup(
     connection: &Connection,
     profile_dir: &Path,
+    expected_version: i64,
+    prefix: &str,
 ) -> rusqlite::Result<PathBuf> {
     let backup_dir = profile_dir.join(PRE_MIGRATION_BACKUP_DIR);
     ensure_backup_dirs(profile_dir)?;
-
-    // Collapse WAL into the main DB so the backup API copies a consistent snapshot.
     checkpoint_wal(connection)?;
 
-    let stamp = backup_timestamp_label(Timestamp::now());
-    let backup_path = backup_dir.join(format!(
-        "{PRE_V2_BACKUP_PREFIX}{stamp}{PRE_V2_BACKUP_SUFFIX}"
-    ));
+    // Refuse to snapshot anything except the exact expected canonical authority.
+    verify_connection_for_version(connection, expected_version)?;
 
-    // Remove a same-timestamp leftover so retry after a partial failure is clean.
+    let stamp = backup_timestamp_label(Timestamp::now());
+    let backup_path = backup_dir.join(format!("{prefix}{stamp}{PRE_MIGRATION_BACKUP_SUFFIX}"));
     if backup_path.exists() {
         fs::remove_file(&backup_path).map_err(io_to_sqlite)?;
     }
 
-    let backup_result = connection.backup(MAIN_DB, &backup_path, None);
-    if let Err(error) = backup_result {
+    if let Err(error) = connection.backup(MAIN_DB, &backup_path, None) {
         let _ = fs::remove_file(&backup_path);
         return Err(error);
     }
@@ -1466,25 +1686,14 @@ fn create_verified_pre_v2_backup(
         let _ = fs::remove_file(&backup_path);
         return Err(io_to_sqlite(error));
     }
-
-    if let Err(error) = verify_pre_v2_backup(&backup_path) {
+    if let Err(error) = verify_pre_migration_backup(&backup_path, expected_version) {
         let _ = fs::remove_file(&backup_path);
         return Err(error);
     }
-
     Ok(backup_path)
 }
 
-fn finalize_successful_v2_to_v3(profile_dir: &Path, backup_path: &Path) -> rusqlite::Result<()> {
-    // Re-verify the snapshot we just took and reopen the migrated live DB.
-    verify_pre_v2_backup(backup_path)?;
-    verify_migrated_database(profile_dir)?;
-    prune_pre_migration_backups(profile_dir)?;
-    Ok(())
-}
-
 fn ensure_backup_dirs(profile_dir: &Path) -> rusqlite::Result<()> {
-    // Set private perms on each created level (create_dir_all alone would not).
     crate::ensure_private_dir(&profile_dir.join("backups")).map_err(io_to_sqlite)?;
     crate::ensure_private_dir(&profile_dir.join(PRE_MIGRATION_BACKUP_DIR)).map_err(io_to_sqlite)?;
     Ok(())
@@ -1503,44 +1712,100 @@ fn checkpoint_wal(connection: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-fn verify_pre_v2_backup(path: &Path) -> rusqlite::Result<()> {
+fn verify_pre_migration_backup(path: &Path, expected_version: i64) -> rusqlite::Result<()> {
     let connection = open_readonly(path)?;
-    let version = current_version(&connection)?;
-    if version != 2 {
+    verify_connection_for_version(&connection, expected_version).map_err(|_| {
+        migration_err(format!(
+            "pre-migration backup failed schema-v{expected_version} verification"
+        ))
+    })
+}
+
+fn verify_database(profile_dir: &Path, expected_version: i64) -> rusqlite::Result<()> {
+    let connection = open_readonly(&profile_dir.join(DATABASE_FILE))?;
+    verify_connection_for_version(&connection, expected_version)
+}
+
+fn verify_connection_for_version(
+    connection: &Connection,
+    expected_version: i64,
+) -> rusqlite::Result<()> {
+    let version = current_version(connection)?;
+    if version != expected_version {
         return Err(migration_err(format!(
-            "pre-migration backup schema version {version} is not 2"
+            "database schema version {version} is not {expected_version}"
         )));
     }
-    if !integrity_check_ok(&connection)? {
-        return Err(migration_err(
-            "pre-migration backup failed PRAGMA integrity_check",
-        ));
+    if !integrity_check_ok(connection)? {
+        return Err(migration_err("database failed PRAGMA integrity_check"));
+    }
+    assert_foreign_keys_clean(connection)?;
+    if expected_version >= 6 {
+        let actual = read_user_schema(connection)?;
+        let expected = canonical_schema(expected_version)?;
+        if actual != expected {
+            return Err(migration_err(schema_mismatch_message(
+                &actual,
+                &expected,
+                expected_version,
+            )));
+        }
     }
     Ok(())
 }
 
-fn verify_migrated_database(profile_dir: &Path) -> rusqlite::Result<()> {
-    let path = profile_dir.join(DATABASE_FILE);
-    let connection = open_readonly(&path)?;
-    let version = current_version(&connection)?;
-    if version != CURRENT_SCHEMA_VERSION {
-        return Err(migration_err(format!(
-            "migrated database schema version {version} is not {CURRENT_SCHEMA_VERSION}"
-        )));
+fn canonical_schema(version: i64) -> rusqlite::Result<Vec<MigrationSchemaObject>> {
+    let mut connection = Connection::open_in_memory()?;
+    connection.pragma_update(None, "foreign_keys", true)?;
+    connection.execute_batch(MIGRATIONS_SCHEMA)?;
+    for next in 1..=version {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        match next {
+            1 => apply_v1(&transaction)?,
+            2 => apply_v2(&transaction)?,
+            3 => apply_v3(&transaction)?,
+            4 => apply_v4(&transaction)?,
+            5 => apply_v5(&transaction)?,
+            6 => apply_v6(&transaction)?,
+            7 => apply_v7(&transaction)?,
+            _ => return Err(unsupported_schema(version)),
+        }
+        record_version(&transaction, next)?;
+        transaction.commit()?;
     }
-    if !integrity_check_ok(&connection)? {
-        return Err(migration_err(
-            "migrated database failed PRAGMA integrity_check",
-        ));
-    }
-    Ok(())
+    read_user_schema(&connection)
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct MigrationSchemaObject {
+    object_type: String,
+    name: String,
+    table_name: String,
+    sql: String,
+}
+
+fn read_user_schema(connection: &Connection) -> rusqlite::Result<Vec<MigrationSchemaObject>> {
+    let mut statement = connection.prepare(
+        "SELECT type, name, tbl_name, COALESCE(sql, '')
+         FROM sqlite_schema
+         WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\'
+         ORDER BY type, name",
+    )?;
+    statement
+        .query_map([], |row| {
+            Ok(MigrationSchemaObject {
+                object_type: row.get(0)?,
+                name: row.get(1)?,
+                table_name: row.get(2)?,
+                sql: row.get(3)?,
+            })
+        })?
+        .collect()
 }
 
 fn open_readonly(path: &Path) -> rusqlite::Result<Connection> {
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let connection = Connection::open_with_flags(path, flags)?;
-    // Foreign keys are not required for integrity_check/schema_version reads,
-    // but enable them so any accidental write attempt would still enforce FKs.
     connection.pragma_update(None, "foreign_keys", true)?;
     Ok(connection)
 }
@@ -1555,14 +1820,12 @@ fn integrity_check_ok(connection: &Connection) -> rusqlite::Result<bool> {
     Ok(messages.len() == 1 && messages[0] == "ok")
 }
 
-fn prune_pre_migration_backups(profile_dir: &Path) -> rusqlite::Result<()> {
+fn prune_pre_migration_backups(profile_dir: &Path, prefix: &str) -> rusqlite::Result<()> {
     let backup_dir = profile_dir.join(PRE_MIGRATION_BACKUP_DIR);
     if !backup_dir.exists() {
         return Ok(());
     }
-
-    let mut backups = list_pre_v2_backups(&backup_dir)?;
-    // Newest first by filename (UTC stamp is sortable after ':' → '-').
+    let mut backups = list_pre_migration_backups(&backup_dir, prefix)?;
     backups.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
     for stale in backups.into_iter().skip(PRE_MIGRATION_BACKUP_RETAIN) {
         fs::remove_file(&stale).map_err(io_to_sqlite)?;
@@ -1570,23 +1833,31 @@ fn prune_pre_migration_backups(profile_dir: &Path) -> rusqlite::Result<()> {
     Ok(())
 }
 
-fn list_pre_v2_backups(backup_dir: &Path) -> rusqlite::Result<Vec<PathBuf>> {
+fn list_pre_migration_backups(backup_dir: &Path, prefix: &str) -> rusqlite::Result<Vec<PathBuf>> {
     let mut backups = Vec::new();
-    let entries = fs::read_dir(backup_dir).map_err(io_to_sqlite)?;
-    for entry in entries {
-        let entry = entry.map_err(io_to_sqlite)?;
-        let path = entry.path();
+    for entry in fs::read_dir(backup_dir).map_err(io_to_sqlite)? {
+        let path = entry.map_err(io_to_sqlite)?.path();
         if !path.is_file() {
             continue;
         }
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if name.starts_with(PRE_V2_BACKUP_PREFIX) && name.ends_with(PRE_V2_BACKUP_SUFFIX) {
+        if name.starts_with(prefix) && name.ends_with(PRE_MIGRATION_BACKUP_SUFFIX) {
             backups.push(path);
         }
     }
     Ok(backups)
+}
+
+#[cfg(test)]
+fn verify_pre_v2_backup(path: &Path) -> rusqlite::Result<()> {
+    verify_pre_migration_backup(path, 2)
+}
+
+#[cfg(test)]
+fn list_pre_v2_backups(backup_dir: &Path) -> rusqlite::Result<Vec<PathBuf>> {
+    list_pre_migration_backups(backup_dir, PRE_V2_BACKUP_PREFIX)
 }
 
 fn backup_timestamp_label(now: Timestamp) -> String {
@@ -1596,6 +1867,93 @@ fn backup_timestamp_label(now: Timestamp) -> String {
 
 fn io_to_sqlite(error: io::Error) -> rusqlite::Error {
     migration_err(format!("pre-migration backup I/O error: {error}"))
+}
+
+fn assert_v7_authority(connection: &Connection) -> rusqlite::Result<()> {
+    if current_version(connection)? != 7 {
+        return Err(migration_err("schema-v7 migration row is missing"));
+    }
+    let mut statement =
+        connection.prepare("SELECT version, applied_at FROM schema_migrations ORDER BY version")?;
+    let mut rows = statement.query([])?;
+    let mut expected_version = 1_i64;
+    while let Some(row) = rows.next()? {
+        let version: i64 = row.get(0)?;
+        let applied_at: String = row.get(1)?;
+        let timestamp = applied_at
+            .parse::<Timestamp>()
+            .map_err(|_| migration_err("schema migration timestamp is invalid"))?;
+        if version != expected_version || timestamp.to_string() != applied_at {
+            return Err(migration_err("schema migration history is not canonical"));
+        }
+        expected_version += 1;
+    }
+    if expected_version != 8 {
+        return Err(migration_err("schema migration history is incomplete"));
+    }
+    let actual = read_user_schema(connection)?;
+    let expected = canonical_schema(7)?;
+    if actual != expected {
+        return Err(migration_err(schema_mismatch_message(
+            &actual, &expected, 7,
+        )));
+    }
+    crate::plugin_validation::validate_plugin_authority(connection)
+        .map_err(|_| migration_err("schema-v7 plugin authority validation failed"))
+}
+
+fn schema_mismatch_message(
+    actual: &[MigrationSchemaObject],
+    expected: &[MigrationSchemaObject],
+    version: i64,
+) -> String {
+    let difference = actual
+        .iter()
+        .zip(expected)
+        .find(|(left, right)| left != right)
+        .map_or_else(
+            || {
+                format!(
+                    "object count actual={} expected={}",
+                    actual.len(),
+                    expected.len()
+                )
+            },
+            |(left, right)| format!("object actual={} expected={}", left.name, right.name),
+        );
+    format!("database schema does not match canonical schema v{version}: {difference}")
+}
+
+fn assert_integrity_clean(connection: &Connection) -> rusqlite::Result<()> {
+    if integrity_check_ok(connection)? {
+        Ok(())
+    } else {
+        Err(migration_err(
+            "schema migration failed PRAGMA integrity_check",
+        ))
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_BEFORE_V7_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static FAIL_AFTER_V7_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn fail_before_v7_commit_if_injected() -> rusqlite::Result<()> {
+    #[cfg(test)]
+    if FAIL_BEFORE_V7_COMMIT.with(|fail| fail.replace(false)) {
+        return Err(migration_err("injected schema-v7 pre-commit failure"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn post_v7_commit_diagnostics() -> rusqlite::Result<()> {
+    if FAIL_AFTER_V7_COMMIT.with(|fail| fail.replace(false)) {
+        return Err(migration_err("injected post-commit diagnostic failure"));
+    }
+    Ok(())
 }
 
 fn migration_err(message: impl Into<String>) -> rusqlite::Error {
@@ -1646,6 +2004,7 @@ mod tests {
     use crate::ops_types::{post_from_tasks, restore_tasks_inverse};
 
     static TEST_DB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    static V7_FAILURE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct TestDb {
         path: PathBuf,
@@ -1695,14 +2054,7 @@ mod tests {
     }
 
     fn seed_v1_with_sample_rows(connection: &mut Connection) {
-        connection
-            .execute_batch(
-                "CREATE TABLE schema_migrations (
-                    version INTEGER PRIMARY KEY,
-                    applied_at TEXT NOT NULL
-                );",
-            )
-            .unwrap();
+        connection.execute_batch(MIGRATIONS_SCHEMA).unwrap();
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .unwrap();
@@ -1912,13 +2264,31 @@ mod tests {
             .collect()
     }
 
+    fn drop_v7_schema(connection: &Connection) {
+        connection
+            .execute_batch(
+                "DROP TABLE IF EXISTS plugin_invocations;
+                 DROP TABLE IF EXISTS plugin_dependency_locks;
+                 DROP TABLE IF EXISTS plugin_event_cursors;
+                 DROP TABLE IF EXISTS plugin_kv;
+                 DROP TABLE IF EXISTS plugin_settings;
+                 DROP TABLE IF EXISTS plugin_grants;
+                 DROP TABLE IF EXISTS plugin_policy;
+                 DROP TABLE IF EXISTS plugin_publisher_trust;
+                 DROP TABLE IF EXISTS plugins;
+                 DROP TABLE IF EXISTS plugin_profile_state;
+                 DELETE FROM schema_migrations WHERE version = 7;",
+            )
+            .unwrap();
+    }
+
     #[test]
     fn future_schema_version_is_rejected_without_mutation() {
         let db = TestDb::new();
         let mut connection = db.open();
         connection
             .execute_batch(
-                "CREATE TABLE schema_migrations (
+                "CREATE TABLE IF NOT EXISTS schema_migrations (
                     version INTEGER PRIMARY KEY,
                     applied_at TEXT NOT NULL
                  );
@@ -1945,7 +2315,10 @@ mod tests {
         let mut connection = db.open();
         db.migrate(&mut connection).unwrap();
 
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
         let tables = table_names(&connection);
         for name in [
             "app_state",
@@ -1979,9 +2352,37 @@ mod tests {
             "ai_run_state",
             "ai_response_invalidations",
             "ai_quota",
+            "plugin_profile_state",
+            "plugins",
+            "plugin_grants",
+            "plugin_publisher_trust",
+            "plugin_policy",
+            "plugin_settings",
+            "plugin_kv",
+            "plugin_event_cursors",
+            "plugin_dependency_locks",
+            "plugin_invocations",
         ] {
             assert!(tables.contains(name), "missing table {name}");
         }
+
+        let allocator: (i64, i64) = connection
+            .query_row(
+                "SELECT singleton, next_package_generation FROM plugin_profile_state",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let policy: (i64, i64) = connection
+            .query_row(
+                "SELECT singleton, community_enabled FROM plugin_policy",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(allocator, (1, 1));
+        assert_eq!(policy, (1, 0));
+        assert_v7_authority(&connection).unwrap();
 
         // Fresh profiles must not create a pre-migration backup.
         assert!(pre_migration_backups(db.profile_dir()).is_empty());
@@ -2293,7 +2694,10 @@ mod tests {
             seed_v1_with_sample_rows(&mut connection);
             assert_eq!(current_version(&connection).unwrap(), 1);
             db.migrate(&mut connection).unwrap();
-            assert_eq!(current_version(&connection).unwrap(), 6);
+            assert_eq!(
+                current_version(&connection).unwrap(),
+                CURRENT_SCHEMA_VERSION
+            );
             // Fresh migrations do not create a pre-v2 backup.
             assert!(pre_migration_backups(db.profile_dir()).is_empty());
 
@@ -2441,7 +2845,10 @@ mod tests {
 
         connection.execute_batch("DROP TABLE comments;").unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
         assert!(table_names(&connection).contains("projects"));
         assert!(table_names(&connection).contains("operation_undo"));
         assert!(table_names(&connection).contains("app_settings"));
@@ -2471,7 +2878,10 @@ mod tests {
         assert_eq!(current_version(&connection).unwrap(), 2);
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
 
         let title: String = connection
             .query_row(
@@ -2567,7 +2977,10 @@ INSERT INTO task_activity(
             .unwrap();
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
         let cancelled_at: Option<String> = connection
             .query_row(
                 "SELECT cancelled_at FROM tasks WHERE id = '33333333-3333-7333-8333-333333333333'",
@@ -2858,7 +3271,10 @@ INSERT INTO task_activity(
             .execute_batch("DROP TRIGGER fail_last_undo_reconciliation;")
             .unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
 
         let mut migrated_rows = Vec::new();
         for (source_operation_id, original) in &original_payloads {
@@ -2930,7 +3346,10 @@ END;
             .execute_batch("DROP TRIGGER fail_cancel_backfill;")
             .unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
         let cancelled_at: Option<String> = connection
             .query_row(
                 "SELECT cancelled_at FROM tasks WHERE id = '11111111-1111-7111-8111-111111111111'",
@@ -2982,7 +3401,10 @@ END;
             .execute_batch("DROP TABLE app_settings;")
             .unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
         assert!(table_names(&connection).contains("app_settings"));
         assert!(table_names(&connection).contains("time_slot_tasks"));
         assert!(task_columns(&connection).contains(&"completion_operation_id".to_owned()));
@@ -3023,7 +3445,10 @@ END;
         assert_eq!(pre_migration_backups(db.profile_dir()).len(), 4);
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
 
         let mut remaining = pre_migration_backups(db.profile_dir());
         remaining.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
@@ -3058,9 +3483,13 @@ END;
         let db = TestDb::new();
         let mut connection = db.open();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
 
         // Rewrite the profile back to a Phase 3/v4 settings shape, then re-run migrate.
+        drop_v7_schema(&connection);
         connection
             .execute_batch(
                 r#"
@@ -3097,7 +3526,10 @@ INSERT INTO app_settings(key, value_json, updated_at) VALUES
         assert_eq!(current_version(&connection).unwrap(), 4);
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
 
         let epoch: String = connection
             .query_row(
@@ -3171,9 +3603,13 @@ INSERT INTO app_settings(key, value_json, updated_at) VALUES
         let db = TestDb::new();
         let mut connection = db.open();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
 
         // Roll back only the v6 marker and AI tables, keep v5 settings blob.
+        drop_v7_schema(&connection);
         let settings_json: String = connection
             .query_row(
                 "SELECT value_json FROM app_settings WHERE key = 'settings_json'",
@@ -3212,10 +3648,16 @@ DROP TABLE IF EXISTS ai_quota;
         assert_eq!(current_version(&connection).unwrap(), 5);
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
         // Failed migration rollback: force a mid-migration failure path by retrying.
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert_eq!(
+            current_version(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
 
         let settings_json: String = connection
             .query_row(
@@ -3842,6 +4284,61 @@ INSERT INTO task_activity(
             )
             .unwrap();
         assert_eq!(remaining, "op-other");
+    }
+
+    #[test]
+    fn v6_to_v7_is_atomic_and_retains_verified_snapshot() {
+        let _serial = V7_FAILURE_TEST_LOCK.lock().unwrap();
+        let db = TestDb::new();
+        let mut connection = db.open();
+        db.migrate(&mut connection).unwrap();
+        drop_v7_schema(&connection);
+        assert_eq!(current_version(&connection).unwrap(), 6);
+
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 7);
+        assert_v7_authority(&connection).unwrap();
+        let backup_dir = db.profile_dir().join(PRE_MIGRATION_BACKUP_DIR);
+        let backups = list_pre_migration_backups(&backup_dir, PRE_V7_BACKUP_PREFIX).unwrap();
+        assert_eq!(backups.len(), 1);
+        verify_pre_migration_backup(&backups[0], 6).unwrap();
+    }
+
+    #[test]
+    fn v7_precommit_failure_rolls_back_and_exact_retry_succeeds() {
+        let _serial = V7_FAILURE_TEST_LOCK.lock().unwrap();
+        let db = TestDb::new();
+        let mut connection = db.open();
+        db.migrate(&mut connection).unwrap();
+        drop_v7_schema(&connection);
+
+        FAIL_BEFORE_V7_COMMIT.with(|fail| fail.set(true));
+        let error = db.migrate(&mut connection).unwrap_err();
+        assert!(error.to_string().contains("pre-commit"));
+        assert_eq!(current_version(&connection).unwrap(), 6);
+        assert!(!table_names(&connection).contains("plugins"));
+        let backup_dir = db.profile_dir().join(PRE_MIGRATION_BACKUP_DIR);
+        let backups = list_pre_migration_backups(&backup_dir, PRE_V7_BACKUP_PREFIX).unwrap();
+        assert_eq!(backups.len(), 1);
+        verify_pre_migration_backup(&backups[0], 6).unwrap();
+
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 7);
+        assert_v7_authority(&connection).unwrap();
+    }
+
+    #[test]
+    fn committed_v7_never_reports_post_commit_diagnostic_failure() {
+        let _serial = V7_FAILURE_TEST_LOCK.lock().unwrap();
+        let db = TestDb::new();
+        let mut connection = db.open();
+        db.migrate(&mut connection).unwrap();
+        drop_v7_schema(&connection);
+
+        FAIL_AFTER_V7_COMMIT.with(|fail| fail.set(true));
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 7);
+        assert_v7_authority(&connection).unwrap();
     }
 
     fn table_columns(connection: &Connection, table: &str) -> Vec<String> {

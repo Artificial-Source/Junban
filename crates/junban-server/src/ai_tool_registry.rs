@@ -1,9 +1,8 @@
 //! Authoritative Rust-owned AI tool registry, validation, and result envelope.
 //!
-//! Wave 3f.1 freezes the 48 legacy-parity tool names, strict JSON argument
-//! validation, effect classification, and the trusted structured result model.
-//! Provider orchestration, approvals, routes, and UI are intentionally out of
-//! scope for this subwave.
+//! Wave 3f freezes the advertised tool names, strict JSON argument validation,
+//! effect classification, and the trusted structured result model. Provider
+//! orchestration, approvals, routes, and UI are intentionally layered elsewhere.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -26,7 +25,9 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 /// Frozen advertised tool inventory size.
-pub const AI_TOOL_COUNT: usize = 48;
+pub const AI_TOOL_COUNT: usize = 49;
+/// Maximum exact blocks accepted by `apply_auto_schedule_day`.
+pub const AI_TOOL_AUTO_SCHEDULE_BLOCKS_MAX: usize = 16;
 /// Maximum UTF-8 bytes accepted for one tool name.
 pub const AI_TOOL_NAME_MAX_BYTES: usize = 64;
 /// Maximum entities retained in one tool result payload before truncation.
@@ -197,6 +198,7 @@ pub enum ValidatedToolAction {
     RecallMemories(RecallMemoriesArgs),
     ForgetMemory(ForgetMemoryArgs),
     AutoScheduleDay(OptionalDateArgs),
+    ApplyAutoScheduleDay(ApplyAutoScheduleDayArgs),
     RescheduleDay(OptionalDateArgs),
     TimeblockingListBlocks(TimeblockingRangeArgs),
     TimeblockingCreateBlock(TimeblockingCreateBlockArgs),
@@ -251,6 +253,7 @@ impl ValidatedToolAction {
             Self::RecallMemories(_) => "recall_memories",
             Self::ForgetMemory(_) => "forget_memory",
             Self::AutoScheduleDay(_) => "auto_schedule_day",
+            Self::ApplyAutoScheduleDay(_) => "apply_auto_schedule_day",
             Self::RescheduleDay(_) => "reschedule_day",
             Self::TimeblockingListBlocks(_) => "timeblocking_list_blocks",
             Self::TimeblockingCreateBlock(_) => "timeblocking_create_block",
@@ -309,6 +312,7 @@ impl ValidatedToolAction {
             | Self::DismissReminder(_)
             | Self::SaveMemory(_)
             | Self::ForgetMemory(_)
+            | Self::ApplyAutoScheduleDay(_)
             | Self::TimeblockingCreateBlock(_)
             | Self::TimeblockingUpdateBlock(_)
             | Self::TimeblockingDeleteBlock(_)
@@ -597,6 +601,25 @@ pub struct OptionalDateArgs {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ApplyAutoScheduleDayArgs {
+    pub date: String,
+    pub blocks: Vec<ApplyAutoScheduleBlockArgs>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplyAutoScheduleBlockArgs {
+    pub task_id: String,
+    pub title: String,
+    pub date: String,
+    pub start: String,
+    pub end: String,
+    pub time_zone: String,
+    pub estimated_minutes: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EstimateTaskDurationArgs {
     #[serde(default)]
     pub task_id: Option<String>,
@@ -726,13 +749,13 @@ pub struct ToolRegistration {
     pub dynamic_effect: bool,
 }
 
-/// Deterministic ordered inventory of the 48 legacy-parity tool names.
+/// Deterministic ordered inventory of the advertised tool names.
 #[must_use]
 pub fn tool_registrations() -> &'static [ToolRegistration; AI_TOOL_COUNT] {
     &TOOL_REGISTRATIONS
 }
 
-/// Provider-advertised tool specs (`junban_ai::ToolSpec`) for the 48 tools.
+/// Provider-advertised tool specs (`junban_ai::ToolSpec`) for the frozen inventory.
 #[must_use]
 pub fn tool_specs() -> &'static [ToolSpec] {
     &TOOL_SPECS
@@ -994,6 +1017,9 @@ fn validate_action_semantics(action: &ValidatedToolAction) -> Result<(), ToolVal
                 parse_date(date)?;
             }
         }
+        ValidatedToolAction::ApplyAutoScheduleDay(args) => {
+            validate_apply_auto_schedule_day_args(args)?;
+        }
         ValidatedToolAction::EstimateTaskDuration(args) => {
             if let Some(task_id) = &args.task_id {
                 parse_task_id(task_id)?;
@@ -1154,6 +1180,52 @@ fn validate_optional_date_range(
             "invalid_range",
             "from must be on or before to",
         ));
+    }
+    Ok(())
+}
+
+fn validate_apply_auto_schedule_day_args(
+    args: &ApplyAutoScheduleDayArgs,
+) -> Result<(), ToolValidationError> {
+    let apply_date = parse_date(&args.date)?;
+    if args.blocks.is_empty() || args.blocks.len() > AI_TOOL_AUTO_SCHEDULE_BLOCKS_MAX {
+        return Err(ToolValidationError::new(
+            "invalid_blocks",
+            "blocks must contain 1..=16 entries",
+        ));
+    }
+    let mut seen_tasks = BTreeSet::new();
+    for block in &args.blocks {
+        let task_id = parse_task_id(&block.task_id)?;
+        if !seen_tasks.insert(task_id.to_string()) {
+            return Err(ToolValidationError::new(
+                "duplicate_task_id",
+                "blocks must reference unique task_id values",
+            ));
+        }
+        parse_entity_name(&block.title)?;
+        let block_date = parse_date(&block.date)?;
+        if block_date != apply_date {
+            return Err(ToolValidationError::new(
+                "date_mismatch",
+                "each block date must equal the apply date",
+            ));
+        }
+        let start = parse_time(&block.start)?;
+        let end = parse_time(&block.end)?;
+        if end <= start {
+            return Err(ToolValidationError::new(
+                "invalid_range",
+                "end must be after start on the same date",
+            ));
+        }
+        parse_time_zone(&block.time_zone)?;
+        if !(15..=240).contains(&block.estimated_minutes) {
+            return Err(ToolValidationError::new(
+                "invalid_estimated_minutes",
+                "estimated_minutes must be 15..=240",
+            ));
+        }
     }
     Ok(())
 }
@@ -1710,6 +1782,11 @@ static TOOL_REGISTRATIONS: [ToolRegistration; AI_TOOL_COUNT] = [
         dynamic_effect: false,
     },
     ToolRegistration {
+        name: "apply_auto_schedule_day",
+        default_effect: ToolEffect::ApprovalRequired,
+        dynamic_effect: false,
+    },
+    ToolRegistration {
         name: "reschedule_day",
         default_effect: ToolEffect::Read,
         dynamic_effect: false,
@@ -1818,6 +1895,9 @@ fn tool_description(name: &str) -> String {
         "recall_memories" => "Recall up to 50 explicit memories for context.",
         "forget_memory" => "Delete one explicit memory.",
         "auto_schedule_day" => "Preview a deterministic day schedule only. Does not apply changes.",
+        "apply_auto_schedule_day" => {
+            "Apply exact approved auto-schedule blocks by creating one time block per entry. Does not recompute the schedule."
+        }
         "reschedule_day" => "Preview a deterministic reschedule plan only. Does not apply changes.",
         "timeblocking_list_blocks" => "List time blocks and slots in a civil date range.",
         "timeblocking_create_block" => "Create one time block.",
@@ -2077,6 +2157,40 @@ fn tool_parameters(name: &str) -> Value {
             json!({ "memory_id": uuid_prop("Memory ID") }),
             &["memory_id"],
         ),
+        "apply_auto_schedule_day" => object(
+            json!({
+                "date": string_prop("Civil date YYYY-MM-DD", 10),
+                "blocks": {
+                    "type": "array",
+                    "description": "Exact approved blocks to create",
+                    "minItems": 1,
+                    "maxItems": AI_TOOL_AUTO_SCHEDULE_BLOCKS_MAX,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "task_id": uuid_prop("Task ID"),
+                            "title": string_prop("Block title", MAX_ENTITY_NAME_CHARS),
+                            "date": string_prop("Civil date YYYY-MM-DD", 10),
+                            "start": string_prop("Start time", 16),
+                            "end": string_prop("End time", 16),
+                            "time_zone": string_prop("IANA time zone", MAX_TIMEZONE_NAME_CHARS),
+                            "estimated_minutes": int_prop("Duration minutes", 15, 240),
+                        },
+                        "required": [
+                            "task_id",
+                            "title",
+                            "date",
+                            "start",
+                            "end",
+                            "time_zone",
+                            "estimated_minutes"
+                        ],
+                    }
+                }
+            }),
+            &["date", "blocks"],
+        ),
         "timeblocking_list_blocks" => object(
             json!({
                 "from": string_prop("Range start YYYY-MM-DD", 10),
@@ -2305,6 +2419,7 @@ fn deserialize_action(
         "recall_memories" => ValidatedToolAction::RecallMemories(from_value(value)?),
         "forget_memory" => ValidatedToolAction::ForgetMemory(from_value(value)?),
         "auto_schedule_day" => ValidatedToolAction::AutoScheduleDay(from_value(value)?),
+        "apply_auto_schedule_day" => ValidatedToolAction::ApplyAutoScheduleDay(from_value(value)?),
         "reschedule_day" => ValidatedToolAction::RescheduleDay(from_value(value)?),
         "timeblocking_list_blocks" => {
             ValidatedToolAction::TimeblockingListBlocks(from_value(value)?)
@@ -2683,7 +2798,7 @@ mod tests {
         assert_eq!(names.len(), AI_TOOL_COUNT);
         // Snapshot first/last and counts by default effect.
         assert_eq!(regs[0].name, "create_task");
-        assert_eq!(regs[47].name, "timeblocking_replan_day");
+        assert_eq!(regs[AI_TOOL_COUNT - 1].name, "timeblocking_replan_day");
         let reads = regs
             .iter()
             .filter(|entry| entry.default_effect == ToolEffect::Read)
@@ -2693,7 +2808,7 @@ mod tests {
             .filter(|entry| entry.default_effect == ToolEffect::ApprovalRequired)
             .count();
         assert_eq!(reads, 24);
-        assert_eq!(mutations, 24);
+        assert_eq!(mutations, 25);
         assert_eq!(regs.iter().filter(|entry| entry.dynamic_effect).count(), 1);
     }
 
@@ -2771,6 +2886,28 @@ mod tests {
         let (schedule, _) =
             validate_tool_call("auto_schedule_day", r#"{"date":"2026-08-02"}"#).unwrap();
         assert_eq!(schedule.effect(), ToolEffect::Read);
+        let (apply_schedule, _) = validate_tool_call(
+            "apply_auto_schedule_day",
+            r#"{
+                "date":"2026-08-02",
+                "blocks":[{
+                    "task_id":"00112233-4455-6677-8899-aabbccddeeff",
+                    "title":"Deep work",
+                    "date":"2026-08-02",
+                    "start":"09:00:00",
+                    "end":"09:30:00",
+                    "time_zone":"UTC",
+                    "estimated_minutes":30
+                }]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(apply_schedule.effect(), ToolEffect::ApprovalRequired);
+        assert!(
+            !registration("apply_auto_schedule_day")
+                .unwrap()
+                .dynamic_effect
+        );
         let (reschedule, _) = validate_tool_call("reschedule_day", "{}").unwrap();
         assert_eq!(reschedule.effect(), ToolEffect::Read);
     }
@@ -2932,6 +3069,25 @@ mod tests {
         let bulk_complete = &specs["bulk_complete_tasks"].parameters["properties"];
         assert_eq!(bulk_complete["task_ids"]["maxItems"], MAX_BULK_IDS);
 
+        let apply_schedule = &specs["apply_auto_schedule_day"].parameters["properties"];
+        assert_eq!(
+            apply_schedule["blocks"]["maxItems"],
+            AI_TOOL_AUTO_SCHEDULE_BLOCKS_MAX
+        );
+        assert_eq!(apply_schedule["blocks"]["minItems"], 1);
+        assert_eq!(
+            apply_schedule["blocks"]["items"]["properties"]["estimated_minutes"]["minimum"],
+            15
+        );
+        assert_eq!(
+            apply_schedule["blocks"]["items"]["properties"]["estimated_minutes"]["maximum"],
+            240
+        );
+        assert_eq!(
+            apply_schedule["blocks"]["items"]["properties"]["title"]["maxLength"],
+            MAX_ENTITY_NAME_CHARS
+        );
+
         let recall = &specs["recall_memories"].parameters["properties"];
         assert_eq!(
             recall["limit"]["maximum"],
@@ -2963,6 +3119,81 @@ mod tests {
             (
                 "break_down_task",
                 r#"{"task_id":"00112233-4455-6677-8899-aabbccddeeff","subtasks":[""]}"#,
+            ),
+            (
+                "apply_auto_schedule_day",
+                r#"{"date":"2026-08-02","blocks":[]}"#,
+            ),
+            (
+                "apply_auto_schedule_day",
+                r#"{
+                    "date":"2026-08-02",
+                    "blocks":[{
+                        "task_id":"00112233-4455-6677-8899-aabbccddeeff",
+                        "title":"Deep work",
+                        "date":"2026-08-03",
+                        "start":"09:00:00",
+                        "end":"09:30:00",
+                        "time_zone":"UTC",
+                        "estimated_minutes":30
+                    }]
+                }"#,
+            ),
+            (
+                "apply_auto_schedule_day",
+                r#"{
+                    "date":"2026-08-02",
+                    "blocks":[{
+                        "task_id":"00112233-4455-6677-8899-aabbccddeeff",
+                        "title":"Deep work",
+                        "date":"2026-08-02",
+                        "start":"10:00:00",
+                        "end":"09:00:00",
+                        "time_zone":"UTC",
+                        "estimated_minutes":30
+                    }]
+                }"#,
+            ),
+            (
+                "apply_auto_schedule_day",
+                r#"{
+                    "date":"2026-08-02",
+                    "blocks":[{
+                        "task_id":"00112233-4455-6677-8899-aabbccddeeff",
+                        "title":"Deep work",
+                        "date":"2026-08-02",
+                        "start":"09:00:00",
+                        "end":"09:30:00",
+                        "time_zone":"UTC",
+                        "estimated_minutes":14
+                    }]
+                }"#,
+            ),
+            (
+                "apply_auto_schedule_day",
+                r#"{
+                    "date":"2026-08-02",
+                    "blocks":[
+                        {
+                            "task_id":"00112233-4455-6677-8899-aabbccddeeff",
+                            "title":"One",
+                            "date":"2026-08-02",
+                            "start":"09:00:00",
+                            "end":"09:30:00",
+                            "time_zone":"UTC",
+                            "estimated_minutes":30
+                        },
+                        {
+                            "task_id":"00112233-4455-6677-8899-aabbccddeeff",
+                            "title":"Two",
+                            "date":"2026-08-02",
+                            "start":"10:00:00",
+                            "end":"10:30:00",
+                            "time_zone":"UTC",
+                            "estimated_minutes":30
+                        }
+                    ]
+                }"#,
             ),
         ];
         for (name, args) in cases {

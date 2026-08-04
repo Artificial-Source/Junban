@@ -9397,8 +9397,8 @@ async fn ai_response_executes_read_tool_and_continues_with_exact_registry() {
     let (first, second) = fixture.await.unwrap();
     let first: Value = serde_json::from_str(&first).unwrap();
     let second: Value = serde_json::from_str(&second).unwrap();
-    assert_eq!(first["tools"].as_array().unwrap().len(), 48);
-    assert_eq!(second["tools"].as_array().unwrap().len(), 48);
+    assert_eq!(first["tools"].as_array().unwrap().len(), 49);
+    assert_eq!(second["tools"].as_array().unwrap().len(), 49);
     assert!(
         second["messages"]
             .as_array()

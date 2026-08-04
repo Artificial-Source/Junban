@@ -19,19 +19,21 @@ use junban_app::{
     TemporalContext, TimeBlockPatch, TimeBlockRangePatch,
 };
 use junban_domain::{
-    AI_CONTEXT_MEMORIES_MAX, AppSettings, CivilTimeRange, MAX_QUERY_PAGE_LIMIT, MAX_TAGS_PER_TASK,
-    OperationId, ProjectView, SortOrder, Tag, Task, TaskDraft, TaskQuery, TaskSort, TaskStatus,
-    TimeBlockDraft, TimeZoneName, WorkHours, parse_filter,
+    AI_CONTEXT_MEMORIES_MAX, AppSettings, CivilTimeRange, MAX_ENTITY_NAME_CHARS,
+    MAX_QUERY_PAGE_LIMIT, MAX_TAGS_PER_TASK, OperationId, ProjectView, SortOrder, Tag, Task,
+    TaskDraft, TaskQuery, TaskSort, TaskStatus, TimeBlockDraft, TimeZoneName, WorkHours,
+    parse_filter,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::ai_tool_registry::{
-    AI_TOOL_COMPOSITE_CREATE_MAX, AI_TOOL_DEFAULT_COLOR, AI_TOOL_RESULT_ENTITY_MAX,
-    AnalyzeRangeArgs, BulkCreateTasksArgs, BulkUpdateTasksArgs, CreateProjectArgs, CreateTaskArgs,
-    EstimateTaskDurationArgs, ExtractTasksFromTextArgs, FindSimilarTasksArgs, ListRemindersArgs,
-    OptionalDateArgs, QueryTasksArgs, RecallMemoriesArgs, SaveMemoryArgs, SuggestTagsArgs,
+    AI_TOOL_AUTO_SCHEDULE_BLOCKS_MAX, AI_TOOL_COMPOSITE_CREATE_MAX, AI_TOOL_DEFAULT_COLOR,
+    AI_TOOL_RESULT_ENTITY_MAX, AnalyzeRangeArgs, ApplyAutoScheduleDayArgs, BulkCreateTasksArgs,
+    BulkUpdateTasksArgs, CreateProjectArgs, CreateTaskArgs, EstimateTaskDurationArgs,
+    ExtractTasksFromTextArgs, FindSimilarTasksArgs, ListRemindersArgs, OptionalDateArgs,
+    QueryTasksArgs, RecallMemoriesArgs, SaveMemoryArgs, SuggestTagsArgs,
     TimeblockingCreateBlockArgs, TimeblockingRangeArgs, TimeblockingReplanDayArgs,
     TimeblockingScheduleTaskArgs, TimeblockingSetRecurrenceArgs, TimeblockingUpdateBlockArgs,
     ToolEffect, ToolResultEnvelope, ToolValidationError, UpdateProjectArgs, UpdateTaskArgs,
@@ -191,6 +193,7 @@ fn is_composite_mutation(action: &ValidatedToolAction) -> bool {
         action,
         ValidatedToolAction::BreakDownTask(_)
             | ValidatedToolAction::BulkCreateTasks(_)
+            | ValidatedToolAction::ApplyAutoScheduleDay(_)
             | ValidatedToolAction::ExtractTasksFromText(ExtractTasksFromTextArgs {
                 dry_run: false,
                 ..
@@ -405,6 +408,9 @@ where
         },
         ValidatedToolAction::AutoScheduleDay(args) => {
             exec_schedule_preview(service, tool, args, ctx, false).await
+        }
+        ValidatedToolAction::ApplyAutoScheduleDay(args) => {
+            exec_apply_auto_schedule_day(service, args, root_operation_id.unwrap(), mode).await
         }
         ValidatedToolAction::RescheduleDay(args) => {
             exec_schedule_preview(service, tool, args, ctx, true).await
@@ -1772,7 +1778,7 @@ async fn exec_recall_memories<R: Repository, E: EventSink>(
     }
 }
 
-// ── Scheduling previews (read-only in 3f.1) ─────────────────────────────────
+// ── Scheduling preview + exact apply ────────────────────────────────────────
 
 /// Documented fallback work window when `settings.planning.work_hours` is unset.
 const DEFAULT_WORK_HOURS_START_MINUTE: u16 = 9 * 60;
@@ -1839,7 +1845,8 @@ async fn exec_schedule_preview<R: Repository, E: EventSink>(
     } else {
         plan.focus_tasks.clone()
     };
-    for task in focus.iter().take(16) {
+    let zone_name = ctx.zone_name();
+    for task in focus.iter().take(AI_TOOL_AUTO_SCHEDULE_BLOCKS_MAX) {
         let minutes = task
             .estimated_minutes
             .map(|value| value.get())
@@ -1850,10 +1857,11 @@ async fn exec_schedule_preview<R: Repository, E: EventSink>(
         };
         proposed.push(json!({
             "task_id": task.id.to_string(),
-            "title": task.title.as_str(),
+            "title": truncate_entity_title(task.title.as_str()),
             "date": date.to_string(),
             "start": start.to_string(),
             "end": end.to_string(),
+            "time_zone": zone_name.as_str(),
             "estimated_minutes": minutes,
         }));
         cursor = end;
@@ -1863,7 +1871,7 @@ async fn exec_schedule_preview<R: Repository, E: EventSink>(
         json!({
             "date": date.to_string(),
             "preview_only": true,
-            "apply_supported": false,
+            "apply_supported": !reschedule,
             "proposed_blocks": proposed,
             "capacity_minutes": plan.capacity_minutes,
             "estimated_total_minutes": plan.estimated_total_minutes,
@@ -1877,6 +1885,211 @@ async fn exec_schedule_preview<R: Repository, E: EventSink>(
             "revision": plan.revision,
         }),
     )
+}
+
+async fn exec_apply_auto_schedule_day<R: Repository, E: EventSink>(
+    service: &JunbanService<R, E>,
+    args: &ApplyAutoScheduleDayArgs,
+    root: OperationId,
+    mode: ToolExecutionMode,
+) -> ToolResultEnvelope {
+    const TOOL: &str = "apply_auto_schedule_day";
+    // Registry already enforced bounds; rebuild drafts before any effect.
+    if args.blocks.is_empty() || args.blocks.len() > AI_TOOL_AUTO_SCHEDULE_BLOCKS_MAX {
+        return ToolResultEnvelope::error(
+            TOOL,
+            "invalid_blocks",
+            "blocks must contain 1..=16 entries",
+        );
+    }
+    let apply_date = match parse_date(&args.date) {
+        Ok(date) => date,
+        Err(error) => return validation_error(TOOL, error),
+    };
+
+    struct PreparedBlock {
+        index: usize,
+        task_id: junban_domain::TaskId,
+        child_op: OperationId,
+        draft: TimeBlockDraft,
+    }
+
+    let mut prepared = Vec::with_capacity(args.blocks.len());
+    let mut seen_tasks = BTreeSet::new();
+    for (index, block) in args.blocks.iter().enumerate() {
+        let task_id = match parse_task_id(&block.task_id) {
+            Ok(id) => id,
+            Err(error) => return validation_error(TOOL, error),
+        };
+        if !seen_tasks.insert(task_id) {
+            return ToolResultEnvelope::error(
+                TOOL,
+                "duplicate_task_id",
+                "blocks must reference unique task_id values",
+            );
+        }
+        let title = match parse_entity_name(&block.title) {
+            Ok(title) => title,
+            Err(error) => return validation_error(TOOL, error),
+        };
+        let block_date = match parse_date(&block.date) {
+            Ok(date) => date,
+            Err(error) => return validation_error(TOOL, error),
+        };
+        if block_date != apply_date {
+            return ToolResultEnvelope::error(
+                TOOL,
+                "date_mismatch",
+                "each block date must equal the apply date",
+            );
+        }
+        let start = match parse_time(&block.start) {
+            Ok(time) => time,
+            Err(error) => return validation_error(TOOL, error),
+        };
+        let end = match parse_time(&block.end) {
+            Ok(time) => time,
+            Err(error) => return validation_error(TOOL, error),
+        };
+        let zone = match parse_time_zone(&block.time_zone) {
+            Ok(zone) => zone,
+            Err(error) => return validation_error(TOOL, error),
+        };
+        if !(15..=240).contains(&block.estimated_minutes) {
+            return ToolResultEnvelope::error(
+                TOOL,
+                "invalid_estimated_minutes",
+                "estimated_minutes must be 15..=240",
+            );
+        }
+        let range = match CivilTimeRange::new(block_date, start, end, zone) {
+            Ok(range) => range,
+            Err(_) => {
+                return ToolResultEnvelope::error(
+                    TOOL,
+                    "invalid_range",
+                    "end must be after start on the same date",
+                );
+            }
+        };
+        let mut draft = TimeBlockDraft::new(title, range);
+        draft.task_id = Some(task_id);
+        prepared.push(PreparedBlock {
+            index,
+            task_id,
+            child_op: derive_child_operation_id(root, TOOL, index as u32),
+            draft,
+        });
+    }
+
+    // Recovery probes durable child receipts before state-dependent prevalidation so a
+    // fully committed retry can replay even if tasks later changed or disappeared.
+    // Initial execution always goes through create_time_block so exact same-root
+    // retries replay while poisoned/different child requests fail closed.
+    let mut recovered: Vec<Option<CommittedMutation>> = vec![None; prepared.len()];
+    if mode == ToolExecutionMode::Recovery {
+        let mut missing = false;
+        for (index, item) in prepared.iter().enumerate() {
+            match service.recover_operation_receipt(item.child_op).await {
+                Ok(mutation) => {
+                    if let Err(error) = validate_time_block_create_receipt(&mutation, item.child_op)
+                    {
+                        return map_app_error(TOOL, error);
+                    }
+                    recovered[index] = Some(mutation);
+                }
+                Err(AppError::NotFound) => missing = true,
+                Err(error) => return map_app_error(TOOL, error),
+            }
+        }
+        if missing {
+            // Fail closed before the first missing write when any referenced task is gone.
+            for task_id in &seen_tasks {
+                if service.get_task(*task_id).await.is_err() {
+                    let created = recovered
+                        .iter()
+                        .zip(prepared.iter())
+                        .filter_map(|(mutation, item)| {
+                            mutation.as_ref().map(|mutation| {
+                                composite_created_block_entry(mutation, item.child_op, item.task_id)
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    if created.is_empty() {
+                        return ToolResultEnvelope::error(
+                            TOOL,
+                            "not_found",
+                            "one or more referenced tasks were not found",
+                        );
+                    }
+                    let failed_index = recovered.iter().position(Option::is_none).unwrap_or(0);
+                    let failed_op = prepared[failed_index].child_op;
+                    return partial_composite_outcome(
+                        TOOL,
+                        created,
+                        failed_index,
+                        AppError::NotFound,
+                        json!({
+                            "date": apply_date.to_string(),
+                            "failed_operation_id": failed_op.to_string(),
+                        }),
+                    );
+                }
+            }
+        }
+    } else {
+        // Initial path: prevalidate every task before the first write.
+        for task_id in &seen_tasks {
+            if service.get_task(*task_id).await.is_err() {
+                return ToolResultEnvelope::error(
+                    TOOL,
+                    "not_found",
+                    "one or more referenced tasks were not found",
+                );
+            }
+        }
+    }
+
+    let mut created = Vec::with_capacity(prepared.len());
+    for (item, prior) in prepared.into_iter().zip(recovered.into_iter()) {
+        let mutation = if let Some(mutation) = prior {
+            mutation
+        } else {
+            match create_composite_time_block(service, item.child_op, item.draft, mode).await {
+                Ok(mutation) => mutation,
+                Err(error) => {
+                    return partial_composite_outcome(
+                        TOOL,
+                        created,
+                        item.index,
+                        error,
+                        json!({
+                            "date": apply_date.to_string(),
+                            "failed_operation_id": item.child_op.to_string(),
+                        }),
+                    );
+                }
+            }
+        };
+        created.push(composite_created_block_entry(
+            &mutation,
+            item.child_op,
+            item.task_id,
+        ));
+    }
+
+    ToolResultEnvelope::success(
+        TOOL,
+        json!({
+            "date": apply_date.to_string(),
+            "created": created,
+            "count": args.blocks.len(),
+        }),
+    )
+}
+
+fn truncate_entity_title(raw: &str) -> String {
+    raw.chars().take(MAX_ENTITY_NAME_CHARS).collect()
 }
 
 fn minutes_to_time(minute: u16) -> Time {
@@ -2353,9 +2566,55 @@ async fn create_composite_task<R: Repository, E: EventSink>(
     Ok(mutation)
 }
 
+async fn create_composite_time_block<R: Repository, E: EventSink>(
+    service: &JunbanService<R, E>,
+    child_operation_id: OperationId,
+    draft: TimeBlockDraft,
+    mode: ToolExecutionMode,
+) -> Result<CommittedMutation, AppError> {
+    let mutation = if mode == ToolExecutionMode::Recovery {
+        match service.recover_operation_receipt(child_operation_id).await {
+            Ok(mutation) => mutation,
+            Err(AppError::NotFound) => service.create_time_block(child_operation_id, draft).await?,
+            Err(error) => return Err(error),
+        }
+    } else {
+        service.create_time_block(child_operation_id, draft).await?
+    };
+    validate_time_block_create_receipt(&mutation, child_operation_id)?;
+    Ok(mutation)
+}
+
 fn composite_created_entry(mutation: &CommittedMutation, child_operation_id: OperationId) -> Value {
     json!({
         "task_id": mutation_primary_id(mutation).expect("validated task-create receipt"),
+        "operation_id": child_operation_id.to_string(),
+        "revision": mutation.event.revision,
+        "event_type": mutation.event.event_type.as_str(),
+    })
+}
+
+fn validate_time_block_create_receipt(
+    mutation: &CommittedMutation,
+    child_operation_id: OperationId,
+) -> Result<(), AppError> {
+    if mutation.event.operation_id != child_operation_id
+        || mutation.event.event_type.as_str() != EventType::TIME_BLOCK_CREATED
+        || mutation_primary_id(mutation).is_none()
+    {
+        return Err(AppError::Storage);
+    }
+    Ok(())
+}
+
+fn composite_created_block_entry(
+    mutation: &CommittedMutation,
+    child_operation_id: OperationId,
+    task_id: junban_domain::TaskId,
+) -> Value {
+    json!({
+        "block_id": mutation_primary_id(mutation).expect("validated time-block-create receipt"),
+        "task_id": task_id.to_string(),
         "operation_id": child_operation_id.to_string(),
         "revision": mutation.event.revision,
         "event_type": mutation.event.event_type.as_str(),
@@ -2901,7 +3160,20 @@ mod tests {
         let scheduled = execute_tool(&service, &schedule, &ctx, None).await;
         assert_eq!(scheduled.outcome, ToolOutcome::Success);
         assert_eq!(scheduled.data["preview_only"], true);
-        assert_eq!(scheduled.data["apply_supported"], false);
+        assert_eq!(scheduled.data["apply_supported"], true);
+        let proposed = scheduled.data["proposed_blocks"].as_array().unwrap();
+        if let Some(first) = proposed.first() {
+            assert!(first.get("time_zone").and_then(Value::as_str).is_some());
+            assert!(first.get("task_id").is_some());
+            assert!(first.get("title").is_some());
+            assert!(first.get("date").is_some());
+            assert!(first.get("start").is_some());
+            assert!(first.get("end").is_some());
+            assert!(first.get("estimated_minutes").is_some());
+        }
+        let (reschedule, _) = validate_tool_call("reschedule_day", "{}").unwrap();
+        let rescheduled = execute_tool(&service, &reschedule, &ctx, None).await;
+        assert_eq!(rescheduled.data["apply_supported"], false);
         let after = service
             .list_timeblocking_range(ctx.date(), ctx.date())
             .await
@@ -3049,6 +3321,13 @@ mod tests {
             ("save_memory", r#"{"content":"second"}"#.to_owned(), true),
             ("recall_memories", r#"{}"#.to_owned(), false),
             ("auto_schedule_day", r#"{}"#.to_owned(), false),
+            (
+                "apply_auto_schedule_day",
+                format!(
+                    r#"{{"date":"2026-08-02","blocks":[{{"task_id":"{task_id}","title":"Seed task","date":"2026-08-02","start":"15:00:00","end":"15:30:00","time_zone":"UTC","estimated_minutes":30}}]}}"#
+                ),
+                true,
+            ),
             ("reschedule_day", r#"{}"#.to_owned(), false),
             ("timeblocking_list_blocks", r#"{}"#.to_owned(), false),
             (
@@ -3234,7 +3513,205 @@ mod tests {
             }
         }
         assert_eq!(reads, 24);
-        assert_eq!(mutations, 24);
+        assert_eq!(mutations, 25);
+    }
+
+    #[tokio::test]
+    async fn apply_auto_schedule_day_creates_exact_blocks_and_replays() {
+        let (_owner, service, profile) = open_service();
+        let ctx = fixed_ctx();
+
+        let long_title = "x".repeat(MAX_ENTITY_NAME_CHARS + 40);
+        let (create, _) = validate_tool_call(
+            "create_task",
+            &json!({
+                "title": long_title,
+                "estimated_minutes": 45,
+                "due_date": "2026-08-02"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let created_task = execute_tool(&service, &create, &ctx, Some(op())).await;
+        assert_eq!(created_task.outcome, ToolOutcome::Success);
+
+        let (preview_action, _) = validate_tool_call("auto_schedule_day", "{}").unwrap();
+        let preview = execute_tool(&service, &preview_action, &ctx, None).await;
+        assert_eq!(preview.outcome, ToolOutcome::Success);
+        assert_eq!(preview.data["apply_supported"], true);
+        let proposed = preview.data["proposed_blocks"].as_array().unwrap();
+        assert!(!proposed.is_empty());
+        let first = &proposed[0];
+        assert_eq!(
+            first["title"].as_str().unwrap().chars().count(),
+            MAX_ENTITY_NAME_CHARS
+        );
+        assert_eq!(first["time_zone"], "UTC");
+
+        // Round-trip exact preview fields through apply validation + execution.
+        let apply_args = json!({
+            "date": preview.data["date"].as_str().unwrap(),
+            "blocks": proposed,
+        });
+        let (apply_action, _) =
+            validate_tool_call("apply_auto_schedule_day", &apply_args.to_string()).unwrap();
+        assert_eq!(apply_action.effect(), ToolEffect::ApprovalRequired);
+        assert!(is_composite_mutation(&apply_action));
+
+        let root = op();
+        let first_apply = execute_tool(&service, &apply_action, &ctx, Some(root)).await;
+        assert_eq!(first_apply.outcome, ToolOutcome::Success);
+        assert_eq!(first_apply.data["count"], proposed.len());
+        let created = first_apply.data["created"].as_array().unwrap();
+        assert_eq!(created.len(), proposed.len());
+        assert!(created.iter().all(|row| {
+            row["block_id"].as_str().is_some()
+                && row["task_id"].as_str().is_some()
+                && row["operation_id"].as_str().is_some()
+                && row["revision"].as_u64().is_some()
+                && row["event_type"] == "time_block.created"
+        }));
+        assert_eq!(
+            created[0]["operation_id"],
+            derive_child_operation_id(root, "apply_auto_schedule_day", 0).to_string()
+        );
+        assert!(first_apply.operation_id.is_none());
+        assert!(first_apply.revision.is_none());
+
+        let blocks = service
+            .list_timeblocking_range(ctx.date(), ctx.date())
+            .await
+            .unwrap();
+        assert_eq!(blocks.blocks.len(), proposed.len());
+
+        // Exact same-root retry replays child receipts without duplicating blocks.
+        let second_apply = execute_tool(&service, &apply_action, &ctx, Some(root)).await;
+        assert_eq!(second_apply, first_apply);
+        let blocks_after = service
+            .list_timeblocking_range(ctx.date(), ctx.date())
+            .await
+            .unwrap();
+        assert_eq!(blocks_after.blocks.len(), blocks.blocks.len());
+
+        // Fully committed recovery still replays after the referenced task is deleted.
+        let task_id = TaskId::parse(first["task_id"].as_str().unwrap()).unwrap();
+        service.delete_task(op(), task_id).await.unwrap();
+        let recovered = execute_tool_recovery(&service, &apply_action, &ctx, root)
+            .await
+            .unwrap();
+        assert_eq!(recovered, first_apply);
+
+        let _ = fs::remove_dir_all(profile);
+    }
+
+    #[tokio::test]
+    async fn apply_auto_schedule_day_prevalidates_tasks_before_first_write() {
+        let (_owner, service, profile) = open_service();
+        let ctx = fixed_ctx();
+        let missing_task = Uuid::new_v4().to_string();
+        let (action, _) = validate_tool_call(
+            "apply_auto_schedule_day",
+            &json!({
+                "date": "2026-08-02",
+                "blocks": [{
+                    "task_id": missing_task,
+                    "title": "Ghost",
+                    "date": "2026-08-02",
+                    "start": "09:00:00",
+                    "end": "09:30:00",
+                    "time_zone": "UTC",
+                    "estimated_minutes": 30
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let result = execute_tool(&service, &action, &ctx, Some(op())).await;
+        assert_eq!(result.outcome, ToolOutcome::Error);
+        assert_eq!(result.data["code"], "not_found");
+        assert!(result.data.get("partial").is_none());
+        let blocks = service
+            .list_timeblocking_range(ctx.date(), ctx.date())
+            .await
+            .unwrap();
+        assert!(blocks.blocks.is_empty());
+        let _ = fs::remove_dir_all(profile);
+    }
+
+    #[tokio::test]
+    async fn apply_auto_schedule_day_reports_partial_on_later_child_conflict() {
+        let (_owner, service, profile) = open_service();
+        let ctx = fixed_ctx();
+
+        let mut task_ids = Vec::new();
+        for title in ["one", "two"] {
+            let (create, _) =
+                validate_tool_call("create_task", &json!({ "title": title }).to_string()).unwrap();
+            let created = execute_tool(&service, &create, &ctx, Some(op())).await;
+            task_ids.push(created.data["primary"]["id"].as_str().unwrap().to_owned());
+        }
+
+        let root = op();
+        let poison = derive_child_operation_id(root, "apply_auto_schedule_day", 1);
+        service
+            .create_time_block(
+                poison,
+                TimeBlockDraft::new(
+                    junban_domain::EntityName::new("poison").unwrap(),
+                    CivilTimeRange::new(
+                        ctx.date(),
+                        Time::constant(12, 0, 0, 0),
+                        Time::constant(12, 30, 0, 0),
+                        ctx.zone_name(),
+                    )
+                    .unwrap(),
+                ),
+            )
+            .await
+            .unwrap();
+
+        let (action, _) = validate_tool_call(
+            "apply_auto_schedule_day",
+            &json!({
+                "date": "2026-08-02",
+                "blocks": [
+                    {
+                        "task_id": task_ids[0],
+                        "title": "one",
+                        "date": "2026-08-02",
+                        "start": "09:00:00",
+                        "end": "09:30:00",
+                        "time_zone": "UTC",
+                        "estimated_minutes": 30
+                    },
+                    {
+                        "task_id": task_ids[1],
+                        "title": "two",
+                        "date": "2026-08-02",
+                        "start": "10:00:00",
+                        "end": "10:30:00",
+                        "time_zone": "UTC",
+                        "estimated_minutes": 30
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let partial = execute_tool(&service, &action, &ctx, Some(root)).await;
+        assert_eq!(partial.outcome, ToolOutcome::Error);
+        assert_eq!(partial.data["partial"], true);
+        assert_eq!(partial.data["failed_index"], 1);
+        assert_eq!(partial.data["code"], "idempotency_mismatch");
+        let created = partial.data["created"].as_array().unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(
+            created[0]["operation_id"],
+            derive_child_operation_id(root, "apply_auto_schedule_day", 0).to_string()
+        );
+        assert_eq!(partial.data["failed_operation_id"], poison.to_string());
+
+        let _ = fs::remove_dir_all(profile);
     }
 
     #[tokio::test]

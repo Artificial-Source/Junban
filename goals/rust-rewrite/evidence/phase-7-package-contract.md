@@ -80,7 +80,7 @@ version              canonical SemVer, 1–64 bytes
 publisher            { id, name, key_id }
 license               SPDX license expression, 1–128 ASCII bytes
 junban_compatibility  canonical SemVer requirement
-wit                   { package: "junban:plugin", world: "plugin", version: "0.1.0" }
+wit                   { package: "junban:plugin", world: "plugin", version: "0.1.0" } (required export world)
 runtime_profile       "rust" or "typescript"
 component_sha256      64 lowercase hex
 permissions          sorted unique permission records
@@ -92,7 +92,7 @@ settings              sorted unique typed setting records
 services              sorted unique read-only service records
 ```
 
-(`dependencies` has no leading whitespace in actual JSON; the alignment above is explanatory.)
+(`dependencies` has no leading whitespace in actual JSON; the alignment above is explanatory.) The WIT triple names the required export world, not an author target-world identity. Canonical `plugin` has no imports and exports the exact guest interface. Each Rust/TypeScript package targets its own build-only world that includes `junban:plugin/plugin@0.1.0` and imports only selected `junban:plugin/host-*` capability interfaces plus the exact runtime-profile baseline. Its local package/world name carries no runtime authority.
 
 Optional repository/homepage/readme/download URLs, arbitrary keywords, install paths, executable entry names, environment, native target, and package-controlled runtime limits are excluded from the runtime manifest. Search tags and release notes belong in the root-signed bundled index and remain non-authoritative presentation metadata.
 
@@ -217,8 +217,8 @@ Package parsing never constructs Wasmtime. A small bounded component parser/vali
 
 1. validates WebAssembly Component Model structure and exact component length/hash;
 2. requires a Component Model outer encoding, enumerates all component imports/exports, and treats embedded core modules only as component internals; JBP1 cannot carry a separate core module/native/custom executable sidecar;
-3. requires export of exact `junban:plugin/plugin@0.1.0` world functions and no alternate Junban world;
-4. maps every `junban:host/*@0.1.0` import to a requested manifest capability;
+3. requires exports structurally compatible with exact `junban:plugin/plugin@0.1.0` (the required guest interface) and rejects alternate Junban guest versions/exports;
+4. permits only exact `junban:plugin/host-* @0.1.0` interfaces selected by the package target world and maps every actual host import to a requested manifest capability;
 5. permits only the frozen minimal WASI P2 baseline for the signed runtime profile and rejects WASI filesystem, sockets, CLI run/exit, environment, stdio inheritance, HTTP, threads and unknown imports;
 6. caps custom/name/producers metadata and ignores it as authority;
 7. records exact sorted import/export fingerprint in install evidence.

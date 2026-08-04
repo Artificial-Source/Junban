@@ -193,7 +193,7 @@ Fault containment breaks a close measurement tie in favor of the child process. 
 
 ### WIT world v0.1.0
 
-Package authority: `package junban:plugin@0.1.0` with one synchronous guest world. Host implementations may await bounded Rust work internally; WASI P3/native async guest contracts are excluded.
+Package authority: `package junban:plugin@0.1.0` with one synchronous required `plugin` world that exports the guest interface and has no ambient imports. Each package targets its own WIT world that includes this required world and imports only its declared Junban host-capability interfaces plus its frozen runtime-profile baseline. This avoids impossible optional imports while preserving one exact guest ABI and a selective linker. Host implementations may await bounded Rust work internally; WASI P3/native async guest contracts are excluded.
 
 Guest exports:
 
@@ -202,7 +202,8 @@ Guest exports:
 - `handle-event`;
 - `render-surface` and `handle-surface-action`;
 - `validate-settings`;
-- bounded read-only `call-service` for declared plugin dependencies.
+- bounded read-only `call-service` for declared plugin dependencies;
+- bounded read-only `resync` for restore/retention recovery.
 
 Host imports:
 
@@ -213,11 +214,7 @@ Host imports:
 - bounded structured logging;
 - bounded call to a declared active dependency's read-only service export.
 
-Guest calls never commit domain or plugin-state writes. A successful ordinary export returns one typed `plugin-outcome` containing:
-
-- at most one application mutation request (single or existing bounded bulk operation), **or** one isolated KV patch;
-- declarative result/surface material;
-- bounded logs.
+Guest calls never commit domain or plugin-state writes. A successful ordinary command/event/surface-action export returns one typed `plugin-outcome` containing at most one application mutation request (single or existing bounded bulk operation), **or** one isolated KV patch. Render, service and validation exports have their own closed typed return shapes; structured logs use the bounded host import. No opaque JSON/bytes field can substitute for these typed contracts.
 
 There are no deferred HTTP intents in `plugin-outcome`. HTTP exists only as a synchronous host import so the guest can inspect the bounded response. The host records whether an invocation used HTTP and rejects any mutation or plugin-state patch returned by that invocation; an invocation is either externally effecting through HTTP or eligible for one post-success SQLite effect, never both.
 
@@ -241,6 +238,7 @@ Initial capabilities:
 - `events:subscribe` with exact event kinds;
 - isolated `settings` and `storage`;
 - `commands`, `ui:view`, `ui:panel`, `ui:status`;
+- `services:provide` and `services:consume` scoped to exact dependency/service identities;
 - `http` with exact HTTPS origins, method set, request/response ceilings, and no redirect;
 - `logging`.
 

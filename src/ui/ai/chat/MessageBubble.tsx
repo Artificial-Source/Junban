@@ -150,13 +150,14 @@ export const MessageBubble = memo(function MessageBubble({
         <div className="space-y-2">
           {message.segments.map((seg, i) => {
             if (seg.kind === "tool_proposed") {
+              // Approvals are decided while SSE remains open (run AwaitingApproval).
+              // Do not disable on isStreaming — decisionPending fences in-flight decisions.
               return (
                 <ToolProposalCard
                   key={`prop-${seg.proposal.approvalId}`}
                   proposal={seg.proposal}
                   onApprove={onApprove}
                   onReject={onReject}
-                  disabled={isStreaming}
                 />
               );
             }

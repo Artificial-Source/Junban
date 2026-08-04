@@ -1,12 +1,25 @@
+//! Private plugin-host stdio protocol authority.
+//!
+//! Each message starts with a canonical JSON header framed by its u32be byte
+//! length. Header bytes remain capped at 256 KiB. Exactly one unencoded raw body
+//! immediately follows a `Load` header (component bytes), an `Invoke` header
+//! (request bytes), or an `Outcome` header (outcome bytes). The corresponding
+//! header size determines the body boundary; the body has no second prefix.
+//! Every other frame has a zero-byte body. Receivers must read and validate the
+//! exact body before reading the next header.
+
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     error::{Result, SdkError},
-    util::{decode_hex_32, is_canonical_id},
+    util::{decode_hex_32, is_canonical_id, sha256},
 };
 
 pub const HOST_PROTOCOL_VERSION: u16 = 1;
 pub const HOST_FRAME_BYTES_MAX: usize = 256 * 1024;
+pub const HOST_COMPONENT_BODY_BYTES_MAX: usize = crate::package::COMPONENT_BYTES_MAX;
+pub const HOST_REQUEST_BODY_BYTES_MAX: usize = 256 * 1024;
+pub const HOST_OUTCOME_BODY_BYTES_MAX: usize = 256 * 1024;
 pub const HOST_PROTOCOL_NAME: &str = "junban-plugin-host-v1";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -214,8 +227,7 @@ pub fn validate_parent_frame(frame: &ParentFrame) -> Result<()> {
             fence.validate()?;
             decode_hex_32(package_sha256, "package_sha256")?;
             decode_hex_32(component_sha256, "component_sha256")?;
-            if *component_size == 0 || *component_size > crate::package::COMPONENT_BYTES_MAX as u64
-            {
+            if *component_size == 0 || *component_size > HOST_COMPONENT_BODY_BYTES_MAX as u64 {
                 return Err(SdkError::Protocol {
                     field: "component_size",
                 });
@@ -231,7 +243,8 @@ pub fn validate_parent_frame(frame: &ParentFrame) -> Result<()> {
             fence.validate()?;
             decode_hex_32(request_sha256, "request_sha256")?;
             if *request_size == 0
-                || usize::try_from(*request_size).unwrap_or(usize::MAX) > HOST_FRAME_BYTES_MAX
+                || usize::try_from(*request_size).unwrap_or(usize::MAX)
+                    > HOST_REQUEST_BODY_BYTES_MAX
             {
                 return Err(SdkError::Protocol {
                     field: "request_size",
@@ -270,7 +283,10 @@ pub fn validate_child_frame(frame: &ChildFrame) -> Result<()> {
         } => {
             fence.validate()?;
             decode_hex_32(outcome_sha256, "outcome_sha256")?;
-            if usize::try_from(*outcome_size).unwrap_or(usize::MAX) > HOST_FRAME_BYTES_MAX {
+            if *outcome_size == 0
+                || usize::try_from(*outcome_size).unwrap_or(usize::MAX)
+                    > HOST_OUTCOME_BODY_BYTES_MAX
+            {
                 return Err(SdkError::Protocol {
                     field: "outcome_size",
                 });
@@ -283,6 +299,96 @@ pub fn validate_child_frame(frame: &ChildFrame) -> Result<()> {
             validate_uuid(host_session_id, "host_session_id")
         }
     }
+}
+
+/// Return the exact raw body length required immediately after a parent header.
+pub fn parent_body_len(frame: &ParentFrame) -> Result<usize> {
+    validate_parent_frame(frame)?;
+    match frame {
+        ParentFrame::Load { component_size, .. } => {
+            usize::try_from(*component_size).map_err(|_| SdkError::Protocol {
+                field: "component_size",
+            })
+        }
+        ParentFrame::Invoke { request_size, .. } => {
+            usize::try_from(*request_size).map_err(|_| SdkError::Protocol {
+                field: "request_size",
+            })
+        }
+        ParentFrame::Hello { .. }
+        | ParentFrame::Cancel { .. }
+        | ParentFrame::Unload { .. }
+        | ParentFrame::Shutdown { .. } => Ok(0),
+    }
+}
+
+/// Return the exact raw body length required immediately after a child header.
+pub fn child_body_len(frame: &ChildFrame) -> Result<usize> {
+    validate_child_frame(frame)?;
+    match frame {
+        ChildFrame::Outcome { outcome_size, .. } => {
+            usize::try_from(*outcome_size).map_err(|_| SdkError::Protocol {
+                field: "outcome_size",
+            })
+        }
+        ChildFrame::Hello { .. }
+        | ChildFrame::Loaded { .. }
+        | ChildFrame::Failed { .. }
+        | ChildFrame::Unloaded { .. }
+        | ChildFrame::ShutdownComplete { .. } => Ok(0),
+    }
+}
+
+/// Validate a caller-owned parent body without copying or encoding it.
+pub fn validate_parent_body(frame: &ParentFrame, body: &[u8]) -> Result<()> {
+    let expected_len = parent_body_len(frame)?;
+    let expected_hash = match frame {
+        ParentFrame::Load {
+            component_sha256, ..
+        } => Some((component_sha256.as_str(), "component_sha256")),
+        ParentFrame::Invoke { request_sha256, .. } => {
+            Some((request_sha256.as_str(), "request_sha256"))
+        }
+        ParentFrame::Hello { .. }
+        | ParentFrame::Cancel { .. }
+        | ParentFrame::Unload { .. }
+        | ParentFrame::Shutdown { .. } => None,
+    };
+    validate_body(expected_len, expected_hash, body)
+}
+
+/// Validate a caller-owned child body without copying or encoding it.
+pub fn validate_child_body(frame: &ChildFrame, body: &[u8]) -> Result<()> {
+    let expected_len = child_body_len(frame)?;
+    let expected_hash = match frame {
+        ChildFrame::Outcome { outcome_sha256, .. } => {
+            Some((outcome_sha256.as_str(), "outcome_sha256"))
+        }
+        ChildFrame::Hello { .. }
+        | ChildFrame::Loaded { .. }
+        | ChildFrame::Failed { .. }
+        | ChildFrame::Unloaded { .. }
+        | ChildFrame::ShutdownComplete { .. } => None,
+    };
+    validate_body(expected_len, expected_hash, body)
+}
+
+fn validate_body(
+    expected_len: usize,
+    expected_hash: Option<(&str, &'static str)>,
+    body: &[u8],
+) -> Result<()> {
+    if body.len() != expected_len {
+        return Err(SdkError::Protocol {
+            field: "body length",
+        });
+    }
+    if let Some((encoded_hash, field)) = expected_hash
+        && decode_hex_32(encoded_hash, field)? != sha256(body)
+    {
+        return Err(SdkError::Protocol { field: "body hash" });
+    }
+    Ok(())
 }
 
 fn validate_version(version: u16) -> Result<()> {

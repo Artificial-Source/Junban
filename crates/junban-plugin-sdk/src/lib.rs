@@ -32,9 +32,13 @@ pub use graph::{
     ValidatedGraph, validate_dependency_graph, validate_dependency_locks,
 };
 pub use linkage::{
-    PRODUCT_ENTRYPOINT_FINGERPRINT, PRODUCT_ENTRYPOINTS, ProductAuthorityTypes,
-    ProductInspectEntrypoint, ProductLinkageAuthority, product_linkage_authority,
-    product_linkage_marker,
+    PRODUCT_ENTRYPOINT_FINGERPRINT, PRODUCT_ENTRYPOINT_FUNCTIONS, PRODUCT_ENTRYPOINTS,
+    ProductAuthorityTypes, ProductEntrypointFunctions, ProductInspectComponentEntrypoint,
+    ProductInspectEntrypoint, ProductLinkageAuthority, ProductPackPackageEntrypoint,
+    ProductParseRegistryEntrypoint, ProductPermissionHashEntrypoint,
+    ProductValidateGrantsEntrypoint, ProductValidateGraphEntrypoint,
+    ProductValidateLocksEntrypoint, ProductValidateRegistryAgreementEntrypoint,
+    ProductVerifySignerEntrypoint, product_linkage_authority, product_linkage_marker,
 };
 pub use manifest::*;
 pub use package::{

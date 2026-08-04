@@ -205,9 +205,7 @@ fn authority_metadata_bytes(bytes: &[u8]) -> Result<usize> {
     let mut total = 0_usize;
     for payload in Parser::new(0).parse_all(bytes) {
         let payload = payload.map_err(|_| SdkError::ComponentMalformed)?;
-        if let Payload::CustomSection(section) = payload
-            && matches!(section.name(), "name" | "producers" | "component-name")
-        {
+        if let Payload::CustomSection(section) = payload {
             let size = section.data().len();
             if size > COMPONENT_AUTHORITY_METADATA_SECTION_MAX {
                 return Err(SdkError::ComponentAuthority {

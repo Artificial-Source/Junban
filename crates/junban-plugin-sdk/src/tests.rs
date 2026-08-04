@@ -44,12 +44,16 @@ fn leb(mut value: usize, output: &mut Vec<u8>) {
     }
 }
 
-fn append_name_section(component: &mut Vec<u8>, data_len: usize) {
+fn append_custom_section(component: &mut Vec<u8>, name: &str, data_len: usize) {
     component.push(0);
-    leb(1 + 4 + data_len, component);
-    component.push(4);
-    component.extend_from_slice(b"name");
+    leb(1 + name.len() + data_len, component);
+    component.push(u8::try_from(name.len()).unwrap());
+    component.extend_from_slice(name.as_bytes());
     component.resize(component.len() + data_len, 0);
+}
+
+fn append_name_section(component: &mut Vec<u8>, data_len: usize) {
+    append_custom_section(component, "name", data_len);
 }
 
 fn nested_component(depth: usize) -> Vec<u8> {
@@ -1056,6 +1060,27 @@ fn component_rejects_core_malformed_export_signature_profile_undeclared_and_meta
     let mut oversized = component.clone();
     append_name_section(&mut oversized, COMPONENT_AUTHORITY_METADATA_SECTION_MAX + 1);
     assert!(inspect_component(&oversized, &valid_manifest(&oversized)).is_err());
+    let mut oversized_producers = component.clone();
+    append_custom_section(
+        &mut oversized_producers,
+        "producers",
+        COMPONENT_AUTHORITY_METADATA_SECTION_MAX + 1,
+    );
+    assert!(
+        inspect_component(&oversized_producers, &valid_manifest(&oversized_producers)).is_err()
+    );
+    let mut oversized_unknown = component.clone();
+    append_custom_section(
+        &mut oversized_unknown,
+        "unknown-metadata",
+        COMPONENT_AUTHORITY_METADATA_SECTION_MAX + 1,
+    );
+    assert!(matches!(
+        inspect_component(&oversized_unknown, &valid_manifest(&oversized_unknown)),
+        Err(SdkError::ComponentAuthority {
+            field: "metadata section"
+        })
+    ));
     let mut aggregate_oversized = component.clone();
     append_name_section(
         &mut aggregate_oversized,
@@ -1326,6 +1351,93 @@ fn protocol_frames_are_canonical_bounded_and_identity_fenced() {
 }
 
 #[test]
+fn protocol_raw_bodies_are_exact_bounded_and_hash_verified() {
+    let fence = AuthorityFence {
+        plugin_id: "test-plugin".into(),
+        package_generation: 1,
+        activation_epoch: 2,
+        host_session_id: "00000000-0000-4000-8000-000000000001".into(),
+        invocation_id: "00000000-0000-4000-8000-000000000002".into(),
+    };
+
+    let component = b"component bytes";
+    let load = ParentFrame::Load {
+        fence: fence.clone(),
+        package_sha256: "1".repeat(64),
+        component_sha256: hex(&sha256(component)),
+        runtime_profile: RuntimeProfile::Typescript,
+        component_size: u64::try_from(component.len()).unwrap(),
+    };
+    assert_eq!(parent_body_len(&load).unwrap(), component.len());
+    validate_parent_body(&load, component).unwrap();
+
+    let request = b"request bytes";
+    let invoke = ParentFrame::Invoke {
+        fence: fence.clone(),
+        kind: InvocationKind::InvokeCommand,
+        request_sha256: hex(&sha256(request)),
+        request_size: u32::try_from(request.len()).unwrap(),
+    };
+    assert_eq!(parent_body_len(&invoke).unwrap(), request.len());
+    validate_parent_body(&invoke, request).unwrap();
+
+    let outcome = b"outcome bytes";
+    let outcome_frame = ChildFrame::Outcome {
+        fence: fence.clone(),
+        outcome_sha256: hex(&sha256(outcome)),
+        outcome_size: u32::try_from(outcome.len()).unwrap(),
+    };
+    assert_eq!(child_body_len(&outcome_frame).unwrap(), outcome.len());
+    validate_child_body(&outcome_frame, outcome).unwrap();
+
+    let mut wrong_hash = invoke.clone();
+    if let ParentFrame::Invoke { request_sha256, .. } = &mut wrong_hash {
+        *request_sha256 = "0".repeat(64);
+    }
+    assert!(validate_parent_body(&wrong_hash, request).is_err());
+    assert!(validate_parent_body(&invoke, &request[..request.len() - 1]).is_err());
+    assert!(validate_parent_body(&invoke, b"").is_err());
+    let mut trailing = request.to_vec();
+    trailing.push(0);
+    assert!(validate_parent_body(&invoke, &trailing).is_err());
+
+    let no_body = ParentFrame::Cancel {
+        fence: fence.clone(),
+    };
+    assert_eq!(parent_body_len(&no_body).unwrap(), 0);
+    validate_parent_body(&no_body, b"").unwrap();
+    assert!(validate_parent_body(&no_body, b"unexpected").is_err());
+
+    let oversized_component = ParentFrame::Load {
+        fence: fence.clone(),
+        package_sha256: "1".repeat(64),
+        component_sha256: "2".repeat(64),
+        runtime_profile: RuntimeProfile::Typescript,
+        component_size: u64::try_from(HOST_COMPONENT_BODY_BYTES_MAX + 1).unwrap(),
+    };
+    assert!(validate_parent_body(&oversized_component, b"").is_err());
+    let oversized_request = ParentFrame::Invoke {
+        fence: fence.clone(),
+        kind: InvocationKind::InvokeCommand,
+        request_sha256: "2".repeat(64),
+        request_size: u32::try_from(HOST_REQUEST_BODY_BYTES_MAX + 1).unwrap(),
+    };
+    assert!(validate_parent_body(&oversized_request, b"").is_err());
+    let oversized_outcome = ChildFrame::Outcome {
+        fence: fence.clone(),
+        outcome_sha256: "2".repeat(64),
+        outcome_size: u32::try_from(HOST_OUTCOME_BODY_BYTES_MAX + 1).unwrap(),
+    };
+    assert!(validate_child_body(&oversized_outcome, b"").is_err());
+    let empty_outcome = ChildFrame::Outcome {
+        fence,
+        outcome_sha256: hex(&sha256(b"")),
+        outcome_size: 0,
+    };
+    assert!(validate_child_body(&empty_outcome, b"").is_err());
+}
+
+#[test]
 fn product_entrypoint_fingerprint_and_linkage_marker_are_stable() {
     let material = PRODUCT_ENTRYPOINTS.join("\n");
     assert_eq!(
@@ -1339,6 +1451,51 @@ fn product_entrypoint_fingerprint_and_linkage_marker_are_stable() {
     );
     let authority = product_linkage_authority();
     assert_eq!(authority.entrypoints, &PRODUCT_ENTRYPOINTS);
+    assert!(std::ptr::eq(
+        authority.entrypoint_functions,
+        &PRODUCT_ENTRYPOINT_FUNCTIONS
+    ));
+    let functions = authority.entrypoint_functions;
+    assert!(std::ptr::fn_addr_eq(
+        functions.inspect_and_verify_package,
+        inspect_and_verify_package as ProductInspectEntrypoint
+    ));
+    assert!(std::ptr::fn_addr_eq(
+        functions.inspect_component,
+        inspect_component as ProductInspectComponentEntrypoint
+    ));
+    assert!(std::ptr::fn_addr_eq(
+        functions.pack_package,
+        pack_package as ProductPackPackageEntrypoint
+    ));
+    assert!(std::ptr::fn_addr_eq(
+        functions.parse_and_verify_registry,
+        parse_and_verify_registry as ProductParseRegistryEntrypoint
+    ));
+    assert!(std::ptr::fn_addr_eq(
+        functions.permission_set_hash,
+        permission_set_hash as ProductPermissionHashEntrypoint
+    ));
+    assert!(std::ptr::fn_addr_eq(
+        functions.validate_dependency_graph,
+        validate_dependency_graph as ProductValidateGraphEntrypoint
+    ));
+    assert!(std::ptr::fn_addr_eq(
+        functions.validate_dependency_locks,
+        validate_dependency_locks as ProductValidateLocksEntrypoint
+    ));
+    assert!(std::ptr::fn_addr_eq(
+        functions.validate_permission_grants,
+        validate_permission_grants as ProductValidateGrantsEntrypoint
+    ));
+    assert!(std::ptr::fn_addr_eq(
+        functions.validate_registry_package_agreement,
+        validate_registry_package_agreement as ProductValidateRegistryAgreementEntrypoint
+    ));
+    assert!(std::ptr::fn_addr_eq(
+        functions.verify_signer_authority,
+        verify_signer_authority as ProductVerifySignerEntrypoint
+    ));
     assert_eq!(authority.fingerprint, PRODUCT_ENTRYPOINT_FINGERPRINT);
     assert_eq!(authority.marker, product_linkage_marker());
     assert!(authority.authority_type_sizes.iter().all(|size| *size > 0));

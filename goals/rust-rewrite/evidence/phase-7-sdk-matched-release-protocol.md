@@ -1,7 +1,7 @@
 # Phase 7 SDK matched-release protocol
 
-Date: 2026-08-04  
-Protocol: `junban-phase7-sdk-matched-release-v1`  
+Date: 2026-08-04
+Protocol: `junban-phase7-sdk-matched-release-v1`
 Status: implementation complete; authoritative parent-run evidence pending
 
 ## Purpose
@@ -11,7 +11,7 @@ This is Phase 7 Wave 1's first production subgate. It measures the optimized
 
 1. `--no-default-features`, the matched pre-SDK linkage baseline;
 2. default features, which links `junban-plugin-sdk` and touches only its static
-   linkage marker/table.
+   linkage marker, stable name table, and typed production function table.
 
 Neither binary may link Wasmtime, construct an Engine, inspect a package, start
 a plugin host, add a route, open another database, or launch Node. This evidence
@@ -32,7 +32,21 @@ It checks both the resolved normal/build Cargo tree and optimized binary bytes.
 The stable `JUNBAN_PLUGIN_SDK_LINKAGE_V1` marker must be absent from feature-off
 and present in default. Wasmtime/wasmtime-wasi/Cranelift runtime markers must be
 absent from both, and neither Cargo tree may contain Wasmtime. Binary SHA-256 and
-size are recorded.
+size are recorded. The linked authority references all ten production parser,
+packer, hash, graph, lock, grant, agreement, and signer functions so optimized
+linkage retains executable SDK code without constructing a runtime.
+
+## Frozen SDK stdio payload boundary
+
+The private host protocol keeps each canonical JSON header u32be-length-prefixed
+and capped at 256 KiB. Exactly one raw, unencoded body follows `Load` (component
+bytes, 1–32 MiB), `Invoke` (request bytes, 1–256 KiB), and `Outcome` (outcome
+bytes, 1–256 KiB). The declared size is the body boundary; there is no second
+length prefix. Every other frame has a zero-byte body. Receivers validate the
+exact declared length and SHA-256 before reading the next header, rejecting
+missing, short, trailing, unexpected, empty, oversized, or hash-mismatched
+bodies. Bodies are never JSON arrays or base64 and carry no filesystem/profile
+path, credential, token, or database authority.
 
 ## Workload and measurements
 

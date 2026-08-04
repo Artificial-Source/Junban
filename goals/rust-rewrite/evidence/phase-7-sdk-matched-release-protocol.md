@@ -87,9 +87,37 @@ The default SDK-linked server must satisfy all of:
 
 Quick mode uses one interleaved sample, enforces the same numeric checks, and is
 always preliminary. A five-sample report is only an authoritative candidate.
-Acceptance additionally requires a clean exact-commit checkout, uncontended
-pre/post host snapshots, explicit `--idle-host-confirmed`, and parent-run review. The
-harness never self-approves evidence produced in an implementation worktree.
+Acceptance additionally requires all of:
+
+- non-quick five-sample mode;
+- explicit `--idle-host-confirmed`;
+- clean git tree at campaign **start** and again **after measurements** (the
+  evidence JSON write afterward must not retroactively dirty eligibility);
+- uncontended pre/post host snapshots under the accepted Phase 7 host-placement
+  activity policy (not mere load1>0.75×CPU or static swap-free percentage);
+- all memory/process/cleanup/linkage gates above;
+- parent-run review.
+
+The harness never self-approves evidence produced in an implementation worktree.
+
+### Host cleanliness (activity, not existence)
+
+Host contention matches the accepted Phase 7 host-placement evidence policy:
+
+- **pre-run** enforces CPU-scaled historical load gates:
+  `load1 > max(1, 0.50×CPU)` **or** `load5 > max(1, 0.30×CPU)` (must not reject a
+  Phase 6-class idle host solely for load5≈3.28 on ~20 CPUs);
+- sample external confounder CPU over a **0.25s** `/proc` window;
+  cargo/rustc/rustdoc/clippy/sccache/npm/npx/pnpm/yarn/wasm-opt/wizer and browser
+  executables match directly; `node`/`nodejs` count only when the command line has
+  recognized build/test/preview markers; existence alone is never contention;
+  the harness PID and its bounded ancestor chain are excluded;
+- active swap I/O gate is sustained combined `pswpin`+`pswpout` **≥256 pages/s**
+  over that same interval; static allocated swap is informational only;
+- **post-run** historical load is informational (the campaign caused it), but
+  active external confounder CPU and swap I/O remain blocking;
+- evidence records complete pre/post signals, active process details, swap rates,
+  thresholds, reasons, and static swap informational value.
 
 ## Commands
 

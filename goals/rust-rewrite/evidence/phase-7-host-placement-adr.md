@@ -1,20 +1,17 @@
-# Phase 7 Wave 0 host-placement ADR (preliminary)
+# Phase 7 Wave 0 host-placement ADR
 
 Date: 2026-08-04
-Status: **preliminary** — quick evidence only; not architecture-gate acceptance
-Branch: `phase-7-wave0-host-placement`
-Evidence: [`phase-7-host-placement-quick.json`](phase-7-host-placement-quick.json)
+Status: **accepted** — clean idle-host five-sample evidence and focused architecture review approved
+Evidence: [`phase-7-host-placement.json`](phase-7-host-placement.json) (authoritative candidate), [`phase-7-host-placement-quick.json`](phase-7-host-placement-quick.json) (preliminary protocol history)
 Contract: [`phase-7-context-map.md`](phase-7-context-map.md)
 
-## Decision (preliminary only)
+## Decision
 
-**Preferred direction under the frozen decision rule: on-demand child `junban-plugin-host`.**
+**Retain an on-demand child `junban-plugin-host`; do not embed Wasmtime in the owner process.**
 
-This is **not** an authoritative architecture-gate acceptance. The harness may select
-`on_demand_child_host` by the context-map fault-containment tiebreak when Rust active-warm
-medians are close. Placement may freeze from accepted Wave 0 evidence (five-sample idle-host
-run with real Rust **and** TypeScript active paths, plus architecture review).
-`accepted` remains `false` until that review.
+The clean five-sample campaign selected `on_demand_child_host` because neither placement materially regressed on the frozen Rust+TypeScript warm, peak or cold criteria, so the predeclared fault-containment tiebreak applies. The child path survived traps, CPU and memory limits, in-flight child death, replacement, graceful shutdown and orphan checks for both component profiles. The ordinary release server remained below 24/32 MiB and did not link or construct Wasmtime or spawn a host.
+
+The harness emitted an authoritative candidate with `accepted=false` because it cannot approve its own architecture decision. The focused architecture recheck returned `APPROVE`, closed `P7-ARCH-001`–`004`, and authorized manual acceptance metadata in the retained JSON.
 
 Wave 1 sequencing is **not** circular with placement:
 
@@ -30,13 +27,13 @@ Wave 1 sequencing is **not** circular with placement:
 
 Temporary isolated spike under `tools/phase7-host-placement/` (not product crates):
 
-| Artifact | Role |
-| -------- | ---- |
-| `junban-p7-spike-probe` | Parent HTTP probe: `sdk` / `inprocess` / `child` modes |
-| `junban-p7-spike-host` | Child stdio host; no DB path, token, or profile lock |
-| Rust `wasm32-wasip2` guest | Minimal ping/trap/cpu-loop/grow component |
-| TypeScript pure guest | jco 1.26.1 + componentize-js 0.22.0 with `--disable all` |
-| `scripts/check-phase7-host-placement.py` | cgroup-v2 harness; fail-closed; SDK/full bins separated |
+| Artifact                                 | Role                                                     |
+| ---------------------------------------- | -------------------------------------------------------- |
+| `junban-p7-spike-probe`                  | Parent HTTP probe: `sdk` / `inprocess` / `child` modes   |
+| `junban-p7-spike-host`                   | Child stdio host; no DB path, token, or profile lock     |
+| Rust `wasm32-wasip2` guest               | Minimal ping/trap/cpu-loop/grow component                |
+| TypeScript pure guest                    | jco 1.26.1 + componentize-js 0.22.0 with `--disable all` |
+| `scripts/check-phase7-host-placement.py` | cgroup-v2 harness; fail-closed; SDK/full bins separated  |
 
 Exact pins:
 
@@ -127,10 +124,31 @@ empty and Rust imports are exactly the frozen five baseline names. Report consta
 not trusted as proof. The spike may still call broader `p2::add_to_linker_async` for Rust;
 that remains an explicit **non-production** linker limitation.
 
+## Authoritative measurements
+
+The retained campaign used a clean tree, three consecutive uncontended preflight windows, explicit idle-host confirmation, five samples per variant and uncontended pre/post checks. Its JSON status is `authoritative_candidate`; the decision has no blockers.
+
+| Variant                    | Warm median / max MiB | Peak max MiB | Cold median / max ms |
+| -------------------------- | --------------------: | -----------: | -------------------: |
+| ordinary `junban-server`   |         4.586 / 5.398 |        6.488 |                  n/a |
+| lazy in-process Rust       |         4.734 / 4.855 |        5.102 |      45.898 / 57.540 |
+| child Rust                 |         4.883 / 5.430 |        5.738 |      47.053 / 54.060 |
+| lazy in-process TypeScript |     280.848 / 287.207 |      333.441 | 9272.868 / 10127.987 |
+| child TypeScript           |     280.512 / 280.695 |      326.727 |  9104.312 / 9460.921 |
+
+The selected child projections and explicit headroom propose these Wave 1 active gates:
+
+| Profile    | Projected warm / peak max MiB | Proposed warm / peak ceiling MiB |
+| ---------- | ----------------------------: | -------------------------------: |
+| Rust       |               10.602 / 11.508 |                  18.602 / 19.508 |
+| TypeScript |             285.867 / 332.496 |                357.334 / 415.620 |
+
+These numbers are intentionally profile-specific. TypeScript's componentize-js/SpiderMonkey component is materially large even though the host placement adds no material regression. The default/no-plugin 24/32-MiB budget remains unchanged. The architecture reviewer accepted these active ceilings as frozen Wave 1 gates; Wave 5 replaces projection with integrated product evidence and may revise them through the same documented gate rather than silently loosening them.
+
 ## Measurement method and limitations
 
 - Linux cgroup-v2 via `systemd-run --user` + MemoryAccounting (self-check required; never faked).
-- Quick mode: **1 sample** → `evidence_status=preliminary_quick`.
+- Quick mode: **1 sample** → `evidence_status=preliminary_quick`; retained authority uses five samples.
 - Authoritative candidate requires **all** of:
   - five samples
   - clean git tree at campaign **start** (evidence file write afterward does not retroactively dirty eligibility)
@@ -160,28 +178,26 @@ are **not** an actual SDK-linked or integrated `junban-server` measurement.
 
 They are a temporary cross-check only. They do **not** prove the context-map criterion that a Phase 7 server linked to SDK/protocol-only stays within default memory growth bounds, and they are **not** a prerequisite to freezing placement. After placement freezes, Wave 1's first SDK-only subgate must produce matched release pairs of ordinary server vs server-with-SDK/protocol default path (no Engine, no child) before schema/runtime work proceeds. Wave 5 still measures integrated server+host and may revise active ceilings.
 
-Preliminary ceilings in the quick JSON are data-derived from those projections plus explicit headroom only. They are not frozen Wave 1 acceptance gates.
+The accepted ceilings are data-derived from selected-path projections plus explicit headroom only. They are not integrated product measurements; architecture acceptance freezes them as Wave 1 implementation gates subject to the mandatory matched SDK-only default proof and later integrated Wave 5 replacement.
 
 Other limits:
 
 - `invoke_wall_ms` is recorded but **not** enforced as a general per-call wall deadline; only the explicit CPU-loop epoch ticker is measured. Product Wave 2 must enforce epoch + wall deadlines on every guest call.
 - Advisory `RUSTSEC-2026-0222` has no 45.x patch; ignored in `deny.toml` only for this throwaway spike. Product host must re-evaluate before shipping.
 
-## Quick-sample posture
+## Evidence posture
 
-Re-run results may still be `preliminary_quick` when the host is busy or the tree is dirty at start. Do not promote quick numbers to acceptance. See the JSON `evidence_status`, `host_contention`, `decision.blockers`, and `measured_preliminary_active_ceilings_mib` fields for the exact sample.
+The quick JSON remains preliminary protocol history and must not be used for acceptance. The retained measurement records `evidence_status=authoritative_candidate`, five complete samples, clean start state, no pre/post contention, real Rust and TypeScript components, exact inspected imports and no decision blockers. After the independent `APPROVE` verdict, manual gate metadata records `accepted=true`, the four fixed findings, retained placement, conditions and numeric ceilings without rewriting any measured value.
 
 ## Losing path
 
-Lazy in-process remains implementable when it passes the same containment probes. It is not deleted from the temporary spike until authoritative evidence + architecture gate confirm the child path. Product Wave 2 should implement only the accepted placement; the temporary crate is deleted or reduced after the gate rather than renamed into `junban-plugin-host`.
+Lazy in-process passed the same containment probes but lost the frozen fault-containment tiebreak. The architecture reviewer authorized deleting or reducing that losing temporary path during Wave 2. Product Wave 2 implements only the accepted child placement; the temporary crate is not renamed wholesale into `junban-plugin-host`.
 
 ## Follow-ups
 
-1. Re-run `python3 scripts/check-phase7-host-placement.py --idle-host-confirmed` on a quiet host with a clean tree and five samples including real TypeScript paths.
-2. Architecture review freezes placement from that Wave 0 evidence.
-3. Wave 1 first subgate: matched ordinary server vs server-with-SDK/protocol default path memory (not satisfied by probe projection; required before schema/runtime work).
-4. Freeze authoritative active ceilings only from accepted evidence (or later integrated measurements).
-5. Resolve Wasmtime advisory via patch, toolchain move, or documented residual risk after review.
+1. Wave 1 first subgate: matched ordinary server vs server-with-SDK/protocol default path memory (not satisfied by probe projection; required before schema/runtime work).
+2. Wave 5 replaces projections with integrated selected-path measurements and may revise active ceilings only through documented evidence/review.
+3. Resolve Wasmtime advisory via patch, toolchain move, or documented residual risk before a product host ships.
 
 ## Commands
 
@@ -193,9 +209,9 @@ cargo build --locked --release -p junban-phase7-host-placement
 python3 scripts/check-phase7-host-placement.py --self-check
 python3 scripts/check-phase7-host-placement.py --quick \
   --output goals/rust-rewrite/evidence/phase-7-host-placement-quick.json
-# authoritative candidate (idle host + clean tree only):
-# python3 scripts/check-phase7-host-placement.py --idle-host-confirmed \
-#   --output goals/rust-rewrite/evidence/phase-7-host-placement.json
+# retained authoritative candidate (idle host + clean tree only):
+python3 scripts/check-phase7-host-placement.py --idle-host-confirmed \
+  --output goals/rust-rewrite/evidence/phase-7-host-placement.json
 node scripts/check-docs.mjs
 git diff --check
 ```

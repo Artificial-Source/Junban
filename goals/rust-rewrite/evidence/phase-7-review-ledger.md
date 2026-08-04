@@ -23,7 +23,7 @@ Closed findings reopen only with new evidence. Each gate uses one risk-matched r
 | `P7-PLAN-002` | high     | fixed  | The draft mixed synchronous HTTP imports with deferred HTTP intents and did not prevent dependency services from creating nested effects.                     | The approved WIT authority now has one synchronous at-least-once HTTP import, no HTTP intents, a stable delivery id, no claimed SQLite atomicity, mutual exclusion with returned SQLite effects, exact event-cursor ordering, and read-only dependency service mode without HTTP/effects. Focused planning recheck approved the correction.                                                    |
 | `P7-PLAN-003` | high     | fixed  | A single unspecified runtime “generation” left grant survival, restore/restart, IPC results, and stale browser actions ambiguous.                             | The approved authority separates persisted monotonic `package_generation`, persisted monotonic `activation_epoch`, and process-local `host_session_id`; it freezes every transition, drain/CAS order, uninstall tombstone, restore cursor epoch/resync, IPC outcome check, and browser action fence. Focused planning recheck approved the correction.                                         |
 
-Planning verdict: **approved**. Wave 0 implementation is authorized. Wave 1 is blocked on the measured host-placement architecture gate.
+Planning verdict: **approved**. Wave 0 implementation was authorized; the later measured host-placement architecture gate is now accepted, so the planning gate no longer blocks Wave 1.
 
 ## Schema-v7 authority plan checkpoint
 
@@ -35,7 +35,7 @@ Planning verdict: **approved**. Wave 0 implementation is authorized. Wave 1 is b
 | `P7-DBPLAN-004` | medium   | fixed  | Blocking only enabled dependents could leave disabled dependents with missing/stale locks and make normal open fail closed.                        | Disable blocks enabled dependents; uninstall blocks every installed dependent. Compatible dependency update atomically rewrites all installed dependent locks after draining enabled dependents; incompatible update blocks with the full closure. No unresolved lock state is accepted.                                                                           |
 | `P7-DBPLAN-005` | medium   | fixed  | Resync had no snapshot revision or atomic cursor handoff, allowing concurrent events to be skipped.                                                | The refined contract closes admission, samples epoch/head atomically, pages `row_revision <= head` by stable ID without holding a transaction across guest calls, stages no durable partial KV, then transactionally verifies session/epoch/ordered exhaustive pages/retained later-event tail, performs the final KV choice and CASes the cursor before catch-up. |
 
-The focused database-plan recheck approved all five corrections. Wave 1 persistence is authorized from the database-plan perspective, but Wave 1 overall remains blocked on the independent measured host-placement architecture gate.
+The focused database-plan recheck approved all five corrections. Wave 1 persistence is authorized from the database-plan perspective; the independent measured host-placement architecture gate is now also accepted.
 
 ## Package-contract security checkpoint
 
@@ -46,7 +46,7 @@ The focused database-plan recheck approved all five corrections. Wave 1 persiste
 | `P7-PKGPLAN-003` | medium   | fixed  | Capability scope and permission-set hash preimages were ambiguous.                              | Domain-separated u32-length-framed SDK preimages and golden ambiguity vectors are exact authority in package and schema contracts.                                                                              |
 | `P7-PKGPLAN-004` | medium   | fixed  | JRI1 did not freeze exact length/canonical/strict-root verification.                            | JRI1 now requires exact `76 + I`, total cap/trailing rejection, typed reserialization equality, compiled root fingerprint equality and strict Ed25519 verification.                                             |
 
-Initial package-plan verdict: `REVISE`. Focused security recheck: `APPROVE`; all four corrections are fixed and JBP1/JRI1, permission-authority and plugin HTTP implementation are authorized from this security-plan perspective after the separate host-placement architecture gate.
+Initial package-plan verdict: `REVISE`. Focused security recheck: `APPROVE`; all four corrections are fixed and JBP1/JRI1, permission-authority and plugin HTTP implementation are authorized from this security-plan perspective. The separate host-placement architecture gate is now accepted.
 
 ## WIT API-contract checkpoint
 
@@ -71,19 +71,19 @@ Initial WIT-plan verdict: `REVISE`. After the seven corrections and a final narr
 | `P7-ARCH-003` | high     | fixed  | Child hash verification reopened a mutable path for compile, so executed bytes were not bound to the session hash. | The child opens once, prechecks and bounded-reads at most 32 MiB+1, hashes and retains that exact buffer, compiles only that buffer, drops it after compile and reuses the compiled component. Replacement/oversize regressions cover the boundary.                                                |
 | `P7-ARCH-004` | medium   | fixed  | Evidence copied literal runtime import lists rather than inspecting freshly built component bytes.                 | An exact `wasmparser` inspector records actual top-level imports and blocks unless TypeScript has zero and Rust has the frozen five; both quick evidence and synthetic mismatch fixtures exercise the check. The broader spike P2 linker remains explicitly non-production.                        |
 
-Initial architecture verdict: `REVISE`; the corrected protocol has focused code/self-check/quick evidence. Final recheck remains pending the clean, idle, five-sample campaign required by the reviewer; quick evidence remains `accepted=false`.
+Initial architecture verdict: `REVISE`. The corrected clean idle-host five-sample campaign recorded real Rust and TypeScript profiles, actual imports, no contention, no decision blockers and the selected child path. Focused recheck verdict: `APPROVE`; all four findings are fixed. `on_demand_child_host` and the Rust 18.6016/19.5078-MiB plus TypeScript 357.334/415.6201-MiB warm/peak gates are frozen, conditioned on Wave 1 matched SDK-only default proof and Wave 5 integrated replacement.
 
 ## Required implementation gates
 
-| Gate                            | Dominant reviewer      | Status  | Acceptance                                                                                                                                                       |
-| ------------------------------- | ---------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Wave 0 host-placement ADR       | architecture           | pending | Measured lazy-in-process versus on-demand result; one retained boundary; default/no-engine and trap/cleanup proof; numeric active Rust/TypeScript budgets frozen |
-| Wave 1 package/schema authority | database               | pending | JBP1/signature/graph/grants/settings/KV/cursor schema v7, migration/open/restore/staging/receipt evidence                                                        |
-| Wave 2 hostile runtime          | security               | pending | Selective linker, limits, IPC, one-effect authority, crash containment, denied capabilities, hostile cross-platform matrix                                       |
-| Wave 3 operator contract        | API contract           | pending | Auth/body/idempotency/staging/lifecycle/registry/contribution/event contracts; automation catalog remains 87                                                     |
-| Wave 4 Extensions UI            | frontend/accessibility | pending | Immutable legacy presentation, permission clarity, safe declarative renderer, stale/revoke/failure, visual/keyboard/axe                                          |
-| Wave 5 integrated acceptance    | security               | pending | Final signed packages, SDK/examples, dogfood, default/Rust/TypeScript performance, full validation and docs                                                      |
+| Gate                            | Dominant reviewer      | Status   | Acceptance                                                                                                                                                                                     |
+| ------------------------------- | ---------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Wave 0 host-placement ADR       | architecture           | accepted | Child retained; default/no-engine, Rust+TS trap/CPU/memory/crash/cleanup and actual-import proof accepted; 18.6016/19.5078-MiB Rust and 357.334/415.6201-MiB TypeScript warm/peak gates frozen |
+| Wave 1 package/schema authority | database               | pending  | JBP1/signature/graph/grants/settings/KV/cursor schema v7, migration/open/restore/staging/receipt evidence                                                                                      |
+| Wave 2 hostile runtime          | security               | pending  | Selective linker, limits, IPC, one-effect authority, crash containment, denied capabilities, hostile cross-platform matrix                                                                     |
+| Wave 3 operator contract        | API contract           | pending  | Auth/body/idempotency/staging/lifecycle/registry/contribution/event contracts; automation catalog remains 87                                                                                   |
+| Wave 4 Extensions UI            | frontend/accessibility | pending  | Immutable legacy presentation, permission clarity, safe declarative renderer, stale/revoke/failure, visual/keyboard/axe                                                                        |
+| Wave 5 integrated acceptance    | security               | pending  | Final signed packages, SDK/examples, dogfood, default/Rust/TypeScript performance, full validation and docs                                                                                    |
 
 ## Current open findings
 
-No finding remains open. The measured host-placement gate remains pending acceptance work.
+No finding remains open. Wave 0 host placement is accepted; Wave 1 may begin with its mandatory matched SDK-only default-memory subgate.

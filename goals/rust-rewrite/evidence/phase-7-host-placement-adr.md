@@ -141,6 +141,7 @@ that remains an explicit **non-production** linker limitation.
   - no Wasmtime on `junban-server`; Wasmtime present on full probe; absent on SDK-only probe
 - Host contention measures **activity**, not mere existence:
   - candidate cargo/node/browser PIDs must show positive CPU tick delta over a short sample window
+  - confounder candidacy excludes the harness PID and its bounded `/proc/<pid>/stat` ancestor chain (supervising Pi/node parent, etc.); siblings, unrelated sessions, and descendants/cgroup work are **not** excluded; evidence records excluded ancestor PIDs/count/method only (no ancestor command lines)
   - swap contention uses `/proc/vmstat` `pswpin`/`pswpout` delta; allocated-but-inactive swap is informational only
   - **pre-run** enforces CPU-scaled historical load thresholds (must not reject a Phase 6-class idle host solely for load5≈3.28 on ~20 CPUs)
   - **post-run** still enforces active external confounder CPU ticks and swap I/O, but treats historical load averages as **informational only** because they include this campaign's own compile/invoke CPU (`load_thresholds_enforced=false` on post samples)

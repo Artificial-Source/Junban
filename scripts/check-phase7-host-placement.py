@@ -246,18 +246,115 @@ def read_vmstat_swap_io() -> tuple[int, int] | None:
     return None
 
 
-def list_candidate_confounder_pids() -> list[dict[str, Any]]:
-    """Enumerate candidate build/browser PIDs without judging activity yet."""
+def parse_ppid_from_stat(stat_text: str) -> int | None:
+    """Parse ppid from a `/proc/<pid>/stat` body.
+
+    Format: `pid (comm) state ppid ...` where comm may contain spaces/parentheses.
+    Malformed input fails closed to None (no broad exclusion).
+    """
+    if not stat_text:
+        return None
+    rparen = stat_text.rfind(")")
+    if rparen < 0:
+        return None
+    rest = stat_text[rparen + 1 :].split()
+    # rest[0]=state, rest[1]=ppid
+    if len(rest) < 2:
+        return None
+    try:
+        ppid = int(rest[1])
+    except ValueError:
+        return None
+    if ppid < 0:
+        return None
+    return ppid
+
+
+def walk_ancestor_pids(
+    start_pid: int,
+    ppid_of,
+    *,
+    max_depth: int = 64,
+) -> list[int]:
+    """Return ancestor PIDs of start_pid (excluding start itself).
+
+    Bounded and cycle-safe. Missing/malformed ppid stops the walk (fail safe:
+    do not invent a broad exclusion set).
+    """
+    ancestors: list[int] = []
+    seen: set[int] = {int(start_pid)}
+    pid = int(start_pid)
+    for _ in range(max(1, int(max_depth))):
+        try:
+            ppid = ppid_of(pid)
+        except Exception:
+            break
+        if ppid is None:
+            break
+        try:
+            ppid_i = int(ppid)
+        except (TypeError, ValueError):
+            break
+        if ppid_i <= 1:
+            break
+        if ppid_i in seen:
+            break
+        seen.add(ppid_i)
+        ancestors.append(ppid_i)
+        pid = ppid_i
+    return ancestors
+
+
+def read_ppid(pid: int) -> int | None:
+    try:
+        text = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return parse_ppid_from_stat(text)
+
+
+def harness_exclusion_set(start_pid: int | None = None) -> dict[str, Any]:
+    """Harness PID + ancestor chain excluded from confounder candidacy.
+
+    Does not exclude siblings, unrelated Pi sessions, or descendants/cgroup work.
+    Evidence records PIDs/count/method only — never ancestor command lines.
+    """
+    harness_pid = int(start_pid if start_pid is not None else os.getpid())
+    ancestors = walk_ancestor_pids(harness_pid, read_ppid, max_depth=64)
+    excluded = [harness_pid, *ancestors]
+    return {
+        "harness_pid": harness_pid,
+        "excluded_ancestor_pids": list(ancestors),
+        "excluded_ancestor_count": len(ancestors),
+        "excluded_pids": list(excluded),
+        "excluded_pid_count": len(excluded),
+        "method": (
+            "bounded cycle-safe /proc/<pid>/stat ppid walk from harness pid; "
+            "exclude harness + ancestors only; malformed/missing ppid stops walk"
+        ),
+    }
+
+
+def list_candidate_confounder_pids(
+    *,
+    exclusion: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Enumerate candidate build/browser PIDs without judging activity yet.
+
+    Excludes the harness process and its ancestor chain (e.g. supervising Pi node),
+    not sibling/unrelated sessions or descendant cgroup work.
+    """
     found: list[dict[str, Any]] = []
     proc = Path("/proc")
     if not proc.is_dir():
         return found
-    self_pid = os.getpid()
+    excl = exclusion if exclusion is not None else harness_exclusion_set()
+    excluded_pids = {int(p) for p in excl.get("excluded_pids") or []}
     for entry in proc.iterdir():
         if not entry.name.isdigit():
             continue
         pid = int(entry.name)
-        if pid == self_pid:
+        if pid in excluded_pids:
             continue
         try:
             comm = (entry / "comm").read_text(encoding="utf-8").strip().lower()
@@ -276,7 +373,7 @@ def list_candidate_confounder_pids() -> list[dict[str, Any]]:
                 pass
         except OSError:
             continue
-        # Never treat this harness as a confounder (parent or residual).
+        # Residual harness script name (same tree) — exclude without cmdline leak.
         if "check-phase7-host-placement" in cmdline or "check-phase7-host-placement" in comm:
             continue
         tokens = set(re.split(r"[^a-z0-9_.+-]+", f"{comm} {exe} {cmdline}"))
@@ -303,7 +400,7 @@ def sample_active_confounders(
     min_tick_delta: int = MIN_ACTIVE_CPU_TICK_DELTA,
 ) -> list[dict[str, Any]]:
     """Return only confounder processes with meaningful positive CPU activity."""
-    candidates = list_candidate_confounder_pids()
+    candidates = list_candidate_confounder_pids(exclusion=harness_exclusion_set())
     before: dict[int, int] = {}
     for item in candidates:
         ticks = read_proc_cpu_ticks(int(item["pid"]))
@@ -431,7 +528,8 @@ def host_contention(host: dict[str, Any], *, phase: str = "pre") -> dict[str, An
     load1, load5, load15 = os.getloadavg()
     cpus = max(int(host.get("cpu_count") or os.cpu_count() or 1), 1)
     # One shared activity window: sample confounder CPU and swap I/O together.
-    candidates = list_candidate_confounder_pids()
+    exclusion = harness_exclusion_set()
+    candidates = list_candidate_confounder_pids(exclusion=exclusion)
     ticks_before: dict[int, int] = {}
     for item in candidates:
         ticks = read_proc_cpu_ticks(int(item["pid"]))
@@ -520,6 +618,11 @@ def host_contention(host: dict[str, Any], *, phase: str = "pre") -> dict[str, An
         "swap_io": swap_io,
         "active_build_confounders": active_confounders,
         "candidate_confounder_count": len(candidates),
+        "harness_pid": exclusion["harness_pid"],
+        "excluded_ancestor_pids": exclusion["excluded_ancestor_pids"],
+        "excluded_ancestor_count": exclusion["excluded_ancestor_count"],
+        "excluded_pid_count": exclusion["excluded_pid_count"],
+        "ancestor_exclusion_method": exclusion["method"],
         "contended": classified["contended"],
         "reason": reason,
         "method": classified["method"],
@@ -637,6 +740,45 @@ def self_check() -> dict[str, Any]:
     if not pre_high_load["contended"] or not pre_high_load["load_thresholds_enforced"]:
         raise HarnessError(f"pre high load must enforce and contend: {pre_high_load}")
 
+    # Ancestor ppid parser/chain fixtures (pure; no ambient process dependency).
+    if parse_ppid_from_stat("123 (bash) S 1 123 123 0 -1") != 1:
+        raise HarnessError("ppid parse failed for simple stat")
+    if parse_ppid_from_stat("9 (a b) S 42 9 9 0 -1") != 42:
+        raise HarnessError("ppid parse failed for comm-with-spaces")
+    if parse_ppid_from_stat("9 (weird) name) S 7 9 9 0 -1") != 7:
+        raise HarnessError("ppid parse failed for comm-with-parens")
+    if parse_ppid_from_stat("") is not None or parse_ppid_from_stat("not-a-stat") is not None:
+        raise HarnessError("malformed stat must fail closed to None")
+    if parse_ppid_from_stat("1 (x) S") is not None:
+        raise HarnessError("short stat must fail closed to None")
+
+    tree = {100: 50, 50: 10, 10: 1, 200: 200}  # 200 is a self-cycle
+
+    def ppid_of(pid: int) -> int | None:
+        return tree.get(int(pid))
+
+    chain = walk_ancestor_pids(100, ppid_of, max_depth=64)
+    if chain != [50, 10]:
+        raise HarnessError(f"ancestor chain expected [50,10], got {chain}")
+    # Missing ppid stops walk — no broad exclusion invented.
+    short = walk_ancestor_pids(999, ppid_of, max_depth=64)
+    if short != []:
+        raise HarnessError(f"missing ppid must yield empty ancestors, got {short}")
+    cyc = walk_ancestor_pids(200, ppid_of, max_depth=64)
+    if cyc != []:
+        raise HarnessError(f"self-cycle must not invent ancestors, got {cyc}")
+    # Cycle mid-chain stops without looping forever.
+    tree2 = {1: 2, 2: 3, 3: 2}
+    mid = walk_ancestor_pids(1, tree2.get, max_depth=64)
+    if mid != [2, 3]:
+        raise HarnessError(f"mid-cycle chain expected [2,3], got {mid}")
+    # Depth bound.
+    deep = {i: i + 1 for i in range(1, 100)}
+    deep[99] = 1
+    bounded = walk_ancestor_pids(1, deep.get, max_depth=5)
+    if len(bounded) != 5:
+        raise HarnessError(f"max_depth=5 expected 5 ancestors, got {bounded}")
+
     checks = {
         "linux_cgroup_v2": True,
         "systemd_run_memory_accounting": True,
@@ -655,6 +797,8 @@ def self_check() -> dict[str, Any]:
         "cold_total_fixtures": run_cold_total_fixtures(),
         "post_load_informational_only": True,
         "post_still_enforces_active_and_swap": True,
+        "ancestor_ppid_parser_fixtures": True,
+        "ancestor_chain_fixtures": True,
     }
     missing = [k for k, v in checks.items() if v is False]
     if missing:

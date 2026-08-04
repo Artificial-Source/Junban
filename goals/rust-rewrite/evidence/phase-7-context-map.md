@@ -215,7 +215,7 @@ Host imports:
 
 Guest calls never commit domain or plugin-state writes. A successful ordinary export returns one typed `plugin-outcome` containing:
 
-- at most one application mutation request (single or existing bounded bulk operation), **or** one isolated settings/KV patch;
+- at most one application mutation request (single or existing bounded bulk operation), **or** one isolated KV patch;
 - declarative result/surface material;
 - bounded logs.
 
@@ -249,8 +249,8 @@ Safe clock/random/WASI I/O required by the selected guest toolchain is a declare
 ### Effects, events, and loops
 
 - Commands/UI actions receive an operator operation ID. Event hooks derive a stable operation ID from the durable event revision.
-- One successful invocation yields at most one AppService mutation or one plugin-state transaction. Existing 500-affected-task and receipt/event/material bounds remain authoritative.
-- Plugin event cursors are durable and advance only after the returned action succeeds or exact-replays. Catch-up is bounded by retained event pages; a cursor behind retention enters explicit resync/suspension rather than guessing.
+- One successful invocation yields at most one AppService mutation or one plugin-local KV transaction. Typed plugin settings are operator-owned: guests validate and read them but cannot rewrite user configuration. Existing 500-affected-task and receipt/event/material bounds remain authoritative.
+- Plugin event cursors are durable and advance only after the returned action succeeds or exact-replays. Catch-up is bounded by retained event pages; a cursor behind retention enters explicit resync/suspension. Resync closes admission, reads snapshot + exact epoch/head revision in one serialized repository transaction, runs a read-only/no-HTTP/no-effect guest export, CASes the cursor to that head, catches up only later revisions, then reopens live admission. Epoch change or renewed retention loss retries/suspends rather than skipping.
 - One plugin invocation runs at a time per plugin; process concurrency is capped at four.
 - Runtime dependency-call depth is capped at eight and detects call cycles. Dependency service mode is read-only and cannot use HTTP or return an effect.
 - HTTP use and a returned SQLite effect are mutually exclusive and fail closed if combined. Every accepted HTTP call is at-least-once with a stable delivery id; only SQLite effects receive exactly-once receipt replay.
@@ -310,20 +310,24 @@ The bundled registry is a local, static, signed index plus content-addressed JBP
 
 ### Schema v7 and filesystem ownership
 
+The exact table/receipt/event/migration/restore/reconciliation authority is frozen in [`phase-7-schema-contract.md`](phase-7-schema-contract.md).
+
 SQLite remains the only live data store. Schema v7 adds bounded normalized authorities for:
 
 - installed package manifest/digest/signer/version/compatibility, monotonic `package_generation`, desired state, and monotonic `activation_epoch`;
-- a bounded plugin-identity tombstone/counter so uninstall/reinstall cannot reuse an old package generation;
+- one profile-global monotonic next-package-generation allocator so uninstall/reinstall, pruning, and receipt expiry can never reuse old package authority;
 - exact grants bound to package digest, signer, permission hash, and `package_generation`;
 - locally trusted publisher keys and revocation state;
 - isolated typed setting values and KV bytes;
 - durable event cursor, failure/suspension/backoff state, and dependency lock;
 - bundled registry serial/hash observed by this Junban release;
-- canonical operation receipts/events for lifecycle, grants, settings/KV, and cursor transitions.
+- canonical global receipts/events for operator-visible install/lifecycle/grant/policy/settings transitions, plus plugin-local receipts for runtime invocation/KV/cursor transitions.
 
 Installed package envelopes live as immutable private content-addressed files under `plugins/packages/sha256/<digest>.jbp`; disposable engine-specific compiled cache lives under `plugins/cache/`. No package path from a manifest is used. Existing private-file helpers and staged-artifact serialization apply.
 
 Install publishes a verified immutable package first, then commits a disabled metadata row. A crash may leave only an unreferenced safe blob, removed by bounded startup cleanup. Uninstall first commits the dependent-safe metadata removal, then best-effort removes now-unreferenced blobs. Cache is never authority.
+
+Operator-visible plugin mutations each consume one ordinary global revision/event/receipt. Runtime invocation receipts, KV commits, cursor advances, failure counters, and backoff are transactional plugin-local bookkeeping: they do not recursively publish global events or consume global revision. A transition into failed/suspended/degraded state may publish one bounded plugin resource event; plugin event subscriptions cannot subscribe to plugin-internal event kinds.
 
 Complete SQLite backup preserves metadata, grants, settings, KV, and event cursors but not package/cache files. A cursor binds the global event epoch plus revision. Restore validates every typed row and dependency graph, then keeps each `package_generation` and its exact bound grant as inactive historical authority, disables desired state, increments `activation_epoch`, marks packages `reverify_required`, clears backoff, and performs no component compile/activation. Restore cutover rotates the global event epoch, places each plugin cursor at the restored current revision in that new epoch with `resync_required`, and never replays pre-restore hooks; explicit re-enable first receives one bounded read-only resync snapshot, then live events. Reinstall/reverification of the exact digest/signer/manifest may reuse the still-bound grant only after the operator explicitly enables the plugin and sees the permissions again; any authority change increments `package_generation` and requires a new grant. Restore/recovery never constructs Wasmtime.
 
@@ -331,7 +335,7 @@ Complete SQLite backup preserves metadata, grants, settings, KV, and event curso
 
 Three distinct identities prevent stale privilege/result reuse:
 
-- persisted monotonic `package_generation` identifies code/manifest/signer/requested-permission authority. First install starts at 1. Package update, signer/manifest/requested-permission change, uninstall/reinstall, or explicit replacement increments it; a bounded identity tombstone retains the counter after uninstall. Grants bind it. Enable/disable and ordinary host restart do not alter grant meaning.
+- persisted `package_generation` identifies code/manifest/signer/requested-permission authority and is allocated from one profile-global monotonic sequence. Every first install, package update, signer/manifest/requested-permission change, uninstall/reinstall, or explicit replacement consumes the next globally unique value; uninstall never rewinds the allocator. Grants bind it. Enable/disable and ordinary host restart do not alter grant meaning.
 - persisted monotonic `activation_epoch` identifies one runtime admission generation. Every enable attempt, disable, grant/revoke transition, package transition, manual retry, server-start activation, host-crash replacement, suspension, restore, and dependency-driven activation change increments it before new work is admitted.
 - random process-local `host_session_id` is created at each parent/child handshake and is never SQLite authority.
 
@@ -445,7 +449,7 @@ Contribution slots remain the legacy-authorized navigation/tools/workspace views
 ### Focused contract suites
 
 - manifest/package/index canonical golden vectors, wrong key/signature/hash/size/trailing-byte/unknown-field failures;
-- semver missing/incompatible/duplicate/self/cycle/depth/fanout/order/dependent disable/uninstall/update/downgrade failures;
+- semver missing/incompatible/duplicate/self/cycle/depth/fanout/order; disable blocks enabled dependents, uninstall blocks every installed dependent, and compatible dependency updates atomically rewrite all locks while incompatible updates fail with the bounded closure;
 - schema v6→v7 migration, future/open/restore validation, package reconciliation, disabled restore, receipts/events/cursors/KV/settings bounds;
 - WIT import subset, unknown import, missing capability, revoked/stale generation, malformed output and UI;
 - CPU epoch, memory/table/stack/grow, hostcall/output/log/HTTP, concurrent invocation, dependency recursion, event loop, cancellation, crash/restart/no-orphan;
@@ -520,10 +524,10 @@ Same-user access to profile files remains operator authority. The sandbox protec
 
 ## Recovery and rollback
 
-- Schema v7 uses the existing verified pre-migration backup and atomic migration. Failure leaves v6 restorable; future schema fails closed.
+- Schema v7 generalizes the existing verified SQLite backup helpers to take a pre-v7 snapshot, but not the old fallible post-commit finalizer. Canonical/semantic/FK/integrity checks run before the one commit; pre-commit failure rolls back v6, commit is the last reported migration operation, and later pruning is non-fatal. A crash leaves SQLite's atomic v6 or prevalidated v7 state with the snapshot retained; future schema fails closed.
 - Package install/replacement is immutable and content-addressed; publication-before-row may leave only a removable orphan. No half package is activated.
 - Enable/grant/revoke/disable, package, and dependency graph changes drain the exact activation epoch before commit. Timeout/partial drain fails closed; completed drain resumes the unchanged old epoch if commit fails, following AI reconfiguration authority.
-- Host crash never changes task data. It invalidates the host session, advances affected activation epochs before replacement, re-verifies exact package-generation/grants/graph, and discards late replies; repeated failure suspends without guessing.
+- Host crash never changes task data. Runtime failure counters/cursors/KV remain plugin-local and cannot create a recursive global event stream. It invalidates the host session, advances affected activation epochs before replacement, re-verifies exact package-generation/grants/graph, and discards late replies; repeated failure suspends without guessing.
 - Restore/recovery never starts the host, preserves package generations and grants only as inactive exact historical authority, advances activation epochs, and leaves every plugin disabled/reverify-required.
 - Reverting the single Phase 7 commit requires restoring the verified pre-v7 database backup; there is no v7→v6 downgrade or parallel implementation.
 

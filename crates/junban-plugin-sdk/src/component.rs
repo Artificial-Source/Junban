@@ -206,7 +206,13 @@ fn authority_metadata_bytes(bytes: &[u8]) -> Result<usize> {
     for payload in Parser::new(0).parse_all(bytes) {
         let payload = payload.map_err(|_| SdkError::ComponentMalformed)?;
         if let Payload::CustomSection(section) = payload {
-            let size = section.data().len();
+            // Count full custom-section authority material: name bytes + data bytes.
+            // wasmparser's range covers the exact payload (name length prefix + name + data).
+            let range = section.range();
+            let size = range.end.checked_sub(range.start).ok_or(SdkError::Length {
+                field: "component metadata",
+            })?;
+            debug_assert!(size >= section.name().len().saturating_add(section.data().len()));
             if size > COMPONENT_AUTHORITY_METADATA_SECTION_MAX {
                 return Err(SdkError::ComponentAuthority {
                     field: "metadata section",
@@ -479,4 +485,98 @@ fn put_text(out: &mut Vec<u8>, text: &str) -> Result<()> {
 #[must_use]
 pub fn capability_for_import(interface: &str) -> Option<Option<Capability>> {
     import_authority(interface).map(|authority| authority.capability)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn leb(mut value: usize, output: &mut Vec<u8>) {
+        loop {
+            let mut byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            output.push(byte);
+            if value == 0 {
+                break;
+            }
+        }
+    }
+
+    fn append_custom_section(component: &mut Vec<u8>, name: &[u8], data_len: usize) {
+        let mut payload = Vec::new();
+        leb(name.len(), &mut payload);
+        payload.extend_from_slice(name);
+        payload.resize(payload.len() + data_len, 0);
+        component.push(0);
+        leb(payload.len(), component);
+        component.extend_from_slice(&payload);
+    }
+
+    fn bare_component() -> Vec<u8> {
+        b"\0asm\x0d\0\x01\0".to_vec()
+    }
+
+    #[test]
+    fn custom_section_name_bytes_count_toward_section_and_aggregate_bounds() {
+        // Oversized unknown name alone (near-empty data) must hit the per-section cap.
+        let mut oversized_name = bare_component();
+        let name = vec![b'n'; COMPONENT_AUTHORITY_METADATA_SECTION_MAX + 1];
+        append_custom_section(&mut oversized_name, &name, 0);
+        assert_eq!(
+            authority_metadata_bytes(&oversized_name),
+            Err(SdkError::ComponentAuthority {
+                field: "metadata section",
+            })
+        );
+
+        // Data alone stays under the 64 KiB aggregate, but counting name bytes
+        // (plus name-length prefixes in the custom-section payload range) exceeds it.
+        let long_name = vec![b'n'; 64]; // single-byte LEB name length
+        let name_len_leb = 1_usize;
+        let data_each = COMPONENT_AUTHORITY_METADATA_SECTION_MAX - name_len_leb - long_name.len();
+        let section_size = name_len_leb + long_name.len() + data_each;
+        assert_eq!(section_size, COMPONENT_AUTHORITY_METADATA_SECTION_MAX);
+        let mut aggregate_names = bare_component();
+        append_custom_section(&mut aggregate_names, &long_name, data_each);
+        append_custom_section(&mut aggregate_names, &long_name, data_each);
+        append_custom_section(&mut aggregate_names, &long_name, 0);
+        let data_only = data_each.checked_mul(2).unwrap();
+        assert!(data_only <= COMPONENT_AUTHORITY_METADATA_MAX);
+        let counted = section_size
+            .checked_mul(2)
+            .and_then(|value| value.checked_add(name_len_leb + long_name.len()))
+            .unwrap();
+        assert!(counted > COMPONENT_AUTHORITY_METADATA_MAX);
+        assert_eq!(
+            authority_metadata_bytes(&aggregate_names),
+            Err(SdkError::ComponentAuthority {
+                field: "metadata aggregate",
+            })
+        );
+
+        // Ordinary small name/producers sections still admit under both caps.
+        let mut ordinary = bare_component();
+        append_custom_section(&mut ordinary, b"name", 16);
+        append_custom_section(&mut ordinary, b"producers", 16);
+        let total = authority_metadata_bytes(&ordinary).unwrap();
+        assert!(total > 32);
+        assert!(total <= COMPONENT_AUTHORITY_METADATA_MAX);
+
+        // Bounds helper is reached from the public inspection pre-check path too.
+        let mut encoded = bare_component();
+        append_custom_section(
+            &mut encoded,
+            b"unknown-metadata",
+            COMPONENT_AUTHORITY_METADATA_SECTION_MAX + 1,
+        );
+        assert!(matches!(
+            require_component_encoding_and_metadata_bounds(&encoded),
+            Err(SdkError::ComponentAuthority {
+                field: "metadata section"
+            })
+        ));
+    }
 }

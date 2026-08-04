@@ -31,10 +31,19 @@ export type VadSessionOptions = {
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
 };
 
+/** onnxruntime-web wasmPaths object form (hashed same-origin URLs). */
+export type VadOrtWasmPaths = {
+  mjs: string;
+  wasm: string;
+};
+
 export type VadEngineHandleLike = {
   workletUrl: string;
   modelUrl: string;
+  /** @deprecated Prefer ortWasmPaths — directory prefixes break under hashed builds. */
   ortWasmBaseUrl: string;
+  /** Exact content-hashed ORT mjs+wasm URLs required under Vite builds. */
+  ortWasmPaths: VadOrtWasmPaths;
   MicVAD: {
     new: (options: Record<string, unknown>) => Promise<MicVadLike>;
   };
@@ -66,9 +75,22 @@ async function defaultLoadEngine(): Promise<VadEngineHandleLike> {
   return mod.loadVadEngineBridge() as Promise<VadEngineHandleLike>;
 }
 
+type OrtConfigTarget = {
+  env?: {
+    wasm?: {
+      wasmPaths?: string | { mjs?: string; wasm?: string };
+    };
+  };
+};
+
 /**
  * Briefly redirect MicVAD's fixed asset filenames to Vite's content-hashed
  * same-origin URLs during construction only.
+ *
+ * MicVAD assigns `onnxWASMBasePath` (a directory prefix) to
+ * `ort.env.wasm.wasmPaths` first, then invokes `ortConfig`. We overwrite with
+ * the exact hashed `{ mjs, wasm }` object after that assignment so ORT does not
+ * fall back to unhashed same-origin filenames.
  */
 async function constructMicVad(
   handle: VadEngineHandleLike,
@@ -77,6 +99,10 @@ async function constructMicVad(
   const origFetch = globalThis.fetch.bind(globalThis);
   const workletProto = typeof AudioWorklet !== "undefined" ? AudioWorklet.prototype : null;
   const origAddModule = workletProto?.addModule;
+  const ortWasmPaths = {
+    mjs: handle.ortWasmPaths.mjs,
+    wasm: handle.ortWasmPaths.wasm,
+  };
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(typeof input === "string" || input instanceof URL ? input : input.url);
@@ -109,6 +135,15 @@ async function constructMicVad(
       onnxWASMBasePath: handle.ortWasmBaseUrl.endsWith("/")
         ? handle.ortWasmBaseUrl
         : `${handle.ortWasmBaseUrl}/`,
+      // Runs after MicVAD sets wasmPaths from onnxWASMBasePath (see package source).
+      ortConfig: (ort: OrtConfigTarget) => {
+        if (!ort.env) ort.env = {};
+        if (!ort.env.wasm) ort.env.wasm = {};
+        ort.env.wasm.wasmPaths = {
+          mjs: ortWasmPaths.mjs,
+          wasm: ortWasmPaths.wasm,
+        };
+      },
     });
   } finally {
     globalThis.fetch = origFetch;

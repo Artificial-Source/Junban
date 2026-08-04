@@ -72,4 +72,27 @@ describe("local voice built assets", () => {
       expect(text).not.toMatch(/new\s+Worker\s*\(\s*[`'"]https?:\/\//);
     }
   });
+
+  it("emits content-hashed VAD ORT mjs+wasm assets when dist exists", () => {
+    if (!existsSync(distDir)) {
+      expect(true).toBe(true);
+      return;
+    }
+    const files = listFiles(distDir).map((file) => path.basename(file));
+    // Vite content-hashes: ort-wasm-simd-threaded-<hash>.{mjs,wasm}
+    const hashedMjs = files.filter(
+      (name) => /^ort-wasm-simd-threaded-[A-Za-z0-9_-]+\.mjs$/.test(name) && !name.includes("jsep"),
+    );
+    const hashedWasm = files.filter(
+      (name) =>
+        /^ort-wasm-simd-threaded-[A-Za-z0-9_-]+\.wasm$/.test(name) && !name.includes("jsep"),
+    );
+    expect(hashedMjs.length, `VAD ORT mjs assets: ${hashedMjs.join(", ")}`).toBeGreaterThan(0);
+    expect(hashedWasm.length, `VAD ORT wasm assets: ${hashedWasm.join(", ")}`).toBeGreaterThan(0);
+
+    // Bridge source must keep both asset ids so the build emits both files.
+    const loader = readFileSync(path.join(root, "src/ui/voice/vad-loader.ts"), "utf8");
+    expect(loader).toContain('import("@junban/ort-vad-wasm?url")');
+    expect(loader).toContain('import("@junban/ort-vad-mjs?url")');
+  });
 });

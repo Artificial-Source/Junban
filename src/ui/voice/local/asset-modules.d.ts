@@ -18,6 +18,11 @@ declare module "@junban/ort-vad-wasm" {
   export default asset;
 }
 
+declare module "@junban/ort-vad-mjs" {
+  const asset: string;
+  export default asset;
+}
+
 declare module "@junban/ort-transformers-wasm" {
   const asset: string;
   export default asset;

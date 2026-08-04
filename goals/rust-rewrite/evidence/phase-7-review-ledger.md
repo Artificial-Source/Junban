@@ -73,12 +73,35 @@ Initial WIT-plan verdict: `REVISE`. After the seven corrections and a final narr
 
 Initial architecture verdict: `REVISE`. The corrected clean idle-host five-sample campaign recorded real Rust and TypeScript profiles, actual imports, no contention, no decision blockers and the selected child path. Focused recheck verdict: `APPROVE`; all four findings are fixed. `on_demand_child_host` and the Rust 18.6016/19.5078-MiB plus TypeScript 357.334/415.6201-MiB warm/peak gates are frozen, conditioned on Wave 1 matched SDK-only default proof and Wave 5 integrated replacement.
 
+## Wave 1 package implementation checkpoint
+
+| ID           | Severity | Status | Finding | Resolution and evidence |
+| ------------ | -------- | ------ | ------- | ----------------------- |
+| `P7-PKG-001` | medium   | open   | JRI1 materialized attacker-declared collections before signature/count validation; a ~3-MiB unsigned million-tag index reached ~32.5 MiB RSS before rejection. | Required correction: strict root-signature verification before JSON deserialization plus bounded vector visitors and hostile max+1/unsigned regressions. |
+| `P7-PKG-002` | medium   | open   | Component metadata accounting excluded custom-section names, so an oversized unknown name bypassed per-section and aggregate limits and produced false inspection evidence. | Required correction: checked full name+data accounting for every custom section plus oversized-name and aggregate-name regressions. |
+| `P7-PKG-003` | medium   | open   | Opaque shim components did not prove the exact supported Rust/TypeScript toolchains, generated bindings or public WIT record/variant round trips. | Required correction is shared with `P7-WIT-001`: reproducible exact-toolchain consumer sources/builds, generated bindings, real profile artifacts/import inspection and full typed round trips. |
+
+Initial package implementation verdict: **blocked**. Authoritative matched-memory evidence and schema v7 must wait for focused fixes and recheck.
+
+## Wave 1 WIT/API implementation checkpoint
+
+| ID           | Severity | Status | Finding | Resolution and evidence |
+| ------------ | -------- | ------ | ------- | ----------------------- |
+| `P7-WIT-001` | blocker  | open   | No checked-in generated Rust/TypeScript consumers compiled against the ABI or exercised every public record/variant and clear/set/default distinction. | Required correction: exact Rust 1.93 `wasm32-wasip2` and jco 1.26.1/componentize-js 0.22.0 source/build/binding/golden authorities with complete consumer coverage. |
+| `P7-WIT-002` | blocker  | open   | The child protocol had no fenced host-import callback request/reply path and load carried neither exact grants/scopes nor runtime limits. | Required correction: typed request-correlated capability callback/reply frames for every host interface, exact load authority, full fences, bodies/bounds, stale/cancel coverage. |
+| `P7-WIT-003` | high     | open   | Task effects used lossy wire types for local due time, deadline/reminder timestamps, dread and monthly recurrence anchor. | Required correction: named exact scalar/change types that reconstruct existing `TaskDraft`, `TaskPatch` and bulk requests losslessly, with clear/set round trips. |
+| `P7-WIT-004` | high     | open   | Resync used generic named-value bags instead of closed full typed task/project/tag snapshot records. | Required correction: closed typed snapshot variants and kind/payload/order/full-field tests. |
+| `P7-WIT-005` | high     | open   | WIT invented sentinel priority values, omitted explicit clear, and omitted the valid Calendar project view. | Required correction: nullable P1–P4, explicit clear/set, Calendar, and exact query/draft/patch/bulk round trips. |
+| `P7-WIT-006` | medium   | open   | The approved shared `types` interface was absent; guest and host interfaces redeclared already-divergent copies. | Required correction: one exact shared interface reused across the guest and selective host interfaces, proven by both generated consumers. |
+
+Initial production API-contract verdict: **blocked**. The checked-in WIT is not frozen and schema v7 must not start until focused correction/recheck and matched-memory evidence pass.
+
 ## Required implementation gates
 
 | Gate                          | Dominant reviewer      | Status   | Acceptance                                                                                                                                                                                     |
 | ----------------------------- | ---------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Wave 0 host-placement ADR     | architecture           | accepted | Child retained; default/no-engine, Rust+TS trap/CPU/memory/crash/cleanup and actual-import proof accepted; 18.6016/19.5078-MiB Rust and 357.334/415.6201-MiB TypeScript warm/peak gates frozen |
-| Wave 1 SDK-first package gate | security/database      | pending  | SDK implementation is complete; clean parent-run matched evidence and package security review remain required                                                                                  |
+| Wave 1 SDK-first package gate | security/API/database  | blocked  | `P7-PKG-001`–`003` and `P7-WIT-001`–`006` require focused corrections/rechecks before clean parent-run matched evidence and schema v7                                                         |
 | Wave 1 schema authority       | database               | pending  | Schema v7, migration/open/restore/staging/receipt evidence; implementation has not started                                                                                                     |
 | Wave 2 hostile runtime        | security               | pending  | Selective linker, limits, IPC, one-effect authority, crash containment, denied capabilities, hostile cross-platform matrix                                                                     |
 | Wave 3 operator contract      | API contract           | pending  | Auth/body/idempotency/staging/lifecycle/registry/contribution/event contracts; automation catalog remains 87                                                                                   |
@@ -87,4 +110,4 @@ Initial architecture verdict: `REVISE`. The corrected clean idle-host five-sampl
 
 ## Current open findings
 
-No named finding remains open. Wave 0 host placement is accepted. Wave 1 SDK implementation is present, but package security review and clean parent-run authoritative matched-release evidence have not run; Wave 1 is not accepted. Schema v7, runtime, routes, registry, UI, and reference plugins have not started.
+Wave 0 host placement is accepted. Wave 1 SDK implementation is present but blocked by open `P7-PKG-001`–`003` and `P7-WIT-001`–`006`; the initial package and production API-contract reviews require bounded pre-signature parsing, complete metadata accounting, a usable fenced callback protocol, exact domain wire types/shared WIT, and real Rust/TypeScript consumers. Authoritative matched-release evidence must run only after those fixes/rechecks. Schema v7, runtime, routes, registry, UI, and reference plugins have not started.

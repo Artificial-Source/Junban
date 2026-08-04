@@ -81,13 +81,6 @@ const REQUIRED_SCENE_IDS = [
   "pomodoro-view-status-desktop-dark",
 ];
 
-/** @type {string[]} */
-const errors = [];
-
-function fail(message) {
-  errors.push(message);
-}
-
 function sha256(buf) {
   return createHash("sha256").update(buf).digest("hex");
 }
@@ -120,19 +113,6 @@ function pngSize(buf) {
     throw new Error("not a PNG");
   }
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
-}
-
-function scanText(label, text) {
-  for (const token of FORBIDDEN) {
-    if (text.includes(token)) {
-      fail(`${label}: forbidden string ${JSON.stringify(token)}`);
-    }
-  }
-}
-
-function scanBytes(label, buf) {
-  const text = buf.toString("latin1");
-  scanText(label, text);
 }
 
 /**

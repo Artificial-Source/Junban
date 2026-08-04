@@ -73,7 +73,7 @@ Deliberately rejected legacy architecture:
 - “restricted mode” presented as hostile-code isolation;
 - package code staged under the application source tree or resolved through `node_modules`.
 
-Wave 0 captures independent immutable legacy-rendered Extensions authorities before visible implementation. At minimum they cover desktop/mobile Extensions management, Restricted Mode, permission review, registry list/detail/error/empty states, typed settings, Pomodoro view/status, and a declarative panel/action. Existing first-party Calendar, Matrix, Stats, Timeblocking, Someday, Completed, Cancelled, and Quick Wins remain first-party Phase 2/3 surfaces rather than being rewrapped as plugins.
+Wave 0 froze thirteen independent immutable legacy-rendered scenes in [`phase-7-legacy-visual-baseline/`](phase-7-legacy-visual-baseline/README.md), exact commit and `maxDiffPixelRatio: 0.01`. They cover desktop/mobile Extensions management, Restricted Mode, permission review, registry list/detail/loading/error/empty states, typed settings, Pomodoro view/status in light and dark themes, and a declarative panel/action. Existing first-party Calendar, Matrix, Stats, Timeblocking, Someday, Completed, Cancelled, and Quick Wins remain first-party Phase 2/3 surfaces rather than being rewrapped as plugins.
 
 ## Scope
 

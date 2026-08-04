@@ -69,27 +69,57 @@ LOAD_FLOOR = 1.0
 # Sample candidate build/browser processes for real CPU activity, not mere existence.
 ACTIVITY_SAMPLE_SECONDS = 0.25
 MIN_ACTIVE_CPU_TICK_DELTA = 2  # utime+stime jiffies over the sample window
-NODE_MARKERS = frozenset({"node", "nodejs", "npm", "npx", "pnpm", "vite", "playwright"})
-BUILD_CONFOUNDERS = frozenset(
+# Direct build/tool executables (identity alone is enough).
+DIRECT_BUILD_EXES = frozenset(
     {
         "cargo",
         "rustc",
         "rustdoc",
         "clippy",
+        "clippy-driver",
         "sccache",
-        "node",
-        "nodejs",
         "npm",
         "npx",
         "pnpm",
-        "vite",
-        "playwright",
-        "chrome",
-        "chromium",
-        "firefox",
+        "yarn",
         "wasm-opt",
         "wizer",
     }
+)
+# Browser executables (identity alone is enough).
+BROWSER_EXES = frozenset(
+    {
+        "chrome",
+        "chromium",
+        "chromium-browser",
+        "google-chrome",
+        "google-chrome-stable",
+        "firefox",
+        "firefox-bin",
+    }
+)
+# Node runtime identity alone is NOT a confounder (bare Pi harnesses are node).
+NODE_EXES = frozenset({"node", "nodejs"})
+# Recognized Node build/preview/test tool markers (substring in comm/cmdline).
+# Avoid generic tokens like plain "build" that false-match ordinary paths.
+NODE_TOOL_MARKERS: tuple[str, ...] = (
+    "/node_modules/.bin/",
+    "componentize-js",
+    "componentize",
+    "playwright",
+    "webpack",
+    "rollup",
+    "vitest",
+    "eslint",
+    "astro",
+    "jest",
+    "vite",
+    "next",
+    "tsc",
+    "npm",
+    "npx",
+    "pnpm",
+    "yarn",
 )
 
 # Hostile-probe StoreLimits safety caps only (linear-memory pages × 64 KiB profiles).
@@ -205,6 +235,57 @@ def load_contention_reasons(load1: float, load5: float, cpus: int) -> list[str]:
 def process_is_cpu_active(tick_delta: int, *, min_delta: int = MIN_ACTIVE_CPU_TICK_DELTA) -> bool:
     """Pure activity gate: existence alone is never contention."""
     return int(tick_delta) >= int(min_delta)
+
+
+def confounder_candidate_hits(comm: str, exe: str, cmdline: str) -> list[str]:
+    """Pure candidacy: build/preview/browser only; bare node/Pi is not a hit.
+
+    - browser executables: direct
+    - cargo/rustc/npm/pnpm/... executables: direct
+    - node/nodejs: only when comm/cmdline contains a recognized tool marker
+    """
+    comm_l = (comm or "").lower().strip()
+    exe_l = (exe or "").lower().strip()
+    cmd_l = (cmdline or "").lower()
+    exe_base = os.path.basename(exe_l) if exe_l else ""
+    identity_tokens = set(
+        re.split(r"[^a-z0-9_.+-]+", f"{comm_l} {exe_l} {exe_base}")
+    )
+    identity_tokens.discard("")
+    hits: list[str] = []
+
+    for name in sorted(DIRECT_BUILD_EXES):
+        if name in identity_tokens or name == comm_l or name == exe_base:
+            hits.append(f"direct:{name}")
+    for name in sorted(BROWSER_EXES):
+        if (
+            name in identity_tokens
+            or name == comm_l
+            or name == exe_base
+            or name in comm_l
+            or name in exe_base
+        ):
+            hits.append(f"browser:{name}")
+
+    is_node = bool(identity_tokens.intersection(NODE_EXES)) or comm_l in NODE_EXES or exe_base in NODE_EXES
+    if is_node:
+        blob = f"{comm_l} {cmd_l}"
+        for marker in NODE_TOOL_MARKERS:
+            if marker in blob:
+                hits.append(f"node_tool:{marker}")
+                break
+    # Deduplicate while stable.
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for hit in hits:
+        if hit not in seen:
+            seen.add(hit)
+            ordered.append(hit)
+    return ordered
+
+
+def is_confounder_candidate(comm: str, exe: str, cmdline: str) -> bool:
+    return bool(confounder_candidate_hits(comm, exe, cmdline))
 
 
 def swap_io_is_active(pswpin_delta: int, pswpout_delta: int) -> bool:
@@ -376,8 +457,7 @@ def list_candidate_confounder_pids(
         # Residual harness script name (same tree) — exclude without cmdline leak.
         if "check-phase7-host-placement" in cmdline or "check-phase7-host-placement" in comm:
             continue
-        tokens = set(re.split(r"[^a-z0-9_.+-]+", f"{comm} {exe} {cmdline}"))
-        hits = sorted(tokens.intersection(BUILD_CONFOUNDERS))
+        hits = confounder_candidate_hits(comm, exe, cmdline)
         if not hits:
             continue
         found.append(
@@ -623,6 +703,11 @@ def host_contention(host: dict[str, Any], *, phase: str = "pre") -> dict[str, An
         "excluded_ancestor_count": exclusion["excluded_ancestor_count"],
         "excluded_pid_count": exclusion["excluded_pid_count"],
         "ancestor_exclusion_method": exclusion["method"],
+        "confounder_match_method": (
+            "direct build/browser exe identity; node/nodejs only with recognized "
+            "build/preview/test tool markers in comm/cmdline; bare pi/node is not a hit; "
+            "active CPU tick delta still required"
+        ),
         "contended": classified["contended"],
         "reason": reason,
         "method": classified["method"],
@@ -779,6 +864,28 @@ def self_check() -> dict[str, Any]:
     if len(bounded) != 5:
         raise HarnessError(f"max_depth=5 expected 5 ancestors, got {bounded}")
 
+    # Pure confounder candidacy fixtures.
+    if is_confounder_candidate("node", "node", "/usr/bin/node /home/x/.pi/agent/dist/index.js"):
+        raise HarnessError("bare pi/node harness must not be a confounder candidate")
+    if is_confounder_candidate("node", "nodejs", "node /opt/pi/run --session abc"):
+        raise HarnessError("bare node session must not be a confounder candidate")
+    if not is_confounder_candidate(
+        "node", "node", "node /proj/node_modules/.bin/tsc -p tsconfig.json"
+    ):
+        raise HarnessError("node-launched tsc must be a confounder candidate")
+    if not is_confounder_candidate("node", "node", "node ./node_modules/vite/bin/vite.js"):
+        raise HarnessError("node-launched vite must be a confounder candidate")
+    if not is_confounder_candidate("pnpm", "pnpm", "pnpm run build"):
+        raise HarnessError("direct pnpm must be a confounder candidate")
+    if not is_confounder_candidate("cargo", "cargo", "cargo build --release"):
+        raise HarnessError("direct cargo must be a confounder candidate")
+    if not is_confounder_candidate("chrome", "google-chrome", "/usr/bin/google-chrome --type=renderer"):
+        raise HarnessError("browser must be a confounder candidate")
+    if is_confounder_candidate("python3", "python3", "python3 scripts/build_helpers.py"):
+        raise HarnessError("unrelated python must not match via plain 'build' token")
+    if is_confounder_candidate("node", "node", "node ./scripts/build.js"):
+        raise HarnessError("node with plain 'build' path must not false-match")
+
     checks = {
         "linux_cgroup_v2": True,
         "systemd_run_memory_accounting": True,
@@ -799,6 +906,8 @@ def self_check() -> dict[str, Any]:
         "post_still_enforces_active_and_swap": True,
         "ancestor_ppid_parser_fixtures": True,
         "ancestor_chain_fixtures": True,
+        "confounder_candidacy_fixtures": True,
+        "bare_pi_node_not_confounder": True,
     }
     missing = [k for k, v in checks.items() if v is False]
     if missing:
@@ -1199,7 +1308,10 @@ def cgroup_snapshot(unit: str) -> dict[str, Any]:
         except OSError:
             continue
         blob = f"{exe} {comm} {cmdline}".lower()
-        if set(re.split(r"[^a-z0-9_.+-]+", blob)).intersection(NODE_MARKERS):
+        # Measurement cgroup must not contain Node tooling at all (stricter than
+        # host confounder candidacy, which allows bare external Pi/node sessions).
+        cgroup_node_tokens = NODE_EXES | {"npm", "npx", "pnpm", "yarn", "vite", "playwright"}
+        if set(re.split(r"[^a-z0-9_.+-]+", blob)).intersection(cgroup_node_tokens):
             node_found = True
         rss_pss = BENCH.read_proc_rss_pss(pid)
         tree.append(

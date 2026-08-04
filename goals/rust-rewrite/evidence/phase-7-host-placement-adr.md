@@ -12,9 +12,19 @@ Contract: [`phase-7-context-map.md`](phase-7-context-map.md)
 
 This is **not** an authoritative architecture-gate acceptance. The harness may select
 `on_demand_child_host` by the context-map fault-containment tiebreak when Rust active-warm
-medians are close. Wave 1 must not treat this as frozen until five-sample idle-host
-evidence is recorded with `--idle-host-confirmed` and architecture review accepts it.
+medians are close. Placement may freeze from accepted Wave 0 evidence (five-sample idle-host
+run with real Rust **and** TypeScript active paths, plus architecture review).
 `accepted` remains `false` until that review.
+
+Wave 1 sequencing is **not** circular with placement:
+
+1. Architecture freezes host placement from Wave 0 evidence.
+2. Wave 1's first SDK-only subgate then produces matched default
+   `junban-server` vs server-with-SDK/protocol memory proof (no Engine, no child)
+   **before** schema/runtime product work proceeds.
+3. That default SDK proof is a condition on **continuing** Wave 1 implementation,
+   not a prerequisite to choosing placement, and is **not** claimed by the custom
+   probe projection.
 
 ## What was built
 
@@ -43,9 +53,9 @@ Exact pins:
 3. **Child receives no DB/token/lock**
    Length-prefixed JSON IPC; env scrubbed; hello identity cannot encode token/sqlite; component path rejects profile-looking names; child hashes loaded bytes and exact-matches hello `component_sha256` before compile.
 4. **Trap / CPU / memory containment**
-   In-process and child survived deliberate trap, epoch-interrupted CPU loop, and StoreLimits grow failure. Missing or failed survival evidence blocks placement selection.
+   In-process and child survived deliberate trap, epoch-interrupted CPU loop, and StoreLimits grow failure for **both Rust and TypeScript**. Missing or failed survival evidence blocks placement selection.
 5. **Child kill/recovery**
-   Deliberate kill of an active child keeps the parent healthy; a fresh child can spawn, instantiate, call, and shut down with no orphan.
+   Deliberate kill of an active child keeps the parent healthy; a fresh child can spawn, instantiate, call, and shut down with no orphan. Required for **both** child Rust and child TypeScript paths.
 6. **No runtime Node**
    TypeScript is componentized at build time; measured units reject active Node tooling processes.
 7. **IPC frame cap = 256 KiB** (product plugin-output ceiling), with unit rejection of oversized frames.
@@ -87,6 +97,8 @@ Wave 2 must:
   - clean git tree at campaign **start** (evidence file write afterward does not retroactively dirty eligibility)
   - pre + post actual idle (CPU-scaled load; active confounder CPU ticks; swap **I/O** delta only)
   - explicit `--idle-host-confirmed`
+  - successful real TypeScript component plus `inprocess_typescript` and `child_typescript` samples
+  - no `--skip-typescript` (debug-only; can never be authoritative)
   - no Wasmtime on `junban-server`; Wasmtime present on full probe; absent on SDK-only probe
 - Host contention measures **activity**, not mere existence:
   - candidate cargo/node/browser PIDs must show positive CPU tick delta over a short sample window
@@ -103,7 +115,7 @@ projected = server_baseline + max(0, variant - sdk_only_probe)
 
 are **not** an actual SDK-linked or integrated `junban-server` measurement.
 
-They are a temporary cross-check only. They do **not** prove the context-map criterion that a Phase 7 server linked to SDK/protocol-only stays within default memory growth bounds. **Wave 1 must produce matched release pairs of ordinary server vs server-with-SDK/protocol default path** (no Engine, no child) before that criterion is claimed. Wave 5 still measures integrated server+host and may revise active ceilings.
+They are a temporary cross-check only. They do **not** prove the context-map criterion that a Phase 7 server linked to SDK/protocol-only stays within default memory growth bounds, and they are **not** a prerequisite to freezing placement. After placement freezes, Wave 1's first SDK-only subgate must produce matched release pairs of ordinary server vs server-with-SDK/protocol default path (no Engine, no child) before schema/runtime work proceeds. Wave 5 still measures integrated server+host and may revise active ceilings.
 
 Preliminary ceilings in the quick JSON are data-derived from those projections plus explicit headroom only. They are not frozen Wave 1 acceptance gates.
 
@@ -120,12 +132,12 @@ Re-run results may still be `preliminary_quick` when the host is busy or the tre
 
 Lazy in-process remains implementable when it passes the same containment probes. It is not deleted from the temporary spike until authoritative evidence + architecture gate confirm the child path. Product Wave 2 should implement only the accepted placement; the temporary crate is deleted or reduced after the gate rather than renamed into `junban-plugin-host`.
 
-## Follow-ups before Wave 1 architecture gate
+## Follow-ups
 
-1. Re-run `python3 scripts/check-phase7-host-placement.py --idle-host-confirmed` on a quiet host with a clean tree and five samples.
-2. Wave 1 matched release proof: ordinary server vs server-with-SDK/protocol default path memory (context-map criterion; not satisfied by probe projection alone).
-3. Freeze authoritative active ceilings only from accepted evidence (or integrated measurements).
-4. Architecture review of the measured placement; only then start product crates.
+1. Re-run `python3 scripts/check-phase7-host-placement.py --idle-host-confirmed` on a quiet host with a clean tree and five samples including real TypeScript paths.
+2. Architecture review freezes placement from that Wave 0 evidence.
+3. Wave 1 first subgate: matched ordinary server vs server-with-SDK/protocol default path memory (not satisfied by probe projection; required before schema/runtime work).
+4. Freeze authoritative active ceilings only from accepted evidence (or later integrated measurements).
 5. Resolve Wasmtime advisory via patch, toolchain move, or documented residual risk after review.
 
 ## Commands

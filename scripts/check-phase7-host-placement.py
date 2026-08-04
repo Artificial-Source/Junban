@@ -518,6 +518,7 @@ def self_check() -> dict[str, Any]:
         "swap_io_not_static_allocation": True,
         "load1_threshold_20cpu": load_thresholds(20)["load1_threshold"],
         "load5_threshold_20cpu": load_thresholds(20)["load5_threshold"],
+        "evaluate_decision_fixtures": run_evaluate_decision_fixtures(),
     }
     missing = [k for k, v in checks.items() if v is False]
     if missing:
@@ -1087,6 +1088,110 @@ def child_stage_plan() -> list[dict[str, Any]]:
     ]
 
 
+def stage_survived(report: dict[str, Any], variant_key: str, stage: str) -> bool | None:
+    samples = report.get("samples", {}).get(variant_key) or []
+    if not samples:
+        return None
+    ok = True
+    for sample in samples:
+        st = ((sample.get("stages") or {}).get(stage) or {}).get("response") or {}
+        if not st.get("ok", False):
+            ok = False
+    return ok
+
+
+def collect_survival_findings(
+    report: dict[str, Any],
+    *,
+    variant_key: str,
+    label: str,
+) -> tuple[list[str], list[str]]:
+    """Return (reasons, blockers) for trap/cpu_loop/grow_memory survival."""
+    reasons: list[str] = []
+    blockers: list[str] = []
+    samples = report.get("samples", {}).get(variant_key) or []
+    if not samples:
+        blockers.append(f"missing required samples for {variant_key}")
+    for stage in ("trap", "cpu_loop", "grow_memory"):
+        survived = stage_survived(report, variant_key, stage)
+        if survived is True:
+            reasons.append(f"{label} {stage} survived")
+        elif survived is False:
+            blockers.append(f"{label} {stage} did not cleanly report survival")
+        else:
+            blockers.append(f"{label} {stage} survival evidence missing")
+    return reasons, blockers
+
+
+def child_lifecycle_ok(sample: dict[str, Any]) -> tuple[bool, bool]:
+    """Return (cleanup_ok, kill_recovery_ok) for one child sample."""
+    stages = sample.get("stages") or {}
+    shut = (stages.get("shutdown_child") or {}).get("response") or {}
+    shut_detail = shut.get("detail") or {}
+    cleanup_ok = bool(shut.get("ok") and shut_detail.get("cleaned", False))
+
+    kill_stage = stages.get("kill_child") or {}
+    kill = kill_stage.get("response") or {}
+    kill_detail = kill.get("detail") or {}
+    parent_after = kill_stage.get("parent_health_after") or {}
+    final_health = (stages.get("final_health") or {}).get("health") or {}
+    parent_ok = bool(
+        kill_detail.get("parent_survived")
+        or parent_after.get("ok")
+        or kill_detail.get("parent_health_ok")
+    )
+    # Recovery proof uses final spawn/instantiate/first_ping keys (post-kill overwrite).
+    spawn_ok = (stages.get("spawn") or {}).get("response") or {}
+    inst_ok = (stages.get("instantiate") or {}).get("response") or {}
+    ping_ok = (stages.get("first_ping") or {}).get("response") or {}
+    kill_ok = bool(
+        kill.get("ok")
+        and kill_detail.get("cleaned", False)
+        and parent_ok
+        and final_health.get("ok", False)
+        and spawn_ok.get("ok")
+        and inst_ok.get("ok")
+        and ping_ok.get("ok")
+    )
+    return cleanup_ok, kill_ok
+
+
+def collect_child_lifecycle_findings(
+    report: dict[str, Any],
+    *,
+    variant_key: str,
+    label: str,
+) -> tuple[list[str], list[str]]:
+    """Return (reasons, blockers) for child kill/recovery and graceful cleanup."""
+    reasons: list[str] = []
+    blockers: list[str] = []
+    samples = report.get("samples", {}).get(variant_key) or []
+    if not samples:
+        blockers.append(f"{label} cleanup evidence missing")
+        blockers.append(f"{label} kill/recovery evidence missing")
+        return reasons, blockers
+    cleanup_ok = True
+    kill_ok = True
+    for sample in samples:
+        sample_cleanup, sample_kill = child_lifecycle_ok(sample)
+        cleanup_ok = cleanup_ok and sample_cleanup
+        kill_ok = kill_ok and sample_kill
+    if cleanup_ok:
+        reasons.append(f"{label} shutdown cleaned with no orphan")
+    else:
+        blockers.append(f"{label} shutdown left orphan or failed cleanup proof")
+    if kill_ok:
+        reasons.append(f"{label} kill/recovery survived with parent healthy")
+    else:
+        blockers.append(f"{label} kill/recovery probe failed or incomplete")
+    return reasons, blockers
+
+
+def typescript_component_ok(report: dict[str, Any]) -> bool:
+    ts = (report.get("components") or {}).get("typescript") or {}
+    return bool(ts.get("ok")) and not ts.get("skipped")
+
+
 def evaluate_decision(report: dict[str, Any]) -> dict[str, Any]:
     """Apply the frozen context-map decision rule. May leave selection unset."""
     summary = report.get("summary") or {}
@@ -1115,80 +1220,27 @@ def evaluate_decision(report: dict[str, Any]) -> dict[str, Any]:
                 f"server baseline exceeds 24/32 MiB ceilings ({server_warm}/{server_peak})"
             )
 
-    # Containment is mandatory for placement selection. Missing samples block.
-    def stage_survived(variant_key: str, stage: str) -> bool | None:
-        samples = report.get("samples", {}).get(variant_key) or []
-        if not samples:
-            return None
-        ok = True
-        for sample in samples:
-            st = ((sample.get("stages") or {}).get(stage) or {}).get("response") or {}
-            if not st.get("ok", False):
-                ok = False
-        return ok
+    # Real TypeScript active evidence is mandatory for placement authority.
+    if not typescript_component_ok(report):
+        blockers.append("typescript component missing, skipped, or failed")
 
-    required_variants = ("inprocess_rust", "child_rust")
-    for variant in required_variants:
-        if not (report.get("samples", {}).get(variant) or []):
-            blockers.append(f"missing required samples for {variant}")
+    for variant_key, label in (
+        ("inprocess_rust", "in-process rust"),
+        ("child_rust", "child rust"),
+        ("inprocess_typescript", "in-process typescript"),
+        ("child_typescript", "child typescript"),
+    ):
+        r, b = collect_survival_findings(report, variant_key=variant_key, label=label)
+        reasons.extend(r)
+        blockers.extend(b)
 
-    for variant, label in (("inprocess_rust", "in-process"), ("child_rust", "child")):
-        for stage in ("trap", "cpu_loop", "grow_memory"):
-            survived = stage_survived(variant, stage)
-            if survived is True:
-                reasons.append(f"{label} {stage} survived")
-            elif survived is False:
-                blockers.append(f"{label} {stage} did not cleanly report survival")
-            else:
-                blockers.append(f"{label} {stage} survival evidence missing")
-
-    child_samples = report.get("samples", {}).get("child_rust") or []
-    if not child_samples:
-        blockers.append("child cleanup evidence missing")
-        blockers.append("child kill/recovery evidence missing")
-    else:
-        child_cleanup_ok = True
-        child_kill_ok = True
-        for sample in child_samples:
-            stages = sample.get("stages") or {}
-            shut = (stages.get("shutdown_child") or {}).get("response") or {}
-            shut_detail = shut.get("detail") or {}
-            if not shut.get("ok") or not shut_detail.get("cleaned", False):
-                child_cleanup_ok = False
-            kill_stage = stages.get("kill_child") or {}
-            kill = kill_stage.get("response") or {}
-            kill_detail = kill.get("detail") or {}
-            parent_after = kill_stage.get("parent_health_after") or {}
-            final_health = (stages.get("final_health") or {}).get("health") or {}
-            parent_ok = bool(
-                kill_detail.get("parent_survived")
-                or parent_after.get("ok")
-                or kill_detail.get("parent_health_ok")
-            )
-            if (
-                not kill.get("ok")
-                or not kill_detail.get("cleaned", False)
-                or not parent_ok
-                or not final_health.get("ok", False)
-            ):
-                child_kill_ok = False
-            # Recovery proof: post-kill spawn/instantiate/first_ping must succeed.
-            # Because stage names repeat, walk recorded responses for kill then
-            # ensure at least one successful spawn and first_ping exist and the
-            # terminal shutdown cleaned.
-            spawn_ok = (stages.get("spawn") or {}).get("response") or {}
-            inst_ok = (stages.get("instantiate") or {}).get("response") or {}
-            ping_ok = (stages.get("first_ping") or {}).get("response") or {}
-            if not (spawn_ok.get("ok") and inst_ok.get("ok") and ping_ok.get("ok")):
-                child_kill_ok = False
-        if child_cleanup_ok:
-            reasons.append("child shutdown cleaned with no orphan")
-        else:
-            blockers.append("child shutdown left orphan or failed cleanup proof")
-        if child_kill_ok:
-            reasons.append("child kill/recovery survived with parent healthy")
-        else:
-            blockers.append("child kill/recovery probe failed or incomplete")
+    for variant_key, label in (
+        ("child_rust", "child rust"),
+        ("child_typescript", "child typescript"),
+    ):
+        r, b = collect_child_lifecycle_findings(report, variant_key=variant_key, label=label)
+        reasons.extend(r)
+        blockers.extend(b)
 
     # Placement selection: fault containment breaks a close tie toward child.
     selected = None
@@ -1237,6 +1289,9 @@ def evaluate_decision(report: dict[str, Any]) -> dict[str, Any]:
     if report.get("protocol", {}).get("quick"):
         selection_status = f"quick_{selection_status}"
         reasons.append("quick mode cannot claim authoritative acceptance")
+    if report.get("protocol", {}).get("skip_typescript"):
+        selection_status = f"debug_skip_ts_{selection_status}"
+        reasons.append("--skip-typescript is debug-only and cannot be authoritative")
 
     return {
         "selected_placement": selected,
@@ -1246,7 +1301,8 @@ def evaluate_decision(report: dict[str, Any]) -> dict[str, Any]:
         "decision_rule": (
             "Ordinary no-plugin server must stay within 24/32 MiB and not construct "
             "an Engine or spawn a host. Guest trap/CPU/memory survival and child "
-            "kill/recovery/cleanup are mandatory blockers when missing or failed. "
+            "kill/recovery/cleanup are mandatory blockers for both Rust and TypeScript "
+            "when missing or failed. Real TypeScript component evidence is required. "
             "Fault containment breaks a close measurement tie toward the child process. "
             "Projected product totals are temporary probe cross-checks only, not "
             "integrated server+SDK proof."
@@ -1259,6 +1315,116 @@ def evaluate_decision(report: dict[str, Any]) -> dict[str, Any]:
                 "Not product active-RSS budgets and not frozen Wave 1 acceptance ceilings."
             ),
         },
+    }
+
+
+def _fixture_hostile_stages(*, ok: bool = True) -> dict[str, Any]:
+    resp = {"ok": ok}
+    return {
+        "trap": {"response": dict(resp)},
+        "cpu_loop": {"response": dict(resp)},
+        "grow_memory": {"response": dict(resp)},
+    }
+
+
+def _fixture_child_lifecycle(*, ok: bool = True) -> dict[str, Any]:
+    stages = _fixture_hostile_stages(ok=ok)
+    stages.update(
+        {
+            "kill_child": {
+                "response": {
+                    "ok": ok,
+                    "detail": {"cleaned": ok, "parent_survived": ok, "parent_health_ok": ok},
+                },
+                "parent_health_after": {"ok": ok},
+            },
+            "spawn": {"response": {"ok": ok}},
+            "instantiate": {"response": {"ok": ok}},
+            "first_ping": {"response": {"ok": ok}},
+            "shutdown_child": {"response": {"ok": ok, "detail": {"cleaned": ok}}},
+            "final_health": {"health": {"ok": ok}},
+        }
+    )
+    return stages
+
+
+def _base_eval_report() -> dict[str, Any]:
+    return {
+        "artifacts": {
+            "server_links_wasmtime": False,
+            "sdk_probe_links_wasmtime": False,
+            "probe_links_wasmtime": True,
+        },
+        "summary": {
+            "server_baseline": {
+                "idle_cgroup_mib": {"max": 4.0},
+                "idle_cgroup_peak_mib": {"max": 5.0},
+            },
+            "inprocess_rust": {"after_warm_cgroup_mib": {"median": 4.5}},
+            "child_rust": {"after_warm_cgroup_mib": {"median": 4.7}},
+        },
+        "components": {
+            "rust": {"ok": True},
+            "typescript": {"ok": True, "path": "tools/phase7-host-placement/components/ts.wasm"},
+        },
+        "samples": {
+            "inprocess_rust": [{"stages": _fixture_hostile_stages(ok=True)}],
+            "child_rust": [{"stages": _fixture_child_lifecycle(ok=True)}],
+            "inprocess_typescript": [{"stages": _fixture_hostile_stages(ok=True)}],
+            "child_typescript": [{"stages": _fixture_child_lifecycle(ok=True)}],
+        },
+        "protocol": {"quick": False, "skip_typescript": False},
+        "host_contention": {"contended": False},
+    }
+
+
+def run_evaluate_decision_fixtures() -> dict[str, Any]:
+    """Synthetic fixtures proving TS skip/missing/failure blocks and complete pass."""
+    complete = evaluate_decision(_base_eval_report())
+    if complete.get("blockers"):
+        raise HarnessError(f"complete TS fixture unexpectedly blocked: {complete['blockers']}")
+    if complete.get("selected_placement") != "on_demand_child_host":
+        raise HarnessError(f"complete fixture selection unexpected: {complete}")
+
+    skipped = _base_eval_report()
+    skipped["components"]["typescript"] = {"ok": False, "skipped": True}
+    skipped["samples"].pop("inprocess_typescript", None)
+    skipped["samples"].pop("child_typescript", None)
+    skipped_decision = evaluate_decision(skipped)
+    if not any("typescript component" in b for b in skipped_decision["blockers"]):
+        raise HarnessError(f"skipped TS did not block: {skipped_decision['blockers']}")
+
+    missing_ts = _base_eval_report()
+    missing_ts["samples"].pop("inprocess_typescript", None)
+    missing_ts["samples"].pop("child_typescript", None)
+    missing_decision = evaluate_decision(missing_ts)
+    if not any("inprocess_typescript" in b or "typescript" in b for b in missing_decision["blockers"]):
+        raise HarnessError(f"missing TS samples did not block: {missing_decision['blockers']}")
+
+    failed_ts_trap = _base_eval_report()
+    failed_ts_trap["samples"]["inprocess_typescript"] = [
+        {"stages": _fixture_hostile_stages(ok=False)}
+    ]
+    failed_decision = evaluate_decision(failed_ts_trap)
+    if not any("in-process typescript trap" in b for b in failed_decision["blockers"]):
+        raise HarnessError(f"failed TS trap did not block: {failed_decision['blockers']}")
+
+    failed_ts_kill = _base_eval_report()
+    failed_ts_kill["samples"]["child_typescript"] = [
+        {"stages": _fixture_child_lifecycle(ok=False)}
+    ]
+    failed_kill_decision = evaluate_decision(failed_ts_kill)
+    if not any("child typescript kill" in b or "child typescript shutdown" in b for b in failed_kill_decision["blockers"]):
+        raise HarnessError(
+            f"failed TS child lifecycle did not block: {failed_kill_decision['blockers']}"
+        )
+
+    return {
+        "complete_selected": complete.get("selected_placement"),
+        "skipped_ts_blocks": True,
+        "missing_ts_blocks": True,
+        "failed_ts_trap_blocks": True,
+        "failed_ts_child_lifecycle_blocks": True,
     }
 
 
@@ -1564,8 +1730,13 @@ def run_campaign(
     contention_post = host_contention(host)
     contended = bool(contention_pre["contended"] or contention_post["contended"])
 
+    ts_ok = bool(ts_component.get("ok")) and not ts_component.get("skipped")
+    has_ts_samples = bool(samples.get("inprocess_typescript")) and bool(
+        samples.get("child_typescript")
+    )
     authoritative = (
         not quick
+        and not skip_typescript
         and idle_host_confirmed
         and not dirty_at_start
         and not contended
@@ -1575,13 +1746,19 @@ def run_campaign(
         and not artifacts.get("server_links_wasmtime")
         and not artifacts.get("sdk_probe_links_wasmtime")
         and bool(artifacts.get("probe_links_wasmtime"))
+        and ts_ok
+        and has_ts_samples
     )
     if quick:
         evidence_status = "preliminary_quick"
+    elif skip_typescript:
+        evidence_status = "preliminary_skip_typescript_debug"
     elif not idle_host_confirmed:
         evidence_status = "preliminary_idle_host_not_confirmed"
     elif dirty_at_start or contended:
         evidence_status = "preliminary_contended_or_dirty_host"
+    elif not ts_ok or not has_ts_samples:
+        evidence_status = "preliminary_typescript_evidence_incomplete"
     elif authoritative:
         evidence_status = "authoritative_candidate"
     else:
@@ -1592,6 +1769,7 @@ def run_campaign(
             "name": PROTOCOL_NAME,
             "version": PROTOCOL_VERSION,
             "quick": quick,
+            "skip_typescript": skip_typescript,
             "idle_host_confirmed": idle_host_confirmed,
             "samples": samples_n,
             "authoritative_samples": AUTHORITATIVE_SAMPLES,

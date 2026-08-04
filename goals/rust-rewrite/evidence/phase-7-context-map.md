@@ -1,7 +1,7 @@
 # Phase 7 context map and execution contract
 
 Date: 2026-08-04
-Status: Wave 0 host placement accepted; Wave 1 SDK-first implementation is under package/WIT/matched-memory acceptance
+Status: Wave 0 host placement accepted; Wave 1 SDK package-security and WIT/API rechecks accepted; clean exact-commit matched-memory acceptance remains before schema/runtime/routes/UI
 Base: Phase 6 commit `18bea1b899108f218074714697759af02fa56670`
 
 ## Purpose and observable outcome

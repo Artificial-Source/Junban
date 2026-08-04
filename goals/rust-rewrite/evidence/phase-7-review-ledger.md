@@ -96,13 +96,25 @@ Initial package implementation verdict: **blocked**. Focused security recheck at
 
 Initial production API-contract verdict: **blocked**. Focused API recheck plus the final `P7-WIT-002` recheck found all six IDs fixed; WIT SHA-256 `5705801973219a0e6981693653f2caefdf1090345b65494750c8d8a9bf4b15f4` is **approved to freeze**.
 
+## Wave 1 schema implementation checkpoint
+
+| ID          | Severity | Status | Finding                                                                                                                                                    | Required correction and focused evidence                                                                                                         |
+| ----------- | -------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `P7-DB-001` | high     | open   | Known accepted v6 in-place AI authority repairs ran only after reaching v7, so legitimate older v6 profiles failed canonical pre-v7 snapshot verification. | Run the restricted v6 repairs before v6 snapshot verification; migrate fixtures missing each accepted object and retain a canonical v6 snapshot. |
+| `P7-DB-002` | high     | open   | v7 normal open and restore silently recreated missing v6-era authority objects before canonical validation.                                                | Restrict repairs to true v6 input; malformed v7 live/backup schemas must fail closed without recreating or losing rows.                          |
+| `P7-DB-003` | medium   | open   | First-process v6→v7 migration skipped accepted reminder timestamp normalization until a later restart.                                                     | Normalize all accepted v6 comparison columns before snapshot/migration and prove fixed-width values immediately after the first migration.       |
+| `P7-DB-004` | medium   | open   | Current-v7 normal open omitted integrity/FK checks, allowing orphan plugin KV/cursor rows inserted with FK enforcement disabled.                           | Enforce `integrity_check` and `foreign_key_check` on current-v7 open; hostile orphan rows must fail without repair.                              |
+| `P7-DB-005` | medium   | open   | SQLite TEXT values satisfied plugin KV bounds because neither schema nor semantic validation required BLOB storage class.                                  | Require `typeof(value) = 'blob'` in schema and validation; TEXT KV must fail normal open and restore without repair.                             |
+
+Initial Slice A database verdict: **blocked**. Slice B must wait for focused corrections and database-specialist recheck.
+
 ## Required implementation gates
 
 | Gate                          | Dominant reviewer      | Status   | Acceptance                                                                                                                                                                                            |
 | ----------------------------- | ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Wave 0 host-placement ADR     | architecture           | accepted | Child retained; default/no-engine, Rust+TS trap/CPU/memory/crash/cleanup and actual-import proof accepted; 18.6016/19.5078-MiB Rust and 357.334/415.6201-MiB TypeScript warm/peak gates frozen        |
 | Wave 1 SDK-first package gate | security/API/database  | accepted | Package security and WIT/API reviews approved; clean exact-commit five-sample evidence passed: default warm 8.6484 MiB median/9.5312 MiB max/9.5820 MiB max peak, 0.3868 MiB below feature-off median |
-| Wave 1 schema authority       | database               | pending  | Schema v7, migration/open/restore/staging/receipt evidence; implementation has not started                                                                                                            |
+| Wave 1 schema authority       | database               | blocked  | Slice A implemented schema/migration/open/restore authority, but `P7-DB-001`–`005` require focused correction/recheck before Slice B                                                                  |
 | Wave 2 hostile runtime        | security               | pending  | Selective linker, limits, IPC, one-effect authority, crash containment, denied capabilities, hostile cross-platform matrix                                                                            |
 | Wave 3 operator contract      | API contract           | pending  | Auth/body/idempotency/staging/lifecycle/registry/contribution/event contracts; automation catalog remains 87                                                                                          |
 | Wave 4 Extensions UI          | frontend/accessibility | pending  | Immutable legacy presentation, permission clarity, safe declarative renderer, stale/revoke/failure, visual/keyboard/axe                                                                               |
@@ -110,4 +122,4 @@ Initial production API-contract verdict: **blocked**. Focused API recheck plus t
 
 ## Current open findings
 
-No named finding is open. Wave 0 host placement and the complete Wave 1 SDK-first package/WIT/matched-memory subgate are accepted. The clean commit `5d05eacbdfd9298eefc16c5b69f730cd2f05494e` run recorded `accepted=true`, no contention/blocker/dirty state, one process, complete cleanup, default warm 8.6484 MiB median/9.5312 MiB maximum and 9.5820 MiB maximum peak. Schema v7 is now authorized; runtime, routes, registry, UI, and reference plugins have not started.
+Wave 0 placement and the SDK-first package/WIT/matched-memory subgate remain accepted. Schema-v7 Slice A is integrated, but open `P7-DB-001`–`005` block Slice B until v6 normalization ordering, strict v7 no-repair validation, current-open integrity/FKs and BLOB-only KV authority are corrected and rechecked. Runtime, routes, registry, UI, and reference plugins have not started.

@@ -2005,47 +2005,59 @@ async fn exec_apply_auto_schedule_day<R: Repository, E: EventSink>(
         if missing {
             // Fail closed before the first missing write when any referenced task is gone.
             for task_id in &seen_tasks {
-                if service.get_task(*task_id).await.is_err() {
-                    let created = recovered
-                        .iter()
-                        .zip(prepared.iter())
-                        .filter_map(|(mutation, item)| {
-                            mutation.as_ref().map(|mutation| {
-                                composite_created_block_entry(mutation, item.child_op, item.task_id)
+                match service.get_task(*task_id).await {
+                    Ok(_) => {}
+                    Err(AppError::NotFound) => {
+                        let created = recovered
+                            .iter()
+                            .zip(prepared.iter())
+                            .filter_map(|(mutation, item)| {
+                                mutation.as_ref().map(|mutation| {
+                                    composite_created_block_entry(
+                                        mutation,
+                                        item.child_op,
+                                        item.task_id,
+                                    )
+                                })
                             })
-                        })
-                        .collect::<Vec<_>>();
-                    if created.is_empty() {
-                        return ToolResultEnvelope::error(
+                            .collect::<Vec<_>>();
+                        if created.is_empty() {
+                            return ToolResultEnvelope::error(
+                                TOOL,
+                                "not_found",
+                                "one or more referenced tasks were not found",
+                            );
+                        }
+                        let failed_index = recovered.iter().position(Option::is_none).unwrap_or(0);
+                        let failed_op = prepared[failed_index].child_op;
+                        return partial_composite_outcome(
                             TOOL,
-                            "not_found",
-                            "one or more referenced tasks were not found",
+                            created,
+                            failed_index,
+                            AppError::NotFound,
+                            json!({
+                                "date": apply_date.to_string(),
+                                "failed_operation_id": failed_op.to_string(),
+                            }),
                         );
                     }
-                    let failed_index = recovered.iter().position(Option::is_none).unwrap_or(0);
-                    let failed_op = prepared[failed_index].child_op;
-                    return partial_composite_outcome(
-                        TOOL,
-                        created,
-                        failed_index,
-                        AppError::NotFound,
-                        json!({
-                            "date": apply_date.to_string(),
-                            "failed_operation_id": failed_op.to_string(),
-                        }),
-                    );
+                    Err(error) => return map_app_error(TOOL, error),
                 }
             }
         }
     } else {
         // Initial path: prevalidate every task before the first write.
         for task_id in &seen_tasks {
-            if service.get_task(*task_id).await.is_err() {
-                return ToolResultEnvelope::error(
-                    TOOL,
-                    "not_found",
-                    "one or more referenced tasks were not found",
-                );
+            match service.get_task(*task_id).await {
+                Ok(_) => {}
+                Err(AppError::NotFound) => {
+                    return ToolResultEnvelope::error(
+                        TOOL,
+                        "not_found",
+                        "one or more referenced tasks were not found",
+                    );
+                }
+                Err(error) => return map_app_error(TOOL, error),
             }
         }
     }

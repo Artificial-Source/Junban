@@ -725,7 +725,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 6 Wave 3 orchestration/tools/API complete, including durable chat, approvals, dispatch recovery, daily briefing, edit/retry/regenerate, and the exact-head security/API gate.
 - [x] Phase 6 Wave 4 preserved React AI/voice implementation: canonical lazy chat/settings, browser/cloud/local speech, half-duplex call UX, exact-manifest local workers, sixteen immutable visual comparisons, browser functional coverage, axe/keyboard coverage, and the integrated frontend/accessibility gate are complete; `P6-W4-REV-001` and `P6-W4-REV-002` are fixed.
 - [x] Phase 6 Wave 5 closure. Exact optimized browser dogfood and real local-voice inference pass; `P6-DOG-001`–`P6-DOG-004` and final security finding `P6-FINAL-SEC-001` are fixed; disabled matched-release, enabled local-mock, schema-v6 conformance, full validation, dependency audit, and final security recheck pass; the phase is one clean commit.
-- [ ] Phase 7 implementation.
+- [ ] Phase 7 portable-plugin implementation. The current/legacy/upstream context, WIT/package/trust/schema/lifecycle/UI/evidence contract, and bounded host-placement spike are frozen in `evidence/phase-7-context-map.md`. The high-risk planning gate approved Wave 0 after closing `P7-PLAN-001`–`003`; Wave 1 remains blocked on the measured Wave 0 host-placement architecture gate.
 - [ ] Phase 8 implementation.
 - [ ] Phase 9 implementation.
 - [x] User requested sequential execution through a new Phase 10 without pausing at phase boundaries.

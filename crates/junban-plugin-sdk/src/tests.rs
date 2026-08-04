@@ -14,7 +14,22 @@ fn root_key() -> SigningKey {
 }
 
 fn valid_component() -> Vec<u8> {
-    include_bytes!("../tests/fixtures/guest-valid.wasm").to_vec()
+    include_bytes!("../consumers/rust/rust-consumer.wasm").to_vec()
+}
+
+fn consumer_permissions() -> Vec<Permission> {
+    [
+        Capability::Logging,
+        Capability::Settings,
+        Capability::Storage,
+        Capability::TasksRead,
+    ]
+    .into_iter()
+    .map(|capability| Permission {
+        capability,
+        scope: PermissionScope::Unscoped(UnscopedPermission {}),
+    })
+    .collect()
 }
 
 fn replace_all_equal(bytes: &mut [u8], from: &[u8], to: &[u8]) {
@@ -108,9 +123,21 @@ fn valid_manifest(component: &[u8]) -> RuntimeManifest {
     }
 }
 
+fn consumer_manifest(component: &[u8], profile: RuntimeProfile) -> RuntimeManifest {
+    let mut manifest = valid_manifest(component);
+    manifest.runtime_profile = profile;
+    manifest.permissions = consumer_permissions();
+    manifest
+}
+
 fn valid_package() -> Vec<u8> {
     let component = valid_component();
-    pack_package(&valid_manifest(&component), &component, &test_key()).unwrap()
+    pack_package(
+        &consumer_manifest(&component, RuntimeProfile::Rust),
+        &component,
+        &test_key(),
+    )
+    .unwrap()
 }
 
 fn registry_envelope(index: &RegistryIndex, key: &SigningKey) -> Vec<u8> {
@@ -153,16 +180,59 @@ fn exact_wit_parses_and_valid_component_has_structural_guest_abi() {
     let component = valid_component();
     assert_eq!(
         hex(&sha256(WIT_SOURCE.as_bytes())),
-        "f31351a3ed17d202c79656a564b864b9bea381c4482d986530cbc2fdc6de0514"
+        "5dd725bcd8138e4ed73f7b496249783690d2c3287cb9481802495d0c3062bd95"
     );
     assert_eq!(
         hex(&sha256(&component)),
-        "f6ef73957f342ea0291739c73a22f5f63ea0a97b1bbd5969af6ae4fd8add5ca8"
+        "1ad8b9f5d56983d72d0d816811ee78e180acea9131303aaa186465faf475ea0f"
     );
-    let inspection = inspect_component(&component, &valid_manifest(&component)).unwrap();
-    assert!(inspection.imports.is_empty());
+    let inspection = inspect_component(
+        &component,
+        &consumer_manifest(&component, RuntimeProfile::Rust),
+    )
+    .unwrap();
+    assert_eq!(
+        inspection.imports,
+        [
+            "junban:plugin/host-log@0.1.0",
+            "junban:plugin/host-settings@0.1.0",
+            "junban:plugin/host-storage@0.1.0",
+            "junban:plugin/host-tasks@0.1.0",
+            "junban:plugin/types@0.1.0",
+            "wasi:cli/environment@0.2.6",
+            "wasi:cli/exit@0.2.6",
+            "wasi:cli/stderr@0.2.6",
+            "wasi:io/error@0.2.6",
+            "wasi:io/streams@0.2.6",
+        ]
+    );
     assert_eq!(inspection.exports, [REQUIRED_GUEST_EXPORT]);
     assert_eq!(inspection.guest_abi_sha256.len(), 64);
+
+    let typescript = include_bytes!("../consumers/typescript/artifacts/typescript-consumer.wasm");
+    assert!(typescript.len() <= COMPONENT_BYTES_MAX);
+    let typescript_manifest = consumer_manifest(typescript, RuntimeProfile::Typescript);
+    let typescript_inspection = inspect_component(typescript, &typescript_manifest).unwrap();
+    assert_eq!(
+        typescript_inspection.imports,
+        [
+            "junban:plugin/host-log@0.1.0",
+            "junban:plugin/host-settings@0.1.0",
+            "junban:plugin/host-storage@0.1.0",
+            "junban:plugin/host-tasks@0.1.0",
+            "junban:plugin/types@0.1.0",
+        ]
+    );
+    assert_eq!(
+        typescript_inspection.guest_abi_sha256,
+        inspection.guest_abi_sha256
+    );
+    let typescript_package = pack_package(&typescript_manifest, typescript, &test_key()).unwrap();
+    assert!(typescript_package.len() <= PACKAGE_BYTES_MAX);
+    assert_eq!(
+        verify_package(&typescript_package).unwrap().component_bytes,
+        typescript
+    );
 }
 
 #[test]
@@ -172,7 +242,7 @@ fn deterministic_valid_package_round_trips_and_full_inspects() {
     assert_eq!(first, second);
     assert_eq!(
         hex(&sha256(&first)),
-        "736af8351f3c7fea35b6548ed4e0f80c13cae14ddd5f91698773e8e37f4a0a39"
+        "d7a36ba28ef97e8b1f1cfaa3b271fabdd1056faeeb6ff817bac165678169d43d"
     );
     let expected_key_id = hex(&sha256(&test_key().verifying_key().to_bytes()));
     let local_trust = [SignerTrustRecord {
@@ -937,7 +1007,7 @@ fn graph_rejects_missing_incompatible_self_cycle_depth_fanout_and_validates_lock
 fn component_rejects_core_malformed_export_signature_profile_undeclared_and_metadata() {
     let core = b"\0asm\x01\0\0\0";
     let component = valid_component();
-    let manifest = valid_manifest(&component);
+    let manifest = consumer_manifest(&component, RuntimeProfile::Rust);
     assert!(matches!(
         inspect_component(core, &manifest),
         Err(SdkError::ComponentEncoding)
@@ -964,25 +1034,28 @@ fn component_rejects_core_malformed_export_signature_profile_undeclared_and_meta
         b"junban:plugin/guest@0.1.0",
         b"junban:plugin/guest@0.2.0",
     );
-    let alternate_manifest = valid_manifest(&alternate_export);
+    let alternate_manifest = consumer_manifest(&alternate_export, RuntimeProfile::Rust);
     assert!(matches!(
         inspect_component(&alternate_export, &alternate_manifest),
         Err(SdkError::ComponentAuthority { field: "exports" })
     ));
 
-    let mismatched = include_bytes!("../tests/fixtures/guest-signature-mismatch.wasm").to_vec();
-    let mut mismatch_manifest = valid_manifest(&mismatched);
-    mismatch_manifest.component_sha256 = hex(&sha256(&mismatched));
+    let mut mismatched = component.clone();
+    replace_all_equal(&mut mismatched, b"activate", b"bctivate");
+    let mismatch_manifest = consumer_manifest(&mismatched, RuntimeProfile::Rust);
     assert!(matches!(
         inspect_component(&mismatched, &mismatch_manifest),
         Err(SdkError::ComponentAuthority { field: "guest ABI" })
     ));
 
-    let imported = include_bytes!("../tests/fixtures/guest-host-tasks.wasm").to_vec();
+    let imported = component.clone();
     let mut wrong_import_abi = imported.clone();
     replace_all_equal(&mut wrong_import_abi, b"query-tasks", b"query-fasks");
     assert!(matches!(
-        inspect_component(&wrong_import_abi, &valid_manifest(&wrong_import_abi)),
+        inspect_component(
+            &wrong_import_abi,
+            &consumer_manifest(&wrong_import_abi, RuntimeProfile::Rust),
+        ),
         Err(SdkError::ComponentAuthority {
             field: "import ABI"
         })
@@ -993,58 +1066,48 @@ fn component_rejects_core_malformed_export_signature_profile_undeclared_and_meta
         b"junban:plugin/host-tasks@0.1.0",
         b"evilxx:plugin/host-tasks@0.1.0",
     );
-    let unknown_manifest = valid_manifest(&unknown_import);
+    let unknown_manifest = consumer_manifest(&unknown_import, RuntimeProfile::Rust);
     assert!(matches!(
         inspect_component(&unknown_import, &unknown_manifest),
         Err(SdkError::ComponentAuthority {
             field: "unknown import"
         })
     ));
-    let no_grant = valid_manifest(&imported);
+    let mut no_grant = valid_manifest(&imported);
+    no_grant
+        .permissions
+        .retain(|permission| permission.capability != Capability::TasksRead);
     assert!(matches!(
         inspect_component(&imported, &no_grant),
         Err(SdkError::ComponentAuthority {
             field: "undeclared import"
         })
     ));
-    let mut granted = no_grant;
-    granted.permissions.push(Permission {
-        capability: Capability::TasksRead,
-        scope: PermissionScope::Unscoped(UnscopedPermission {}),
-    });
+    let granted = consumer_manifest(&imported, RuntimeProfile::Rust);
     assert!(inspect_component(&imported, &granted).is_ok());
 
-    let mut rust_profile = valid_manifest(&component);
-    rust_profile.runtime_profile = RuntimeProfile::Rust;
+    let wrong_profile = consumer_manifest(&component, RuntimeProfile::Typescript);
     assert!(matches!(
-        inspect_component(&component, &rust_profile),
+        inspect_component(&component, &wrong_profile),
         Err(SdkError::ComponentAuthority {
             field: "runtime profile imports"
         })
     ));
-    let rust_component = include_bytes!("../tests/fixtures/guest-rust-baseline.wasm").to_vec();
-    rust_profile.component_sha256 = hex(&sha256(&rust_component));
+    let rust_component = component.clone();
+    let mut rust_profile = consumer_manifest(&rust_component, RuntimeProfile::Rust);
     let rust_inspection = inspect_component(&rust_component, &rust_profile).unwrap();
-    assert_eq!(rust_inspection.imports, RUST_WASI_BASELINE);
+    assert_eq!(
+        rust_inspection
+            .imports
+            .iter()
+            .filter(|import| import.starts_with("wasi:"))
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        RUST_WASI_BASELINE
+    );
     assert_eq!(
         hex(&sha256(&rust_component)),
-        "c6f30603d464ab04e5e4fda49529b33e375c0bfdc505e57068e6f1fd0a2d0ad4"
-    );
-    assert_eq!(
-        hex(&sha256(
-            &pack_package(&rust_profile, &rust_component, &test_key()).unwrap()
-        )),
-        "3ee8c8a5264e2bef6c655bf207c2099cc83521cfd6fffa008a1f2b9d77367b5c"
-    );
-    assert_eq!(
-        hex(&sha256(&imported)),
-        "935d6a3bc571f3eeb230aa70a1c772911ec70e5bf98604cb155239f48c6c4f45"
-    );
-    assert_eq!(
-        hex(&sha256(
-            &pack_package(&granted, &imported, &test_key()).unwrap()
-        )),
-        "8589329f72034384be959157516ed2c583563c9788dfcb4293f8ef3c04951560"
+        "1ad8b9f5d56983d72d0d816811ee78e180acea9131303aaa186465faf475ea0f"
     );
     let mut wrong_wasi_abi = rust_component.clone();
     replace_all_equal(&mut wrong_wasi_abi, b"exit", b"exix");
@@ -1184,7 +1247,7 @@ fn jri1_strict_verification_and_package_agreement() {
     changed.license = "Apache-2.0".into();
     disagreements.push(changed);
     let mut changed = agreement.clone();
-    changed.runtime_profile = RuntimeProfile::Rust;
+    changed.runtime_profile = RuntimeProfile::Typescript;
     disagreements.push(changed);
     let mut changed = agreement.clone();
     changed.requested_capabilities.push(Capability::TasksRead);
@@ -1367,6 +1430,9 @@ fn protocol_raw_bodies_are_exact_bounded_and_hash_verified() {
         component_sha256: hex(&sha256(component)),
         runtime_profile: RuntimeProfile::Typescript,
         component_size: u64::try_from(component.len()).unwrap(),
+        grants: Vec::new(),
+        permission_hash: canonical_permission_hash(&[]).unwrap(),
+        limits: RuntimeLimits::for_profile(RuntimeProfile::Typescript),
     };
     assert_eq!(parent_body_len(&load).unwrap(), component.len());
     validate_parent_body(&load, component).unwrap();
@@ -1375,6 +1441,8 @@ fn protocol_raw_bodies_are_exact_bounded_and_hash_verified() {
     let invoke = ParentFrame::Invoke {
         fence: fence.clone(),
         kind: InvocationKind::InvokeCommand,
+        mode: InvocationMode::Effect,
+        permission_hash: canonical_permission_hash(&[]).unwrap(),
         request_sha256: hex(&sha256(request)),
         request_size: u32::try_from(request.len()).unwrap(),
     };
@@ -1414,11 +1482,16 @@ fn protocol_raw_bodies_are_exact_bounded_and_hash_verified() {
         component_sha256: "2".repeat(64),
         runtime_profile: RuntimeProfile::Typescript,
         component_size: u64::try_from(HOST_COMPONENT_BODY_BYTES_MAX + 1).unwrap(),
+        grants: Vec::new(),
+        permission_hash: canonical_permission_hash(&[]).unwrap(),
+        limits: RuntimeLimits::for_profile(RuntimeProfile::Typescript),
     };
     assert!(validate_parent_body(&oversized_component, b"").is_err());
     let oversized_request = ParentFrame::Invoke {
         fence: fence.clone(),
         kind: InvocationKind::InvokeCommand,
+        mode: InvocationMode::Effect,
+        permission_hash: canonical_permission_hash(&[]).unwrap(),
         request_sha256: "2".repeat(64),
         request_size: u32::try_from(HOST_REQUEST_BODY_BYTES_MAX + 1).unwrap(),
     };
@@ -1435,6 +1508,191 @@ fn protocol_raw_bodies_are_exact_bounded_and_hash_verified() {
         outcome_size: 0,
     };
     assert!(validate_child_body(&empty_outcome, b"").is_err());
+}
+
+#[test]
+fn protocol_exhausts_invocation_modes_host_calls_and_grants() {
+    let invocation_rows = [
+        (InvocationKind::Activate, InvocationMode::Lifecycle),
+        (InvocationKind::Deactivate, InvocationMode::Lifecycle),
+        (InvocationKind::InvokeCommand, InvocationMode::Effect),
+        (InvocationKind::HandleEvent, InvocationMode::Effect),
+        (InvocationKind::RenderSurface, InvocationMode::Render),
+        (InvocationKind::HandleSurfaceAction, InvocationMode::Effect),
+        (
+            InvocationKind::ValidateSettings,
+            InvocationMode::ValidateSettings,
+        ),
+        (InvocationKind::Resync, InvocationMode::Resync),
+        (InvocationKind::CallService, InvocationMode::Service),
+    ];
+    for (kind, expected) in invocation_rows {
+        assert_eq!(kind.mode(), expected);
+        for candidate in [
+            InvocationMode::Lifecycle,
+            InvocationMode::Effect,
+            InvocationMode::Render,
+            InvocationMode::ValidateSettings,
+            InvocationMode::Resync,
+            InvocationMode::Service,
+        ] {
+            assert_eq!(kind.mode() == candidate, expected == candidate);
+        }
+    }
+
+    let modes = [
+        InvocationMode::Lifecycle,
+        InvocationMode::Effect,
+        InvocationMode::Render,
+        InvocationMode::ValidateSettings,
+        InvocationMode::Resync,
+        InvocationMode::Service,
+    ];
+    assert_eq!(HOST_CALL_KINDS.len(), 11);
+    for kind in HOST_CALL_KINDS {
+        let grants = kind.capability().map_or_else(Vec::new, |capability| {
+            let scope = match capability {
+                Capability::Http => PermissionScope::Http(HttpScope {
+                    origins: vec![HttpOrigin("https://example.com".into())],
+                    methods: vec![HttpMethod::Get],
+                }),
+                Capability::ServicesConsume => PermissionScope::Services(ServiceConsumeScope {
+                    services: vec![ServiceReference {
+                        plugin_id: "dependency".into(),
+                        service_id: "service".into(),
+                    }],
+                }),
+                _ => PermissionScope::Unscoped(UnscopedPermission {}),
+            };
+            vec![Permission { capability, scope }]
+        });
+        for mode in modes {
+            assert_eq!(
+                validate_host_call_authority(*kind, mode, &grants).is_ok(),
+                kind.allowed_in(mode),
+                "{kind:?}/{mode:?}"
+            );
+            if kind.capability().is_some() {
+                assert!(validate_host_call_authority(*kind, mode, &[]).is_err());
+            }
+        }
+    }
+}
+
+#[test]
+fn protocol_load_callback_cancellation_and_limits_are_fenced() {
+    let fence = AuthorityFence {
+        plugin_id: "test-plugin".into(),
+        package_generation: 7,
+        activation_epoch: 9,
+        host_session_id: "00000000-0000-4000-8000-000000000001".into(),
+        invocation_id: "00000000-0000-4000-8000-000000000002".into(),
+    };
+    let grants = vec![Permission {
+        capability: Capability::Logging,
+        scope: PermissionScope::Unscoped(UnscopedPermission {}),
+    }];
+    let permission_hash = canonical_permission_hash(&grants).unwrap();
+    let component = b"component";
+    let load = ParentFrame::Load {
+        fence: fence.clone(),
+        package_sha256: "1".repeat(64),
+        component_sha256: hex(&sha256(component)),
+        runtime_profile: RuntimeProfile::Rust,
+        component_size: component.len() as u64,
+        grants: grants.clone(),
+        permission_hash: permission_hash.clone(),
+        limits: RuntimeLimits::for_profile(RuntimeProfile::Rust),
+    };
+    validate_parent_body(&load, component).unwrap();
+
+    let mut wrong_hash = load.clone();
+    if let ParentFrame::Load {
+        permission_hash, ..
+    } = &mut wrong_hash
+    {
+        *permission_hash = "0".repeat(64);
+    }
+    assert!(validate_parent_frame(&wrong_hash).is_err());
+    let mut wrong_limit = load.clone();
+    if let ParentFrame::Load { limits, .. } = &mut wrong_limit {
+        limits.output_bytes += 1;
+    }
+    assert!(validate_parent_frame(&wrong_limit).is_err());
+    let mut wrong_profile_limit = load.clone();
+    if let ParentFrame::Load {
+        runtime_profile, ..
+    } = &mut wrong_profile_limit
+    {
+        *runtime_profile = RuntimeProfile::Typescript;
+    }
+    assert!(validate_parent_frame(&wrong_profile_limit).is_err());
+
+    let callback = CallbackFence {
+        plugin_id: fence.plugin_id.clone(),
+        package_generation: fence.package_generation,
+        activation_epoch: fence.activation_epoch,
+        host_session_id: fence.host_session_id.clone(),
+        invocation_id: fence.invocation_id.clone(),
+        callback_id: 1,
+    };
+    let large_body = vec![7; HOST_OUTCOME_BODY_BYTES_MAX + 1];
+    let request = ChildFrame::CapabilityRequest {
+        callback: callback.clone(),
+        kind: HostCallKind::HttpRequest,
+        request_sha256: hex(&sha256(&large_body)),
+        request_size: large_body.len() as u32,
+    };
+    validate_child_body(&request, &large_body).unwrap();
+    validate_callback_correlation(&fence, 1, &callback).unwrap();
+
+    let reply = ParentFrame::CapabilityReply {
+        callback: callback.clone(),
+        kind: HostCallKind::HttpRequest,
+        result: CapabilityReplyKind::Success,
+        response_sha256: hex(&sha256(&large_body)),
+        response_size: large_body.len() as u32,
+    };
+    validate_parent_body(&reply, &large_body).unwrap();
+    validate_capability_reply(&request, &reply, &fence).unwrap();
+    assert!(validate_parent_body(&reply, &large_body[..large_body.len() - 1]).is_err());
+    let mut wrong_kind = reply.clone();
+    if let ParentFrame::CapabilityReply { kind, .. } = &mut wrong_kind {
+        *kind = HostCallKind::GetKv;
+    }
+    assert!(validate_capability_reply(&request, &wrong_kind, &fence).is_err());
+    let mut stale = callback.clone();
+    stale.activation_epoch += 1;
+    assert!(validate_callback_correlation(&fence, 1, &stale).is_err());
+    let mut mismatched = callback.clone();
+    mismatched.callback_id += 1;
+    assert!(validate_callback_correlation(&fence, 1, &mismatched).is_err());
+    let mut over_id = callback.clone();
+    over_id.callback_id = HOST_CALLBACK_ID_MAX + 1;
+    assert!(over_id.validate().is_err());
+
+    let over_limit = ChildFrame::CapabilityRequest {
+        callback,
+        kind: HostCallKind::GetKv,
+        request_sha256: "2".repeat(64),
+        request_size: HOST_CALLBACK_BODY_BYTES_MAX as u32 + 1,
+    };
+    assert!(validate_child_frame(&over_limit).is_err());
+
+    let cancelled = ParentFrame::CapabilityReply {
+        callback: stale,
+        kind: HostCallKind::HttpRequest,
+        result: CapabilityReplyKind::Cancelled,
+        response_sha256: hex(&sha256(b"")),
+        response_size: 0,
+    };
+    validate_parent_body(&cancelled, b"").unwrap();
+    let cancel = ParentFrame::Cancel {
+        fence: fence.clone(),
+    };
+    let cancelled_ack = ChildFrame::Cancelled { fence };
+    assert_eq!(parent_body_len(&cancel).unwrap(), 0);
+    assert_eq!(child_body_len(&cancelled_ack).unwrap(), 0);
 }
 
 #[test]
@@ -1499,7 +1757,7 @@ fn product_entrypoint_fingerprint_and_linkage_marker_are_stable() {
     assert_eq!(authority.fingerprint, PRODUCT_ENTRYPOINT_FINGERPRINT);
     assert_eq!(authority.marker, product_linkage_marker());
     assert!(authority.authority_type_sizes.iter().all(|size| *size > 0));
-    assert_eq!(IMPORT_AUTHORITIES.len(), 9);
+    assert_eq!(IMPORT_AUTHORITIES.len(), 10);
     assert_eq!(DECLARATION_AUTHORITIES.len(), 7);
     assert_eq!(OUTCOME_AUTHORITIES.len(), 15);
     assert_eq!(import_authority("unknown:plugin/import@0.1.0"), None);

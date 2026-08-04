@@ -219,7 +219,7 @@ Package parsing never constructs Wasmtime. A small bounded component parser/vali
 1. validates WebAssembly Component Model structure and exact component length/hash;
 2. requires a Component Model outer encoding, enumerates all component imports/exports, and treats embedded core modules only as component internals; JBP1 cannot carry a separate core module/native/custom executable sidecar;
 3. requires exports structurally compatible with exact `junban:plugin/plugin@0.1.0` (the required guest interface) and rejects alternate Junban guest versions/exports;
-4. permits only exact `junban:plugin/host-*@0.1.0` interfaces selected by the package target world and maps every actual host import to a requested manifest capability;
+4. permits the exact type-only `junban:plugin/types@0.1.0` import plus only exact `junban:plugin/host-*@0.1.0` interfaces selected by the package target world, and maps every actual capability import to a requested manifest capability;
 5. for `typescript`, permits zero WASI imports; for `rust`, permits exactly `wasi:io/error@0.2.6`, `wasi:io/streams@0.2.6`, `wasi:cli/environment@0.2.6`, `wasi:cli/exit@0.2.6`, and `wasi:cli/stderr@0.2.6`, whose host implementations return empty environment/arguments/cwd, closed or bounded-sink streams and controlled exit termination. It rejects every other WASI import including filesystem/preopens, sockets/network, CLI run, inherited stdio/environment, HTTP, random, clocks, threads and unknown interfaces;
 6. caps custom/name/producers metadata and ignores it as authority;
 7. records exact sorted import/export fingerprint in install evidence.

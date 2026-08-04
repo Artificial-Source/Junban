@@ -17,7 +17,9 @@ use crate::{
 pub const COMPONENT_AUTHORITY_METADATA_MAX: usize = 64 * 1024;
 pub const COMPONENT_AUTHORITY_METADATA_SECTION_MAX: usize = 32 * 1024;
 pub const COMPONENT_NESTING_MAX: usize = 32;
-pub const COMPONENT_SECTIONS_MAX: usize = 4_096;
+// StarlingMonkey's retained TypeScript profile has thousands of nested core
+// sections; this remains a fixed pre-iteration ceiling rather than an unbounded walk.
+pub const COMPONENT_SECTIONS_MAX: usize = 65_536;
 pub const REQUIRED_GUEST_EXPORT: &str = "junban:plugin/guest@0.1.0";
 pub const RUST_WASI_BASELINE: &[&str] = &[
     "wasi:cli/environment@0.2.6",
@@ -29,23 +31,23 @@ pub const RUST_WASI_BASELINE: &[&str] = &[
 pub const RUST_WASI_ABI_SHA256: &[(&str, &str)] = &[
     (
         "wasi:cli/environment@0.2.6",
-        "b8b4b08cd11aeed55a842d5c1ea292ed994166dcc4e4b75ff22ea5e8946decae",
+        "ff2daa4ad66d87df64e46fbdca0360a7e757dfc9ea546d7fad83310259294947",
     ),
     (
         "wasi:cli/exit@0.2.6",
-        "576e1a9e3d0c24badf4f689c828db7ed145f0fb621e86336c95af12c595f772b",
+        "946f1bb8c8fac1d522a3fc0adb07c4288be7be43018d7ac32c5591b5024efd46",
     ),
     (
         "wasi:cli/stderr@0.2.6",
-        "0c620e95463e43046284e9582e9f7bd4faf5958f91ebf77eeb74fe5a05a63912",
+        "2a3074042b3354f77e10acd8ec7ec41d4a99d0a11a5a2fc6977701d1cc08702f",
     ),
     (
         "wasi:io/error@0.2.6",
-        "659f10bdcf492c93f346a1c052f729723fab3f93e5d91dba8f3f4167e8a61a7d",
+        "55715af05302db4a7253df123e35f8dd5df22f4c68dedb07673f8d8994abc454",
     ),
     (
         "wasi:io/streams@0.2.6",
-        "576e7dfa7752b5b80d4a8c261e503388eb7aa7d703e6075129e2b853fdc2d023",
+        "4a00cb6646e72b260045e0f064db68f1629202aca581d6b1f445d896519bd100",
     ),
 ];
 pub const WIT_SOURCE: &str = include_str!("../wit/plugin.wit");
@@ -84,12 +86,13 @@ pub fn inspect_component(
             });
         };
         let name = resolve.name_world_key(key);
-        if let Some(expected) = expected_import_fingerprint(&name)?
-            && <[u8; 32]>::from(Sha256::digest(interface_fingerprint(&resolve, *id)?)) != expected
-        {
-            return Err(SdkError::ComponentAuthority {
-                field: "import ABI",
-            });
+        if let Some(expected) = expected_import_fingerprint(&name)? {
+            let actual = <[u8; 32]>::from(Sha256::digest(interface_fingerprint(&resolve, *id)?));
+            if actual != expected {
+                return Err(SdkError::ComponentAuthority {
+                    field: "import ABI",
+                });
+            }
         }
         imports.push(name);
     }
@@ -294,9 +297,8 @@ fn expected_import_fingerprint(name: &str) -> Result<Option<[u8; 32]>> {
             .ok_or(SdkError::ComponentAuthority {
                 field: "unknown import",
             })?;
-        return Ok(Some(
-            Sha256::digest(interface_fingerprint(&resolve, interface)?).into(),
-        ));
+        let material = interface_fingerprint(&resolve, interface)?;
+        return Ok(Some(Sha256::digest(material).into()));
     }
     RUST_WASI_ABI_SHA256
         .iter()
@@ -323,10 +325,28 @@ fn interface_fingerprint(resolve: &Resolve, interface_id: InterfaceId) -> Result
 }
 
 fn function_fingerprint(resolve: &Resolve, function: &Function, out: &mut Vec<u8>) -> Result<()> {
-    if !matches!(function.kind, wit_parser::FunctionKind::Freestanding) {
-        return Err(SdkError::ComponentAuthority {
-            field: "guest function kind",
-        });
+    use wit_parser::FunctionKind;
+    match function.kind {
+        FunctionKind::Freestanding => out.extend_from_slice(b"freestanding;"),
+        FunctionKind::Method(resource) => {
+            out.extend_from_slice(b"method;");
+            type_fingerprint(resolve, Type::Id(resource), out, &mut BTreeSet::new())?;
+        }
+        FunctionKind::Static(resource) => {
+            out.extend_from_slice(b"static;");
+            type_fingerprint(resolve, Type::Id(resource), out, &mut BTreeSet::new())?;
+        }
+        FunctionKind::Constructor(resource) => {
+            out.extend_from_slice(b"constructor;");
+            type_fingerprint(resolve, Type::Id(resource), out, &mut BTreeSet::new())?;
+        }
+        FunctionKind::AsyncFreestanding
+        | FunctionKind::AsyncMethod(_)
+        | FunctionKind::AsyncStatic(_) => {
+            return Err(SdkError::ComponentAuthority {
+                field: "async function kind",
+            });
+        }
     }
     put_u32(out, function.params.len())?;
     for parameter in &function.params {
@@ -374,6 +394,13 @@ fn type_fingerprint(
                 });
             }
             let definition = &resolve.types[id];
+            // A WIT `use` is a source-level alias. Component producers may retain
+            // or erase that alias while preserving the same shared nominal type.
+            if let TypeDefKind::Type(aliased) = &definition.kind {
+                let result = type_fingerprint(resolve, *aliased, out, visiting);
+                visiting.remove(&id.index());
+                return result;
+            }
             if let Some(name) = &definition.name {
                 put_text(out, name)?;
             } else {
@@ -436,13 +463,20 @@ fn type_fingerprint(
                     out.extend_from_slice(b"list;");
                     type_fingerprint(resolve, *ty, out, visiting)?;
                 }
-                TypeDefKind::Type(ty) => {
-                    out.extend_from_slice(b"alias;");
-                    type_fingerprint(resolve, *ty, out, visiting)?;
+                TypeDefKind::Type(_) => unreachable!("aliases returned above"),
+                TypeDefKind::Resource => out.extend_from_slice(b"resource;"),
+                TypeDefKind::Handle(handle) => {
+                    match handle {
+                        wit_parser::Handle::Own(_) => out.extend_from_slice(b"own;"),
+                        wit_parser::Handle::Borrow(_) => out.extend_from_slice(b"borrow;"),
+                    }
+                    let resource = match handle {
+                        wit_parser::Handle::Own(resource)
+                        | wit_parser::Handle::Borrow(resource) => *resource,
+                    };
+                    type_fingerprint(resolve, Type::Id(resource), out, visiting)?;
                 }
-                TypeDefKind::Resource
-                | TypeDefKind::Handle(_)
-                | TypeDefKind::Map(_, _)
+                TypeDefKind::Map(_, _)
                 | TypeDefKind::FixedLengthList(_, _)
                 | TypeDefKind::Future(_)
                 | TypeDefKind::Stream(_)

@@ -8,6 +8,10 @@ pub struct ImportAuthority {
 
 pub const IMPORT_AUTHORITIES: &[ImportAuthority] = &[
     ImportAuthority {
+        interface: "junban:plugin/types@0.1.0",
+        capability: None,
+    },
+    ImportAuthority {
         interface: "junban:plugin/host-clock@0.1.0",
         capability: None,
     },

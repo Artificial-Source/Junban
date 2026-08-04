@@ -75,12 +75,17 @@ The current backend crates are `junban-domain`, `junban-app`, `junban-storage`, 
 
 ```bash
 cargo test --locked -p junban-plugin-sdk
+python3 scripts/check-phase7-sdk-consumers.py
+# Intentional binding/golden update only:
+# python3 scripts/check-phase7-sdk-consumers.py --regenerate
 cargo test --locked -p junban-server
 cargo test --locked -p junban-server --no-default-features
 cargo tree --locked -p junban-server --edges normal,build
 cargo tree --locked -p junban-server --no-default-features --edges normal,build
 python3 scripts/check-phase7-sdk-matched-release.py --self-check
 ```
+
+The consumer check requires Rust 1.93 with `wasm32-wasip2`, exact `wit-bindgen-cli 0.51.0`, and `npm ci --ignore-scripts` in `crates/junban-plugin-sdk/consumers/typescript` for exact jco 1.26.1/ComponentizeJS 0.22.0. It compiles/typechecks both target worlds and verifies retained hashes, exact imports/exports, shared bindings, and the TypeScript size ceiling. See the consumer README for the explicit ComponentizeJS byte-reproducibility limitation.
 
 The default server touches the SDK's zero-allocation static product authority, including typed pointers that retain every production parser/validator without executing one. `--no-default-features` provides the matched feature-off benchmark baseline; neither configuration links or initializes Wasmtime. Supply-chain checks are also required:
 

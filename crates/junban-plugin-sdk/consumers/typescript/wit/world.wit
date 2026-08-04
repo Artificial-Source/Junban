@@ -1,0 +1,9 @@
+package junban:typescript-consumer@0.1.0;
+
+world typescript-consumer {
+  include junban:plugin/plugin@0.1.0;
+  import junban:plugin/host-tasks@0.1.0;
+  import junban:plugin/host-settings@0.1.0;
+  import junban:plugin/host-storage@0.1.0;
+  import junban:plugin/host-log@0.1.0;
+}

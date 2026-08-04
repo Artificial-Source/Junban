@@ -1,7 +1,7 @@
 # Phase 7 WIT contract
 
 Date: 2026-08-04
-Status: Wave 0 pre-implementation authority; exact `.wit` source and generated Rust/TypeScript bindings land in Wave 1 and must compile before this gate closes
+Status: Wave 1 production authority; exact `.wit`, generated Rust/TypeScript bindings, source consumers, and retained inspected components are checked in
 Package: `junban:plugin@0.1.0`
 Parent authorities: [`phase-7-context-map.md`](phase-7-context-map.md), [`phase-7-package-contract.md`](phase-7-package-contract.md)
 
@@ -43,7 +43,7 @@ The local package/world name is build metadata, not authority. JBP1 records the 
 
 Exact package interface IDs:
 
-- `types`: shared records/variants/enums;
+- `types`: the shared records/variants/enums authority imported nominally by generated consumers and reused by every interface;
 - `host-tasks`, `host-projects`, `host-tags`: bounded read queries;
 - `host-settings`: current typed settings reads;
 - `host-storage`: isolated KV reads;

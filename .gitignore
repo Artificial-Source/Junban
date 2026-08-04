@@ -45,4 +45,6 @@ Thumbs.db
 /tools/phase7-host-placement/guests/typescript-spike/node_modules/
 /target/p7-sdk-only/
 /target/p7-empty-web/
+/crates/junban-plugin-sdk/consumers/rust/target/
+/crates/junban-plugin-sdk/consumers/typescript/node_modules/
 __pycache__/

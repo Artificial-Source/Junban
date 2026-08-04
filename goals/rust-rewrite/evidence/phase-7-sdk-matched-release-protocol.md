@@ -40,12 +40,19 @@ linkage retains executable SDK code without constructing a runtime.
 
 The private host protocol keeps each canonical JSON header u32be-length-prefixed
 and capped at 256 KiB. Exactly one raw, unencoded body follows `Load` (component
-bytes, 1–32 MiB), `Invoke` (request bytes, 1–256 KiB), and `Outcome` (outcome
-bytes, 1–256 KiB). The declared size is the body boundary; there is no second
-length prefix. Every other frame has a zero-byte body. Receivers validate the
-exact declared length and SHA-256 before reading the next header, rejecting
-missing, short, trailing, unexpected, empty, oversized, or hash-mismatched
-bodies. Bodies are never JSON arrays or base64 and carry no filesystem/profile
+bytes, 1–32 MiB), `Invoke` (request bytes, 1–256 KiB), `Outcome` (outcome
+bytes, 1–256 KiB), child capability requests, and parent capability replies
+(the latter two 0–4 MiB so typed HTTP/KV host calls are not incorrectly capped
+by the outcome ceiling). The declared size is the body boundary; there is no
+second length prefix. Receivers validate exact length and SHA-256 before the
+next header and reject short, trailing, unexpected, oversized, or mismatched
+bodies. Every callback/reply carries the complete plugin/generation/epoch/
+session/invocation fence and a bounded callback ID. Load freezes canonical
+sorted grants/scopes, permission hash, runtime profile, and exact numeric
+limits; invoke freezes both guest kind and its required mode. Closed host-call
+kinds cover every WIT host function, enforce the mode/grant matrix, and have no
+generic name escape hatch. Cancellation has a full-fence acknowledgement.
+Bodies are never JSON byte arrays or base64 and carry no filesystem/profile
 path, credential, token, or database authority.
 
 ## Workload and measurements

@@ -399,6 +399,33 @@ async fn read_bounded_success_body(
         .map_err(|_| ProviderError::stream("provider response body is not valid UTF-8"))
 }
 
+/// Await a reqwest response-headers future until headers arrive or the run is
+/// cancelled. Cancellation drops the send future immediately so a provider that
+/// accepts the connection but withholds headers cannot pin the run until the
+/// client timeout.
+pub(crate) async fn await_response_headers<F>(
+    future: F,
+    run: &RunCancel,
+    active_secret: Option<&str>,
+) -> Result<Response, ProviderError>
+where
+    F: Future<Output = Result<Response, reqwest::Error>>,
+{
+    let cancel = run.token();
+    tokio::select! {
+        biased;
+        () = cancel.cancelled() => Err(ProviderError::Cancelled),
+        result = future => result.map_err(|error| {
+            let err = if error.is_timeout() {
+                ProviderError::Timeout
+            } else {
+                ProviderError::connect(error.to_string())
+            };
+            err.scrub_secret_opt(active_secret)
+        }),
+    }
+}
+
 fn map_body_error(error: reqwest::Error, phase: RequestBodyPhase) -> ProviderError {
     if error.is_timeout() {
         return ProviderError::Timeout;

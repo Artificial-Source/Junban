@@ -455,6 +455,58 @@ async fn cancellation_at_frame_and_effect_boundary() {
     assert_eq!(run.generation(), generation);
 }
 
+/// P6-DOG-002: cancel while the provider has accepted the request but withholds
+/// response headers must return Cancelled promptly (drop the send future) with
+/// no retry. Barriers only — no production sleeps.
+#[tokio::test]
+async fn p6_dog_002_cancel_while_waiting_for_response_headers() {
+    use std::time::Instant;
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let (received_tx, received_rx) = oneshot::channel::<()>();
+    let url = spawn_accept_then_withhold_headers(Arc::clone(&hits), received_tx).await;
+
+    let runtime = Arc::new(ProviderRuntime::new());
+    let endpoint = endpoint_for_mock(ProviderPreset::Custom, &url);
+    let request = simple_request();
+    let run = Arc::new(RunCancel::new());
+
+    let runtime_task = Arc::clone(&runtime);
+    let run_task = Arc::clone(&run);
+    let join = tokio::spawn(async move { runtime_task.chat(&endpoint, &request, &run_task).await });
+
+    // Wait until the loopback peer has fully accepted the HTTP request.
+    tokio::time::timeout(Duration::from_secs(2), received_rx)
+        .await
+        .expect("provider accepted request before cancel ceiling")
+        .expect("received signal");
+
+    let started = Instant::now();
+    run.cancel();
+    let err = tokio::time::timeout(Duration::from_secs(2), join)
+        .await
+        .expect("cancel must not wait for the reqwest client timeout")
+        .expect("chat task join")
+        .expect_err("expected Cancelled while headers withheld");
+
+    assert!(
+        matches!(err, ProviderError::Cancelled),
+        "expected Cancelled, got {err:?}"
+    );
+    assert!(!err.to_string().contains(SYNTH));
+    assert!(!format!("{err:?}").contains(SYNTH));
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "Cancelled must not open a second provider request"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "cancel while awaiting headers must complete promptly"
+    );
+    assert!(!run.is_live());
+}
+
 #[tokio::test]
 async fn dashscope_non_stream_tools_round_trip() {
     let body = r#"{
@@ -1184,6 +1236,46 @@ async fn spawn_gated(gate: oneshot::Receiver<()>) -> String {
         let _ = gate.await;
         let late = b"data: {\"choices\":[{\"delta\":{\"content\":\"LATE\"}}]}\n\ndata: [DONE]\n\n";
         let _ = socket.write_all(late).await;
+    });
+    format!("http://{addr}")
+}
+
+/// Accept one HTTP request (read until header terminator), signal readiness, then
+/// withhold response headers until the peer drops the connection.
+async fn spawn_accept_then_withhold_headers(
+    hits: Arc<AtomicUsize>,
+    received: oneshot::Sender<()>,
+) -> String {
+    let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let Ok((mut socket, _)) = listener.accept().await else {
+            return;
+        };
+        hits.fetch_add(1, Ordering::SeqCst);
+        let mut buf = vec![0u8; 16 * 1024];
+        let mut filled = 0usize;
+        loop {
+            match socket.read(&mut buf[filled..]).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    filled = filled.saturating_add(n);
+                    if buf[..filled].windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                    if filled == buf.len() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        let _ = received.send(());
+        // Hold the accepted socket with no response bytes until the client drops
+        // after cancel. Ceiling only — production cancel must not rely on this.
+        let _ = tokio::time::timeout(Duration::from_secs(30), socket.read(&mut buf)).await;
     });
     format!("http://{addr}")
 }

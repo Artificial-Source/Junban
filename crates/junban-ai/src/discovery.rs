@@ -18,7 +18,7 @@ use crate::ids::{ModelId, ProviderKind};
 use crate::registry::ProviderDescriptor;
 use crate::request::ProviderEndpoint;
 use crate::retry::{RequestBodyPhase, RetryDecision, classify_retry};
-use crate::transport::http_status_error;
+use crate::transport::{await_response_headers, http_status_error};
 use crate::url_policy::join_base_path;
 
 /// One discovered model with mapped capabilities (never a guessed full catalog).
@@ -103,22 +103,12 @@ async fn discover_once(
 ) -> Result<Vec<DiscoveredModel>, ProviderError> {
     let client = factory.client()?.clone();
     run.check_live()?;
-    let response = client
-        .get(url)
-        .headers(headers.clone())
-        .send()
-        .await
-        .map_err(|error| {
-            let err = if error.is_timeout() {
-                ProviderError::Timeout
-            } else {
-                ProviderError::connect(error.to_string())
-            };
-            match active_secret {
-                Some(secret) => err.scrub_secret(secret),
-                None => err,
-            }
-        })?;
+    let response = await_response_headers(
+        client.get(url).headers(headers.clone()).send(),
+        run,
+        active_secret,
+    )
+    .await?;
 
     run.check_live()?;
     let status = response.status();

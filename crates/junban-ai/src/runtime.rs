@@ -19,7 +19,7 @@ use crate::error::ProviderError;
 use crate::request::{ProviderChatRequest, ProviderEndpoint};
 use crate::retry::{RequestBodyPhase, RetryDecision, classify_retry};
 use crate::stream::NormalizedStreamEvent;
-use crate::transport::{stream_provider_json, stream_provider_sse};
+use crate::transport::{await_response_headers, stream_provider_json, stream_provider_sse};
 
 /// Lazy provider runtime. Default construction allocates no HTTP client.
 #[derive(Debug, Default)]
@@ -148,23 +148,18 @@ impl ProviderRuntime {
     {
         let client = self.factory.client()?.clone();
         run.check_live()?;
-        let response = client
-            .post(&prepared.url)
-            .headers(prepared.headers.clone())
-            .json(&prepared.body)
-            .send()
-            .await
-            .map_err(|error| {
-                let err = if error.is_timeout() {
-                    ProviderError::Timeout
-                } else {
-                    ProviderError::connect(error.to_string())
-                };
-                match active_secret {
-                    Some(secret) => err.scrub_secret(secret),
-                    None => err,
-                }
-            })?;
+        // Race headers against the exact run token so cancel drops the send
+        // future when a provider accepts the socket but withholds response headers.
+        let response = await_response_headers(
+            client
+                .post(&prepared.url)
+                .headers(prepared.headers.clone())
+                .json(&prepared.body)
+                .send(),
+            run,
+            active_secret,
+        )
+        .await?;
 
         // Headers received — still pre-body until the first body byte is accepted.
         run.check_live()?;

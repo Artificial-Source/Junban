@@ -143,7 +143,7 @@ that remains an explicit **non-production** linker limitation.
   - candidate build/preview/browser PIDs must show positive CPU tick delta over a short sample window
   - candidacy is not bare Node identity: cargo/rustc/etc and browsers match directly; `node`/`nodejs` count only with recognized tool markers in comm/cmdline (`tsc`, `vite`, `pnpm`, `/node_modules/.bin/`, …). Bare Pi/agent Node sessions are not process-specific confounders (aggregate CPU still covered by pre load thresholds)
   - confounder candidacy excludes the harness PID and its bounded `/proc/<pid>/stat` ancestor chain (supervising Pi/node parent, etc.); siblings, unrelated sessions, and descendants/cgroup work are **not** excluded; evidence records excluded ancestor PIDs/count/method only (no ancestor command lines)
-  - swap contention uses `/proc/vmstat` `pswpin`/`pswpout` delta; allocated-but-inactive swap is informational only
+  - swap contention uses combined `/proc/vmstat` `pswpin`/`pswpout` **rate** over the 0.25s activity window with a frozen threshold of **≥256 pages/s (≥1 MiB/s at 4 KiB/page)**; below-threshold page noise is informational only; allocated-but-inactive swap never contends; evidence records raw deltas, pages/s, MiB/s, page-size assumption, and threshold
   - **pre-run** enforces CPU-scaled historical load thresholds (must not reject a Phase 6-class idle host solely for load5≈3.28 on ~20 CPUs)
   - **post-run** still enforces active external confounder CPU ticks and swap I/O, but treats historical load averages as **informational only** because they include this campaign's own compile/invoke CPU (`load_thresholds_enforced=false` on post samples)
   - authoritative eligibility requires both pre and post uncontended under those respective semantics

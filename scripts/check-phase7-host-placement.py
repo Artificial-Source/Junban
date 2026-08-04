@@ -69,6 +69,13 @@ LOAD_FLOOR = 1.0
 # Sample candidate build/browser processes for real CPU activity, not mere existence.
 ACTIVITY_SAMPLE_SECONDS = 0.25
 MIN_ACTIVE_CPU_TICK_DELTA = 2  # utime+stime jiffies over the sample window
+# Swap I/O contention: sustained rate, not any single page (scheduler noise).
+# Assume 4 KiB pages; >=256 pages/s == >=1 MiB/s over the sample window.
+SWAP_PAGE_BYTES = 4096
+SWAP_ACTIVE_PAGES_PER_SEC = 256.0
+SWAP_ACTIVE_MIB_PER_SEC = (
+    SWAP_ACTIVE_PAGES_PER_SEC * SWAP_PAGE_BYTES / (1024.0 * 1024.0)
+)  # 1.0 MiB/s
 # Direct build/tool executables (identity alone is enough).
 DIRECT_BUILD_EXES = frozenset(
     {
@@ -288,9 +295,69 @@ def is_confounder_candidate(comm: str, exe: str, cmdline: str) -> bool:
     return bool(confounder_candidate_hits(comm, exe, cmdline))
 
 
-def swap_io_is_active(pswpin_delta: int, pswpout_delta: int) -> bool:
-    """Pure swap gate: allocated-but-inactive swap is not contention."""
-    return int(pswpin_delta) > 0 or int(pswpout_delta) > 0
+def swap_io_rate_pages_per_sec(
+    pswpin_delta: int,
+    pswpout_delta: int,
+    *,
+    sample_seconds: float,
+) -> float:
+    """Combined pswpin+pswpout page rate over the sample window."""
+    seconds = max(float(sample_seconds), 1e-9)
+    pages = max(0, int(pswpin_delta)) + max(0, int(pswpout_delta))
+    return float(pages) / seconds
+
+
+def swap_io_is_active(
+    pswpin_delta: int,
+    pswpout_delta: int,
+    *,
+    sample_seconds: float = ACTIVITY_SAMPLE_SECONDS,
+    threshold_pages_per_sec: float = SWAP_ACTIVE_PAGES_PER_SEC,
+) -> bool:
+    """Pure swap activity gate: rate at-or-above threshold contends.
+
+    Below-threshold page noise is informational only. Static allocated swap never
+    contends. Default threshold is 256 pages/s (1 MiB/s at 4 KiB/page).
+    """
+    rate = swap_io_rate_pages_per_sec(
+        pswpin_delta, pswpout_delta, sample_seconds=sample_seconds
+    )
+    return rate >= float(threshold_pages_per_sec)
+
+
+def swap_io_assessment(
+    pswpin_delta: int,
+    pswpout_delta: int,
+    *,
+    sample_seconds: float = ACTIVITY_SAMPLE_SECONDS,
+) -> dict[str, Any]:
+    """Record raw deltas, rates, page-size assumption, and threshold decision."""
+    pin = max(0, int(pswpin_delta))
+    pout = max(0, int(pswpout_delta))
+    seconds = max(float(sample_seconds), 1e-9)
+    pages = pin + pout
+    rate = float(pages) / seconds
+    mib_s = rate * SWAP_PAGE_BYTES / (1024.0 * 1024.0)
+    active = rate >= float(SWAP_ACTIVE_PAGES_PER_SEC)
+    return {
+        "pswpin_delta": pin,
+        "pswpout_delta": pout,
+        "combined_pages_delta": pages,
+        "sample_seconds": float(sample_seconds),
+        "pages_per_sec": rate,
+        "mib_per_sec": mib_s,
+        "page_bytes_assumed": SWAP_PAGE_BYTES,
+        "threshold_pages_per_sec": float(SWAP_ACTIVE_PAGES_PER_SEC),
+        "threshold_mib_per_sec": float(SWAP_ACTIVE_MIB_PER_SEC),
+        "active": active,
+        "informational_below_threshold": (not active) and pages > 0,
+        "method": (
+            "combined pswpin+pswpout page rate over sample window; "
+            f">= {SWAP_ACTIVE_PAGES_PER_SEC:g} pages/s "
+            f"(>= {SWAP_ACTIVE_MIB_PER_SEC:g} MiB/s at {SWAP_PAGE_BYTES}-byte pages) "
+            "enforced; below-threshold activity informational only"
+        ),
+    }
 
 
 def read_proc_cpu_ticks(pid: int) -> int | None:
@@ -511,33 +578,25 @@ def sample_swap_io(
     """Measure pswpin/pswpout delta; static allocated swap is ignored."""
     first = read_vmstat_swap_io()
     if first is None:
-        return {
-            "available": False,
-            "pswpin_delta": 0,
-            "pswpout_delta": 0,
-            "active": False,
-        }
+        assessed = swap_io_assessment(0, 0, sample_seconds=sample_seconds)
+        return {"available": False, **assessed}
     time.sleep(max(float(sample_seconds), 0.05))
     second = read_vmstat_swap_io()
     if second is None:
-        return {
-            "available": False,
-            "pswpin_delta": 0,
-            "pswpout_delta": 0,
-            "active": False,
-        }
+        assessed = swap_io_assessment(0, 0, sample_seconds=sample_seconds)
+        return {"available": False, **assessed}
     pin_delta = max(0, second[0] - first[0])
     pout_delta = max(0, second[1] - first[1])
+    assessed = swap_io_assessment(
+        pin_delta, pout_delta, sample_seconds=sample_seconds
+    )
     return {
         "available": True,
         "pswpin_before": first[0],
         "pswpout_before": first[1],
         "pswpin_after": second[0],
         "pswpout_after": second[1],
-        "pswpin_delta": pin_delta,
-        "pswpout_delta": pout_delta,
-        "active": swap_io_is_active(pin_delta, pout_delta),
-        "sample_seconds": float(sample_seconds),
+        **assessed,
     }
 
 
@@ -576,12 +635,12 @@ def classify_host_contention(
     if load_thresholds_enforced:
         method = (
             "pre: enforce CPU-scaled historical load thresholds; "
-            "active confounder CPU tick deltas; pswpin/pswpout delta"
+            "active confounder CPU tick deltas; swap I/O rate threshold"
         )
     else:
         method = (
             "post: historical load averages informational only (include campaign CPU); "
-            "still enforce active external confounder CPU tick deltas and pswpin/pswpout delta"
+            "still enforce active external confounder CPU tick deltas and swap I/O rate threshold"
         )
     return {
         "phase": phase,
@@ -634,21 +693,13 @@ def host_contention(host: dict[str, Any], *, phase: str = "pre") -> dict[str, An
     if swap_before is not None and swap_after is not None:
         pin_delta = max(0, swap_after[0] - swap_before[0])
         pout_delta = max(0, swap_after[1] - swap_before[1])
-        swap_io = {
-            "available": True,
-            "pswpin_delta": pin_delta,
-            "pswpout_delta": pout_delta,
-            "active": swap_io_is_active(pin_delta, pout_delta),
-            "sample_seconds": ACTIVITY_SAMPLE_SECONDS,
-        }
+        assessed = swap_io_assessment(
+            pin_delta, pout_delta, sample_seconds=ACTIVITY_SAMPLE_SECONDS
+        )
+        swap_io = {"available": True, **assessed}
     else:
-        swap_io = {
-            "available": False,
-            "pswpin_delta": 0,
-            "pswpout_delta": 0,
-            "active": False,
-            "sample_seconds": ACTIVITY_SAMPLE_SECONDS,
-        }
+        assessed = swap_io_assessment(0, 0, sample_seconds=ACTIVITY_SAMPLE_SECONDS)
+        swap_io = {"available": False, **assessed}
     classified = classify_host_contention(
         phase=phase,
         load1=load1,
@@ -671,16 +722,28 @@ def host_contention(host: dict[str, Any], *, phase: str = "pre") -> dict[str, An
             swap_used_mib = (total - avail) / 1024.0
     except OSError:
         pass
-    # Attach swap detail into enforced reason when active (keep numbers).
+    # Attach swap detail into enforced reason when active (keep numbers/rates).
     reason = classified["reason"]
     if swap_io.get("active") and "swap_io_active" in reason:
         reason = reason.replace(
             "swap_io_active",
             "swap_io_active "
             f"pswpin_delta={swap_io['pswpin_delta']} "
-            f"pswpout_delta={swap_io['pswpout_delta']}",
+            f"pswpout_delta={swap_io['pswpout_delta']} "
+            f"pages_per_sec={swap_io['pages_per_sec']:.2f} "
+            f"threshold={swap_io['threshold_pages_per_sec']:g}",
             1,
         )
+    informational = list(classified["informational"])
+    if swap_io.get("informational_below_threshold"):
+        informational.append(
+            "swap_io_below_threshold "
+            f"combined_pages_delta={swap_io.get('combined_pages_delta', 0)} "
+            f"pages_per_sec={float(swap_io.get('pages_per_sec') or 0.0):.2f} "
+            f"threshold={float(swap_io.get('threshold_pages_per_sec') or 0.0):g}"
+        )
+    if not classified["contended"] and informational:
+        reason = "no_enforced_contention_signals; " + "; ".join(informational)
     return {
         "phase": classified["phase"],
         "load_thresholds_enforced": classified["load_thresholds_enforced"],
@@ -691,7 +754,7 @@ def host_contention(host: dict[str, Any], *, phase: str = "pre") -> dict[str, An
         "load1_threshold": classified["load1_threshold"],
         "load5_threshold": classified["load5_threshold"],
         "load_reasons": classified["load_reasons"],
-        "informational": classified["informational"],
+        "informational": informational,
         "activity_sample_seconds": ACTIVITY_SAMPLE_SECONDS,
         "min_active_cpu_tick_delta": MIN_ACTIVE_CPU_TICK_DELTA,
         "swap_used_mib_informational": swap_used_mib,
@@ -774,10 +837,33 @@ def self_check() -> dict[str, Any]:
         raise HarnessError("idle process ticks must not count as active")
     if not process_is_cpu_active(MIN_ACTIVE_CPU_TICK_DELTA):
         raise HarnessError("min tick delta must count as active")
-    if swap_io_is_active(0, 0):
+    if swap_io_is_active(0, 0, sample_seconds=ACTIVITY_SAMPLE_SECONDS):
         raise HarnessError("static swap must not count as active I/O")
-    if not swap_io_is_active(1, 0) or not swap_io_is_active(0, 2):
-        raise HarnessError("positive pswpin/pswpout delta must count as active")
+    # Below-threshold noise (e.g. 22 pages / 0.25s ≈ 88 pages/s) is informational.
+    if swap_io_is_active(22, 0, sample_seconds=ACTIVITY_SAMPLE_SECONDS):
+        raise HarnessError("below-threshold swap noise must not contend")
+    below = swap_io_assessment(22, 0, sample_seconds=ACTIVITY_SAMPLE_SECONDS)
+    if below["active"] or not below["informational_below_threshold"]:
+        raise HarnessError(f"below-threshold assessment malformed: {below}")
+    # Exactly at threshold over the window: 256 pages/s * 0.25s = 64 pages.
+    equal_pages = int(SWAP_ACTIVE_PAGES_PER_SEC * ACTIVITY_SAMPLE_SECONDS)
+    if equal_pages < 1:
+        raise HarnessError("swap threshold window pages must be positive")
+    if not swap_io_is_active(equal_pages, 0, sample_seconds=ACTIVITY_SAMPLE_SECONDS):
+        raise HarnessError("at-threshold swap rate must contend")
+    equal = swap_io_assessment(equal_pages, 0, sample_seconds=ACTIVITY_SAMPLE_SECONDS)
+    if not equal["active"] or equal["informational_below_threshold"]:
+        raise HarnessError(f"at-threshold assessment malformed: {equal}")
+    if not swap_io_is_active(equal_pages + 1, 0, sample_seconds=ACTIVITY_SAMPLE_SECONDS):
+        raise HarnessError("above-threshold swap rate must contend")
+    above = swap_io_assessment(equal_pages + 1, 0, sample_seconds=ACTIVITY_SAMPLE_SECONDS)
+    if not above["active"]:
+        raise HarnessError(f"above-threshold assessment malformed: {above}")
+    # Combined pin+pout pages count toward the same rate.
+    half = max(1, equal_pages // 2)
+    rest = equal_pages - half
+    if not swap_io_is_active(half, rest, sample_seconds=ACTIVITY_SAMPLE_SECONDS):
+        raise HarnessError("combined pin+pout at threshold must contend")
 
     # Post-run historical load alone must not contend; active process/swap still do.
     post_high_load = classify_host_contention(
@@ -898,6 +984,9 @@ def self_check() -> dict[str, Any]:
         "load_gate_allows_phase6_class_idle": True,
         "activity_not_existence": True,
         "swap_io_not_static_allocation": True,
+        "swap_rate_threshold_pages_per_sec": SWAP_ACTIVE_PAGES_PER_SEC,
+        "swap_rate_threshold_mib_per_sec": SWAP_ACTIVE_MIB_PER_SEC,
+        "swap_rate_below_equal_above_fixtures": True,
         "load1_threshold_20cpu": load_thresholds(20)["load1_threshold"],
         "load5_threshold_20cpu": load_thresholds(20)["load5_threshold"],
         "evaluate_decision_fixtures": run_evaluate_decision_fixtures(),

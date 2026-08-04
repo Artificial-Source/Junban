@@ -5913,6 +5913,77 @@ fn ai_sse_envelopes(bytes: &[u8]) -> Vec<Value> {
         .collect()
 }
 
+async fn exact_auto_schedule_apply_fixture(context: &TestContext) -> (String, String) {
+    let settings = context.state.service.get_settings().await.unwrap();
+    let date = jiff::Zoned::now().date().to_string();
+    create_task_payload(
+        context,
+        json!({
+            "title": "Auto-schedule fixture",
+            "due_date": date,
+            "estimated_minutes": 30,
+        }),
+    )
+    .await;
+    let (preview_action, _) = crate::ai_tool_registry::validate_tool_call(
+        "auto_schedule_day",
+        &json!({"date": date}).to_string(),
+    )
+    .unwrap();
+    let execution_context = crate::ai_tool_executor::ToolExecContext::with_confirmed_settings(
+        jiff::Zoned::now(),
+        &settings,
+    );
+    let preview = crate::ai_tool_executor::execute_tool(
+        &context.state.service,
+        &preview_action,
+        &execution_context,
+        None,
+    )
+    .await;
+    assert_eq!(
+        preview.outcome,
+        crate::ai_tool_registry::ToolOutcome::Success
+    );
+    assert_eq!(preview.data["preview_only"], true);
+    assert_eq!(preview.data["apply_supported"], true);
+    assert!(
+        !preview.data["proposed_blocks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let apply = json!({
+        "date": preview.data["date"].clone(),
+        "blocks": preview.data["proposed_blocks"].clone(),
+    });
+    let (_, canonical_apply) =
+        crate::ai_tool_registry::validate_tool_call("apply_auto_schedule_day", &apply.to_string())
+            .unwrap();
+    (date, canonical_apply)
+}
+
+fn provider_tool_frame(call_id: &str, name: &str, canonical_arguments: &str) -> String {
+    format!(
+        "data: {}\n\n",
+        json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": call_id,
+                        "function": {
+                            "name": name,
+                            "arguments": canonical_arguments,
+                        },
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+        })
+    )
+}
+
 async fn blocking_chat_fixture(
     listener: tokio::net::TcpListener,
     ready: tokio::sync::oneshot::Sender<()>,
@@ -9346,6 +9417,330 @@ async fn durable_dispatch_finish_wins_queued_cancel_and_emits_one_exact_bounded_
         .drop_reconfigure_runtime(epoch)
         .unwrap();
     context.state.ai_runtime.finish_reconfigure(epoch).unwrap();
+}
+
+#[tokio::test]
+async fn ai_auto_schedule_exact_immediate_preview_persists_canonical_proposal() {
+    use tokio::net::TcpListener;
+
+    let context = TestContext::new();
+    let (date, canonical_apply) = exact_auto_schedule_apply_fixture(&context).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let preview_arguments = json!({"date": date}).to_string();
+    let preview_frame = provider_tool_frame(
+        "auto-schedule-preview",
+        "auto_schedule_day",
+        &preview_arguments,
+    );
+    let apply_frame = provider_tool_frame(
+        "auto-schedule-apply",
+        "apply_auto_schedule_day",
+        &canonical_apply,
+    );
+    let fixture = tokio::spawn(async move {
+        let (first, _) = listener.accept().await.unwrap();
+        let first =
+            fragmented_chat_socket(first, &[preview_frame.as_str(), "data: [DONE]\n\n"]).await;
+        let (second, _) = listener.accept().await.unwrap();
+        let second =
+            fragmented_chat_socket(second, &[apply_frame.as_str(), "data: [DONE]\n\n"]).await;
+        (first, second)
+    });
+    let session_id = configure_loopback_ai_session(&context, address).await;
+    let response_operation = Uuid::now_v7().to_string();
+    let response = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &response_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"message":"Preview then apply exactly"}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+    let mut streamed = Vec::new();
+    let proposal = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let frame = body.frame().await.unwrap().unwrap();
+            if let Ok(data) = frame.into_data() {
+                streamed.extend_from_slice(&data);
+            }
+            if let Some(event) = ai_sse_envelopes(&streamed)
+                .into_iter()
+                .find(|event| event["type"] == "tool_proposed")
+            {
+                break event;
+            }
+        }
+    })
+    .await
+    .expect("exact apply proposal must persist and stream");
+
+    let identity = crate::ai_identity::AiResponseIdentity::derive(
+        OperationId::parse(&response_operation).unwrap(),
+    );
+    let approval_id = identity.round(2).approval_id;
+    assert_eq!(
+        proposal["payload"]["approval_id"].as_str(),
+        Some(approval_id.to_string().as_str())
+    );
+    let approval = context
+        .state
+        .service
+        .get_ai_approval(approval_id)
+        .await
+        .unwrap();
+    assert_eq!(approval.tool_name, "apply_auto_schedule_day");
+    assert_eq!(approval.arguments_json, canonical_apply);
+    assert_eq!(
+        approval.action_hash,
+        junban_domain::ai_approval_action_hash(
+            "apply_auto_schedule_day",
+            &approval.arguments_json,
+        )
+        .unwrap()
+    );
+    assert_eq!(proposal["payload"]["action_hash"], approval.action_hash);
+    let apply_value: Value = serde_json::from_str(&approval.arguments_json).unwrap();
+    assert_eq!(proposal["payload"]["arguments"], apply_value);
+    let parsed_date: jiff::civil::Date = date.parse().unwrap();
+    assert!(
+        context
+            .state
+            .service
+            .list_timeblocking_range(parsed_date, parsed_date)
+            .await
+            .unwrap()
+            .blocks
+            .is_empty(),
+        "proposal admission must not execute the apply action"
+    );
+    let _provider_requests = fixture.await.unwrap();
+    drop(body);
+}
+
+#[tokio::test]
+async fn ai_auto_schedule_preview_from_prior_run_cannot_authorize_direct_apply() {
+    use tokio::net::TcpListener;
+
+    let context = TestContext::new();
+    let (date, canonical_apply) = exact_auto_schedule_apply_fixture(&context).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let preview_frame = provider_tool_frame(
+        "prior-preview",
+        "auto_schedule_day",
+        &json!({"date": date}).to_string(),
+    );
+    let apply_frame = provider_tool_frame(
+        "cross-run-apply",
+        "apply_auto_schedule_day",
+        &canonical_apply,
+    );
+    let fixture = tokio::spawn(async move {
+        let (first, _) = listener.accept().await.unwrap();
+        fragmented_chat_socket(first, &[preview_frame.as_str(), "data: [DONE]\n\n"]).await;
+        let (second, _) = listener.accept().await.unwrap();
+        fragmented_chat_socket(
+            second,
+            &[
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Preview complete.\"}}]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+        )
+        .await;
+        let (third, _) = listener.accept().await.unwrap();
+        fragmented_chat_socket(third, &[apply_frame.as_str(), "data: [DONE]\n\n"]).await;
+        let (fourth, _) = listener.accept().await.unwrap();
+        fragmented_chat_socket(
+            fourth,
+            &[
+                "data: {\"choices\":[{\"delta\":{\"content\":\"I will preview again.\"}}]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+        )
+        .await
+    });
+    let session_id = configure_loopback_ai_session(&context, address).await;
+
+    let prior_operation = Uuid::now_v7().to_string();
+    let prior = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &prior_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"message":"Preview it"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    let prior_events = ai_sse_envelopes(&response_bytes(prior).await);
+    assert_eq!(prior_events.last().unwrap()["type"], "run_completed");
+
+    let direct_operation = Uuid::now_v7().to_string();
+    let direct = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &direct_operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"message":"Apply it"}).to_string()))
+            .unwrap(),
+        )
+        .await;
+    let direct_events = ai_sse_envelopes(&response_bytes(direct).await);
+    assert_eq!(direct_events.last().unwrap()["type"], "run_completed");
+    assert!(
+        direct_events
+            .iter()
+            .all(|event| event["type"] != "tool_proposed")
+    );
+    let rejection = direct_events
+        .iter()
+        .find(|event| event["type"] == "tool_result")
+        .unwrap();
+    assert_eq!(rejection["payload"]["tool"], "apply_auto_schedule_day");
+    assert_eq!(rejection["payload"]["outcome"], "error");
+    assert_eq!(rejection["payload"]["data"]["code"], "preview_required");
+    assert_eq!(
+        rejection["payload"]["data"]["message"],
+        "call auto_schedule_day immediately before apply_auto_schedule_day with the exact returned date and proposed_blocks"
+    );
+    let direct_identity = crate::ai_identity::AiResponseIdentity::derive(
+        OperationId::parse(&direct_operation).unwrap(),
+    );
+    assert_eq!(
+        context
+            .state
+            .service
+            .get_ai_approval(direct_identity.round(1).approval_id)
+            .await
+            .unwrap_err(),
+        AppError::NotFound
+    );
+    let fourth_request: Value = serde_json::from_str(&fixture.await.unwrap()).unwrap();
+    let tool_message = fourth_request["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .unwrap();
+    let trusted_result: Value =
+        serde_json::from_str(tool_message["content"].as_str().unwrap()).unwrap();
+    assert_eq!(trusted_result["data"]["code"], "preview_required");
+    let parsed_date: jiff::civil::Date = date.parse().unwrap();
+    assert!(
+        context
+            .state
+            .service
+            .list_timeblocking_range(parsed_date, parsed_date)
+            .await
+            .unwrap()
+            .blocks
+            .is_empty(),
+        "rejected direct apply must not mutate"
+    );
+}
+
+#[tokio::test]
+async fn ai_auto_schedule_intervening_tool_result_invalidates_preview() {
+    use tokio::net::TcpListener;
+
+    let context = TestContext::new();
+    let (date, canonical_apply) = exact_auto_schedule_apply_fixture(&context).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let preview_frame = provider_tool_frame(
+        "immediate-preview",
+        "auto_schedule_day",
+        &json!({"date": date}).to_string(),
+    );
+    let intervening_frame = provider_tool_frame("intervening-read", "list_projects", "{}");
+    let apply_frame =
+        provider_tool_frame("stale-apply", "apply_auto_schedule_day", &canonical_apply);
+    let fixture = tokio::spawn(async move {
+        for frame in [preview_frame, intervening_frame, apply_frame] {
+            let (socket, _) = listener.accept().await.unwrap();
+            fragmented_chat_socket(socket, &[frame.as_str(), "data: [DONE]\n\n"]).await;
+        }
+        let (final_socket, _) = listener.accept().await.unwrap();
+        fragmented_chat_socket(
+            final_socket,
+            &[
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Preview required.\"}}]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+        )
+        .await
+    });
+    let session_id = configure_loopback_ai_session(&context, address).await;
+    let operation = Uuid::now_v7().to_string();
+    let response = context
+        .request(
+            operation_header_key(
+                authenticated(
+                    Method::POST,
+                    &format!("/api/v1/ai/sessions/{session_id}/responses"),
+                ),
+                &operation,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"message":"Preview, inspect, apply"}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    let events = ai_sse_envelopes(&response_bytes(response).await);
+    assert_eq!(events.last().unwrap()["type"], "run_completed");
+    assert!(events.iter().all(|event| event["type"] != "tool_proposed"));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["type"] == "tool_result")
+            .map(|event| event["payload"]["data"]["code"].as_str())
+            .collect::<Vec<_>>(),
+        vec![None, None, Some("preview_required")]
+    );
+    let identity =
+        crate::ai_identity::AiResponseIdentity::derive(OperationId::parse(&operation).unwrap());
+    assert_eq!(
+        context
+            .state
+            .service
+            .get_ai_approval(identity.round(3).approval_id)
+            .await
+            .unwrap_err(),
+        AppError::NotFound
+    );
+    let final_request: Value = serde_json::from_str(&fixture.await.unwrap()).unwrap();
+    let tool_messages = final_request["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["role"] == "tool")
+        .collect::<Vec<_>>();
+    assert_eq!(tool_messages.len(), 3);
+    let result: Value =
+        serde_json::from_str(tool_messages.last().unwrap()["content"].as_str().unwrap()).unwrap();
+    assert_eq!(result["data"]["code"], "preview_required");
 }
 
 #[tokio::test]

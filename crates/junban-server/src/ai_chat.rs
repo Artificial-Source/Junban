@@ -37,7 +37,7 @@ use crate::{
     },
     ai_identity::AiResponseIdentity,
     ai_tool_executor::{ToolExecContext, execute_tool},
-    ai_tool_registry::{ToolEffect, tool_specs, validate_tool_call},
+    ai_tool_registry::{ToolEffect, ToolResultEnvelope, tool_specs, validate_tool_call},
     ai_tool_transcript::bound_chat_read_result,
     error::{ApiError, validation_error},
     routes_ai::CreateAiResponseRequest,
@@ -49,6 +49,10 @@ pub(crate) const RUN_GENERATION: u64 = 1;
 const STATIC_FAILED_CODE: &str = "ai_run_failed";
 const MAX_PROVIDER_ROUNDS: u8 = 8;
 const MAX_PROVIDER_CALL_ID_BYTES: usize = 256;
+const AUTO_SCHEDULE_PREVIEW_TOOL: &str = "auto_schedule_day";
+const AUTO_SCHEDULE_APPLY_TOOL: &str = "apply_auto_schedule_day";
+const PREVIEW_REQUIRED_CODE: &str = "preview_required";
+const PREVIEW_REQUIRED_MESSAGE: &str = "call auto_schedule_day immediately before apply_auto_schedule_day with the exact returned date and proposed_blocks";
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AiRunSseEnvelope {
@@ -946,7 +950,7 @@ async fn orchestrate(
                 }
             };
 
-        if action.effect() == ToolEffect::Read {
+        let automatic_result = if action.effect() == ToolEffect::Read {
             let settings = match durable.service.get_settings().await {
                 Ok(settings) => settings,
                 Err(_) => {
@@ -955,9 +959,22 @@ async fn orchestrate(
                 }
             };
             let context = ToolExecContext::with_confirmed_settings(jiff::Zoned::now(), &settings);
-            let tool_result = bound_chat_read_result(
+            Some(bound_chat_read_result(
                 execute_tool(&durable.service, &action, &context, None).await,
-            );
+            ))
+        } else if action.name() == AUTO_SCHEDULE_APPLY_TOOL
+            && !matches_immediate_auto_schedule_preview(last_tool.as_ref(), &canonical_arguments)
+        {
+            Some(bound_chat_read_result(ToolResultEnvelope::error(
+                AUTO_SCHEDULE_APPLY_TOOL,
+                PREVIEW_REQUIRED_CODE,
+                PREVIEW_REQUIRED_MESSAGE,
+            )))
+        } else {
+            None
+        };
+
+        if let Some(tool_result) = automatic_result {
             if tool_result.operation_id.is_some() || tool_result.revision.is_some() {
                 terminal = Some(AiTerminalOutcome::Failed);
                 break;
@@ -1372,6 +1389,46 @@ async fn orchestrate(
             send_static_failed(&sender, durable.identity.run_id, &mut sequence, None).await;
         }
     }
+}
+
+fn matches_immediate_auto_schedule_preview(
+    last_tool: Option<&LastTool>,
+    canonical_apply_arguments: &str,
+) -> bool {
+    let Some(last_tool) = last_tool.filter(|tool| tool.name == AUTO_SCHEDULE_PREVIEW_TOOL) else {
+        return false;
+    };
+    let Some(result_json) = last_tool.result_json.as_deref() else {
+        return false;
+    };
+    let Ok(result) = serde_json::from_str::<Value>(result_json) else {
+        return false;
+    };
+    if result.get("tool").and_then(Value::as_str) != Some(AUTO_SCHEDULE_PREVIEW_TOOL)
+        || result.get("outcome").and_then(Value::as_str) != Some("success")
+    {
+        return false;
+    }
+    let Some(data) = result.get("data").and_then(Value::as_object) else {
+        return false;
+    };
+    if data.get("preview_only").and_then(Value::as_bool) != Some(true)
+        || data.get("apply_supported").and_then(Value::as_bool) != Some(true)
+    {
+        return false;
+    }
+    let (Some(date), Some(blocks)) = (data.get("date"), data.get("proposed_blocks")) else {
+        return false;
+    };
+    if !date.is_string() || !blocks.is_array() {
+        return false;
+    }
+    let expected = json!({"date": date, "blocks": blocks});
+    let Ok(expected_json) = serde_json::to_string(&expected) else {
+        return false;
+    };
+    validate_tool_call(AUTO_SCHEDULE_APPLY_TOOL, &expected_json)
+        .is_ok_and(|(_, expected_canonical)| expected_canonical == canonical_apply_arguments)
 }
 
 fn append_tool_exchange(
@@ -1895,6 +1952,168 @@ mod tests {
     use junban_ai::{ProviderPreset, descriptor};
 
     use super::*;
+
+    fn preview_blocks() -> Value {
+        json!([
+            {
+                "task_id": "00112233-4455-6677-8899-aabbccddeeff",
+                "title": "First task",
+                "date": "2026-08-02",
+                "start": "09:00:00",
+                "end": "09:30:00",
+                "time_zone": "UTC",
+                "estimated_minutes": 30
+            },
+            {
+                "task_id": "11112233-4455-6677-8899-aabbccddeeff",
+                "title": "Second task",
+                "date": "2026-08-02",
+                "start": "09:30:00",
+                "end": "10:00:00",
+                "time_zone": "UTC",
+                "estimated_minutes": 30
+            }
+        ])
+    }
+
+    fn preview_last_tool(blocks: Value) -> LastTool {
+        let result = ToolResultEnvelope::success(
+            AUTO_SCHEDULE_PREVIEW_TOOL,
+            json!({
+                "date": "2026-08-02",
+                "preview_only": true,
+                "apply_supported": true,
+                "proposed_blocks": blocks,
+            }),
+        );
+        LastTool {
+            name: AUTO_SCHEDULE_PREVIEW_TOOL.to_owned(),
+            canonical_arguments: r#"{"date":"2026-08-02"}"#.to_owned(),
+            result_json: Some(serde_json::to_string(&result).unwrap()),
+        }
+    }
+
+    fn canonical_apply(arguments: &Value) -> String {
+        validate_tool_call(AUTO_SCHEDULE_APPLY_TOOL, &arguments.to_string())
+            .unwrap()
+            .1
+    }
+
+    #[test]
+    fn apply_auto_schedule_requires_exact_immediate_successful_preview() {
+        let blocks = preview_blocks();
+        let preview = preview_last_tool(blocks.clone());
+        let exact = json!({"date": "2026-08-02", "blocks": blocks});
+        assert!(matches_immediate_auto_schedule_preview(
+            Some(&preview),
+            &canonical_apply(&exact),
+        ));
+
+        let mut changed = Vec::new();
+
+        let mut reordered_blocks = exact.clone();
+        reordered_blocks["blocks"].as_array_mut().unwrap().reverse();
+        changed.push(reordered_blocks);
+
+        let mut omitted_block = exact.clone();
+        omitted_block["blocks"].as_array_mut().unwrap().pop();
+        changed.push(omitted_block);
+
+        let mut added_block = exact.clone();
+        added_block["blocks"].as_array_mut().unwrap().push(json!({
+            "task_id": "22112233-4455-6677-8899-aabbccddeeff",
+            "title": "Added task",
+            "date": "2026-08-02",
+            "start": "10:00:00",
+            "end": "10:30:00",
+            "time_zone": "UTC",
+            "estimated_minutes": 30
+        }));
+        changed.push(added_block);
+
+        let mut task = exact.clone();
+        task["blocks"][0]["task_id"] = json!("33112233-4455-6677-8899-aabbccddeeff");
+        changed.push(task);
+
+        let mut time = exact.clone();
+        time["blocks"][0]["start"] = json!("09:05:00");
+        changed.push(time);
+
+        let mut title = exact.clone();
+        title["blocks"][0]["title"] = json!("Changed title");
+        changed.push(title);
+
+        let mut date = exact.clone();
+        date["date"] = json!("2026-08-03");
+        for block in date["blocks"].as_array_mut().unwrap() {
+            block["date"] = json!("2026-08-03");
+        }
+        changed.push(date);
+
+        let mut zone = exact.clone();
+        zone["blocks"][0]["time_zone"] = json!("Etc/UTC");
+        changed.push(zone);
+
+        let mut minutes = exact.clone();
+        minutes["blocks"][0]["estimated_minutes"] = json!(45);
+        changed.push(minutes);
+
+        for arguments in changed {
+            assert!(
+                !matches_immediate_auto_schedule_preview(
+                    Some(&preview),
+                    &canonical_apply(&arguments),
+                ),
+                "changed apply arguments must not match: {arguments}",
+            );
+        }
+    }
+
+    #[test]
+    fn apply_auto_schedule_rejects_missing_failed_and_non_preview_results() {
+        let blocks = preview_blocks();
+        let arguments = canonical_apply(&json!({
+            "date": "2026-08-02",
+            "blocks": blocks.clone(),
+        }));
+        assert!(!matches_immediate_auto_schedule_preview(None, &arguments));
+
+        let mut missing_result = preview_last_tool(blocks.clone());
+        missing_result.result_json = None;
+        assert!(!matches_immediate_auto_schedule_preview(
+            Some(&missing_result),
+            &arguments,
+        ));
+
+        let mut failed = preview_last_tool(blocks.clone());
+        let mut failed_result: Value =
+            serde_json::from_str(failed.result_json.as_deref().unwrap()).unwrap();
+        failed_result["outcome"] = json!("error");
+        failed.result_json = Some(failed_result.to_string());
+        assert!(!matches_immediate_auto_schedule_preview(
+            Some(&failed),
+            &arguments,
+        ));
+
+        for field in ["preview_only", "apply_supported"] {
+            let mut non_preview = preview_last_tool(blocks.clone());
+            let mut result: Value =
+                serde_json::from_str(non_preview.result_json.as_deref().unwrap()).unwrap();
+            result["data"][field] = json!(false);
+            non_preview.result_json = Some(result.to_string());
+            assert!(!matches_immediate_auto_schedule_preview(
+                Some(&non_preview),
+                &arguments,
+            ));
+        }
+
+        let mut reschedule = preview_last_tool(blocks);
+        reschedule.name = "reschedule_day".to_owned();
+        assert!(!matches_immediate_auto_schedule_preview(
+            Some(&reschedule),
+            &arguments,
+        ));
+    }
 
     #[test]
     fn ai_sse_alias_is_owned_by_chat_without_a_route_dependency() {

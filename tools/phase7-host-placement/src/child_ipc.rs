@@ -55,6 +55,10 @@ pub enum HostRequest {
     GrowMemory {
         pages: u32,
     },
+    /// Host-side sleep used only for in-flight crash probes (parent blocked on reply).
+    Sleep {
+        ms: u64,
+    },
     DropInstance,
     DropEngine,
     Shutdown,

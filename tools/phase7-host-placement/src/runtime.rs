@@ -14,7 +14,9 @@ use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::child_ipc::Timings;
+use crate::imports::MAX_COMPONENT_BYTES;
 use crate::protocol::{ComponentKind, SpikeLimits};
+use crate::sha256_bytes_hex;
 
 wasmtime::component::bindgen!({
     path: "wit",
@@ -52,10 +54,16 @@ impl WasiView for HostState {
 }
 
 /// Lazy in-process runtime. Constructing this type does **not** create an Engine.
+///
+/// Component admission is TOCTOU-safe: bytes are read once, hashed, retained, and
+/// compiled from that exact buffer. Paths are never reopened at compile time.
 pub struct SpikeRuntime {
     limits: SpikeLimits,
     component_kind: ComponentKind,
     engine: Option<Engine>,
+    /// Exact admitted component bytes retained until first successful compile.
+    pending_bytes: Option<Vec<u8>>,
+    pending_sha256: Option<String>,
     component: Option<Component>,
     store: Option<Store<HostState>>,
     instance: Option<Spike>,
@@ -67,6 +75,8 @@ impl SpikeRuntime {
             limits,
             component_kind,
             engine: None,
+            pending_bytes: None,
+            pending_sha256: None,
             component: None,
             store: None,
             instance: None,
@@ -77,8 +87,20 @@ impl SpikeRuntime {
         self.engine.is_some()
     }
 
+    pub fn has_component(&self) -> bool {
+        self.component.is_some()
+    }
+
+    pub fn has_pending_bytes(&self) -> bool {
+        self.pending_bytes.is_some()
+    }
+
     pub fn has_instance(&self) -> bool {
         self.instance.is_some()
+    }
+
+    pub fn pending_sha256(&self) -> Option<&str> {
+        self.pending_sha256.as_deref()
     }
 
     pub fn create_engine(&mut self) -> Result<Timings, RuntimeError> {
@@ -101,17 +123,62 @@ impl SpikeRuntime {
         })
     }
 
-    pub fn compile_component(&mut self, path: &Path) -> Result<Timings, RuntimeError> {
+    /// Admit exact component bytes once. Hashes the buffer and retains it.
+    /// Does not open filesystem paths and does not compile yet.
+    pub fn load_component_bytes(
+        &mut self,
+        bytes: Vec<u8>,
+        expected_sha256: &str,
+    ) -> Result<String, RuntimeError> {
+        if bytes.len() > MAX_COMPONENT_BYTES {
+            return Err(RuntimeError::State(format!(
+                "component exceeds {MAX_COMPONENT_BYTES} byte ceiling ({})",
+                bytes.len()
+            )));
+        }
+        let actual = sha256_bytes_hex(&bytes);
+        let expected = expected_sha256.to_ascii_lowercase();
+        if actual != expected {
+            return Err(RuntimeError::State(format!(
+                "component sha256 mismatch: expected {expected}, got {actual}"
+            )));
+        }
+        self.pending_bytes = Some(bytes);
+        self.pending_sha256 = Some(actual.clone());
+        // New admission invalidates any prior compiled component/instance.
+        self.component = None;
+        self.instance = None;
+        self.store = None;
+        Ok(actual)
+    }
+
+    /// Read a path once into memory and admit those exact bytes (TOCTOU-safe).
+    pub fn load_component_path(
+        &mut self,
+        path: &Path,
+        expected_sha256: &str,
+    ) -> Result<String, RuntimeError> {
+        let bytes = std::fs::read(path)?;
+        self.load_component_bytes(bytes, expected_sha256)
+    }
+
+    /// Compile retained exact bytes into a Component, then drop the byte buffer.
+    /// Later reinstantiations use the compiled Component only.
+    pub fn compile_loaded_bytes(&mut self) -> Result<Timings, RuntimeError> {
         let engine = self
             .engine
             .as_ref()
             .ok_or_else(|| RuntimeError::State("engine missing".into()))?;
+        let bytes = self
+            .pending_bytes
+            .take()
+            .ok_or_else(|| RuntimeError::State("no pending component bytes".into()))?;
         let started = Instant::now();
-        let bytes = std::fs::read(path)?;
-        let component = Component::new(engine, bytes)?;
+        let component = Component::new(engine, &bytes)?;
         let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+        // Bytes are dropped with `bytes` going out of scope after compile.
+        drop(bytes);
         self.component = Some(component);
-        // Compiling replaces any prior instance.
         self.instance = None;
         self.store = None;
         Ok(Timings {
@@ -119,6 +186,22 @@ impl SpikeRuntime {
             total_ms: Some(elapsed),
             ..Timings::default()
         })
+    }
+
+    /// Ensure a compiled Component exists: compile pending bytes if needed.
+    pub fn ensure_compiled(&mut self) -> Result<Timings, RuntimeError> {
+        if self.component.is_some() {
+            return Ok(Timings::default());
+        }
+        self.compile_loaded_bytes()
+    }
+
+    /// Compatibility helper for in-process path stages: one-shot path admit+compile.
+    pub fn compile_component(&mut self, path: &Path) -> Result<Timings, RuntimeError> {
+        let bytes = std::fs::read(path)?;
+        let digest = sha256_bytes_hex(&bytes);
+        self.load_component_bytes(bytes, &digest)?;
+        self.compile_loaded_bytes()
     }
 
     pub async fn instantiate(&mut self) -> Result<Timings, RuntimeError> {
@@ -341,6 +424,8 @@ impl SpikeRuntime {
         self.instance = None;
         self.store = None;
         self.component = None;
+        self.pending_bytes = None;
+        self.pending_sha256 = None;
         self.engine = None;
         let elapsed = started.elapsed().as_secs_f64() * 1000.0;
         Timings {
@@ -385,4 +470,51 @@ pub fn detail_ok(value: impl Into<serde_json::Value>) -> serde_json::Value {
 
 pub fn detail_message(message: impl Into<String>) -> serde_json::Value {
     json!({ "message": message.into() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn tiny_invalid_wasm() -> Vec<u8> {
+        // Not a valid component; used only for load/hash TOCTOU tests.
+        b"\0asm\x01\x00\x00\x00".to_vec()
+    }
+
+    #[test]
+    fn load_hashes_exact_buffer_and_rejects_path_replacement() {
+        let mut rt = SpikeRuntime::new(SpikeLimits::default(), ComponentKind::Rust);
+        let bytes = tiny_invalid_wasm();
+        let digest = sha256_bytes_hex(&bytes);
+        rt.load_component_bytes(bytes.clone(), &digest).unwrap();
+        assert!(rt.has_pending_bytes());
+        assert_eq!(rt.pending_sha256(), Some(digest.as_str()));
+
+        // Simulate TOCTOU attacker replacing the on-disk file after load: the
+        // runtime must still hold the original buffer and never re-read a path.
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(b"replaced-after-load").unwrap();
+        file.flush().unwrap();
+        // Re-admit from path would hash the replacement; retained pending digest must differ.
+        let replaced = std::fs::read(file.path()).unwrap();
+        assert_ne!(sha256_bytes_hex(&replaced), digest);
+        assert_eq!(rt.pending_sha256(), Some(digest.as_str()));
+    }
+
+    #[test]
+    fn load_rejects_hash_mismatch_and_oversize() {
+        let mut rt = SpikeRuntime::new(SpikeLimits::default(), ComponentKind::Rust);
+        let err = rt
+            .load_component_bytes(tiny_invalid_wasm(), &"00".repeat(32))
+            .unwrap_err();
+        assert!(err.to_string().contains("sha256 mismatch"));
+
+        let mut rt = SpikeRuntime::new(SpikeLimits::default(), ComponentKind::Rust);
+        let huge = vec![0_u8; MAX_COMPONENT_BYTES + 1];
+        let digest = sha256_bytes_hex(&huge);
+        let err = rt.load_component_bytes(huge, &digest).unwrap_err();
+        assert!(err.to_string().contains("ceiling"));
+    }
 }

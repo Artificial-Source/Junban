@@ -3,8 +3,8 @@
   "artifacts": {
     "child_host": {
       "path": "target/release/junban-p7-spike-host",
-      "sha256": "b4334dd0d9c77f6dfb1b75422f9fe9b5a5bec04cbb3ac9daef1f0c3768706f6a",
-      "size_bytes": 14165920
+      "sha256": "212c132574601a0421884e831543cd534ecbe6d0aa179e6cc3e0d2c82e819072",
+      "size_bytes": 14169712
     },
     "junban_server": {
       "path": "target/release/junban-server",
@@ -19,14 +19,14 @@
     },
     "probe_inprocess": {
       "path": "target/release/junban-p7-spike-probe",
-      "sha256": "e87219c225cf0ac2a1616af9c2b7b7abd0e79362463711726c691cf01ece261b",
-      "size_bytes": 14245144
+      "sha256": "8f601a986f25e45be71619caa4ccb2bc421fc6812fdd4d78665e30a9b8517a41",
+      "size_bytes": 14287304
     },
     "probe_links_wasmtime": true,
     "probe_sdk_only": {
       "path": "target/p7-sdk-only/release/junban-p7-spike-probe",
-      "sha256": "6ab1f6de8d98f201f7f803064ea106dd6470343d77c153a31d30b50c6ac86619",
-      "size_bytes": 654072
+      "sha256": "4231268c49c144ae1e895c59db4e46dc3be8b331e10171cdefdb074ba29573dc",
+      "size_bytes": 706032
     },
     "sdk_probe_links_wasmtime": false,
     "server_links_wasmtime": false
@@ -34,7 +34,24 @@
   "command": "scripts/check-phase7-host-placement.py --quick --output goals/rust-rewrite/evidence/phase-7-host-placement-quick.json",
   "components": {
     "rust": {
+      "expected_imports": [
+        "wasi:cli/environment@0.2.6",
+        "wasi:cli/exit@0.2.6",
+        "wasi:cli/stderr@0.2.6",
+        "wasi:io/error@0.2.6",
+        "wasi:io/streams@0.2.6"
+      ],
+      "import_profile_ok": true,
+      "imports": [
+        "wasi:cli/environment@0.2.6",
+        "wasi:cli/exit@0.2.6",
+        "wasi:cli/stderr@0.2.6",
+        "wasi:io/error@0.2.6",
+        "wasi:io/streams@0.2.6"
+      ],
+      "inspector": "target/release/junban-p7-inspect-imports",
       "kind": "rust",
+      "ok": true,
       "path": "tools/phase7-host-placement/components/rust-spike.wasm",
       "sha256": "41ad2e3d0ba77d72e0b8403e5a6a4991c2435e96468a4cf1b938ab5a89914b26",
       "size_bytes": 44420,
@@ -42,18 +59,22 @@
     },
     "typescript": {
       "componentize_js": "0.22.0",
+      "expected_imports": [],
+      "import_profile_ok": true,
+      "imports": [],
+      "inspector": "target/release/junban-p7-inspect-imports",
       "jco": "1.26.1",
       "kind": "typescript",
       "ok": true,
       "path": "tools/phase7-host-placement/components/typescript-spike.wasm",
       "runtime_node": false,
-      "sha256": "00360d819ce3a54647431f57b08321e92ad4e2e92cc842bfd554b378bf1cba96",
-      "size_bytes": 12475827
+      "sha256": "ee6e25d512322addf3d70065a546495984b766cf68b5b600e1d6586bfd9ba4c9",
+      "size_bytes": 12475805
     }
   },
   "decision": {
     "blockers": [],
-    "decision_rule": "Ordinary no-plugin server must stay within 24/32 MiB and not construct an Engine or spawn a host. Guest trap/CPU/memory survival and child kill/recovery/cleanup are mandatory blockers for both Rust and TypeScript when missing or failed. Real TypeScript component evidence is required. Fault containment breaks a close measurement tie toward the child process. Projected product totals are temporary probe cross-checks only, not integrated server+SDK proof.",
+    "decision_rule": "Ordinary no-plugin server must stay within 24/32 MiB and not construct an Engine or spawn a host. Guest trap/CPU/memory survival and child in-flight crash/recovery/cleanup are mandatory blockers for both Rust and TypeScript. Real TypeScript component evidence and actual import inspection are required. Child variants are measured under the SDK-only parent probe. Fair selection uses warm/peak/cold material thresholds; fault containment picks child only when neither placement materially regresses. Projected product totals are temporary probe cross-checks only.",
     "hostile_probe_safety_caps_mib": {
       "note": "StoreLimits linear-memory safety caps for grow_memory hostile probes only. Not product active-RSS budgets and not frozen Wave 1 acceptance ceilings.",
       "rust_linear_memory": 64.0,
@@ -73,16 +94,16 @@
       "child typescript cpu_loop survived",
       "child typescript grow_memory survived",
       "child rust shutdown cleaned with no orphan",
-      "child rust kill/recovery survived with parent healthy",
+      "child rust in-flight crash/recovery survived with parent healthy",
       "child typescript shutdown cleaned with no orphan",
-      "child typescript kill/recovery survived with parent healthy",
-      "active warm medians close (inprocess=4.219, child=4.555); context map awards fault containment to child process",
-      "peaks inprocess=5.254 child=5.863",
+      "child typescript in-flight crash/recovery survived with parent healthy",
+      "fair comparator thresholds: warm>max(15%,8.0MiB), peak>max(20%,32.0MiB), cold>max(25%,100.0ms)",
+      "no material warm/peak/cold regression on Rust+TS; fault containment selects on-demand child host",
       "host contended; result is preliminary and not acceptance",
       "quick mode cannot claim authoritative acceptance"
     ],
     "selected_placement": "on_demand_child_host",
-    "selection_status": "quick_preliminary_selected_by_fault_containment_tiebreak"
+    "selection_status": "quick_preliminary_selected_by_fault_containment_no_material_regression"
   },
   "evidence_status": "preliminary_quick",
   "git_dirty": true,
@@ -90,7 +111,7 @@
   "host": {
     "cpu_count": 20,
     "cpu_model": "Intel(R) Core(TM) i9-10850K CPU @ 3.60GHz",
-    "git_commit": "90112c6d1c7200a3bdd4b2dccf827934d9c9c9bd",
+    "git_commit": "aa2334cf01fe9b3a09362d97c1003fef745502f6",
     "git_dirty": true,
     "hostname": "xn3-main-desktop",
     "kernel": "7.0.0-28-generic",
@@ -105,7 +126,7 @@
         {
           "cmdline": "pi",
           "comm": "pi",
-          "cpu_tick_delta": 4,
+          "cpu_tick_delta": 25,
           "exe": "node",
           "hits": [
             "node"
@@ -115,7 +136,7 @@
         {
           "cmdline": "/opt/google/chrome/chrome",
           "comm": "chrome",
-          "cpu_tick_delta": 4,
+          "cpu_tick_delta": 3,
           "exe": "chrome",
           "hits": [
             "chrome"
@@ -125,7 +146,7 @@
         {
           "cmdline": "/opt/google/chrome/chrome --type=renderer --crashpad-handler-pid=2697789 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --ozone-platform=wayland --lang=en-us --num-raster-threads=4 --enable-main-frame-before-activation --rend",
           "comm": "chrome",
-          "cpu_tick_delta": 8,
+          "cpu_tick_delta": 17,
           "exe": "chrome",
           "hits": [
             "chrome"
@@ -135,7 +156,7 @@
         {
           "cmdline": "/opt/google/chrome/chrome --type=utility --utility-sub-type=audio.mojom.audioservice --lang=en-us --service-sandbox-type=none --render-node-override=/dev/dri/renderd128 --crashpad-handler-pid=2697789 --enable-crash-reporter=, --change-stack",
           "comm": "chrome",
-          "cpu_tick_delta": 12,
+          "cpu_tick_delta": 13,
           "exe": "chrome",
           "hits": [
             "chrome"
@@ -145,51 +166,41 @@
         {
           "cmdline": "pi",
           "comm": "pi",
-          "cpu_tick_delta": 12,
+          "cpu_tick_delta": 15,
           "exe": "node",
           "hits": [
             "node"
           ],
           "pid": 2829357
-        },
-        {
-          "cmdline": "pi",
-          "comm": "pi",
-          "cpu_tick_delta": 4,
-          "exe": "node",
-          "hits": [
-            "node"
-          ],
-          "pid": 3006030
         }
       ],
       "activity_sample_seconds": 0.25,
-      "candidate_confounder_count": 64,
+      "candidate_confounder_count": 59,
       "contended": true,
       "cpu_count": 20,
-      "load1": 23.0712890625,
-      "load15": 15.37451171875,
+      "load1": 13.67138671875,
+      "load15": 13.01806640625,
       "load1_threshold": 10.0,
-      "load5": 19.68701171875,
+      "load5": 13.26220703125,
       "load5_threshold": 6.0,
       "method": "load CPU-scaled thresholds; confounders require positive CPU tick delta over 0.25s; swap contention uses pswpin/pswpout delta only",
       "min_active_cpu_tick_delta": 2,
-      "reason": "load1 23.07 > threshold 10.00; load5 19.69 > threshold 6.00; active_build_confounders=6; swap_io_active pswpin_delta=2 pswpout_delta=68",
+      "reason": "load1 13.67 > threshold 10.00; load5 13.26 > threshold 6.00; active_build_confounders=5",
       "swap_io": {
-        "active": true,
+        "active": false,
         "available": true,
-        "pswpin_delta": 2,
-        "pswpout_delta": 68,
+        "pswpin_delta": 0,
+        "pswpout_delta": 0,
         "sample_seconds": 0.25
       },
-      "swap_used_mib_informational": 9332.7734375
+      "swap_used_mib_informational": 10841.23828125
     },
     "pre": {
       "active_build_confounders": [
         {
           "cmdline": "pi",
           "comm": "pi",
-          "cpu_tick_delta": 7,
+          "cpu_tick_delta": 3,
           "exe": "node",
           "hits": [
             "node"
@@ -199,7 +210,7 @@
         {
           "cmdline": "/opt/google/chrome/chrome",
           "comm": "chrome",
-          "cpu_tick_delta": 4,
+          "cpu_tick_delta": 5,
           "exe": "chrome",
           "hits": [
             "chrome"
@@ -219,7 +230,7 @@
         {
           "cmdline": "/opt/google/chrome/chrome --type=utility --utility-sub-type=audio.mojom.audioservice --lang=en-us --service-sandbox-type=none --render-node-override=/dev/dri/renderd128 --crashpad-handler-pid=2697789 --enable-crash-reporter=, --change-stack",
           "comm": "chrome",
-          "cpu_tick_delta": 14,
+          "cpu_tick_delta": 15,
           "exe": "chrome",
           "hits": [
             "chrome"
@@ -237,40 +248,40 @@
           "pid": 2829357
         },
         {
-          "cmdline": "pi",
-          "comm": "pi",
-          "cpu_tick_delta": 4,
-          "exe": "node",
+          "cmdline": "/opt/google/chrome/chrome --type=utility --utility-sub-type=video_capture.mojom.videocaptureservice --lang=en-us --service-sandbox-type=none --render-node-override=/dev/dri/renderd128 --message-loop-type-ui --crashpad-handler-pid=2697789 --",
+          "comm": "chrome",
+          "cpu_tick_delta": 2,
+          "exe": "chrome",
           "hits": [
-            "node"
+            "chrome"
           ],
-          "pid": 3006030
+          "pid": 3267280
         }
       ],
       "activity_sample_seconds": 0.25,
-      "candidate_confounder_count": 60,
+      "candidate_confounder_count": 59,
       "contended": true,
       "cpu_count": 20,
-      "load1": 19.3466796875,
-      "load15": 14.1953125,
+      "load1": 15.98681640625,
+      "load15": 13.0419921875,
       "load1_threshold": 10.0,
-      "load5": 17.62890625,
+      "load5": 13.40771484375,
       "load5_threshold": 6.0,
       "method": "load CPU-scaled thresholds; confounders require positive CPU tick delta over 0.25s; swap contention uses pswpin/pswpout delta only",
       "min_active_cpu_tick_delta": 2,
-      "reason": "load1 19.35 > threshold 10.00; load5 17.63 > threshold 6.00; active_build_confounders=6; swap_io_active pswpin_delta=2 pswpout_delta=0",
+      "reason": "load1 15.99 > threshold 10.00; load5 13.41 > threshold 6.00; active_build_confounders=6",
       "swap_io": {
-        "active": true,
+        "active": false,
         "available": true,
-        "pswpin_delta": 2,
+        "pswpin_delta": 0,
         "pswpout_delta": 0,
         "sample_seconds": 0.25
       },
-      "swap_used_mib_informational": 8961.0703125
+      "swap_used_mib_informational": 10844.1640625
     }
   },
   "measured_preliminary_active_ceilings_mib": {
-    "basis": "projected_product = server_baseline + max(0, variant - sdk_only); ceilings = projected_maxima + explicit headroom",
+    "basis": "projected_product = server_baseline + max(0, variant - sdk_only); selected-profile ceilings use selected placement only + headroom",
     "headroom_rule": "ceil = max(projected_max * 1.25, projected_max + 8 MiB) for Rust; max(projected_max * 1.25, projected_max + 16 MiB) for TypeScript; unresolved when required series are missing",
     "limitations": [
       "Projection is not an integrated server+host measurement.",
@@ -278,45 +289,68 @@
       "Wave 5 must measure actual product server+host and may revise ceilings.",
       "Raw probe/child cgroup totals alone must not be frozen as product budgets."
     ],
-    "note": "Preliminary Wave 0 ADR numbers only. Not authoritative Wave 1 acceptance gates until five-sample idle-host evidence is recorded and accepted.",
-    "preliminary_rust_peak_ceiling_mib": 19.4336,
-    "preliminary_rust_warm_ceiling_mib": 16.3164,
-    "preliminary_typescript_peak_ceiling_mib": 484.5069,
-    "preliminary_typescript_warm_ceiling_mib": 358.042,
-    "projected_rust_peak_max_mib": 11.4336,
-    "projected_rust_warm_max_mib": 8.3164,
-    "projected_typescript_peak_max_mib": 387.6055,
-    "projected_typescript_warm_max_mib": 286.4336,
-    "projections": {
-      "child_rust": {
-        "projected_product_peak_mib": 11.4336,
-        "projected_product_warm_mib": 8.3164,
-        "variant_peak_max_mib": 5.86328125,
-        "variant_warm_max_mib": 4.5546875
-      },
-      "child_typescript": {
-        "projected_product_peak_mib": 387.6055,
-        "projected_product_warm_mib": 284.2969,
-        "variant_peak_max_mib": 382.03515625,
-        "variant_warm_max_mib": 280.53515625
-      },
+    "losing_projections": {
       "inprocess_rust": {
-        "projected_product_peak_mib": 10.8242,
-        "projected_product_warm_mib": 7.9805,
-        "variant_peak_max_mib": 5.25390625,
-        "variant_warm_max_mib": 4.21875
+        "projected_product_peak_mib": 9.957,
+        "projected_product_warm_mib": 7.9531,
+        "variant_peak_max_mib": 4.94921875,
+        "variant_warm_max_mib": 4.19921875
       },
       "inprocess_typescript": {
-        "projected_product_peak_mib": 334.6484,
-        "projected_product_warm_mib": 286.4336,
-        "variant_peak_max_mib": 329.078125,
-        "variant_warm_max_mib": 282.671875
+        "projected_product_peak_mib": 331.7773,
+        "projected_product_warm_mib": 284.4023,
+        "variant_peak_max_mib": 326.76953125,
+        "variant_warm_max_mib": 280.6484375
       }
     },
-    "sdk_only_peak_median_mib": 0.74609375,
+    "note": "Preliminary Wave 0 ADR numbers only. Not authoritative Wave 1 acceptance gates until five-sample idle-host evidence is recorded and accepted.",
+    "preliminary_rust_peak_ceiling_mib": 18.707,
+    "preliminary_rust_warm_ceiling_mib": 15.9805,
+    "preliminary_typescript_peak_ceiling_mib": 414.2627,
+    "preliminary_typescript_warm_ceiling_mib": 355.3663,
+    "projected_rust_peak_max_mib": 10.707,
+    "projected_rust_warm_max_mib": 7.9805,
+    "projected_typescript_peak_max_mib": 331.4102,
+    "projected_typescript_warm_max_mib": 284.293,
+    "projections": {
+      "child_rust": {
+        "projected_product_peak_mib": 10.707,
+        "projected_product_warm_mib": 7.9805,
+        "variant_peak_max_mib": 5.69921875,
+        "variant_warm_max_mib": 4.2265625
+      },
+      "child_typescript": {
+        "projected_product_peak_mib": 331.4102,
+        "projected_product_warm_mib": 284.293,
+        "variant_peak_max_mib": 326.40234375,
+        "variant_warm_max_mib": 280.5390625
+      },
+      "inprocess_rust": {
+        "projected_product_peak_mib": 9.957,
+        "projected_product_warm_mib": 7.9531,
+        "variant_peak_max_mib": 4.94921875,
+        "variant_warm_max_mib": 4.19921875
+      },
+      "inprocess_typescript": {
+        "projected_product_peak_mib": 331.7773,
+        "projected_product_warm_mib": 284.4023,
+        "variant_peak_max_mib": 326.76953125,
+        "variant_warm_max_mib": 280.6484375
+      }
+    },
+    "sdk_only_peak_median_mib": 1.25,
     "sdk_only_warm_median_mib": 0.21484375,
-    "server_baseline_peak_max_mib": 6.31640625,
-    "server_baseline_warm_max_mib": 3.9765625,
+    "selected_placement": "on_demand_child_host",
+    "selected_projection_keys": {
+      "rust": [
+        "child_rust"
+      ],
+      "typescript": [
+        "child_typescript"
+      ]
+    },
+    "server_baseline_peak_max_mib": 6.2578125,
+    "server_baseline_warm_max_mib": 3.96875,
     "status": "derived_from_projected_measurements"
   },
   "protocol": {
@@ -362,81 +396,81 @@
       "p2"
     ]
   },
-  "run_id": "79e730407fb5401ca3bc3a01159ea577",
+  "run_id": "f43bc6690f8f4f32923f777a91e31257",
   "samples": {
     "child_rust": [
       {
         "mode": "child",
         "ready": {
-          "address": "127.0.0.1:45555",
+          "address": "127.0.0.1:40205",
           "banner": "junban-phase7-host-placement-spike-v1/v1",
           "mode": "child",
-          "pid": 3170998,
+          "pid": 3282748,
           "protocol": "junban-phase7-host-placement-spike-v1/v1"
         },
         "stages": {
           "child_idle": {
             "memory": {
-              "cgroup_current_bytes": 1896448,
-              "cgroup_current_mib": 1.80859375,
-              "cgroup_peak_bytes": 2400256,
-              "cgroup_peak_mib": 2.2890625,
+              "cgroup_current_bytes": 1413120,
+              "cgroup_current_mib": 1.34765625,
+              "cgroup_peak_bytes": 2068480,
+              "cgroup_peak_mib": 1.97265625,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2698240,
-                  "rss_bytes": 4820992
+                  "pid": 3282748,
+                  "pss_bytes": 836608,
+                  "rss_bytes": 2646016
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3171095,
-                  "pss_bytes": 3397632,
-                  "rss_bytes": 5263360
+                  "pid": 3282836,
+                  "pss_bytes": 2385920,
+                  "rss_bytes": 4255744
                 }
               ]
             },
             "response": {
               "detail": {
                 "alive": true,
-                "child_pid": 3171095
+                "child_pid": 3282836
               },
               "ok": true,
               "stage": "child_idle",
               "timings_ms": {}
             },
-            "wall_ms": 1.0500159987714142
+            "wall_ms": 1.2846440076828003
           },
           "cpu_loop": {
             "memory": {
-              "cgroup_current_bytes": 5345280,
-              "cgroup_current_mib": 5.09765625,
-              "cgroup_peak_bytes": 6148096,
-              "cgroup_peak_mib": 5.86328125,
+              "cgroup_current_bytes": 4726784,
+              "cgroup_current_mib": 4.5078125,
+              "cgroup_peak_bytes": 5976064,
+              "cgroup_peak_mib": 5.69921875,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2702336,
-                  "rss_bytes": 4825088
+                  "pid": 3282748,
+                  "pss_bytes": 836608,
+                  "rss_bytes": 2646016
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3171095,
-                  "pss_bytes": 15097856,
-                  "rss_bytes": 17289216
+                  "pid": 3282836,
+                  "pss_bytes": 14167040,
+                  "rss_bytes": 16363520
                 }
               ]
             },
@@ -448,11 +482,61 @@
               "ok": true,
               "stage": "cpu_loop",
               "timings_ms": {
-                "terminate_ms": 0.08208700000000001,
-                "total_ms": 0.08208700000000001
+                "terminate_ms": 0.088013,
+                "total_ms": 0.088013
               }
             },
-            "wall_ms": 0.9105839999392629
+            "wall_ms": 0.8394619799219072
+          },
+          "crash_child_inflight": {
+            "memory": {
+              "cgroup_current_bytes": 790528,
+              "cgroup_current_mib": 0.75390625,
+              "cgroup_peak_bytes": 5976064,
+              "cgroup_peak_mib": 5.69921875,
+              "node_process_count": 0,
+              "process_count": 1,
+              "process_tree": [
+                {
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "comm": "junban-p7-spike",
+                  "exe": "junban-p7-spike-probe",
+                  "pid": 3282748,
+                  "pss_bytes": 874496,
+                  "rss_bytes": 2813952
+                }
+              ]
+            },
+            "parent_health_after": {
+              "banner": "junban-phase7-host-placement-spike-v1/v1",
+              "child_pid": null,
+              "has_engine": false,
+              "has_instance": false,
+              "mode": "child",
+              "ok": true,
+              "pid": 3282748
+            },
+            "response": {
+              "detail": {
+                "bound_ms": 2000,
+                "cleaned": true,
+                "in_flight": true,
+                "ipc_error": "io error: failed to fill whole buffer",
+                "kill_delay_ms": 40,
+                "killed_pid": 3282836,
+                "parent_health_ok": true,
+                "parent_survived": true,
+                "session_cleared": true,
+                "wait_ok": true
+              },
+              "ok": true,
+              "stage": "crash_child_inflight",
+              "timings_ms": {
+                "terminate_ms": 61.710318,
+                "total_ms": 61.710131000000004
+              }
+            },
+            "wall_ms": 62.27948499144986
           },
           "final_health": {
             "health": {
@@ -462,51 +546,51 @@
               "has_instance": false,
               "mode": "child",
               "ok": true,
-              "pid": 3170998
+              "pid": 3282748
             },
             "memory": {
-              "cgroup_current_bytes": 1134592,
-              "cgroup_current_mib": 1.08203125,
-              "cgroup_peak_bytes": 6148096,
-              "cgroup_peak_mib": 5.86328125,
+              "cgroup_current_bytes": 983040,
+              "cgroup_current_mib": 0.9375,
+              "cgroup_peak_bytes": 5976064,
+              "cgroup_peak_mib": 5.69921875,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2706432,
-                  "rss_bytes": 4829184
+                  "pid": 3282748,
+                  "pss_bytes": 878592,
+                  "rss_bytes": 2818048
                 }
               ]
             }
           },
           "first_ping": {
             "memory": {
-              "cgroup_current_bytes": 5283840,
-              "cgroup_current_mib": 5.0390625,
-              "cgroup_peak_bytes": 6148096,
-              "cgroup_peak_mib": 5.86328125,
+              "cgroup_current_bytes": 4759552,
+              "cgroup_current_mib": 4.5390625,
+              "cgroup_peak_bytes": 5976064,
+              "cgroup_peak_mib": 5.69921875,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2706432,
-                  "rss_bytes": 4829184
+                  "pid": 3282748,
+                  "pss_bytes": 878592,
+                  "rss_bytes": 2818048
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3171187,
-                  "pss_bytes": 14517248,
-                  "rss_bytes": 16506880
+                  "pid": 3282924,
+                  "pss_bytes": 13978624,
+                  "rss_bytes": 15921152
                 }
               ]
             },
@@ -517,36 +601,36 @@
               "ok": true,
               "stage": "first_ping",
               "timings_ms": {
-                "first_call_ms": 0.04949,
-                "total_ms": 0.04949
+                "first_call_ms": 0.07818800000000001,
+                "total_ms": 0.07818800000000001
               }
             },
-            "wall_ms": 0.6618620245717466
+            "wall_ms": 0.7523600070271641
           },
           "grow_memory": {
             "memory": {
-              "cgroup_current_bytes": 5697536,
-              "cgroup_current_mib": 5.43359375,
-              "cgroup_peak_bytes": 6148096,
-              "cgroup_peak_mib": 5.86328125,
+              "cgroup_current_bytes": 4718592,
+              "cgroup_current_mib": 4.5,
+              "cgroup_peak_bytes": 5976064,
+              "cgroup_peak_mib": 5.69921875,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2706432,
-                  "rss_bytes": 4829184
+                  "pid": 3282748,
+                  "pss_bytes": 840704,
+                  "rss_bytes": 2650112
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3171095,
-                  "pss_bytes": 15241216,
-                  "rss_bytes": 17432576
+                  "pid": 3282836,
+                  "pss_bytes": 14167040,
+                  "rss_bytes": 16363520
                 }
               ]
             },
@@ -561,90 +645,50 @@
               "stage": "grow_memory",
               "timings_ms": {}
             },
-            "wall_ms": 0.7183070119936019
+            "wall_ms": 0.7635789806954563
           },
           "instantiate": {
             "memory": {
-              "cgroup_current_bytes": 5296128,
-              "cgroup_current_mib": 5.05078125,
-              "cgroup_peak_bytes": 6148096,
-              "cgroup_peak_mib": 5.86328125,
+              "cgroup_current_bytes": 4665344,
+              "cgroup_current_mib": 4.44921875,
+              "cgroup_peak_bytes": 5976064,
+              "cgroup_peak_mib": 5.69921875,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2706432,
-                  "rss_bytes": 4829184
+                  "pid": 3282748,
+                  "pss_bytes": 878592,
+                  "rss_bytes": 2818048
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3171187,
-                  "pss_bytes": 14488576,
-                  "rss_bytes": 16478208
+                  "pid": 3282924,
+                  "pss_bytes": 13900800,
+                  "rss_bytes": 15843328
                 }
               ]
             },
             "response": {
               "detail": {
-                "has_instance": true
+                "has_component": true,
+                "has_instance": true,
+                "has_pending_bytes": false
               },
               "ok": true,
               "stage": "instantiate",
               "timings_ms": {
-                "compile_ms": 59.994673,
-                "instantiate_ms": 0.227975,
-                "total_ms": 60.222648
+                "compile_ms": 57.276594,
+                "instantiate_ms": 0.244305,
+                "total_ms": 57.520899
               }
             },
-            "wall_ms": 61.38650100911036
-          },
-          "kill_child": {
-            "memory": {
-              "cgroup_current_bytes": 761856,
-              "cgroup_current_mib": 0.7265625,
-              "cgroup_peak_bytes": 6148096,
-              "cgroup_peak_mib": 5.86328125,
-              "node_process_count": 0,
-              "process_count": 1,
-              "process_tree": [
-                {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
-                  "comm": "junban-p7-spike",
-                  "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2706432,
-                  "rss_bytes": 4829184
-                }
-              ]
-            },
-            "parent_health_after": {
-              "banner": "junban-phase7-host-placement-spike-v1/v1",
-              "child_pid": null,
-              "has_engine": false,
-              "has_instance": false,
-              "mode": "child",
-              "ok": true,
-              "pid": 3170998
-            },
-            "response": {
-              "detail": {
-                "cleaned": true,
-                "killed_pid": 3171095,
-                "parent_health_ok": true,
-                "parent_survived": true,
-                "wait_ok": true
-              },
-              "ok": true,
-              "stage": "kill_child",
-              "timings_ms": {}
-            },
-            "wall_ms": 22.29634701507166
+            "wall_ms": 58.60866600414738
           },
           "linked_idle": {
             "health": {
@@ -654,49 +698,49 @@
               "has_instance": false,
               "mode": "child",
               "ok": true,
-              "pid": 3170998
+              "pid": 3282748
             },
             "memory": {
-              "cgroup_current_bytes": 569344,
-              "cgroup_current_mib": 0.54296875,
-              "cgroup_peak_bytes": 1044480,
-              "cgroup_peak_mib": 0.99609375,
+              "cgroup_current_bytes": 233472,
+              "cgroup_current_mib": 0.22265625,
+              "cgroup_peak_bytes": 516096,
+              "cgroup_peak_mib": 0.4921875,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2455552,
-                  "rss_bytes": 4378624
+                  "pid": 3282748,
+                  "pss_bytes": 692224,
+                  "rss_bytes": 2301952
                 }
               ]
             }
           },
           "shutdown_child": {
             "memory": {
-              "cgroup_current_bytes": 610304,
-              "cgroup_current_mib": 0.58203125,
-              "cgroup_peak_bytes": 6148096,
-              "cgroup_peak_mib": 5.86328125,
+              "cgroup_current_bytes": 458752,
+              "cgroup_current_mib": 0.4375,
+              "cgroup_peak_bytes": 5976064,
+              "cgroup_peak_mib": 5.69921875,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2706432,
-                  "rss_bytes": 4829184
+                  "pid": 3282748,
+                  "pss_bytes": 878592,
+                  "rss_bytes": 2818048
                 }
               ]
             },
             "response": {
               "detail": {
-                "child_pid": 3171187,
+                "child_pid": 3282924,
                 "cleaned": true,
                 "exit_ok": true
               },
@@ -704,72 +748,72 @@
               "stage": "shutdown_child",
               "timings_ms": {}
             },
-            "wall_ms": 21.758987015346065
+            "wall_ms": 21.702400990761817
           },
           "spawn": {
             "memory": {
-              "cgroup_current_bytes": 1490944,
-              "cgroup_current_mib": 1.421875,
-              "cgroup_peak_bytes": 6148096,
-              "cgroup_peak_mib": 5.86328125,
+              "cgroup_current_bytes": 1437696,
+              "cgroup_current_mib": 1.37109375,
+              "cgroup_peak_bytes": 5976064,
+              "cgroup_peak_mib": 5.69921875,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2706432,
-                  "rss_bytes": 4829184
+                  "pid": 3282748,
+                  "pss_bytes": 878592,
+                  "rss_bytes": 2818048
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3171187,
-                  "pss_bytes": 3401728,
-                  "rss_bytes": 5271552
+                  "pid": 3282924,
+                  "pss_bytes": 2483200,
+                  "rss_bytes": 4329472
                 }
               ]
             },
             "response": {
               "detail": {
-                "child_pid": 3171187,
+                "child_pid": 3282924,
                 "cmdline": ""
               },
               "ok": true,
               "stage": "spawn",
               "timings_ms": {
-                "total_ms": 1.7833599999999998
+                "total_ms": 1.726119
               }
             },
-            "wall_ms": 2.30823497986421
+            "wall_ms": 2.144350000889972
           },
           "trap": {
             "memory": {
-              "cgroup_current_bytes": 4775936,
-              "cgroup_current_mib": 4.5546875,
-              "cgroup_peak_bytes": 6049792,
-              "cgroup_peak_mib": 5.76953125,
+              "cgroup_current_bytes": 4931584,
+              "cgroup_current_mib": 4.703125,
+              "cgroup_peak_bytes": 5730304,
+              "cgroup_peak_mib": 5.46484375,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2702336,
-                  "rss_bytes": 4825088
+                  "pid": 3282748,
+                  "pss_bytes": 836608,
+                  "rss_bytes": 2646016
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3171095,
-                  "pss_bytes": 14760960,
-                  "rss_bytes": 16756736
+                  "pid": 3282836,
+                  "pss_bytes": 14144512,
+                  "rss_bytes": 16146432
                 }
               ]
             },
@@ -781,36 +825,36 @@
               "ok": true,
               "stage": "trap",
               "timings_ms": {
-                "terminate_ms": 0.08576099999999999,
-                "total_ms": 0.08576099999999999
+                "terminate_ms": 0.07761499999999999,
+                "total_ms": 0.07761499999999999
               }
             },
-            "wall_ms": 0.7458100153598934
+            "wall_ms": 0.8319089829456061
           },
           "warm_ping": {
             "memory": {
-              "cgroup_current_bytes": 4775936,
-              "cgroup_current_mib": 4.5546875,
-              "cgroup_peak_bytes": 6049792,
-              "cgroup_peak_mib": 5.76953125,
+              "cgroup_current_bytes": 4431872,
+              "cgroup_current_mib": 4.2265625,
+              "cgroup_peak_bytes": 5730304,
+              "cgroup_peak_mib": 5.46484375,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-7dqeg5vs/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_rust-3e5ruqez/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170998,
-                  "pss_bytes": 2702336,
-                  "rss_bytes": 4825088
+                  "pid": 3282748,
+                  "pss_bytes": 836608,
+                  "rss_bytes": 2646016
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3171095,
-                  "pss_bytes": 14437376,
-                  "rss_bytes": 16433152
+                  "pid": 3282836,
+                  "pss_bytes": 14017536,
+                  "rss_bytes": 16019456
                 }
               ]
             },
@@ -822,14 +866,14 @@
               "ok": true,
               "stage": "warm_ping",
               "timings_ms": {
-                "total_ms": 0.034337,
-                "warm_call_ms": 0.00068674
+                "total_ms": 0.019945,
+                "warm_call_ms": 0.0003989
               }
             },
-            "wall_ms": 0.7418339955620468
+            "wall_ms": 0.5833299946971238
           }
         },
-        "startup_to_health_ms": 39.70881999703124,
+        "startup_to_health_ms": 21.797258988954127,
         "variant": "child_rust"
       }
     ],
@@ -837,75 +881,75 @@
       {
         "mode": "child",
         "ready": {
-          "address": "127.0.0.1:45971",
+          "address": "127.0.0.1:42129",
           "banner": "junban-phase7-host-placement-spike-v1/v1",
           "mode": "child",
-          "pid": 3171986,
+          "pid": 3283596,
           "protocol": "junban-phase7-host-placement-spike-v1/v1"
         },
         "stages": {
           "child_idle": {
             "memory": {
-              "cgroup_current_bytes": 1474560,
-              "cgroup_current_mib": 1.40625,
-              "cgroup_peak_bytes": 1736704,
-              "cgroup_peak_mib": 1.65625,
+              "cgroup_current_bytes": 14082048,
+              "cgroup_current_mib": 13.4296875,
+              "cgroup_peak_bytes": 14118912,
+              "cgroup_peak_mib": 13.46484375,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2881536,
-                  "rss_bytes": 5054464
+                  "pid": 3283596,
+                  "pss_bytes": 857088,
+                  "rss_bytes": 2666496
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3172264,
-                  "pss_bytes": 3223552,
-                  "rss_bytes": 5095424
+                  "pid": 3283658,
+                  "pss_bytes": 14960640,
+                  "rss_bytes": 16830464
                 }
               ]
             },
             "response": {
               "detail": {
                 "alive": true,
-                "child_pid": 3172264
+                "child_pid": 3283658
               },
               "ok": true,
               "stage": "child_idle",
               "timings_ms": {}
             },
-            "wall_ms": 1.6040990012697875
+            "wall_ms": 0.4189549945294857
           },
           "cpu_loop": {
             "memory": {
-              "cgroup_current_bytes": 303849472,
-              "cgroup_current_mib": 289.7734375,
-              "cgroup_peak_bytes": 400592896,
-              "cgroup_peak_mib": 382.03515625,
+              "cgroup_current_bytes": 293027840,
+              "cgroup_current_mib": 279.453125,
+              "cgroup_peak_bytes": 342163456,
+              "cgroup_peak_mib": 326.3125,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2857984,
-                  "rss_bytes": 5029888
+                  "pid": 3283596,
+                  "pss_bytes": 857088,
+                  "rss_bytes": 2666496
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3172264,
-                  "pss_bytes": 304135168,
-                  "rss_bytes": 306397184
+                  "pid": 3283658,
+                  "pss_bytes": 293395456,
+                  "rss_bytes": 295653376
                 }
               ]
             },
@@ -917,11 +961,61 @@
               "ok": true,
               "stage": "cpu_loop",
               "timings_ms": {
-                "terminate_ms": 20.212266,
-                "total_ms": 20.212266
+                "terminate_ms": 20.197495999999997,
+                "total_ms": 20.197495999999997
               }
             },
-            "wall_ms": 21.355939999921247
+            "wall_ms": 21.05902199400589
+          },
+          "crash_child_inflight": {
+            "memory": {
+              "cgroup_current_bytes": 1138688,
+              "cgroup_current_mib": 1.0859375,
+              "cgroup_peak_bytes": 342163456,
+              "cgroup_peak_mib": 326.3125,
+              "node_process_count": 0,
+              "process_count": 1,
+              "process_tree": [
+                {
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "comm": "junban-p7-spike",
+                  "exe": "junban-p7-spike-probe",
+                  "pid": 3283596,
+                  "pss_bytes": 894976,
+                  "rss_bytes": 2834432
+                }
+              ]
+            },
+            "parent_health_after": {
+              "banner": "junban-phase7-host-placement-spike-v1/v1",
+              "child_pid": null,
+              "has_engine": false,
+              "has_instance": false,
+              "mode": "child",
+              "ok": true,
+              "pid": 3283596
+            },
+            "response": {
+              "detail": {
+                "bound_ms": 2000,
+                "cleaned": true,
+                "in_flight": true,
+                "ipc_error": "io error: failed to fill whole buffer",
+                "kill_delay_ms": 40,
+                "killed_pid": 3283658,
+                "parent_health_ok": true,
+                "parent_survived": true,
+                "session_cleared": true,
+                "wait_ok": true
+              },
+              "ok": true,
+              "stage": "crash_child_inflight",
+              "timings_ms": {
+                "terminate_ms": 90.373305,
+                "total_ms": 90.373175
+              }
+            },
+            "wall_ms": 90.98477399675176
           },
           "final_health": {
             "health": {
@@ -931,51 +1025,51 @@
               "has_instance": false,
               "mode": "child",
               "ok": true,
-              "pid": 3171986
+              "pid": 3283596
             },
             "memory": {
-              "cgroup_current_bytes": 1429504,
-              "cgroup_current_mib": 1.36328125,
-              "cgroup_peak_bytes": 400592896,
-              "cgroup_peak_mib": 382.03515625,
+              "cgroup_current_bytes": 970752,
+              "cgroup_current_mib": 0.92578125,
+              "cgroup_peak_bytes": 342257664,
+              "cgroup_peak_mib": 326.40234375,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2776064,
-                  "rss_bytes": 4947968
+                  "pid": 3283596,
+                  "pss_bytes": 899072,
+                  "rss_bytes": 2838528
                 }
               ]
             }
           },
           "first_ping": {
             "memory": {
-              "cgroup_current_bytes": 294158336,
-              "cgroup_current_mib": 280.53125,
-              "cgroup_peak_bytes": 400592896,
-              "cgroup_peak_mib": 382.03515625,
+              "cgroup_current_bytes": 293679104,
+              "cgroup_current_mib": 280.07421875,
+              "cgroup_peak_bytes": 342257664,
+              "cgroup_peak_mib": 326.40234375,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2776064,
-                  "rss_bytes": 4947968
+                  "pid": 3283596,
+                  "pss_bytes": 899072,
+                  "rss_bytes": 2838528
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3180188,
-                  "pss_bytes": 295362560,
-                  "rss_bytes": 297349120
+                  "pid": 3284152,
+                  "pss_bytes": 295885824,
+                  "rss_bytes": 297881600
                 }
               ]
             },
@@ -986,36 +1080,36 @@
               "ok": true,
               "stage": "first_ping",
               "timings_ms": {
-                "first_call_ms": 1.085487,
-                "total_ms": 1.085487
+                "first_call_ms": 0.943575,
+                "total_ms": 0.943575
               }
             },
-            "wall_ms": 1.7981139826588333
+            "wall_ms": 1.6137000056914985
           },
           "grow_memory": {
             "memory": {
-              "cgroup_current_bytes": 300511232,
-              "cgroup_current_mib": 286.58984375,
-              "cgroup_peak_bytes": 400592896,
-              "cgroup_peak_mib": 382.03515625,
+              "cgroup_current_bytes": 293470208,
+              "cgroup_current_mib": 279.875,
+              "cgroup_peak_bytes": 342163456,
+              "cgroup_peak_mib": 326.3125,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2862080,
-                  "rss_bytes": 5033984
+                  "pid": 3283596,
+                  "pss_bytes": 861184,
+                  "rss_bytes": 2670592
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3172264,
-                  "pss_bytes": 301091840,
-                  "rss_bytes": 303353856
+                  "pid": 3283658,
+                  "pss_bytes": 293399552,
+                  "rss_bytes": 295657472
                 }
               ]
             },
@@ -1030,90 +1124,50 @@
               "stage": "grow_memory",
               "timings_ms": {}
             },
-            "wall_ms": 2.3462820099666715
+            "wall_ms": 1.5346579893957824
           },
           "instantiate": {
             "memory": {
-              "cgroup_current_bytes": 293220352,
-              "cgroup_current_mib": 279.63671875,
-              "cgroup_peak_bytes": 400592896,
-              "cgroup_peak_mib": 382.03515625,
+              "cgroup_current_bytes": 292999168,
+              "cgroup_current_mib": 279.42578125,
+              "cgroup_peak_bytes": 342257664,
+              "cgroup_peak_mib": 326.40234375,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2776064,
-                  "rss_bytes": 4947968
+                  "pid": 3283596,
+                  "pss_bytes": 899072,
+                  "rss_bytes": 2838528
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3180188,
-                  "pss_bytes": 292769792,
-                  "rss_bytes": 294756352
+                  "pid": 3284152,
+                  "pss_bytes": 293293056,
+                  "rss_bytes": 295288832
                 }
               ]
             },
             "response": {
               "detail": {
-                "has_instance": true
+                "has_component": true,
+                "has_instance": true,
+                "has_pending_bytes": false
               },
               "ok": true,
               "stage": "instantiate",
               "timings_ms": {
-                "compile_ms": 12689.4942,
-                "instantiate_ms": 2.90757,
-                "total_ms": 12692.40177
+                "compile_ms": 12253.68493,
+                "instantiate_ms": 3.364478,
+                "total_ms": 12257.049408
               }
             },
-            "wall_ms": 12693.231556011597
-          },
-          "kill_child": {
-            "memory": {
-              "cgroup_current_bytes": 618496,
-              "cgroup_current_mib": 0.58984375,
-              "cgroup_peak_bytes": 400592896,
-              "cgroup_peak_mib": 382.03515625,
-              "node_process_count": 0,
-              "process_count": 1,
-              "process_tree": [
-                {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
-                  "comm": "junban-p7-spike",
-                  "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2862080,
-                  "rss_bytes": 5033984
-                }
-              ]
-            },
-            "parent_health_after": {
-              "banner": "junban-phase7-host-placement-spike-v1/v1",
-              "child_pid": null,
-              "has_engine": false,
-              "has_instance": false,
-              "mode": "child",
-              "ok": true,
-              "pid": 3171986
-            },
-            "response": {
-              "detail": {
-                "cleaned": true,
-                "killed_pid": 3172264,
-                "parent_health_ok": true,
-                "parent_survived": true,
-                "wait_ok": true
-              },
-              "ok": true,
-              "stage": "kill_child",
-              "timings_ms": {}
-            },
-            "wall_ms": 50.270956999156624
+            "wall_ms": 12258.735159994103
           },
           "linked_idle": {
             "health": {
@@ -1123,49 +1177,49 @@
               "has_instance": false,
               "mode": "child",
               "ok": true,
-              "pid": 3171986
+              "pid": 3283596
             },
             "memory": {
-              "cgroup_current_bytes": 573440,
-              "cgroup_current_mib": 0.546875,
-              "cgroup_peak_bytes": 1572864,
-              "cgroup_peak_mib": 1.5,
+              "cgroup_current_bytes": 229376,
+              "cgroup_current_mib": 0.21875,
+              "cgroup_peak_bytes": 520192,
+              "cgroup_peak_mib": 0.49609375,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2573312,
-                  "rss_bytes": 4546560
+                  "pid": 3283596,
+                  "pss_bytes": 749568,
+                  "rss_bytes": 2359296
                 }
               ]
             }
           },
           "shutdown_child": {
             "memory": {
-              "cgroup_current_bytes": 1167360,
-              "cgroup_current_mib": 1.11328125,
-              "cgroup_peak_bytes": 400592896,
-              "cgroup_peak_mib": 382.03515625,
+              "cgroup_current_bytes": 446464,
+              "cgroup_current_mib": 0.42578125,
+              "cgroup_peak_bytes": 342257664,
+              "cgroup_peak_mib": 326.40234375,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2776064,
-                  "rss_bytes": 4947968
+                  "pid": 3283596,
+                  "pss_bytes": 899072,
+                  "rss_bytes": 2838528
                 }
               ]
             },
             "response": {
               "detail": {
-                "child_pid": 3180188,
+                "child_pid": 3284152,
                 "cleaned": true,
                 "exit_ok": true
               },
@@ -1173,72 +1227,72 @@
               "stage": "shutdown_child",
               "timings_ms": {}
             },
-            "wall_ms": 47.944563993951306
+            "wall_ms": 49.90749101852998
           },
           "spawn": {
             "memory": {
-              "cgroup_current_bytes": 1228800,
-              "cgroup_current_mib": 1.171875,
-              "cgroup_peak_bytes": 400592896,
-              "cgroup_peak_mib": 382.03515625,
+              "cgroup_current_bytes": 13910016,
+              "cgroup_current_mib": 13.265625,
+              "cgroup_peak_bytes": 342163456,
+              "cgroup_peak_mib": 326.3125,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2862080,
-                  "rss_bytes": 5033984
+                  "pid": 3283596,
+                  "pss_bytes": 899072,
+                  "rss_bytes": 2838528
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3180188,
-                  "pss_bytes": 3277824,
-                  "rss_bytes": 5148672
+                  "pid": 3284152,
+                  "pss_bytes": 14886912,
+                  "rss_bytes": 16752640
                 }
               ]
             },
             "response": {
               "detail": {
-                "child_pid": 3180188,
+                "child_pid": 3284152,
                 "cmdline": ""
               },
               "ok": true,
               "stage": "spawn",
               "timings_ms": {
-                "total_ms": 145.07814399999998
+                "total_ms": 143.372431
               }
             },
-            "wall_ms": 145.67351699224673
+            "wall_ms": 144.01060799718834
           },
           "trap": {
             "memory": {
-              "cgroup_current_bytes": 293421056,
-              "cgroup_current_mib": 279.828125,
-              "cgroup_peak_bytes": 342593536,
-              "cgroup_peak_mib": 326.72265625,
+              "cgroup_current_bytes": 292872192,
+              "cgroup_current_mib": 279.3046875,
+              "cgroup_peak_bytes": 342163456,
+              "cgroup_peak_mib": 326.3125,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2856960,
-                  "rss_bytes": 5029888
+                  "pid": 3283596,
+                  "pss_bytes": 857088,
+                  "rss_bytes": 2666496
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3172264,
-                  "pss_bytes": 293527552,
-                  "rss_bytes": 295530496
+                  "pid": 3283658,
+                  "pss_bytes": 293382144,
+                  "rss_bytes": 295378944
                 }
               ]
             },
@@ -1250,36 +1304,36 @@
               "ok": true,
               "stage": "trap",
               "timings_ms": {
-                "terminate_ms": 0.81716,
-                "total_ms": 0.81716
+                "terminate_ms": 0.55033,
+                "total_ms": 0.55033
               }
             },
-            "wall_ms": 2.4833770003169775
+            "wall_ms": 1.5781589900143445
           },
           "warm_ping": {
             "memory": {
-              "cgroup_current_bytes": 294162432,
-              "cgroup_current_mib": 280.53515625,
-              "cgroup_peak_bytes": 342593536,
-              "cgroup_peak_mib": 326.72265625,
+              "cgroup_current_bytes": 294166528,
+              "cgroup_current_mib": 280.5390625,
+              "cgroup_peak_bytes": 342163456,
+              "cgroup_peak_mib": 326.3125,
               "node_process_count": 0,
               "process_count": 2,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-5_i2qt2y/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode child --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-child_typescript-qgbf5d6s/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm --host-bin /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171986,
-                  "pss_bytes": 2856960,
-                  "rss_bytes": 5029888
+                  "pid": 3283596,
+                  "pss_bytes": 857088,
+                  "rss_bytes": 2666496
                 },
                 {
                   "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-host",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-host",
-                  "pid": 3172264,
-                  "pss_bytes": 296361984,
-                  "rss_bytes": 298364928
+                  "pid": 3283658,
+                  "pss_bytes": 296216576,
+                  "rss_bytes": 298213376
                 }
               ]
             },
@@ -1291,14 +1345,14 @@
               "ok": true,
               "stage": "warm_ping",
               "timings_ms": {
-                "total_ms": 13.182067,
-                "warm_call_ms": 0.26364134
+                "total_ms": 8.439387,
+                "warm_call_ms": 0.16878774
               }
             },
-            "wall_ms": 15.186708013061434
+            "wall_ms": 9.174743987387046
           }
         },
-        "startup_to_health_ms": 16.472140996484086,
+        "startup_to_health_ms": 14.265519013861194,
         "variant": "child_typescript"
       }
     ],
@@ -1306,29 +1360,29 @@
       {
         "mode": "inprocess",
         "ready": {
-          "address": "127.0.0.1:40907",
+          "address": "127.0.0.1:43903",
           "banner": "junban-phase7-host-placement-spike-v1/v1",
           "mode": "inprocess",
-          "pid": 3170873,
+          "pid": 3282587,
           "protocol": "junban-phase7-host-placement-spike-v1/v1"
         },
         "stages": {
           "compile": {
             "memory": {
-              "cgroup_current_bytes": 4575232,
-              "cgroup_current_mib": 4.36328125,
-              "cgroup_peak_bytes": 5406720,
-              "cgroup_peak_mib": 5.15625,
+              "cgroup_current_bytes": 4112384,
+              "cgroup_current_mib": 3.921875,
+              "cgroup_peak_bytes": 5140480,
+              "cgroup_peak_mib": 4.90234375,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-cnfkvy44/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-mtngxy80/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170873,
-                  "pss_bytes": 13586432,
-                  "rss_bytes": 15659008
+                  "pid": 3282587,
+                  "pss_bytes": 13612032,
+                  "rss_bytes": 15667200
                 }
               ]
             },
@@ -1339,28 +1393,28 @@
               "ok": true,
               "stage": "compile",
               "timings_ms": {
-                "compile_ms": 56.839871,
-                "total_ms": 56.839871
+                "compile_ms": 56.398658,
+                "total_ms": 56.398658
               }
             },
-            "wall_ms": 57.557669992093
+            "wall_ms": 57.64392501441762
           },
           "cpu_loop": {
             "memory": {
-              "cgroup_current_bytes": 4722688,
-              "cgroup_current_mib": 4.50390625,
-              "cgroup_peak_bytes": 5455872,
-              "cgroup_peak_mib": 5.203125,
+              "cgroup_current_bytes": 4902912,
+              "cgroup_current_mib": 4.67578125,
+              "cgroup_peak_bytes": 5189632,
+              "cgroup_peak_mib": 4.94921875,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-cnfkvy44/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-mtngxy80/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170873,
-                  "pss_bytes": 14231552,
-                  "rss_bytes": 16498688
+                  "pid": 3282587,
+                  "pss_bytes": 14288896,
+                  "rss_bytes": 16539648
                 }
               ]
             },
@@ -1372,28 +1426,28 @@
               "ok": true,
               "stage": "cpu_loop",
               "timings_ms": {
-                "terminate_ms": 0.07234,
-                "total_ms": 0.07234
+                "terminate_ms": 10.161887,
+                "total_ms": 10.161887
               }
             },
-            "wall_ms": 0.7756789855193347
+            "wall_ms": 10.911107005085796
           },
           "create_engine": {
             "memory": {
-              "cgroup_current_bytes": 1093632,
-              "cgroup_current_mib": 1.04296875,
-              "cgroup_peak_bytes": 1097728,
-              "cgroup_peak_mib": 1.046875,
+              "cgroup_current_bytes": 1089536,
+              "cgroup_current_mib": 1.0390625,
+              "cgroup_peak_bytes": 1351680,
+              "cgroup_peak_mib": 1.2890625,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-cnfkvy44/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-mtngxy80/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170873,
-                  "pss_bytes": 4500480,
-                  "rss_bytes": 6533120
+                  "pid": 3282587,
+                  "pss_bytes": 4237312,
+                  "rss_bytes": 6242304
                 }
               ]
             },
@@ -1404,28 +1458,28 @@
               "ok": true,
               "stage": "create_engine",
               "timings_ms": {
-                "engine_create_ms": 0.08067200000000001,
-                "total_ms": 0.08067200000000001
+                "engine_create_ms": 0.092518,
+                "total_ms": 0.092518
               }
             },
-            "wall_ms": 0.5696929874829948
+            "wall_ms": 0.6786489975638688
           },
           "drop_engine": {
             "memory": {
-              "cgroup_current_bytes": 4235264,
-              "cgroup_current_mib": 4.0390625,
-              "cgroup_peak_bytes": 5509120,
-              "cgroup_peak_mib": 5.25390625,
+              "cgroup_current_bytes": 4677632,
+              "cgroup_current_mib": 4.4609375,
+              "cgroup_peak_bytes": 5189632,
+              "cgroup_peak_mib": 4.94921875,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-cnfkvy44/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-mtngxy80/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170873,
-                  "pss_bytes": 14026752,
-                  "rss_bytes": 16293888
+                  "pid": 3282587,
+                  "pss_bytes": 14084096,
+                  "rss_bytes": 16334848
                 }
               ]
             },
@@ -1436,11 +1490,11 @@
               "ok": true,
               "stage": "drop_engine",
               "timings_ms": {
-                "terminate_ms": 0.119538,
-                "total_ms": 0.119538
+                "terminate_ms": 0.14403,
+                "total_ms": 0.14403
               }
             },
-            "wall_ms": 0.6247929995879531
+            "wall_ms": 0.833884987514466
           },
           "final_health": {
             "health": {
@@ -1450,43 +1504,43 @@
               "has_instance": false,
               "mode": "inprocess",
               "ok": true,
-              "pid": 3170873
+              "pid": 3282587
             },
             "memory": {
-              "cgroup_current_bytes": 4755456,
-              "cgroup_current_mib": 4.53515625,
-              "cgroup_peak_bytes": 5509120,
-              "cgroup_peak_mib": 5.25390625,
+              "cgroup_current_bytes": 4472832,
+              "cgroup_current_mib": 4.265625,
+              "cgroup_peak_bytes": 5189632,
+              "cgroup_peak_mib": 4.94921875,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-cnfkvy44/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-mtngxy80/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170873,
-                  "pss_bytes": 14026752,
-                  "rss_bytes": 16293888
+                  "pid": 3282587,
+                  "pss_bytes": 14084096,
+                  "rss_bytes": 16334848
                 }
               ]
             }
           },
           "first_ping": {
             "memory": {
-              "cgroup_current_bytes": 4419584,
-              "cgroup_current_mib": 4.21484375,
-              "cgroup_peak_bytes": 5406720,
-              "cgroup_peak_mib": 5.15625,
+              "cgroup_current_bytes": 4145152,
+              "cgroup_current_mib": 3.953125,
+              "cgroup_peak_bytes": 5140480,
+              "cgroup_peak_mib": 4.90234375,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-cnfkvy44/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-mtngxy80/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170873,
-                  "pss_bytes": 13927424,
-                  "rss_bytes": 15998976
+                  "pid": 3282587,
+                  "pss_bytes": 13820928,
+                  "rss_bytes": 15876096
                 }
               ]
             },
@@ -1497,28 +1551,28 @@
               "ok": true,
               "stage": "first_ping",
               "timings_ms": {
-                "first_call_ms": 0.065697,
-                "total_ms": 0.065697
+                "first_call_ms": 0.057312999999999996,
+                "total_ms": 0.057312999999999996
               }
             },
-            "wall_ms": 0.5700889742001891
+            "wall_ms": 0.724739016732201
           },
           "grow_memory": {
             "memory": {
-              "cgroup_current_bytes": 4714496,
-              "cgroup_current_mib": 4.49609375,
-              "cgroup_peak_bytes": 5509120,
-              "cgroup_peak_mib": 5.25390625,
+              "cgroup_current_bytes": 4644864,
+              "cgroup_current_mib": 4.4296875,
+              "cgroup_peak_bytes": 5189632,
+              "cgroup_peak_mib": 4.94921875,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-cnfkvy44/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-mtngxy80/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170873,
-                  "pss_bytes": 14231552,
-                  "rss_bytes": 16498688
+                  "pid": 3282587,
+                  "pss_bytes": 14288896,
+                  "rss_bytes": 16539648
                 }
               ]
             },
@@ -1533,24 +1587,24 @@
               "stage": "grow_memory",
               "timings_ms": {}
             },
-            "wall_ms": 0.6194179877638817
+            "wall_ms": 0.6009520147927105
           },
           "instantiate": {
             "memory": {
-              "cgroup_current_bytes": 4722688,
-              "cgroup_current_mib": 4.50390625,
-              "cgroup_peak_bytes": 5509120,
-              "cgroup_peak_mib": 5.25390625,
+              "cgroup_current_bytes": 4640768,
+              "cgroup_current_mib": 4.42578125,
+              "cgroup_peak_bytes": 5189632,
+              "cgroup_peak_mib": 4.94921875,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-cnfkvy44/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-mtngxy80/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170873,
-                  "pss_bytes": 14231552,
-                  "rss_bytes": 16498688
+                  "pid": 3282587,
+                  "pss_bytes": 14288896,
+                  "rss_bytes": 16539648
                 }
               ]
             },
@@ -1561,11 +1615,11 @@
               "ok": true,
               "stage": "instantiate",
               "timings_ms": {
-                "instantiate_ms": 0.201319,
-                "total_ms": 0.201319
+                "instantiate_ms": 0.24856599999999998,
+                "total_ms": 0.24856599999999998
               }
             },
-            "wall_ms": 0.7824880012776703
+            "wall_ms": 0.9775530197657645
           },
           "linked_idle": {
             "health": {
@@ -1575,43 +1629,43 @@
               "has_instance": false,
               "mode": "inprocess",
               "ok": true,
-              "pid": 3170873
+              "pid": 3282587
             },
             "memory": {
-              "cgroup_current_bytes": 573440,
-              "cgroup_current_mib": 0.546875,
-              "cgroup_peak_bytes": 1040384,
-              "cgroup_peak_mib": 0.9921875,
+              "cgroup_current_bytes": 565248,
+              "cgroup_current_mib": 0.5390625,
+              "cgroup_peak_bytes": 1044480,
+              "cgroup_peak_mib": 0.99609375,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-cnfkvy44/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-mtngxy80/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170873,
-                  "pss_bytes": 2455552,
-                  "rss_bytes": 4419584
+                  "pid": 3282587,
+                  "pss_bytes": 2463744,
+                  "rss_bytes": 4399104
                 }
               ]
             }
           },
           "trap": {
             "memory": {
-              "cgroup_current_bytes": 4669440,
-              "cgroup_current_mib": 4.453125,
-              "cgroup_peak_bytes": 5406720,
-              "cgroup_peak_mib": 5.15625,
+              "cgroup_current_bytes": 4411392,
+              "cgroup_current_mib": 4.20703125,
+              "cgroup_peak_bytes": 5189632,
+              "cgroup_peak_mib": 4.94921875,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-cnfkvy44/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-mtngxy80/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170873,
-                  "pss_bytes": 14156800,
-                  "rss_bytes": 16228352
+                  "pid": 3282587,
+                  "pss_bytes": 14210048,
+                  "rss_bytes": 16265216
                 }
               ]
             },
@@ -1623,28 +1677,28 @@
               "ok": true,
               "stage": "trap",
               "timings_ms": {
-                "terminate_ms": 0.098699,
-                "total_ms": 0.098699
+                "terminate_ms": 0.096331,
+                "total_ms": 0.096331
               }
             },
-            "wall_ms": 0.5783959932159632
+            "wall_ms": 0.7094389875419438
           },
           "warm_ping": {
             "memory": {
-              "cgroup_current_bytes": 4423680,
-              "cgroup_current_mib": 4.21875,
-              "cgroup_peak_bytes": 5406720,
-              "cgroup_peak_mib": 5.15625,
+              "cgroup_current_bytes": 4403200,
+              "cgroup_current_mib": 4.19921875,
+              "cgroup_peak_bytes": 5140480,
+              "cgroup_peak_mib": 4.90234375,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-cnfkvy44/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_rust-mtngxy80/ready.json --component-kind rust --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/rust-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170873,
-                  "pss_bytes": 13927424,
-                  "rss_bytes": 15998976
+                  "pid": 3282587,
+                  "pss_bytes": 13820928,
+                  "rss_bytes": 15876096
                 }
               ]
             },
@@ -1656,14 +1710,14 @@
               "ok": true,
               "stage": "warm_ping",
               "timings_ms": {
-                "total_ms": 0.021445,
-                "warm_call_ms": 0.00042889999999999996
+                "total_ms": 0.019975,
+                "warm_call_ms": 0.0003995
               }
             },
-            "wall_ms": 0.5153719976078719
+            "wall_ms": 0.5158830026630312
           }
         },
-        "startup_to_health_ms": 18.480669998098165,
+        "startup_to_health_ms": 15.031870978418738,
         "variant": "inprocess_rust"
       }
     ],
@@ -1671,29 +1725,29 @@
       {
         "mode": "inprocess",
         "ready": {
-          "address": "127.0.0.1:33693",
+          "address": "127.0.0.1:33843",
           "banner": "junban-phase7-host-placement-spike-v1/v1",
           "mode": "inprocess",
-          "pid": 3171230,
+          "pid": 3282940,
           "protocol": "junban-phase7-host-placement-spike-v1/v1"
         },
         "stages": {
           "compile": {
             "memory": {
-              "cgroup_current_bytes": 286965760,
-              "cgroup_current_mib": 273.671875,
-              "cgroup_peak_bytes": 345063424,
-              "cgroup_peak_mib": 329.078125,
+              "cgroup_current_bytes": 284516352,
+              "cgroup_current_mib": 271.3359375,
+              "cgroup_peak_bytes": 342642688,
+              "cgroup_peak_mib": 326.76953125,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-1sgp9z6x/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-h_azq7jd/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171230,
-                  "pss_bytes": 295982080,
-                  "rss_bytes": 298049536
+                  "pid": 3282940,
+                  "pss_bytes": 293505024,
+                  "rss_bytes": 295567360
                 }
               ]
             },
@@ -1704,28 +1758,28 @@
               "ok": true,
               "stage": "compile",
               "timings_ms": {
-                "compile_ms": 12879.606985,
-                "total_ms": 12879.606985
+                "compile_ms": 12137.460694,
+                "total_ms": 12137.460694
               }
             },
-            "wall_ms": 12880.220484017627
+            "wall_ms": 12277.953940996667
           },
           "cpu_loop": {
             "memory": {
-              "cgroup_current_bytes": 295391232,
-              "cgroup_current_mib": 281.70703125,
-              "cgroup_peak_bytes": 345063424,
-              "cgroup_peak_mib": 329.078125,
+              "cgroup_current_bytes": 292990976,
+              "cgroup_current_mib": 279.41796875,
+              "cgroup_peak_bytes": 342642688,
+              "cgroup_peak_mib": 326.76953125,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-1sgp9z6x/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-h_azq7jd/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171230,
-                  "pss_bytes": 296396800,
-                  "rss_bytes": 298659840
+                  "pid": 3282940,
+                  "pss_bytes": 293837824,
+                  "rss_bytes": 296095744
                 }
               ]
             },
@@ -1737,28 +1791,28 @@
               "ok": true,
               "stage": "cpu_loop",
               "timings_ms": {
-                "terminate_ms": 20.248411,
-                "total_ms": 20.248411
+                "terminate_ms": 20.267786,
+                "total_ms": 20.267786
               }
             },
-            "wall_ms": 21.37762901838869
+            "wall_ms": 21.17990198894404
           },
           "create_engine": {
             "memory": {
-              "cgroup_current_bytes": 831488,
-              "cgroup_current_mib": 0.79296875,
-              "cgroup_peak_bytes": 1572864,
-              "cgroup_peak_mib": 1.5,
+              "cgroup_current_bytes": 823296,
+              "cgroup_current_mib": 0.78515625,
+              "cgroup_peak_bytes": 1085440,
+              "cgroup_peak_mib": 1.03515625,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-1sgp9z6x/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-h_azq7jd/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171230,
-                  "pss_bytes": 4409344,
-                  "rss_bytes": 6402048
+                  "pid": 3282940,
+                  "pss_bytes": 4372480,
+                  "rss_bytes": 6377472
                 }
               ]
             },
@@ -1769,28 +1823,28 @@
               "ok": true,
               "stage": "create_engine",
               "timings_ms": {
-                "engine_create_ms": 0.07245499999999999,
-                "total_ms": 0.07245499999999999
+                "engine_create_ms": 0.090121,
+                "total_ms": 0.090121
               }
             },
-            "wall_ms": 0.6759679818060249
+            "wall_ms": 0.6977049924898893
           },
           "drop_engine": {
             "memory": {
-              "cgroup_current_bytes": 235433984,
-              "cgroup_current_mib": 224.52734375,
-              "cgroup_peak_bytes": 345063424,
-              "cgroup_peak_mib": 329.078125,
+              "cgroup_current_bytes": 232796160,
+              "cgroup_current_mib": 222.01171875,
+              "cgroup_peak_bytes": 342642688,
+              "cgroup_peak_mib": 326.76953125,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-1sgp9z6x/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-h_azq7jd/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171230,
-                  "pss_bytes": 244824064,
-                  "rss_bytes": 247087104
+                  "pid": 3282940,
+                  "pss_bytes": 242265088,
+                  "rss_bytes": 244523008
                 }
               ]
             },
@@ -1801,11 +1855,11 @@
               "ok": true,
               "stage": "drop_engine",
               "timings_ms": {
-                "terminate_ms": 5.633951,
-                "total_ms": 5.633951
+                "terminate_ms": 5.771842,
+                "total_ms": 5.771842
               }
             },
-            "wall_ms": 6.232066982192919
+            "wall_ms": 6.503829994471744
           },
           "final_health": {
             "health": {
@@ -1815,43 +1869,43 @@
               "has_instance": false,
               "mode": "inprocess",
               "ok": true,
-              "pid": 3171230
+              "pid": 3282940
             },
             "memory": {
-              "cgroup_current_bytes": 235175936,
-              "cgroup_current_mib": 224.28125,
-              "cgroup_peak_bytes": 345063424,
-              "cgroup_peak_mib": 329.078125,
+              "cgroup_current_bytes": 233058304,
+              "cgroup_current_mib": 222.26171875,
+              "cgroup_peak_bytes": 342642688,
+              "cgroup_peak_mib": 326.76953125,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-1sgp9z6x/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-h_azq7jd/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171230,
-                  "pss_bytes": 244824064,
-                  "rss_bytes": 247087104
+                  "pid": 3282940,
+                  "pss_bytes": 242265088,
+                  "rss_bytes": 244523008
                 }
               ]
             }
           },
           "first_ping": {
             "memory": {
-              "cgroup_current_bytes": 296087552,
-              "cgroup_current_mib": 282.37109375,
-              "cgroup_peak_bytes": 345063424,
-              "cgroup_peak_mib": 329.078125,
+              "cgroup_current_bytes": 293941248,
+              "cgroup_current_mib": 280.32421875,
+              "cgroup_peak_bytes": 342642688,
+              "cgroup_peak_mib": 326.76953125,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-1sgp9z6x/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-h_azq7jd/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171230,
-                  "pss_bytes": 298902528,
-                  "rss_bytes": 300969984
+                  "pid": 3282940,
+                  "pss_bytes": 296376320,
+                  "rss_bytes": 298438656
                 }
               ]
             },
@@ -1862,28 +1916,28 @@
               "ok": true,
               "stage": "first_ping",
               "timings_ms": {
-                "first_call_ms": 1.227661,
-                "total_ms": 1.227661
+                "first_call_ms": 1.23648,
+                "total_ms": 1.23648
               }
             },
-            "wall_ms": 1.9617519865278155
+            "wall_ms": 1.7771080019883811
           },
           "grow_memory": {
             "memory": {
-              "cgroup_current_bytes": 295342080,
-              "cgroup_current_mib": 281.66015625,
-              "cgroup_peak_bytes": 345063424,
-              "cgroup_peak_mib": 329.078125,
+              "cgroup_current_bytes": 293437440,
+              "cgroup_current_mib": 279.84375,
+              "cgroup_peak_bytes": 342642688,
+              "cgroup_peak_mib": 326.76953125,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-1sgp9z6x/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-h_azq7jd/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171230,
-                  "pss_bytes": 296396800,
-                  "rss_bytes": 298659840
+                  "pid": 3282940,
+                  "pss_bytes": 293837824,
+                  "rss_bytes": 296095744
                 }
               ]
             },
@@ -1898,24 +1952,24 @@
               "stage": "grow_memory",
               "timings_ms": {}
             },
-            "wall_ms": 2.1238909976091236
+            "wall_ms": 1.9255969964433461
           },
           "instantiate": {
             "memory": {
-              "cgroup_current_bytes": 295346176,
-              "cgroup_current_mib": 281.6640625,
-              "cgroup_peak_bytes": 345063424,
-              "cgroup_peak_mib": 329.078125,
+              "cgroup_current_bytes": 293253120,
+              "cgroup_current_mib": 279.66796875,
+              "cgroup_peak_bytes": 342642688,
+              "cgroup_peak_mib": 326.76953125,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-1sgp9z6x/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-h_azq7jd/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171230,
-                  "pss_bytes": 296396800,
-                  "rss_bytes": 298659840
+                  "pid": 3282940,
+                  "pss_bytes": 293837824,
+                  "rss_bytes": 296095744
                 }
               ]
             },
@@ -1926,11 +1980,11 @@
               "ok": true,
               "stage": "instantiate",
               "timings_ms": {
-                "instantiate_ms": 0.076238,
-                "total_ms": 0.076238
+                "instantiate_ms": 0.10072,
+                "total_ms": 0.10072
               }
             },
-            "wall_ms": 0.6380240083672106
+            "wall_ms": 0.6456169940065593
           },
           "linked_idle": {
             "health": {
@@ -1940,43 +1994,43 @@
               "has_instance": false,
               "mode": "inprocess",
               "ok": true,
-              "pid": 3171230
+              "pid": 3282940
             },
             "memory": {
-              "cgroup_current_bytes": 565248,
-              "cgroup_current_mib": 0.5390625,
-              "cgroup_peak_bytes": 1572864,
-              "cgroup_peak_mib": 1.5,
+              "cgroup_current_bytes": 561152,
+              "cgroup_current_mib": 0.53515625,
+              "cgroup_peak_bytes": 1044480,
+              "cgroup_peak_mib": 0.99609375,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-1sgp9z6x/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-h_azq7jd/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171230,
-                  "pss_bytes": 2455552,
-                  "rss_bytes": 4378624
+                  "pid": 3282940,
+                  "pss_bytes": 2414592,
+                  "rss_bytes": 4349952
                 }
               ]
             }
           },
           "trap": {
             "memory": {
-              "cgroup_current_bytes": 295317504,
-              "cgroup_current_mib": 281.63671875,
-              "cgroup_peak_bytes": 345063424,
-              "cgroup_peak_mib": 329.078125,
+              "cgroup_current_bytes": 293302272,
+              "cgroup_current_mib": 279.71484375,
+              "cgroup_peak_bytes": 342642688,
+              "cgroup_peak_mib": 326.76953125,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-1sgp9z6x/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-h_azq7jd/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171230,
-                  "pss_bytes": 296317952,
-                  "rss_bytes": 298385408
+                  "pid": 3282940,
+                  "pss_bytes": 293824512,
+                  "rss_bytes": 295886848
                 }
               ]
             },
@@ -1988,28 +2042,28 @@
               "ok": true,
               "stage": "trap",
               "timings_ms": {
-                "terminate_ms": 0.576357,
-                "total_ms": 0.576357
+                "terminate_ms": 0.49176899999999996,
+                "total_ms": 0.49176899999999996
               }
             },
-            "wall_ms": 1.5036480035632849
+            "wall_ms": 1.416075974702835
           },
           "warm_ping": {
             "memory": {
-              "cgroup_current_bytes": 296402944,
-              "cgroup_current_mib": 282.671875,
-              "cgroup_peak_bytes": 345063424,
-              "cgroup_peak_mib": 329.078125,
+              "cgroup_current_bytes": 294281216,
+              "cgroup_current_mib": 280.6484375,
+              "cgroup_peak_bytes": 342642688,
+              "cgroup_peak_mib": 326.76953125,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-1sgp9z6x/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-p7-spike-probe --mode inprocess --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-inprocess_typescript-h_azq7jd/ready.json --component-kind typescript --component /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/tools/phase7-host-placement/components/typescript-spike.wasm",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3171230,
-                  "pss_bytes": 299152384,
-                  "rss_bytes": 301219840
+                  "pid": 3282940,
+                  "pss_bytes": 296626176,
+                  "rss_bytes": 298688512
                 }
               ]
             },
@@ -2021,14 +2075,14 @@
               "ok": true,
               "stage": "warm_ping",
               "timings_ms": {
-                "total_ms": 7.843236,
-                "warm_call_ms": 0.15686472
+                "total_ms": 8.188547,
+                "warm_call_ms": 0.16377094
               }
             },
-            "wall_ms": 8.663029002491385
+            "wall_ms": 8.863408002071083
           }
         },
-        "startup_to_health_ms": 18.6223600176163,
+        "startup_to_health_ms": 12.636480998480693,
         "variant": "inprocess_typescript"
       }
     ],
@@ -2036,10 +2090,10 @@
       {
         "mode": "sdk",
         "ready": {
-          "address": "127.0.0.1:40173",
+          "address": "127.0.0.1:46395",
           "banner": "junban-phase7-host-placement-spike-v1/v1",
           "mode": "sdk",
-          "pid": 3170762,
+          "pid": 3282501,
           "protocol": "junban-phase7-host-placement-spike-v1/v1"
         },
         "stages": {
@@ -2051,43 +2105,43 @@
               "has_instance": false,
               "mode": "sdk",
               "ok": true,
-              "pid": 3170762
+              "pid": 3282501
             },
             "memory": {
-              "cgroup_current_bytes": 753664,
-              "cgroup_current_mib": 0.71875,
-              "cgroup_peak_bytes": 782336,
-              "cgroup_peak_mib": 0.74609375,
+              "cgroup_current_bytes": 1273856,
+              "cgroup_current_mib": 1.21484375,
+              "cgroup_peak_bytes": 1310720,
+              "cgroup_peak_mib": 1.25,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode sdk --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-sdk_only-vkpifgp6/ready.json --component-kind rust",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode sdk --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-sdk_only-84qjs1bu/ready.json --component-kind rust",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170762,
-                  "pss_bytes": 663552,
-                  "rss_bytes": 2273280
+                  "pid": 3282501,
+                  "pss_bytes": 696320,
+                  "rss_bytes": 2306048
                 }
               ]
             }
           },
           "idle": {
             "memory": {
-              "cgroup_current_bytes": 225280,
-              "cgroup_current_mib": 0.21484375,
-              "cgroup_peak_bytes": 782336,
-              "cgroup_peak_mib": 0.74609375,
+              "cgroup_current_bytes": 749568,
+              "cgroup_current_mib": 0.71484375,
+              "cgroup_peak_bytes": 1310720,
+              "cgroup_peak_mib": 1.25,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode sdk --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-sdk_only-vkpifgp6/ready.json --component-kind rust",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode sdk --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-sdk_only-84qjs1bu/ready.json --component-kind rust",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170762,
-                  "pss_bytes": 659456,
-                  "rss_bytes": 2269184
+                  "pid": 3282501,
+                  "pss_bytes": 692224,
+                  "rss_bytes": 2301952
                 }
               ]
             },
@@ -2100,7 +2154,7 @@
               "stage": "idle",
               "timings_ms": {}
             },
-            "wall_ms": 0.6299550004769117
+            "wall_ms": 0.4886189999524504
           },
           "linked_idle": {
             "health": {
@@ -2110,58 +2164,58 @@
               "has_instance": false,
               "mode": "sdk",
               "ok": true,
-              "pid": 3170762
+              "pid": 3282501
             },
             "memory": {
               "cgroup_current_bytes": 225280,
               "cgroup_current_mib": 0.21484375,
-              "cgroup_peak_bytes": 782336,
-              "cgroup_peak_mib": 0.74609375,
+              "cgroup_peak_bytes": 1310720,
+              "cgroup_peak_mib": 1.25,
               "node_process_count": 0,
               "process_count": 1,
               "process_tree": [
                 {
-                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode sdk --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-sdk_only-vkpifgp6/ready.json --component-kind rust",
+                  "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-sdk-only/release/junban-p7-spike-probe --mode sdk --bind 127.0.0.1:0 --ready-file /tmp/junban-p7-sdk_only-84qjs1bu/ready.json --component-kind rust",
                   "comm": "junban-p7-spike",
                   "exe": "junban-p7-spike-probe",
-                  "pid": 3170762,
-                  "pss_bytes": 659456,
-                  "rss_bytes": 2269184
+                  "pid": 3282501,
+                  "pss_bytes": 692224,
+                  "rss_bytes": 2301952
                 }
               ]
             }
           }
         },
-        "startup_to_health_ms": 17.702873010421172,
+        "startup_to_health_ms": 15.08500601630658,
         "variant": "sdk_only"
       }
     ],
     "server_baseline": [
       {
         "health": {
-          "instance_id": "cfbf944e-a64c-49d5-b894-da0047d74f6a",
+          "instance_id": "f2f4d05f-e492-4638-ba92-8a005e523404",
           "status": "ok"
         },
-        "health_ms": 24.17529301601462,
+        "health_ms": 23.489883984439075,
         "idle": {
-          "cgroup_current_bytes": 4169728,
-          "cgroup_current_mib": 3.9765625,
-          "cgroup_peak_bytes": 6623232,
-          "cgroup_peak_mib": 6.31640625,
+          "cgroup_current_bytes": 4161536,
+          "cgroup_current_mib": 3.96875,
+          "cgroup_peak_bytes": 6561792,
+          "cgroup_peak_mib": 6.2578125,
           "node_process_count": 0,
           "process_count": 1,
           "process_tree": [
             {
-              "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-p7-server-4wcqmq9_/profile --web-dir /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-empty-web",
+              "cmdline": "/tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-p7-server-qqab2iqj/profile --web-dir /tmp/pi-agent-9107006e-5d4e-431-e5014b6f/target/p7-empty-web",
               "comm": "junban-server",
               "exe": "junban-server",
-              "pid": 3170657,
-              "pss_bytes": 13847552,
-              "rss_bytes": 16236544
+              "pid": 3282405,
+              "pss_bytes": 13862912,
+              "rss_bytes": 16220160
             }
           ]
         },
-        "startup_to_health_ms": 42.84694098168984,
+        "startup_to_health_ms": 40.26661399984732,
         "variant": "server_baseline"
       }
     ]
@@ -2169,109 +2223,94 @@
   "summary": {
     "child_rust": {
       "after_warm_cgroup_mib": {
-        "max": 4.5546875,
-        "mean": 4.5546875,
-        "median": 4.5546875,
-        "min": 4.5546875
+        "max": 4.2265625,
+        "mean": 4.2265625,
+        "median": 4.2265625,
+        "min": 4.2265625
+      },
+      "cold_total_ms": {
+        "max": 116.92429299999999,
+        "mean": 116.92429299999999,
+        "median": 116.92429299999999,
+        "min": 116.92429299999999
       },
       "idle_cgroup_mib": {
-        "max": 0.54296875,
-        "mean": 0.54296875,
-        "median": 0.54296875,
-        "min": 0.54296875
+        "max": 0.22265625,
+        "mean": 0.22265625,
+        "median": 0.22265625,
+        "min": 0.22265625
       },
       "idle_cgroup_peak_mib": {
-        "max": 5.86328125,
-        "mean": 4.97828125,
-        "median": 5.86328125,
-        "min": 0.99609375
+        "max": 5.69921875,
+        "mean": 4.73875,
+        "median": 5.69921875,
+        "min": 0.4921875
       },
       "peak_cgroup_mib": {
-        "max": 5.86328125,
-        "mean": 4.97828125,
-        "median": 5.86328125,
-        "min": 0.99609375
+        "max": 5.69921875,
+        "mean": 4.73875,
+        "median": 5.69921875,
+        "min": 0.4921875
       },
       "samples": 1,
       "startup_to_health_ms": {
-        "max": 39.70881999703124,
-        "mean": 39.70881999703124,
-        "median": 39.70881999703124,
-        "min": 39.70881999703124
+        "max": 21.797258988954127,
+        "mean": 21.797258988954127,
+        "median": 21.797258988954127,
+        "min": 21.797258988954127
       }
     },
     "child_typescript": {
       "after_warm_cgroup_mib": {
-        "max": 280.53515625,
-        "mean": 280.53515625,
-        "median": 280.53515625,
-        "min": 280.53515625
+        "max": 280.5390625,
+        "mean": 280.5390625,
+        "median": 280.5390625,
+        "min": 280.5390625
+      },
+      "cold_total_ms": {
+        "max": 24659.358397000004,
+        "mean": 24659.358397000004,
+        "median": 24659.358397000004,
+        "min": 24659.358397000004
       },
       "idle_cgroup_mib": {
-        "max": 0.546875,
-        "mean": 0.546875,
-        "median": 0.546875,
-        "min": 0.546875
+        "max": 0.21875,
+        "mean": 0.21875,
+        "median": 0.21875,
+        "min": 0.21875
       },
       "idle_cgroup_peak_mib": {
-        "max": 382.03515625,
-        "mean": 297.090625,
-        "median": 382.03515625,
-        "min": 1.5
+        "max": 326.40234375,
+        "mean": 262.21546875,
+        "median": 326.3125,
+        "min": 0.49609375
       },
       "peak_cgroup_mib": {
-        "max": 382.03515625,
-        "mean": 297.090625,
-        "median": 382.03515625,
-        "min": 1.5
+        "max": 326.40234375,
+        "mean": 262.21546875,
+        "median": 326.3125,
+        "min": 0.49609375
       },
       "samples": 1,
       "startup_to_health_ms": {
-        "max": 16.472140996484086,
-        "mean": 16.472140996484086,
-        "median": 16.472140996484086,
-        "min": 16.472140996484086
+        "max": 14.265519013861194,
+        "mean": 14.265519013861194,
+        "median": 14.265519013861194,
+        "min": 14.265519013861194
       }
     },
     "inprocess_rust": {
       "after_warm_cgroup_mib": {
-        "max": 4.21875,
-        "mean": 4.21875,
-        "median": 4.21875,
-        "min": 4.21875
+        "max": 4.19921875,
+        "mean": 4.19921875,
+        "median": 4.19921875,
+        "min": 4.19921875
       },
-      "idle_cgroup_mib": {
-        "max": 0.546875,
-        "mean": 0.546875,
-        "median": 0.546875,
-        "min": 0.546875
-      },
-      "idle_cgroup_peak_mib": {
-        "max": 5.25390625,
-        "mean": 4.293817934782608,
-        "median": 5.15625,
-        "min": 0.9921875
-      },
-      "peak_cgroup_mib": {
-        "max": 5.25390625,
-        "mean": 4.293817934782608,
-        "median": 5.15625,
-        "min": 0.9921875
-      },
-      "samples": 1,
-      "startup_to_health_ms": {
-        "max": 18.480669998098165,
-        "mean": 18.480669998098165,
-        "median": 18.480669998098165,
-        "min": 18.480669998098165
-      }
-    },
-    "inprocess_typescript": {
-      "after_warm_cgroup_mib": {
-        "max": 282.671875,
-        "mean": 282.671875,
-        "median": 282.671875,
-        "min": 282.671875
+      "cold_total_ms": {
+        "max": 113.59410999999997,
+        "mean": 113.59410999999997,
+        "median": 113.59410999999997,
+        "min": 113.59410999999997
       },
       "idle_cgroup_mib": {
         "max": 0.5390625,
@@ -2280,31 +2319,70 @@
         "min": 0.5390625
       },
       "idle_cgroup_peak_mib": {
-        "max": 329.078125,
-        "mean": 257.8654891304348,
-        "median": 329.078125,
-        "min": 1.5
+        "max": 4.94921875,
+        "mean": 4.103091032608695,
+        "median": 4.94921875,
+        "min": 0.99609375
       },
       "peak_cgroup_mib": {
-        "max": 329.078125,
-        "mean": 257.8654891304348,
-        "median": 329.078125,
-        "min": 1.5
+        "max": 4.94921875,
+        "mean": 4.103091032608695,
+        "median": 4.94921875,
+        "min": 0.99609375
       },
       "samples": 1,
       "startup_to_health_ms": {
-        "max": 18.6223600176163,
-        "mean": 18.6223600176163,
-        "median": 18.6223600176163,
-        "min": 18.6223600176163
+        "max": 15.031870978418738,
+        "mean": 15.031870978418738,
+        "median": 15.031870978418738,
+        "min": 15.031870978418738
+      }
+    },
+    "inprocess_typescript": {
+      "after_warm_cgroup_mib": {
+        "max": 280.6484375,
+        "mean": 280.6484375,
+        "median": 280.6484375,
+        "min": 280.6484375
+      },
+      "cold_total_ms": {
+        "max": 24277.776029999994,
+        "mean": 24277.776029999994,
+        "median": 24277.776029999994,
+        "min": 24277.776029999994
+      },
+      "idle_cgroup_mib": {
+        "max": 0.53515625,
+        "mean": 0.53515625,
+        "median": 0.53515625,
+        "min": 0.53515625
+      },
+      "idle_cgroup_peak_mib": {
+        "max": 326.76953125,
+        "mean": 255.95261548913044,
+        "median": 326.76953125,
+        "min": 0.99609375
+      },
+      "peak_cgroup_mib": {
+        "max": 326.76953125,
+        "mean": 255.95261548913044,
+        "median": 326.76953125,
+        "min": 0.99609375
+      },
+      "samples": 1,
+      "startup_to_health_ms": {
+        "max": 12.636480998480693,
+        "mean": 12.636480998480693,
+        "median": 12.636480998480693,
+        "min": 12.636480998480693
       }
     },
     "sdk_only": {
       "after_warm_cgroup_mib": {
-        "max": 0.21484375,
-        "mean": 0.21484375,
-        "median": 0.21484375,
-        "min": 0.21484375
+        "max": 0.71484375,
+        "mean": 0.71484375,
+        "median": 0.71484375,
+        "min": 0.71484375
       },
       "idle_cgroup_mib": {
         "max": 0.21484375,
@@ -2313,50 +2391,50 @@
         "min": 0.21484375
       },
       "idle_cgroup_peak_mib": {
-        "max": 0.74609375,
-        "mean": 0.74609375,
-        "median": 0.74609375,
-        "min": 0.74609375
+        "max": 1.25,
+        "mean": 1.25,
+        "median": 1.25,
+        "min": 1.25
       },
       "peak_cgroup_mib": {
-        "max": 0.74609375,
-        "mean": 0.74609375,
-        "median": 0.74609375,
-        "min": 0.74609375
+        "max": 1.25,
+        "mean": 1.25,
+        "median": 1.25,
+        "min": 1.25
       },
       "samples": 1,
       "startup_to_health_ms": {
-        "max": 17.702873010421172,
-        "mean": 17.702873010421172,
-        "median": 17.702873010421172,
-        "min": 17.702873010421172
+        "max": 15.08500601630658,
+        "mean": 15.08500601630658,
+        "median": 15.08500601630658,
+        "min": 15.08500601630658
       }
     },
     "server_baseline": {
       "idle_cgroup_mib": {
-        "max": 3.9765625,
-        "mean": 3.9765625,
-        "median": 3.9765625,
-        "min": 3.9765625
+        "max": 3.96875,
+        "mean": 3.96875,
+        "median": 3.96875,
+        "min": 3.96875
       },
       "idle_cgroup_peak_mib": {
-        "max": 6.31640625,
-        "mean": 6.31640625,
-        "median": 6.31640625,
-        "min": 6.31640625
+        "max": 6.2578125,
+        "mean": 6.2578125,
+        "median": 6.2578125,
+        "min": 6.2578125
       },
       "peak_cgroup_mib": {
-        "max": 6.31640625,
-        "mean": 6.31640625,
-        "median": 6.31640625,
-        "min": 6.31640625
+        "max": 6.2578125,
+        "mean": 6.2578125,
+        "median": 6.2578125,
+        "min": 6.2578125
       },
       "samples": 1,
       "startup_to_health_ms": {
-        "max": 42.84694098168984,
-        "mean": 42.84694098168984,
-        "median": 42.84694098168984,
-        "min": 42.84694098168984
+        "max": 40.26661399984732,
+        "mean": 40.26661399984732,
+        "median": 40.26661399984732,
+        "min": 40.26661399984732
       }
     }
   }

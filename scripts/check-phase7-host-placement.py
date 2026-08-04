@@ -96,6 +96,22 @@ BUILD_CONFOUNDERS = frozenset(
 # NOT product active-memory budgets and NOT frozen evidence ceilings.
 HOSTILE_PROBE_RUST_MEMORY_MIB = 64.0
 HOSTILE_PROBE_TS_MEMORY_MIB = 128.0
+MAX_COMPONENT_BYTES = 32 * 1024 * 1024
+RUST_BASELINE_IMPORTS = [
+    "wasi:cli/environment@0.2.6",
+    "wasi:cli/exit@0.2.6",
+    "wasi:cli/stderr@0.2.6",
+    "wasi:io/error@0.2.6",
+    "wasi:io/streams@0.2.6",
+]
+# Premeasurement selection thresholds (data-independent, explicit).
+# Material if delta exceeds both relative and absolute floors.
+SELECT_WARM_PCT = 0.15
+SELECT_WARM_FLOOR_MIB = 8.0
+SELECT_PEAK_PCT = 0.20
+SELECT_PEAK_FLOOR_MIB = 32.0
+SELECT_COLD_PCT = 0.25
+SELECT_COLD_FLOOR_MS = 100.0
 
 
 class HarnessError(RuntimeError):
@@ -663,6 +679,60 @@ def build_release_artifacts() -> dict[str, Any]:
     }
 
 
+def inspect_component_artifact(path: Path, *, kind: str) -> dict[str, Any]:
+    """Inspect freshly built component bytes via the spike import inspector."""
+    inspector = REPO_ROOT / "target" / "release" / "junban-p7-inspect-imports"
+    if not inspector.is_file():
+        run_cmd(
+            [
+                "cargo",
+                "build",
+                "--locked",
+                "--release",
+                "-p",
+                "junban-phase7-host-placement",
+                "--bin",
+                "junban-p7-inspect-imports",
+            ],
+            cwd=REPO_ROOT,
+        )
+    result = run_cmd(
+        [str(inspector), str(path), "--kind", kind],
+        check=False,
+    )
+    if result.returncode not in {0, 3}:
+        raise HarnessError(
+            f"import inspect failed for {path}: {(result.stderr or result.stdout)[:1000]}"
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise HarnessError(f"import inspect JSON decode failed: {error}") from error
+    imports = list(payload.get("imports") or [])
+    size = int(payload.get("size_bytes") or path.stat().st_size)
+    if size > MAX_COMPONENT_BYTES:
+        raise HarnessError(f"component exceeds {MAX_COMPONENT_BYTES} bytes: {size}")
+    if kind == "rust":
+        expected = list(RUST_BASELINE_IMPORTS)
+        ok = imports == expected and bool(payload.get("profile_ok"))
+        if not ok:
+            raise HarnessError(
+                f"rust imports mismatch: actual={imports!r} expected={expected!r}"
+            )
+    elif kind in {"typescript", "ts"}:
+        ok = imports == [] and bool(payload.get("profile_ok"))
+        if not ok:
+            raise HarnessError(f"typescript imports must be empty, got {imports!r}")
+    else:
+        ok = bool(payload.get("profile_ok", True))
+    return {
+        "imports": imports,
+        "import_profile_ok": ok,
+        "size_bytes": size,
+        "inspector": str(inspector.relative_to(REPO_ROOT)),
+    }
+
+
 def build_rust_component() -> dict[str, Any]:
     COMPONENTS_DIR.mkdir(parents=True, exist_ok=True)
     out = COMPONENTS_DIR / "rust-spike.wasm"
@@ -699,12 +769,16 @@ def build_rust_component() -> dict[str, Any]:
             raise HarnessError("rust spike wasm not produced")
         built = candidates[0]
     shutil.copy2(built, out)
+    inspected = inspect_component_artifact(out, kind="rust")
     return {
+        "ok": True,
         "path": str(out.relative_to(REPO_ROOT)),
         "sha256": sha256_file(out),
         "size_bytes": out.stat().st_size,
         "kind": "rust",
         "target": "wasm32-wasip2",
+        **inspected,
+        "expected_imports": list(RUST_BASELINE_IMPORTS),
     }
 
 
@@ -743,6 +817,19 @@ def build_typescript_component() -> dict[str, Any]:
             "jco": JCO_VERSION,
             "componentize_js": COMPONENTIZE_JS_VERSION,
         }
+    try:
+        inspected = inspect_component_artifact(out, kind="typescript")
+    except HarnessError as error:
+        return {
+            "ok": False,
+            "error": str(error),
+            "kind": "typescript",
+            "jco": JCO_VERSION,
+            "componentize_js": COMPONENTIZE_JS_VERSION,
+            "path": str(out.relative_to(REPO_ROOT)),
+            "sha256": sha256_file(out),
+            "size_bytes": out.stat().st_size,
+        }
     return {
         "ok": True,
         "path": str(out.relative_to(REPO_ROOT)),
@@ -752,6 +839,8 @@ def build_typescript_component() -> dict[str, Any]:
         "jco": JCO_VERSION,
         "componentize_js": COMPONENTIZE_JS_VERSION,
         "runtime_node": False,
+        **inspected,
+        "expected_imports": [],
     }
 
 
@@ -1000,7 +1089,12 @@ def measure_probe_variant(
                 }
                 # After deliberate child kill, prove the parent probe is still healthy
                 # before recovery spawn stages run.
-                if name in {"kill_child", "child_kill"}:
+                if name in {
+                    "kill_child",
+                    "child_kill",
+                    "crash_child_inflight",
+                    "kill_child_inflight",
+                }:
                     try:
                         parent_health = http_json("GET", f"{base}/health")
                     except HarnessError as error:
@@ -1078,9 +1172,8 @@ def child_stage_plan() -> list[dict[str, Any]]:
         {"stage": "cpu_loop"},
         {"stage": "instantiate"},
         {"stage": "grow_memory", "pages": 2048},
-        # Deliberate kill while a child session exists; parent must survive,
-        # then recover with a fresh child before graceful shutdown.
-        {"stage": "kill_child"},
+        # Active in-flight crash while parent awaits long-running work.
+        {"stage": "crash_child_inflight"},
         {"stage": "spawn"},
         {"stage": "instantiate"},
         {"stage": "first_ping", "input": 5},
@@ -1124,13 +1217,18 @@ def collect_survival_findings(
 
 
 def child_lifecycle_ok(sample: dict[str, Any]) -> tuple[bool, bool]:
-    """Return (cleanup_ok, kill_recovery_ok) for one child sample."""
+    """Return (cleanup_ok, inflight_crash_recovery_ok) for one child sample."""
     stages = sample.get("stages") or {}
     shut = (stages.get("shutdown_child") or {}).get("response") or {}
     shut_detail = shut.get("detail") or {}
     cleanup_ok = bool(shut.get("ok") and shut_detail.get("cleaned", False))
 
-    kill_stage = stages.get("kill_child") or {}
+    kill_stage = (
+        stages.get("crash_child_inflight")
+        or stages.get("kill_child_inflight")
+        or stages.get("kill_child")
+        or {}
+    )
     kill = kill_stage.get("response") or {}
     kill_detail = kill.get("detail") or {}
     parent_after = kill_stage.get("parent_health_after") or {}
@@ -1144,9 +1242,12 @@ def child_lifecycle_ok(sample: dict[str, Any]) -> tuple[bool, bool]:
     spawn_ok = (stages.get("spawn") or {}).get("response") or {}
     inst_ok = (stages.get("instantiate") or {}).get("response") or {}
     ping_ok = (stages.get("first_ping") or {}).get("response") or {}
+    inflight = bool(kill_detail.get("in_flight", True))
     kill_ok = bool(
         kill.get("ok")
         and kill_detail.get("cleaned", False)
+        and kill_detail.get("session_cleared", True)
+        and inflight
         and parent_ok
         and final_health.get("ok", False)
         and spawn_ok.get("ok")
@@ -1181,10 +1282,152 @@ def collect_child_lifecycle_findings(
     else:
         blockers.append(f"{label} shutdown left orphan or failed cleanup proof")
     if kill_ok:
-        reasons.append(f"{label} kill/recovery survived with parent healthy")
+        reasons.append(f"{label} in-flight crash/recovery survived with parent healthy")
     else:
-        blockers.append(f"{label} kill/recovery probe failed or incomplete")
+        blockers.append(f"{label} in-flight crash/recovery probe failed or incomplete")
     return reasons, blockers
+
+
+def material_worse(candidate: float, baseline: float, *, pct: float, floor: float) -> bool:
+    """True when candidate exceeds baseline by both relative and absolute floors."""
+    return candidate > baseline + max(pct * max(baseline, 0.0), floor)
+
+
+def cold_total_ms_from_summary(summary_variant: dict[str, Any]) -> float | None:
+    cold = summary_variant.get("cold_total_ms") or {}
+    if cold.get("median") is not None:
+        return float(cold["median"])
+    return None
+
+
+def select_placement_fair(
+    summary: dict[str, Any],
+) -> tuple[str | None, str, list[str], list[str]]:
+    """Premeasurement fair comparator over Rust+TS warm/peak/cold.
+
+    Returns (selected, status, reasons, blockers).
+    Child must be measured under the SDK-only parent probe (no Wasmtime parent).
+    """
+    reasons: list[str] = []
+    blockers: list[str] = []
+
+    def metrics(prefix: str) -> dict[str, float | None]:
+        ip = summary.get(f"inprocess_{prefix}") or {}
+        ch = summary.get(f"child_{prefix}") or {}
+        return {
+            "ip_warm": ((ip.get("after_warm_cgroup_mib") or {}).get("median")),
+            "ch_warm": ((ch.get("after_warm_cgroup_mib") or {}).get("median")),
+            "ip_peak": ((ip.get("peak_cgroup_mib") or {}).get("max")),
+            "ch_peak": ((ch.get("peak_cgroup_mib") or {}).get("max")),
+            "ip_cold": cold_total_ms_from_summary(ip),
+            "ch_cold": cold_total_ms_from_summary(ch),
+        }
+
+    rust = metrics("rust")
+    ts = metrics("typescript")
+    required = [
+        rust["ip_warm"],
+        rust["ch_warm"],
+        rust["ip_peak"],
+        rust["ch_peak"],
+        rust["ip_cold"],
+        rust["ch_cold"],
+        ts["ip_warm"],
+        ts["ch_warm"],
+        ts["ip_peak"],
+        ts["ch_peak"],
+        ts["ip_cold"],
+        ts["ch_cold"],
+    ]
+    if any(v is None for v in required):
+        return None, "insufficient_data", reasons, ["missing warm/peak/cold metrics for fair selection"]
+
+    # Material regressions: child worse than in-process, and vice versa.
+    child_worse = False
+    inprocess_worse = False
+    detail: list[str] = []
+    for label, m in (("rust", rust), ("typescript", ts)):
+        assert m["ip_warm"] is not None and m["ch_warm"] is not None
+        assert m["ip_peak"] is not None and m["ch_peak"] is not None
+        assert m["ip_cold"] is not None and m["ch_cold"] is not None
+        if material_worse(
+            float(m["ch_warm"]),
+            float(m["ip_warm"]),
+            pct=SELECT_WARM_PCT,
+            floor=SELECT_WARM_FLOOR_MIB,
+        ):
+            child_worse = True
+            detail.append(f"{label} child warm materially worse")
+        if material_worse(
+            float(m["ip_warm"]),
+            float(m["ch_warm"]),
+            pct=SELECT_WARM_PCT,
+            floor=SELECT_WARM_FLOOR_MIB,
+        ):
+            inprocess_worse = True
+            detail.append(f"{label} in-process warm materially worse")
+        if material_worse(
+            float(m["ch_peak"]),
+            float(m["ip_peak"]),
+            pct=SELECT_PEAK_PCT,
+            floor=SELECT_PEAK_FLOOR_MIB,
+        ):
+            child_worse = True
+            detail.append(f"{label} child peak materially worse")
+        if material_worse(
+            float(m["ip_peak"]),
+            float(m["ch_peak"]),
+            pct=SELECT_PEAK_PCT,
+            floor=SELECT_PEAK_FLOOR_MIB,
+        ):
+            inprocess_worse = True
+            detail.append(f"{label} in-process peak materially worse")
+        if material_worse(
+            float(m["ch_cold"]),
+            float(m["ip_cold"]),
+            pct=SELECT_COLD_PCT,
+            floor=SELECT_COLD_FLOOR_MS,
+        ):
+            child_worse = True
+            detail.append(f"{label} child cold materially worse")
+        if material_worse(
+            float(m["ip_cold"]),
+            float(m["ch_cold"]),
+            pct=SELECT_COLD_PCT,
+            floor=SELECT_COLD_FLOOR_MS,
+        ):
+            inprocess_worse = True
+            detail.append(f"{label} in-process cold materially worse")
+
+    reasons.extend(detail)
+    reasons.append(
+        "fair comparator thresholds: "
+        f"warm>max({SELECT_WARM_PCT:.0%},{SELECT_WARM_FLOOR_MIB}MiB), "
+        f"peak>max({SELECT_PEAK_PCT:.0%},{SELECT_PEAK_FLOOR_MIB}MiB), "
+        f"cold>max({SELECT_COLD_PCT:.0%},{SELECT_COLD_FLOOR_MS}ms)"
+    )
+
+    if child_worse and not inprocess_worse:
+        return "lazy_inprocess", "selected_by_material_metrics", reasons, blockers
+    if inprocess_worse and not child_worse:
+        return "on_demand_child_host", "selected_by_material_metrics", reasons, blockers
+    if child_worse and inprocess_worse:
+        blockers.append(
+            "conflicting material tradeoffs between placements; architecture judgment required"
+        )
+        return None, "blocked_conflicting_material_tradeoffs", reasons, blockers
+
+    # Neither placement materially regresses on required profiles: fault containment.
+    reasons.append(
+        "no material warm/peak/cold regression on Rust+TS; "
+        "fault containment selects on-demand child host"
+    )
+    return (
+        "on_demand_child_host",
+        "selected_by_fault_containment_no_material_regression",
+        reasons,
+        blockers,
+    )
 
 
 def typescript_component_ok(report: dict[str, Any]) -> bool:
@@ -1196,8 +1439,6 @@ def evaluate_decision(report: dict[str, Any]) -> dict[str, Any]:
     """Apply the frozen context-map decision rule. May leave selection unset."""
     summary = report.get("summary") or {}
     server = summary.get("server_baseline") or {}
-    inprocess = summary.get("inprocess_rust") or {}
-    child = summary.get("child_rust") or {}
     artifacts = report.get("artifacts") or {}
 
     reasons: list[str] = []
@@ -1242,46 +1483,33 @@ def evaluate_decision(report: dict[str, Any]) -> dict[str, Any]:
         reasons.extend(r)
         blockers.extend(b)
 
-    # Placement selection: fault containment breaks a close tie toward child.
+    # Import profile authority from actual inspected bytes (not report constants).
+    for kind, label in (("rust", "rust"), ("typescript", "typescript")):
+        comp = (report.get("components") or {}).get(kind) or {}
+        if not comp.get("ok"):
+            continue
+        if comp.get("import_profile_ok") is False:
+            blockers.append(f"{label} actual import profile failed inspection")
+        imports = comp.get("imports")
+        if imports is None:
+            blockers.append(f"{label} actual imports missing from component artifact")
+        elif kind == "rust" and list(imports) != list(RUST_BASELINE_IMPORTS):
+            blockers.append(f"rust actual imports {imports!r} != frozen five")
+        elif kind == "typescript" and list(imports) != []:
+            blockers.append(f"typescript actual imports must be empty, got {imports!r}")
+
+    # Placement selection: fair material comparator; fault containment only if none.
     selected = None
     selection_status = "undecided"
     if blockers:
         selection_status = "blocked"
     else:
-        # Compare active peaks after instantiate/warm if available.
-        ip_warm = (inprocess.get("after_warm_cgroup_mib") or {}).get("median")
-        ch_warm = (child.get("after_warm_cgroup_mib") or {}).get("median")
-        ip_peak = (inprocess.get("peak_cgroup_mib") or {}).get("max")
-        ch_peak = (child.get("peak_cgroup_mib") or {}).get("max")
-        if ip_warm is None or ch_warm is None:
-            selection_status = "insufficient_data"
-        else:
-            # Close if within 15% or 4 MiB.
-            delta = abs(ip_warm - ch_warm)
-            close = delta <= max(4.0, 0.15 * max(ip_warm, ch_warm, 1.0))
-            if close:
-                selected = "on_demand_child_host"
-                selection_status = "selected_by_fault_containment_tiebreak"
-                reasons.append(
-                    f"active warm medians close (inprocess={ip_warm:.3f}, child={ch_warm:.3f}); "
-                    "context map awards fault containment to child process"
-                )
-            elif ch_warm < ip_warm:
-                selected = "on_demand_child_host"
-                selection_status = "selected_by_memory"
-                reasons.append(
-                    f"child active warm median {ch_warm:.3f} < in-process {ip_warm:.3f}"
-                )
-            else:
-                # In-process only wins if it clearly beats child on memory AND
-                # matched containment (already required).
-                selected = "lazy_inprocess"
-                selection_status = "selected_by_memory"
-                reasons.append(
-                    f"in-process active warm median {ip_warm:.3f} < child {ch_warm:.3f}"
-                )
-            if ip_peak is not None and ch_peak is not None:
-                reasons.append(f"peaks inprocess={ip_peak:.3f} child={ch_peak:.3f}")
+        selected, selection_status, sel_reasons, sel_blockers = select_placement_fair(summary)
+        reasons.extend(sel_reasons)
+        blockers.extend(sel_blockers)
+        if blockers:
+            selection_status = "blocked"
+            selected = None
 
     if report.get("host_contention", {}).get("contended"):
         selection_status = f"preliminary_{selection_status}"
@@ -1301,11 +1529,12 @@ def evaluate_decision(report: dict[str, Any]) -> dict[str, Any]:
         "decision_rule": (
             "Ordinary no-plugin server must stay within 24/32 MiB and not construct "
             "an Engine or spawn a host. Guest trap/CPU/memory survival and child "
-            "kill/recovery/cleanup are mandatory blockers for both Rust and TypeScript "
-            "when missing or failed. Real TypeScript component evidence is required. "
-            "Fault containment breaks a close measurement tie toward the child process. "
-            "Projected product totals are temporary probe cross-checks only, not "
-            "integrated server+SDK proof."
+            "in-flight crash/recovery/cleanup are mandatory blockers for both Rust and "
+            "TypeScript. Real TypeScript component evidence and actual import inspection "
+            "are required. Child variants are measured under the SDK-only parent probe. "
+            "Fair selection uses warm/peak/cold material thresholds; fault containment "
+            "picks child only when neither placement materially regresses. Projected "
+            "product totals are temporary probe cross-checks only."
         ),
         "hostile_probe_safety_caps_mib": {
             "rust_linear_memory": HOSTILE_PROBE_RUST_MEMORY_MIB,
@@ -1331,16 +1560,39 @@ def _fixture_child_lifecycle(*, ok: bool = True) -> dict[str, Any]:
     stages = _fixture_hostile_stages(ok=ok)
     stages.update(
         {
-            "kill_child": {
+            "crash_child_inflight": {
                 "response": {
                     "ok": ok,
-                    "detail": {"cleaned": ok, "parent_survived": ok, "parent_health_ok": ok},
+                    "detail": {
+                        "cleaned": ok,
+                        "parent_survived": ok,
+                        "parent_health_ok": ok,
+                        "in_flight": True,
+                        "session_cleared": ok,
+                    },
                 },
                 "parent_health_after": {"ok": ok},
             },
-            "spawn": {"response": {"ok": ok}},
-            "instantiate": {"response": {"ok": ok}},
-            "first_ping": {"response": {"ok": ok}},
+            "spawn": {
+                "response": {"ok": ok, "timings_ms": {"total_ms": 5.0}},
+                "wall_ms": 5.0,
+            },
+            "instantiate": {
+                "response": {
+                    "ok": ok,
+                    "timings_ms": {
+                        "engine_create_ms": 1.0,
+                        "compile_ms": 10.0,
+                        "instantiate_ms": 2.0,
+                        "total_ms": 13.0,
+                    },
+                },
+                "wall_ms": 13.0,
+            },
+            "first_ping": {
+                "response": {"ok": ok, "timings_ms": {"first_call_ms": 1.0, "total_ms": 1.0}},
+                "wall_ms": 1.0,
+            },
             "shutdown_child": {"response": {"ok": ok, "detail": {"cleaned": ok}}},
             "final_health": {"health": {"ok": ok}},
         }
@@ -1348,7 +1600,16 @@ def _fixture_child_lifecycle(*, ok: bool = True) -> dict[str, Any]:
     return stages
 
 
+def _metric_block(warm: float, peak: float, cold: float) -> dict[str, Any]:
+    return {
+        "after_warm_cgroup_mib": {"median": warm, "max": warm},
+        "peak_cgroup_mib": {"max": peak, "median": peak},
+        "cold_total_ms": {"median": cold, "max": cold},
+    }
+
+
 def _base_eval_report() -> dict[str, Any]:
+    # Near-parity metrics so fault-containment can select child when containment passes.
     return {
         "artifacts": {
             "server_links_wasmtime": False,
@@ -1360,18 +1621,33 @@ def _base_eval_report() -> dict[str, Any]:
                 "idle_cgroup_mib": {"max": 4.0},
                 "idle_cgroup_peak_mib": {"max": 5.0},
             },
-            "inprocess_rust": {"after_warm_cgroup_mib": {"median": 4.5}},
-            "child_rust": {"after_warm_cgroup_mib": {"median": 4.7}},
+            "inprocess_rust": _metric_block(4.5, 5.0, 20.0),
+            "child_rust": _metric_block(4.7, 5.5, 25.0),
+            "inprocess_typescript": _metric_block(80.0, 100.0, 200.0),
+            "child_typescript": _metric_block(82.0, 105.0, 220.0),
         },
         "components": {
-            "rust": {"ok": True},
-            "typescript": {"ok": True, "path": "tools/phase7-host-placement/components/ts.wasm"},
+            "rust": {
+                "ok": True,
+                "imports": list(RUST_BASELINE_IMPORTS),
+                "import_profile_ok": True,
+            },
+            "typescript": {
+                "ok": True,
+                "path": "tools/phase7-host-placement/components/ts.wasm",
+                "imports": [],
+                "import_profile_ok": True,
+            },
         },
         "samples": {
-            "inprocess_rust": [{"stages": _fixture_hostile_stages(ok=True)}],
-            "child_rust": [{"stages": _fixture_child_lifecycle(ok=True)}],
-            "inprocess_typescript": [{"stages": _fixture_hostile_stages(ok=True)}],
-            "child_typescript": [{"stages": _fixture_child_lifecycle(ok=True)}],
+            "inprocess_rust": [{"mode": "inprocess", "stages": _fixture_hostile_stages(ok=True)}],
+            "child_rust": [{"mode": "child", "stages": _fixture_child_lifecycle(ok=True)}],
+            "inprocess_typescript": [
+                {"mode": "inprocess", "stages": _fixture_hostile_stages(ok=True)}
+            ],
+            "child_typescript": [
+                {"mode": "child", "stages": _fixture_child_lifecycle(ok=True)}
+            ],
         },
         "protocol": {"quick": False, "skip_typescript": False},
         "host_contention": {"contended": False},
@@ -1414,10 +1690,49 @@ def run_evaluate_decision_fixtures() -> dict[str, Any]:
         {"stages": _fixture_child_lifecycle(ok=False)}
     ]
     failed_kill_decision = evaluate_decision(failed_ts_kill)
-    if not any("child typescript kill" in b or "child typescript shutdown" in b for b in failed_kill_decision["blockers"]):
+    if not any(
+        "child typescript in-flight crash" in b or "child typescript shutdown" in b
+        for b in failed_kill_decision["blockers"]
+    ):
         raise HarnessError(
             f"failed TS child lifecycle did not block: {failed_kill_decision['blockers']}"
         )
+
+    # Fair selection rule branches (pure summary metrics).
+    child_worse = _base_eval_report()
+    child_worse["summary"]["child_rust"] = _metric_block(40.0, 80.0, 500.0)
+    child_worse["summary"]["child_typescript"] = _metric_block(200.0, 250.0, 800.0)
+    sel, status, _, bl = select_placement_fair(child_worse["summary"])
+    if sel != "lazy_inprocess" or bl:
+        raise HarnessError(f"child-worse branch failed: {sel} {status} {bl}")
+
+    ip_worse = _base_eval_report()
+    ip_worse["summary"]["inprocess_rust"] = _metric_block(40.0, 80.0, 500.0)
+    ip_worse["summary"]["inprocess_typescript"] = _metric_block(200.0, 250.0, 800.0)
+    sel, status, _, bl = select_placement_fair(ip_worse["summary"])
+    if sel != "on_demand_child_host" or bl:
+        raise HarnessError(f"inprocess-worse branch failed: {sel} {status} {bl}")
+
+    conflict = _base_eval_report()
+    conflict["summary"]["child_rust"] = _metric_block(40.0, 5.5, 25.0)
+    conflict["summary"]["inprocess_typescript"] = _metric_block(200.0, 100.0, 200.0)
+    sel, status, _, bl = select_placement_fair(conflict["summary"])
+    if sel is not None or not bl:
+        raise HarnessError(f"conflict branch failed: {sel} {status} {bl}")
+
+    no_reg = _base_eval_report()
+    sel, status, _, bl = select_placement_fair(no_reg["summary"])
+    if sel != "on_demand_child_host" or "fault containment" not in status.replace("_", " "):
+        # status is selected_by_fault_containment_no_material_regression
+        if sel != "on_demand_child_host" or "fault_containment" not in status:
+            raise HarnessError(f"no-regression branch failed: {sel} {status} {bl}")
+
+    bad_imports = _base_eval_report()
+    bad_imports["components"]["rust"]["imports"] = ["wasi:http/types@0.2.6"]
+    bad_imports["components"]["rust"]["import_profile_ok"] = False
+    bad_imp_decision = evaluate_decision(bad_imports)
+    if not any("import" in b for b in bad_imp_decision["blockers"]):
+        raise HarnessError(f"bad imports did not block: {bad_imp_decision['blockers']}")
 
     return {
         "complete_selected": complete.get("selected_placement"),
@@ -1425,22 +1740,78 @@ def run_evaluate_decision_fixtures() -> dict[str, Any]:
         "missing_ts_blocks": True,
         "failed_ts_trap_blocks": True,
         "failed_ts_child_lifecycle_blocks": True,
+        "selection_child_worse_picks_inprocess": True,
+        "selection_inprocess_worse_picks_child": True,
+        "selection_conflict_blocks": True,
+        "selection_no_regression_fault_containment": True,
+        "bad_imports_block": True,
     }
 
 
-def summarize_variant(samples: list[dict[str, Any]], *, active_stage: str | None) -> dict[str, Any]:
+def cold_total_from_stages(stages: dict[str, Any], *, mode: str) -> float | None:
+    """Cold total ms from exact stages: engine/compile/instantiate/first call or child spawn path."""
+    total = 0.0
+    saw = False
+
+    def add_stage(name: str, timing_keys: tuple[str, ...]) -> None:
+        nonlocal total, saw
+        stage = stages.get(name) or {}
+        resp = stage.get("response") or {}
+        timings = resp.get("timings_ms") or {}
+        wall = stage.get("wall_ms")
+        added = False
+        for key in timing_keys:
+            val = timings.get(key)
+            if val is not None:
+                total += float(val)
+                added = True
+        if not added and wall is not None and name in {
+            "spawn",
+            "create_engine",
+            "compile",
+            "instantiate",
+            "first_ping",
+        }:
+            total += float(wall)
+            added = True
+        if added:
+            saw = True
+
+    if mode == "child":
+        add_stage("spawn", ("total_ms",))
+        add_stage("instantiate", ("engine_create_ms", "compile_ms", "instantiate_ms", "total_ms"))
+        add_stage("first_ping", ("first_call_ms", "total_ms"))
+    else:
+        add_stage("create_engine", ("engine_create_ms", "total_ms"))
+        add_stage("compile", ("compile_ms", "total_ms"))
+        add_stage("instantiate", ("instantiate_ms", "total_ms"))
+        add_stage("first_ping", ("first_call_ms", "total_ms"))
+    return total if saw else None
+
+
+def summarize_variant(
+    samples: list[dict[str, Any]],
+    *,
+    active_stage: str | None,
+    mode: str | None = None,
+) -> dict[str, Any]:
     if not samples:
         return {}
     idle_vals = []
     peak_vals = []
     active_vals = []
     startup_vals = []
+    cold_vals = []
     for sample in samples:
         startup_vals.append(float(sample.get("startup_to_health_ms") or 0.0))
+        sample_mode = mode or sample.get("mode") or ""
         if "idle" in sample:
             idle_vals.append(float(sample["idle"]["cgroup_current_mib"]))
             peak_vals.append(float(sample["idle"]["cgroup_peak_mib"]))
         stages = sample.get("stages") or {}
+        cold = cold_total_from_stages(stages, mode=str(sample_mode))
+        if cold is not None:
+            cold_vals.append(float(cold))
         linked = stages.get("linked_idle") or {}
         if linked.get("memory"):
             idle_vals.append(float(linked["memory"]["cgroup_current_mib"]))
@@ -1468,17 +1839,23 @@ def summarize_variant(samples: list[dict[str, Any]], *, active_stage: str | None
     if peak_vals:
         out["idle_cgroup_peak_mib"] = series_summary(peak_vals)
         out["peak_cgroup_mib"] = series_summary(peak_vals)
+    if cold_vals:
+        out["cold_total_ms"] = series_summary(cold_vals)
     return out
 
 
-def derive_measured_ceilings(summary: dict[str, Any]) -> dict[str, Any]:
+def derive_measured_ceilings(
+    summary: dict[str, Any],
+    *,
+    selected_placement: str | None,
+) -> dict[str, Any]:
     """Derive preliminary product-active ceilings from projected totals + headroom.
 
     Probe cgroup totals are not product server+runtime totals. Project each active
     placement as:
       projected = server_baseline + max(0, variant - sdk_only_probe)
-    Then freeze preliminary ceilings from projected maxima + explicit headroom.
-    Never invents 64/96-style premeasurement product budgets from raw probe RSS.
+    Final selected-profile ceilings derive from the selected placement only;
+    losing projections are retained separately.
     """
 
     def series_max(variant: str, field: str) -> float | None:
@@ -1537,14 +1914,26 @@ def derive_measured_ceilings(summary: dict[str, Any]) -> dict[str, Any]:
         ]
         return max(values) if values else None
 
-    rust_warm = max_projected(["inprocess_rust", "child_rust"], "projected_product_warm_mib")
-    rust_peak = max_projected(["inprocess_rust", "child_rust"], "projected_product_peak_mib")
-    ts_warm = max_projected(
-        ["inprocess_typescript", "child_typescript"], "projected_product_warm_mib"
-    )
-    ts_peak = max_projected(
-        ["inprocess_typescript", "child_typescript"], "projected_product_peak_mib"
-    )
+    if selected_placement == "on_demand_child_host":
+        selected_rust_keys = ["child_rust"]
+        selected_ts_keys = ["child_typescript"]
+        losing_rust_keys = ["inprocess_rust"]
+        losing_ts_keys = ["inprocess_typescript"]
+    elif selected_placement == "lazy_inprocess":
+        selected_rust_keys = ["inprocess_rust"]
+        selected_ts_keys = ["inprocess_typescript"]
+        losing_rust_keys = ["child_rust"]
+        losing_ts_keys = ["child_typescript"]
+    else:
+        selected_rust_keys = []
+        selected_ts_keys = []
+        losing_rust_keys = ["inprocess_rust", "child_rust"]
+        losing_ts_keys = ["inprocess_typescript", "child_typescript"]
+
+    rust_warm = max_projected(selected_rust_keys, "projected_product_warm_mib")
+    rust_peak = max_projected(selected_rust_keys, "projected_product_peak_mib")
+    ts_warm = max_projected(selected_ts_keys, "projected_product_warm_mib")
+    ts_peak = max_projected(selected_ts_keys, "projected_product_peak_mib")
 
     def with_headroom(value: float | None, *, pct: float, floor_mib: float) -> float | None:
         if value is None:
@@ -1552,9 +1941,19 @@ def derive_measured_ceilings(summary: dict[str, Any]) -> dict[str, Any]:
         return round(max(value * (1.0 + pct), value + floor_mib), 4)
 
     return {
+        "selected_placement": selected_placement,
+        "selected_projection_keys": {
+            "rust": selected_rust_keys,
+            "typescript": selected_ts_keys,
+        },
+        "losing_projections": {
+            key: projections.get(key)
+            for key in [*losing_rust_keys, *losing_ts_keys]
+            if key in projections
+        },
         "basis": (
             "projected_product = server_baseline + max(0, variant - sdk_only); "
-            "ceilings = projected_maxima + explicit headroom"
+            "selected-profile ceilings use selected placement only + headroom"
         ),
         "headroom_rule": (
             "ceil = max(projected_max * 1.25, projected_max + 8 MiB) for Rust; "
@@ -1675,7 +2074,8 @@ def run_campaign(
         samples["child_rust"].append(
             measure_probe_variant(
                 label="child_rust",
-                probe=probe,
+                # Fair comparator: child parent is SDK-only (no Wasmtime in parent).
+                probe=sdk_probe,
                 mode="child",
                 sample_index=i,
                 component=rust_wasm,
@@ -1700,7 +2100,7 @@ def run_campaign(
             samples["child_typescript"].append(
                 measure_probe_variant(
                     label="child_typescript",
-                    probe=probe,
+                    probe=sdk_probe,
                     mode="child",
                     sample_index=i,
                     component=ts_wasm,
@@ -1712,21 +2112,22 @@ def run_campaign(
 
     summary = {
         "server_baseline": summarize_variant(samples["server_baseline"], active_stage=None),
-        "sdk_only": summarize_variant(samples["sdk_only"], active_stage="idle"),
+        "sdk_only": summarize_variant(samples["sdk_only"], active_stage="idle", mode="sdk"),
         "inprocess_rust": summarize_variant(
-            samples["inprocess_rust"], active_stage="warm_ping"
+            samples["inprocess_rust"], active_stage="warm_ping", mode="inprocess"
         ),
-        "child_rust": summarize_variant(samples["child_rust"], active_stage="warm_ping"),
+        "child_rust": summarize_variant(
+            samples["child_rust"], active_stage="warm_ping", mode="child"
+        ),
     }
     if "inprocess_typescript" in samples:
         summary["inprocess_typescript"] = summarize_variant(
-            samples["inprocess_typescript"], active_stage="warm_ping"
+            samples["inprocess_typescript"], active_stage="warm_ping", mode="inprocess"
         )
         summary["child_typescript"] = summarize_variant(
-            samples["child_typescript"], active_stage="warm_ping"
+            samples["child_typescript"], active_stage="warm_ping", mode="child"
         )
 
-    measured_ceilings = derive_measured_ceilings(summary)
     contention_post = host_contention(host)
     contended = bool(contention_pre["contended"] or contention_post["contended"])
 
@@ -1826,11 +2227,14 @@ def run_campaign(
         },
         "samples": samples,
         "summary": summary,
-        "measured_preliminary_active_ceilings_mib": measured_ceilings,
         "command": " ".join(sys.argv),
         "run_id": uuid.uuid4().hex,
     }
     report["decision"] = evaluate_decision(report)
+    report["measured_preliminary_active_ceilings_mib"] = derive_measured_ceilings(
+        summary,
+        selected_placement=report["decision"].get("selected_placement"),
+    )
     return report
 
 

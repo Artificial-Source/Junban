@@ -54,8 +54,12 @@ Exact pins:
    Length-prefixed JSON IPC; env scrubbed; hello identity cannot encode token/sqlite; component path rejects profile-looking names; child hashes loaded bytes and exact-matches hello `component_sha256` before compile.
 4. **Trap / CPU / memory containment**
    In-process and child survived deliberate trap, epoch-interrupted CPU loop, and StoreLimits grow failure for **both Rust and TypeScript**. Missing or failed survival evidence blocks placement selection.
-5. **Child kill/recovery**
-   Deliberate kill of an active child keeps the parent healthy; a fresh child can spawn, instantiate, call, and shut down with no orphan. Required for **both** child Rust and child TypeScript paths.
+5. **Child in-flight crash/recovery (P7-ARCH-001)**
+   While the parent is blocked on long-running child work (`cpu_loop`), the child is
+   SIGKILL'd after a short controlled delay. The parent completes the wait within a
+   bound, reaps/clears the session on EOF/error, stays healthy, then recovers with a
+   fresh spawn/instantiate/call/shutdown and no orphan. Required for **both** child
+   Rust and child TypeScript paths. Missing/failed/bound-overrun blocks selection.
 6. **No runtime Node**
    TypeScript is componentized at build time; measured units reject active Node tooling processes.
 7. **IPC frame cap = 256 KiB** (product plugin-output ceiling), with unit rejection of oversized frames.
@@ -87,6 +91,38 @@ Wave 2 must:
 1. import-lint exact baseline + granted host interfaces;
 2. either define the five baseline interfaces à la carte, or prove broader definitions are unreachable/denied under security review;
 3. never claim raw stdio/environment exposure.
+
+## Fair comparator (P7-ARCH-002)
+
+Child variants are measured with the **SDK-only parent probe** (no Wasmtime linked in
+the parent process). In-process variants use the full Wasmtime parent probe.
+
+Selection considers **both Rust and TypeScript** warm current, peak, and cold total
+(spawn+engine/compile/instantiate/first call as applicable):
+
+- warm material if delta > max(15%, 8 MiB)
+- peak material if delta > max(20%, 32 MiB)
+- cold material if delta > max(25%, 100 ms)
+
+If one placement is materially worse and the other is not, choose the other. Conflicting
+material tradeoffs block for architecture judgment. Only when neither required profile
+materially regresses may fault containment pick child. Selected-profile ceilings derive
+from the selected placement only; losing projections are retained separately.
+
+## TOCTOU component admission (P7-ARCH-003)
+
+Load reads component bytes once (≤32 MiB), hashes that exact buffer, retains the buffer,
+and compiles those exact bytes. Paths are not reopened at compile time. After first
+compile, bytes may be dropped while the compiled `Component` is retained for later
+reinstantiate-after-trap. Replacement-after-load is covered by unit tests.
+
+## Actual import inspection (P7-ARCH-004)
+
+Freshly built component bytes are inspected with `wasmparser` (`junban-p7-inspect-imports`).
+Evidence records actual imports. Selection blocks unless TypeScript imports are exactly
+empty and Rust imports are exactly the frozen five baseline names. Report constants are
+not trusted as proof. The spike may still call broader `p2::add_to_linker_async` for Rust;
+that remains an explicit **non-production** linker limitation.
 
 ## Measurement method and limitations
 

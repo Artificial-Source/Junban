@@ -10,7 +10,6 @@ use junban_phase7_host_placement::child_ipc::{
     HostRequest, HostResponse, Timings, read_frame, validate_hello, write_frame,
 };
 use junban_phase7_host_placement::runtime::SpikeRuntime;
-use junban_phase7_host_placement::sha256_file_hex;
 use serde_json::json;
 
 fn main() {
@@ -36,7 +35,6 @@ fn run() -> Result<(), String> {
     let mut writer = BufWriter::new(stdout.lock());
 
     let mut runtime: Option<SpikeRuntime> = None;
-    let mut component_path: Option<PathBuf> = None;
     let mut expected_component_sha256: Option<String> = None;
     let mut greeted = false;
 
@@ -82,7 +80,8 @@ fn run() -> Result<(), String> {
                 ensure_greeted(greeted)?;
                 let expected = expected_component_sha256
                     .as_ref()
-                    .ok_or("hello identity missing component hash")?;
+                    .ok_or("hello identity missing component hash")?
+                    .clone();
                 let path = PathBuf::from(path);
                 if !path.is_file() {
                     fail("load", format!("component missing: {}", path.display()))
@@ -92,31 +91,33 @@ fn run() -> Result<(), String> {
                     if display.contains("access-token") || display.ends_with("junban.sqlite3") {
                         return Err("refusing profile-looking component path".into());
                     }
-                    let actual = sha256_file_hex(&path)?;
-                    if actual != *expected {
-                        return Err(format!(
-                            "component sha256 mismatch: expected {expected}, got {actual}"
-                        ));
-                    }
-                    component_path = Some(path);
-                    HostResponse::Ok {
-                        timings_ms: Timings::default(),
-                        detail: Some(json!({
-                            "loaded_path_set": true,
-                            "component_sha256_matched": true,
-                            "component_sha256": actual,
-                        })),
+                    // Read once into memory; hash and retain exact bytes. Never reopen
+                    // the path at compile/instantiate time (TOCTOU-closed).
+                    let rt = runtime.as_mut().ok_or("runtime missing")?;
+                    match rt.load_component_path(&path, &expected) {
+                        Ok(actual) => HostResponse::Ok {
+                            timings_ms: Timings::default(),
+                            detail: Some(json!({
+                                "loaded_bytes_retained": true,
+                                "component_sha256_matched": true,
+                                "component_sha256": actual,
+                                "has_pending_bytes": rt.has_pending_bytes(),
+                                "has_component": rt.has_component(),
+                            })),
+                        },
+                        Err(err) => fail("load", err.to_string()),
                     }
                 }
             }
             HostRequest::Instantiate => {
                 let rt = runtime.as_mut().ok_or("runtime missing")?;
-                let path = component_path.as_ref().ok_or("component path missing")?;
                 match block_on(async {
                     if !rt.has_engine() {
                         rt.create_engine().map_err(|e| e.to_string())?;
                     }
-                    let compile = rt.compile_component(path).map_err(|e| e.to_string())?;
+                    // Compile retained exact bytes only on first need; later
+                    // reinstantiations reuse the compiled Component.
+                    let compile = rt.ensure_compiled().map_err(|e| e.to_string())?;
                     let inst = rt.instantiate().await.map_err(|e| e.to_string())?;
                     Ok::<_, String>((compile, inst))
                 }) {
@@ -130,7 +131,11 @@ fn run() -> Result<(), String> {
                             ),
                             ..Timings::default()
                         },
-                        detail: Some(json!({ "has_instance": true })),
+                        detail: Some(json!({
+                            "has_instance": true,
+                            "has_component": true,
+                            "has_pending_bytes": rt.has_pending_bytes(),
+                        })),
                     },
                     Err(message) => fail("instantiate", message),
                 }
@@ -187,6 +192,18 @@ fn run() -> Result<(), String> {
                         message: err.to_string(),
                         timings_ms: Timings::default(),
                     },
+                }
+            }
+            HostRequest::Sleep { ms } => {
+                // Bound sleep so a runaway parent cannot hang the child forever.
+                let ms = ms.min(10_000);
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                HostResponse::Ok {
+                    timings_ms: Timings {
+                        total_ms: Some(ms as f64),
+                        ..Timings::default()
+                    },
+                    detail: Some(json!({ "slept_ms": ms })),
                 }
             }
             HostRequest::DropInstance => {

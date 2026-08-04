@@ -1377,6 +1377,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "wasmparser",
  "wasmtime",
  "wasmtime-wasi",
 ]

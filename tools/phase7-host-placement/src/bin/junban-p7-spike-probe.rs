@@ -642,26 +642,82 @@ fn dispatch_child(
                 json!({ "child_pid": child.pid, "alive": true }),
             )
         }
-        // Deliberate child-kill fault probe: parent must survive and drop the session
-        // so a later spawn can recover without orphan processes.
-        "kill_child" | "child_kill" => {
+        // Active in-flight crash: kill the child while the parent is blocked on a
+        // long-running guest call response. Session must clear on EOF/error.
+        "crash_child_inflight" | "kill_child_inflight" | "kill_child" | "child_kill" => {
             let mut child = guard.child.take().ok_or("child not spawned")?;
             let pid = child.pid;
+            let kill_delay_ms = 40_u64;
+            let bound_ms = 2_000_u64;
+            // Parent blocks on a long child reply (host-side sleep). Epoch-interrupted
+            // cpu_loop returns too quickly to exercise mid-wait crash reliably.
+            write_frame(&mut child.stdin, &HostRequest::Sleep { ms: 5_000 })
+                .map_err(|e| e.to_string())?;
+            let started = Instant::now();
+            // Reader thread blocks on the long-running response while a helper kills.
+            let mut stdout = child.stdout;
+            let (tx, rx) = std::sync::mpsc::channel();
+            let reader = std::thread::spawn(move || {
+                let result = read_frame::<_, HostResponse>(&mut stdout);
+                let _ = tx.send(result.map_err(|e| e.to_string()));
+            });
+            let killer = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(kill_delay_ms));
+                let _ = Command::new("/bin/kill")
+                    .args(["-KILL", &pid.to_string()])
+                    .status();
+            });
+            let read_result = match rx.recv_timeout(Duration::from_millis(bound_ms)) {
+                Ok(msg) => msg,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    let _ = child.child.kill();
+                    let _ = child.child.wait();
+                    let _ = killer.join();
+                    let _ = reader.join();
+                    return Err(format!(
+                        "in-flight crash wait exceeded {bound_ms}ms bound without IPC completion"
+                    ));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    Err("in-flight reader disconnected".into())
+                }
+            };
+            let _ = killer.join();
+            let _ = reader.join();
+            // Always reap and clear session ownership after crash/EOF.
             let _ = child.child.kill();
-            let status = child.child.wait().map_err(|e| e.to_string())?;
+            let wait_status = child.child.wait();
             std::thread::sleep(Duration::from_millis(20));
             if path_exists(&format!("/proc/{pid}")) {
-                return Err(format!("child pid {pid} still alive after kill"));
+                return Err(format!("child pid {pid} still alive after in-flight kill"));
             }
-            let _ = status; // killed children are not required to exit successfully
+            // Success path is an IPC error/EOF after kill, not a normal Ok response.
+            let ipc_error = match read_result {
+                Ok(_resp) => {
+                    return Err(
+                        "in-flight crash expected IPC failure after kill, got success response"
+                            .into(),
+                    );
+                }
+                Err(msg) => msg,
+            };
             ok_stage(
                 name,
-                Timings::default(),
+                Timings {
+                    total_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
+                    terminate_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
+                    ..Timings::default()
+                },
                 json!({
                     "killed_pid": pid,
-                    "wait_ok": true,
+                    "in_flight": true,
+                    "ipc_error": ipc_error,
+                    "wait_ok": wait_status.is_ok(),
                     "cleaned": true,
+                    "session_cleared": true,
                     "parent_survived": true,
+                    "bound_ms": bound_ms,
+                    "kill_delay_ms": kill_delay_ms,
                 }),
             )
         }

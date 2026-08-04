@@ -71,6 +71,7 @@ export const AI_TOOL_NAMES = [
   "recall_memories",
   "forget_memory",
   "auto_schedule_day",
+  "apply_auto_schedule_day",
   "reschedule_day",
   "timeblocking_list_blocks",
   "timeblocking_create_block",
@@ -86,7 +87,13 @@ export type AiToolName = (typeof AI_TOOL_NAMES)[number];
 
 export type ToolMeta = {
   icon: LucideIcon;
+  /** Progressive badge verb ("Creating", "Searching tasks"). */
   verb: string;
+  /**
+   * Friendly noun phrase for proposal/result headers.
+   * When set, normal UI must not fall back to raw snake_case tool names.
+   */
+  label?: string;
 };
 
 export const TOOL_META: Record<string, ToolMeta> = {
@@ -129,6 +136,11 @@ export const TOOL_META: Record<string, ToolMeta> = {
   recall_memories: { icon: Brain, verb: "Recalling memories" },
   forget_memory: { icon: Brain, verb: "Forgetting" },
   auto_schedule_day: { icon: CalendarClock, verb: "Auto-scheduling" },
+  apply_auto_schedule_day: {
+    icon: CalendarClock,
+    verb: "Applying day schedule",
+    label: "day schedule",
+  },
   reschedule_day: { icon: CalendarClock, verb: "Rescheduling" },
   timeblocking_list_blocks: { icon: CalendarClock, verb: "Listing blocks" },
   timeblocking_create_block: { icon: CalendarClock, verb: "Creating block" },
@@ -142,6 +154,13 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
 export function toolMetaFor(name: string): ToolMeta {
   return TOOL_META[name] ?? { icon: Zap, verb: name.replace(/_/g, " ") };
+}
+
+/** Friendly header label for proposal/result chrome (never raw snake_case when known). */
+export function toolDisplayLabel(name: string): string {
+  const meta = toolMetaFor(name);
+  if (meta.label && meta.label.trim()) return meta.label.trim();
+  return name.replace(/_/g, " ");
 }
 
 /** Build a short badge label from tool name + canonical argument object/JSON. */
@@ -158,9 +177,14 @@ export function toolBadgeLabel(name: string, args: unknown): string {
     label = `${meta.verb} (${obj.status.trim()})`;
   } else if (typeof obj.name === "string" && obj.name.trim()) {
     label = `${meta.verb} "${obj.name.trim()}"`;
+  } else if (typeof obj.date === "string" && obj.date.trim()) {
+    label = `${meta.verb} (${obj.date.trim()})`;
   }
   return label;
 }
+
+/** Canonical apply-auto-schedule tool id (approval-required exact blocks). */
+export const APPLY_AUTO_SCHEDULE_DAY_TOOL = "apply_auto_schedule_day" as const;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === "object" && !Array.isArray(value)) {

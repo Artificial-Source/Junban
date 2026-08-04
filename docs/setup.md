@@ -71,7 +71,18 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
 ```
 
-The current backend crates are `junban-domain`, `junban-app`, `junban-storage`, and `junban-server`. Supply-chain checks are also required:
+The current backend crates are `junban-domain`, `junban-app`, `junban-storage`, `junban-server`, `junban-cli`, `junban-mcp`, `junban-ai`, and the pure `junban-plugin-sdk`. The plugin SDK has no runtime host, storage, HTTP, or Wasmtime dependency. Focused Phase 7 SDK checks are:
+
+```bash
+cargo test --locked -p junban-plugin-sdk
+cargo test --locked -p junban-server
+cargo test --locked -p junban-server --no-default-features
+cargo tree --locked -p junban-server --edges normal,build
+cargo tree --locked -p junban-server --no-default-features --edges normal,build
+python3 scripts/check-phase7-sdk-matched-release.py --self-check
+```
+
+The default server links only the SDK's static product-entrypoint marker/table. `--no-default-features` provides the matched feature-off benchmark baseline; neither configuration links or initializes Wasmtime. Supply-chain checks are also required:
 
 ```bash
 cargo deny check

@@ -1,0 +1,265 @@
+package junban:plugin@0.1.0;
+
+interface guest {
+  type id = string;
+  type date = string;
+  type timestamp = string;
+  type operation-id = string;
+
+  enum priority { none, low, medium, high, urgent }
+  enum task-status { pending, completed, cancelled }
+  enum project-view { %list, board }
+  enum log-level { debug, info, warn, error }
+  enum host-error-code { invalid-input, not-found, conflict, cursor-stale, permission-denied, unavailable, rate-limited, cancelled, internal }
+  enum plugin-error-code { invalid-input, not-found, conflict, cursor-stale, permission-denied, unavailable, rate-limited, cancelled, internal }
+
+  record host-error { code: host-error-code, field: option<string>, message: string }
+  record plugin-error { code: plugin-error-code, field: option<string>, message: string }
+
+  variant scalar-value {
+    string-value(string), integer-value(s64), boolean-value(bool), date-value(date),
+    timestamp-value(timestamp), task-id(id), project-id(id), tag-id(id),
+    plugin-id(id), option-id(id)
+  }
+  variant data-value {
+    scalar(scalar-value), string-list(list<string>), integer-list(list<s64>),
+    boolean-list(list<bool>), date-list(list<date>), timestamp-list(list<timestamp>),
+    task-id-list(list<id>), project-id-list(list<id>), tag-id-list(list<id>),
+    plugin-id-list(list<id>), option-id-list(list<id>)
+  }
+  record named-value { name: id, value: data-value }
+  record scalar-named-value { name: id, value: scalar-value }
+
+  record invocation-context {
+    plugin-id: id,
+    package-generation: u64,
+    activation-epoch: u64,
+    host-session-id: id,
+    invocation-id: operation-id,
+    entry-id: option<id>,
+  }
+
+  record task-query {
+    task-id: option<id>, project-id: option<id>, section-id: option<id>,
+    parent-id: option<id>, tag-ids: list<id>, statuses: list<task-status>,
+    priorities: list<priority>, due-from: option<date>, due-before: option<date>,
+    search: option<string>, cursor: option<string>, limit: u16,
+  }
+  record task-view {
+    id: id, title: string, description: string, status: task-status,
+    priority: priority, due-date: option<date>, due-time: option<string>,
+    estimated-minutes: option<u32>, actual-minutes: option<u32>,
+    project-id: option<id>, section-id: option<id>, parent-id: option<id>,
+    tag-ids: list<id>, recurring: bool, someday: bool,
+    created-at: timestamp, updated-at: timestamp, revision: u64,
+  }
+  record task-page { items: list<task-view>, next-cursor: option<string>, revision: u64 }
+  record catalog-query { cursor: option<string>, limit: u16 }
+  record project-view-record { id: id, name: string, color: option<string>, icon: option<id>, view: project-view, revision: u64 }
+  record project-page { items: list<project-view-record>, next-cursor: option<string>, revision: u64 }
+  record tag-view { id: id, name: string, color: option<string>, revision: u64 }
+  record tag-page { items: list<tag-view>, next-cursor: option<string>, revision: u64 }
+
+  variant optional-string-change { unchanged, clear, set(string) }
+  variant optional-id-change { unchanged, clear, set(id) }
+  variant optional-date-change { unchanged, clear, set(date) }
+  variant optional-u32-change { unchanged, clear, set(u32) }
+  variant string-change { unchanged, set(string) }
+  variant bool-change { unchanged, set(bool) }
+  variant s64-change { unchanged, set(s64) }
+  variant priority-change { unchanged, set(priority) }
+  variant project-view-change { unchanged, set(project-view) }
+  variant id-list-change { unchanged, replace(list<id>) }
+
+  record task-draft {
+    title: string, description: string, priority: priority,
+    due-date: option<date>, due-time: option<string>, deadline: option<date>,
+    someday: bool, estimated-minutes: option<u32>, actual-minutes: option<u32>,
+    dread: option<u8>, project-id: option<id>, section-id: option<id>,
+    parent-id: option<id>, tag-ids: list<id>, sort-order: s64,
+    recurrence-rule: option<string>, reminder-at: option<timestamp>,
+    recurrence-anchor: option<date>,
+  }
+  record task-patch {
+    title: string-change, description: string-change, priority: priority-change,
+    due-date: optional-date-change, due-time: optional-string-change,
+    deadline: optional-date-change, someday: bool-change,
+    estimated-minutes: optional-u32-change, actual-minutes: optional-u32-change,
+    dread: optional-u32-change, project-id: optional-id-change,
+    section-id: optional-id-change, parent-id: optional-id-change,
+    tag-ids: id-list-change, sort-order: s64-change,
+    recurrence-rule: optional-string-change, reminder-at: optional-string-change,
+    recurrence-anchor: optional-date-change,
+  }
+  record patch-task { task-id: id, patch: task-patch }
+  record bulk-move { project-id: optional-id-change, section-id: optional-id-change, parent-id: optional-id-change }
+  record bulk-tag { add: list<id>, remove: list<id> }
+  record bulk-schedule { due-date: optional-date-change, due-time: optional-string-change, deadline: optional-date-change, someday: bool-change }
+  variant bulk-action { complete, uncomplete, cancel, reopen, delete, move(bulk-move), tag(bulk-tag), schedule(bulk-schedule), priority(priority) }
+  record bulk-tasks { task-ids: list<id>, action: bulk-action }
+
+  record project-draft { name: string, color: string, icon: option<id>, parent-id: option<id>, favorite: bool, archived: bool, view: project-view, sort-order: s64 }
+  record project-patch { name: string-change, color: string-change, icon: optional-id-change, parent-id: optional-id-change, favorite: bool-change, archived: bool-change, view: project-view-change, sort-order: s64-change }
+  record patch-project { project-id: id, patch: project-patch }
+  record tag-draft { name: string, color: string }
+  record tag-patch { name: string-change, color: string-change }
+  record patch-tag { tag-id: id, patch: tag-patch }
+
+  variant domain-mutation {
+    create-task(task-draft), patch-task(patch-task), complete-task(id),
+    uncomplete-task(id), cancel-task(id), reopen-task(id), delete-task(id),
+    bulk-tasks(bulk-tasks), create-project(project-draft),
+    patch-project(patch-project), delete-project(id), create-tag(tag-draft),
+    patch-tag(patch-tag), delete-tag(id)
+  }
+  record kv-set { key: string, value: list<u8> }
+  variant kv-operation { set(kv-set), delete(string) }
+  record kv-patch { operations: list<kv-operation> }
+  variant plugin-effect { domain-mutation(domain-mutation), kv-patch(kv-patch) }
+  record plugin-outcome { effect: option<plugin-effect> }
+
+  record command-call { command-id: id, values: list<named-value> }
+  enum event-kind {
+    task-created, task-updated, task-completed, task-uncompleted, task-cancelled,
+    task-reopened, task-deleted, project-created, project-updated, project-deleted,
+    tag-created, tag-updated, tag-deleted, section-created, section-updated, section-deleted
+  }
+  variant event-subject { task(task-view), project(project-view-record), tag(tag-view), deleted-id(id) }
+  record event-envelope { event-epoch: id, revision: u64, kind: event-kind, subject: event-subject }
+
+  enum ui-tone { neutral, accent, positive, warning, danger }
+  enum ui-size { small, medium, large }
+  enum ui-align { start, center, end, stretch }
+  record layout-props { gap: u8, align: ui-align }
+  record text-props { text: string, tone: ui-tone, size: ui-size }
+  record metric-props { label: string, value: string, tone: ui-tone }
+  record progress-props { label: string, value: u16, maximum: u16 }
+  record button-props { label: string, action-id: id, tone: ui-tone, icon: option<id> }
+  record input-props { label: string, action-id: id, value: scalar-value, options: list<scalar-named-value> }
+  record task-list-props { task-ids: list<id> }
+  variant ui-content {
+    stack(layout-props), row(layout-props), heading(text-props), text(text-props),
+    badge(text-props), metric(metric-props), progress(progress-props),
+    button(button-props), text-input(input-props), number-input(input-props),
+    select(input-props), toggle(input-props), task-list(task-list-props),
+    task-ref(id), divider, empty-state(text-props), error-state(text-props)
+  }
+  record ui-node { id: id, parent-index: option<u16>, content: ui-content }
+  record surface { surface-id: id, root-index: u16, nodes: list<ui-node> }
+  record surface-request { surface-id: id }
+  record surface-action { surface-id: id, action-id: id, values: list<scalar-named-value> }
+
+  record setting-value { id: id, value: scalar-value }
+  record validation-issue { setting-id: id, message: string }
+  record setting-values { values: list<setting-value> }
+  record service-call { plugin-id: id, service-id: id, values: list<named-value> }
+  record service-data { values: list<named-value> }
+
+  enum resource-kind { task, project, tag }
+  record snapshot-page { session-id: id, event-epoch: id, head-revision: u64, kind: resource-kind, page-index: u32, records: list<named-value>, final-snapshot-page: bool }
+  record flush-staged-kv { session-id: id, request-index: u8 }
+  record finalize-resync { session-id: id }
+  variant resync-page { snapshot(snapshot-page), flush-staged-kv(flush-staged-kv), finalize(finalize-resync) }
+  record kv-segment { operations: list<kv-operation> }
+  enum flush-state { more, complete }
+  enum final-kv-choice { leave-kv, replace-kv-with-staged-segments }
+  variant resync-page-outcome { snapshot-ack(kv-segment), flush-ack(tuple<kv-segment, flush-state>), finalized(final-kv-choice) }
+
+  enum http-method { get, post, put, patch, delete }
+  record http-header { name: string, value: string }
+  record http-request { method: http-method, origin: string, path-and-query: string, headers: list<http-header>, body: list<u8> }
+  record http-response { status: u16, headers: list<http-header>, body: list<u8>, truncated: bool }
+  enum http-error-code { invalid-request, invalid-response, permission-denied, dns-denied, tls-failed, connect-failed, timeout, delivery-ambiguous, unavailable }
+  enum delivery-state { not-sent, may-have-been-sent, response-received }
+  record http-error { code: http-error-code, delivery: delivery-state, retryable: bool, message: string }
+  record log-field { name: id, value: scalar-value }
+  record kv-entry { key: string, value: list<u8> }
+  record kv-page { entries: list<kv-entry>, next-cursor: option<string> }
+
+  activate: func(context: invocation-context) -> result<_, plugin-error>;
+  deactivate: func(context: invocation-context) -> result<_, plugin-error>;
+  invoke-command: func(context: invocation-context, call: command-call) -> result<plugin-outcome, plugin-error>;
+  handle-event: func(context: invocation-context, event: event-envelope) -> result<plugin-outcome, plugin-error>;
+  render-surface: func(context: invocation-context, request: surface-request) -> result<surface, plugin-error>;
+  handle-surface-action: func(context: invocation-context, action: surface-action) -> result<plugin-outcome, plugin-error>;
+  validate-settings: func(context: invocation-context, values: setting-values) -> result<list<validation-issue>, plugin-error>;
+  resync: func(context: invocation-context, page: resync-page) -> result<resync-page-outcome, plugin-error>;
+  call-service: func(context: invocation-context, call: service-call) -> result<service-data, plugin-error>;
+}
+
+interface host-tasks {
+  enum priority { none, low, medium, high, urgent }
+  enum task-status { pending, completed, cancelled }
+  enum host-error-code { invalid-input, not-found, conflict, cursor-stale, permission-denied, unavailable, rate-limited, cancelled, internal }
+  record host-error { code: host-error-code, field: option<string>, message: string }
+  record task-query { task-id: option<string>, project-id: option<string>, section-id: option<string>, parent-id: option<string>, tag-ids: list<string>, statuses: list<task-status>, priorities: list<priority>, due-from: option<string>, due-before: option<string>, search: option<string>, cursor: option<string>, limit: u16 }
+  record task-view { id: string, title: string, description: string, status: task-status, priority: priority, due-date: option<string>, due-time: option<string>, estimated-minutes: option<u32>, actual-minutes: option<u32>, project-id: option<string>, section-id: option<string>, parent-id: option<string>, tag-ids: list<string>, recurring: bool, someday: bool, created-at: string, updated-at: string, revision: u64 }
+  record task-page { items: list<task-view>, next-cursor: option<string>, revision: u64 }
+  query-tasks: func(query: task-query) -> result<task-page, host-error>;
+}
+interface host-projects {
+  enum host-error-code { invalid-input, not-found, conflict, cursor-stale, permission-denied, unavailable, rate-limited, cancelled, internal }
+  enum project-view { %list, board }
+  record host-error { code: host-error-code, field: option<string>, message: string }
+  record catalog-query { cursor: option<string>, limit: u16 }
+  record project-view-record { id: string, name: string, color: option<string>, icon: option<string>, view: project-view, revision: u64 }
+  record project-page { items: list<project-view-record>, next-cursor: option<string>, revision: u64 }
+  query-projects: func(query: catalog-query) -> result<project-page, host-error>;
+}
+interface host-tags {
+  enum host-error-code { invalid-input, not-found, conflict, cursor-stale, permission-denied, unavailable, rate-limited, cancelled, internal }
+  record host-error { code: host-error-code, field: option<string>, message: string }
+  record catalog-query { cursor: option<string>, limit: u16 }
+  record tag-view { id: string, name: string, color: option<string>, revision: u64 }
+  record tag-page { items: list<tag-view>, next-cursor: option<string>, revision: u64 }
+  query-tags: func(query: catalog-query) -> result<tag-page, host-error>;
+}
+interface host-settings {
+  variant setting-value { text(string), integer(s64), boolean(bool), option-id(string) }
+  record named-setting { id: string, value: setting-value }
+  enum host-error-code { invalid-input, not-found, conflict, cursor-stale, permission-denied, unavailable, rate-limited, cancelled, internal }
+  record host-error { code: host-error-code, field: option<string>, message: string }
+  get-settings: func() -> result<list<named-setting>, host-error>;
+}
+interface host-storage {
+  record kv-entry { key: string, value: list<u8> }
+  record kv-page { entries: list<kv-entry>, next-cursor: option<string> }
+  enum host-error-code { invalid-input, not-found, conflict, cursor-stale, permission-denied, unavailable, rate-limited, cancelled, internal }
+  record host-error { code: host-error-code, field: option<string>, message: string }
+  get-kv: func(keys: list<string>) -> result<list<kv-entry>, host-error>;
+  list-kv: func(cursor: option<string>, limit: u8) -> result<kv-page, host-error>;
+}
+interface host-clock {
+  wall-now: func() -> string;
+  monotonic-ms: func() -> u64;
+}
+interface host-http {
+  enum http-method { get, post, put, patch, delete }
+  record http-header { name: string, value: string }
+  record http-request { method: http-method, origin: string, path-and-query: string, headers: list<http-header>, body: list<u8> }
+  record http-response { status: u16, headers: list<http-header>, body: list<u8>, truncated: bool }
+  enum http-error-code { invalid-request, invalid-response, permission-denied, dns-denied, tls-failed, connect-failed, timeout, delivery-ambiguous, unavailable }
+  enum delivery-state { not-sent, may-have-been-sent, response-received }
+  record http-error { code: http-error-code, delivery: delivery-state, retryable: bool, message: string }
+  request: func(request: http-request) -> result<http-response, http-error>;
+}
+interface host-log {
+  enum log-level { debug, info, warn, error }
+  variant log-value { string-value(string), integer-value(s64), boolean-value(bool) }
+  record log-field { name: string, value: log-value }
+  log: func(level: log-level, message: string, fields: list<log-field>);
+}
+interface host-services {
+  variant scalar-value { string-value(string), integer-value(s64), boolean-value(bool), date-value(string), timestamp-value(string), task-id(string), project-id(string), tag-id(string), plugin-id(string), option-id(string) }
+  variant data-value { scalar(scalar-value), string-list(list<string>), integer-list(list<s64>), boolean-list(list<bool>), date-list(list<string>), timestamp-list(list<string>), task-id-list(list<string>), project-id-list(list<string>), tag-id-list(list<string>), plugin-id-list(list<string>), option-id-list(list<string>) }
+  record named-value { name: string, value: data-value }
+  record service-call { plugin-id: string, service-id: string, values: list<named-value> }
+  record service-data { values: list<named-value> }
+  enum host-error-code { invalid-input, not-found, conflict, cursor-stale, permission-denied, unavailable, rate-limited, cancelled, internal }
+  record host-error { code: host-error-code, field: option<string>, message: string }
+  call-service: func(call: service-call) -> result<service-data, host-error>;
+}
+
+world plugin {
+  export guest;
+}

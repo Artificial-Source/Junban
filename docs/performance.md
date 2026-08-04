@@ -289,6 +289,23 @@ python3 scripts/check-phase6-enabled-benchmark.py \
 
 Or use `pnpm bench:phase6-enabled:self-check` for the interception preflight. Do not retain contended-host result JSON as accepted evidence.
 
+## Phase 7 SDK matched release (`junban-phase7-sdk-matched-release-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md`](../goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md). Harness: [`../scripts/check-phase7-sdk-matched-release.py`](../scripts/check-phase7-sdk-matched-release.py).
+
+The harness builds optimized `junban-server` binaries into separate default and `--no-default-features` target roots, proves the SDK marker exists only in default and Wasmtime exists in neither Cargo tree/binary, then runs five interleaved copies of the exact frozen Phase 1 workload through `bench-hosted-server.py`. It records current/peak cgroup memory, RSS/PSS, one-process tree, binary size/hash, startup, latency, cleanup, and host cleanliness.
+
+```bash
+python3 scripts/check-phase7-sdk-matched-release.py --self-check
+pnpm build # creates dist/ before host cleanliness sampling
+# Preliminary smoke only:
+python3 scripts/check-phase7-sdk-matched-release.py --quick --output /tmp/phase7-sdk-quick.json
+# Clean parent-run candidate only:
+python3 scripts/check-phase7-sdk-matched-release.py --idle-host-confirmed
+```
+
+The default build must remain within 24/32 MiB warm/peak, within `max(15%, 1 MiB)` median warm growth versus feature-off, and within 1.255665 MiB of the frozen Phase 6 8.3711-MiB median. No authoritative report is claimed by the SDK implementation worktree; Wave 1 remains blocked on the clean parent-run report and package security review.
+
 ## Measurement rules
 
 - Optimized release binaries are authoritative. Development servers are not.
@@ -299,7 +316,7 @@ Or use `pnpm bench:phase6-enabled:self-check` for the interception preflight. Do
 ## Default-path discipline
 
 - Do not initialize AI provider clients, local voice engines, or Wasmtime during ordinary task-server startup.
-- Plugin runtime stays unloaded when no plugin is active. Ordinary `junban-server` must not link Wasmtime; Wave 0 spike evidence and the preliminary host-placement ADR live under `goals/rust-rewrite/evidence/phase-7-host-placement*`.
+- Plugin runtime stays unloaded when no plugin is active. Ordinary `junban-server` must not link Wasmtime; the accepted Wave 0 child-process placement evidence/ADR lives under `goals/rust-rewrite/evidence/phase-7-host-placement*`, and the superseded probe crate is deleted.
 - Avoid eager dependency aggregation that quietly reintroduces idle cost.
 
 ## Phase expectations

@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 6 are complete. Phase 7 capability-limited portable plugins are next; Phases 8–10 remain.
+**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 6 are complete. Phase 7 capability-limited portable plugins are in progress at the Wave 1 SDK-first acceptance gate; Phases 8–10 remain.
 
 ## Purpose and user-visible outcome
 
@@ -726,7 +726,9 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 6 Wave 4 preserved React AI/voice implementation: canonical lazy chat/settings, browser/cloud/local speech, half-duplex call UX, exact-manifest local workers, sixteen immutable visual comparisons, browser functional coverage, axe/keyboard coverage, and the integrated frontend/accessibility gate are complete; `P6-W4-REV-001` and `P6-W4-REV-002` are fixed.
 - [x] Phase 6 Wave 5 closure. Exact optimized browser dogfood and real local-voice inference pass; `P6-DOG-001`–`P6-DOG-004` and final security finding `P6-FINAL-SEC-001` are fixed; disabled matched-release, enabled local-mock, schema-v6 conformance, full validation, dependency audit, and final security recheck pass; the phase is one clean commit.
 - [x] Phase 7 Wave 0 host-placement gate: temporary `tools/phase7-host-placement` probes compared protocol-only / lazy in-process / SDK-parent-plus-child with real Rust + pure TypeScript components, actual import inspection, fair warm/peak/cold selection, trap/CPU/memory/in-flight-child-crash/recovery/cleanup containment, exact byte/hash binding and cgroup evidence. The clean idle five-sample campaign and focused architecture recheck closed `P7-ARCH-001`–`004` and accepted `on_demand_child_host`. Frozen projected active gates are Rust 18.6016/19.5078 MiB and TypeScript 357.334/415.6201 MiB warm/peak; ordinary no-plugin 24/32 MiB remains unchanged. See `evidence/phase-7-host-placement-adr.md` and `evidence/phase-7-host-placement.json`.
-- [ ] Phase 7 portable-plugin implementation (Waves 1–5). Contract remains `evidence/phase-7-context-map.md`. Planning, schema, package, WIT and host-placement gates are approved. Wave 1 begins with the mandatory matched ordinary-server versus SDK/protocol-linked default-memory subgate before schema/runtime work.
+- [ ] Phase 7 portable-plugin implementation (Waves 1–5). Contract remains `evidence/phase-7-context-map.md`. Planning, schema, package, WIT and host-placement gates are approved.
+  - [x] Wave 1 SDK-first implementation subgate: production `junban-plugin-sdk` owns exact WIT/JBP1/JRI1/manifest/signature/capability/graph/component/protocol authorities; default server linkage is static-only with a matched feature-off baseline, and the superseded Wasmtime probe is deleted.
+  - [ ] Wave 1 acceptance: clean parent-run five-sample SDK matched-release evidence and package security review. Schema v7, runtime host, routes, UI, registry artifacts, and reference plugins have not started.
 - [ ] Phase 8 implementation.
 - [ ] Phase 9 implementation.
 - [x] User requested sequential execution through a new Phase 10 without pausing at phase boundaries.
@@ -791,6 +793,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-08-04: Phase 6 auto-schedule application is a distinct approval-required tool that accepts only the exact immediately preceding successful preview in the same run. It creates at most 16 ordinary Phase 3 time blocks through deterministic child operations; no hidden apply mode or direct unpreviewed mutation exists.
 - 2026-08-04: Phase 6 disabled acceptance uses the same-host Phase 5 parent/Phase 6 head matched protocol, while enabled acceptance is separate local-mock evidence. The final accepted candidate passed at 8.3711 MiB disabled median warm and 11.0898/13.3164 MiB enabled maximum post-session warm/cgroup peak without a waiver.
 - 2026-08-04: completed Phase 6 with lazy Rust provider/chat/tool/speech services, private receipt-first credentials, durable approval/recovery/cancellation, preview-bound schedule application, and hash-gated browser-local voice. Final security review found and closed complete approval-argument visibility; no reviewed finding remains.
+- 2026-08-04: Phase 7 Wave 1 starts SDK-first. `junban-plugin-sdk` owns exact package/WIT/trust/capability/graph/index/component/protocol data authority and bounded pure verification only. Default server linkage touches one static table, feature-off remains the matched baseline, and Wasmtime remains absent. Schema v7, runtime/process I/O, routes, persistence, registry, UI, and reference plugins wait for the parent-run memory gate and package security review.
 
 ## Discoveries and risks
 

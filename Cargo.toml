@@ -1,8 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "tools/phase7-host-placement"]
-# Guest wasm crates are built out-of-workspace for wasm32-wasip2.
-exclude = ["tools/phase7-host-placement/guests/rust-spike"]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +11,7 @@ repository = "https://github.com/Artificial-Source/Junban"
 
 [workspace.dependencies]
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc", "std"] }
 clap = { version = "4.5.60", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
 fs4 = { version = "1.1.0", default-features = false, features = ["sync"] }
@@ -25,6 +24,8 @@ proptest = "1.11"
 rusqlite = { version = "0.39.0", default-features = false, features = ["bundled", "cache"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+semver = { version = "1.0.28", features = ["serde"] }
+spdx = "0.10.9"
 sha2 = { version = "0.10", default-features = false }
 subtle = { version = "2.6.1", default-features = false, features = ["std"] }
 thiserror = "2.0.18"
@@ -36,6 +37,8 @@ tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.22", default-features = false, features = ["fmt"] }
 utoipa = { version = "5.5.0", default-features = false, features = ["jiff_0_2", "macros", "uuid"] }
 uuid = { version = "1.24.0", default-features = false, features = ["rng-getrandom", "serde", "std", "v4", "v7"] }
+wasmparser = { version = "=0.248.0", default-features = false, features = ["std", "component-model", "validate"] }
+wit-parser = { version = "=0.248.0", default-features = false, features = ["decoding"] }
 windows-sys = { version = "=0.61.2", default-features = false }
 
 [profile.release]

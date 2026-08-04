@@ -30,6 +30,9 @@ struct Config {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "plugin-sdk")]
+    std::hint::black_box(junban_plugin_sdk::product_linkage_authority());
+
     tracing_subscriber::fmt()
         .with_target(false)
         .compact()

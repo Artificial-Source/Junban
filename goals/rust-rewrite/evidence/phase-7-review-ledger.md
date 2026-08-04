@@ -75,15 +75,16 @@ Initial architecture verdict: `REVISE`. The corrected clean idle-host five-sampl
 
 ## Required implementation gates
 
-| Gate                            | Dominant reviewer      | Status   | Acceptance                                                                                                                                                                                     |
-| ------------------------------- | ---------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Wave 0 host-placement ADR       | architecture           | accepted | Child retained; default/no-engine, Rust+TS trap/CPU/memory/crash/cleanup and actual-import proof accepted; 18.6016/19.5078-MiB Rust and 357.334/415.6201-MiB TypeScript warm/peak gates frozen |
-| Wave 1 package/schema authority | database               | pending  | JBP1/signature/graph/grants/settings/KV/cursor schema v7, migration/open/restore/staging/receipt evidence                                                                                      |
-| Wave 2 hostile runtime          | security               | pending  | Selective linker, limits, IPC, one-effect authority, crash containment, denied capabilities, hostile cross-platform matrix                                                                     |
-| Wave 3 operator contract        | API contract           | pending  | Auth/body/idempotency/staging/lifecycle/registry/contribution/event contracts; automation catalog remains 87                                                                                   |
-| Wave 4 Extensions UI            | frontend/accessibility | pending  | Immutable legacy presentation, permission clarity, safe declarative renderer, stale/revoke/failure, visual/keyboard/axe                                                                        |
-| Wave 5 integrated acceptance    | security               | pending  | Final signed packages, SDK/examples, dogfood, default/Rust/TypeScript performance, full validation and docs                                                                                    |
+| Gate                          | Dominant reviewer      | Status   | Acceptance                                                                                                                                                                                     |
+| ----------------------------- | ---------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Wave 0 host-placement ADR     | architecture           | accepted | Child retained; default/no-engine, Rust+TS trap/CPU/memory/crash/cleanup and actual-import proof accepted; 18.6016/19.5078-MiB Rust and 357.334/415.6201-MiB TypeScript warm/peak gates frozen |
+| Wave 1 SDK-first package gate | security/database      | pending  | SDK implementation is complete; clean parent-run matched evidence and package security review remain required                                                                                  |
+| Wave 1 schema authority       | database               | pending  | Schema v7, migration/open/restore/staging/receipt evidence; implementation has not started                                                                                                     |
+| Wave 2 hostile runtime        | security               | pending  | Selective linker, limits, IPC, one-effect authority, crash containment, denied capabilities, hostile cross-platform matrix                                                                     |
+| Wave 3 operator contract      | API contract           | pending  | Auth/body/idempotency/staging/lifecycle/registry/contribution/event contracts; automation catalog remains 87                                                                                   |
+| Wave 4 Extensions UI          | frontend/accessibility | pending  | Immutable legacy presentation, permission clarity, safe declarative renderer, stale/revoke/failure, visual/keyboard/axe                                                                        |
+| Wave 5 integrated acceptance  | security               | pending  | Final signed packages, SDK/examples, dogfood, default/Rust/TypeScript performance, full validation and docs                                                                                    |
 
 ## Current open findings
 
-No finding remains open. Wave 0 host placement is accepted; Wave 1 may begin with its mandatory matched SDK-only default-memory subgate.
+No named finding remains open. Wave 0 host placement is accepted. Wave 1 SDK implementation is present, but package security review and clean parent-run authoritative matched-release evidence have not run; Wave 1 is not accepted. Schema v7, runtime, routes, registry, UI, and reference plugins have not started.

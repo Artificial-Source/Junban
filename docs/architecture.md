@@ -23,17 +23,17 @@ Phases 1 and 2 implement the hosted product in `junban-domain`, `junban-app`, `j
 
 ## Crate boundaries
 
-| Crate                | Responsibility                                                                                                               |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `junban-domain`      | Pure task entities, UUID IDs, title validation, civil dates and UTC instants                                                 |
-| `junban-storage`     | SQLite schema/migrations, profile lock, receipts, activity and durable events                                                |
-| `junban-app`         | Framework-free task use cases and application-owned repository/event ports                                                   |
-| `junban-server`      | Axum composition, HTTP DTO/OpenAPI authority, principal/scope auth, static serving, SSE, and reusable API-only owner runtime |
-| `junban-cli`         | Native CLI session, HTTP executor, versioned automation catalog, and human/JSON commands                                     |
-| `junban-mcp`         | Native MCP stdio adapter over the CLI session/catalog (Wave 3 completes tools/resources/prompts)                             |
-| `junban-ai`          | Optional lazy chat/speech provider clients (no default-startup construct)                                                    |
-| `junban-plugin-sdk`  | WIT contract and package types                                                                                               |
-| `junban-plugin-host` | Optional Wasmtime runtime after a measured spike (Wave 0 preliminary preference: on-demand child process; see host-placement ADR) |
+| Crate                | Responsibility                                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `junban-domain`      | Pure task entities, UUID IDs, title validation, civil dates and UTC instants                                                           |
+| `junban-storage`     | SQLite schema/migrations, profile lock, receipts, activity and durable events                                                          |
+| `junban-app`         | Framework-free task use cases and application-owned repository/event ports                                                             |
+| `junban-server`      | Axum composition, HTTP DTO/OpenAPI authority, principal/scope auth, static serving, SSE, and reusable API-only owner runtime           |
+| `junban-cli`         | Native CLI session, HTTP executor, versioned automation catalog, and human/JSON commands                                               |
+| `junban-mcp`         | Native MCP stdio adapter over the CLI session/catalog (Wave 3 completes tools/resources/prompts)                                       |
+| `junban-ai`          | Optional lazy chat/speech provider clients (no default-startup construct)                                                              |
+| `junban-plugin-sdk`  | Exact WIT, JBP1/JRI1 trust, manifest/capability/dependency/component-inspection, and private protocol data contracts; no runtime owner |
+| `junban-plugin-host` | Accepted future on-demand Wasmtime child runtime; not created by the SDK-first Wave 1 subgate                                          |
 
 Rules:
 
@@ -79,7 +79,11 @@ Mutation tools require an approval bound to canonical tool name and arguments be
 
 ## Plugin direction
 
-Portable, capability-limited packages on the Wasmtime Component Model with WASI P2. TypeScript authoring compiles ahead of time and does not imply a resident Node plugin process. Declarative host-rendered UI replaces arbitrary plugin React execution.
+Portable, capability-limited packages use the checked-in `junban:plugin@0.1.0` Component Model WIT. `junban-plugin-sdk` owns bounded JBP1 package parsing/packing, strict Ed25519 verification, canonical typed manifests, requested/granted permission hashes and subset authority, dependency/lock validation, JRI1 verification, bounded structural component inspection, capability metadata, and private parent/child protocol DTOs. It owns no SQLite, HTTP server, Wasmtime Engine, host process, profile path, or credential.
+
+The accepted runtime placement remains an on-demand `junban-plugin-host` child, but that product host is a later wave and does not yet exist. Default `junban-server` links the SDK through one zero-allocation static marker/table so thin LTO preserves the boundary; `--no-default-features` is the matched feature-off baseline. Neither build links Wasmtime. The completed Wave 0 probe crate and its Wasmtime advisory exception were removed after the placement ADR was accepted.
+
+TypeScript authoring compiles ahead of time and does not imply a resident Node plugin process. Declarative host-rendered UI replaces arbitrary plugin React execution. Schema v7, package publication, runtime, routes, registry artifacts, reference plugins, and UI remain outside this SDK-first subgate.
 
 ## Dependency policy
 

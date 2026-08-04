@@ -26,6 +26,8 @@
     "check:runtime-boundary": "node scripts/check-runtime-boundary.mjs",
     "check:local-voice-assets": "node scripts/check-local-voice-assets.mjs --require-dist",
     "check:phase6-legacy-visual": "node scripts/check-phase6-legacy-visual-baseline.mjs",
+    "check:phase7-legacy-visual": "node scripts/check-phase7-legacy-visual-baseline.mjs",
+    "check:phase7-legacy-visual:self-check": "node scripts/check-phase7-legacy-visual-baseline.mjs --self-check",
     "bench:hosted-server": "python3 scripts/bench-hosted-server.py",
     "bench:hosted-server:quick": "python3 scripts/bench-hosted-server.py --quick",
     "bench:scale": "python3 scripts/bench-hosted-server.py --mode scale",
@@ -43,7 +45,7 @@
     "conformance:phase6": "python3 scripts/check-phase5-conformance.py --phase6 --authoritative",
     "bench:phase6-enabled:self-check": "python3 scripts/check-phase6-enabled-benchmark.py --self-check",
     "bench:self-check": "python3 scripts/bench-hosted-server.py --self-check && python3 scripts/check-phase6-disabled-matched-release.py --self-check",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary && pnpm check:local-voice-assets && pnpm check:phase6-legacy-visual"
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary && pnpm check:local-voice-assets && pnpm check:phase6-legacy-visual && pnpm check:phase7-legacy-visual"
   },
   "dependencies": {
     "@diffusionstudio/piper-wasm": "1.0.0",

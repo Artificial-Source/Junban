@@ -6,12 +6,12 @@ Related: [`architecture.md`](architecture.md) (crate and runtime boundaries), [`
 
 ## What you get
 
-| Surface | Where | Default |
-| ------- | ----- | ------- |
+| Surface                                      | Where                                    | Default                                             |
+| -------------------------------------------- | ---------------------------------------- | --------------------------------------------------- |
 | AI chat, tools, approvals, history, memories | Browser **AI** route + Settings → **AI** | Disabled until a provider is configured and enabled |
-| Cloud speech (STT/TTS) | Settings → **Voice**, chat mic controls | Cloud speech disabled; Browser speech selected |
-| Local Whisper / Kokoro / Piper | Settings → **Voice** → local models | Not downloaded; preference is Browser |
-| Daily briefing | AI chat when enabled in AI settings | Off |
+| Cloud speech (STT/TTS)                       | Settings → **Voice**, chat mic controls  | Cloud speech disabled; Browser speech selected      |
+| Local Whisper / Kokoro / Piper               | Settings → **Voice** → local models      | Not downloaded; preference is Browser               |
+| Daily briefing                               | AI chat when enabled in AI settings      | Off                                                 |
 
 Feature flags under Settings → **Features** control other product surfaces only. They do not enable AI, delete AI data, or authorize providers.
 
@@ -26,21 +26,21 @@ Feature flags under Settings → **Features** control other product surfaces onl
 
 Canonical wire IDs (snake_case):
 
-| ID | Label | Default base URL | Auth |
-| -- | ----- | ---------------- | ---- |
-| `openai` | OpenAI | `https://api.openai.com/v1` | API key (Bearer) |
-| `anthropic` | Anthropic | `https://api.anthropic.com` | API key |
-| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | API key |
-| `ollama` | Ollama | `http://127.0.0.1:11434/v1` | None |
-| `lm_studio` | LM Studio | `http://127.0.0.1:1234/v1` | None |
-| `deepseek` | DeepSeek | `https://api.deepseek.com` | API key |
-| `gemini` | Gemini | `https://generativelanguage.googleapis.com/v1beta` | API key |
-| `mistral` | Mistral | `https://api.mistral.ai/v1` | API key |
-| `kimi` | Kimi / Moonshot | `https://api.moonshot.ai/v1` | API key |
-| `dashscope` | DashScope | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | API key |
-| `groq` | Groq | `https://api.groq.com/openai/v1` | API key |
-| `z_ai` | Z.AI / GLM | `https://api.z.ai/api/paas/v4` | API key |
-| `custom` | Custom | **Required** operator URL | API key when the endpoint needs one |
+| ID           | Label           | Default base URL                                         | Auth                                |
+| ------------ | --------------- | -------------------------------------------------------- | ----------------------------------- |
+| `openai`     | OpenAI          | `https://api.openai.com/v1`                              | API key (Bearer)                    |
+| `anthropic`  | Anthropic       | `https://api.anthropic.com`                              | API key                             |
+| `openrouter` | OpenRouter      | `https://openrouter.ai/api/v1`                           | API key                             |
+| `ollama`     | Ollama          | `http://127.0.0.1:11434/v1`                              | None                                |
+| `lm_studio`  | LM Studio       | `http://127.0.0.1:1234/v1`                               | None                                |
+| `deepseek`   | DeepSeek        | `https://api.deepseek.com`                               | API key                             |
+| `gemini`     | Gemini          | `https://generativelanguage.googleapis.com/v1beta`       | API key                             |
+| `mistral`    | Mistral         | `https://api.mistral.ai/v1`                              | API key                             |
+| `kimi`       | Kimi / Moonshot | `https://api.moonshot.ai/v1`                             | API key                             |
+| `dashscope`  | DashScope       | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | API key                             |
+| `groq`       | Groq            | `https://api.groq.com/openai/v1`                         | API key                             |
+| `z_ai`       | Z.AI / GLM      | `https://api.z.ai/api/paas/v4`                           | API key                             |
+| `custom`     | Custom          | **Required** operator URL                                | API key when the endpoint needs one |
 
 Built-in cloud presets accept **only** their official HTTPS origin. Ollama and LM Studio accept **loopback** hosts only (any loopback port). Custom endpoints allow:
 
@@ -76,9 +76,9 @@ Chat, configuration, credentials, sessions, memories, approvals, and response ac
 
 The server advertises a fixed registry of task/planning tools (create/update/complete tasks, projects, tags, reminders, planning summaries, memories, timeblocking, and related reads). Exactly one tool call is accepted per model round.
 
-| Effect | Behavior |
-| ------ | -------- |
-| **Read** | Runs immediately. Returns a bounded trusted result envelope (no receipts, tokens, or raw provider/transport errors). |
+| Effect                | Behavior                                                                                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Read**              | Runs immediately. Returns a bounded trusted result envelope (no receipts, tokens, or raw provider/transport errors).                                                                  |
 | **Approval required** | Streams a proposal bound to `approval_id` + `action_hash`. The hash covers the canonical tool name and canonical JSON arguments. Nothing mutates until you **Approve** or **Reject**. |
 
 Approvals:
@@ -89,7 +89,7 @@ Approvals:
 - On reject, a stable rejection result is recorded on the turn; no mutation runs.
 - Startup recovers a bounded set of interrupted dispatching approvals without re-running arbitrary provider work.
 
-UI cards use **Approve** / **Reject** with the tool name and structured arguments. Do not approve actions you do not understand.
+UI cards use **Approve** / **Reject** with the tool name and the complete exact structured arguments. The argument area scrolls instead of truncating, so inspect every field and item before approving; do not approve actions you do not understand.
 
 ### Scheduling tools
 
@@ -109,15 +109,15 @@ Open **Settings → Voice**.
 
 ### Modes and providers
 
-| Control | Options | Notes |
-| ------- | ------- | ----- |
-| Speech-to-text | Browser, OpenAI, Groq | Inworld is not offered for STT |
-| Text-to-speech | Browser, OpenAI, Groq, Inworld | Inworld is TTS-only |
-| Cloud speech master | On/Off | Required for cloud STT/TTS routes |
-| Speak responses | On/Off (`tts_enabled`) | Independent of STT |
-| Voice mode | Push-to-Talk, VAD (Hands-free) | Hands-free uses browser VAD + grace period |
-| Grace period | 500–3000 ms (default 1000) | Silence window before hands-free ends an utterance |
-| Microphone | Browser device picker | Stored only as a local device id preference |
+| Control             | Options                        | Notes                                              |
+| ------------------- | ------------------------------ | -------------------------------------------------- |
+| Speech-to-text      | Browser, OpenAI, Groq          | Inworld is not offered for STT                     |
+| Text-to-speech      | Browser, OpenAI, Groq, Inworld | Inworld is TTS-only                                |
+| Cloud speech master | On/Off                         | Required for cloud STT/TTS routes                  |
+| Speak responses     | On/Off (`tts_enabled`)         | Independent of STT                                 |
+| Voice mode          | Push-to-Talk, VAD (Hands-free) | Hands-free uses browser VAD + grace period         |
+| Grace period        | 500–3000 ms (default 1000)     | Silence window before hands-free ends an utterance |
+| Microphone          | Browser device picker          | Stored only as a local device id preference        |
 
 Cloud speech help text in the UI: credentials stay server-side and audio for cloud providers is sent through the Junban server (`POST /api/v1/voice/transcriptions`, `POST /api/v1/voice/speech`). Browser speech may use a browser-vendor cloud service and the system default microphone unless you grant permission and pick a device.
 
@@ -127,10 +127,10 @@ Switching away from a cloud provider that still has a stored credential prompts 
 
 When STT/TTS is **Browser**, you may optionally download and select pinned local packages. Preferences live in browser storage only (`junban.voice.local.v1`) and never hold secrets.
 
-| Package id | Role | Engine pin | License (package) |
-| ---------- | ---- | ---------- | ----------------- |
-| `whisper-tiny.en-q4` | Local STT | `@huggingface/transformers@3.8.1` | OpenAI-Whisper-MIT |
-| `kokoro-82m-v1-q8` | Local TTS | `kokoro-js@1.2.1` | Apache-2.0 |
+| Package id                    | Role      | Engine pin                           | License (package)                         |
+| ----------------------------- | --------- | ------------------------------------ | ----------------------------------------- |
+| `whisper-tiny.en-q4`          | Local STT | `@huggingface/transformers@3.8.1`    | OpenAI-Whisper-MIT                        |
+| `kokoro-82m-v1-q8`            | Local TTS | `kokoro-js@1.2.1`                    | Apache-2.0                                |
 | `piper-en_US-ljspeech-medium` | Local TTS | `@mintplex-labs/piper-tts-web@1.0.4` | MIT (LJ Speech source data public domain) |
 
 Rules:
@@ -167,30 +167,30 @@ Browser UI ──HTTP/SSE──► junban-server ──► junban-app ──► 
 
 ## Troubleshooting
 
-| Symptom | What to check |
-| ------- | ------------- |
-| AI route stays on “not configured” | Settings → AI: enabled, provider, model; credential present for cloud providers; save succeeded |
-| Model list empty | Provider reachable; for Ollama/LM Studio, loopback service up; credential valid for cloud |
-| Custom provider rejected | HTTPS or loopback HTTP only; no userinfo/query/fragment; URL required for `custom` |
-| Tool did nothing | Mutation tools need **Approve**; expired approvals must be re-proposed by a new turn |
-| Cancel appears ignored | Wait for terminal SSE (`run_cancelled` / completed); refresh session history if the tab dropped the stream |
-| Cloud STT/TTS 409/503 | Cloud speech disabled, missing model/credential, speech capacity, or runtime draining for reconfigure |
-| Mic permission error | Site settings → allow microphone; retry from the voice control; confirm non-empty device list after grant |
-| Local model “error” / hash failure | Remove the package card cache entry, confirm disk/OPFS quota, reload, consent and download again (pinned revision only) |
-| Local model selected but silent | Package must show **ready**; `tts_enabled` on; AudioContext not blocked; try Push-to-Talk once to satisfy gesture policies |
-| After restore, AI disabled | Expected: re-add keys in Settings; chat history may restore from SQLite while secrets do not |
-| High server memory with local voice | Local weights run in the browser only; inspect browser task manager, not the server cgroup |
+| Symptom                             | What to check                                                                                                              |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| AI route stays on “not configured”  | Settings → AI: enabled, provider, model; credential present for cloud providers; save succeeded                            |
+| Model list empty                    | Provider reachable; for Ollama/LM Studio, loopback service up; credential valid for cloud                                  |
+| Custom provider rejected            | HTTPS or loopback HTTP only; no userinfo/query/fragment; URL required for `custom`                                         |
+| Tool did nothing                    | Mutation tools need **Approve**; expired approvals must be re-proposed by a new turn                                       |
+| Cancel appears ignored              | Wait for terminal SSE (`run_cancelled` / completed); refresh session history if the tab dropped the stream                 |
+| Cloud STT/TTS 409/503               | Cloud speech disabled, missing model/credential, speech capacity, or runtime draining for reconfigure                      |
+| Mic permission error                | Site settings → allow microphone; retry from the voice control; confirm non-empty device list after grant                  |
+| Local model “error” / hash failure  | Remove the package card cache entry, confirm disk/OPFS quota, reload, consent and download again (pinned revision only)    |
+| Local model selected but silent     | Package must show **ready**; `tts_enabled` on; AudioContext not blocked; try Push-to-Talk once to satisfy gesture policies |
+| After restore, AI disabled          | Expected: re-add keys in Settings; chat history may restore from SQLite while secrets do not                               |
+| High server memory with local voice | Local weights run in the browser only; inspect browser task manager, not the server cgroup                                 |
 
 ## Privacy and egress summary
 
-| Data | Leaves the machine? |
-| ---- | ------------------- |
-| Task/planning context in AI chat | Yes, to the configured chat provider endpoint when AI runs |
-| Provider API keys | No (server-private file; used only as upstream auth) |
-| Cloud STT audio / TTS text | Yes, via Junban server to OpenAI, Groq, or Inworld when cloud speech is enabled |
-| Browser speech audio | Depends on the browser vendor implementation |
+| Data                                         | Leaves the machine?                                                                 |
+| -------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Task/planning context in AI chat             | Yes, to the configured chat provider endpoint when AI runs                          |
+| Provider API keys                            | No (server-private file; used only as upstream auth)                                |
+| Cloud STT audio / TTS text                   | Yes, via Junban server to OpenAI, Groq, or Inworld when cloud speech is enabled     |
+| Browser speech audio                         | Depends on the browser vendor implementation                                        |
 | Local Whisper/Kokoro/Piper audio and weights | No provider egress after the one-time pinned Hugging Face download you consented to |
-| Automation CLI/MCP traffic | Separate scoped credentials; does not expose AI secret bytes or chat SSE |
+| Automation CLI/MCP traffic                   | Separate scoped credentials; does not expose AI secret bytes or chat SSE            |
 
 ## Related operator docs
 

@@ -288,6 +288,7 @@ python3 scripts/check-phase6-enabled-benchmark.py \
 ```
 
 Or use `pnpm bench:phase6-enabled:self-check` for the interception preflight. Do not retain contended-host result JSON as accepted evidence.
+
 ## Measurement rules
 
 - Optimized release binaries are authoritative. Development servers are not.

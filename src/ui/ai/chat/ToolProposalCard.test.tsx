@@ -194,23 +194,16 @@ describe("ToolProposalCard", () => {
     expect(container.querySelector('[aria-label="Approved schedule blocks"]')).toBeNull();
   });
 
-  it("shows complete generic bulk mutation args beyond the old 2k truncation", () => {
-    // Pretty JSON for many padded entries exceeds the old 2_000-char formatter bound.
-    const finalMarker = "FINAL-BULK-ITEM-MARKER-p6-final-sec-001";
-    const items = Array.from({ length: 48 }, (_, i) => ({
-      id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
-      title: `Bulk item ${i + 1} ${"detail-padding-".repeat(10)}`,
-      project_id: `11111111-1111-4111-8111-${String(i + 1).padStart(12, "0")}`,
-      notes: `note-body-${"x".repeat(40)}-${i + 1}`,
-    }));
-    items[items.length - 1] = {
-      ...items[items.length - 1]!,
-      title: finalMarker,
-      notes: `unique-final-field-${finalMarker}`,
-    };
-    const args = { items };
+  it("shows every task in valid generic bulk mutation args beyond the old 2k truncation", () => {
+    // The registry accepts up to 500 task IDs; this valid 100-ID mutation already exceeds 2,000 chars.
+    const taskIds = Array.from(
+      { length: 100 },
+      (_, i) => `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+    );
+    const finalTaskId = taskIds.at(-1)!;
+    const args = { task_ids: taskIds, priority: 2 };
     const truncated = formatStructuredPlain(args, 2_000);
-    expect(truncated.includes(finalMarker)).toBe(false);
+    expect(truncated.includes(finalTaskId)).toBe(false);
     expect(truncated.includes("…")).toBe(true);
 
     const onApprove = vi.fn();
@@ -232,9 +225,9 @@ describe("ToolProposalCard", () => {
     const pre = container.querySelector("pre");
     expect(pre).toBeTruthy();
     const preText = pre?.textContent ?? "";
-    expect(preText).toContain(finalMarker);
-    expect(preText).toContain(`unique-final-field-${finalMarker}`);
-    expect(preText).toContain(items[items.length - 1]!.id);
+    expect(preText).toContain(finalTaskId);
+    expect(preText).toContain('"priority": 2');
+    expect(preText.match(/00000000-0000-4000-8000-/g)).toHaveLength(100);
     // Must not hide the suffix behind the old formatter ellipsis.
     expect(preText.includes("\n…")).toBe(false);
     expect(preText.endsWith("…")).toBe(false);

@@ -353,16 +353,13 @@ fn open_and_validate_payload(
         .pragma_update(None, "foreign_keys", true)
         .map_err(storage_error)?;
 
-    // The framed payload and its hash have already been authenticated. Authenticate
-    // SQLite integrity before applying only the known in-place current-v6 response-
-    // authority correction; canonical schema and all semantic checks still follow.
+    // The framed payload and its hash have already been authenticated. Current-v7
+    // restore preflight is validation-only and never repairs missing schema objects.
     assert_integrity(&connection).map_err(|_| invalid_backup())?;
     let schema_version = read_schema_version(&connection).map_err(|_| invalid_backup())?;
     if schema_version != manifest.schema_version || schema_version != CURRENT_SCHEMA_VERSION {
         return Err(invalid_backup());
     }
-    migration::repair_current_v6_ai_response_authority(&connection)
-        .map_err(|_| invalid_backup())?;
     validate_payload(&connection, manifest, profile_dir)?;
     Ok(connection)
 }
@@ -3027,48 +3024,130 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restore_repairs_only_known_pre_wave3g_schema_v6_objects() {
+    async fn restore_rejects_each_missing_v6_authority_without_repair_or_cutover() {
         let (dir, owner) = temp_profile();
         let repo = owner.repository();
         let backup = repo.create_backup().await.unwrap();
-        let legacy = rewrite_backup_payload(
-            &dir,
-            &backup,
-            "DROP INDEX idx_ai_messages_daily_briefing_active;
-             DROP INDEX idx_ai_messages_briefing_date;
-             DROP TABLE ai_response_invalidations;",
-        );
+        let live = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        live.execute(
+            "INSERT INTO ai_response_invalidations(
+                run_id, session_id, invalidating_operation_id, expires_at
+             ) VALUES ('retained-run', 'retained-session', 'retained-operation',
+                '2026-08-04T12:00:00Z')",
+            [],
+        )
+        .unwrap();
+        drop(live);
 
-        let candidate = repo.prepare_restore(legacy).await.unwrap();
-        let repaired = Connection::open(candidate.path()).unwrap();
-        let repaired_objects: i64 = repaired
+        for (name, drop_sql) in [
+            (
+                "idx_ai_run_state_state",
+                "DROP INDEX idx_ai_run_state_state;",
+            ),
+            (
+                "idx_ai_messages_daily_briefing_active",
+                "DROP INDEX idx_ai_messages_daily_briefing_active;",
+            ),
+            (
+                "idx_ai_messages_briefing_date",
+                "DROP INDEX idx_ai_messages_briefing_date;",
+            ),
+            (
+                "ai_response_invalidations",
+                "DROP TABLE ai_response_invalidations;",
+            ),
+        ] {
+            let hostile = rewrite_backup_payload(&dir, &backup, drop_sql);
+            assert!(
+                matches!(
+                    repo.prepare_restore(hostile).await,
+                    Err(RepositoryError::Validation(_))
+                ),
+                "{name}"
+            );
+            let live = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+            let retained: i64 = live
+                .query_row(
+                    "SELECT COUNT(*) FROM ai_response_invalidations",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(retained, 1, "{name}");
+            assert_canonical_schema(&live, dir.path()).unwrap();
+        }
+    }
+
+    #[test]
+    fn normal_open_rejects_in_bound_text_plugin_kv_without_repair() {
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, 3);
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        connection
+            .pragma_update(None, "ignore_check_constraints", true)
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE plugin_kv SET value = CAST('within-bounds' AS TEXT)
+                 WHERE plugin_id = 'restore-plugin' AND key = 'preserved'",
+                [],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "ignore_check_constraints", false)
+            .unwrap();
+        drop(connection);
+        drop(owner);
+
+        assert!(matches!(
+            ProfileOwner::open(dir.path()),
+            Err(crate::OpenError::Database(_))
+        ));
+        let retained = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        let storage_class: String = retained
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_schema WHERE name IN (
-                    'idx_ai_messages_daily_briefing_active',
-                    'idx_ai_messages_briefing_date',
-                    'ai_response_invalidations',
-                    'idx_ai_response_invalidations_session',
-                    'idx_ai_response_invalidations_expiry'
-                 )",
+                "SELECT typeof(value) FROM plugin_kv
+                 WHERE plugin_id = 'restore-plugin' AND key = 'preserved'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(repaired_objects, 5);
-        drop(repaired);
-        repo.restore_backup(candidate).await.unwrap();
-        drop(repo);
-        drop(owner);
-
-        let reopened = ProfileOwner::open(dir.path()).unwrap();
-        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
-        assert_canonical_schema(&connection, dir.path()).unwrap();
-        drop(connection);
-        drop(reopened);
+        assert_eq!(storage_class, "text");
     }
 
     #[tokio::test]
-    async fn restore_rejects_conflicting_known_v6_repair_object() {
+    async fn restore_preflight_rejects_in_bound_text_plugin_kv_without_repair() {
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, 3);
+        let repo = owner.repository();
+        let backup = repo.create_backup().await.unwrap();
+        let hostile = rewrite_backup_payload(
+            &dir,
+            &backup,
+            "PRAGMA ignore_check_constraints = ON;
+             UPDATE plugin_kv SET value = CAST('within-bounds' AS TEXT)
+             WHERE plugin_id = 'restore-plugin' AND key = 'preserved';
+             PRAGMA ignore_check_constraints = OFF;",
+        );
+
+        assert!(matches!(
+            repo.prepare_restore(hostile).await,
+            Err(RepositoryError::Validation(_))
+        ));
+        let live = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        let storage_class: String = live
+            .query_row(
+                "SELECT typeof(value) FROM plugin_kv
+                 WHERE plugin_id = 'restore-plugin' AND key = 'preserved'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(storage_class, "blob");
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_conflicting_v6_era_authority_object() {
         let (dir, owner) = temp_profile();
         let repo = owner.repository();
         let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;

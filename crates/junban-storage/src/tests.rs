@@ -4335,6 +4335,27 @@ async fn reminder_timestamps_use_canonical_sortable_text() {
     drop(repo);
     drop(owner);
 
+    // This variable-width representation is accepted only at the v6 migration
+    // boundary. Reframe the fixture to exact schema v6 so the first v6→v7 open
+    // performs normalization before its verified snapshot.
+    let connection = rusqlite::Connection::open(directory.0.join("junban.sqlite3")).unwrap();
+    connection
+        .execute_batch(
+            "DROP TABLE plugin_invocations;
+             DROP TABLE plugin_dependency_locks;
+             DROP TABLE plugin_event_cursors;
+             DROP TABLE plugin_kv;
+             DROP TABLE plugin_settings;
+             DROP TABLE plugin_grants;
+             DROP TABLE plugin_policy;
+             DROP TABLE plugin_publisher_trust;
+             DROP TABLE plugins;
+             DROP TABLE plugin_profile_state;
+             DELETE FROM schema_migrations WHERE version = 7;",
+        )
+        .unwrap();
+    drop(connection);
+
     let owner = ProfileOwner::open(&directory.0).unwrap();
     let repo = owner.repository();
     // Advance past any prior lease left released-at-t0 and any unexpired claims.

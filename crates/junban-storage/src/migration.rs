@@ -88,12 +88,12 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
     }
 
     // A later successful canonical v7 open is the first point at which a retained
-    // pre-v7 snapshot may be pruned. Housekeeping is deliberately non-fatal.
+    // pre-v7 snapshot may be pruned. Current-v7 authority is validation-only: known
+    // v6 in-place corrections are never applied after the schema version advances.
     if starting_version == CURRENT_SCHEMA_VERSION {
-        normalize_reminder_timestamp_text(connection)?;
-        ensure_v6_ai_runtime_indexes(connection)?;
-        repair_current_v6_ai_response_authority(connection)?;
         assert_v7_authority(connection)?;
+        assert_integrity_clean(connection)?;
+        assert_foreign_keys_clean(connection)?;
         let _ = prune_pre_migration_backups(profile_dir, PRE_V7_BACKUP_PREFIX);
         return Ok(());
     }
@@ -165,6 +165,11 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
     }
 
     let pre_v7_backup = if starting_version == 6 {
+        // These are the only accepted in-place v6 authorities. They must complete
+        // before exact canonical-v6 verification and the retained pre-v7 snapshot.
+        normalize_reminder_timestamp_text(connection)?;
+        ensure_v6_ai_runtime_indexes(connection)?;
+        repair_current_v6_ai_response_authority(connection)?;
         Some(create_verified_pre_migration_backup(
             connection,
             profile_dir,
@@ -205,10 +210,8 @@ fn ensure_v6_ai_runtime_indexes(connection: &Connection) -> rusqlite::Result<()>
 /// This is deliberately limited to the known indexes and invalidation table added
 /// in-place during schema v6. Conflicting objects fail here or during canonical
 /// schema validation rather than being replaced.
-pub(crate) fn repair_current_v6_ai_response_authority(
-    connection: &Connection,
-) -> rusqlite::Result<()> {
-    if !matches!(current_version(connection)?, 6 | 7) {
+fn repair_current_v6_ai_response_authority(connection: &Connection) -> rusqlite::Result<()> {
+    if current_version(connection)? != 6 {
         return Ok(());
     }
     let transaction = connection.unchecked_transaction()?;
@@ -1060,7 +1063,7 @@ CREATE TABLE plugin_settings (
 CREATE TABLE plugin_kv (
     plugin_id TEXT NOT NULL REFERENCES plugins(plugin_id) ON DELETE CASCADE,
     key TEXT NOT NULL CHECK (length(CAST(key AS BLOB)) BETWEEN 1 AND 128),
-    value BLOB NOT NULL CHECK (length(value) <= 65536),
+    value BLOB NOT NULL CHECK (typeof(value) = 'blob' AND length(value) <= 65536),
     updated_at TEXT NOT NULL CHECK (length(updated_at) BETWEEN 20 AND 35),
     PRIMARY KEY (plugin_id, key)
 );
@@ -2253,6 +2256,33 @@ mod tests {
             .unwrap()
             .map(|row| row.unwrap())
             .collect()
+    }
+
+    fn schema_object_exists(connection: &Connection, name: &str) -> bool {
+        connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = ?1)",
+                [name],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn reminder_authority_timestamps(connection: &Connection) -> Vec<String> {
+        connection
+            .query_row(
+                "SELECT t.remind_at, occurrence.remind_at,
+                        occurrence.claim_expires_at, occurrence.next_attempt_at,
+                        occurrence.created_at, occurrence.updated_at,
+                        lease.expires_at, lease.updated_at
+                 FROM tasks AS t
+                 JOIN reminder_occurrences AS occurrence ON occurrence.task_id = t.id
+                 CROSS JOIN reminder_delivery_lease AS lease
+                 WHERE t.id = 'aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa'",
+                [],
+                |row| (0..8).map(|index| row.get(index)).collect(),
+            )
+            .unwrap()
     }
 
     fn task_columns(connection: &Connection) -> Vec<String> {
@@ -4284,6 +4314,157 @@ INSERT INTO task_activity(
             )
             .unwrap();
         assert_eq!(remaining, "op-other");
+    }
+
+    #[test]
+    fn v6_in_place_authorities_are_repaired_before_verified_v7_snapshot() {
+        for (name, drop_sql) in [
+            (
+                "idx_ai_run_state_state",
+                "DROP INDEX idx_ai_run_state_state;",
+            ),
+            (
+                "idx_ai_messages_daily_briefing_active",
+                "DROP INDEX idx_ai_messages_daily_briefing_active;",
+            ),
+            (
+                "idx_ai_messages_briefing_date",
+                "DROP INDEX idx_ai_messages_briefing_date;",
+            ),
+            (
+                "ai_response_invalidations",
+                "DROP TABLE ai_response_invalidations;",
+            ),
+        ] {
+            let db = TestDb::new();
+            let mut connection = db.open();
+            db.migrate(&mut connection).unwrap();
+            drop_v7_schema(&connection);
+            connection.execute_batch(drop_sql).unwrap();
+            assert_eq!(current_version(&connection).unwrap(), 6, "{name}");
+            assert!(!schema_object_exists(&connection, name), "{name}");
+
+            db.migrate(&mut connection).unwrap();
+            assert_eq!(current_version(&connection).unwrap(), 7, "{name}");
+            assert_v7_authority(&connection).unwrap();
+            let backup_dir = db.profile_dir().join(PRE_MIGRATION_BACKUP_DIR);
+            let backups = list_pre_migration_backups(&backup_dir, PRE_V7_BACKUP_PREFIX).unwrap();
+            assert_eq!(backups.len(), 1, "{name}");
+            verify_pre_migration_backup(&backups[0], 6).unwrap();
+            let snapshot = open_readonly(&backups[0]).unwrap();
+            assert_eq!(
+                read_user_schema(&snapshot).unwrap(),
+                canonical_schema(6).unwrap()
+            );
+            assert!(schema_object_exists(&snapshot, name), "{name}");
+        }
+    }
+
+    #[test]
+    fn v6_reminder_comparison_timestamps_are_canonical_before_v7_commit_and_snapshot() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        db.migrate(&mut connection).unwrap();
+        drop_v7_schema(&connection);
+        connection
+            .execute_batch(
+                "INSERT INTO tasks(
+                    id, title, status, remind_at, created_at, updated_at, revision
+                 ) VALUES (
+                    'aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa', 'Reminder', 'pending',
+                    '2026-08-04T12:00:00.1Z', '2026-08-04T11:00:00Z',
+                    '2026-08-04T11:00:00Z', 1
+                 );
+                 INSERT INTO reminder_occurrences(
+                    task_id, remind_at, state, claim_term, claim_expires_at, attempts,
+                    next_attempt_at, created_at, updated_at
+                 ) VALUES (
+                    'aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa',
+                    '2026-08-04T12:00:00.2Z', 'claimed', 'term',
+                    '2026-08-04T12:00:00.3Z', 1, '2026-08-04T12:00:00.4Z',
+                    '2026-08-04T12:00:00.5Z', '2026-08-04T12:00:00.6Z'
+                 );
+                 INSERT INTO reminder_delivery_lease(
+                    singleton, fence_term, expires_at, updated_at
+                 ) VALUES (
+                    1, 'term', '2026-08-04T12:00:00.7Z',
+                    '2026-08-04T12:00:00.8Z'
+                 );",
+            )
+            .unwrap();
+
+        db.migrate(&mut connection).unwrap();
+        let expected = vec![
+            "2026-08-04T12:00:00.100000000Z",
+            "2026-08-04T12:00:00.200000000Z",
+            "2026-08-04T12:00:00.300000000Z",
+            "2026-08-04T12:00:00.400000000Z",
+            "2026-08-04T12:00:00.500000000Z",
+            "2026-08-04T12:00:00.600000000Z",
+            "2026-08-04T12:00:00.700000000Z",
+            "2026-08-04T12:00:00.800000000Z",
+        ];
+        assert_eq!(reminder_authority_timestamps(&connection), expected);
+
+        let backup_dir = db.profile_dir().join(PRE_MIGRATION_BACKUP_DIR);
+        let backups = list_pre_migration_backups(&backup_dir, PRE_V7_BACKUP_PREFIX).unwrap();
+        assert_eq!(backups.len(), 1);
+        verify_pre_migration_backup(&backups[0], 6).unwrap();
+        let snapshot = open_readonly(&backups[0]).unwrap();
+        assert_eq!(reminder_authority_timestamps(&snapshot), expected);
+    }
+
+    #[test]
+    fn current_v7_normal_open_rejects_plugin_foreign_key_orphans_without_repair() {
+        for table in ["plugin_kv", "plugin_event_cursors"] {
+            let db = TestDb::new();
+            let mut connection = db.open();
+            db.migrate(&mut connection).unwrap();
+            let event_epoch: String = connection
+                .query_row(
+                    "SELECT event_epoch FROM app_state WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            drop(connection);
+
+            let hostile = Connection::open(&db.path).unwrap();
+            hostile.pragma_update(None, "foreign_keys", false).unwrap();
+            if table == "plugin_kv" {
+                hostile
+                    .execute(
+                        "INSERT INTO plugin_kv(plugin_id, key, value, updated_at)
+                         VALUES ('orphan-plugin', 'key', X'01', '2026-08-04T12:00:00Z')",
+                        [],
+                    )
+                    .unwrap();
+            } else {
+                hostile
+                    .execute(
+                        "INSERT INTO plugin_event_cursors(
+                            plugin_id, event_epoch, revision, resync_required, updated_at
+                         ) VALUES (
+                            'orphan-plugin', ?1, 0, 0, '2026-08-04T12:00:00Z'
+                         )",
+                        [event_epoch],
+                    )
+                    .unwrap();
+            }
+            drop(hostile);
+
+            assert!(
+                crate::ProfileOwner::open(db.profile_dir()).is_err(),
+                "{table}"
+            );
+            let retained = Connection::open(&db.path).unwrap();
+            let count: i64 = retained
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 1, "{table}");
+        }
     }
 
     #[test]

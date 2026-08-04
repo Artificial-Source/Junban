@@ -376,7 +376,7 @@ fn validate_setting_value(schema: &SettingSchema, raw: &str) -> Result<(), Repos
 fn validate_kv(connection: &Connection) -> Result<(), RepositoryError> {
     let mut statement = connection
         .prepare(
-            "SELECT plugin_id, key, LENGTH(value), updated_at
+            "SELECT plugin_id, key, TYPEOF(value), LENGTH(value), updated_at
              FROM plugin_kv ORDER BY plugin_id, key",
         )
         .map_err(storage)?;
@@ -385,12 +385,14 @@ fn validate_kv(connection: &Connection) -> Result<(), RepositoryError> {
     while let Some(row) = rows.next().map_err(storage)? {
         let plugin_id: String = row.get(0).map_err(storage)?;
         let key: String = row.get(1).map_err(storage)?;
-        let value_bytes: i64 = row.get(2).map_err(storage)?;
-        let updated_at: String = row.get(3).map_err(storage)?;
+        let value_type: String = row.get(2).map_err(storage)?;
+        let value_bytes: i64 = row.get(3).map_err(storage)?;
+        let updated_at: String = row.get(4).map_err(storage)?;
         canonical_timestamp(&updated_at)?;
         if key.is_empty()
             || key.len() > 128
             || !valid_kv_key(&key)
+            || value_type != "blob"
             || !(0..=KV_VALUE_BYTES_MAX).contains(&value_bytes)
         {
             return invalid("plugin KV scalar authority");
@@ -916,6 +918,46 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM plugin_kv", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, KV_KEYS_MAX + 1);
+    }
+
+    #[test]
+    fn plugin_kv_requires_blob_storage_in_schema_and_semantic_validation() {
+        let profile = TempProfile::new();
+        let connection = fresh_connection(&profile);
+        seed_plugin(&connection);
+
+        let text_insert = connection.execute(
+            "INSERT INTO plugin_kv(plugin_id, key, value, updated_at)
+             VALUES ('test-plugin', 'text-value', 'within-bounds',
+                '2026-08-04T12:00:00Z')",
+            [],
+        );
+        assert!(text_insert.is_err());
+
+        connection
+            .pragma_update(None, "ignore_check_constraints", true)
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO plugin_kv(plugin_id, key, value, updated_at)
+                 VALUES ('test-plugin', 'text-value', 'within-bounds',
+                    '2026-08-04T12:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "ignore_check_constraints", false)
+            .unwrap();
+
+        assert!(validate_plugin_authority(&connection).is_err());
+        let storage_class: String = connection
+            .query_row(
+                "SELECT typeof(value) FROM plugin_kv WHERE key = 'text-value'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(storage_class, "text");
     }
 
     #[test]

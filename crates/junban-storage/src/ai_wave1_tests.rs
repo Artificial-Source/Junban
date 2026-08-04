@@ -180,37 +180,74 @@ fn fresh_migrate_reaches_v6_with_disabled_ai_defaults() {
 }
 
 #[test]
-fn current_v6_repairs_and_uses_dispatch_recovery_index() {
+fn current_v7_rejects_missing_v6_authority_without_repair() {
+    for (name, drop_sql) in [
+        (
+            "idx_ai_run_state_state",
+            "DROP INDEX idx_ai_run_state_state;",
+        ),
+        (
+            "idx_ai_messages_daily_briefing_active",
+            "DROP INDEX idx_ai_messages_daily_briefing_active;",
+        ),
+        (
+            "idx_ai_messages_briefing_date",
+            "DROP INDEX idx_ai_messages_briefing_date;",
+        ),
+        (
+            "ai_response_invalidations",
+            "DROP TABLE ai_response_invalidations;",
+        ),
+    ] {
+        let profile = temp_profile();
+        let connection = open_migrated(&profile);
+        connection
+            .execute(
+                "INSERT INTO ai_response_invalidations(
+                    run_id, session_id, invalidating_operation_id, expires_at
+                 ) VALUES ('retained-run', 'retained-session', 'retained-operation',
+                    '2026-08-04T12:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection.execute_batch(drop_sql).unwrap();
+        drop(connection);
+
+        assert!(
+            matches!(
+                ProfileOwner::open(&profile),
+                Err(crate::OpenError::Database(_))
+            ),
+            "{name}"
+        );
+        let connection = Connection::open(profile.join("junban.sqlite3")).unwrap();
+        let exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = ?1)",
+                [name],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!exists, "current-v7 open recreated {name}");
+        if name != "ai_response_invalidations" {
+            let retained: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM ai_response_invalidations",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(retained, 1, "{name}");
+        }
+        drop(connection);
+        fs::remove_dir_all(profile).unwrap();
+    }
+}
+
+#[test]
+fn dispatch_recovery_uses_state_index() {
     let profile = temp_profile();
-    let mut connection = open_migrated(&profile);
-    connection
-        .execute("DROP INDEX idx_ai_run_state_state", [])
-        .unwrap();
-    connection
-        .execute("DROP INDEX idx_ai_messages_daily_briefing_active", [])
-        .unwrap();
-    connection
-        .execute("DROP TABLE ai_response_invalidations", [])
-        .unwrap();
-    migration::migrate(&mut connection, &profile).unwrap();
-    let repaired: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master
-             WHERE (type = 'table' AND name = 'ai_response_invalidations')
-                OR (type = 'index' AND name = 'idx_ai_messages_daily_briefing_active')",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(repaired, 2);
-    let invalidation_foreign_keys: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_foreign_key_list('ai_response_invalidations')",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(invalidation_foreign_keys, 0);
+    let connection = open_migrated(&profile);
     let plan: Vec<String> = connection
         .prepare(
             "EXPLAIN QUERY PLAN SELECT a.id
@@ -230,6 +267,7 @@ fn current_v6_repairs_and_uses_dispatch_recovery_index() {
         "dispatch recovery must search the state index: {}",
         plan.join(" | ")
     );
+    drop(connection);
     fs::remove_dir_all(profile).unwrap();
 }
 

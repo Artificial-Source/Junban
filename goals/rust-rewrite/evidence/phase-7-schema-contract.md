@@ -69,11 +69,11 @@ One exact granted capability/scope:
 | `plugin_id`, `package_generation` | foreign authority; package generation must be current when active                                           |
 | `capability`                      | known canonical capability ID                                                                               |
 | `scope_json`                      | canonical bounded typed scope for event kinds or HTTP origins/methods; empty object for unscoped capability |
-| `scope_hash`                      | SHA-256 of capability + canonical scope; part of primary key                                                |
-| `permission_hash`                 | exact requested-set hash from `plugins`                                                                     |
+| `scope_hash`                      | exact domain-separated, length-framed hash from the JBP1 contract; part of primary key                      |
+| `permission_hash`                 | exact domain-separated, length-framed requested-set hash from `plugins`                                     |
 | `granted_at`                      | canonical timestamp                                                                                         |
 
-A grant is usable only when plugin id, package generation, permission hash, signer, package digest, and requested manifest entry exact-match. Grant/revoke drains current activation epoch and advances it; it does not change package generation. Unknown/extraneous grants make normal open/restore fail closed rather than being ignored.
+The hash preimages and one shared SDK implementation are frozen in [`phase-7-package-contract.md`](phase-7-package-contract.md). A grant is usable only when plugin id, package generation, permission hash, signer, package digest, and requested manifest entry exact-match. Grant/revoke drains current activation epoch and advances it; it does not change package generation. Unknown/extraneous grants make normal open/restore fail closed rather than being ignored.
 
 ### `plugin_publisher_trust`
 

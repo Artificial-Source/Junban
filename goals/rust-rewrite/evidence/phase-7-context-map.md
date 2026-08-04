@@ -259,6 +259,8 @@ Safe clock/random/WASI I/O required by the selected guest toolchain is a declare
 
 ### Package format and trust
 
+The exact JBP1/JRI1 framing, canonical manifest, cryptographic identities, permissions/dependencies/contributions/settings, component import validation, local inspection and publication contract is frozen in [`phase-7-package-contract.md`](phase-7-package-contract.md).
+
 A `.jbp` package is a fixed binary envelope rather than a free-form archive:
 
 ```text

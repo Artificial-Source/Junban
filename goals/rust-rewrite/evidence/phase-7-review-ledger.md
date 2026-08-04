@@ -37,6 +37,17 @@ Planning verdict: **approved**. Wave 0 implementation is authorized. Wave 1 is b
 
 The focused database-plan recheck approved all five corrections. Wave 1 persistence is authorized from the database-plan perspective, but Wave 1 overall remains blocked on the independent measured host-placement architecture gate.
 
+## Package-contract security checkpoint
+
+| ID               | Severity | Status | Finding                                                                                         | Resolution and evidence                                                                                                                                                                                         |
+| ---------------- | -------- | ------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `P7-PKGPLAN-001` | high     | fixed  | Exact-origin HTTP did not freeze DNS pinning, proxy suppression or the non-global IP predicate. | The dedicated client now validates every DNS answer, pins a global address while retaining hostname TLS/SNI/Host, rejects special/mapped/translation forms, and disables proxies/redirects/retries/credentials. |
+| `P7-PKGPLAN-002` | high     | fixed  | Import validation alone did not bind declarations and returned effects to grants.               | The exact declaration/import/outcome matrix now checks current generation/epoch grants before exposure, every import, and final resource-specific commit.                                                       |
+| `P7-PKGPLAN-003` | medium   | fixed  | Capability scope and permission-set hash preimages were ambiguous.                              | Domain-separated u32-length-framed SDK preimages and golden ambiguity vectors are exact authority in package and schema contracts.                                                                              |
+| `P7-PKGPLAN-004` | medium   | fixed  | JRI1 did not freeze exact length/canonical/strict-root verification.                            | JRI1 now requires exact `76 + I`, total cap/trailing rejection, typed reserialization equality, compiled root fingerprint equality and strict Ed25519 verification.                                             |
+
+Initial package-plan verdict: `REVISE`. Focused security recheck: `APPROVE`; all four corrections are fixed and JBP1/JRI1, permission-authority and plugin HTTP implementation are authorized from this security-plan perspective after the separate host-placement architecture gate.
+
 ## Required implementation gates
 
 | Gate                            | Dominant reviewer      | Status  | Acceptance                                                                                                                                                       |

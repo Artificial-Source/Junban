@@ -2,8 +2,8 @@
   "id": "phase-6-local-voice",
   "version": 1,
   "status": "passed",
-  "startedAt": "2026-08-03T21:30:19.250Z",
-  "finishedAt": "2026-08-03T21:31:29.421Z",
+  "startedAt": "2026-08-04T02:25:22.308Z",
+  "finishedAt": "2026-08-04T02:26:33.075Z",
   "browser": {
     "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36",
     "language": "en-US"
@@ -65,9 +65,9 @@
       "primarySha256": "57d4303f3bbc8bb4016273b172285236f5719c75e8a7d23b7265cfa1d71494a4"
     },
     "timing": {
-      "firstDownloadMs": 8553,
-      "warmLoadMs": 6176,
-      "inferMs": 2068
+      "firstDownloadMs": 10424,
+      "warmLoadMs": 6287,
+      "inferMs": 1879
     },
     "transcript": "Then my day.",
     "matchedTokens": [
@@ -92,9 +92,9 @@
       "primarySha256": "fbae9257e1e05ffc727e951ef9b9c98418e6d79f1c9b6b13bd59f5c9028a1478"
     },
     "timing": {
-      "firstDownloadMs": 7374,
-      "warmLoadMs": 3455,
-      "inferMs": 4051
+      "firstDownloadMs": 9029,
+      "warmLoadMs": 3300,
+      "inferMs": 4419
     },
     "format": "pcm-f32",
     "sampleRateHz": 24000,
@@ -119,15 +119,15 @@
       "primarySha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22"
     },
     "timing": {
-      "firstDownloadMs": 4960,
-      "warmLoadMs": 2950,
-      "inferMs": 426
+      "firstDownloadMs": 6749,
+      "warmLoadMs": 2839,
+      "inferMs": 393
     },
     "format": "wav",
     "sampleRateHz": 22050,
     "channels": 1,
-    "byteLength": 45612,
-    "durationSeconds": 1.0332879818594105,
+    "byteLength": 47660,
+    "durationSeconds": 1.0797278911564625,
     "playable": true,
     "error": null
   },
@@ -338,6 +338,6 @@
       "huggingface.co",
       "us.aws.cdn.hf.co"
     ],
-    "runId": "0fae1400-1825-414b-be10-3d0528da9df4"
+    "runId": "d14f5aeb-03f0-4383-83ca-5c97bdf656e1"
   }
 }

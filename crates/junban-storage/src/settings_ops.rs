@@ -278,9 +278,7 @@ fn map_secret_error(error: AiSecretStoreError) -> RepositoryError {
 
 /// Load and validate the typed settings aggregate inside an open transaction.
 /// Reused only by storage mutations that must read defaults atomically with their write.
-pub(crate) fn load_settings_tx(
-    tx: &rusqlite::Transaction<'_>,
-) -> Result<AppSettings, RepositoryError> {
+pub(crate) fn load_settings_tx(tx: &rusqlite::Connection) -> Result<AppSettings, RepositoryError> {
     let json: String = tx
         .query_row(
             "SELECT value_json FROM app_settings WHERE key = ?1",

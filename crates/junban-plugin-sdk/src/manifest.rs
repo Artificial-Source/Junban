@@ -334,6 +334,66 @@ pub enum SettingSchema {
     },
 }
 
+/// Canonical scalar persisted for one non-secret manifest setting.
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(untagged)]
+pub enum SettingValue {
+    Text(String),
+    Integer(i64),
+    Boolean(bool),
+}
+
+impl SettingSchema {
+    /// Validate one SQLite-persistable value against this exact schema.
+    /// Secret text declarations deliberately have no SQLite representation.
+    pub fn validate_persisted_value(&self, value: &SettingValue) -> Result<()> {
+        match (self, value) {
+            (
+                Self::Text {
+                    min_bytes,
+                    max_bytes,
+                    secret: false,
+                    ..
+                },
+                SettingValue::Text(value),
+            ) if value.len() >= usize::from(*min_bytes)
+                && value.len() <= usize::from(*max_bytes)
+                && validate_visible(value, 0, usize::from(*max_bytes), true, "settings.value")
+                    .is_ok() =>
+            {
+                Ok(())
+            }
+            (Self::Integer { min, max, step, .. }, SettingValue::Integer(value))
+                if *step > 0
+                    && value >= min
+                    && value <= max
+                    && (i128::from(*value) - i128::from(*min)) % i128::from(*step) == 0 =>
+            {
+                Ok(())
+            }
+            (Self::Boolean { .. }, SettingValue::Boolean(_)) => Ok(()),
+            (Self::Select { options, .. }, SettingValue::Text(value))
+                if options.iter().any(|option| option.id == *value) =>
+            {
+                Ok(())
+            }
+            _ => Err(SdkError::Manifest { field: "settings" }),
+        }
+    }
+}
+
+impl RuntimeManifest {
+    /// Validate one persisted setting key/value through the manifest authority.
+    pub fn validate_persisted_setting(&self, key: &str, value: &SettingValue) -> Result<()> {
+        let declaration = self
+            .settings
+            .iter()
+            .find(|declaration| declaration.id == key)
+            .ok_or(SdkError::Manifest { field: "settings" })?;
+        declaration.schema.validate_persisted_value(value)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SettingOption {

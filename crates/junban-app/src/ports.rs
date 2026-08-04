@@ -17,12 +17,13 @@ use junban_domain::{
 use crate::{
     AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
     AiSecretBytes, AiSessionCursor, AiSessionListPage, BulkAction, CatalogSnapshot, CommentPatch,
-    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, PreparedAiResponse, ProjectDraft,
-    ProjectListPage, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
-    RepositoryError, ReserveDailyAiResponseRequest, RewriteAiResponseRequest, SavedFilterDraft,
-    SavedFilterPatch, SectionDraft, SectionPatch, StagedFile, TagDraft, TagListPage, TagPatch,
-    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
+    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, PluginRepository,
+    PreparedAiResponse, ProjectDraft, ProjectListPage, ProjectPatch, ReorderScope,
+    ReplanPastBlocksAction, ReplanPastBlocksPreview, RepositoryError,
+    ReserveDailyAiResponseRequest, RewriteAiResponseRequest, SavedFilterDraft, SavedFilterPatch,
+    SectionDraft, SectionPatch, StagedFile, TagDraft, TagListPage, TagPatch, TaskListAsOf,
+    TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch, TemporalContext,
+    TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
     TimeblockingRangeQuery,
 };
 
@@ -37,7 +38,7 @@ pub struct SyncState {
 }
 
 /// Single profile store. Implemented by the SQLite worker owner only.
-pub trait Repository: Send + Sync + 'static {
+pub trait Repository: PluginRepository + Send + Sync + 'static {
     fn create_task(
         &self,
         operation_id: OperationId,

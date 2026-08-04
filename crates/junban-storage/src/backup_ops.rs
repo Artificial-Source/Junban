@@ -33,6 +33,7 @@ use rusqlite::{Connection, MAIN_DB, OptionalExtension, Transaction, backup::Back
 use sha2::{Digest, Sha256};
 
 use crate::migration::{self, CURRENT_SCHEMA_VERSION};
+use crate::plugin_validation;
 use crate::rows::storage_error;
 use crate::{advise_dont_need_pages, ensure_private_dir, set_private_file_permissions};
 
@@ -1840,6 +1841,19 @@ fn validate_event_type(raw: &str) -> Result<(), RepositoryError> {
             | EventType::AI_MEMORY_CHANGED
             | EventType::AI_MEMORY_DELETED
             | EventType::AI_APPROVAL_CHANGED
+            | EventType::PLUGIN_INSTALLED
+            | EventType::PLUGIN_REPLACED
+            | EventType::PLUGIN_UNINSTALLED
+            | EventType::PLUGIN_ENABLED
+            | EventType::PLUGIN_DISABLED
+            | EventType::PLUGIN_RETRY_REQUESTED
+            | EventType::PLUGIN_PUBLISHER_TRUSTED
+            | EventType::PLUGIN_PUBLISHER_REVOKED
+            | EventType::PLUGIN_COMMUNITY_POLICY_UPDATED
+            | EventType::PLUGIN_GRANTS_REPLACED
+            | EventType::PLUGIN_GRANTS_REVOKED
+            | EventType::PLUGIN_SETTING_UPDATED
+            | EventType::PLUGIN_SETTING_DELETED
     ) {
         Ok(())
     } else {
@@ -1880,6 +1894,9 @@ fn validate_subject(
             parse_canonical_ai_id(id, AiRunId::parse).map(|_| ())
         }
         (Some("ai_response_rewrite"), Some("edit" | "retry" | "regenerate")) => Ok(()),
+        (Some("plugin"), Some(id)) => junban_plugin_sdk::PluginId::parse(id)
+            .map(|_| ())
+            .map_err(storage_error),
         (Some("ai_session_memory"), Some(id)) => {
             let (session, memory) = id.split_once(':').ok_or_else(|| {
                 RepositoryError::Storage("invalid AI session-memory subject".to_owned())
@@ -1905,6 +1922,17 @@ fn validate_committed_event(event: &CommittedEvent) -> Result<(), RepositoryErro
         validate_resource_id(primary.resource_type, &primary.id)?;
     }
     validate_task_ids(&event.affected.task_ids)?;
+    if event.affected.plugin_ids.len() > junban_app::PLUGINS_INSTALLED_MAX
+        || event
+            .affected
+            .plugin_ids
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+    {
+        return Err(RepositoryError::Storage(
+            "event affected plugin IDs exceed the bounded contract".to_owned(),
+        ));
+    }
     for count in [
         event.affected.project_ids.len(),
         event.affected.section_ids.len(),
@@ -1949,6 +1977,87 @@ fn validate_committed_event(event: &CommittedEvent) -> Result<(), RepositoryErro
             }
             ResourceSnapshot::TimeBlock { time_block } => validate_time_block_value(time_block)?,
             ResourceSnapshot::TimeSlot { time_slot } => validate_time_slot_value(time_slot)?,
+            ResourceSnapshot::Plugin { plugin } => {
+                junban_plugin_sdk::PluginId::parse(plugin.plugin_id.to_string())
+                    .map_err(storage_error)?;
+                if event.primary.as_ref().is_none_or(|primary| {
+                    primary.resource_type != ResourceType::Plugin
+                        || primary.id != plugin.plugin_id.as_str()
+                }) {
+                    return Err(RepositoryError::Storage(
+                        "plugin event snapshot identity mismatch".to_owned(),
+                    ));
+                }
+                junban_plugin_sdk::compare_versions(&plugin.version, &plugin.version)
+                    .map_err(storage_error)?;
+                let capabilities_canonical = plugin.requested_capabilities.len()
+                    <= junban_plugin_sdk::PERMISSIONS_MAX
+                    && plugin
+                        .requested_capabilities
+                        .windows(2)
+                        .all(|pair| pair[0] < pair[1]);
+                let granted_capabilities_canonical = plugin.granted_capabilities.len()
+                    <= junban_plugin_sdk::PERMISSIONS_MAX
+                    && plugin
+                        .granted_capabilities
+                        .windows(2)
+                        .all(|pair| pair[0] < pair[1])
+                    && plugin
+                        .granted_capabilities
+                        .iter()
+                        .all(|capability| plugin.requested_capabilities.contains(capability));
+                let dependencies_canonical = plugin.dependencies.len()
+                    <= junban_plugin_sdk::PLUGIN_DEPENDENCIES_MAX
+                    && plugin.dependencies.windows(2).all(|pair| pair[0] < pair[1])
+                    && !plugin.dependencies.contains(&plugin.plugin_id);
+                let runtime_state_consistent = match plugin.runtime_state {
+                    junban_app::PluginRuntimeState::Disabled => {
+                        !plugin.desired_enabled && plugin.last_error_code.is_none()
+                    }
+                    junban_app::PluginRuntimeState::Starting
+                    | junban_app::PluginRuntimeState::Active => {
+                        plugin.desired_enabled && plugin.last_error_code.is_none()
+                    }
+                    junban_app::PluginRuntimeState::Degraded
+                    | junban_app::PluginRuntimeState::Failed => {
+                        plugin.desired_enabled && plugin.last_error_code.is_some()
+                    }
+                    junban_app::PluginRuntimeState::Suspended => {
+                        !plugin.desired_enabled && plugin.last_error_code.is_some()
+                    }
+                    junban_app::PluginRuntimeState::ReverifyRequired => !plugin.desired_enabled,
+                };
+                if plugin.name.is_empty()
+                    || plugin.name.len() > 128
+                    || plugin.name != plugin.name.trim()
+                    || plugin.name.chars().any(|character| {
+                        character.is_control()
+                            || matches!(
+                                character,
+                                '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+                            )
+                    })
+                    || plugin.version.is_empty()
+                    || plugin.version.len() > 64
+                    || plugin.package_generation == 0
+                    || plugin.package_generation > i64::MAX as u64
+                    || plugin.activation_epoch > i64::MAX as u64
+                    || !capabilities_canonical
+                    || !granted_capabilities_canonical
+                    || !dependencies_canonical
+                    || !runtime_state_consistent
+                    || (plugin.runtime_state == junban_app::PluginRuntimeState::Active
+                        && !plugin.dependencies_satisfied)
+                    || plugin
+                        .last_error_code
+                        .as_deref()
+                        .is_some_and(|code| !plugin_validation::valid_error_code(code))
+                {
+                    return Err(RepositoryError::Storage(
+                        "invalid plugin event snapshot".to_owned(),
+                    ));
+                }
+            }
         }
     }
     Ok(())
@@ -1970,6 +2079,9 @@ fn validate_resource_id(kind: ResourceType, id: &str) -> Result<(), RepositoryEr
         ResourceType::AiSession => parse_canonical_ai_id(id, AiSessionId::parse).map(|_| ()),
         ResourceType::AiMemory => parse_canonical_ai_id(id, AiMemoryId::parse).map(|_| ()),
         ResourceType::AiApproval => parse_canonical_ai_id(id, AiApprovalId::parse).map(|_| ()),
+        ResourceType::Plugin => junban_plugin_sdk::PluginId::parse(id)
+            .map(|_| ())
+            .map_err(storage_error),
         ResourceType::Relation => Ok(()),
         _ => Err(RepositoryError::Storage(
             "invalid event resource id".to_owned(),
@@ -2460,7 +2572,7 @@ fn sanitize_restored_plugin_state(
                  last_error_code = NULL,
                  next_retry_at = NULL,
                  updated_at = ?1",
-            [&now],
+            [now.as_str()],
         )
         .map_err(storage_error)?;
     let head: i64 = transaction
@@ -2802,13 +2914,13 @@ fn record_post_copy_epoch(connection: &Connection) -> Result<(), RepositoryError
 mod tests {
     use super::*;
     use crate::ProfileOwner;
-    use junban_app::Repository;
+    use junban_app::{PluginRepository, Repository};
     use junban_domain::{
         OperationId, TaskDraft, TaskTitle, frame_backup_envelope, parse_backup_envelope, sha256_hex,
     };
     use junban_plugin_sdk::{
-        Capability, Permission, PermissionScope, Publisher, RuntimeManifest, RuntimeProfile,
-        UnscopedPermission, WitAuthority, scope_hash,
+        Capability, CommandDeclaration, Permission, PermissionScope, Publisher, RuntimeManifest,
+        RuntimeProfile, UnscopedPermission, WitAuthority, scope_hash,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -2987,6 +3099,28 @@ mod tests {
             repo.get_sync_state().await.unwrap().event_epoch,
             epoch_before
         );
+    }
+
+    #[tokio::test]
+    async fn restore_sanitization_advances_to_the_max_epoch_without_overflow() {
+        let _serial = RESTORE_FAULT_TEST_LOCK.lock().await;
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, i64::MAX - 1);
+        let repo = owner.repository();
+        let backup = repo.create_backup().await.unwrap();
+        let candidate = repo.prepare_restore(backup).await.unwrap();
+        repo.restore_backup(candidate).await.unwrap();
+
+        let plugin = repo
+            .get_installed_plugin(junban_plugin_sdk::PluginId::parse("restore-plugin").unwrap())
+            .await
+            .unwrap();
+        assert_eq!(plugin.activation_epoch, i64::MAX as u64);
+        assert_eq!(
+            plugin.runtime_state,
+            junban_app::PluginRuntimeState::ReverifyRequired
+        );
+        assert!(!plugin.desired_enabled);
     }
 
     #[tokio::test]
@@ -3227,11 +3361,17 @@ mod tests {
             runtime_profile: RuntimeProfile::Typescript,
             component_sha256: "11".repeat(32),
             permissions: vec![Permission {
-                capability: Capability::Storage,
+                capability: Capability::Commands,
                 scope: PermissionScope::Unscoped(UnscopedPermission::default()),
             }],
             dependencies: Vec::new(),
-            commands: Vec::new(),
+            commands: vec![CommandDeclaration {
+                id: "run".into(),
+                title: "Run".into(),
+                description: "Run the backup fixture".into(),
+                icon: None,
+                inputs: Vec::new(),
+            }],
             subscriptions: Vec::new(),
             surfaces: Vec::new(),
             settings: Vec::new(),
@@ -3297,9 +3437,14 @@ mod tests {
                 "INSERT INTO plugin_grants(
                     plugin_id, package_generation, capability, scope_json, scope_hash,
                     permission_hash, granted_at
-                 ) VALUES ('restore-plugin', 1, 'storage', ?1, ?2, ?3,
+                 ) VALUES ('restore-plugin', 1, ?1, ?2, ?3, ?4,
                     '2020-08-04T12:00:00Z')",
-                params![scope_json, scope_hash, permission_hash],
+                params![
+                    permission.capability.as_str(),
+                    scope_json,
+                    scope_hash,
+                    permission_hash
+                ],
             )
             .unwrap();
         let public_key = vec![9_u8; 32];
@@ -3333,9 +3478,9 @@ mod tests {
                         operation_id, plugin_id, package_generation, activation_epoch,
                         hook_kind, entry_id, request_hash, delivery_id, state,
                         created_at, updated_at, retain_until
-                     ) VALUES (?1, 'restore-plugin', 1, ?2, 'resync', 'resync', ?3, ?4,
-                        'reserved', '2020-08-04T12:00:00Z', '2020-08-04T12:00:00Z',
-                        '2030-08-05T12:00:00Z')",
+                     ) VALUES (?1, 'restore-plugin', 1, ?2, 'invoke_command', 'run', ?3, ?4,
+                        'reserved', '2020-08-04T12:00:00Z', '2020-08-04T12:01:00Z',
+                        '2020-09-03T12:00:00Z')",
                     params![
                         uuid::Uuid::new_v4().to_string(),
                         activation_epoch,

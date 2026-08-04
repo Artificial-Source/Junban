@@ -2,19 +2,19 @@
 
 use std::collections::BTreeMap;
 
-use jiff::Timestamp;
+use jiff::{Timestamp, ToSpan};
 use junban_app::RepositoryError;
 use junban_domain::{OperationId, TaskId, decode_sha256_hex};
 use junban_plugin_sdk::{
     Capability, DependencyLock, HostFailureCode, InstalledPackage, Permission, PermissionScope,
-    RuntimeManifest, SettingSchema, permission_set_hash, scope_hash, validate_dependency_locks,
-    validate_permission_grants,
+    RuntimeManifest, SettingSchema, SettingValue, permission_set_hash, scope_hash,
+    validate_dependency_locks, validate_permission_grants, validate_signer_public_key,
 };
 use rusqlite::Connection;
 use serde::de::DeserializeOwned;
-use sha2::{Digest, Sha256};
 
 const PLUGINS_MAX: i64 = 64;
+const ENABLED_PLUGINS_MAX: usize = 16;
 const SETTINGS_BYTES_MAX: i64 = 65_536;
 const KV_KEYS_MAX: i64 = 256;
 const KV_VALUE_BYTES_MAX: i64 = 65_536;
@@ -78,11 +78,25 @@ pub(crate) fn validate_plugin_authority(connection: &Connection) -> Result<(), R
 
     let plugins = load_plugins(connection, next_generation)?;
     validate_trust(connection)?;
+    let revoked_enabled: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM plugins AS p
+                JOIN plugin_publisher_trust AS trust ON trust.key_id = p.publisher_key_id
+                WHERE trust.status = 'revoked' AND p.desired_enabled = 1
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(storage)?;
+    if revoked_enabled {
+        return invalid("revoked publisher activation");
+    }
     validate_grants(connection, &plugins)?;
     validate_settings(connection, &plugins)?;
     validate_kv(connection)?;
     validate_locks(connection, &plugins)?;
-    validate_cursors(connection)?;
+    validate_cursors(connection, &plugins)?;
     validate_invocations(connection, &plugins)?;
     Ok(())
 }
@@ -152,14 +166,16 @@ fn load_plugins(
         canonical_hash(&row.component_sha256)?;
         canonical_hash(&row.publisher_key_id)?;
         canonical_hash(&row.permission_hash)?;
-        canonical_timestamp(&row.installed_at)?;
-        canonical_timestamp(&row.updated_at)?;
-        if canonical_timestamp(&row.updated_at)? < canonical_timestamp(&row.installed_at)? {
+        let installed_at = canonical_timestamp(&row.installed_at)?;
+        let updated_at = canonical_timestamp(&row.updated_at)?;
+        if updated_at < installed_at {
             return invalid("installed plugin timestamp order");
         }
-        if let Some(timestamp) = &row.next_retry_at {
-            canonical_timestamp(timestamp)?;
-        }
+        let next_retry_at = row
+            .next_retry_at
+            .as_deref()
+            .map(canonical_timestamp)
+            .transpose()?;
         if row
             .last_error_code
             .as_deref()
@@ -167,8 +183,41 @@ fn load_plugins(
         {
             return invalid("plugin error code");
         }
-        if row.failure_count == 0 && (row.last_error_code.is_some() || row.next_retry_at.is_some())
-        {
+        let runtime_state_consistent = match row.runtime_state.as_str() {
+            "disabled" => {
+                row.desired_enabled == 0
+                    && row.failure_count == 0
+                    && row.last_error_code.is_none()
+                    && row.next_retry_at.is_none()
+            }
+            "starting" | "active" => {
+                row.desired_enabled == 1
+                    && row.failure_count == 0
+                    && row.last_error_code.is_none()
+                    && row.next_retry_at.is_none()
+            }
+            "degraded" | "failed" => {
+                row.desired_enabled == 1
+                    && ((row.runtime_state == "degraded" && row.failure_count == 1)
+                        || (row.runtime_state == "failed" && row.failure_count == 2))
+                    && row.last_error_code.is_some()
+                    && next_retry_at.is_some_and(|retry_at| retry_at > updated_at)
+            }
+            "suspended" => {
+                row.desired_enabled == 0
+                    && row.failure_count == 3
+                    && row.last_error_code.is_some()
+                    && row.next_retry_at.is_none()
+            }
+            "reverify_required" => {
+                row.desired_enabled == 0
+                    && row.next_retry_at.is_none()
+                    && ((row.failure_count == 0 && row.last_error_code.is_none())
+                        || (row.failure_count == 3 && row.last_error_code.is_some()))
+            }
+            _ => false,
+        };
+        if !runtime_state_consistent {
             return invalid("plugin failure authority");
         }
 
@@ -188,6 +237,14 @@ fn load_plugins(
             return invalid("manifest column authority");
         }
         loaded.push(LoadedPlugin { row, manifest });
+    }
+    if loaded
+        .iter()
+        .filter(|plugin| plugin.row.desired_enabled == 1)
+        .count()
+        > ENABLED_PLUGINS_MAX
+    {
+        return invalid("enabled plugin ceiling");
     }
     Ok(loaded)
 }
@@ -215,7 +272,14 @@ fn validate_trust(connection: &Connection) -> Result<(), RepositoryError> {
         let (key_id, public_key, status, trusted_at, revoked_at) = result.map_err(storage)?;
         count += 1;
         canonical_hash(&key_id)?;
-        if public_key.len() != 32 || hash_hex(&Sha256::digest(&public_key)) != key_id {
+        let public_key: [u8; 32] = public_key
+            .try_into()
+            .map_err(|_| invalid_error("publisher key fingerprint"))?;
+        if validate_signer_public_key(&public_key)
+            .map_err(|_| invalid_error("publisher key authority"))?
+            .as_str()
+            != key_id
+        {
             return invalid("publisher key fingerprint");
         }
         match (status.as_str(), revoked_at.as_deref()) {
@@ -340,37 +404,13 @@ fn validate_settings(
 }
 
 fn validate_setting_value(schema: &SettingSchema, raw: &str) -> Result<(), RepositoryError> {
-    let value: serde_json::Value = parse_json(raw, "plugin setting value")?;
+    let value: SettingValue = parse_json(raw, "plugin setting value")?;
     if serde_json::to_string(&value).map_err(storage)? != raw {
         return invalid("canonical plugin setting value");
     }
-    let valid = match schema {
-        SettingSchema::Text {
-            min_bytes,
-            max_bytes,
-            ..
-        } => value.as_str().is_some_and(|text| {
-            text.len() >= usize::from(*min_bytes)
-                && text.len() <= usize::from(*max_bytes)
-                && valid_setting_text(text)
-        }),
-        SettingSchema::Integer { min, max, step, .. } => value.as_i64().is_some_and(|number| {
-            number >= *min
-                && number <= *max
-                && number
-                    .checked_sub(*min)
-                    .is_some_and(|delta| delta % *step == 0)
-        }),
-        SettingSchema::Boolean { .. } => value.is_boolean(),
-        SettingSchema::Select { options, .. } => value
-            .as_str()
-            .is_some_and(|id| options.iter().any(|option| option.id == id)),
-    };
-    if valid {
-        Ok(())
-    } else {
-        invalid("plugin setting type")
-    }
+    schema
+        .validate_persisted_value(&value)
+        .map_err(|_| invalid_error("plugin setting type"))
 }
 
 fn validate_kv(connection: &Connection) -> Result<(), RepositoryError> {
@@ -422,6 +462,16 @@ fn validate_locks(
             package_sha256: &plugin.row.package_sha256,
         })
         .collect();
+    for installed in plugins.iter().filter(|plugin| {
+        plugin.row.desired_enabled == 1
+            && !matches!(plugin.row.runtime_state.as_str(), "starting" | "suspended")
+    }) {
+        for dependency in &installed.manifest.dependencies {
+            if plugin(plugins, &dependency.id)?.row.desired_enabled != 1 {
+                return invalid("plugin dependency lifecycle authority");
+            }
+        }
+    }
     let mut statement = connection
         .prepare(
             "SELECT plugin_id, dependency_id, version_requirement, resolved_version,
@@ -467,7 +517,10 @@ fn validate_locks(
         .map_err(|_| invalid_error("plugin dependency authority"))
 }
 
-fn validate_cursors(connection: &Connection) -> Result<(), RepositoryError> {
+fn validate_cursors(
+    connection: &Connection,
+    plugins: &[LoadedPlugin],
+) -> Result<(), RepositoryError> {
     let (event_epoch, head): (String, i64) = connection
         .query_row(
             "SELECT event_epoch, global_revision FROM app_state WHERE singleton = 1",
@@ -478,7 +531,7 @@ fn validate_cursors(connection: &Connection) -> Result<(), RepositoryError> {
     canonical_uuid(&event_epoch)?;
     let mut statement = connection
         .prepare(
-            "SELECT event_epoch, revision, resync_required, updated_at
+            "SELECT plugin_id, event_epoch, revision, resync_required, updated_at
              FROM plugin_event_cursors ORDER BY plugin_id",
         )
         .map_err(storage)?;
@@ -486,23 +539,37 @@ fn validate_cursors(connection: &Connection) -> Result<(), RepositoryError> {
         .query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
+                row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
-                row.get::<_, String>(3)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
             ))
         })
         .map_err(storage)?;
+    let mut cursor_plugins = Vec::new();
     for result in rows {
-        let (cursor_epoch, revision, resync_required, updated_at) = result.map_err(storage)?;
+        let (plugin_id, cursor_epoch, revision, resync_required, updated_at) =
+            result.map_err(storage)?;
         canonical_uuid(&cursor_epoch)?;
         canonical_timestamp(&updated_at)?;
+        let authority = plugin(plugins, &plugin_id)?;
         if revision < 0
             || revision > head
             || !strict_bool(resync_required)
             || (cursor_epoch != event_epoch && resync_required != 1)
+            || (resync_required == 1 && authority.row.runtime_state == "active")
         {
             return invalid("plugin event cursor");
         }
+        cursor_plugins.push(plugin_id);
+    }
+    if cursor_plugins.len() != plugins.len()
+        || cursor_plugins
+            .iter()
+            .zip(plugins)
+            .any(|(cursor_plugin, plugin)| cursor_plugin != &plugin.row.plugin_id)
+    {
+        return invalid("plugin event cursor completeness");
     }
     Ok(())
 }
@@ -519,7 +586,7 @@ fn validate_invocations(
             "SELECT operation_id, plugin_id, package_generation, activation_epoch,
                     hook_kind, entry_id, request_hash, delivery_id, state, error_code,
                     created_at, updated_at, retain_until,
-                    LENGTH(CAST(operation_id AS BLOB)) + LENGTH(CAST(plugin_id AS BLOB))
+                    LENGTH(CAST(operation_id AS BLOB)) + LENGTH(CAST(plugin_id AS BLOB)) + 16
                       + LENGTH(CAST(hook_kind AS BLOB)) + LENGTH(CAST(entry_id AS BLOB))
                       + LENGTH(CAST(request_hash AS BLOB)) + LENGTH(CAST(delivery_id AS BLOB))
                       + LENGTH(CAST(state AS BLOB)) + COALESCE(LENGTH(CAST(error_code AS BLOB)), 0)
@@ -550,6 +617,7 @@ fn validate_invocations(
         if package_generation != plugin.row.package_generation
             || activation_epoch <= 0
             || activation_epoch != plugin.row.activation_epoch
+            || (plugin.row.desired_enabled != 1 && state != "ambiguous_http")
             || !matches!(
                 state.as_str(),
                 "reserved" | "dispatching_http" | "effect_committing" | "ambiguous_http"
@@ -560,14 +628,93 @@ fn validate_invocations(
         {
             return invalid("plugin invocation fence");
         }
+        let http_state = matches!(state.as_str(), "dispatching_http" | "ambiguous_http");
+        let http_requested = plugin
+            .manifest
+            .permissions
+            .iter()
+            .any(|permission| permission.capability == Capability::Http);
+        let http_granted = if state == "dispatching_http" {
+            connection
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM plugin_grants
+                        WHERE plugin_id = ?1 AND package_generation = ?2
+                          AND capability = 'http'
+                     )",
+                    rusqlite::params![plugin_id.as_str(), package_generation],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(storage)?
+        } else {
+            false
+        };
+        let cursor_resync_required: bool = connection
+            .query_row(
+                "SELECT resync_required FROM plugin_event_cursors WHERE plugin_id = ?1",
+                [plugin_id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        let runtime_admits_invocation = state == "ambiguous_http"
+            || if hook_kind == "resync" {
+                plugin.row.runtime_state == "starting" && cursor_resync_required
+            } else {
+                !cursor_resync_required
+                    && matches!(
+                        plugin.row.runtime_state.as_str(),
+                        "active" | "degraded" | "failed"
+                    )
+            };
+        if !runtime_admits_invocation
+            || (state == "ambiguous_http") != (error_code.as_deref() == Some("http_ambiguous"))
+            || (http_state
+                && (hook_kind == "resync"
+                    || !http_requested
+                    || (state == "dispatching_http" && !http_granted)))
+            || (state != "ambiguous_http" && error_code.is_some())
+        {
+            return invalid("plugin invocation transition authority");
+        }
         canonical_operation_id(&operation_id)?;
         canonical_operation_id(&delivery_id)?;
         canonical_hash(&request_hash)?;
-        validate_hook(plugin, &hook_kind, &entry_id)?;
+        if let Some(capability) = validate_hook(plugin, &hook_kind, &entry_id)?
+            && state != "ambiguous_http"
+        {
+            let granted: bool = connection
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM plugin_grants
+                        WHERE plugin_id = ?1 AND capability = ?2
+                     )",
+                    rusqlite::params![plugin.row.plugin_id, capability],
+                    |row| row.get(0),
+                )
+                .map_err(storage)?;
+            if !granted {
+                return invalid("plugin invocation capability fence");
+            }
+        }
         let created = canonical_timestamp(&created_at)?;
         let updated = canonical_timestamp(&updated_at)?;
         let retained = canonical_timestamp(&retain_until)?;
-        if created > updated || updated > retained {
+        if state != "ambiguous_http"
+            && matches!(plugin.row.runtime_state.as_str(), "degraded" | "failed")
+            && plugin
+                .row
+                .next_retry_at
+                .as_deref()
+                .map(canonical_timestamp)
+                .transpose()?
+                .is_none_or(|retry_at| updated < retry_at)
+        {
+            return invalid("plugin invocation retry authority");
+        }
+        let retention_limit = created
+            .checked_add((30 * 24).hours())
+            .map_err(|_| invalid_error("plugin invocation retention"))?;
+        if created > updated || updated > retained || retained > retention_limit {
             return invalid("plugin invocation timestamp order");
         }
         let aggregate = aggregates.entry(plugin_id).or_default();
@@ -593,32 +740,46 @@ fn validate_hook(
     plugin: &LoadedPlugin,
     hook_kind: &str,
     entry_id: &str,
-) -> Result<(), RepositoryError> {
-    let found = match hook_kind {
-        "invoke_command" => plugin
-            .manifest
-            .commands
-            .iter()
-            .any(|command| command.id == entry_id),
-        "handle_event" => plugin.manifest.subscriptions.iter().any(|event| {
-            serde_json::to_string(event)
-                .ok()
-                .and_then(|json| json.strip_prefix('"')?.strip_suffix('"').map(str::to_owned))
-                .is_some_and(|id| id == entry_id)
-        }),
-        "handle_surface_action" => plugin
-            .manifest
-            .surfaces
-            .iter()
-            .any(|surface| surface.actions.iter().any(|action| action == entry_id)),
-        "resync" => entry_id == "resync",
-        _ => false,
+) -> Result<Option<&'static str>, RepositoryError> {
+    let capability = match hook_kind {
+        "invoke_command"
+            if plugin
+                .manifest
+                .commands
+                .iter()
+                .any(|command| command.id == entry_id) =>
+        {
+            Some(Capability::Commands.as_str())
+        }
+        "handle_event"
+            if plugin.manifest.subscriptions.iter().any(|event| {
+                serde_json::to_string(event)
+                    .ok()
+                    .and_then(|json| json.strip_prefix('"')?.strip_suffix('"').map(str::to_owned))
+                    .is_some_and(|id| id == entry_id)
+            }) =>
+        {
+            Some(Capability::EventsSubscribe.as_str())
+        }
+        "handle_surface_action" => {
+            let Some(surface) = plugin
+                .manifest
+                .surfaces
+                .iter()
+                .find(|surface| surface.actions.iter().any(|action| action == entry_id))
+            else {
+                return invalid("plugin invocation hook");
+            };
+            Some(match surface.kind {
+                junban_plugin_sdk::SurfaceKind::View => Capability::UiView.as_str(),
+                junban_plugin_sdk::SurfaceKind::Panel => Capability::UiPanel.as_str(),
+                junban_plugin_sdk::SurfaceKind::Status => Capability::UiStatus.as_str(),
+            })
+        }
+        "resync" if entry_id == "resync" => None,
+        _ => return invalid("plugin invocation hook"),
     };
-    if found {
-        Ok(())
-    } else {
-        invalid("plugin invocation hook")
-    }
+    Ok(capability)
 }
 
 fn plugin<'a>(
@@ -631,7 +792,7 @@ fn plugin<'a>(
         .map_err(|_| invalid_error("plugin foreign authority"))
 }
 
-fn valid_error_code(code: &str) -> bool {
+pub(crate) fn valid_error_code(code: &str) -> bool {
     let host_code = serde_json::from_str::<HostFailureCode>(&format!("\"{code}\""));
     host_code.is_ok()
         || matches!(
@@ -662,14 +823,6 @@ fn valid_kv_key(value: &str) -> bool {
     !value.chars().any(|character| {
         character.is_control()
             || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-    })
-}
-
-fn valid_setting_text(value: &str) -> bool {
-    !value.chars().any(|character| {
-        character == '\0'
-            || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-            || (character.is_control() && character != '\n' && character != '\t')
     })
 }
 
@@ -844,6 +997,16 @@ mod tests {
                 ],
             )
             .unwrap();
+        connection
+            .execute(
+                "INSERT INTO plugin_event_cursors(
+                    plugin_id, event_epoch, revision, resync_required, updated_at
+                 ) SELECT 'test-plugin', event_epoch, global_revision, 0,
+                          '2026-08-04T12:00:00Z'
+                   FROM app_state WHERE singleton = 1",
+                [],
+            )
+            .unwrap();
     }
 
     fn fresh_connection(profile: &TempProfile) -> Connection {
@@ -862,6 +1025,109 @@ mod tests {
         validate_plugin_authority(&connection).unwrap();
         seed_plugin(&connection);
         validate_plugin_authority(&connection).unwrap();
+    }
+
+    #[test]
+    fn cursor_runtime_and_invocation_transition_authority_fail_without_repair() {
+        let profile = TempProfile::new();
+        let connection = fresh_connection(&profile);
+        seed_plugin(&connection);
+
+        connection
+            .execute(
+                "DELETE FROM plugin_event_cursors WHERE plugin_id = 'test-plugin'",
+                [],
+            )
+            .unwrap();
+        assert!(validate_plugin_authority(&connection).is_err());
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>("SELECT COUNT(*) FROM plugin_event_cursors", [], |row| {
+                    row.get(0)
+                })
+                .unwrap(),
+            0
+        );
+        connection
+            .execute(
+                "INSERT INTO plugin_event_cursors(
+                    plugin_id, event_epoch, revision, resync_required, updated_at
+                 ) SELECT 'test-plugin', event_epoch, global_revision, 1,
+                          '2026-08-04T12:00:00Z'
+                   FROM app_state WHERE singleton = 1",
+                [],
+            )
+            .unwrap();
+        assert!(validate_plugin_authority(&connection).is_err());
+        connection
+            .execute(
+                "UPDATE plugins SET runtime_state = 'starting' WHERE plugin_id = 'test-plugin'",
+                [],
+            )
+            .unwrap();
+        validate_plugin_authority(&connection).unwrap();
+
+        connection
+            .execute(
+                "UPDATE plugins SET desired_enabled = 0 WHERE plugin_id = 'test-plugin'",
+                [],
+            )
+            .unwrap();
+        assert!(validate_plugin_authority(&connection).is_err());
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT desired_enabled FROM plugins WHERE plugin_id = 'test-plugin'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            0
+        );
+        connection
+            .execute(
+                "UPDATE plugins SET desired_enabled = 1, runtime_state = 'starting'
+                 WHERE plugin_id = 'test-plugin'",
+                [],
+            )
+            .unwrap();
+
+        let insert_invocation = |retain_until: &str, error_code: Option<&str>| {
+            connection.execute(
+                "INSERT INTO plugin_invocations(
+                    operation_id, plugin_id, package_generation, activation_epoch,
+                    hook_kind, entry_id, request_hash, delivery_id, state, error_code,
+                    created_at, updated_at, retain_until
+                 ) VALUES (
+                    '70000000-0000-7000-8000-000000000011', 'test-plugin', 1, 4,
+                    'resync', 'resync', ?1,
+                    '70000000-0000-7000-8000-000000000012', 'reserved', ?2,
+                    '2026-08-04T12:00:00Z', '2026-08-04T12:00:00Z', ?3
+                 )",
+                rusqlite::params!["00".repeat(32), error_code, retain_until],
+            )
+        };
+        insert_invocation("2026-09-03T12:00:00Z", None).unwrap();
+        validate_plugin_authority(&connection).unwrap();
+        connection
+            .execute("DELETE FROM plugin_invocations", [])
+            .unwrap();
+
+        insert_invocation("2026-09-04T12:00:00Z", None).unwrap();
+        assert!(validate_plugin_authority(&connection).is_err());
+        connection
+            .execute("DELETE FROM plugin_invocations", [])
+            .unwrap();
+        insert_invocation("2026-09-03T12:00:00Z", Some("timeout")).unwrap();
+        assert!(validate_plugin_authority(&connection).is_err());
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>("SELECT COUNT(*) FROM plugin_invocations", [], |row| {
+                    row.get(0)
+                })
+                .unwrap(),
+            1
+        );
     }
 
     #[test]
@@ -1007,11 +1273,11 @@ mod tests {
         let transaction = connection.unchecked_transaction().unwrap();
         transaction
             .execute(
-                "INSERT INTO plugin_event_cursors(
-                    plugin_id, event_epoch, revision, resync_required, updated_at
-                 ) SELECT 'test-plugin', event_epoch, global_revision + 1, 0,
-                          '2020-08-04T12:00:00Z'
-                   FROM app_state WHERE singleton = 1",
+                "UPDATE plugin_event_cursors
+                 SET revision = (
+                    SELECT global_revision + 1 FROM app_state WHERE singleton = 1
+                 ), resync_required = 0
+                 WHERE plugin_id = 'test-plugin'",
                 [],
             )
             .unwrap();

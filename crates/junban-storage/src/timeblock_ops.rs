@@ -13,7 +13,7 @@ use junban_domain::{
     ProjectId, RecurrenceRule, TaskId, TimeBlock, TimeBlockDraft, TimeBlockId, TimeSlot,
     TimeSlotDraft, TimeSlotId, TimeZoneName, replan_window, validate_timeblock_date_range,
 };
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 use crate::helpers::{constraint_conflict, validation};
@@ -554,7 +554,7 @@ pub(crate) fn replan_past_blocks(
 }
 
 fn load_replan_eligible_ids(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     window_start: Date,
     window_end: Date,
 ) -> Result<Vec<TimeBlockId>, RepositoryError> {
@@ -584,7 +584,7 @@ fn ensure_civil_range(range: &CivilTimeRange) -> Result<(), RepositoryError> {
 }
 
 fn load_block_ids_for_slot(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     slot_id: TimeSlotId,
 ) -> Result<Vec<TimeBlockId>, RepositoryError> {
     let mut statement = tx
@@ -607,7 +607,7 @@ fn load_block_ids_for_slot(
 }
 
 fn validate_block_refs(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_id: Option<TaskId>,
     slot_id: Option<TimeSlotId>,
 ) -> Result<(), RepositoryError> {
@@ -622,7 +622,7 @@ fn validate_block_refs(
     Ok(())
 }
 
-fn ensure_slot_exists(tx: &Transaction<'_>, slot_id: TimeSlotId) -> Result<(), RepositoryError> {
+fn ensure_slot_exists(tx: &Connection, slot_id: TimeSlotId) -> Result<(), RepositoryError> {
     let found: Option<i64> = tx
         .query_row(
             "SELECT 1 FROM time_slots WHERE id = ?1",
@@ -698,7 +698,7 @@ fn apply_slot_patch(slot: &mut TimeSlot, patch: &TimeSlotPatch) -> Result<(), Re
     Ok(())
 }
 
-fn insert_time_block(tx: &Transaction<'_>, block: &TimeBlock) -> Result<(), RepositoryError> {
+fn insert_time_block(tx: &Connection, block: &TimeBlock) -> Result<(), RepositoryError> {
     tx.execute(
         "INSERT INTO time_blocks(
             id, task_id, slot_id, title, civil_date, start_time, end_time, timezone,
@@ -726,7 +726,7 @@ fn insert_time_block(tx: &Transaction<'_>, block: &TimeBlock) -> Result<(), Repo
     Ok(())
 }
 
-fn update_time_block_row(tx: &Transaction<'_>, block: &TimeBlock) -> Result<(), RepositoryError> {
+fn update_time_block_row(tx: &Connection, block: &TimeBlock) -> Result<(), RepositoryError> {
     let changed = tx
         .execute(
             "UPDATE time_blocks SET
@@ -759,7 +759,7 @@ fn update_time_block_row(tx: &Transaction<'_>, block: &TimeBlock) -> Result<(), 
     Ok(())
 }
 
-fn insert_time_slot(tx: &Transaction<'_>, slot: &TimeSlot) -> Result<(), RepositoryError> {
+fn insert_time_slot(tx: &Connection, slot: &TimeSlot) -> Result<(), RepositoryError> {
     tx.execute(
         "INSERT INTO time_slots(
             id, title, project_id, civil_date, start_time, end_time, timezone, color,
@@ -785,13 +785,13 @@ fn insert_time_slot(tx: &Transaction<'_>, slot: &TimeSlot) -> Result<(), Reposit
     Ok(())
 }
 
-fn update_time_slot_row(tx: &Transaction<'_>, slot: &TimeSlot) -> Result<(), RepositoryError> {
+fn update_time_slot_row(tx: &Connection, slot: &TimeSlot) -> Result<(), RepositoryError> {
     update_time_slot_meta(tx, slot)?;
     rewrite_slot_membership(tx, slot.id, slot.task_ids.as_slice())?;
     Ok(())
 }
 
-fn update_time_slot_meta(tx: &Transaction<'_>, slot: &TimeSlot) -> Result<(), RepositoryError> {
+fn update_time_slot_meta(tx: &Connection, slot: &TimeSlot) -> Result<(), RepositoryError> {
     let changed = tx
         .execute(
             "UPDATE time_slots SET
@@ -822,7 +822,7 @@ fn update_time_slot_meta(tx: &Transaction<'_>, slot: &TimeSlot) -> Result<(), Re
 }
 
 fn rewrite_slot_membership(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     slot_id: TimeSlotId,
     task_ids: &[TaskId],
 ) -> Result<(), RepositoryError> {
@@ -846,7 +846,7 @@ fn rewrite_slot_membership(
 }
 
 pub(crate) fn load_time_block(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     id: TimeBlockId,
 ) -> Result<TimeBlock, RepositoryError> {
     tx.query_row(
@@ -859,10 +859,7 @@ pub(crate) fn load_time_block(
     .map_err(map_not_found)
 }
 
-pub(crate) fn load_time_slot(
-    tx: &Transaction<'_>,
-    id: TimeSlotId,
-) -> Result<TimeSlot, RepositoryError> {
+pub(crate) fn load_time_slot(tx: &Connection, id: TimeSlotId) -> Result<TimeSlot, RepositoryError> {
     let mut slot = tx
         .query_row(
             "SELECT id, title, project_id, civil_date, start_time, end_time, timezone, color,
@@ -877,7 +874,7 @@ pub(crate) fn load_time_slot(
 }
 
 fn load_slot_membership(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     slot_id: TimeSlotId,
 ) -> Result<junban_domain::OrderedSlotMembership, RepositoryError> {
     let mut statement = tx
@@ -1008,7 +1005,7 @@ fn task_id_placeholders(task_ids: &[TaskId]) -> (String, Vec<String>) {
 
 /// Capture exact planning links owned by `task_ids` before a task-closure delete.
 pub(crate) fn load_planning_links_for_tasks(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_ids: &[TaskId],
 ) -> Result<(Vec<ClosureSlotMembership>, Vec<ClosureBlockLink>), RepositoryError> {
     if task_ids.is_empty() {
@@ -1089,7 +1086,7 @@ pub(crate) struct PlanningDetachResult {
 /// Compacts each affected slot's remaining positions and stamps slot/block
 /// `updated_at`/`revision` with the delete mutation values. Does not delete tasks.
 pub(crate) fn detach_planning_links_for_tasks(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_ids: &[TaskId],
     now: Timestamp,
     revision: u64,
@@ -1168,7 +1165,7 @@ pub(crate) fn detach_planning_links_for_tasks(
 /// Callers must have already validated delete post-image slot/block state. Updates
 /// affected metadata to the undo mutation values and returns affected IDs.
 pub(crate) fn restore_planning_links(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     memberships: &[ClosureSlotMembership],
     block_links: &[ClosureBlockLink],
     now: Timestamp,

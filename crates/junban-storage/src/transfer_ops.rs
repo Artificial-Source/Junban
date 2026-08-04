@@ -17,7 +17,7 @@ use junban_domain::{
     TagName, Task, TaskActivityAction, TaskDraft, TaskId, TransferApply, TransferFormat,
     TransferPreview, draft_to_task_fields, preview_transfer,
 };
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 use crate::helpers::{validate_task_refs, validation};
@@ -589,7 +589,7 @@ fn mapping_table(pairs: &[(String, String)]) -> HashMap<String, String> {
 }
 
 fn ensure_project_named(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     name: &str,
     now: Timestamp,
 ) -> Result<(ProjectId, bool), RepositoryError> {
@@ -624,7 +624,7 @@ fn ensure_project_named(
 }
 
 fn ensure_tag_named(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     name: &str,
     now: Timestamp,
 ) -> Result<(TagId, bool), RepositoryError> {

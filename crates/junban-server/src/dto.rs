@@ -25,10 +25,17 @@ use junban_domain::{
     WeeklyDayStats, WeeklyReviewSummary, WeeklySuggestion, WorkHours,
 };
 use serde::{Deserialize, Serialize};
-use utoipa::{IntoParams, ToSchema};
+use utoipa::{
+    IntoParams, PartialSchema, ToSchema,
+    openapi::{RefOr, Schema},
+};
 
 use crate::RequestId;
 use crate::cursor::encode_task_cursor;
+
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
 use crate::error::{ApiError, validation_error};
 
 // ── shared primitives ──────────────────────────────────────────────────────
@@ -1329,7 +1336,7 @@ pub struct TaskActivityResponse {
 
 // ── events / mutations ─────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceTypeDto {
     Task,
@@ -1347,7 +1354,39 @@ pub enum ResourceTypeDto {
     AiSession,
     AiMemory,
     AiApproval,
+    Plugin,
 }
+
+// Wave 1 persists plugin events but deliberately does not add them to the HTTP/OpenAPI
+// contract. Keep the existing public schema until the transport wave owns that change.
+#[allow(dead_code)]
+#[derive(ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum PublicResourceTypeSchema {
+    Task,
+    Project,
+    Section,
+    Tag,
+    Template,
+    SavedFilter,
+    Comment,
+    Relation,
+    Operation,
+    TimeBlock,
+    TimeSlot,
+    Settings,
+    AiSession,
+    AiMemory,
+    AiApproval,
+}
+
+impl PartialSchema for ResourceTypeDto {
+    fn schema() -> RefOr<Schema> {
+        PublicResourceTypeSchema::schema()
+    }
+}
+
+impl ToSchema for ResourceTypeDto {}
 
 impl From<ResourceType> for ResourceTypeDto {
     fn from(value: ResourceType) -> Self {
@@ -1367,6 +1406,7 @@ impl From<ResourceType> for ResourceTypeDto {
             ResourceType::AiSession => Self::AiSession,
             ResourceType::AiMemory => Self::AiMemory,
             ResourceType::AiApproval => Self::AiApproval,
+            ResourceType::Plugin => Self::Plugin,
         }
     }
 }
@@ -1386,7 +1426,7 @@ impl From<ResourceRef> for ResourceRefDto {
     }
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "resource_type", rename_all = "snake_case")]
 pub enum ResourceSnapshotDto {
     Task { task: TaskDto },
@@ -1398,7 +1438,31 @@ pub enum ResourceSnapshotDto {
     Comment { comment: CommentDto },
     TimeBlock { time_block: TimeBlockDto },
     TimeSlot { time_slot: TimeSlotDto },
+    Plugin { plugin: PluginSummaryDto },
 }
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+#[serde(tag = "resource_type", rename_all = "snake_case")]
+enum PublicResourceSnapshotSchema {
+    Task { task: TaskDto },
+    Project { project: ProjectDto },
+    Section { section: SectionDto },
+    Tag { tag: TagDto },
+    Template { template: TemplateDto },
+    SavedFilter { saved_filter: SavedFilterDto },
+    Comment { comment: CommentDto },
+    TimeBlock { time_block: TimeBlockDto },
+    TimeSlot { time_slot: TimeSlotDto },
+}
+
+impl PartialSchema for ResourceSnapshotDto {
+    fn schema() -> RefOr<Schema> {
+        PublicResourceSnapshotSchema::schema()
+    }
+}
+
+impl ToSchema for ResourceSnapshotDto {}
 
 impl From<ResourceSnapshot> for ResourceSnapshotDto {
     fn from(value: ResourceSnapshot) -> Self {
@@ -1426,6 +1490,65 @@ impl From<ResourceSnapshot> for ResourceSnapshotDto {
             ResourceSnapshot::TimeSlot { time_slot } => Self::TimeSlot {
                 time_slot: time_slot.into(),
             },
+            ResourceSnapshot::Plugin { plugin } => Self::Plugin {
+                plugin: plugin.into(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PluginSummaryDto {
+    pub plugin_id: String,
+    pub name: String,
+    pub version: String,
+    pub package_generation: u64,
+    pub activation_epoch: u64,
+    pub desired_enabled: bool,
+    pub runtime_state: String,
+    pub requested_capabilities: Vec<String>,
+    pub granted_capabilities: Vec<String>,
+    pub dependencies: Vec<String>,
+    pub dependencies_satisfied: bool,
+    pub last_error_code: Option<String>,
+}
+
+impl From<junban_app::PluginSummary> for PluginSummaryDto {
+    fn from(value: junban_app::PluginSummary) -> Self {
+        Self {
+            plugin_id: value.plugin_id.to_string(),
+            name: value.name,
+            version: value.version,
+            package_generation: value.package_generation,
+            activation_epoch: value.activation_epoch,
+            desired_enabled: value.desired_enabled,
+            runtime_state: match value.runtime_state {
+                junban_app::PluginRuntimeState::Disabled => "disabled",
+                junban_app::PluginRuntimeState::Starting => "starting",
+                junban_app::PluginRuntimeState::Active => "active",
+                junban_app::PluginRuntimeState::Degraded => "degraded",
+                junban_app::PluginRuntimeState::Failed => "failed",
+                junban_app::PluginRuntimeState::Suspended => "suspended",
+                junban_app::PluginRuntimeState::ReverifyRequired => "reverify_required",
+            }
+            .to_owned(),
+            requested_capabilities: value
+                .requested_capabilities
+                .into_iter()
+                .map(|capability| capability.as_str().to_owned())
+                .collect(),
+            granted_capabilities: value
+                .granted_capabilities
+                .into_iter()
+                .map(|capability| capability.as_str().to_owned())
+                .collect(),
+            dependencies: value
+                .dependencies
+                .into_iter()
+                .map(|dependency| dependency.to_string())
+                .collect(),
+            dependencies_satisfied: value.dependencies_satisfied,
+            last_error_code: value.last_error_code,
         }
     }
 }
@@ -1876,6 +1999,9 @@ pub struct AffectedIdsDto {
     pub time_block_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub time_slot_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(ignore)]
+    pub plugin_ids: Vec<String>,
 }
 
 impl From<AffectedIds> for AffectedIdsDto {
@@ -1902,6 +2028,7 @@ impl From<AffectedIds> for AffectedIdsDto {
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
+            plugin_ids: value.plugin_ids.iter().map(ToString::to_string).collect(),
         }
     }
 }
@@ -1911,6 +2038,9 @@ pub struct ResyncScopeDto {
     pub tasks: bool,
     pub catalog: bool,
     pub settings: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schema(ignore)]
+    pub plugins: bool,
 }
 
 impl From<ResyncScope> for ResyncScopeDto {
@@ -1919,6 +2049,7 @@ impl From<ResyncScope> for ResyncScopeDto {
             tasks: value.tasks,
             catalog: value.catalog,
             settings: value.settings,
+            plugins: value.plugins,
         }
     }
 }

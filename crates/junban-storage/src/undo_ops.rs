@@ -47,7 +47,7 @@ fn missing_as_conflict(error: RepositoryError) -> RepositoryError {
 }
 
 fn validate_generated_task_references(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     generated_ids: &[TaskId],
     post: &PostImage,
 ) -> Result<(), RepositoryError> {
@@ -134,7 +134,7 @@ fn validate_generated_task_references(
 }
 
 pub(crate) fn validate_inverse_post_image(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     inverse: &Inverse,
     post: &PostImage,
 ) -> Result<(), RepositoryError> {
@@ -252,7 +252,7 @@ pub(crate) fn validate_inverse_post_image(
 }
 
 fn restore_closure(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     closure: &TaskClosure,
     now: Timestamp,
     revision: u64,
@@ -368,7 +368,7 @@ pub(crate) struct InverseApply {
 }
 
 fn validate_import_catalog_ownership(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     task_ids: &[TaskId],
     projects: &[Project],
     tags: &[Tag],
@@ -430,7 +430,7 @@ fn validate_import_catalog_ownership(
 }
 
 fn insert_import_project(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     project: &Project,
 ) -> Result<(), RepositoryError> {
     tx.execute(
@@ -458,7 +458,7 @@ fn insert_import_project(
     Ok(())
 }
 
-fn insert_import_tag(tx: &rusqlite::Transaction<'_>, tag: &Tag) -> Result<(), RepositoryError> {
+fn insert_import_tag(tx: &rusqlite::Connection, tag: &Tag) -> Result<(), RepositoryError> {
     tx.execute(
         "INSERT INTO tags(id,name,name_normalized,color,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6)",
         params![
@@ -475,7 +475,7 @@ fn insert_import_tag(tx: &rusqlite::Transaction<'_>, tag: &Tag) -> Result<(), Re
 }
 
 pub(crate) fn apply_inverse(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     inverse: &Inverse,
     now: Timestamp,
     revision: u64,
@@ -950,7 +950,7 @@ pub(crate) fn apply_inverse(
 }
 
 fn capture_redo_post(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     affected: &AffectedIds,
     now: Timestamp,
 ) -> Result<PostImage, RepositoryError> {

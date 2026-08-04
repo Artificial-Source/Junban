@@ -1882,3 +1882,95 @@ proptest! {
         let _ = decode_child_frame(&bytes);
     }
 }
+
+#[test]
+fn plugin_identity_and_version_authorities_are_canonical() {
+    let plugin_id = PluginId::parse("plugin-2").unwrap();
+    assert_eq!(plugin_id.as_str(), "plugin-2");
+    for invalid in ["", "Plugin", "plugin--two", "plugin-", "plugin_two"] {
+        assert!(PluginId::parse(invalid).is_err(), "accepted {invalid:?}");
+    }
+    assert!(PluginId::parse("a".repeat(65)).is_err());
+
+    let digest = Sha256Digest::of(b"authority");
+    assert_eq!(digest.as_str().len(), 64);
+    assert!(Sha256Digest::parse(digest.as_str().to_uppercase()).is_err());
+    assert!(Sha256Digest::parse("0".repeat(63)).is_err());
+    let public_key = test_key().verifying_key().to_bytes();
+    assert_eq!(
+        validate_signer_public_key(&public_key).unwrap(),
+        signer_key_id(&public_key)
+    );
+    assert_eq!(
+        serde_json::from_str::<Sha256Digest>(&format!("\"{digest}\"")).unwrap(),
+        digest
+    );
+
+    assert_eq!(
+        compare_versions("1.2.3", "1.3.0").unwrap(),
+        std::cmp::Ordering::Less
+    );
+    assert!(compare_versions("1.2", "1.3.0").is_err());
+    assert!(version_matches("^1.2", "1.9.0").unwrap());
+    assert!(!version_matches("^1.2", "2.0.0").unwrap());
+}
+
+#[test]
+fn persisted_setting_validation_rejects_secrets_types_controls_and_bad_steps() {
+    let visible = SettingSchema::Text {
+        default: String::new(),
+        min_bytes: 1,
+        max_bytes: 8,
+        secret: false,
+    };
+    assert!(
+        visible
+            .validate_persisted_value(&SettingValue::Text("value".into()))
+            .is_ok()
+    );
+    assert!(
+        visible
+            .validate_persisted_value(&SettingValue::Text("bad\0".into()))
+            .is_err()
+    );
+    assert!(
+        visible
+            .validate_persisted_value(&SettingValue::Boolean(true))
+            .is_err()
+    );
+
+    let secret = SettingSchema::Text {
+        default: String::new(),
+        min_bytes: 0,
+        max_bytes: 8,
+        secret: true,
+    };
+    assert!(
+        secret
+            .validate_persisted_value(&SettingValue::Text("secret".into()))
+            .is_err()
+    );
+
+    let invalid_integer = SettingSchema::Integer {
+        default: 0,
+        min: 0,
+        max: 10,
+        step: 0,
+    };
+    assert!(
+        invalid_integer
+            .validate_persisted_value(&SettingValue::Integer(2))
+            .is_err()
+    );
+    let full_range = SettingSchema::Integer {
+        default: i64::MIN,
+        min: i64::MIN,
+        max: i64::MAX,
+        step: 1,
+    };
+    assert!(
+        full_range
+            .validate_persisted_value(&SettingValue::Integer(i64::MAX))
+            .is_ok()
+    );
+}

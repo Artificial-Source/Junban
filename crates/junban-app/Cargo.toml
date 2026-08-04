@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 jiff.workspace = true
 junban-domain = { path = "../junban-domain", version = "0.1.0" }
+junban-plugin-sdk = { path = "../junban-plugin-sdk", version = "0.1.0" }
 serde.workspace = true
 thiserror.workspace = true
 

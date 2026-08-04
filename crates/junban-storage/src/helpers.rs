@@ -6,7 +6,7 @@ use junban_domain::{
     OperationId, Task, TaskActivity, TaskActivityAction, ValidationError,
     resolve_recurrence_anchor, validate_parent_chain, validate_task_tags,
 };
-use rusqlite::Transaction;
+use rusqlite::Connection;
 
 use crate::ops_types::status_name;
 use crate::rows::{
@@ -129,7 +129,7 @@ pub(crate) fn apply_patch(task: &mut Task, patch: &TaskPatch) -> Result<(), Repo
     Ok(())
 }
 
-pub(crate) fn validate_task_refs(tx: &Transaction<'_>, task: &Task) -> Result<(), RepositoryError> {
+pub(crate) fn validate_task_refs(tx: &Connection, task: &Task) -> Result<(), RepositoryError> {
     if let Some(project_id) = task.project_id {
         ensure_project_exists(tx, project_id)?;
     }

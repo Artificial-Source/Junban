@@ -6,7 +6,7 @@ use junban_app::{
     EventType, RepositoryError, ResourceRef, ResourceSnapshot, ResyncScope,
 };
 use junban_domain::{OperationId, TaskActivity, UncompleteOutcome};
-use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 
 use crate::rows::{activity_action_str, revision_to_i64, storage_error};
@@ -41,8 +41,12 @@ pub(crate) fn mutate(
     operation_id: OperationId,
     request_json: String,
     now: Timestamp,
-    apply: impl FnOnce(&Transaction<'_>, u64) -> Result<MutationEffect, RepositoryError>,
+    apply: impl FnOnce(&Connection, u64) -> Result<MutationEffect, RepositoryError>,
 ) -> Result<CommittedMutation, RepositoryError> {
+    if !connection.is_autocommit() {
+        return mutate_in_transaction(connection, operation_id, request_json, now, apply);
+    }
+
     // Expiry is an authority boundary, not best-effort housekeeping. Commit cleanup
     // before receipt/undo lookup so stale operations cannot replay after 30 days,
     // even when the requested mutation later fails.
@@ -50,14 +54,37 @@ pub(crate) fn mutate(
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(storage_error)?;
+    let response = mutate_in_transaction(&transaction, operation_id, request_json, now, apply)?;
+    transaction.commit().map_err(storage_error)?;
 
-    if let Some(replay) = read_receipt(&transaction, operation_id, &request_json)? {
-        // Drop the open transaction without writing; replay is never newly committed.
-        drop(transaction);
+    // Event pruning is housekeeping after the mutation is durable; failure cannot
+    // roll back the committed user operation.
+    if response.newly_committed {
+        let _ = prune_retained_events(connection);
+    }
+    Ok(response)
+}
+
+/// Apply the ordinary receipt/revision/event protocol inside a caller-owned
+/// SQLite transaction. Plugin effect terminalization uses this exact primitive
+/// so its cursor and invocation cleanup share the child operation commit.
+pub(crate) fn mutate_in_transaction(
+    connection: &Connection,
+    operation_id: OperationId,
+    request_json: String,
+    now: Timestamp,
+    apply: impl FnOnce(&Connection, u64) -> Result<MutationEffect, RepositoryError>,
+) -> Result<CommittedMutation, RepositoryError> {
+    if connection.is_autocommit() {
+        return Err(RepositoryError::Storage(
+            "caller-owned mutation transaction is not active".to_owned(),
+        ));
+    }
+    if let Some(replay) = read_receipt(connection, operation_id, &request_json)? {
         return Ok(replay);
     }
 
-    let current_revision: i64 = transaction
+    let current_revision: i64 = connection
         .query_row(
             "SELECT global_revision FROM app_state WHERE singleton = 1",
             [],
@@ -69,7 +96,7 @@ pub(crate) fn mutate(
         .and_then(|value| value.checked_add(1))
         .ok_or_else(|| RepositoryError::Storage("global revision overflow".to_owned()))?;
 
-    let effect = apply(&transaction, revision)?;
+    let effect = apply(connection, revision)?;
     let event = CommittedEvent {
         revision,
         operation_id,
@@ -109,7 +136,7 @@ pub(crate) fn mutate(
         return Err(RepositoryError::OperationTooLarge);
     }
 
-    transaction
+    connection
         .execute(
             "UPDATE app_state SET global_revision = ?1 WHERE singleton = 1",
             [revision_to_i64(revision)?],
@@ -117,7 +144,7 @@ pub(crate) fn mutate(
         .map_err(storage_error)?;
 
     for activity in &effect.task_activity {
-        transaction
+        connection
             .execute(
                 "INSERT INTO task_activity(
                     revision, sequence, operation_id, task_id, action, field,
@@ -142,7 +169,7 @@ pub(crate) fn mutate(
         Some((kind, id)) => (Some(kind.as_str()), Some(id.as_str())),
         None => (None, None),
     };
-    transaction
+    connection
         .execute(
             "INSERT INTO activity(
                 revision, operation_id, kind, subject_type, subject_id, created_at
@@ -158,7 +185,7 @@ pub(crate) fn mutate(
         )
         .map_err(storage_error)?;
 
-    transaction
+    connection
         .execute(
             "INSERT INTO events(revision, event_type, operation_id, event_json, occurred_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -176,7 +203,7 @@ pub(crate) fn mutate(
     let expires_at = now
         .checked_add((RECEIPT_TTL_DAYS * 24).hours())
         .map_err(|error| RepositoryError::Storage(error.to_string()))?;
-    transaction
+    connection
         .execute(
             "INSERT INTO operation_receipts(
                 operation_id, request_json, response_json, created_at, expires_at
@@ -192,7 +219,7 @@ pub(crate) fn mutate(
         .map_err(storage_error)?;
 
     if let Some(undo) = effect.undo {
-        transaction
+        connection
             .execute(
                 "INSERT INTO operation_undo(
                     source_operation_id, source_revision, inverse_json, post_image_json
@@ -208,7 +235,7 @@ pub(crate) fn mutate(
     }
 
     if let Some(source_operation_id) = effect.mark_undone {
-        transaction
+        connection
             .execute(
                 "UPDATE operation_undo
                  SET undone_by_operation_id = ?1, undone_at = ?2
@@ -222,12 +249,6 @@ pub(crate) fn mutate(
             )
             .map_err(storage_error)?;
     }
-
-    transaction.commit().map_err(storage_error)?;
-
-    // Event pruning is housekeeping after the mutation is durable; failure cannot
-    // roll back the committed user operation.
-    let _ = prune_retained_events(connection);
 
     Ok(response)
 }
@@ -252,7 +273,7 @@ pub(crate) fn recover_operation_receipt(
 }
 
 fn read_receipt(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     operation_id: OperationId,
     request_json: &str,
 ) -> Result<Option<CommittedMutation>, RepositoryError> {
@@ -274,7 +295,7 @@ fn read_receipt(
     Ok(Some(response))
 }
 
-fn cleanup_expired_receipts(
+pub(crate) fn cleanup_expired_receipts(
     connection: &mut Connection,
     now: Timestamp,
 ) -> Result<(), RepositoryError> {
@@ -368,7 +389,7 @@ pub(crate) fn retained_event_bytes(connection: &Connection) -> Result<i64, Repos
         .map_err(storage_error)
 }
 
-fn prune_retained_events(connection: &Connection) -> Result<(), RepositoryError> {
+pub(crate) fn prune_retained_events(connection: &Connection) -> Result<(), RepositoryError> {
     loop {
         let count: i64 = connection
             .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))

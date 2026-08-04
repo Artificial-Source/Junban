@@ -4,6 +4,7 @@ mod authority;
 mod component;
 mod error;
 mod graph;
+mod identity;
 mod linkage;
 mod manifest;
 mod package;
@@ -30,6 +31,10 @@ pub use error::SdkError;
 pub use graph::{
     DependencyLock, GraphError, IncompatibleDependency, InstalledPackage, MissingDependency,
     ValidatedGraph, validate_dependency_graph, validate_dependency_locks,
+};
+pub use identity::{
+    PluginId, Sha256Digest, compare_versions, signer_key_id, validate_signer_public_key,
+    version_matches,
 };
 pub use linkage::{
     PRODUCT_ENTRYPOINT_FINGERPRINT, PRODUCT_ENTRYPOINT_FUNCTIONS, PRODUCT_ENTRYPOINTS,

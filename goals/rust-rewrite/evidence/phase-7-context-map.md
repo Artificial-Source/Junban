@@ -1,7 +1,7 @@
 # Phase 7 context map and execution contract
 
 Date: 2026-08-04
-Status: high-risk planning gate approved on 2026-08-04; Wave 0 implementation authorized
+Status: Wave 0 host placement accepted; Wave 1 SDK-first implementation is under package/WIT/matched-memory acceptance
 Base: Phase 6 commit `18bea1b899108f218074714697759af02fa56670`
 
 ## Purpose and observable outcome
@@ -23,9 +23,9 @@ The phase ends only after the frozen Rust and TypeScript examples build and run 
 
 ### Current repository
 
-- Workspace crates: `junban-domain`, `junban-app`, `junban-storage`, `junban-server`, `junban-cli`, `junban-mcp`, and lazy `junban-ai`.
-- `crates/junban-plugin-sdk` and `crates/junban-plugin-host` do not exist.
-- SQLite schema head is v6; schema v7 is unused and available.
+- Workspace crates: `junban-domain`, `junban-app`, `junban-storage`, `junban-server`, `junban-cli`, `junban-mcp`, lazy `junban-ai`, and pure `junban-plugin-sdk`.
+- `junban-plugin-sdk` now owns bounded package/WIT/trust/component/protocol authority without Wasmtime, storage or runtime construction; `junban-plugin-host` does not yet exist.
+- SQLite schema head remains v6; schema v7 is unused and available until the SDK-first acceptance subgate passes.
 - `FeatureSettings` contains only six first-party feature toggles. `/settings/plugins` is intentionally rejected today, and `FeaturesTab` documents that plugin keys are unsupported.
 - `docs/architecture.md` reserves `junban-plugin-sdk` for WIT/package contracts and `junban-plugin-host` for the measured optional runtime.
 - `docs/performance.md` requires no Wasmtime initialization on ordinary startup.
@@ -38,7 +38,7 @@ Verified on 2026-08-04:
 
 - Wasmtime/`wasmtime-wasi` **45.0.3** are the newest patch line compatible with Junban's Rust 1.93.0 pin. Wasmtime 46/47 require Rust 1.94. Phase 7 pins exact 45.0.3 and re-evaluates only through a separate toolchain decision.
 - Product runtime uses Component Model + WASI Preview 2. WASI Preview 3 and component-model async guest ABI are experimental/out of scope.
-- Host limits use `StoreLimits`, on-demand allocation unless the spike proves otherwise, epoch interruption plus host-future cancellation, one mutable store owner, bounded buffers, and a deny-by-default/selective linker.
+- The accepted product placement is one on-demand child host. Host limits use `StoreLimits`, on-demand allocation, epoch interruption plus host-future cancellation, one mutable store owner, bounded buffers, and a deny-by-default/selective linker.
 - Rust guests use stable `wasm32-wasip2` plus `wit-bindgen`; `cargo-component` is being deprecated and is not the authoring authority.
 - TypeScript uses exact build-only `@bytecodealliance/jco` 1.26.1 and `@bytecodealliance/componentize-js` 0.22.0. A component embeds StarlingMonkey and is expected to add roughly 8 MiB or more before guest heap; its package/memory/cold-start evidence remains separate.
 - Package signatures use strict Ed25519 verification (`ed25519-dalek` 2.2.0) and existing SHA-256. Full TUF, Sigstore, Warg, OCI registry clients, Minisign as a runtime ABI, Extism, WASI P3, and resident Node are excluded from v1.
@@ -166,13 +166,13 @@ junban-plugin-sdk      +------ junban-server ----spawn----> junban-plugin-host
 - `junban-plugin-sdk` contains portable WIT/package/data contracts only. It constructs no Wasmtime engine and contains no server/database owner.
 - `junban-plugin-host` owns Wasmtime and guest stores only. It never opens SQLite, reads the profile token, or calls Junban HTTP.
 - `junban-server` remains the sole profile/application authority. It verifies packages and grants, owns the event cursor, mediates every capability, and spawns the host only after an enabled graph exists.
-- Host placement is finalized by the Wave 0 spike. If lazy in-process wins every frozen criterion, the same ownership and no-engine-when-unused rules apply. Temporary losing spike code is deleted.
+- The accepted Wave 0 placement is one on-demand child host. Lazy in-process lost the predeclared fault-containment tiebreak; all temporary spike code and the completed harness are deleted.
 
 A separate small generic “shared” crate is not added. Parent/child protocol types belong in the plugin SDK because both product sides need the versioned plugin-host contract and it carries no engine.
 
-### Host-placement spike and decision rule
+### Accepted host-placement spike and decision rule
 
-Wave 0 builds throwaway, isolated probes for:
+Wave 0 built throwaway, isolated probes for:
 
 1. Phase 6 baseline server;
 2. Phase 7 server linked to SDK/protocol only, no engine;
@@ -350,7 +350,7 @@ Authority transitions acquire the plugin reconfiguration mutex, close admission 
 The retained host-placement ADR owns exact mechanics. For the preferred child-process path:
 
 - `junban-server` spawns a sibling `junban-plugin-host` only after an enabled, verified, dependency-valid graph exists;
-- one versioned length-prefixed private stdio protocol carries no bearer or database path and hard-caps every frame;
+- one versioned private stdio protocol carries no bearer, profile path or database path: canonical u32be-length-prefixed JSON headers are capped at 256 KiB, while exact hash/length-bound raw bodies follow only component load, invocation and outcome headers;
 - the host receives only verified component bytes/identity, exact grants/runtime config, and capability replies, all bound to package generation + activation epoch + host session;
 - stdout is protocol only; guest stdout/stderr are discarded or bounded into structured log messages;
 - host exit marks active plugins degraded without affecting HTTP/storage, then uses bounded restart/backoff; repeated failure suspends plugins;
@@ -360,9 +360,9 @@ The retained host-placement ADR owns exact mechanics. For the preferred child-pr
 
 No host process owns the profile lock or survives the server.
 
-### Resource ceilings frozen before Wave 1
+### Resource ceilings frozen for implementation
 
-Wave 0 verifies and may tighten these initial ceilings; any increase is recorded before implementation:
+Wave 0 accepted the functional ceilings below and froze separate selected-child active cgroup gates: Rust 18.6016 MiB warm / 19.5078 MiB peak and TypeScript 357.334 MiB warm / 415.6201 MiB peak. Wave 5 replaces the projected active gates with integrated product evidence; the ordinary no-plugin 24/32-MiB ceiling never changes silently.
 
 - installed plugins 64; enabled plugins 16; dependencies/plugin 16; graph depth 16;
 - one invocation/plugin; four total; dependency call depth 8;
@@ -590,4 +590,4 @@ Largest implementation risks:
 | `P7-PLAN-002` | High     | fixed  | WIT now has one synchronous HTTP-import model only, no outcome intents. Every HTTP invocation is honestly at-least-once with stable delivery identity and no SQLite atomicity; HTTP and a returned SQLite effect are mutually exclusive. Dependency service mode is read-only and forbids HTTP/effects. Event cursor ordering is explicit for HTTP-only and receipt-backed SQLite effects. |
 | `P7-PLAN-003` | High     | fixed  | Separate persisted `package_generation` and `activation_epoch` plus process-local `host_session_id` now define grants, every transition, drain/CAS ordering, restore behavior, IPC outcome fencing, and browser action freshness. Package authority changes invalidate grants; restart/re-enable epochs do not silently broaden them.                                                      |
 
-The focused planning recheck approved all three corrections with no new blocker. Wave 0 implementation is authorized; the measured placement still requires its planned architecture gate before Wave 1.
+The focused planning recheck approved all three corrections with no new blocker. Wave 0 then completed its measured architecture gate and retained the on-demand child placement. Wave 1 proceeds only through the SDK-first package/WIT/matched-memory acceptance subgate recorded in the live ExecPlan and review ledger.

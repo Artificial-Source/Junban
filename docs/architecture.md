@@ -33,7 +33,7 @@ Phases 1 and 2 implement the hosted product in `junban-domain`, `junban-app`, `j
 | `junban-mcp`         | Native MCP stdio adapter over the CLI session/catalog (Wave 3 completes tools/resources/prompts)                             |
 | `junban-ai`          | Optional lazy chat/speech provider clients (no default-startup construct)                                                    |
 | `junban-plugin-sdk`  | WIT contract and package types                                                                                               |
-| `junban-plugin-host` | Optional Wasmtime runtime after a measured spike                                                                             |
+| `junban-plugin-host` | Optional Wasmtime runtime after a measured spike (Wave 0 preliminary preference: on-demand child process; see host-placement ADR) |
 
 Rules:
 

@@ -53,6 +53,7 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-7-package-contract.md`](../goals/rust-rewrite/evidence/phase-7-package-contract.md): exact JBP1/JRI1 framing, manifest, trust, permissions, dependency, import-validation, registry and publication authority
 - [`../goals/rust-rewrite/evidence/phase-7-wit-contract.md`](../goals/rust-rewrite/evidence/phase-7-wit-contract.md): exact Component Model world composition, typed host/guest interfaces, effects, events, declarative UI and runtime-profile import authority
 - [`../goals/rust-rewrite/evidence/phase-7-schema-contract.md`](../goals/rust-rewrite/evidence/phase-7-schema-contract.md): exact schema-v7 plugin generations, grants, settings/KV, event cursor, invocation, restore, and package reconciliation authority
+- [`../goals/rust-rewrite/evidence/phase-7-host-placement-adr.md`](../goals/rust-rewrite/evidence/phase-7-host-placement-adr.md): Wave 0 host-placement spike ADR and measured placement gate
 - [`../goals/rust-rewrite/evidence/phase-7-review-ledger.md`](../goals/rust-rewrite/evidence/phase-7-review-ledger.md): Phase 7 specialist findings and closure evidence
 - [`../goals/rust-rewrite/evidence/phase-7-legacy-visual-baseline/README.md`](../goals/rust-rewrite/evidence/phase-7-legacy-visual-baseline/README.md): independent legacy-rendered Phase 7 Extensions/plugin visual authorities and manifest
 - [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings

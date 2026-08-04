@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "tools/phase7-host-placement"]
+# Guest wasm crates are built out-of-workspace for wasm32-wasip2.
+exclude = ["tools/phase7-host-placement/guests/rust-spike"]
 
 [workspace.package]
 version = "0.1.0"

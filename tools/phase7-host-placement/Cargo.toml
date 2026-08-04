@@ -1,0 +1,46 @@
+# TEMPORARY Phase 7 Wave 0 host-placement spike. Not a product crate.
+[package]
+name = "junban-phase7-host-placement"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "TEMPORARY Phase 7 Wave 0 Wasmtime host-placement spike (delete after ADR)"
+publish = false
+
+[features]
+default = ["wasmtime-runtime"]
+# Protocol/SDK-only builds set --no-default-features.
+wasmtime-runtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
+# Exact pin required by Phase 7 Wave 0 contract (Rust 1.93.0 MSRV line).
+wasmtime = { version = "=45.0.3", default-features = false, features = [
+  "runtime",
+  "cranelift",
+  "component-model",
+  "async",
+], optional = true }
+wasmtime-wasi = { version = "=45.0.3", default-features = false, features = [
+  "p2",
+], optional = true }
+
+[dev-dependencies]
+tempfile = "3.23.0"
+
+[[bin]]
+name = "junban-p7-spike-probe"
+path = "src/bin/junban-p7-spike-probe.rs"
+
+[[bin]]
+name = "junban-p7-spike-host"
+path = "src/bin/junban-p7-spike-host.rs"
+required-features = ["wasmtime-runtime"]
+
+[lints]
+workspace = true

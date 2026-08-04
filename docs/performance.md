@@ -299,7 +299,7 @@ Or use `pnpm bench:phase6-enabled:self-check` for the interception preflight. Do
 ## Default-path discipline
 
 - Do not initialize AI provider clients, local voice engines, or Wasmtime during ordinary task-server startup.
-- Plugin runtime stays unloaded when no plugin is active.
+- Plugin runtime stays unloaded when no plugin is active. Ordinary `junban-server` must not link Wasmtime; Wave 0 spike evidence and the preliminary host-placement ADR live under `goals/rust-rewrite/evidence/phase-7-host-placement*`.
 - Avoid eager dependency aggregation that quietly reintroduces idle cost.
 
 ## Phase expectations

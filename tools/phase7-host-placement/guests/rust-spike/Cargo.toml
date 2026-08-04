@@ -1,0 +1,24 @@
+# TEMPORARY Phase 7 Wave 0 Rust spike guest. Not a product plugin.
+# Independent package: empty workspace table keeps it out of the repo workspace.
+[workspace]
+
+[package]
+name = "junban-p7-rust-spike-guest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+wit-bindgen = { version = "0.51.0", default-features = false, features = ["macros", "realloc"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

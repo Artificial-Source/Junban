@@ -61,9 +61,14 @@ WARM_MEMORY_CEILING_MIB = 24.0
 PEAK_MEMORY_CEILING_MIB = 32.0
 GROWTH_PCT = 0.15
 GROWTH_FLOOR_MIB = 1.0
-# Conservative: authoritative claims require near-idle host, not merely "under 0.75*ncpu".
-LOAD_BUSY_PER_CPU = 0.25
-LOAD_STABLE_MAX = 2.0
+# CPU-scaled load gates. Must not reject a Phase 6-class idle host solely because
+# load5 was ~3.28 on ~20 CPUs (that is below 20*0.30=6.0).
+LOAD1_BUSY_PER_CPU = 0.50
+LOAD5_BUSY_PER_CPU = 0.30
+LOAD_FLOOR = 1.0
+# Sample candidate build/browser processes for real CPU activity, not mere existence.
+ACTIVITY_SAMPLE_SECONDS = 0.25
+MIN_ACTIVE_CPU_TICK_DELTA = 2  # utime+stime jiffies over the sample window
 NODE_MARKERS = frozenset({"node", "nodejs", "npm", "npx", "pnpm", "vite", "playwright"})
 BUILD_CONFOUNDERS = frozenset(
     {
@@ -157,14 +162,86 @@ def series_summary(values: list[float]) -> dict[str, float]:
     }
 
 
-def scan_build_confounders() -> list[dict[str, Any]]:
-    """Detect cargo/rustc/node/browser processes that confound memory samples."""
+def load_thresholds(cpus: int) -> dict[str, float]:
+    cpus = max(int(cpus), 1)
+    return {
+        "cpu_count": float(cpus),
+        "load1_threshold": max(LOAD_FLOOR, cpus * LOAD1_BUSY_PER_CPU),
+        "load5_threshold": max(LOAD_FLOOR, cpus * LOAD5_BUSY_PER_CPU),
+    }
+
+
+def load_contention_reasons(load1: float, load5: float, cpus: int) -> list[str]:
+    """Pure load gate used by host_contention and self-check."""
+    thresholds = load_thresholds(cpus)
+    reasons: list[str] = []
+    if load1 > thresholds["load1_threshold"]:
+        reasons.append(
+            f"load1 {load1:.2f} > threshold {thresholds['load1_threshold']:.2f}"
+        )
+    if load5 > thresholds["load5_threshold"]:
+        reasons.append(
+            f"load5 {load5:.2f} > threshold {thresholds['load5_threshold']:.2f}"
+        )
+    return reasons
+
+
+def process_is_cpu_active(tick_delta: int, *, min_delta: int = MIN_ACTIVE_CPU_TICK_DELTA) -> bool:
+    """Pure activity gate: existence alone is never contention."""
+    return int(tick_delta) >= int(min_delta)
+
+
+def swap_io_is_active(pswpin_delta: int, pswpout_delta: int) -> bool:
+    """Pure swap gate: allocated-but-inactive swap is not contention."""
+    return int(pswpin_delta) > 0 or int(pswpout_delta) > 0
+
+
+def read_proc_cpu_ticks(pid: int) -> int | None:
+    """Return utime+stime jiffies for pid, or None if unreadable."""
+    try:
+        # /proc/<pid>/stat: field 14=utime, 15=stime (1-indexed after pid/comm).
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        rparen = raw.rfind(")")
+        if rparen < 0:
+            return None
+        fields = raw[rparen + 2 :].split()
+        utime = int(fields[11])
+        stime = int(fields[12])
+        return utime + stime
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def read_vmstat_swap_io() -> tuple[int, int] | None:
+    try:
+        pswpin = pswpout = 0
+        found_in = found_out = False
+        for line in Path("/proc/vmstat").read_text(encoding="utf-8").splitlines():
+            if line.startswith("pswpin "):
+                pswpin = int(line.split()[1])
+                found_in = True
+            elif line.startswith("pswpout "):
+                pswpout = int(line.split()[1])
+                found_out = True
+        if found_in and found_out:
+            return pswpin, pswpout
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def list_candidate_confounder_pids() -> list[dict[str, Any]]:
+    """Enumerate candidate build/browser PIDs without judging activity yet."""
     found: list[dict[str, Any]] = []
     proc = Path("/proc")
     if not proc.is_dir():
         return found
+    self_pid = os.getpid()
     for entry in proc.iterdir():
         if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid == self_pid:
             continue
         try:
             comm = (entry / "comm").read_text(encoding="utf-8").strip().lower()
@@ -183,32 +260,149 @@ def scan_build_confounders() -> list[dict[str, Any]]:
                 pass
         except OSError:
             continue
+        # Never treat this harness as a confounder (parent or residual).
+        if "check-phase7-host-placement" in cmdline or "check-phase7-host-placement" in comm:
+            continue
         tokens = set(re.split(r"[^a-z0-9_.+-]+", f"{comm} {exe} {cmdline}"))
         hits = sorted(tokens.intersection(BUILD_CONFOUNDERS))
         if not hits:
             continue
-        # Ignore this harness itself.
-        if "check-phase7-host-placement" in cmdline:
-            continue
         found.append(
             {
-                "pid": int(entry.name),
+                "pid": pid,
                 "comm": comm,
                 "exe": exe,
                 "hits": hits,
                 "cmdline": cmdline[:240],
             }
         )
-        if len(found) >= 32:
+        if len(found) >= 64:
             break
     return found
+
+
+def sample_active_confounders(
+    *,
+    sample_seconds: float = ACTIVITY_SAMPLE_SECONDS,
+    min_tick_delta: int = MIN_ACTIVE_CPU_TICK_DELTA,
+) -> list[dict[str, Any]]:
+    """Return only confounder processes with meaningful positive CPU activity."""
+    candidates = list_candidate_confounder_pids()
+    before: dict[int, int] = {}
+    for item in candidates:
+        ticks = read_proc_cpu_ticks(int(item["pid"]))
+        if ticks is not None:
+            before[int(item["pid"])] = ticks
+    time.sleep(max(float(sample_seconds), 0.05))
+    active: list[dict[str, Any]] = []
+    for item in candidates:
+        pid = int(item["pid"])
+        if pid not in before:
+            continue
+        after = read_proc_cpu_ticks(pid)
+        if after is None:
+            continue
+        delta = max(0, after - before[pid])
+        if not process_is_cpu_active(delta, min_delta=min_tick_delta):
+            continue
+        active.append({**item, "cpu_tick_delta": delta})
+        if len(active) >= 32:
+            break
+    return active
+
+
+def sample_swap_io(
+    *,
+    sample_seconds: float = ACTIVITY_SAMPLE_SECONDS,
+) -> dict[str, Any]:
+    """Measure pswpin/pswpout delta; static allocated swap is ignored."""
+    first = read_vmstat_swap_io()
+    if first is None:
+        return {
+            "available": False,
+            "pswpin_delta": 0,
+            "pswpout_delta": 0,
+            "active": False,
+        }
+    time.sleep(max(float(sample_seconds), 0.05))
+    second = read_vmstat_swap_io()
+    if second is None:
+        return {
+            "available": False,
+            "pswpin_delta": 0,
+            "pswpout_delta": 0,
+            "active": False,
+        }
+    pin_delta = max(0, second[0] - first[0])
+    pout_delta = max(0, second[1] - first[1])
+    return {
+        "available": True,
+        "pswpin_before": first[0],
+        "pswpout_before": first[1],
+        "pswpin_after": second[0],
+        "pswpout_after": second[1],
+        "pswpin_delta": pin_delta,
+        "pswpout_delta": pout_delta,
+        "active": swap_io_is_active(pin_delta, pout_delta),
+        "sample_seconds": float(sample_seconds),
+    }
 
 
 def host_contention(host: dict[str, Any]) -> dict[str, Any]:
     load1, load5, load15 = os.getloadavg()
     cpus = max(int(host.get("cpu_count") or os.cpu_count() or 1), 1)
-    threshold = min(LOAD_STABLE_MAX, cpus * LOAD_BUSY_PER_CPU)
-    # Swap activity is a strong contention signal on this project’s hosts.
+    thresholds = load_thresholds(cpus)
+    reasons = load_contention_reasons(load1, load5, cpus)
+    # One shared activity window: sample confounder CPU and swap I/O together.
+    candidates = list_candidate_confounder_pids()
+    ticks_before: dict[int, int] = {}
+    for item in candidates:
+        ticks = read_proc_cpu_ticks(int(item["pid"]))
+        if ticks is not None:
+            ticks_before[int(item["pid"])] = ticks
+    swap_before = read_vmstat_swap_io()
+    time.sleep(ACTIVITY_SAMPLE_SECONDS)
+    active_confounders: list[dict[str, Any]] = []
+    for item in candidates:
+        pid = int(item["pid"])
+        if pid not in ticks_before:
+            continue
+        after = read_proc_cpu_ticks(pid)
+        if after is None:
+            continue
+        delta = max(0, after - ticks_before[pid])
+        if process_is_cpu_active(delta):
+            active_confounders.append({**item, "cpu_tick_delta": delta})
+            if len(active_confounders) >= 32:
+                break
+    swap_after = read_vmstat_swap_io()
+    if swap_before is not None and swap_after is not None:
+        pin_delta = max(0, swap_after[0] - swap_before[0])
+        pout_delta = max(0, swap_after[1] - swap_before[1])
+        swap_io = {
+            "available": True,
+            "pswpin_delta": pin_delta,
+            "pswpout_delta": pout_delta,
+            "active": swap_io_is_active(pin_delta, pout_delta),
+            "sample_seconds": ACTIVITY_SAMPLE_SECONDS,
+        }
+    else:
+        swap_io = {
+            "available": False,
+            "pswpin_delta": 0,
+            "pswpout_delta": 0,
+            "active": False,
+            "sample_seconds": ACTIVITY_SAMPLE_SECONDS,
+        }
+    if active_confounders:
+        reasons.append(f"active_build_confounders={len(active_confounders)}")
+    if swap_io.get("active"):
+        reasons.append(
+            "swap_io_active "
+            f"pswpin_delta={swap_io['pswpin_delta']} "
+            f"pswpout_delta={swap_io['pswpout_delta']}"
+        )
+    # Informational only: static swap allocation is recorded but never contends.
     swap_used_mib = None
     try:
         meminfo = Path("/proc/meminfo").read_text(encoding="utf-8")
@@ -222,27 +416,26 @@ def host_contention(host: dict[str, Any]) -> dict[str, Any]:
             swap_used_mib = (total - avail) / 1024.0
     except OSError:
         pass
-    confounders = scan_build_confounders()
-    reasons: list[str] = []
-    if load1 > threshold:
-        reasons.append(f"load1 {load1:.2f} > threshold {threshold:.2f}")
-    if load5 > threshold + 0.5:
-        reasons.append(f"load5 {load5:.2f} elevated")
-    if swap_used_mib is not None and swap_used_mib > 256.0:
-        reasons.append(f"swap_used_mib {swap_used_mib:.1f}")
-    if confounders:
-        reasons.append(f"build_confounders={len(confounders)}")
     contended = bool(reasons)
     return {
         "load1": load1,
         "load5": load5,
         "load15": load15,
         "cpu_count": cpus,
-        "load_threshold": threshold,
-        "swap_used_mib": swap_used_mib,
-        "build_confounders": confounders,
+        "load1_threshold": thresholds["load1_threshold"],
+        "load5_threshold": thresholds["load5_threshold"],
+        "activity_sample_seconds": ACTIVITY_SAMPLE_SECONDS,
+        "min_active_cpu_tick_delta": MIN_ACTIVE_CPU_TICK_DELTA,
+        "swap_used_mib_informational": swap_used_mib,
+        "swap_io": swap_io,
+        "active_build_confounders": active_confounders,
+        "candidate_confounder_count": len(candidates),
         "contended": contended,
         "reason": "; ".join(reasons) if reasons else "no_contention_signals",
+        "method": (
+            "load CPU-scaled thresholds; confounders require positive CPU tick delta "
+            f"over {ACTIVITY_SAMPLE_SECONDS}s; swap contention uses pswpin/pswpout delta only"
+        ),
     }
 
 
@@ -296,6 +489,21 @@ def self_check() -> dict[str, Any]:
         run_cmd(["systemctl", "--user", "stop", unit], check=False)
         run_cmd(["systemctl", "--user", "reset-failed", unit], check=False)
 
+    # Pure contention semantics (no ambient process dependency).
+    # load5=3.28 on 20 CPUs must remain under the scaled threshold (6.0).
+    if load_contention_reasons(3.28, 3.28, 20):
+        raise HarnessError("load gate falsely contends Phase-6-class idle load5=3.28/20cpu")
+    if not load_contention_reasons(20.0, 20.0, 20):
+        raise HarnessError("load gate failed to contend clearly overloaded host")
+    if process_is_cpu_active(0):
+        raise HarnessError("idle process ticks must not count as active")
+    if not process_is_cpu_active(MIN_ACTIVE_CPU_TICK_DELTA):
+        raise HarnessError("min tick delta must count as active")
+    if swap_io_is_active(0, 0):
+        raise HarnessError("static swap must not count as active I/O")
+    if not swap_io_is_active(1, 0) or not swap_io_is_active(0, 2):
+        raise HarnessError("positive pswpin/pswpout delta must count as active")
+
     checks = {
         "linux_cgroup_v2": True,
         "systemd_run_memory_accounting": True,
@@ -305,6 +513,11 @@ def self_check() -> dict[str, Any]:
         "wasmtime_pin": WASMTIME_VERSION,
         "jco_pin": JCO_VERSION,
         "componentize_js_pin": COMPONENTIZE_JS_VERSION,
+        "load_gate_allows_phase6_class_idle": True,
+        "activity_not_existence": True,
+        "swap_io_not_static_allocation": True,
+        "load1_threshold_20cpu": load_thresholds(20)["load1_threshold"],
+        "load5_threshold_20cpu": load_thresholds(20)["load5_threshold"],
     }
     missing = [k for k, v in checks.items() if v is False]
     if missing:
@@ -779,11 +992,28 @@ def measure_probe_variant(
                     resp = {"ok": False, "error": str(error), "stage": name}
                 elapsed = (time.perf_counter() - started) * 1000.0
                 time.sleep(0.15)
-                stages_out[name] = {
+                entry: dict[str, Any] = {
                     "response": resp,
                     "wall_ms": elapsed,
                     "memory": cgroup_snapshot(unit),
                 }
+                # After deliberate child kill, prove the parent probe is still healthy
+                # before recovery spawn stages run.
+                if name in {"kill_child", "child_kill"}:
+                    try:
+                        parent_health = http_json("GET", f"{base}/health")
+                    except HarnessError as error:
+                        parent_health = {"ok": False, "error": str(error)}
+                    entry["parent_health_after"] = parent_health
+                    if isinstance(resp, dict) and resp.get("ok"):
+                        detail = resp.setdefault("detail", {})
+                        if isinstance(detail, dict):
+                            detail["parent_health_ok"] = bool(parent_health.get("ok"))
+                            detail["parent_survived"] = bool(parent_health.get("ok"))
+                            if not parent_health.get("ok"):
+                                resp["ok"] = False
+                                resp["error"] = "parent unhealthy after child kill"
+                stages_out[name] = entry
             # Final health proves survival after hostile stages.
             final_health = http_json("GET", f"{base}/health")
             stages_out["final_health"] = {
@@ -847,7 +1077,12 @@ def child_stage_plan() -> list[dict[str, Any]]:
         {"stage": "cpu_loop"},
         {"stage": "instantiate"},
         {"stage": "grow_memory", "pages": 2048},
-        {"stage": "disable"},
+        # Deliberate kill while a child session exists; parent must survive,
+        # then recover with a fresh child before graceful shutdown.
+        {"stage": "kill_child"},
+        {"stage": "spawn"},
+        {"stage": "instantiate"},
+        {"stage": "first_ping", "input": 5},
         {"stage": "shutdown_child"},
     ]
 
@@ -880,7 +1115,7 @@ def evaluate_decision(report: dict[str, Any]) -> dict[str, Any]:
                 f"server baseline exceeds 24/32 MiB ceilings ({server_warm}/{server_peak})"
             )
 
-    # Containment: trap/cpu/memory must show survival on both paths when present.
+    # Containment is mandatory for placement selection. Missing samples block.
     def stage_survived(variant_key: str, stage: str) -> bool | None:
         samples = report.get("samples", {}).get(variant_key) or []
         if not samples:
@@ -892,25 +1127,68 @@ def evaluate_decision(report: dict[str, Any]) -> dict[str, Any]:
                 ok = False
         return ok
 
+    required_variants = ("inprocess_rust", "child_rust")
+    for variant in required_variants:
+        if not (report.get("samples", {}).get(variant) or []):
+            blockers.append(f"missing required samples for {variant}")
+
     for variant, label in (("inprocess_rust", "in-process"), ("child_rust", "child")):
         for stage in ("trap", "cpu_loop", "grow_memory"):
             survived = stage_survived(variant, stage)
-            if survived is False:
-                reasons.append(f"{label} {stage} did not cleanly report survival")
-            elif survived is True:
+            if survived is True:
                 reasons.append(f"{label} {stage} survived")
+            elif survived is False:
+                blockers.append(f"{label} {stage} did not cleanly report survival")
+            else:
+                blockers.append(f"{label} {stage} survival evidence missing")
 
-    child_cleanup_ok = True
-    for sample in report.get("samples", {}).get("child_rust") or []:
-        shut = ((sample.get("stages") or {}).get("shutdown_child") or {}).get("response") or {}
-        detail = shut.get("detail") or {}
-        if not shut.get("ok") or not detail.get("cleaned", False):
-            child_cleanup_ok = False
-    if report.get("samples", {}).get("child_rust"):
+    child_samples = report.get("samples", {}).get("child_rust") or []
+    if not child_samples:
+        blockers.append("child cleanup evidence missing")
+        blockers.append("child kill/recovery evidence missing")
+    else:
+        child_cleanup_ok = True
+        child_kill_ok = True
+        for sample in child_samples:
+            stages = sample.get("stages") or {}
+            shut = (stages.get("shutdown_child") or {}).get("response") or {}
+            shut_detail = shut.get("detail") or {}
+            if not shut.get("ok") or not shut_detail.get("cleaned", False):
+                child_cleanup_ok = False
+            kill_stage = stages.get("kill_child") or {}
+            kill = kill_stage.get("response") or {}
+            kill_detail = kill.get("detail") or {}
+            parent_after = kill_stage.get("parent_health_after") or {}
+            final_health = (stages.get("final_health") or {}).get("health") or {}
+            parent_ok = bool(
+                kill_detail.get("parent_survived")
+                or parent_after.get("ok")
+                or kill_detail.get("parent_health_ok")
+            )
+            if (
+                not kill.get("ok")
+                or not kill_detail.get("cleaned", False)
+                or not parent_ok
+                or not final_health.get("ok", False)
+            ):
+                child_kill_ok = False
+            # Recovery proof: post-kill spawn/instantiate/first_ping must succeed.
+            # Because stage names repeat, walk recorded responses for kill then
+            # ensure at least one successful spawn and first_ping exist and the
+            # terminal shutdown cleaned.
+            spawn_ok = (stages.get("spawn") or {}).get("response") or {}
+            inst_ok = (stages.get("instantiate") or {}).get("response") or {}
+            ping_ok = (stages.get("first_ping") or {}).get("response") or {}
+            if not (spawn_ok.get("ok") and inst_ok.get("ok") and ping_ok.get("ok")):
+                child_kill_ok = False
         if child_cleanup_ok:
             reasons.append("child shutdown cleaned with no orphan")
         else:
             blockers.append("child shutdown left orphan or failed cleanup proof")
+        if child_kill_ok:
+            reasons.append("child kill/recovery survived with parent healthy")
+        else:
+            blockers.append("child kill/recovery probe failed or incomplete")
 
     # Placement selection: fault containment breaks a close tie toward child.
     selected = None
@@ -967,10 +1245,11 @@ def evaluate_decision(report: dict[str, Any]) -> dict[str, Any]:
         "blockers": blockers,
         "decision_rule": (
             "Ordinary no-plugin server must stay within 24/32 MiB and not construct "
-            "an Engine or spawn a host. Guest trap/CPU/memory must not stop the "
-            "server. Fault containment breaks a close measurement tie toward the "
-            "child process. Preliminary active ceilings use projected product totals "
-            "(server baseline + max(0, variant - sdk-only)), never raw probe RSS alone."
+            "an Engine or spawn a host. Guest trap/CPU/memory survival and child "
+            "kill/recovery/cleanup are mandatory blockers when missing or failed. "
+            "Fault containment breaks a close measurement tie toward the child process. "
+            "Projected product totals are temporary probe cross-checks only, not "
+            "integrated server+SDK proof."
         ),
         "hostile_probe_safety_caps_mib": {
             "rust_linear_memory": HOSTILE_PROBE_RUST_MEMORY_MIB,
@@ -1140,6 +1419,10 @@ def derive_measured_ceilings(summary: dict[str, Any]) -> dict[str, Any]:
         ),
         "limitations": [
             "Projection is not an integrated server+host measurement.",
+            (
+                "Projection is not SDK-linked integrated junban-server proof; "
+                "Wave 1 must measure matched server-with-SDK default path."
+            ),
             "Wave 5 must measure actual product server+host and may revise ceilings.",
             "Raw probe/child cgroup totals alone must not be frozen as product budgets.",
         ],
@@ -1159,8 +1442,10 @@ def run_campaign(
     require_cgroup_stack()
     samples_n = QUICK_SAMPLES if quick else AUTHORITATIVE_SAMPLES
     host = BENCH.host_metadata(REPO_ROOT)
+    # Authoritative eligibility uses start-of-run tree cleanliness only. Writing
+    # the evidence JSON after measurement must not retroactively dirty this bit.
+    dirty_at_start = git_dirty(REPO_ROOT)
     contention_pre = host_contention(host)
-    dirty = git_dirty(REPO_ROOT)
 
     artifacts = build_release_artifacts()
     rust_component = build_rust_component()
@@ -1282,8 +1567,10 @@ def run_campaign(
     authoritative = (
         not quick
         and idle_host_confirmed
-        and not dirty
+        and not dirty_at_start
         and not contended
+        and not contention_pre["contended"]
+        and not contention_post["contended"]
         and samples_n >= AUTHORITATIVE_SAMPLES
         and not artifacts.get("server_links_wasmtime")
         and not artifacts.get("sdk_probe_links_wasmtime")
@@ -1293,7 +1580,7 @@ def run_campaign(
         evidence_status = "preliminary_quick"
     elif not idle_host_confirmed:
         evidence_status = "preliminary_idle_host_not_confirmed"
-    elif dirty or contended:
+    elif dirty_at_start or contended:
         evidence_status = "preliminary_contended_or_dirty_host"
     elif authoritative:
         evidence_status = "authoritative_candidate"
@@ -1349,9 +1636,11 @@ def run_campaign(
             "post": contention_post,
             "contended": contended,
         },
-        "git_dirty": dirty,
+        "git_dirty_at_start": dirty_at_start,
+        # Backward-compatible alias; always the start-of-run value.
+        "git_dirty": dirty_at_start,
         "evidence_status": evidence_status,
-        "accepted": False,  # Wave 0 ADR acceptance is separate; never auto-accept.
+        "accepted": False,  # Never auto-accept; architecture review is separate.
         "artifacts": artifacts,
         "components": {
             "rust": rust_component,

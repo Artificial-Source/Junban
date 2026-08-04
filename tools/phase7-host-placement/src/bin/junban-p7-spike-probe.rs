@@ -642,6 +642,29 @@ fn dispatch_child(
                 json!({ "child_pid": child.pid, "alive": true }),
             )
         }
+        // Deliberate child-kill fault probe: parent must survive and drop the session
+        // so a later spawn can recover without orphan processes.
+        "kill_child" | "child_kill" => {
+            let mut child = guard.child.take().ok_or("child not spawned")?;
+            let pid = child.pid;
+            let _ = child.child.kill();
+            let status = child.child.wait().map_err(|e| e.to_string())?;
+            std::thread::sleep(Duration::from_millis(20));
+            if path_exists(&format!("/proc/{pid}")) {
+                return Err(format!("child pid {pid} still alive after kill"));
+            }
+            let _ = status; // killed children are not required to exit successfully
+            ok_stage(
+                name,
+                Timings::default(),
+                json!({
+                    "killed_pid": pid,
+                    "wait_ok": true,
+                    "cleaned": true,
+                    "parent_survived": true,
+                }),
+            )
+        }
         other => {
             let child = guard.child.as_mut().ok_or("child not spawned")?;
             let request = match other {

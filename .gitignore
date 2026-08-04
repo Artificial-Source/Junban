@@ -45,3 +45,4 @@ Thumbs.db
 /tools/phase7-host-placement/guests/typescript-spike/node_modules/
 /target/p7-sdk-only/
 /target/p7-empty-web/
+__pycache__/

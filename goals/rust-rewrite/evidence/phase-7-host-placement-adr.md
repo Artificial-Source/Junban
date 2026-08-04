@@ -1,19 +1,20 @@
 # Phase 7 Wave 0 host-placement ADR (preliminary)
 
-Date: 2026-08-04  
-Status: **preliminary** — one-sample quick evidence on a contended host  
-Branch: `phase-7-wave0-host-placement`  
-Evidence: [`phase-7-host-placement-quick.json`](phase-7-host-placement-quick.json)  
+Date: 2026-08-04
+Status: **preliminary** — quick evidence only; not architecture-gate acceptance
+Branch: `phase-7-wave0-host-placement`
+Evidence: [`phase-7-host-placement-quick.json`](phase-7-host-placement-quick.json)
 Contract: [`phase-7-context-map.md`](phase-7-context-map.md)
 
 ## Decision (preliminary only)
 
 **Preferred direction under the frozen decision rule: on-demand child `junban-plugin-host`.**
 
-This is **not** an authoritative architecture-gate acceptance. The quick harness selected
-`on_demand_child_host` by the context-map fault-containment tiebreak after close Rust
-active-warm medians. Wave 1 must not treat this as frozen until five-sample idle-host
+This is **not** an authoritative architecture-gate acceptance. The harness may select
+`on_demand_child_host` by the context-map fault-containment tiebreak when Rust active-warm
+medians are close. Wave 1 must not treat this as frozen until five-sample idle-host
 evidence is recorded with `--idle-host-confirmed` and architecture review accepts it.
+`accepted` remains `false` until that review.
 
 ## What was built
 
@@ -35,17 +36,19 @@ Exact pins:
 
 ## Non-negotiables proven in this spike
 
-1. **Ordinary `junban-server` does not link or construct Wasmtime**  
+1. **Ordinary `junban-server` does not link or construct Wasmtime**
    `strings`/crate-path markers: no Wasmtime on the release server binary. Server baseline cgroup stayed well under 24/32 MiB in the quick sample.
-2. **SDK/protocol-only probe is separable**  
-   Built with `--no-default-features` into `target/p7-sdk-only/` so it is not overwritten by the full probe. ~0.62 MiB vs ~13.6 MiB full probe.
-3. **Child receives no DB/token/lock**  
+2. **SDK/protocol-only probe is separable**
+   Built with `--no-default-features` into `target/p7-sdk-only/` so it is not overwritten by the full probe.
+3. **Child receives no DB/token/lock**
    Length-prefixed JSON IPC; env scrubbed; hello identity cannot encode token/sqlite; component path rejects profile-looking names; child hashes loaded bytes and exact-matches hello `component_sha256` before compile.
-4. **Trap / CPU / memory containment**  
-   In-process and child survived deliberate trap, epoch-interrupted CPU loop, and StoreLimits grow failure; child shutdown left no orphan (`cleaned: true`).
-5. **No runtime Node**  
-   TypeScript is componentized at build time; process-tree scans reject node markers in measured units.
-6. **IPC frame cap = 256 KiB** (product plugin-output ceiling), with unit rejection of oversized frames.
+4. **Trap / CPU / memory containment**
+   In-process and child survived deliberate trap, epoch-interrupted CPU loop, and StoreLimits grow failure. Missing or failed survival evidence blocks placement selection.
+5. **Child kill/recovery**
+   Deliberate kill of an active child keeps the parent healthy; a fresh child can spawn, instantiate, call, and shut down with no orphan.
+6. **No runtime Node**
+   TypeScript is componentized at build time; measured units reject active Node tooling processes.
+7. **IPC frame cap = 256 KiB** (product plugin-output ceiling), with unit rejection of oversized frames.
 
 ## Import profiles (frozen for Wave 2 linker design)
 
@@ -78,53 +81,52 @@ Wave 2 must:
 ## Measurement method and limitations
 
 - Linux cgroup-v2 via `systemd-run --user` + MemoryAccounting (self-check required; never faked).
-- Quick mode: **1 sample**, dirty tree allowed, contended host allowed → `evidence_status=preliminary_quick`.
-- Authoritative candidate requires: five samples, clean tree, no contention signals, and explicit `--idle-host-confirmed`.
-- **Probe cgroup totals are not product server+runtime totals.**  
-  Projected product active memory:
+- Quick mode: **1 sample** → `evidence_status=preliminary_quick`.
+- Authoritative candidate requires **all** of:
+  - five samples
+  - clean git tree at campaign **start** (evidence file write afterward does not retroactively dirty eligibility)
+  - pre + post actual idle (CPU-scaled load; active confounder CPU ticks; swap **I/O** delta only)
+  - explicit `--idle-host-confirmed`
+  - no Wasmtime on `junban-server`; Wasmtime present on full probe; absent on SDK-only probe
+- Host contention measures **activity**, not mere existence:
+  - candidate cargo/node/browser PIDs must show positive CPU tick delta over a short sample window
+  - swap contention uses `/proc/vmstat` `pswpin`/`pswpout` delta; allocated-but-inactive swap is informational only
+  - load thresholds are CPU-scaled and must not reject a Phase 6-class idle host solely for load5≈3.28 on ~20 CPUs
 
-  ```text
-  projected = server_baseline + max(0, variant - sdk_only_probe)
-  ```
+### Projection limitation (critical honesty)
 
-  Preliminary ceilings = projected maxima + explicit headroom (Rust +25%/+8 MiB, TS +25%/+16 MiB).
-- Wave 5 must measure integrated server+host and may revise ceilings.
-- `invoke_wall_ms` is recorded as a limit field but **not** enforced as a general per-call wall deadline in this spike; only the explicit CPU-loop epoch ticker is measured. Product Wave 2 must enforce epoch + wall deadlines on every guest call.
-- Advisory: `RUSTSEC-2026-0222` (GHSA-hgjw-h833-99q9) has no 45.x patch; ignored in `deny.toml` **only** for this throwaway spike with documented reason. Product host must re-evaluate pin/toolchain before shipping.
+Custom probe cgroup totals and derived **projected product** values:
 
-## Quick-sample numbers (preliminary, contended host)
+```text
+projected = server_baseline + max(0, variant - sdk_only_probe)
+```
 
-Host was contended (high load, swap, build confounders). Do not use these as acceptance.
+are **not** an actual SDK-linked or integrated `junban-server` measurement.
 
-| Variant | Warm (median MiB) | Peak max (MiB) | Notes |
-| ------- | ----------------- | -------------- | ----- |
-| server baseline | 3.96 idle | 5.73 | under 24/32 |
-| sdk-only probe | 0.47 | 0.49 | no engine |
-| in-process Rust after warm | 4.46 | 4.96 | trap/cpu/grow survived |
-| child Rust after warm | 4.78 | 5.94 | shutdown cleaned |
-| in-process TypeScript after warm | 282.8 | 329.1 | pure component ~12.5 MiB wasm |
-| child TypeScript after warm | 280.3 | 379.8 | separate from Rust evidence |
+They are a temporary cross-check only. They do **not** prove the context-map criterion that a Phase 7 server linked to SDK/protocol-only stays within default memory growth bounds. **Wave 1 must produce matched release pairs of ordinary server vs server-with-SDK/protocol default path** (no Engine, no child) before that criterion is claimed. Wave 5 still measures integrated server+host and may revise active ceilings.
 
-Projected product (server + max(0, variant − sdk)):
+Preliminary ceilings in the quick JSON are data-derived from those projections plus explicit headroom only. They are not frozen Wave 1 acceptance gates.
 
-| Profile | Projected warm max | Projected peak max | Preliminary ceiling warm/peak |
-| ------- | ------------------ | ------------------ | ----------------------------- |
-| Rust | 8.52 | 11.18 | 16.52 / 19.18 |
-| TypeScript | 286.51 | 385.07 | 358.14 / 481.34 |
+Other limits:
 
-Selection rule outcome on raw probe warm medians: close (4.46 vs 4.78) → **child** by fault-containment tiebreak.
+- `invoke_wall_ms` is recorded but **not** enforced as a general per-call wall deadline; only the explicit CPU-loop epoch ticker is measured. Product Wave 2 must enforce epoch + wall deadlines on every guest call.
+- Advisory `RUSTSEC-2026-0222` has no 45.x patch; ignored in `deny.toml` only for this throwaway spike. Product host must re-evaluate before shipping.
+
+## Quick-sample posture
+
+Re-run results may still be `preliminary_quick` when the host is busy or the tree is dirty at start. Do not promote quick numbers to acceptance. See the JSON `evidence_status`, `host_contention`, `decision.blockers`, and `measured_preliminary_active_ceilings_mib` fields for the exact sample.
 
 ## Losing path
 
-Lazy in-process remains implementable and passed the same containment probes. It is not deleted from the temporary spike until authoritative evidence + architecture gate confirm the child path. Product Wave 2 should implement only the accepted placement; the temporary crate is deleted or reduced after the gate rather than renamed into `junban-plugin-host`.
+Lazy in-process remains implementable when it passes the same containment probes. It is not deleted from the temporary spike until authoritative evidence + architecture gate confirm the child path. Product Wave 2 should implement only the accepted placement; the temporary crate is deleted or reduced after the gate rather than renamed into `junban-plugin-host`.
 
 ## Follow-ups before Wave 1 architecture gate
 
 1. Re-run `python3 scripts/check-phase7-host-placement.py --idle-host-confirmed` on a quiet host with a clean tree and five samples.
-2. Confirm server no-Wasmtime linkage and ≤`max(15%, 1 MiB)` median growth vs Phase 6 disabled baseline on matched release pairs.
-3. Freeze authoritative projected/active ceilings from that run (or integrated measurements if available).
-4. Architecture review of the measured placement; only then start Wave 1 product crates.
-5. Resolve Wasmtime advisory via 45.x patch (if published), toolchain move to a patched line, or documented residual risk accepted for product host only after review.
+2. Wave 1 matched release proof: ordinary server vs server-with-SDK/protocol default path memory (context-map criterion; not satisfied by probe projection alone).
+3. Freeze authoritative active ceilings only from accepted evidence (or integrated measurements).
+4. Architecture review of the measured placement; only then start product crates.
+5. Resolve Wasmtime advisory via patch, toolchain move, or documented residual risk after review.
 
 ## Commands
 
@@ -133,12 +135,12 @@ cargo fmt -p junban-phase7-host-placement -- --check
 cargo clippy --locked -p junban-phase7-host-placement --all-targets --all-features -- -D warnings
 cargo test --locked -p junban-phase7-host-placement --all-features
 cargo build --locked --release -p junban-phase7-host-placement
-cargo deny check
 python3 scripts/check-phase7-host-placement.py --self-check
 python3 scripts/check-phase7-host-placement.py --quick \
   --output goals/rust-rewrite/evidence/phase-7-host-placement-quick.json
-# authoritative candidate (idle host only):
+# authoritative candidate (idle host + clean tree only):
 # python3 scripts/check-phase7-host-placement.py --idle-host-confirmed \
 #   --output goals/rust-rewrite/evidence/phase-7-host-placement.json
 node scripts/check-docs.mjs
+git diff --check
 ```

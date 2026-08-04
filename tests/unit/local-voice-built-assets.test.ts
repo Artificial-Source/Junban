@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const distDir = path.join(root, "dist");
 
-const FORBIDDEN = ["cdn.jsdelivr.net", "cdnjs.cloudflare.com", "resolve/main", "onnxruntime-node"];
+const FORBIDDEN = ["cdn.jsdelivr.net", "cdnjs.cloudflare.com"];
+const MUTABLE_REMOTE_URL = /https?:\/\/[^"'`\s]+\/resolve\/(?:main|master|latest)\//;
+const ONNXRUNTIME_NODE_IMPORT = /(?:from\s*|import\s*\(|require\s*\()\s*["'`]onnxruntime-node["'`]/;
 
 const ENGINE_MARKERS = [
   "@huggingface/transformers",
@@ -41,6 +43,10 @@ describe("local voice built assets", () => {
     for (const marker of [...FORBIDDEN, ...ENGINE_MARKERS]) {
       expect(indexHtml, `index.html contains ${marker}`).not.toContain(marker);
     }
+    expect(indexHtml, "index.html contains a mutable remote model URL").not.toMatch(
+      MUTABLE_REMOTE_URL,
+    );
+    expect(indexHtml, "index.html imports onnxruntime-node").not.toMatch(ONNXRUNTIME_NODE_IMPORT);
 
     const scriptSrcs = [...indexHtml.matchAll(/<script[^>]+src=["']([^"']+)["']/g)].map(
       (match) => match[1]!,
@@ -54,6 +60,8 @@ describe("local voice built assets", () => {
       for (const marker of [...FORBIDDEN, ...ENGINE_MARKERS]) {
         expect(text, `${src} contains ${marker}`).not.toContain(marker);
       }
+      expect(text, `${src} contains a mutable remote model URL`).not.toMatch(MUTABLE_REMOTE_URL);
+      expect(text, `${src} imports onnxruntime-node`).not.toMatch(ONNXRUNTIME_NODE_IMPORT);
     }
   });
 
@@ -68,6 +76,12 @@ describe("local voice built assets", () => {
       for (const needle of FORBIDDEN) {
         expect(text, `${path.relative(root, file)} contains ${needle}`).not.toContain(needle);
       }
+      expect(text, `${path.relative(root, file)} contains a mutable remote model URL`).not.toMatch(
+        MUTABLE_REMOTE_URL,
+      );
+      expect(text, `${path.relative(root, file)} imports onnxruntime-node`).not.toMatch(
+        ONNXRUNTIME_NODE_IMPORT,
+      );
       expect(text).not.toMatch(/["']sharp["']/);
       expect(text).not.toMatch(/new\s+Worker\s*\(\s*[`'"]https?:\/\//);
     }

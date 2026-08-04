@@ -14,7 +14,7 @@ use rusqlite::{
 use crate::ops_types::{Inverse, PostImage};
 
 /// Highest schema version applied by this crate.
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 5;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 /// Live database file name under a profile directory.
 const DATABASE_FILE: &str = "junban.sqlite3";
@@ -137,6 +137,15 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
         transaction.commit()?;
     }
 
+    let current = current_version(connection)?;
+    if current < 6 {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        apply_v6(&transaction)?;
+        assert_foreign_keys_clean(&transaction)?;
+        record_version(&transaction, 6)?;
+        transaction.commit()?;
+    }
+
     if let Some(backup_path) = pre_migration_backup {
         // Prune only after the new backup and the fully migrated DB both reopen cleanly.
         finalize_successful_v2_to_v3(profile_dir, &backup_path)?;
@@ -160,9 +169,56 @@ pub(crate) fn migrate(connection: &mut Connection, profile_dir: &Path) -> rusqli
     // SQL ordering matches instant order. Idempotent on already-canonical rows.
     if applied == CURRENT_SCHEMA_VERSION {
         normalize_reminder_timestamp_text(connection)?;
+        ensure_v6_ai_runtime_indexes(connection)?;
+        repair_current_v6_ai_response_authority(connection)?;
     }
 
     Ok(())
+}
+
+fn ensure_v6_ai_runtime_indexes(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_ai_run_state_state
+         ON ai_run_state(state, run_id);",
+    )
+}
+
+/// Apply the idempotent current-v6 AI response-authority correction.
+///
+/// This is deliberately limited to the known indexes and invalidation table added
+/// in-place during schema v6. Conflicting objects fail here or during canonical
+/// schema validation rather than being replaced.
+pub(crate) fn repair_current_v6_ai_response_authority(
+    connection: &Connection,
+) -> rusqlite::Result<()> {
+    if current_version(connection)? != CURRENT_SCHEMA_VERSION {
+        return Ok(());
+    }
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute_batch(
+        r#"
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_messages_daily_briefing_active
+    ON ai_messages(json_extract(content_json, '$.briefing_date'))
+    WHERE role = 'assistant'
+      AND status IN ('streaming', 'completed')
+      AND json_type(content_json, '$.briefing_date') = 'text';
+CREATE INDEX IF NOT EXISTS idx_ai_messages_briefing_date
+    ON ai_messages(json_extract(content_json, '$.briefing_date'), status, id)
+    WHERE role = 'assistant'
+      AND json_type(content_json, '$.briefing_date') = 'text';
+CREATE TABLE IF NOT EXISTS ai_response_invalidations (
+    run_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    invalidating_operation_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_response_invalidations_session
+    ON ai_response_invalidations(session_id, run_id);
+CREATE INDEX IF NOT EXISTS idx_ai_response_invalidations_expiry
+    ON ai_response_invalidations(expires_at, run_id);
+"#,
+    )?;
+    transaction.commit()
 }
 
 /// Rewrite reminder comparison columns to fixed nine-fractional-digit UTC text.
@@ -855,6 +911,195 @@ CREATE TABLE time_slot_tasks (
 CREATE INDEX idx_time_slot_tasks_task ON time_slot_tasks(task_id);
 ",
     )?;
+
+    Ok(())
+}
+
+/// Add schema-v6 AI chat/memory/approval tables and expand settings with AI/voice defaults.
+fn apply_v6(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
+    use junban_domain::AppSettings;
+
+    transaction.execute_batch(
+        r#"
+CREATE TABLE ai_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL CHECK (length(title) > 0 AND length(title) <= 200),
+    status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
+    message_count INTEGER NOT NULL CHECK (message_count >= 0 AND message_count <= 500),
+    content_bytes INTEGER NOT NULL CHECK (content_bytes >= 0 AND content_bytes <= 33554432),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_message_at TEXT
+);
+CREATE INDEX idx_ai_sessions_updated ON ai_sessions(updated_at DESC, id);
+
+CREATE TABLE ai_messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES ai_sessions(id) ON DELETE CASCADE,
+    turn_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence > 0),
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
+    status TEXT NOT NULL CHECK (
+        status IN ('pending', 'streaming', 'completed', 'failed', 'cancelled')
+    ),
+    content_json TEXT NOT NULL,
+    content_bytes INTEGER NOT NULL CHECK (content_bytes >= 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (session_id, sequence)
+);
+CREATE INDEX idx_ai_messages_session_sequence ON ai_messages(session_id, sequence);
+CREATE INDEX idx_ai_messages_turn ON ai_messages(session_id, turn_id);
+
+CREATE TABLE ai_memories (
+    id TEXT PRIMARY KEY,
+    content TEXT NOT NULL CHECK (length(content) > 0 AND length(content) <= 10000),
+    content_bytes INTEGER NOT NULL CHECK (content_bytes > 0 AND content_bytes <= 10000),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_ai_memories_updated ON ai_memories(updated_at DESC, id);
+
+CREATE TABLE ai_session_memories (
+    session_id TEXT NOT NULL REFERENCES ai_sessions(id) ON DELETE CASCADE,
+    memory_id TEXT NOT NULL REFERENCES ai_memories(id) ON DELETE CASCADE,
+    PRIMARY KEY (session_id, memory_id)
+);
+CREATE INDEX idx_ai_session_memories_memory ON ai_session_memories(memory_id);
+
+CREATE TABLE ai_tool_approvals (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES ai_sessions(id) ON DELETE CASCADE,
+    turn_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    generation INTEGER NOT NULL CHECK (generation >= 0),
+    tool_name TEXT NOT NULL CHECK (length(tool_name) > 0 AND length(tool_name) <= 64),
+    arguments_json TEXT NOT NULL,
+    arguments_bytes INTEGER NOT NULL CHECK (arguments_bytes >= 0 AND arguments_bytes <= 131072),
+    action_hash TEXT NOT NULL CHECK (length(action_hash) = 64),
+    status TEXT NOT NULL CHECK (
+        status IN ('pending', 'approved', 'rejected', 'expired', 'consumed')
+    ),
+    expires_at TEXT NOT NULL,
+    operation_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_ai_tool_approvals_session ON ai_tool_approvals(session_id, status);
+CREATE INDEX idx_ai_tool_approvals_run ON ai_tool_approvals(run_id, generation);
+
+CREATE TABLE ai_run_state (
+    run_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES ai_sessions(id) ON DELETE CASCADE,
+    turn_id TEXT NOT NULL,
+    assistant_message_id TEXT NOT NULL UNIQUE REFERENCES ai_messages(id) ON DELETE CASCADE,
+    generation INTEGER NOT NULL CHECK (generation >= 0),
+    state TEXT NOT NULL CHECK (
+        state IN (
+            'running', 'awaiting_approval', 'dispatching',
+            'completed', 'failed', 'cancelled'
+        )
+    ),
+    approval_id TEXT REFERENCES ai_tool_approvals(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_ai_run_state_session ON ai_run_state(session_id, state);
+-- Bounded startup dispatch recovery probes by state and stable run identity.
+CREATE INDEX idx_ai_run_state_state ON ai_run_state(state, run_id);
+-- Restore validation probes terminal approvals by approval_id; keep that path indexed.
+CREATE INDEX idx_ai_run_state_approval
+    ON ai_run_state(approval_id)
+    WHERE approval_id IS NOT NULL;
+
+CREATE UNIQUE INDEX idx_ai_messages_daily_briefing_active
+    ON ai_messages(json_extract(content_json, '$.briefing_date'))
+    WHERE role = 'assistant'
+      AND status IN ('streaming', 'completed')
+      AND json_type(content_json, '$.briefing_date') = 'text';
+CREATE INDEX idx_ai_messages_briefing_date
+    ON ai_messages(json_extract(content_json, '$.briefing_date'), status, id)
+    WHERE role = 'assistant'
+      AND json_type(content_json, '$.briefing_date') = 'text';
+
+CREATE TABLE IF NOT EXISTS ai_response_invalidations (
+    run_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    invalidating_operation_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_response_invalidations_session
+    ON ai_response_invalidations(session_id, run_id);
+CREATE INDEX IF NOT EXISTS idx_ai_response_invalidations_expiry
+    ON ai_response_invalidations(expires_at, run_id);
+
+CREATE TABLE ai_quota (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    session_count INTEGER NOT NULL CHECK (session_count >= 0 AND session_count <= 500),
+    total_content_bytes INTEGER NOT NULL CHECK (
+        total_content_bytes >= 0 AND total_content_bytes <= 134217728
+    ),
+    memory_count INTEGER NOT NULL CHECK (memory_count >= 0 AND memory_count <= 500),
+    memory_content_bytes INTEGER NOT NULL CHECK (
+        memory_content_bytes >= 0 AND memory_content_bytes <= 5242880
+    ),
+    pending_approval_count INTEGER NOT NULL CHECK (
+        pending_approval_count >= 0 AND pending_approval_count <= 128
+    ),
+    pending_approval_content_bytes INTEGER NOT NULL CHECK (
+        pending_approval_content_bytes >= 0 AND pending_approval_content_bytes <= 1048576
+    )
+);
+INSERT INTO ai_quota(
+    singleton, session_count, total_content_bytes, memory_count, memory_content_bytes,
+    pending_approval_count, pending_approval_content_bytes
+) VALUES (1, 0, 0, 0, 0, 0, 0);
+"#,
+    )?;
+
+    // Expand the typed settings aggregate with AI/voice defaults while preserving
+    // every existing non-AI preference from the v5 settings_json row.
+    let existing_json: Option<String> = transaction
+        .query_row(
+            "SELECT value_json FROM app_settings WHERE key = 'settings_json'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let mut settings = if let Some(json) = existing_json {
+        serde_json::from_str::<AppSettings>(&json).map_err(|error| {
+            migration_err(format!("invalid settings_json before v6 migrate: {error}"))
+        })?
+    } else {
+        AppSettings::default_settings()
+    };
+    // Force disabled cloud AI/speech defaults when sections were absent (serde default)
+    // or when an older snapshot somehow enabled them without Wave-1 authority.
+    if settings.ai.credential_id.is_some() || settings.ai.enabled {
+        settings.ai = settings.ai.cleared_for_restore();
+    }
+    if settings.voice.cloud_speech_enabled
+        || settings.voice.stt_credential_id.is_some()
+        || settings.voice.tts_credential_id.is_some()
+    {
+        settings.voice = settings.voice.cleared_for_restore();
+    }
+    settings
+        .validate()
+        .map_err(|error| migration_err(format!("settings invalid after v6 migrate: {error}")))?;
+    let settings_json =
+        serde_json::to_string(&settings).map_err(|error| migration_err(error.to_string()))?;
+    let updated_at = Timestamp::now().to_string();
+    let updated = transaction.execute(
+        "UPDATE app_settings SET value_json = ?1, updated_at = ?2 WHERE key = 'settings_json'",
+        rusqlite::params![settings_json, updated_at],
+    )?;
+    if updated != 1 {
+        transaction.execute(
+            "INSERT INTO app_settings(key, value_json, updated_at) VALUES ('settings_json', ?1, ?2)",
+            rusqlite::params![settings_json, updated_at],
+        )?;
+    }
 
     Ok(())
 }
@@ -1700,7 +1945,7 @@ mod tests {
         let mut connection = db.open();
         db.migrate(&mut connection).unwrap();
 
-        assert_eq!(current_version(&connection).unwrap(), 5);
+        assert_eq!(current_version(&connection).unwrap(), 6);
         let tables = table_names(&connection);
         for name in [
             "app_state",
@@ -1726,6 +1971,14 @@ mod tests {
             "time_blocks",
             "time_slots",
             "time_slot_tasks",
+            "ai_sessions",
+            "ai_messages",
+            "ai_memories",
+            "ai_session_memories",
+            "ai_tool_approvals",
+            "ai_run_state",
+            "ai_response_invalidations",
+            "ai_quota",
         ] {
             assert!(tables.contains(name), "missing table {name}");
         }
@@ -2015,6 +2268,21 @@ mod tests {
             ),
             "expected time_slots range check, got {err:?}"
         );
+
+        let approval_index_sql: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master
+                 WHERE type = 'index' AND name = 'idx_ai_run_state_approval'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            approval_index_sql.contains("approval_id")
+                && approval_index_sql.contains("WHERE")
+                && approval_index_sql.contains("approval_id IS NOT NULL"),
+            "fresh schema v6 must include partial ai_run_state.approval_id index: {approval_index_sql}"
+        );
     }
 
     #[test]
@@ -2025,7 +2293,7 @@ mod tests {
             seed_v1_with_sample_rows(&mut connection);
             assert_eq!(current_version(&connection).unwrap(), 1);
             db.migrate(&mut connection).unwrap();
-            assert_eq!(current_version(&connection).unwrap(), 5);
+            assert_eq!(current_version(&connection).unwrap(), 6);
             // Fresh migrations do not create a pre-v2 backup.
             assert!(pre_migration_backups(db.profile_dir()).is_empty());
 
@@ -2173,7 +2441,7 @@ mod tests {
 
         connection.execute_batch("DROP TABLE comments;").unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 5);
+        assert_eq!(current_version(&connection).unwrap(), 6);
         assert!(table_names(&connection).contains("projects"));
         assert!(table_names(&connection).contains("operation_undo"));
         assert!(table_names(&connection).contains("app_settings"));
@@ -2203,7 +2471,7 @@ mod tests {
         assert_eq!(current_version(&connection).unwrap(), 2);
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 5);
+        assert_eq!(current_version(&connection).unwrap(), 6);
 
         let title: String = connection
             .query_row(
@@ -2299,7 +2567,7 @@ INSERT INTO task_activity(
             .unwrap();
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 5);
+        assert_eq!(current_version(&connection).unwrap(), 6);
         let cancelled_at: Option<String> = connection
             .query_row(
                 "SELECT cancelled_at FROM tasks WHERE id = '33333333-3333-7333-8333-333333333333'",
@@ -2590,7 +2858,7 @@ INSERT INTO task_activity(
             .execute_batch("DROP TRIGGER fail_last_undo_reconciliation;")
             .unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 5);
+        assert_eq!(current_version(&connection).unwrap(), 6);
 
         let mut migrated_rows = Vec::new();
         for (source_operation_id, original) in &original_payloads {
@@ -2662,7 +2930,7 @@ END;
             .execute_batch("DROP TRIGGER fail_cancel_backfill;")
             .unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 5);
+        assert_eq!(current_version(&connection).unwrap(), 6);
         let cancelled_at: Option<String> = connection
             .query_row(
                 "SELECT cancelled_at FROM tasks WHERE id = '11111111-1111-7111-8111-111111111111'",
@@ -2714,7 +2982,7 @@ END;
             .execute_batch("DROP TABLE app_settings;")
             .unwrap();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 5);
+        assert_eq!(current_version(&connection).unwrap(), 6);
         assert!(table_names(&connection).contains("app_settings"));
         assert!(table_names(&connection).contains("time_slot_tasks"));
         assert!(task_columns(&connection).contains(&"completion_operation_id".to_owned()));
@@ -2755,7 +3023,7 @@ END;
         assert_eq!(pre_migration_backups(db.profile_dir()).len(), 4);
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 5);
+        assert_eq!(current_version(&connection).unwrap(), 6);
 
         let mut remaining = pre_migration_backups(db.profile_dir());
         remaining.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
@@ -2790,13 +3058,20 @@ END;
         let db = TestDb::new();
         let mut connection = db.open();
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 5);
+        assert_eq!(current_version(&connection).unwrap(), 6);
 
         // Rewrite the profile back to a Phase 3/v4 settings shape, then re-run migrate.
         connection
             .execute_batch(
                 r#"
-DELETE FROM schema_migrations WHERE version = 5;
+DELETE FROM schema_migrations WHERE version >= 5;
+DROP TABLE IF EXISTS ai_run_state;
+DROP TABLE IF EXISTS ai_tool_approvals;
+DROP TABLE IF EXISTS ai_session_memories;
+DROP TABLE IF EXISTS ai_messages;
+DROP TABLE IF EXISTS ai_memories;
+DROP TABLE IF EXISTS ai_sessions;
+DROP TABLE IF EXISTS ai_quota;
 DELETE FROM app_settings;
 DROP TABLE app_settings;
 CREATE TABLE app_settings (
@@ -2822,7 +3097,7 @@ INSERT INTO app_settings(key, value_json, updated_at) VALUES
         assert_eq!(current_version(&connection).unwrap(), 4);
 
         db.migrate(&mut connection).unwrap();
-        assert_eq!(current_version(&connection).unwrap(), 5);
+        assert_eq!(current_version(&connection).unwrap(), 6);
 
         let epoch: String = connection
             .query_row(
@@ -2874,10 +3149,121 @@ INSERT INTO app_settings(key, value_json, updated_at) VALUES
             settings.keyboard_shortcuts.len(),
             junban_domain::KEYBOARD_SHORTCUT_ACTIONS.len()
         );
+        assert!(!settings.ai.enabled);
+        assert!(!settings.voice.cloud_speech_enabled);
+        assert!(settings.ai.credential_id.is_none());
         let count: i64 = connection
             .query_row("SELECT COUNT(*) FROM app_settings", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
+        let ai_tables: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE 'ai_%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(ai_tables >= 7);
+    }
+
+    #[test]
+    fn migrate_v5_to_v6_is_idempotent_and_preserves_settings() {
+        let db = TestDb::new();
+        let mut connection = db.open();
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 6);
+
+        // Roll back only the v6 marker and AI tables, keep v5 settings blob.
+        let settings_json: String = connection
+            .query_row(
+                "SELECT value_json FROM app_settings WHERE key = 'settings_json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut settings: junban_domain::AppSettings =
+            serde_json::from_str(&settings_json).unwrap();
+        settings.planning.capacity_minutes = 300;
+        // Simulate a hostile pre-v6 snapshot that somehow carried bindings.
+        settings.ai.enabled = true;
+        settings.ai.provider = Some(junban_domain::AiProviderPreset::OpenAi);
+        settings.ai.credential_id = Some(junban_domain::AiCredentialId::new());
+        let hostile = serde_json::to_string(&settings).unwrap();
+        connection
+            .execute_batch(
+                r#"
+DELETE FROM schema_migrations WHERE version = 6;
+DROP TABLE IF EXISTS ai_run_state;
+DROP TABLE IF EXISTS ai_tool_approvals;
+DROP TABLE IF EXISTS ai_session_memories;
+DROP TABLE IF EXISTS ai_messages;
+DROP TABLE IF EXISTS ai_memories;
+DROP TABLE IF EXISTS ai_sessions;
+DROP TABLE IF EXISTS ai_quota;
+"#,
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE app_settings SET value_json = ?1 WHERE key = 'settings_json'",
+                [&hostile],
+            )
+            .unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 5);
+
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 6);
+        // Failed migration rollback: force a mid-migration failure path by retrying.
+        db.migrate(&mut connection).unwrap();
+        assert_eq!(current_version(&connection).unwrap(), 6);
+
+        let settings_json: String = connection
+            .query_row(
+                "SELECT value_json FROM app_settings WHERE key = 'settings_json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let settings: junban_domain::AppSettings = serde_json::from_str(&settings_json).unwrap();
+        assert_eq!(settings.planning.capacity_minutes, 300);
+        assert!(!settings.ai.enabled);
+        assert!(settings.ai.credential_id.is_none());
+        assert_eq!(
+            settings.ai.provider,
+            Some(junban_domain::AiProviderPreset::OpenAi)
+        );
+
+        let approval_index_sql: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master
+                 WHERE type = 'index' AND name = 'idx_ai_run_state_approval'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            approval_index_sql.contains("approval_id")
+                && approval_index_sql.contains("WHERE")
+                && approval_index_sql.contains("approval_id IS NOT NULL"),
+            "v5→v6 must create partial ai_run_state.approval_id index: {approval_index_sql}"
+        );
+        let assistant_not_null: i64 = connection
+            .query_row(
+                "SELECT \"notnull\" FROM pragma_table_info('ai_run_state')
+                 WHERE name = 'assistant_message_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(assistant_not_null, 1);
+        let run_schema: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ai_run_state'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(run_schema.contains("assistant_message_id TEXT NOT NULL UNIQUE"));
     }
 
     #[test]

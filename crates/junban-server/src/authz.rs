@@ -173,6 +173,158 @@ pub fn classified_routes() -> &'static [ClassifiedRoute] {
             path: "/api/v1/backup/restore",
             access: RouteAccess::OperatorOnly,
         },
+        // Cloud speech and AI/provider control planes — operator only.
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/voice/transcriptions",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/voice/speech",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/providers",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/providers/{provider}/models",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/config",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "PUT",
+            path: "/api/v1/ai/config",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/ai/config",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "PUT",
+            path: "/api/v1/ai/credentials/{target}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/ai/credentials/{target}",
+            access: RouteAccess::OperatorOnly,
+        },
+        // Durable AI session/message/memory control plane — operator only.
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/sessions",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/sessions",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/sessions/{session_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "PATCH",
+            path: "/api/v1/ai/sessions/{session_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/ai/sessions/{session_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/sessions/{session_id}/messages",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/sessions/{session_id}/responses",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/sessions/{session_id}/daily-briefing",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/sessions/{session_id}/messages/{message_id}/edit",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/sessions/{session_id}/messages/{message_id}/retry",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/sessions/{session_id}/messages/{message_id}/regenerate",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/runs/{run_id}/cancel",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/approvals/{approval_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/approvals/{approval_id}/approve",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/approvals/{approval_id}/reject",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/sessions/{session_id}/clear",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/memories",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/ai/memories",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/ai/memories/{memory_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "PATCH",
+            path: "/api/v1/ai/memories/{memory_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/ai/memories/{memory_id}",
+            access: RouteAccess::OperatorOnly,
+        },
         // Reminder delivery control plane — operator only
         ClassifiedRoute {
             method: "POST",

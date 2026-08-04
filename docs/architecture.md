@@ -31,7 +31,7 @@ Phases 1 and 2 implement the hosted product in `junban-domain`, `junban-app`, `j
 | `junban-server`      | Axum composition, HTTP DTO/OpenAPI authority, principal/scope auth, static serving, SSE, and reusable API-only owner runtime |
 | `junban-cli`         | Native CLI session, HTTP executor, versioned automation catalog, and human/JSON commands                                     |
 | `junban-mcp`         | Native MCP stdio adapter over the CLI session/catalog (Wave 3 completes tools/resources/prompts)                             |
-| `junban-ai`          | Optional provider clients and orchestration                                                                                  |
+| `junban-ai`          | Optional lazy chat/speech provider clients (no default-startup construct)                                                    |
 | `junban-plugin-sdk`  | WIT contract and package types                                                                                               |
 | `junban-plugin-host` | Optional Wasmtime runtime after a measured spike                                                                             |
 
@@ -41,6 +41,8 @@ Rules:
 - HTTP, CLI, MCP, desktop, AI tools, and plugins invoke the same application use cases.
 - Avoid a generic “shared” crate. A type belongs to the layer that owns its meaning.
 - Transport DTOs are not domain entities.
+- AI chat tools mutate only through `junban-app`; raw provider API keys live outside SQLite in profile-private `ai-secrets.json`.
+- Browser-local speech (Whisper/Kokoro/Piper/VAD) runs in the page with pinned manifests and same-origin workers; it is not a server subsystem. Operator guide: [`ai-and-voice.md`](ai-and-voice.md).
 
 ## Runtime ownership
 
@@ -59,6 +61,14 @@ Transport DTOs live in `junban-server`, not the domain. Utoipa derives the deter
 SSE clients subscribe before durable catch-up. Revision IDs deduplicate queued/live overlap, and a lagged in-process receiver catches up from SQLite again. Catch-up pages are bounded to 100 events and 2 MiB; retained history is bounded to 2,048 events and 64 MiB, with an explicit resync signal when a client falls behind retained history. This makes SQLite—not the broadcast queue—the live-change authority. Each forwarder selects on client disconnect, process shutdown cancellation, and broadcast work so dropped responses and SIGINT/SIGTERM both release the task promptly. Concurrent SSE connections are hard-capped per process.
 
 Reminder delivery adds one process-global Tokio wake coordinator (started only from `main`, cancelled with the same shutdown token) and an authenticated ephemeral `GET /api/v1/reminders/events` stream. The coordinator sleeps until `next_reminder_wake_at`, broadcasts a content-free `reminders_due` signal with a process-local sequence, and recomputes on `Notify` after committed user mutations and successful reminder control-plane routes. Overdue wakes throttle at 30 seconds unless notified. These wakes are not committed task events and never increment the global revision. They share the same 64-connection SSE cap as `/api/v1/events`.
+
+## Durable AI response authority
+
+AI chat uses ordinary schema-v6 session/message/run rows. Daily briefing durably reserves only one assistant streaming message carrying the server-local `briefing_date`; a partial unique expression index permits at most one streaming/completed briefing for a profile date while failed/cancelled attempts remain history. Provider context adds one ephemeral server-owned user instruction with the exact date, read-only `plan_my_day`-first/no-apply language, and confirmed default energy when configured. No scheduler table or durable synthetic user message is involved.
+
+Edit, retry, and regenerate are typed suffix rewrites. Basic chat and typed actions share the same provider/configuration/context/credential preflight under the AI reconfiguration admission mutex before one storage transaction preserves the exact prefix, rejects an active suffix, tombstones removed run IDs for the 30-day receipt horizon, deletes the suffix, appends one completed user plus streaming assistant/run seed, and recomputes quotas. Invalidation session IDs are historical metadata independent of live session deletion and expire only with their receipt horizon. The setup task owns the response sender, SSE permit, mutex, request, and runtime admission through commit, so a dropped handler still terminalizes its durable run without cancelling unrelated runs. Exact terminal retries replay the retained seed and SSE transcript without provider setup or egress.
+
+Mutation tools require an approval bound to canonical tool name and arguments before `AppService` dispatch; streaming uses versioned local SSE envelopes rather than vendor frames. The response-action and chat routes are operator-only HTTP/SSE and intentionally do not extend the frozen CLI/MCP catalog. Configuration, credentials, tools, local voice, and operator troubleshooting: [`ai-and-voice.md`](ai-and-voice.md).
 
 ## Frontend boundary
 

@@ -7,20 +7,27 @@ use std::{
     time::Duration,
 };
 
-use jiff::Timestamp;
+use jiff::{Timestamp, ToSpan};
 use junban_app::{
     CommittedEvent, CommittedMutation, EventType, RepositoryError, ResourceSnapshot, ResourceType,
     StagedFile,
 };
 use junban_domain::{
-    ActualMinutes, AppSettings, BACKUP_HEADER_LEN, BACKUP_VERSION, BackupError, BackupHeader,
-    BackupManifest, CommentBody, CommentId, DreadLevel, EntityName, EstimatedMinutes, HexColor,
-    MAX_BACKUP_MANIFEST_BYTES, MAX_BACKUP_PAYLOAD_BYTES, MarkdownText, MonthlyAnchorDay,
+    AI_APPROVAL_LIFETIME_SECS, AI_MEMORIES_PER_PROFILE_MAX, AI_MEMORY_BYTES_MAX,
+    AI_MEMORY_CONTENT_BYTES_MAX, AI_MESSAGE_CONTENT_JSON_BYTES_MAX, AI_MESSAGES_PER_SESSION_MAX,
+    AI_PENDING_APPROVAL_CONTENT_BYTES_MAX, AI_PENDING_APPROVALS_MAX, AI_PROFILE_CONTENT_BYTES_MAX,
+    AI_PROVIDER_ID_BYTES_MAX, AI_SESSION_CONTENT_BYTES_MAX, AI_SESSION_TITLE_BYTES_MAX,
+    AI_SESSIONS_PER_PROFILE_MAX, AI_TOOL_ARGUMENTS_BYTES_MAX, AI_USER_INPUT_BYTES_MAX,
+    ActualMinutes, AiApprovalId, AiApprovalStatus, AiMemory, AiMemoryId, AiMessageContent,
+    AiMessageId, AiMessageRole, AiMessageStatus, AiRunId, AiRunPhase, AiSession, AiSessionId,
+    AiSessionStatus, AiTurnId, AppSettings, BACKUP_HEADER_LEN, BACKUP_VERSION, BackupError,
+    BackupHeader, BackupManifest, CommentBody, CommentId, DreadLevel, EntityName, EstimatedMinutes,
+    HexColor, MAX_BACKUP_MANIFEST_BYTES, MAX_BACKUP_PAYLOAD_BYTES, MarkdownText, MonthlyAnchorDay,
     OperationId, Priority, ProjectId, RecurrenceRule, ReminderFenceTerm, ReminderOccurrence,
     ReminderOccurrenceState, SavedFilterId, SectionId, TagId, TagName, Task, TaskId, TaskStatus,
     TaskTitle, TemplateId, TimeBlock, TimeBlockId, TimeSlot, TimeSlotId, TimeZoneName,
-    decode_sha256_hex, read_backup_header, sha256_bytes, validate_backup_header,
-    validate_task_tags, write_backup_header,
+    ai_approval_action_hash, decode_sha256_hex, read_backup_header, sha256_bytes,
+    validate_backup_header, validate_task_tags, write_backup_header,
 };
 use rusqlite::{Connection, MAIN_DB, OptionalExtension, Transaction, backup::Backup, params};
 use sha2::{Digest, Sha256};
@@ -202,6 +209,9 @@ pub(crate) fn prepare_restore(
             "app_state row missing while preparing restore".into(),
         ));
     }
+    // Candidate restore validation clears credential bindings and forces AI/cloud
+    // speech disabled while preserving non-secret preferences/chat/memory data.
+    sanitize_restored_ai_state(&validated)?;
     checkpoint_wal(&validated)?;
     validate_payload(&validated, &manifest, profile_dir)?;
     drop(validated);
@@ -339,6 +349,17 @@ fn open_and_validate_payload(
     connection
         .pragma_update(None, "foreign_keys", true)
         .map_err(storage_error)?;
+
+    // The framed payload and its hash have already been authenticated. Authenticate
+    // SQLite integrity before applying only the known in-place current-v6 response-
+    // authority correction; canonical schema and all semantic checks still follow.
+    assert_integrity(&connection).map_err(|_| invalid_backup())?;
+    let schema_version = read_schema_version(&connection).map_err(|_| invalid_backup())?;
+    if schema_version != manifest.schema_version || schema_version != CURRENT_SCHEMA_VERSION {
+        return Err(invalid_backup());
+    }
+    migration::repair_current_v6_ai_response_authority(&connection)
+        .map_err(|_| invalid_backup())?;
     validate_payload(&connection, manifest, profile_dir)?;
     Ok(connection)
 }
@@ -469,6 +490,7 @@ fn validate_authoritative_rows(connection: &Connection) -> Result<(), Repository
     validate_serialized_size_bounds(&tx)?;
     validate_migration_rows(&tx)?;
     validate_settings_rows(&tx)?;
+    validate_ai_rows(&tx)?;
     validate_loaded_entities(&tx, head)?;
     validate_relation_and_control_rows(&tx, head)?;
     validate_event_rows(&tx, head)?;
@@ -569,6 +591,561 @@ fn validate_settings_rows(tx: &Transaction<'_>) -> Result<(), RepositoryError> {
     Ok(())
 }
 
+fn validate_ai_rows(tx: &Transaction<'_>) -> Result<(), RepositoryError> {
+    // Reject oversized cells using SQLite's byte-length primitive before Rust loads
+    // any hostile text. Every later row allocation is therefore independently bounded.
+    let oversized: bool = tx
+        .query_row(
+            "SELECT
+                EXISTS(SELECT 1 FROM ai_sessions WHERE
+                    LENGTH(CAST(id AS BLOB)) > 64
+                    OR LENGTH(CAST(title AS BLOB)) > ?1
+                    OR LENGTH(CAST(status AS BLOB)) > 32
+                    OR LENGTH(CAST(created_at AS BLOB)) > 64
+                    OR LENGTH(CAST(updated_at AS BLOB)) > 64
+                    OR LENGTH(CAST(COALESCE(last_message_at, '') AS BLOB)) > 64)
+                OR EXISTS(SELECT 1 FROM ai_messages WHERE
+                    LENGTH(CAST(id AS BLOB)) > 64
+                    OR LENGTH(CAST(session_id AS BLOB)) > 64
+                    OR LENGTH(CAST(turn_id AS BLOB)) > 64
+                    OR LENGTH(CAST(role AS BLOB)) > 32
+                    OR LENGTH(CAST(status AS BLOB)) > 32
+                    OR LENGTH(CAST(content_json AS BLOB)) > ?2
+                    OR LENGTH(CAST(created_at AS BLOB)) > 64
+                    OR LENGTH(CAST(updated_at AS BLOB)) > 64)
+                OR EXISTS(SELECT 1 FROM ai_memories WHERE
+                    LENGTH(CAST(id AS BLOB)) > 64
+                    OR LENGTH(CAST(content AS BLOB)) > ?3
+                    OR LENGTH(CAST(created_at AS BLOB)) > 64
+                    OR LENGTH(CAST(updated_at AS BLOB)) > 64)
+                OR EXISTS(SELECT 1 FROM ai_session_memories WHERE
+                    LENGTH(CAST(session_id AS BLOB)) > 64
+                    OR LENGTH(CAST(memory_id AS BLOB)) > 64)
+                OR EXISTS(SELECT 1 FROM ai_tool_approvals WHERE
+                    LENGTH(CAST(id AS BLOB)) > 64
+                    OR LENGTH(CAST(session_id AS BLOB)) > 64
+                    OR LENGTH(CAST(turn_id AS BLOB)) > 64
+                    OR LENGTH(CAST(run_id AS BLOB)) > 64
+                    OR LENGTH(CAST(tool_name AS BLOB)) > ?4
+                    OR LENGTH(CAST(arguments_json AS BLOB)) > ?5
+                    OR LENGTH(CAST(action_hash AS BLOB)) > 64
+                    OR LENGTH(CAST(status AS BLOB)) > 32
+                    OR LENGTH(CAST(expires_at AS BLOB)) > 64
+                    OR LENGTH(CAST(COALESCE(operation_id, '') AS BLOB)) > 64
+                    OR LENGTH(CAST(created_at AS BLOB)) > 64
+                    OR LENGTH(CAST(updated_at AS BLOB)) > 64)
+                OR EXISTS(SELECT 1 FROM ai_response_invalidations WHERE
+                    LENGTH(CAST(run_id AS BLOB)) > 64
+                    OR LENGTH(CAST(session_id AS BLOB)) > 64
+                    OR LENGTH(CAST(invalidating_operation_id AS BLOB)) > 64
+                    OR LENGTH(CAST(expires_at AS BLOB)) > 64)
+                OR EXISTS(SELECT 1 FROM ai_run_state WHERE
+                    LENGTH(CAST(run_id AS BLOB)) > 64
+                    OR LENGTH(CAST(session_id AS BLOB)) > 64
+                    OR LENGTH(CAST(turn_id AS BLOB)) > 64
+                    OR LENGTH(CAST(assistant_message_id AS BLOB)) > 64
+                    OR LENGTH(CAST(state AS BLOB)) > 32
+                    OR LENGTH(CAST(COALESCE(approval_id, '') AS BLOB)) > 64
+                    OR LENGTH(CAST(created_at AS BLOB)) > 64
+                    OR LENGTH(CAST(updated_at AS BLOB)) > 64)",
+            params![
+                i64::try_from(AI_SESSION_TITLE_BYTES_MAX).map_err(storage_error)?,
+                i64::try_from(AI_MESSAGE_CONTENT_JSON_BYTES_MAX).map_err(storage_error)?,
+                i64::try_from(AI_MEMORY_BYTES_MAX).map_err(storage_error)?,
+                i64::try_from(AI_PROVIDER_ID_BYTES_MAX).map_err(storage_error)?,
+                i64::try_from(AI_TOOL_ARGUMENTS_BYTES_MAX).map_err(storage_error)?,
+            ],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    if oversized {
+        return Err(RepositoryError::Storage(
+            "AI row material exceeds its bound".to_owned(),
+        ));
+    }
+
+    let session_count: i64 = tx
+        .query_row("SELECT COUNT(*) FROM ai_sessions", [], |row| row.get(0))
+        .map_err(storage_error)?;
+    let profile_bytes: i64 = tx
+        .query_row(
+            "SELECT COALESCE(SUM(LENGTH(CAST(content_json AS BLOB))), 0)
+             FROM ai_messages",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    let memory_count: i64 = tx
+        .query_row("SELECT COUNT(*) FROM ai_memories", [], |row| row.get(0))
+        .map_err(storage_error)?;
+    let memory_bytes: i64 = tx
+        .query_row(
+            "SELECT COALESCE(SUM(LENGTH(CAST(content AS BLOB))), 0) FROM ai_memories",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    let (pending_count, pending_bytes): (i64, i64) = tx
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(arguments_json AS BLOB))), 0)
+             FROM ai_tool_approvals WHERE status = 'pending'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(storage_error)?;
+    if session_count > i64::from(AI_SESSIONS_PER_PROFILE_MAX)
+        || profile_bytes > i64::try_from(AI_PROFILE_CONTENT_BYTES_MAX).map_err(storage_error)?
+        || memory_count > i64::from(AI_MEMORIES_PER_PROFILE_MAX)
+        || memory_bytes > i64::try_from(AI_MEMORY_CONTENT_BYTES_MAX).map_err(storage_error)?
+        || pending_count > i64::from(AI_PENDING_APPROVALS_MAX)
+        || pending_bytes
+            > i64::try_from(AI_PENDING_APPROVAL_CONTENT_BYTES_MAX).map_err(storage_error)?
+    {
+        return Err(RepositoryError::Storage(
+            "AI aggregate quota is exceeded".to_owned(),
+        ));
+    }
+
+    crate::ai_ops::validate_ai_response_authority(tx)?;
+    crate::ai_ops::validate_ai_approval_authority(tx)?;
+
+    scan_text_ids(tx, "ai_sessions", |tx, raw| {
+        let id = parse_canonical_ai_id(raw, AiSessionId::parse)?;
+        let row = tx
+            .query_row(
+                "SELECT title, status, message_count, content_bytes, created_at, updated_at,
+                        last_message_at,
+                        (SELECT COUNT(*) FROM ai_messages WHERE session_id = ai_sessions.id),
+                        (SELECT COALESCE(SUM(LENGTH(CAST(content_json AS BLOB))), 0)
+                         FROM ai_messages WHERE session_id = ai_sessions.id),
+                        (SELECT MAX(updated_at) FROM ai_messages WHERE session_id = ai_sessions.id),
+                        (SELECT COALESCE(MAX(sequence), 0) FROM ai_messages
+                         WHERE session_id = ai_sessions.id)
+                 FROM ai_sessions WHERE id = ?1",
+                [raw],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, i64>(10)?,
+                    ))
+                },
+            )
+            .map_err(storage_error)?;
+        let status = AiSessionStatus::parse(&row.1).map_err(storage_error)?;
+        let created = parse_timestamp(&row.4)?;
+        let updated = parse_timestamp(&row.5)?;
+        let last = row.6.as_deref().map(parse_timestamp).transpose()?;
+        AiSession::new(id, row.0, created).map_err(storage_error)?;
+        if created > updated
+            || last.is_some_and(|value| value < created || value > updated)
+            || row.2 != row.7
+            || row.3 != row.8
+            || row.7 > i64::from(AI_MESSAGES_PER_SESSION_MAX)
+            || row.8 > i64::try_from(AI_SESSION_CONTENT_BYTES_MAX).map_err(storage_error)?
+            || row.9.as_deref() != row.6.as_deref()
+            || row.10 != row.7
+            || !matches!(status, AiSessionStatus::Active | AiSessionStatus::Archived)
+        {
+            return Err(RepositoryError::Storage(
+                "AI session counters or timestamps are inconsistent".to_owned(),
+            ));
+        }
+        Ok(())
+    })?;
+
+    scan_text_ids(tx, "ai_messages", |tx, raw| {
+        parse_canonical_ai_id(raw, AiMessageId::parse)?;
+        let row = tx
+            .query_row(
+                "SELECT session_id, turn_id, sequence, role, status, content_json,
+                        content_bytes, created_at, updated_at
+                 FROM ai_messages WHERE id = ?1",
+                [raw],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                    ))
+                },
+            )
+            .map_err(storage_error)?;
+        parse_canonical_ai_id(&row.0, AiSessionId::parse)?;
+        parse_canonical_ai_id(&row.1, AiTurnId::parse)?;
+        let role = AiMessageRole::parse(&row.3).map_err(storage_error)?;
+        AiMessageStatus::parse(&row.4).map_err(storage_error)?;
+        let content: AiMessageContent = serde_json::from_str(&row.5).map_err(storage_error)?;
+        content.validate().map_err(storage_error)?;
+        if content.canonical_json().map_err(storage_error)? != row.5
+            || row.6 != i64::try_from(row.5.len()).map_err(storage_error)?
+            || (role == AiMessageRole::User && content.text.len() > AI_USER_INPUT_BYTES_MAX)
+            || !embedded_json_is_canonical(content.tool_arguments_json.as_deref())
+            || !embedded_json_is_canonical(content.tool_result_json.as_deref())
+            || content
+                .briefing_date
+                .as_deref()
+                .is_some_and(|date| date.parse::<jiff::civil::Date>().is_err())
+            || row.2 <= 0
+            || row.2 > i64::from(AI_MESSAGES_PER_SESSION_MAX)
+            || parse_timestamp(&row.7)? > parse_timestamp(&row.8)?
+        {
+            return Err(RepositoryError::Storage(
+                "AI message row is invalid".to_owned(),
+            ));
+        }
+        Ok(())
+    })?;
+
+    scan_text_ids(tx, "ai_memories", |tx, raw| {
+        let id = parse_canonical_ai_id(raw, AiMemoryId::parse)?;
+        let row = tx
+            .query_row(
+                "SELECT content, content_bytes, created_at, updated_at
+                 FROM ai_memories WHERE id = ?1",
+                [raw],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .map_err(storage_error)?;
+        let memory = AiMemory::new(id, row.0, parse_timestamp(&row.2)?).map_err(storage_error)?;
+        if row.1 != i64::try_from(memory.content_bytes).map_err(storage_error)?
+            || memory.created_at > parse_timestamp(&row.3)?
+        {
+            return Err(RepositoryError::Storage(
+                "AI memory row is invalid".to_owned(),
+            ));
+        }
+        Ok(())
+    })?;
+
+    {
+        let mut statement = tx
+            .prepare("SELECT session_id, memory_id FROM ai_session_memories")
+            .map_err(storage_error)?;
+        let mut rows = statement.query([]).map_err(storage_error)?;
+        while let Some(row) = rows.next().map_err(storage_error)? {
+            parse_canonical_ai_id(
+                &row.get::<_, String>(0).map_err(storage_error)?,
+                AiSessionId::parse,
+            )?;
+            parse_canonical_ai_id(
+                &row.get::<_, String>(1).map_err(storage_error)?,
+                AiMemoryId::parse,
+            )?;
+        }
+    }
+
+    scan_text_ids(tx, "ai_tool_approvals", |tx, raw| {
+        let approval_id = parse_canonical_ai_id(raw, AiApprovalId::parse)?;
+        let row = tx
+            .query_row(
+                "SELECT session_id, turn_id, run_id, generation, tool_name, arguments_json,
+                        arguments_bytes, action_hash, status, expires_at, operation_id,
+                        created_at, updated_at
+                 FROM ai_tool_approvals WHERE id = ?1",
+                [raw],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, Option<String>>(10)?,
+                        row.get::<_, String>(11)?,
+                        row.get::<_, String>(12)?,
+                    ))
+                },
+            )
+            .map_err(storage_error)?;
+        parse_canonical_ai_id(&row.0, AiSessionId::parse)?;
+        parse_canonical_ai_id(&row.1, AiTurnId::parse)?;
+        parse_canonical_ai_id(&row.2, AiRunId::parse)?;
+        u64::try_from(row.3).map_err(storage_error)?;
+        validate_ai_token(&row.4, AI_PROVIDER_ID_BYTES_MAX)?;
+        let arguments: serde_json::Value = serde_json::from_str(&row.5).map_err(storage_error)?;
+        let status = AiApprovalStatus::parse(&row.8).map_err(storage_error)?;
+        let created = parse_timestamp(&row.11)?;
+        let updated = parse_timestamp(&row.12)?;
+        let expires = parse_timestamp(&row.9)?;
+        let expected_hash = ai_approval_action_hash(&row.4, &row.5).map_err(storage_error)?;
+        let operation = row
+            .10
+            .as_deref()
+            .map(|value| parse_canonical_operation_id(value).map(|_| value))
+            .transpose()?;
+        if !arguments.is_object()
+            || serde_json::to_string(&arguments).map_err(storage_error)? != row.5
+            || row.6 != i64::try_from(row.5.len()).map_err(storage_error)?
+            || row.7 != expected_hash
+            || created > updated
+            || expires != created + AI_APPROVAL_LIFETIME_SECS.seconds()
+            || (status == AiApprovalStatus::Consumed) != operation.is_some()
+            || (status != AiApprovalStatus::Consumed && operation.is_some())
+        {
+            return Err(RepositoryError::Storage(
+                "AI approval row is invalid".to_owned(),
+            ));
+        }
+
+        let approval_key = approval_id.to_string();
+        if matches!(
+            status,
+            AiApprovalStatus::Rejected | AiApprovalStatus::Expired
+        ) {
+            let actively_bound: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM ai_run_state WHERE approval_id = ?1)",
+                    [&approval_key],
+                    |run| run.get(0),
+                )
+                .map_err(storage_error)?;
+            if actively_bound {
+                return Err(RepositoryError::Storage(
+                    "terminal AI approval remains actively bound".to_owned(),
+                ));
+            }
+            return Ok(());
+        }
+
+        // Validate the reverse approval -> run edge before restore sanitization. Run-only
+        // validation cannot detect orphan authority or a second approval cross-bound to an
+        // otherwise valid run.
+        let run = tx
+            .query_row(
+                "SELECT session_id, turn_id, generation, state, approval_id
+                 FROM ai_run_state WHERE run_id = ?1",
+                [&row.2],
+                |run| {
+                    Ok((
+                        run.get::<_, String>(0)?,
+                        run.get::<_, String>(1)?,
+                        run.get::<_, i64>(2)?,
+                        run.get::<_, String>(3)?,
+                        run.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(storage_error)?
+            .ok_or_else(|| RepositoryError::Storage("AI approval run is missing".to_owned()))?;
+        let phase = AiRunPhase::parse(&run.3).map_err(storage_error)?;
+        let exact_run = run.0 == row.0 && run.1 == row.1 && run.2 == row.3;
+        let exact_binding = run.4.as_deref() == Some(approval_key.as_str());
+        let legal_pair = match status {
+            AiApprovalStatus::Pending | AiApprovalStatus::Approved => {
+                exact_run && phase == AiRunPhase::AwaitingApproval && exact_binding
+            }
+            AiApprovalStatus::Consumed => {
+                exact_run
+                    && ((phase == AiRunPhase::Dispatching && exact_binding)
+                        || (phase.is_terminal()
+                            && run.4.as_deref().is_none_or(|bound| bound == approval_key)))
+            }
+            AiApprovalStatus::Rejected | AiApprovalStatus::Expired => false,
+        };
+        if !legal_pair {
+            return Err(RepositoryError::Storage(
+                "AI approval run binding is inconsistent".to_owned(),
+            ));
+        }
+        Ok(())
+    })?;
+
+    scan_text_keys(tx, "ai_run_state", "run_id", |tx, raw| {
+        parse_canonical_ai_id(raw, AiRunId::parse)?;
+        let row = tx
+            .query_row(
+                "SELECT session_id, turn_id, generation, state, approval_id,
+                        created_at, updated_at
+                 FROM ai_run_state WHERE run_id = ?1",
+                [raw],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                },
+            )
+            .map_err(storage_error)?;
+        parse_canonical_ai_id(&row.0, AiSessionId::parse)?;
+        parse_canonical_ai_id(&row.1, AiTurnId::parse)?;
+        u64::try_from(row.2).map_err(storage_error)?;
+        let phase = AiRunPhase::parse(&row.3).map_err(storage_error)?;
+        if parse_timestamp(&row.5)? > parse_timestamp(&row.6)? {
+            return Err(RepositoryError::Storage(
+                "AI run timestamps are invalid".to_owned(),
+            ));
+        }
+        if let Some(approval) = &row.4 {
+            parse_canonical_ai_id(approval, AiApprovalId::parse)?;
+            let binding: (String, String, String, i64, String, Option<String>) = tx
+                .query_row(
+                    "SELECT session_id, turn_id, run_id, generation, status, operation_id
+                     FROM ai_tool_approvals WHERE id = ?1",
+                    [approval],
+                    |approval| {
+                        Ok((
+                            approval.get(0)?,
+                            approval.get(1)?,
+                            approval.get(2)?,
+                            approval.get(3)?,
+                            approval.get(4)?,
+                            approval.get(5)?,
+                        ))
+                    },
+                )
+                .map_err(storage_error)?;
+            let approval_status = AiApprovalStatus::parse(&binding.4).map_err(storage_error)?;
+            if binding.0 != row.0
+                || binding.1 != row.1
+                || binding.2 != raw
+                || binding.3 != row.2
+                || (phase == AiRunPhase::AwaitingApproval
+                    && !matches!(
+                        approval_status,
+                        AiApprovalStatus::Pending | AiApprovalStatus::Approved
+                    ))
+                || (phase == AiRunPhase::Dispatching
+                    && (approval_status != AiApprovalStatus::Consumed || binding.5.is_none()))
+                || (phase.is_terminal() && approval_status != AiApprovalStatus::Consumed)
+                || phase == AiRunPhase::Running
+            {
+                return Err(RepositoryError::Storage(
+                    "AI run approval binding is inconsistent".to_owned(),
+                ));
+            }
+        } else if matches!(
+            phase,
+            AiRunPhase::AwaitingApproval | AiRunPhase::Dispatching
+        ) {
+            return Err(RepositoryError::Storage(
+                "AI run phase requires an approval".to_owned(),
+            ));
+        }
+        Ok(())
+    })?;
+
+    if table_count(tx, "ai_quota")? != 1 {
+        return Err(RepositoryError::Storage(
+            "ai_quota must contain one row".to_owned(),
+        ));
+    }
+    let quota: (i64, i64, i64, i64, i64, i64) = tx
+        .query_row(
+            "SELECT session_count, total_content_bytes, memory_count, memory_content_bytes,
+                    pending_approval_count, pending_approval_content_bytes
+             FROM ai_quota WHERE singleton = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .map_err(storage_error)?;
+    if quota
+        != (
+            session_count,
+            profile_bytes,
+            memory_count,
+            memory_bytes,
+            pending_count,
+            pending_bytes,
+        )
+    {
+        return Err(RepositoryError::Storage(
+            "AI quota counters are inconsistent".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn parse_timestamp(raw: &str) -> Result<Timestamp, RepositoryError> {
+    let parsed = raw.parse::<Timestamp>().map_err(storage_error)?;
+    if parsed.to_string() != raw {
+        return Err(RepositoryError::Storage(
+            "timestamp is not canonical".to_owned(),
+        ));
+    }
+    Ok(parsed)
+}
+
+fn parse_canonical_ai_id<T: ToString>(
+    raw: &str,
+    parse: impl FnOnce(&str) -> Result<T, junban_domain::ValidationError>,
+) -> Result<T, RepositoryError> {
+    let parsed = parse(raw).map_err(storage_error)?;
+    if parsed.to_string() != raw {
+        return Err(RepositoryError::Storage(
+            "AI ID is not canonical".to_owned(),
+        ));
+    }
+    Ok(parsed)
+}
+
+fn parse_canonical_operation_id(raw: &str) -> Result<OperationId, RepositoryError> {
+    let parsed = OperationId::parse(raw).map_err(storage_error)?;
+    if parsed.to_string() != raw {
+        return Err(RepositoryError::Storage(
+            "operation ID is not canonical".to_owned(),
+        ));
+    }
+    Ok(parsed)
+}
+
+fn validate_ai_token(raw: &str, max: usize) -> Result<(), RepositoryError> {
+    if raw.is_empty() || raw.len() > max || raw != raw.trim() || raw.chars().any(char::is_control) {
+        return Err(RepositoryError::Storage("AI token is invalid".to_owned()));
+    }
+    Ok(())
+}
+
+fn embedded_json_is_canonical(raw: Option<&str>) -> bool {
+    raw.is_none_or(|raw| {
+        serde_json::from_str::<serde_json::Value>(raw)
+            .ok()
+            .and_then(|value| serde_json::to_string(&value).ok())
+            .is_some_and(|canonical| canonical == raw)
+    })
+}
+
 fn validate_loaded_entities(tx: &Transaction<'_>, head: u64) -> Result<(), RepositoryError> {
     scan_text_ids(tx, "tasks", |tx, raw| {
         let task = crate::rows::load_task(tx, TaskId::parse(raw).map_err(storage_error)?)?;
@@ -655,12 +1232,23 @@ fn validate_loaded_entities(tx: &Transaction<'_>, head: u64) -> Result<(), Repos
 fn scan_text_ids(
     tx: &Transaction<'_>,
     table: &str,
+    validate: impl FnMut(&Transaction<'_>, &str) -> Result<(), RepositoryError>,
+) -> Result<(), RepositoryError> {
+    scan_text_keys(tx, table, "id", validate)
+}
+
+fn scan_text_keys(
+    tx: &Transaction<'_>,
+    table: &str,
+    column: &str,
     mut validate: impl FnMut(&Transaction<'_>, &str) -> Result<(), RepositoryError>,
 ) -> Result<(), RepositoryError> {
     let mut after: Option<String> = None;
     loop {
-        let sql =
-            format!("SELECT id FROM {table} WHERE (?1 IS NULL OR id > ?1) ORDER BY id LIMIT ?2");
+        let sql = format!(
+            "SELECT {column} FROM {table} WHERE (?1 IS NULL OR {column} > ?1) \
+             ORDER BY {column} LIMIT ?2"
+        );
         let mut statement = tx.prepare(&sql).map_err(storage_error)?;
         let ids = statement
             .query_map(params![after.as_deref(), VALIDATION_PAGE_ROWS], |row| {
@@ -1246,6 +1834,11 @@ fn validate_event_type(raw: &str) -> Result<(), RepositoryError> {
             | EventType::TIME_SLOT_MEMBERSHIP_UPDATED
             | EventType::SETTINGS_UPDATED
             | EventType::IMPORT_APPLIED
+            | EventType::AI_SESSION_CHANGED
+            | EventType::AI_SESSION_DELETED
+            | EventType::AI_MEMORY_CHANGED
+            | EventType::AI_MEMORY_DELETED
+            | EventType::AI_APPROVAL_CHANGED
     ) {
         Ok(())
     } else {
@@ -1273,6 +1866,27 @@ fn validate_subject(
         (Some("time_slot"), Some(id)) => TimeSlotId::parse(id).map(|_| ()).map_err(storage_error),
         (Some("operation"), Some(id)) => OperationId::parse(id).map(|_| ()).map_err(storage_error),
         (Some("settings"), Some("settings")) | (Some("import"), Some(_)) => Ok(()),
+        (Some("ai_credential"), Some(id)) => {
+            parse_canonical_ai_id(id, junban_domain::AiCredentialId::parse).map(|_| ())
+        }
+        (Some("ai_session"), Some(id)) => parse_canonical_ai_id(id, AiSessionId::parse).map(|_| ()),
+        (Some("ai_memory"), Some(id)) => parse_canonical_ai_id(id, AiMemoryId::parse).map(|_| ()),
+        (Some("ai_approval"), Some(id)) => {
+            parse_canonical_ai_id(id, AiApprovalId::parse).map(|_| ())
+        }
+        (Some("ai_message"), Some(id)) => parse_canonical_ai_id(id, AiMessageId::parse).map(|_| ()),
+        (Some("ai_run" | "ai_response"), Some(id)) => {
+            parse_canonical_ai_id(id, AiRunId::parse).map(|_| ())
+        }
+        (Some("ai_response_rewrite"), Some("edit" | "retry" | "regenerate")) => Ok(()),
+        (Some("ai_session_memory"), Some(id)) => {
+            let (session, memory) = id.split_once(':').ok_or_else(|| {
+                RepositoryError::Storage("invalid AI session-memory subject".to_owned())
+            })?;
+            parse_canonical_ai_id(session, AiSessionId::parse)?;
+            parse_canonical_ai_id(memory, AiMemoryId::parse)?;
+            Ok(())
+        }
         _ => Err(RepositoryError::Storage(
             "invalid activity subject".to_owned(),
         )),
@@ -1352,6 +1966,9 @@ fn validate_resource_id(kind: ResourceType, id: &str) -> Result<(), RepositoryEr
         ResourceType::TimeBlock => TimeBlockId::parse(id).map(|_| ()).map_err(storage_error),
         ResourceType::TimeSlot => TimeSlotId::parse(id).map(|_| ()).map_err(storage_error),
         ResourceType::Settings if id == "settings" => Ok(()),
+        ResourceType::AiSession => parse_canonical_ai_id(id, AiSessionId::parse).map(|_| ()),
+        ResourceType::AiMemory => parse_canonical_ai_id(id, AiMemoryId::parse).map(|_| ()),
+        ResourceType::AiApproval => parse_canonical_ai_id(id, AiApprovalId::parse).map(|_| ()),
         ResourceType::Relation => Ok(()),
         _ => Err(RepositoryError::Storage(
             "invalid event resource id".to_owned(),
@@ -1807,6 +2424,30 @@ fn normalize_runtime_state(connection: &Connection) -> Result<(), RepositoryErro
     Ok(())
 }
 
+/// Clear credential bindings, force AI/cloud speech disabled, and recover ephemeral
+/// approval/run authority on a restore candidate. Never touches `ai-secrets.json`.
+fn sanitize_restored_ai_state(connection: &Connection) -> Result<(), RepositoryError> {
+    let now = Timestamp::now();
+    let mut settings = read_settings(connection)?;
+    settings = settings.cleared_for_restore();
+    settings.validate().map_err(crate::helpers::validation)?;
+    let json = serde_json::to_string(&settings).map_err(storage_error)?;
+    let updated = connection
+        .execute(
+            "UPDATE app_settings SET value_json = ?1, updated_at = ?2 WHERE key = ?3",
+            params![json, now.to_string(), SETTINGS_KEY],
+        )
+        .map_err(storage_error)?;
+    if updated != 1 {
+        return Err(RepositoryError::Storage(
+            "settings_json row missing while sanitizing restore candidate".into(),
+        ));
+    }
+    crate::ai_ops::expire_ai_runtime_state(connection, now)?;
+    crate::ai_ops::recompute_ai_quotas(connection)?;
+    Ok(())
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct SchemaObject {
     object_type: String,
@@ -2074,7 +2715,8 @@ fn map_backup_error(error: BackupError) -> RepositoryError {
 }
 
 #[cfg(test)]
-static RESTORE_FAULT_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static RESTORE_FAULT_TEST_LOCK: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
 #[cfg(test)]
 static POST_COPY_EPOCH: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 #[cfg(test)]
@@ -2175,6 +2817,70 @@ mod tests {
         })
     }
 
+    #[tokio::test]
+    async fn restore_repairs_only_known_pre_wave3g_schema_v6_objects() {
+        let (dir, owner) = temp_profile();
+        let repo = owner.repository();
+        let backup = repo.create_backup().await.unwrap();
+        let legacy = rewrite_backup_payload(
+            &dir,
+            &backup,
+            "DROP INDEX idx_ai_messages_daily_briefing_active;
+             DROP INDEX idx_ai_messages_briefing_date;
+             DROP TABLE ai_response_invalidations;",
+        );
+
+        let candidate = repo.prepare_restore(legacy).await.unwrap();
+        let repaired = Connection::open(candidate.path()).unwrap();
+        let repaired_objects: i64 = repaired
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name IN (
+                    'idx_ai_messages_daily_briefing_active',
+                    'idx_ai_messages_briefing_date',
+                    'ai_response_invalidations',
+                    'idx_ai_response_invalidations_session',
+                    'idx_ai_response_invalidations_expiry'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(repaired_objects, 5);
+        drop(repaired);
+        repo.restore_backup(candidate).await.unwrap();
+        drop(repo);
+        drop(owner);
+
+        let reopened = ProfileOwner::open(dir.path()).unwrap();
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        assert_canonical_schema(&connection, dir.path()).unwrap();
+        drop(connection);
+        drop(reopened);
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_conflicting_known_v6_repair_object() {
+        let (dir, owner) = temp_profile();
+        let repo = owner.repository();
+        let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;
+        let backup = repo.create_backup().await.unwrap();
+        let hostile = rewrite_backup_payload(
+            &dir,
+            &backup,
+            "DROP TABLE ai_response_invalidations;
+             CREATE TABLE ai_response_invalidations(run_id TEXT PRIMARY KEY);",
+        );
+
+        assert!(matches!(
+            repo.prepare_restore(hostile).await,
+            Err(RepositoryError::Validation(_))
+        ));
+        assert_eq!(
+            repo.get_sync_state().await.unwrap().event_epoch,
+            epoch_before
+        );
+    }
+
     fn rewrite_backup_with(
         dir: &TempDir,
         backup: &StagedFile,
@@ -2205,6 +2911,35 @@ mod tests {
             Timestamp::now(),
             1,
         )
+    }
+
+    fn seed_ai_backup_rows(dir: &TempDir) {
+        let mut connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        let session_id = AiSessionId::new();
+        let now = Timestamp::now();
+        crate::ai_ops::create_ai_session(
+            &mut connection,
+            OperationId::parse(&uuid::Uuid::new_v4().to_string()).unwrap(),
+            session_id,
+            "backup chat".into(),
+            now,
+        )
+        .unwrap();
+        crate::ai_ops::upsert_ai_message(
+            &mut connection,
+            OperationId::parse(&uuid::Uuid::new_v4().to_string()).unwrap(),
+            AiMessageId::new(),
+            session_id,
+            AiTurnId::new(),
+            AiMessageRole::User,
+            AiMessageStatus::Completed,
+            AiMessageContent::text("bounded backup body").unwrap(),
+            now,
+        )
+        .unwrap();
     }
 
     fn set_only_undo_inverse(connection: &Connection, inverse: &crate::ops_types::Inverse) {
@@ -2460,6 +3195,164 @@ mod tests {
                 epoch_before
             );
         }
+    }
+
+    #[tokio::test]
+    async fn restore_preflight_rejects_forged_ai_byte_counters() {
+        let (dir, owner) = temp_profile();
+        seed_ai_backup_rows(&dir);
+        let repo = owner.repository();
+        let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;
+        let backup = repo.create_backup().await.unwrap();
+        let hostile = rewrite_backup_payload(
+            &dir,
+            &backup,
+            "PRAGMA ignore_check_constraints=ON;
+             UPDATE ai_messages SET content_bytes = 0;
+             UPDATE ai_sessions SET content_bytes = 0;
+             UPDATE ai_quota SET total_content_bytes = 0;",
+        );
+        assert!(matches!(
+            repo.prepare_restore(hostile).await,
+            Err(RepositoryError::Validation(_))
+        ));
+        assert_eq!(
+            repo.get_sync_state().await.unwrap().event_epoch,
+            epoch_before
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_preflight_rejects_malformed_ai_content_and_ids() {
+        for attack in [
+            "UPDATE ai_messages SET content_json = '{\"text\":', content_bytes = 8;",
+            "UPDATE ai_messages SET id = 'not-a-uuid';",
+        ] {
+            let (dir, owner) = temp_profile();
+            seed_ai_backup_rows(&dir);
+            let repo = owner.repository();
+            let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;
+            let backup = repo.create_backup().await.unwrap();
+            let hostile = rewrite_backup_payload(&dir, &backup, attack);
+            assert!(
+                matches!(
+                    repo.prepare_restore(hostile).await,
+                    Err(RepositoryError::Validation(_))
+                ),
+                "hostile AI row reached restore: {attack}"
+            );
+            assert_eq!(
+                repo.get_sync_state().await.unwrap().event_epoch,
+                epoch_before
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn restore_preflight_rejects_oversized_serialized_ai_message_before_loading_cell() {
+        let (dir, owner) = temp_profile();
+        seed_ai_backup_rows(&dir);
+        let repo = owner.repository();
+        let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;
+        let backup = repo.create_backup().await.unwrap();
+        let hostile_bytes = AI_MESSAGE_CONTENT_JSON_BYTES_MAX + 1;
+        assert!(hostile_bytes < AI_SESSION_CONTENT_BYTES_MAX as usize);
+        let hostile = rewrite_backup_with(&dir, &backup, |connection| {
+            connection
+                .execute(
+                    "UPDATE ai_messages
+                     SET content_json = CAST(zeroblob(?1) AS TEXT), content_bytes = ?1",
+                    [i64::try_from(hostile_bytes).unwrap()],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "UPDATE ai_sessions SET content_bytes = ?1;",
+                    [i64::try_from(hostile_bytes).unwrap()],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "UPDATE ai_quota SET total_content_bytes = ?1 WHERE singleton = 1",
+                    [i64::try_from(hostile_bytes).unwrap()],
+                )
+                .unwrap();
+        });
+        assert!(matches!(
+            repo.prepare_restore(hostile).await,
+            Err(RepositoryError::Validation(_))
+        ));
+        assert_eq!(
+            repo.get_sync_state().await.unwrap().event_epoch,
+            epoch_before
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_preflight_rejects_actual_pending_approval_aggregate_overflow() {
+        let (dir, owner) = temp_profile();
+        seed_ai_backup_rows(&dir);
+        let repo = owner.repository();
+        let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;
+        let backup = repo.create_backup().await.unwrap();
+        let hostile = rewrite_backup_with(&dir, &backup, |connection| {
+            let session_id: String = connection
+                .query_row("SELECT id FROM ai_sessions LIMIT 1", [], |row| row.get(0))
+                .unwrap();
+            let arguments_json = serde_json::to_string(&serde_json::json!({
+                "value": "x".repeat(131_000)
+            }))
+            .unwrap();
+            assert!(arguments_json.len() <= AI_TOOL_ARGUMENTS_BYTES_MAX);
+            let created = Timestamp::now();
+            let expires = created + AI_APPROVAL_LIFETIME_SECS.seconds();
+            for _ in 0..9 {
+                let approval_id = AiApprovalId::new();
+                let turn_id = AiTurnId::new();
+                let run_id = AiRunId::new();
+                let generation = 1_u64;
+                let action_hash = ai_approval_action_hash("create_task", &arguments_json).unwrap();
+                connection
+                    .execute(
+                        "INSERT INTO ai_tool_approvals(
+                            id, session_id, turn_id, run_id, generation, tool_name,
+                            arguments_json, arguments_bytes, action_hash, status, expires_at,
+                            operation_id, created_at, updated_at
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, 'create_task', ?6, ?7, ?8,
+                                   'pending', ?9, NULL, ?10, ?10)",
+                        params![
+                            approval_id.to_string(),
+                            session_id,
+                            turn_id.to_string(),
+                            run_id.to_string(),
+                            generation as i64,
+                            arguments_json,
+                            arguments_json.len() as i64,
+                            action_hash,
+                            expires.to_string(),
+                            created.to_string(),
+                        ],
+                    )
+                    .unwrap();
+            }
+            // Correct-looking declared counters must not replace independent aggregation.
+            connection
+                .execute(
+                    "UPDATE ai_quota
+                     SET pending_approval_count = 0, pending_approval_content_bytes = 0
+                     WHERE singleton = 1",
+                    [],
+                )
+                .unwrap();
+        });
+        assert!(matches!(
+            repo.prepare_restore(hostile).await,
+            Err(RepositoryError::Validation(_))
+        ));
+        assert_eq!(
+            repo.get_sync_state().await.unwrap().event_epoch,
+            epoch_before
+        );
     }
 
     #[tokio::test]

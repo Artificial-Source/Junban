@@ -1344,6 +1344,9 @@ pub enum ResourceTypeDto {
     TimeBlock,
     TimeSlot,
     Settings,
+    AiSession,
+    AiMemory,
+    AiApproval,
 }
 
 impl From<ResourceType> for ResourceTypeDto {
@@ -1361,6 +1364,9 @@ impl From<ResourceType> for ResourceTypeDto {
             ResourceType::TimeBlock => Self::TimeBlock,
             ResourceType::TimeSlot => Self::TimeSlot,
             ResourceType::Settings => Self::Settings,
+            ResourceType::AiSession => Self::AiSession,
+            ResourceType::AiMemory => Self::AiMemory,
+            ResourceType::AiApproval => Self::AiApproval,
         }
     }
 }
@@ -3524,6 +3530,9 @@ impl PatchSettingsRequest {
             features,
             planning,
             keyboard_shortcuts,
+            // Wave 1: AI/voice settings are storage-backed; HTTP patch surface arrives later.
+            ai: None,
+            voice: None,
         };
         patch
             .validate()

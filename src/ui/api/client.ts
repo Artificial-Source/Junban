@@ -538,6 +538,99 @@ async function sendMutation<T>(
 }
 
 // ---------------------------------------------------------------------------
+// Shared authenticated request seam (feature transports)
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal options for feature-local transports (AI, etc.).
+ * Keeps Authorization construction and envelope parsing in one place without
+ * growing the endpoint facade.
+ */
+export type AuthenticatedRequestOptions = {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /** When set, sends the Idempotency-Key header. */
+  operationId?: string;
+  /** JSON-encoded body. */
+  body?: unknown;
+  /** Force Content-Type application/json even when body is omitted. */
+  forceJson?: boolean;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+  /**
+   * Milliseconds before abort; `null` disables (SSE). Default ordinary timeout.
+   */
+  timeoutMs?: number | null;
+  /**
+   * Retry one ambiguous network failure with the same headers/body.
+   * Default: true for non-GET. Streaming POSTs must pass false — never
+   * auto-replay after an ambiguous dispatch.
+   */
+  retryNetwork?: boolean;
+};
+
+function buildAuthenticatedHeaders(options: AuthenticatedRequestOptions): Record<string, string> {
+  const headers: Record<string, string> = {
+    ...authHeaders(),
+    ...(options.headers ?? {}),
+  };
+  if (options.operationId) {
+    headers["Idempotency-Key"] = options.operationId;
+  }
+  if (options.body !== undefined || options.forceJson) {
+    if (!headers["Content-Type"]) {
+      headers["Content-Type"] = "application/json";
+    }
+  }
+  return headers;
+}
+
+/**
+ * Authenticated fetch returning the raw Response (SSE and non-JSON callers).
+ * Never logs Authorization or request bodies.
+ */
+export async function authenticatedFetch(
+  path: string,
+  options: AuthenticatedRequestOptions = {},
+): Promise<Response> {
+  const method = options.method ?? "GET";
+  const retryNetwork = options.retryNetwork ?? method !== "GET";
+  const run = () =>
+    rawFetch(
+      path,
+      {
+        method,
+        headers: buildAuthenticatedHeaders(options),
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal: options.signal,
+      },
+      { timeoutMs: options.timeoutMs },
+    );
+  if (!retryNetwork) {
+    return run();
+  }
+  return withNetworkRetry(run);
+}
+
+/**
+ * Authenticated JSON request with standard error-envelope parsing.
+ */
+export async function authenticatedJson<T>(
+  path: string,
+  options: AuthenticatedRequestOptions = {},
+): Promise<T> {
+  const response = await authenticatedFetch(path, options);
+  return parseResponse<T>(response);
+}
+
+/**
+ * Parse a non-OK or JSON Response with the shared envelope rules.
+ * Used by streaming callers after checking content-type.
+ */
+export async function parseAuthenticatedResponse<T>(response: Response): Promise<T> {
+  return parseResponse<T>(response);
+}
+
+// ---------------------------------------------------------------------------
 // Health / profile
 // ---------------------------------------------------------------------------
 

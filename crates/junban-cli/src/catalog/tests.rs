@@ -140,7 +140,7 @@ fn catalog_route_scopes_match_server_classification() {
 #[test]
 fn every_non_excluded_openapi_operation_is_catalogued() {
     let doc = openapi::parse_openapi().unwrap();
-    let ops = openapi::iter_operations(&doc).unwrap();
+    let ops = openapi::iter_operations(&doc, EXCLUDED_OPERATION_IDS).unwrap();
     let names: BTreeSet<&str> = catalog()
         .tools
         .iter()
@@ -148,9 +148,6 @@ fn every_non_excluded_openapi_operation_is_catalogued() {
         .collect();
     let mut missing = Vec::new();
     for op in ops {
-        if EXCLUDED_OPERATION_IDS.contains(&op.operation_id.as_str()) {
-            continue;
-        }
         if !names.contains(op.operation_id.as_str()) {
             missing.push(op.operation_id);
         }
@@ -218,7 +215,7 @@ fn contains_ref(value: &Value) -> bool {
 
 #[test]
 fn catalog_count_is_stable_snapshot() {
-    // 99 OpenAPI ops − 12 excluded (health, principal, 2 SSE, 7 delivery, raw credential create) = 87.
+    // OpenAPI ops minus excluded health/principal/SSE/delivery/AI/voice/raw-secret ops = 87.
     let catalog = catalog();
     assert_eq!(
         catalog.tools.len(),
@@ -231,6 +228,12 @@ fn catalog_count_is_stable_snapshot() {
         !catalog.names().contains(&"get_principal"),
         "principal discovery must stay out of the shared operator tool catalog"
     );
+    for operation in ["create_voice_transcription", "create_voice_speech"] {
+        assert!(
+            !catalog.names().contains(&operation),
+            "cloud voice must stay out of the frozen automation catalog"
+        );
+    }
     let _ = ToolCatalog {
         version: catalog.version,
         tools: catalog.tools.clone(),

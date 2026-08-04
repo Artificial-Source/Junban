@@ -32,6 +32,7 @@ import {
   History,
   Pencil,
   Check,
+  Bot,
 } from "lucide-react";
 import type { TaskDto, TagDto, CommentDto, TaskActivityDto, RelationDto } from "../api/client";
 import {
@@ -85,6 +86,11 @@ interface TaskDetailPanelProps {
   returnFocusTo?: HTMLElement | null;
   /** Enter Focus Mode for this task (`?focus=1`). */
   onEnterFocusMode?: (taskId: string) => void;
+  /**
+   * Launch AI chat focused on this task.
+   * Callback-only seam — does not import routing or AI modules.
+   */
+  onAskAi?: (taskId: string) => void;
   /** Preserve the pinned legacy presentation only for the explicit Phase 3 visual fixture. */
   phase3VisualFixture?: boolean;
 }
@@ -95,6 +101,7 @@ export function TaskDetailPanel({
   onOpenFullPage,
   returnFocusTo,
   onEnterFocusMode,
+  onAskAi,
   phase3VisualFixture = false,
 }: TaskDetailPanelProps) {
   const { catalog, mutationPhase, mutationError, revision, settings } = useWorkspace();
@@ -757,6 +764,17 @@ export function TaskDetailPanel({
                 >
                   <Focus size={14} aria-hidden="true" />
                   Focus
+                </button>
+              )}
+              {onAskAi && (
+                <button
+                  type="button"
+                  onClick={() => onAskAi(committed.id)}
+                  aria-label="Ask AI"
+                  title="Ask AI"
+                  className="min-h-7 min-w-7 rounded-md p-1.5 text-on-surface-muted transition-colors hover:bg-surface-tertiary hover:text-on-surface"
+                >
+                  <Bot size={16} aria-hidden="true" />
                 </button>
               )}
               <button

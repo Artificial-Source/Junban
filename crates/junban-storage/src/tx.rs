@@ -232,6 +232,25 @@ pub(crate) fn mutate(
     Ok(response)
 }
 
+/// Recovery-only receipt lookup by a server-owned operation identity.
+///
+/// Ordinary idempotency must continue through `read_receipt`, which exact-matches request bytes.
+pub(crate) fn recover_operation_receipt(
+    connection: &Connection,
+    operation_id: OperationId,
+) -> Result<CommittedMutation, RepositoryError> {
+    let response = connection
+        .query_row(
+            "SELECT response_json FROM operation_receipts WHERE operation_id = ?1",
+            [operation_id.to_string()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(storage_error)?
+        .ok_or(RepositoryError::NotFound)?;
+    serde_json::from_str(&response).map_err(storage_error)
+}
+
 fn read_receipt(
     transaction: &Transaction<'_>,
     operation_id: OperationId,
@@ -263,8 +282,20 @@ fn cleanup_expired_receipts(
     let has_expired: bool = connection
         .query_row(
             "SELECT EXISTS(
-                SELECT 1 FROM operation_receipts
-                WHERE expires_at IS NOT NULL AND expires_at <= ?1
+                SELECT 1 FROM operation_receipts receipt
+                WHERE receipt.expires_at IS NOT NULL AND receipt.expires_at <= ?1
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM ai_tool_approvals approval
+                    JOIN ai_run_state run
+                      ON run.run_id = approval.run_id
+                     AND run.approval_id = approval.id
+                    WHERE approval.status = 'consumed'
+                      AND run.state = 'dispatching'
+                      AND receipt.created_at >= approval.updated_at
+                  )
+                UNION ALL
+                SELECT 1 FROM ai_response_invalidations WHERE expires_at <= ?1
             )",
             [&now],
             |row| row.get(0),
@@ -275,26 +306,51 @@ fn cleanup_expired_receipts(
     }
 
     let transaction = connection.transaction().map_err(storage_error)?;
+    transaction
+        .execute(
+            "DELETE FROM ai_response_invalidations WHERE expires_at <= ?1",
+            [&now],
+        )
+        .map_err(storage_error)?;
     // Remove expired undo rows first (by source or undone_by link) so FK RESTRICT cannot
     // pin open, undone, or undo-of-undo receipts past the retention window.
     transaction
         .execute(
-            "DELETE FROM operation_undo
-             WHERE source_operation_id IN (
-                SELECT operation_id FROM operation_receipts
-                WHERE expires_at IS NOT NULL AND expires_at <= ?1
+            "WITH expired(operation_id) AS (
+                SELECT receipt.operation_id
+                FROM operation_receipts receipt
+                WHERE receipt.expires_at IS NOT NULL AND receipt.expires_at <= ?1
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM ai_tool_approvals approval
+                    JOIN ai_run_state run
+                      ON run.run_id = approval.run_id
+                     AND run.approval_id = approval.id
+                    WHERE approval.status = 'consumed'
+                      AND run.state = 'dispatching'
+                      AND receipt.created_at >= approval.updated_at
+                  )
              )
-             OR undone_by_operation_id IN (
-                SELECT operation_id FROM operation_receipts
-                WHERE expires_at IS NOT NULL AND expires_at <= ?1
-             )",
+             DELETE FROM operation_undo
+             WHERE source_operation_id IN (SELECT operation_id FROM expired)
+                OR undone_by_operation_id IN (SELECT operation_id FROM expired)",
             [&now],
         )
         .map_err(storage_error)?;
     transaction
         .execute(
-            "DELETE FROM operation_receipts
-             WHERE expires_at IS NOT NULL AND expires_at <= ?1",
+            "DELETE FROM operation_receipts AS receipt
+             WHERE receipt.expires_at IS NOT NULL AND receipt.expires_at <= ?1
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM ai_tool_approvals approval
+                 JOIN ai_run_state run
+                   ON run.run_id = approval.run_id
+                  AND run.approval_id = approval.id
+                 WHERE approval.status = 'consumed'
+                   AND run.state = 'dispatching'
+                   AND receipt.created_at >= approval.updated_at
+               )",
             [&now],
         )
         .map_err(storage_error)?;

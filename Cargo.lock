@@ -344,6 +344,7 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "crypto-common",
+ "subtle",
 ]
 
 [[package]]
@@ -600,6 +601,15 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest",
+]
 
 [[package]]
 name = "http"
@@ -918,6 +928,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "junban-ai"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "futures-util",
+ "junban-domain",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "junban-app"
 version = "0.1.0"
 dependencies = [
@@ -991,12 +1019,15 @@ dependencies = [
  "futures-core",
  "http-body-util",
  "jiff",
+ "junban-ai",
  "junban-app",
  "junban-domain",
  "junban-storage",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "subtle",
  "thiserror",
  "tokio",
@@ -1014,6 +1045,8 @@ name = "junban-storage"
 version = "0.1.0"
 dependencies = [
  "fs4",
+ "getrandom 0.3.4",
+ "hmac",
  "jiff",
  "junban-app",
  "junban-domain",

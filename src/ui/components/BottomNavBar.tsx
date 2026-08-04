@@ -1,10 +1,11 @@
 /**
  * Mobile bottom navigation bar.
  * Preserves the legacy layout with Inbox/Today on the left, Upcoming on the right,
- * and the center AI button absent (not disabled) until Phase 6.
+ * and the raised center AI control that navigates to /ai-chat.
  */
-import { Inbox, CalendarDays, Clock, Menu } from "lucide-react";
+import { Inbox, CalendarDays, Clock, Menu, MessageCircle } from "lucide-react";
 import type { View } from "../hooks/useRouting";
+import { isPhase6VisualFixture } from "../lib/phase6VisualFixture";
 
 interface BottomNavBarProps {
   currentView: View;
@@ -39,6 +40,8 @@ export function BottomNavBar({
     inbox: inboxCount,
     today: todayCount,
   };
+  // Immutable Phase 6 mobile capture froze a flat icon row (no raised orb / badge chips).
+  const phase6Fixture = isPhase6VisualFixture();
 
   const renderNavItem = (item: {
     id: View;
@@ -52,6 +55,7 @@ export function BottomNavBar({
     return (
       <button
         key={item.id}
+        type="button"
         onClick={() => onNavigate(item.id)}
         aria-current={isActive ? "page" : undefined}
         className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors ${
@@ -60,27 +64,54 @@ export function BottomNavBar({
       >
         <span className="relative">
           <Icon size={20} strokeWidth={isActive ? 2.25 : 1.75} />
-          {typeof count === "number" && count > 0 && (
+          {!phase6Fixture && typeof count === "number" && count > 0 && (
             <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold bg-accent-action text-on-accent-action rounded-full">
               {count > 99 ? "99+" : count}
             </span>
           )}
         </span>
+        {phase6Fixture && typeof count === "number" && count > 0 ? (
+          <span className="text-[10px] font-medium leading-none">{count}</span>
+        ) : null}
         <span className="text-[10px] font-medium">{item.label}</span>
       </button>
     );
   };
 
+  const aiActive = currentView === "ai-chat";
+
   return (
     <nav
       aria-label="Mobile navigation"
-      className="fixed bottom-0 left-0 right-0 z-40 md:hidden border-t border-border bg-surface pb-safe"
+      className={`bottom-0 left-0 right-0 z-40 md:hidden border-t border-border bg-surface pb-safe ${
+        phase6Fixture ? "absolute" : "fixed"
+      }`}
     >
       <div className="flex items-stretch h-[--height-bottom-nav]">
         {LEFT_ITEMS.map(renderNavItem)}
 
-        {/* Center spacer — AI button is absent until Phase 6 */}
-        <div className="flex-1" aria-hidden="true" />
+        {/* Center AI control — raised orb at runtime; flat icon under Phase 6 capture authority. */}
+        <div className="flex-1 flex items-center justify-center">
+          <button
+            type="button"
+            onClick={() => onNavigate("ai-chat")}
+            aria-label="AI Assistant"
+            aria-current={aiActive ? "page" : undefined}
+            className={
+              phase6Fixture
+                ? `flex flex-col items-center justify-center min-h-[44px] transition-colors ${
+                    aiActive ? "text-accent-foreground" : "text-on-surface-muted"
+                  }`
+                : `-mt-5 w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100 ${
+                    aiActive
+                      ? "bg-accent-action text-on-accent-action shadow-accent-action/30"
+                      : "bg-accent-action text-on-accent-action shadow-accent-action/20"
+                  }`
+            }
+          >
+            <MessageCircle size={phase6Fixture ? 20 : 22} aria-hidden="true" />
+          </button>
+        </div>
 
         {RIGHT_ITEMS.map((item) => {
           const Icon = item.icon;
@@ -88,6 +119,7 @@ export function BottomNavBar({
           return (
             <button
               key={item.id}
+              type="button"
               onClick={() => onNavigate(item.id)}
               aria-current={isActive ? "page" : undefined}
               className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors ${

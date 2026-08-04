@@ -2,15 +2,16 @@
 
 use jiff::Timestamp;
 use junban_app::{
-    AffectedIds, CatalogSnapshot, CommittedMutation, EventType, ProjectDraft, ProjectPatch,
-    RepositoryError, ResourceRef, ResourceSnapshot, ResyncScope, SavedFilterDraft,
-    SavedFilterPatch, SectionDraft, SectionPatch, TagDraft, TagPatch, TemplateApply, TemplateDraft,
-    TemplatePatch,
+    AffectedIds, CatalogSnapshot, CommittedMutation, EventType, ProjectDraft, ProjectListPage,
+    ProjectPatch, RepositoryError, ResourceRef, ResourceSnapshot, ResyncScope, SavedFilterDraft,
+    SavedFilterPatch, SectionDraft, SectionPatch, TagDraft, TagListPage, TagPatch, TemplateApply,
+    TemplateDraft, TemplatePatch,
 };
 use junban_domain::{
-    MAX_BULK_IDS, MarkdownText, OperationId, Project, ProjectId, SavedFilter, SavedFilterId,
-    Section, SectionId, Tag, TagId, TagName, Task, TaskActivityAction, TaskId, TaskTitle, Template,
-    TemplateId, TimeSlotId, ValidationError, validate_project_parent_chain,
+    EntityName, MAX_BULK_IDS, MAX_TAGS_PER_TASK, MarkdownText, OperationId, Project, ProjectId,
+    SavedFilter, SavedFilterId, Section, SectionId, Tag, TagId, TagName, Task, TaskActivityAction,
+    TaskId, TaskTitle, Template, TemplateId, TimeSlotId, ValidationError,
+    validate_project_parent_chain,
 };
 use rusqlite::{Connection, params};
 use serde::Serialize;
@@ -155,6 +156,181 @@ pub(crate) fn list_catalog(connection: &Connection) -> Result<CatalogSnapshot, R
         saved_filters,
         revision,
     })
+}
+
+pub(crate) fn list_projects_bounded(
+    connection: &Connection,
+    limit: u32,
+) -> Result<ProjectListPage, RepositoryError> {
+    let limit = (limit as usize).clamp(1, MAX_BULK_IDS);
+    let revision = global_revision(connection)?;
+    let tx = connection.unchecked_transaction().map_err(storage_error)?;
+    let fetch = limit + 1;
+    let mut statement = tx
+        .prepare("SELECT id FROM projects ORDER BY sort_order, id LIMIT ?1")
+        .map_err(storage_error)?;
+    let rows = statement
+        .query_map([fetch as i64], |row| row.get::<_, String>(0))
+        .map_err(storage_error)?;
+    let mut ids = rows.collect::<Result<Vec<_>, _>>().map_err(storage_error)?;
+    let truncated = ids.len() > limit;
+    if truncated {
+        ids.truncate(limit);
+    }
+    let mut projects = Vec::with_capacity(ids.len());
+    for id in ids {
+        projects.push(load_project(
+            &tx,
+            ProjectId::parse(&id).map_err(storage_error)?,
+        )?);
+    }
+    Ok(ProjectListPage {
+        projects,
+        revision,
+        truncated,
+    })
+}
+
+pub(crate) fn list_tags_bounded(
+    connection: &Connection,
+    limit: u32,
+) -> Result<TagListPage, RepositoryError> {
+    let limit = (limit as usize).clamp(1, MAX_BULK_IDS);
+    let revision = global_revision(connection)?;
+    let tx = connection.unchecked_transaction().map_err(storage_error)?;
+    let fetch = limit + 1;
+    let mut statement = tx
+        .prepare("SELECT id FROM tags ORDER BY name_normalized LIMIT ?1")
+        .map_err(storage_error)?;
+    let rows = statement
+        .query_map([fetch as i64], |row| row.get::<_, String>(0))
+        .map_err(storage_error)?;
+    let mut ids = rows.collect::<Result<Vec<_>, _>>().map_err(storage_error)?;
+    let truncated = ids.len() > limit;
+    if truncated {
+        ids.truncate(limit);
+    }
+    let mut tags = Vec::with_capacity(ids.len());
+    for id in ids {
+        tags.push(load_tag(&tx, TagId::parse(&id).map_err(storage_error)?)?);
+    }
+    Ok(TagListPage {
+        tags,
+        revision,
+        truncated,
+    })
+}
+
+pub(crate) fn get_project(
+    connection: &Connection,
+    project_id: ProjectId,
+) -> Result<Project, RepositoryError> {
+    let tx = connection.unchecked_transaction().map_err(storage_error)?;
+    load_project(&tx, project_id)
+}
+
+/// Exact multi-project primary-key lookup (one indexed `IN` query, ≤500 unique IDs).
+pub(crate) fn get_projects_by_ids(
+    connection: &Connection,
+    project_ids: &[ProjectId],
+) -> Result<ProjectListPage, RepositoryError> {
+    let mut unique = Vec::with_capacity(project_ids.len());
+    let mut seen = std::collections::BTreeSet::new();
+    for id in project_ids {
+        if seen.insert(*id) {
+            unique.push(*id);
+        }
+    }
+    if unique.len() > MAX_BULK_IDS {
+        return Err(validation(ValidationError::TooMany {
+            field: "project_ids",
+            count: unique.len(),
+            max: MAX_BULK_IDS,
+        }));
+    }
+    let revision = global_revision(connection)?;
+    if unique.is_empty() {
+        return Ok(ProjectListPage {
+            projects: Vec::new(),
+            revision,
+            truncated: false,
+        });
+    }
+
+    let tx = connection.unchecked_transaction().map_err(storage_error)?;
+    let placeholders = unique
+        .iter()
+        .enumerate()
+        .map(|(index, _)| format!("?{}", index + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql =
+        format!("SELECT id FROM projects WHERE id IN ({placeholders}) ORDER BY sort_order, id");
+    let binds = unique.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+    let mut statement = tx.prepare(&sql).map_err(storage_error)?;
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(binds.iter()), |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(storage_error)?;
+    let ids = rows.collect::<Result<Vec<_>, _>>().map_err(storage_error)?;
+    let mut projects = Vec::with_capacity(ids.len());
+    for id in ids {
+        projects.push(load_project(
+            &tx,
+            ProjectId::parse(&id).map_err(storage_error)?,
+        )?);
+    }
+    Ok(ProjectListPage {
+        projects,
+        revision,
+        truncated: false,
+    })
+}
+
+pub(crate) fn get_project_by_name(
+    connection: &Connection,
+    name: &EntityName,
+) -> Result<Project, RepositoryError> {
+    let tx = connection.unchecked_transaction().map_err(storage_error)?;
+    let id: String = tx
+        .query_row(
+            "SELECT id FROM projects WHERE name = ?1 ORDER BY sort_order, id LIMIT 1",
+            [name.as_str()],
+            |row| row.get(0),
+        )
+        .map_err(crate::rows::map_not_found)?;
+    load_project(&tx, ProjectId::parse(&id).map_err(storage_error)?)
+}
+
+pub(crate) fn resolve_tags_by_names(
+    connection: &Connection,
+    names: &[TagName],
+) -> Result<Vec<Tag>, RepositoryError> {
+    if names.len() > MAX_TAGS_PER_TASK {
+        return Err(validation(ValidationError::TooMany {
+            field: "tag_names",
+            count: names.len(),
+            max: MAX_TAGS_PER_TASK,
+        }));
+    }
+    let tx = connection.unchecked_transaction().map_err(storage_error)?;
+    let mut tags = Vec::with_capacity(names.len());
+    let mut seen = std::collections::BTreeSet::new();
+    for name in names {
+        let id: String = tx
+            .query_row(
+                "SELECT id FROM tags WHERE name_normalized = ?1",
+                [normalize_tag_name(name.as_str())],
+                |row| row.get(0),
+            )
+            .map_err(crate::rows::map_not_found)?;
+        let tag_id = parse_sql(id, TagId::parse).map_err(storage_error)?;
+        if seen.insert(tag_id) {
+            tags.push(load_tag(&tx, tag_id)?);
+        }
+    }
+    Ok(tags)
 }
 
 pub(crate) fn create_project(

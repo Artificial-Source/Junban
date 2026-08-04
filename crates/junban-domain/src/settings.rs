@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ai::{AiSettings, VoiceSettings};
 use crate::{
     EstimatedMinutes, HexColor, NudgeRuleKind, NudgeRuleSettings, Priority, ReminderChannel,
     ReminderChannelSet, TaskViewPreset, ValidationError, WeekStart, WorkHours,
@@ -752,6 +753,12 @@ pub struct AppSettings {
     pub features: FeatureSettings,
     pub planning: PlanningSettings,
     pub keyboard_shortcuts: Vec<KeyboardShortcut>,
+    /// Defaults leave cloud AI disabled when absent from older snapshots.
+    #[serde(default)]
+    pub ai: AiSettings,
+    /// Defaults leave cloud speech disabled when absent from older snapshots.
+    #[serde(default)]
+    pub voice: VoiceSettings,
 }
 
 impl AppSettings {
@@ -766,6 +773,8 @@ impl AppSettings {
             features: FeatureSettings::default_settings(),
             planning: PlanningSettings::default_settings(),
             keyboard_shortcuts: default_keyboard_shortcuts(),
+            ai: AiSettings::default_settings(),
+            voice: VoiceSettings::default_settings(),
         }
     }
 
@@ -777,6 +786,8 @@ impl AppSettings {
         self.features.validate()?;
         self.planning.validate()?;
         validate_keyboard_shortcuts(&self.keyboard_shortcuts)?;
+        self.ai.validate()?;
+        self.voice.validate()?;
         Ok(())
     }
 
@@ -805,8 +816,24 @@ impl AppSettings {
         if let Some(keyboard_shortcuts) = &patch.keyboard_shortcuts {
             next.keyboard_shortcuts = keyboard_shortcuts.clone();
         }
+        if let Some(ai) = &patch.ai {
+            next.ai = ai.clone();
+        }
+        if let Some(voice) = &patch.voice {
+            next.voice = voice.clone();
+        }
         next.validate()?;
         Ok(next)
+    }
+
+    /// Candidate-restore sanitization: drop credential bindings and force AI/cloud
+    /// speech disabled while preserving non-secret preferences.
+    #[must_use]
+    pub fn cleared_for_restore(&self) -> Self {
+        let mut next = self.clone();
+        next.ai = self.ai.cleared_for_restore();
+        next.voice = self.voice.cleared_for_restore();
+        next
     }
 }
 
@@ -895,6 +922,10 @@ pub struct SettingsPatch {
     pub planning: Option<PlanningSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keyboard_shortcuts: Option<Vec<KeyboardShortcut>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai: Option<AiSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice: Option<VoiceSettings>,
 }
 
 impl SettingsPatch {
@@ -921,6 +952,12 @@ impl SettingsPatch {
         if let Some(shortcuts) = &self.keyboard_shortcuts {
             validate_keyboard_shortcuts(shortcuts)?;
         }
+        if let Some(ai) = &self.ai {
+            ai.validate()?;
+        }
+        if let Some(voice) = &self.voice {
+            voice.validate()?;
+        }
         Ok(())
     }
 
@@ -933,6 +970,8 @@ impl SettingsPatch {
             && self.features.is_none()
             && self.planning.is_none()
             && self.keyboard_shortcuts.is_none()
+            && self.ai.is_none()
+            && self.voice.is_none()
     }
 }
 
@@ -968,6 +1007,9 @@ mod tests {
             &[ReminderChannel::InApp, ReminderChannel::Sound]
         );
         assert_eq!(settings.notifications.volume_percent.get(), 70);
+        assert!(!settings.ai.enabled);
+        assert!(!settings.voice.cloud_speech_enabled);
+        assert!(settings.ai.credential_id.is_none());
         assert!(settings.notifications.task_completed_sound);
         assert!(settings.notifications.task_created_sound);
         assert!(settings.notifications.task_deleted_sound);

@@ -84,6 +84,8 @@ describe("Phase 4 settings route matrix", () => {
       tab: "appearance",
     });
     expect(parseSettingsLocation("/settings/features")).toEqual({ open: true, tab: "features" });
+    expect(parseSettingsLocation("/settings/ai")).toEqual({ open: true, tab: "ai" });
+    expect(parseSettingsLocation("/settings/voice")).toEqual({ open: true, tab: "voice" });
     expect(parseSettingsLocation("/settings/keyboard")).toEqual({ open: true, tab: "keyboard" });
     expect(parseSettingsLocation("/settings/templates")).toEqual({ open: true, tab: "templates" });
     expect(parseSettingsLocation("/settings/data")).toEqual({ open: true, tab: "data" });
@@ -95,17 +97,18 @@ describe("Phase 4 settings route matrix", () => {
   });
 
   it("rejects hidden legacy tabs and unknown segments", () => {
-    expect(parseSettingsLocation("/settings/ai")).toBeNull();
-    expect(parseSettingsLocation("/settings/voice")).toBeNull();
     expect(parseSettingsLocation("/settings/plugins")).toBeNull();
     expect(parseSettingsLocation("/settings/about")).toBeNull();
     expect(parseSettingsLocation("/settings/general")).toBeNull();
+    expect(parseSettingsLocation("/settings/ai/extra")).toBeNull();
     expect(parseSettingsLocation("/inbox")).toBeNull();
   });
 
   it("builds canonical settings paths", () => {
     expect(settingsToPath(null)).toBe("/settings");
     expect(settingsToPath("essentials")).toBe("/settings/essentials");
+    expect(settingsToPath("ai")).toBe("/settings/ai");
+    expect(settingsToPath("voice")).toBe("/settings/voice");
     expect(settingsToPath("data")).toBe("/settings/data");
     expect(settingsToPath("templates")).toBe("/settings/templates");
   });
@@ -123,5 +126,23 @@ describe("view helpers", () => {
     expect(pathToView("/inbox")).toBe("inbox");
     expect(viewToPath("inbox")).toBe("/inbox");
     expect(pathToView("/settings")).toBe("today");
+  });
+});
+
+describe("Wave 4a ai-chat route", () => {
+  it("parses and serializes the canonical /ai-chat path only", () => {
+    expect(parseRoute("/ai-chat")).toEqual({ name: "ai-chat" });
+    expect(parseRoute("/ai-chat/")).toEqual({ name: "ai-chat" });
+    expect(routeToPath({ name: "ai-chat" })).toBe("/ai-chat");
+    expect(viewToRoute("ai-chat")).toEqual({ name: "ai-chat" });
+    expect(viewToPath("ai-chat")).toBe("/ai-chat");
+    expect(pathToView("/ai-chat")).toBe("ai-chat");
+  });
+
+  it("rejects /ai alias and other non-canonical AI paths", () => {
+    expect(parseRoute("/ai")).toBeNull();
+    expect(parseRoute("/ai/")).toBeNull();
+    expect(parseRoute("/ai-chat/extra")).toBeNull();
+    expect(parseRoute("/AI-Chat")).toBeNull();
   });
 });

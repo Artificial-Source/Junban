@@ -4,7 +4,7 @@ Date frozen: 2026-08-01
 
 Protocol: `junban-phase5-conformance-v1`
 
-Status: frozen before the authoritative run. The corpus uses only accepted Phase 1–4 behavior and the Phase 5 shared catalog. It does not use direct SQLite access or a Node runtime.
+Status: frozen before the authoritative run. The corpus uses only accepted Phase 1–4 behavior and the Phase 5 shared catalog. It does not use direct SQLite access or a Node runtime. The accepted Phase 5 result at `phase-5-conformance.json` is immutable. Schema-v6 head reruns use `--phase6` and write `phase-6-conformance.json` under [`phase-6-conformance-protocol.md`](./phase-6-conformance-protocol.md); they must not rewrite this Phase 5 evidence.
 
 ## Surfaces
 
@@ -102,4 +102,4 @@ The normalized success responses, error responses, final state, revision sequenc
 - write deterministic `goals/rust-rewrite/evidence/phase-5-conformance.json` with corpus version, per-surface normalized digests, assertion booleans, and top-level `accepted`;
 - exit nonzero on any skipped call, normalization omission, schema/state/revision/event/error/artifact mismatch, stdout contamination, retained process/listener/lock, or secret occurrence.
 
-A `--self-check` mode may use temporary output and a reduced setup to validate harness rejection paths. It is not acceptance evidence.
+A `--self-check` mode may use temporary output and a reduced setup to validate harness rejection paths. It is not acceptance evidence. Phase 6 schema-v6 head reruns are a separate labeled mode (`--phase6`) and never overwrite this protocol's accepted evidence path.

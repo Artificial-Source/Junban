@@ -1,5 +1,14 @@
 //! Axum router, HTTP contract, authentication, static serving, and SSE delivery.
 
+mod ai_approval_dispatch;
+mod ai_chat;
+mod ai_context;
+mod ai_identity;
+mod ai_response_actions;
+mod ai_runtime;
+mod ai_tool_executor;
+mod ai_tool_registry;
+mod ai_tool_transcript;
 mod authz;
 mod credentials;
 mod cursor;
@@ -10,6 +19,11 @@ mod maintenance;
 mod owner_runtime;
 mod reminder_wake;
 mod routes;
+mod routes_ai;
+mod routes_ai_approvals;
+mod routes_ai_turns;
+mod routes_voice;
+mod speech_runtime;
 mod sse;
 
 use std::{
@@ -39,8 +53,12 @@ use junban_storage::{
     save_allowed_hosts, write_private_file,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::sync::atomic::AtomicU8;
 use thiserror::Error;
-use tokio::sync::broadcast;
+#[cfg(test)]
+use tokio::sync::Notify;
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
 use tokio_util::sync::CancellationToken;
 use tower_http::services::{ServeDir, ServeFile};
 use utoipa::{
@@ -76,8 +94,32 @@ use crate::routes::{
     restore_backup, revoke_automation_credential, rotate_token, settle_reminder_delivered,
     settle_reminder_failed, stats, uncomplete_task, undo_operation,
 };
+use crate::routes_ai::{
+    cancel_ai_run, clear_ai_session, create_ai_memory, create_ai_response, create_ai_session,
+    delete_ai_config, delete_ai_credential, delete_ai_memory, delete_ai_session,
+    discover_ai_provider_models, get_ai_config, get_ai_memory, get_ai_session, list_ai_memories,
+    list_ai_messages, list_ai_providers, list_ai_sessions, patch_ai_memory, patch_ai_session,
+    put_ai_config, put_ai_credential,
+};
+use crate::routes_ai_approvals::{approve_ai_approval, get_ai_approval, reject_ai_approval};
+use crate::routes_ai_turns::{
+    create_ai_daily_briefing, edit_ai_response, regenerate_ai_response, retry_ai_response,
+};
+use crate::routes_voice::{create_voice_speech, create_voice_transcription};
 use crate::sse::{AppService, SseConnectionPermit};
 
+pub use crate::ai_runtime::{
+    AiDecisionCompletion, AiDecisionCompletionState, AiDecisionNotification, AiDecisionPayload,
+    AiDecisionPermit, AiRunGuard, AiRuntimeError, AiRuntimeSupervisor, AiTerminalOutcome,
+    MAX_ACTIVE_AI_RUNS, MAX_AI_DECISION_PAYLOAD_BYTES,
+};
+pub use crate::ai_tool_executor::{ToolExecContext, derive_child_operation_id, execute_tool};
+pub use crate::ai_tool_registry::{
+    AI_TOOL_COUNT, AI_TOOL_DEFAULT_COLOR, AI_TOOL_NAME_MAX_BYTES, AI_TOOL_RESULT_ENTITY_MAX,
+    ToolEffect, ToolOutcome, ToolRegistration, ToolResultEnvelope, ToolValidationError,
+    ValidatedToolAction, extract_task_titles_from_text, forbidden_argument_names, registration,
+    tool_registrations, tool_specs, validate_tool_call,
+};
 pub use crate::authz::{
     AutomationScope, ClassifiedRoute, Principal as RequestPrincipal, RouteAccess, classified_routes,
 };
@@ -94,6 +136,10 @@ pub use crate::owner_runtime::{
     resolve_default_profile_dir,
 };
 pub use crate::reminder_wake::{REMINDER_OVERDUE_WAKE_THROTTLE, REMINDER_WAKE_EVENT_TYPE};
+pub use crate::speech_runtime::{
+    MAX_ACTIVE_CLOUD_SPEECH, SpeechActivityGuard, SpeechActivityKind, SpeechActivitySupervisor,
+    SpeechRuntimeError,
+};
 
 /// Phase 2 HTTP body ceiling (matches frozen transport plan).
 pub const MAX_BODY_BYTES: usize = 512 * 1024;
@@ -105,6 +151,18 @@ pub const MAX_BACKUP_BODY_BYTES: usize = junban_domain::MAX_BACKUP_PAYLOAD_BYTES
     + junban_domain::BACKUP_HEADER_LEN;
 /// Bounded drain deadline for restore under the maintenance barrier.
 pub const RESTORE_DRAIN_DEADLINE: Duration = Duration::from_secs(5);
+/// Bounded AI cancel/drain deadline during process shutdown.
+pub const AI_SHUTDOWN_DRAIN_DEADLINE: Duration = Duration::from_secs(5);
+/// Bounded cancel/drain deadline before confirmed AI/voice reconfiguration.
+pub const AI_RECONFIGURE_DRAIN_DEADLINE: Duration = Duration::from_secs(5);
+/// Strict ceiling for typed AI/voice configuration and credential request bodies.
+pub const MAX_AI_CONFIG_BODY_BYTES: usize = 32 * 1024;
+/// Strict ceiling for one basic AI response request body.
+pub const MAX_AI_RESPONSE_BODY_BYTES: usize = 32 * 1024;
+/// Strict JSON ceiling for one speech synthesis request.
+pub const MAX_SPEECH_SYNTHESIS_BODY_BYTES: usize = 32 * 1024;
+/// Multipart envelope ceiling around one independently bounded 25 MiB audio field.
+pub const MAX_SPEECH_MULTIPART_BODY_BYTES: usize = junban_ai::MAX_SPEECH_AUDIO_BYTES + 16 * 1024;
 const AUTH_ATTEMPTS: usize = 8;
 const AUTH_WINDOW: Duration = Duration::from_secs(30);
 pub const TOKEN_FILE: &str = "access-token";
@@ -290,6 +348,78 @@ impl Drop for RecoveryRestorePermit {
     }
 }
 
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct AiReconfigureTestGate {
+    armed: AtomicBool,
+    reached: Notify,
+    release: Notify,
+}
+
+#[cfg(test)]
+impl AiReconfigureTestGate {
+    pub(crate) fn arm(&self) {
+        self.armed.store(true, Ordering::Release);
+    }
+
+    pub(crate) async fn wait_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+
+    pub(crate) async fn pause_after_commit(&self) {
+        if self.armed.swap(false, Ordering::AcqRel) {
+            self.reached.notify_one();
+            self.release.notified().await;
+        }
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AiResponseSetupStage {
+    BeforeCommit = 1,
+    AfterCommit = 2,
+    AfterAdmission = 3,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct AiResponseSetupTestGate {
+    armed: AtomicU8,
+    reached: Notify,
+    release: Notify,
+}
+
+#[cfg(test)]
+impl AiResponseSetupTestGate {
+    pub(crate) fn arm(&self, stage: AiResponseSetupStage) {
+        self.armed.store(stage as u8, Ordering::Release);
+    }
+
+    pub(crate) async fn wait_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+
+    pub(crate) async fn pause(&self, stage: AiResponseSetupStage) {
+        if self
+            .armed
+            .compare_exchange(stage as u8, 0, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.reached.notify_one();
+            self.release.notified().await;
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ServerState {
     pub(crate) service: AppService,
@@ -298,7 +428,7 @@ pub struct ServerState {
     maintenance: Arc<MaintenanceGate>,
     bearer_token: Arc<RwLock<Arc<str>>>,
     /// Hosts supplied at process start (CLI / bind address); never removed via API.
-    cli_hosts: Arc<Vec<String>>,
+    cli_hosts: Arc<RwLock<Vec<String>>>,
     allowed_hosts: Arc<RwLock<HashSet<String>>>,
     pub(crate) profile_dir: PathBuf,
     auth_limiter: Arc<AuthLimiter>,
@@ -317,6 +447,24 @@ pub struct ServerState {
     pub(crate) active_forwarders: Arc<AtomicUsize>,
     reminder_coordinator: Arc<Mutex<Option<RunningReminderCoordinator>>>,
     reminder_coordinator_stopped: Arc<AtomicBool>,
+    /// Lazy AI provider runtime + live-run registry (normal owner only).
+    ai_runtime: Arc<AiRuntimeSupervisor>,
+    /// Independent lazy cloud-speech activity and lifecycle authority.
+    speech_runtime: Arc<SpeechActivitySupervisor>,
+    /// Serializes atomic AI/speech lifecycle transitions against shutdown.
+    ai_speech_transition: Arc<Mutex<()>>,
+    /// Serializes confirmed AI/voice reconfiguration and consistent config reads.
+    pub(crate) ai_reconfigure: Arc<AsyncMutex<()>>,
+    #[cfg(test)]
+    pub(crate) ai_reconfigure_test_gate: Arc<AiReconfigureTestGate>,
+    #[cfg(test)]
+    pub(crate) ai_response_setup_test_gate: Arc<AiResponseSetupTestGate>,
+    /// Counts successful post-drop allocator reclaim hooks (tests only).
+    #[cfg(test)]
+    pub(crate) allocator_reclaim_calls: Arc<AtomicUsize>,
+    /// Counts successful post-commit SQLite pager release hooks (tests only).
+    #[cfg(test)]
+    pub(crate) pager_release_calls: Arc<AtomicUsize>,
     /// Random per-process instance id shared with runtime metadata and health.
     instance_id: Arc<str>,
 }
@@ -382,7 +530,7 @@ impl ServerState {
             reminder_wakes,
             maintenance: MaintenanceGate::new(),
             bearer_token: Arc::new(RwLock::new(Arc::from(bearer_token))),
-            cli_hosts: Arc::new(cli_hosts),
+            cli_hosts: Arc::new(RwLock::new(cli_hosts)),
             allowed_hosts: Arc::new(RwLock::new(allowed_hosts)),
             profile_dir,
             auth_limiter: Arc::new(AuthLimiter::new()),
@@ -396,6 +544,18 @@ impl ServerState {
             active_forwarders: Arc::new(AtomicUsize::new(0)),
             reminder_coordinator: Arc::new(Mutex::new(None)),
             reminder_coordinator_stopped: Arc::new(AtomicBool::new(false)),
+            ai_runtime: AiRuntimeSupervisor::new(),
+            speech_runtime: Arc::new(SpeechActivitySupervisor::new()),
+            ai_speech_transition: Arc::new(Mutex::new(())),
+            ai_reconfigure: Arc::new(AsyncMutex::new(())),
+            #[cfg(test)]
+            ai_reconfigure_test_gate: Arc::new(AiReconfigureTestGate::default()),
+            #[cfg(test)]
+            ai_response_setup_test_gate: Arc::new(AiResponseSetupTestGate::default()),
+            #[cfg(test)]
+            allocator_reclaim_calls: Arc::new(AtomicUsize::new(0)),
+            #[cfg(test)]
+            pager_release_calls: Arc::new(AtomicUsize::new(0)),
             instance_id: Arc::from(generate_instance_id()),
         })
     }
@@ -410,6 +570,132 @@ impl ServerState {
     #[must_use]
     pub fn maintenance(&self) -> &MaintenanceGate {
         self.maintenance.as_ref()
+    }
+
+    /// Lazy AI runtime supervisor owned by the normal profile owner only.
+    #[must_use]
+    pub fn ai_runtime(&self) -> &Arc<AiRuntimeSupervisor> {
+        &self.ai_runtime
+    }
+
+    /// Independent lazy cloud-speech activity authority.
+    #[must_use]
+    pub fn speech_runtime(&self) -> &Arc<SpeechActivitySupervisor> {
+        &self.speech_runtime
+    }
+
+    /// Observation helper: provider HTTP client construction count at/after startup.
+    #[must_use]
+    pub fn ai_provider_client_construct_calls(&self) -> usize {
+        self.ai_runtime.provider_client_construct_calls()
+    }
+
+    /// Observation helper for the independently lazy speech HTTP client.
+    #[must_use]
+    pub fn speech_provider_client_construct_calls(&self) -> usize {
+        self.speech_runtime.provider_client_construct_calls()
+    }
+
+    pub(crate) fn begin_ai_speech_reconfigure(
+        &self,
+    ) -> Result<(crate::ai_runtime::ReconfigureEpoch, u64), ()> {
+        let _transition = self
+            .ai_speech_transition
+            .lock()
+            .expect("AI/speech transition poisoned");
+        let ai_epoch = match self.ai_runtime.begin_reconfigure() {
+            Ok(epoch) => epoch,
+            Err(_) => {
+                self.ai_runtime.begin_permanent_drain();
+                self.speech_runtime.begin_permanent_drain();
+                return Err(());
+            }
+        };
+        match self.speech_runtime.begin_reconfigure() {
+            Ok(speech_epoch) => Ok((ai_epoch, speech_epoch)),
+            Err(_) => {
+                // This can occur only after a permanent speech drain. Invalidate
+                // the temporary AI epoch rather than allowing asymmetric resume.
+                self.ai_runtime.begin_permanent_drain();
+                self.speech_runtime.begin_permanent_drain();
+                Err(())
+            }
+        }
+    }
+
+    pub(crate) fn drop_ai_speech_reconfigure(
+        &self,
+        ai_epoch: crate::ai_runtime::ReconfigureEpoch,
+        speech_epoch: u64,
+    ) -> Result<(), ()> {
+        {
+            let _transition = self
+                .ai_speech_transition
+                .lock()
+                .expect("AI/speech transition poisoned");
+            self.ai_runtime
+                .drop_reconfigure_runtime(ai_epoch)
+                .map_err(|_| ())?;
+            self.speech_runtime
+                .drop_reconfigure_runtime(speech_epoch)
+                .map_err(|_| ())?;
+        }
+        // Outside `ai_speech_transition`: glibc heap walks must not stall permanent drain.
+        reclaim_allocator_after_runtime_drop();
+        #[cfg(test)]
+        self.allocator_reclaim_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    pub(crate) fn finish_ai_speech_reconfigure(
+        &self,
+        ai_epoch: crate::ai_runtime::ReconfigureEpoch,
+        speech_epoch: u64,
+    ) -> Result<(), ()> {
+        let _transition = self
+            .ai_speech_transition
+            .lock()
+            .expect("AI/speech transition poisoned");
+        // Both exact dropped epochs are checked before either is resumed.
+        self.ai_runtime
+            .validate_finish_reconfigure(ai_epoch)
+            .map_err(|_| ())?;
+        self.speech_runtime
+            .validate_finish_reconfigure(speech_epoch)
+            .map_err(|_| ())?;
+        // Neither finish can race permanent drain while this lock is retained.
+        self.speech_runtime
+            .finish_reconfigure(speech_epoch)
+            .map_err(|_| ())?;
+        self.ai_runtime.finish_reconfigure(ai_epoch).map_err(|_| ())
+    }
+
+    /// Test-only observation of successful post-drop allocator reclaim hooks.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn allocator_reclaim_calls(&self) -> usize {
+        self.allocator_reclaim_calls.load(Ordering::SeqCst)
+    }
+
+    /// Test-only observation of successful post-commit SQLite pager release hooks.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn pager_release_calls(&self) -> usize {
+        self.pager_release_calls.load(Ordering::SeqCst)
+    }
+
+    /// Test-only counter for a successful `release_cached_memory` after reconfigure commit.
+    #[cfg(test)]
+    pub(crate) fn record_pager_release_success(&self) {
+        self.pager_release_calls.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Recover every exact consumed mutation approval before any normal service starts.
+    ///
+    /// Thin lifecycle delegate; validation, execution, transcript, and terminalization
+    /// live in [`ai_approval_dispatch`]. Never constructs a provider runtime.
+    pub async fn recover_ai_dispatches(&self) -> io::Result<()> {
+        ai_approval_dispatch::recover_ai_dispatches(self).await
     }
 
     /// Cancelled when the process begins graceful shutdown.
@@ -458,13 +744,26 @@ impl ServerState {
     }
 
     /// Replace persisted hosts and refresh the effective allowlist.
+    /// Add listener-derived hosts after startup recovery and listener binding.
+    pub fn add_cli_hosts(&self, hosts: impl IntoIterator<Item = String>) {
+        let mut cli_hosts = self.cli_hosts.write().expect("CLI hosts poisoned");
+        let mut allowed_hosts = self.allowed_hosts.write().expect("allowed hosts poisoned");
+        for host in hosts {
+            allowed_hosts.insert(host.clone());
+            if !cli_hosts.contains(&host) {
+                cli_hosts.push(host);
+            }
+        }
+    }
+
     pub(crate) fn set_persisted_hosts(
         &self,
         persisted: Vec<String>,
     ) -> io::Result<HashSet<String>> {
-        let mut effective: HashSet<String> = self.cli_hosts.iter().cloned().collect();
+        let cli_hosts = self.cli_hosts.read().expect("CLI hosts poisoned");
+        let mut effective: HashSet<String> = cli_hosts.iter().cloned().collect();
         effective.extend(persisted);
-        save_allowed_hosts(&self.profile_dir, &effective, self.cli_hosts.as_slice())?;
+        save_allowed_hosts(&self.profile_dir, &effective, cli_hosts.as_slice())?;
         *self.allowed_hosts.write().expect("allowed hosts poisoned") = effective.clone();
         self.diagnostics.log(
             DiagnosticSeverity::Info,
@@ -625,6 +924,51 @@ impl ServerState {
             running.handle.abort();
             let _ = running.handle.await;
         }
+    }
+
+    /// Synchronously close AI and cloud-speech admission and cancel all provider work.
+    ///
+    /// The shared transition lock prevents a temporary reconfiguration epoch from
+    /// reopening only one authority while shutdown begins.
+    pub fn begin_ai_shutdown(&self) {
+        let _transition = self
+            .ai_speech_transition
+            .lock()
+            .expect("AI/speech transition poisoned");
+        self.ai_runtime.begin_permanent_drain();
+        self.speech_runtime.begin_permanent_drain();
+    }
+
+    /// Permanently cancel and drain AI and speech work, then drop both lazy runtimes.
+    ///
+    /// On timeout, both lifecycles stay permanently draining and fail-closed.
+    pub async fn drain_ai_runtime(&self, deadline: Duration) -> bool {
+        self.begin_ai_shutdown();
+        let started = tokio::time::Instant::now();
+        if !self.ai_runtime.wait_drained(deadline).await {
+            return false;
+        }
+        let remaining = deadline.saturating_sub(started.elapsed());
+        if !self.speech_runtime.wait_drained(remaining).await {
+            return false;
+        }
+        let _transition = self
+            .ai_speech_transition
+            .lock()
+            .expect("AI/speech transition poisoned");
+        self.ai_runtime.drop_permanent_runtime().is_ok()
+            && self.speech_runtime.drop_permanent_runtime().is_ok()
+    }
+
+    /// Hosted-process AI/speech teardown. A timeout may continue process exit,
+    /// but cancellation must already have begun before Axum graceful drain.
+    pub async fn shutdown_ai_runtime(&self, deadline: Duration) {
+        if self.drain_ai_runtime(deadline).await {
+            return;
+        }
+        tracing::warn!(
+            "AI or speech runtime drain timed out during shutdown; continuing process shutdown"
+        );
     }
 
     #[must_use]
@@ -852,6 +1196,97 @@ fn api_route_table() -> Router<ServerState> {
         .route("/api/v1/nudges", get(nudges))
         .route("/api/v1/settings", get(get_settings).patch(patch_settings))
         .route("/api/v1/settings/temporal", get(get_temporal_settings))
+        .route(
+            "/api/v1/voice/transcriptions",
+            post(create_voice_transcription)
+                .layer(DefaultBodyLimit::max(MAX_SPEECH_MULTIPART_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/voice/speech",
+            post(create_voice_speech).layer(DefaultBodyLimit::max(MAX_SPEECH_SYNTHESIS_BODY_BYTES)),
+        )
+        .route("/api/v1/ai/providers", get(list_ai_providers))
+        .route(
+            "/api/v1/ai/providers/{provider}/models",
+            get(discover_ai_provider_models),
+        )
+        .route(
+            "/api/v1/ai/config",
+            get(get_ai_config)
+                .put(put_ai_config)
+                .delete(delete_ai_config)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/credentials/{target}",
+            axum::routing::put(put_ai_credential)
+                .delete(delete_ai_credential)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions",
+            get(list_ai_sessions)
+                .post(create_ai_session)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}",
+            get(get_ai_session)
+                .patch(patch_ai_session)
+                .delete(delete_ai_session)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/messages",
+            get(list_ai_messages),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/responses",
+            post(create_ai_response).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/daily-briefing",
+            post(create_ai_daily_briefing).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/messages/{message_id}/edit",
+            post(edit_ai_response).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/messages/{message_id}/retry",
+            post(retry_ai_response).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/messages/{message_id}/regenerate",
+            post(regenerate_ai_response).layer(DefaultBodyLimit::max(MAX_AI_RESPONSE_BODY_BYTES)),
+        )
+        .route("/api/v1/ai/runs/{run_id}/cancel", post(cancel_ai_run))
+        .route("/api/v1/ai/approvals/{approval_id}", get(get_ai_approval))
+        .route(
+            "/api/v1/ai/approvals/{approval_id}/approve",
+            post(approve_ai_approval).layer(DefaultBodyLimit::max(4 * 1024)),
+        )
+        .route(
+            "/api/v1/ai/approvals/{approval_id}/reject",
+            post(reject_ai_approval).layer(DefaultBodyLimit::max(4 * 1024)),
+        )
+        .route(
+            "/api/v1/ai/sessions/{session_id}/clear",
+            post(clear_ai_session),
+        )
+        .route(
+            "/api/v1/ai/memories",
+            get(list_ai_memories)
+                .post(create_ai_memory)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/ai/memories/{memory_id}",
+            get(get_ai_memory)
+                .patch(patch_ai_memory)
+                .delete(delete_ai_memory)
+                .layer(DefaultBodyLimit::max(MAX_AI_CONFIG_BODY_BYTES)),
+        )
         .route(
             "/api/v1/imports/preview",
             post(preview_import).layer(DefaultBodyLimit::max(MAX_TRANSFER_BODY_BYTES)),
@@ -1418,7 +1853,7 @@ fn secure_response(mut response: Response, request_id: &RequestId) -> Response {
     headers.insert(
         HeaderName::from_static("content-security-policy"),
         HeaderValue::from_static(
-            "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; connect-src 'self'",
+            "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://huggingface.co https://*.huggingface.co https://hf.co https://*.hf.co; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; manifest-src 'self'",
         ),
     );
     if let Ok(value) = HeaderValue::from_str(&request_id.0) {
@@ -1529,6 +1964,36 @@ impl Modify for SecurityAddon {
         routes::get_settings,
         routes::patch_settings,
         routes::get_temporal_settings,
+        routes_voice::create_voice_transcription,
+        routes_voice::create_voice_speech,
+        routes_ai::list_ai_providers,
+        routes_ai::get_ai_config,
+        routes_ai::put_ai_config,
+        routes_ai::delete_ai_config,
+        routes_ai::put_ai_credential,
+        routes_ai::delete_ai_credential,
+        routes_ai::discover_ai_provider_models,
+        routes_ai::list_ai_sessions,
+        routes_ai::create_ai_session,
+        routes_ai::get_ai_session,
+        routes_ai::patch_ai_session,
+        routes_ai::delete_ai_session,
+        routes_ai::list_ai_messages,
+        routes_ai::create_ai_response,
+        routes_ai_turns::create_ai_daily_briefing,
+        routes_ai_turns::edit_ai_response,
+        routes_ai_turns::retry_ai_response,
+        routes_ai_turns::regenerate_ai_response,
+        routes_ai::cancel_ai_run,
+        routes_ai_approvals::get_ai_approval,
+        routes_ai_approvals::approve_ai_approval,
+        routes_ai_approvals::reject_ai_approval,
+        routes_ai::clear_ai_session,
+        routes_ai::list_ai_memories,
+        routes_ai::create_ai_memory,
+        routes_ai::get_ai_memory,
+        routes_ai::patch_ai_memory,
+        routes_ai::delete_ai_memory,
         routes::preview_import,
         routes::apply_import,
         routes::export_tasks,
@@ -1692,6 +2157,59 @@ impl Modify for SecurityAddon {
         dto::AppSettingsResponse,
         dto::PatchSettingsRequest,
         dto::TemporalSettingsResponse,
+        routes_voice::SpeechTranscriptionMultipart,
+        routes_voice::SpeechBinaryResponse,
+        routes_voice::SpeechSynthesisRequest,
+        routes_voice::TranscriptionResponse,
+        routes_ai::AiProviderPresetDto,
+        routes_ai::SpeechProviderPresetDto,
+        routes_ai::VoiceModeDto,
+        routes_ai::AiSecretKindDto,
+        routes_ai::AiCredentialTargetDto,
+        routes_ai::ProviderOriginClassDto,
+        routes_ai::ProviderCapabilityDto,
+        routes_ai::AiProviderRegistryEntry,
+        routes_ai::AiProviderRegistryResponse,
+        routes_ai::AiSettingsDto,
+        routes_ai::VoiceSettingsDto,
+        routes_ai::AiCredentialMetadataDto,
+        routes_ai::AiCredentialBindingsDto,
+        routes_ai::AiConfigResponse,
+        routes_ai::AiConfigPutRequest,
+        routes_ai::AiConfigInput,
+        routes_ai::VoiceConfigInput,
+        routes_ai::PutAiCredentialRequest,
+        routes_ai::AiCredentialBindingResponse,
+        routes_ai::DiscoveredModelDto,
+        routes_ai::ModelDiscoveryResponse,
+        routes_ai::CreateAiResponseRequest,
+        routes_ai_turns::EmptyAiResponseActionRequest,
+        routes_ai_turns::EditAiResponseRequest,
+        routes_ai::CancelAiRunResponse,
+        ai_chat::AiRunSseEnvelope,
+        ai_chat::AiRunEventType,
+        ai_context::AiContextMetadata,
+        routes_ai::AiSessionStatusDto,
+        routes_ai::AiSessionDto,
+        routes_ai::AiMemoryDto,
+        routes_ai::AiMessageRoleDto,
+        routes_ai::AiMessageStatusDto,
+        routes_ai::AiMessageContentDto,
+        routes_ai::AiMessageDto,
+        routes_ai::CreateAiSessionHttpRequest,
+        routes_ai::PatchAiSessionRequest,
+        routes_ai::CreateAiMemoryHttpRequest,
+        routes_ai::PatchAiMemoryRequest,
+        routes_ai::AiSessionListResponse,
+        routes_ai::AiMessageListResponse,
+        routes_ai::AiMemoryListResponse,
+        routes_ai::AiSessionMutationResponse,
+        routes_ai::AiMemoryMutationResponse,
+        routes_ai_approvals::AiApprovalDecisionRequest,
+        routes_ai_approvals::AiApprovalDto,
+        routes_ai_approvals::AiApprovalMessageDto,
+        routes_ai_approvals::AiApprovalRunDto,
+        routes_ai_approvals::AiApprovalResponse,
         dto::EatTheFrogResponse,
         dto::TaskJarResponse,
         dto::DopamineMenuResponse,
@@ -1906,6 +2424,170 @@ impl Drop for RuntimeMetadataFile {
 // Keep HeaderMap available for security_guard signature stability across refactors.
 #[allow(dead_code)]
 fn _touch_headers(_: &HeaderMap) {}
+
+/// Return freeable heap pages to the OS after optional AI/speech runtimes drop.
+///
+/// First reqwest/rustls/TTS use warms multi-MiB glibc arenas whose free lists
+/// stay in anonymous cgroup memory after Rust `Drop`. Call only after both
+/// supervisors confirm an exact-epoch runtime drop during clean temporary
+/// reconfiguration. Never call on disabled startup, per-request hot paths, or
+/// while holding [`ServerState::ai_speech_transition`] (which would stall
+/// permanent drain). Non-Linux-GNU targets are a documented no-op.
+fn reclaim_allocator_after_runtime_drop() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        // SAFETY: `malloc_trim` is a glibc extension that walks free heap chunks
+        // and returns unused pages to the OS. `pad == 0` trims as aggressively as
+        // glibc allows. It does not free live allocations, does not touch Junban
+        // locks or SQLite state, and is safe concurrent with other malloc/free.
+        // We never call it while holding `ai_speech_transition`.
+        #[allow(unsafe_code)]
+        unsafe {
+            let _released = libc::malloc_trim(0);
+        }
+    }
+}
+
+#[cfg(test)]
+mod allocator_reclaim_tests {
+    use super::reclaim_allocator_after_runtime_drop;
+    use junban_storage::ProfileOwner;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct Fixture {
+        root: PathBuf,
+        _owner: ProfileOwner,
+        state: super::ServerState,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "junban-alloc-reclaim-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+            ));
+            let profile = root.join("profile");
+            fs::create_dir_all(&profile).unwrap();
+            let owner = ProfileOwner::open(&profile).unwrap();
+            let state = super::ServerState::new(
+                owner.repository(),
+                "test-token".to_owned(),
+                ["127.0.0.1".to_owned()],
+                profile,
+            )
+            .unwrap();
+            Self {
+                root,
+                _owner: owner,
+                state,
+            }
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn disabled_startup_does_not_reclaim() {
+        let fixture = Fixture::new();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+        // Direct helper is a platform no-op or glibc trim; it must not touch lifecycle counts.
+        reclaim_allocator_after_runtime_drop();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+    }
+
+    #[test]
+    fn successful_exact_epoch_drop_reaches_reclaim_hook_once() {
+        let fixture = Fixture::new();
+        let (ai_epoch, speech_epoch) = fixture.state.begin_ai_speech_reconfigure().unwrap();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+        fixture
+            .state
+            .drop_ai_speech_reconfigure(ai_epoch, speech_epoch)
+            .unwrap();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 1);
+        fixture
+            .state
+            .finish_ai_speech_reconfigure(ai_epoch, speech_epoch)
+            .unwrap();
+        assert_eq!(
+            fixture.state.allocator_reclaim_calls(),
+            1,
+            "finish must not reclaim again"
+        );
+    }
+
+    #[test]
+    fn repeated_drop_of_same_epoch_does_not_reclaim_again() {
+        let fixture = Fixture::new();
+        let (ai_epoch, speech_epoch) = fixture.state.begin_ai_speech_reconfigure().unwrap();
+        fixture
+            .state
+            .drop_ai_speech_reconfigure(ai_epoch, speech_epoch)
+            .unwrap();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 1);
+        assert!(
+            fixture
+                .state
+                .drop_ai_speech_reconfigure(ai_epoch, speech_epoch)
+                .is_err()
+        );
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 1);
+    }
+
+    #[test]
+    fn asymmetric_speech_drop_failure_does_not_reclaim() {
+        let fixture = Fixture::new();
+        let (ai_epoch, speech_epoch) = fixture.state.begin_ai_speech_reconfigure().unwrap();
+        assert!(
+            fixture
+                .state
+                .drop_ai_speech_reconfigure(ai_epoch, speech_epoch.wrapping_add(1))
+                .is_err()
+        );
+        assert_eq!(
+            fixture.state.allocator_reclaim_calls(),
+            0,
+            "reclaim only after both AI and speech exact-epoch drops succeed"
+        );
+        // Permanent drain invalidates the temporary epoch; reclaim stays closed.
+        fixture.state.begin_ai_shutdown();
+        assert!(
+            fixture
+                .state
+                .drop_ai_speech_reconfigure(ai_epoch, speech_epoch)
+                .is_err()
+        );
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+    }
+
+    #[test]
+    fn permanent_drain_drop_path_does_not_use_reconfigure_reclaim() {
+        let fixture = Fixture::new();
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+        // Permanent drain drops under a different lifecycle than temporary reconfigure.
+        let drained = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(
+                fixture
+                    .state
+                    .drain_ai_runtime(std::time::Duration::from_secs(1)),
+            );
+        assert!(drained);
+        assert_eq!(fixture.state.allocator_reclaim_calls(), 0);
+    }
+}
 
 #[cfg(test)]
 #[path = "tests_api.rs"]

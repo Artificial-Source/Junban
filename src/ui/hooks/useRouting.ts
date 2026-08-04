@@ -10,11 +10,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Closed Phase 4 Settings tab identifiers (URL segments). */
+/** Closed Settings tab identifiers (URL segments). */
 export type SettingsTabId =
   | "essentials"
   | "appearance"
   | "features"
+  | "ai"
+  | "voice"
   | "keyboard"
   | "templates"
   | "data"
@@ -25,6 +27,8 @@ export const SETTINGS_TAB_IDS: readonly SettingsTabId[] = [
   "essentials",
   "appearance",
   "features",
+  "ai",
+  "voice",
   "keyboard",
   "templates",
   "data",
@@ -49,7 +53,8 @@ export type View =
   | "matrix"
   | "stats"
   | "dopamine-menu"
-  | "timeblocking";
+  | "timeblocking"
+  | "ai-chat";
 
 /** Structured application route (never the Settings overlay itself). */
 export type AppRoute =
@@ -68,7 +73,8 @@ export type AppRoute =
   | { name: "matrix" }
   | { name: "stats" }
   | { name: "dopamine-menu" }
-  | { name: "timeblocking" };
+  | { name: "timeblocking" }
+  | { name: "ai-chat" };
 
 /** Settings overlay location derived from the URL. */
 export type SettingsLocation =
@@ -182,6 +188,8 @@ export function parseRoute(path: string): AppRoute | null {
       return { name: "dopamine-menu" };
     case "/timeblocking":
       return { name: "timeblocking" };
+    case "/ai-chat":
+      return { name: "ai-chat" };
     default:
       break;
   }
@@ -258,6 +266,8 @@ export function routeToPath(route: AppRoute): string {
       return "/dopamine-menu";
     case "timeblocking":
       return "/timeblocking";
+    case "ai-chat":
+      return "/ai-chat";
   }
 }
 
@@ -277,6 +287,7 @@ export function viewToRoute(view: View): AppRoute | null {
     case "stats":
     case "dopamine-menu":
     case "timeblocking":
+    case "ai-chat":
       return { name: view };
     case "saved-filter":
     case "project":

@@ -2,9 +2,9 @@
 
 use jiff::Timestamp;
 use junban_domain::{
-    Comment, CommentId, OperationId, Project, ProjectId, SavedFilter, SavedFilterId, Section,
-    SectionId, Tag, TagId, Task, TaskId, Template, TemplateId, TimeBlock, TimeBlockId, TimeSlot,
-    TimeSlotId, UncompleteOutcome,
+    AiApprovalId, AiMemoryId, AiSessionId, Comment, CommentId, OperationId, Project, ProjectId,
+    SavedFilter, SavedFilterId, Section, SectionId, Tag, TagId, Task, TaskId, Template, TemplateId,
+    TimeBlock, TimeBlockId, TimeSlot, TimeSlotId, UncompleteOutcome,
 };
 use serde::{Deserialize, Serialize};
 
@@ -57,6 +57,11 @@ impl EventType {
     pub const TIME_SLOT_MEMBERSHIP_UPDATED: &'static str = "time_slot.membership_updated";
     pub const SETTINGS_UPDATED: &'static str = "settings.updated";
     pub const IMPORT_APPLIED: &'static str = "import.applied";
+    pub const AI_SESSION_CHANGED: &'static str = "ai.session.changed";
+    pub const AI_SESSION_DELETED: &'static str = "ai.session.deleted";
+    pub const AI_MEMORY_CHANGED: &'static str = "ai.memory.changed";
+    pub const AI_MEMORY_DELETED: &'static str = "ai.memory.deleted";
+    pub const AI_APPROVAL_CHANGED: &'static str = "ai.approval.changed";
 
     #[must_use]
     pub fn new(value: impl Into<String>) -> Self {
@@ -90,6 +95,9 @@ pub enum ResourceType {
     TimeBlock,
     TimeSlot,
     Settings,
+    AiSession,
+    AiMemory,
+    AiApproval,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +192,30 @@ impl ResourceRef {
         Self {
             resource_type: ResourceType::Settings,
             id: "settings".to_owned(),
+        }
+    }
+
+    #[must_use]
+    pub fn ai_session(id: AiSessionId) -> Self {
+        Self {
+            resource_type: ResourceType::AiSession,
+            id: id.to_string(),
+        }
+    }
+
+    #[must_use]
+    pub fn ai_memory(id: AiMemoryId) -> Self {
+        Self {
+            resource_type: ResourceType::AiMemory,
+            id: id.to_string(),
+        }
+    }
+
+    #[must_use]
+    pub fn ai_approval(id: AiApprovalId) -> Self {
+        Self {
+            resource_type: ResourceType::AiApproval,
+            id: id.to_string(),
         }
     }
 }

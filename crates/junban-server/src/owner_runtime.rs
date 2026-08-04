@@ -146,21 +146,95 @@ pub struct LocalApiOwner {
     owner: Option<ProfileOwner>,
 }
 
+/// Cancellation-safe owner teardown. If this future is dropped before AI and
+/// reminders drain, its lock-owning values are deliberately retained forever.
+struct LocalOwnerCleanup {
+    state: Option<ServerState>,
+    serve_handle: Option<JoinHandle<io::Result<()>>>,
+    runtime_metadata: Option<RuntimeMetadataFile>,
+    owner: Option<ProfileOwner>,
+    release_allowed: bool,
+}
+
+impl LocalOwnerCleanup {
+    fn new(
+        state: Option<ServerState>,
+        serve_handle: Option<JoinHandle<io::Result<()>>>,
+        runtime_metadata: Option<RuntimeMetadataFile>,
+        owner: Option<ProfileOwner>,
+    ) -> Self {
+        Self {
+            state,
+            serve_handle,
+            runtime_metadata,
+            owner,
+            release_allowed: false,
+        }
+    }
+
+    async fn finish(mut self) {
+        if let Some(handle) = self.serve_handle.take() {
+            let _ = handle.await;
+        }
+        if let Some(state) = self.state.as_ref() {
+            loop {
+                if state
+                    .drain_ai_runtime(crate::AI_SHUTDOWN_DRAIN_DEADLINE)
+                    .await
+                {
+                    break;
+                }
+                tracing::warn!(
+                    "AI runtime remains active during API-only owner shutdown; retaining profile ownership"
+                );
+            }
+            state.stop_reminder_coordinator().await;
+        }
+        self.release_allowed = true;
+    }
+}
+
+impl Drop for LocalOwnerCleanup {
+    fn drop(&mut self) {
+        if self.release_allowed {
+            return;
+        }
+        // Losing the async cleanup future must never unlock a profile while AI
+        // authority may remain. Leaking is exceptional, explicit, and fail-closed.
+        if let Some(state) = self.state.take() {
+            std::mem::forget(state);
+        }
+        if let Some(metadata) = self.runtime_metadata.take() {
+            std::mem::forget(metadata);
+        }
+        if let Some(owner) = self.owner.take() {
+            std::mem::forget(owner);
+        }
+    }
+}
+
 impl LocalApiOwner {
-    /// Acquire the profile lock, bind loopback, serve the normal API, then publish metadata.
+    /// Acquire the profile lock, recover dispatches, bind loopback, then publish metadata.
     pub async fn start(profile_dir: impl Into<PathBuf>) -> Result<Self, LocalApiOwnerError> {
         let profile_dir = profile_dir.into();
         // Lock before any database open — ProfileOwner enforces this ordering.
         let owner = ProfileOwner::open(&profile_dir)?;
         let token = load_or_create_token(&profile_dir)?;
+        let state = ServerState::new(
+            owner.repository(),
+            token,
+            Vec::<String>::new(),
+            &profile_dir,
+        )?;
+        state.recover_ai_dispatches().await?;
+
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await?;
         let address = listener.local_addr()?;
-
-        let mut cli_hosts = vec![address.to_string()];
+        let mut listener_hosts = vec![address.to_string()];
         if address.ip().is_loopback() {
-            cli_hosts.push(format!("localhost:{}", address.port()));
+            listener_hosts.push(format!("localhost:{}", address.port()));
         }
-        let state = ServerState::new(owner.repository(), token, cli_hosts, &profile_dir)?;
+        state.add_cli_hosts(listener_hosts);
         let instance_id = state.instance_id().to_owned();
         let shutdown = state.shutdown_token();
         assert!(
@@ -176,7 +250,7 @@ impl LocalApiOwner {
 
         let app = api_only_router(state.clone());
         let serve_shutdown = shutdown.clone();
-        let mut serve_handle = tokio::spawn(async move {
+        let serve_handle = tokio::spawn(async move {
             axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
                     serve_shutdown.cancelled().await;
@@ -190,17 +264,13 @@ impl LocalApiOwner {
             match RuntimeMetadataFile::create(&profile_dir, address, &instance_id) {
                 Ok(metadata) => metadata,
                 Err(error) => {
+                    // Revoke AI and speech before general shutdown and before awaiting Axum.
+                    state.begin_ai_shutdown();
                     shutdown.cancel();
-                    if tokio::time::timeout(Duration::from_secs(5), &mut serve_handle)
-                        .await
-                        .is_err()
-                    {
-                        serve_handle.abort();
-                        let _ = serve_handle.await;
-                    }
-                    state.stop_reminder_coordinator().await;
-                    drop(state);
-                    drop(owner);
+                    serve_handle.abort();
+                    LocalOwnerCleanup::new(Some(state), Some(serve_handle), None, Some(owner))
+                        .finish()
+                        .await;
                     return Err(error.into());
                 }
             };
@@ -246,6 +316,7 @@ impl LocalApiOwner {
                 None,
                 "graceful API-only owner shutdown",
             );
+            state.begin_ai_shutdown();
         }
         self.shutdown.cancel();
         if let Some(mut handle) = self.serve_handle.take() {
@@ -263,35 +334,54 @@ impl LocalApiOwner {
                 }
             }
         }
-        if let Some(state) = self.state.take() {
-            state.stop_reminder_coordinator().await;
-            drop(state);
-        }
-        drop(self.runtime_metadata.take());
-        drop(self.owner.take());
+        LocalOwnerCleanup::new(
+            self.state.take(),
+            None,
+            self.runtime_metadata.take(),
+            self.owner.take(),
+        )
+        .finish()
+        .await;
     }
 }
 
 impl Drop for LocalApiOwner {
     fn drop(&mut self) {
+        if let Some(state) = self.state.as_ref() {
+            state.begin_ai_shutdown();
+        }
         self.shutdown.cancel();
-        if let Some(handle) = self.serve_handle.take() {
+        let serve_handle = self.serve_handle.take();
+        if let Some(handle) = serve_handle.as_ref() {
             handle.abort();
         }
-        drop(self.runtime_metadata.take());
-        drop(self.state.take());
-        // Best-effort: release ownership if shutdown() was not awaited.
-        drop(self.owner.take());
+        let cleanup = LocalOwnerCleanup::new(
+            self.state.take(),
+            serve_handle,
+            self.runtime_metadata.take(),
+            self.owner.take(),
+        );
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn(cleanup.finish());
+            }
+            Err(_) => {
+                // No executor can complete drain/join. Retain the lock-owning
+                // cleanup values rather than releasing ownership unsafely.
+                std::mem::forget(cleanup);
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{DataDirPlatform, LocalApiOwner, resolve_default_profile_dir};
-    use junban_storage::ProfileOwner;
+    use junban_storage::{OpenError, ProfileOwner};
     use std::ffi::OsStr;
     use std::fs;
     use std::path::PathBuf;
+    use std::time::Duration;
 
     #[test]
     fn unix_prefers_xdg_data_home() {
@@ -368,6 +458,78 @@ mod tests {
     fn windows_falls_back_to_relative_data_when_local_app_data_missing() {
         let path = resolve_default_profile_dir(DataDirPlatform::Windows, None, None, None);
         assert_eq!(path, PathBuf::from("data"));
+    }
+
+    #[tokio::test]
+    async fn explicit_shutdown_cancels_ai_before_completion_and_retains_profile_lock() {
+        let profile = std::env::temp_dir().join(format!(
+            "junban-owner-explicit-cleanup-test-{}",
+            uuid::Uuid::now_v7()
+        ));
+        let owner = LocalApiOwner::start(&profile).await.expect("start owner");
+        let guard = owner
+            .state
+            .as_ref()
+            .expect("state")
+            .ai_runtime()
+            .admit_run(junban_domain::AiRunId::new(), 1)
+            .expect("admit held AI run");
+
+        let shutdown = tokio::spawn(owner.shutdown());
+        tokio::task::yield_now().await;
+        assert!(!guard.is_live(), "AI cancellation must begin synchronously");
+        assert!(!shutdown.is_finished(), "held AI guard must block cleanup");
+        assert!(matches!(
+            ProfileOwner::open(&profile),
+            Err(OpenError::AlreadyOwned)
+        ));
+
+        drop(guard);
+        tokio::time::timeout(Duration::from_secs(2), shutdown)
+            .await
+            .expect("shutdown released after guard drop")
+            .expect("shutdown task");
+        let reopened = ProfileOwner::open(&profile).expect("profile released after full drain");
+        drop(reopened);
+        fs::remove_dir_all(profile).expect("remove temp profile");
+    }
+
+    #[tokio::test]
+    async fn drop_cleanup_retains_profile_lock_until_held_ai_guard_drops() {
+        let profile = std::env::temp_dir().join(format!(
+            "junban-owner-drop-cleanup-test-{}",
+            uuid::Uuid::now_v7()
+        ));
+        let owner = LocalApiOwner::start(&profile).await.expect("start owner");
+        let guard = owner
+            .state
+            .as_ref()
+            .expect("state")
+            .ai_runtime()
+            .admit_run(junban_domain::AiRunId::new(), 1)
+            .expect("admit held AI run");
+
+        drop(owner);
+        assert!(!guard.is_live(), "Drop must synchronously cancel AI");
+        assert!(matches!(
+            ProfileOwner::open(&profile),
+            Err(OpenError::AlreadyOwned)
+        ));
+        drop(guard);
+
+        let reopened = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                match ProfileOwner::open(&profile) {
+                    Ok(owner) => break owner,
+                    Err(OpenError::AlreadyOwned) => tokio::task::yield_now().await,
+                    Err(error) => panic!("unexpected profile reopen error: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("drop cleanup released after guard drop");
+        drop(reopened);
+        fs::remove_dir_all(profile).expect("remove temp profile");
     }
 
     #[tokio::test]

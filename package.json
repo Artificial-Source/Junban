@@ -18,11 +18,14 @@
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test",
+    "test:e2e:local-voice-acceptance": "node scripts/run-phase6-local-voice-acceptance.mjs",
     "audit:dependencies": "pnpm audit --audit-level high",
     "contract:generate": "node scripts/contract.mjs generate",
     "contract:check": "node scripts/contract.mjs check",
     "check:docs": "node scripts/check-docs.mjs",
     "check:runtime-boundary": "node scripts/check-runtime-boundary.mjs",
+    "check:local-voice-assets": "node scripts/check-local-voice-assets.mjs --require-dist",
+    "check:phase6-legacy-visual": "node scripts/check-phase6-legacy-visual-baseline.mjs",
     "bench:hosted-server": "python3 scripts/bench-hosted-server.py",
     "bench:hosted-server:quick": "python3 scripts/bench-hosted-server.py --quick",
     "bench:scale": "python3 scripts/bench-hosted-server.py --mode scale",
@@ -33,11 +36,21 @@
     "bench:phase4:quick": "python3 scripts/bench-hosted-server.py --mode phase4 --quick",
     "bench:phase5": "python3 scripts/check-phase5-automation-budget.py",
     "bench:phase5:quick": "python3 scripts/check-phase5-automation-budget.py --quick",
+    "bench:phase6-disabled-matched": "python3 scripts/check-phase6-disabled-matched-release.py",
+    "bench:phase6-disabled-matched:quick": "python3 scripts/check-phase6-disabled-matched-release.py --quick",
+    "bench:phase6-disabled-matched:self-check": "python3 scripts/check-phase6-disabled-matched-release.py --self-check",
     "conformance:phase5": "python3 scripts/check-phase5-conformance.py --authoritative",
-    "bench:self-check": "python3 scripts/bench-hosted-server.py --self-check",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary"
+    "conformance:phase6": "python3 scripts/check-phase5-conformance.py --phase6 --authoritative",
+    "bench:phase6-enabled:self-check": "python3 scripts/check-phase6-enabled-benchmark.py --self-check",
+    "bench:self-check": "python3 scripts/bench-hosted-server.py --self-check && python3 scripts/check-phase6-disabled-matched-release.py --self-check",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary && pnpm check:local-voice-assets && pnpm check:phase6-legacy-visual"
   },
   "dependencies": {
+    "@diffusionstudio/piper-wasm": "1.0.0",
+    "@huggingface/transformers": "3.8.1",
+    "@mintplex-labs/piper-tts-web": "1.0.4",
+    "@ricky0123/vad-web": "0.0.30",
+    "kokoro-js": "1.2.1",
     "lucide-react": "^0.548.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -63,8 +76,14 @@
   },
   "pnpm": {
     "overrides": {
-      "brace-expansion": "5.0.8",
-      "js-yaml": "4.3.0"
+      "brace-expansion": "5.0.9",
+      "js-yaml": "4.3.0",
+      "sharp": "0.35.3"
+    },
+    "patchedDependencies": {
+      "@mintplex-labs/piper-tts-web@1.0.4": "patches/@mintplex-labs__piper-tts-web@1.0.4.patch",
+      "kokoro-js@1.2.1": "patches/kokoro-js@1.2.1.patch",
+      "@huggingface/transformers@3.8.1": "patches/@huggingface__transformers@3.8.1.patch"
     }
   }
 }

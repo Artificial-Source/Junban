@@ -1,0 +1,343 @@
+{
+  "id": "phase-6-local-voice",
+  "version": 1,
+  "status": "passed",
+  "startedAt": "2026-08-04T02:25:22.308Z",
+  "finishedAt": "2026-08-04T02:26:33.075Z",
+  "browser": {
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.34 Safari/537.36",
+    "language": "en-US"
+  },
+  "fixture": {
+    "name": "whisper-plan-my-day-16k.wav",
+    "sha256": "09d36ecbb7c00737df3eb862321c312948a0741ad29aa32085685deb1ca96aa3",
+    "bytes": 47022,
+    "phrase": "plan my day",
+    "sampleRateHz": 16000
+  },
+  "packages": [
+    {
+      "packageId": "whisper-tiny.en-q4",
+      "engine": "whisper",
+      "repo": "onnx-community/whisper-tiny.en",
+      "revision": "2575352d61be1bf7225cf8f8b268a4678025fc58",
+      "engineVersion": "@huggingface/transformers@3.8.1",
+      "license": "OpenAI-Whisper-MIT",
+      "totalBytes": 98971117,
+      "fileCount": 11,
+      "primarySha256": "57d4303f3bbc8bb4016273b172285236f5719c75e8a7d23b7265cfa1d71494a4"
+    },
+    {
+      "packageId": "kokoro-82m-v1-q8",
+      "engine": "kokoro",
+      "repo": "onnx-community/Kokoro-82M-v1.0-ONNX",
+      "revision": "1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+      "engineVersion": "kokoro-js@1.2.1",
+      "license": "Apache-2.0",
+      "totalBytes": 92887010,
+      "fileCount": 5,
+      "primarySha256": "fbae9257e1e05ffc727e951ef9b9c98418e6d79f1c9b6b13bd59f5c9028a1478"
+    },
+    {
+      "packageId": "piper-en_US-ljspeech-medium",
+      "engine": "piper",
+      "repo": "rhasspy/piper-voices",
+      "revision": "9f967d15e9ccdf43078586d1476ee70f314401bd",
+      "engineVersion": "@mintplex-labs/piper-tts-web@1.0.4",
+      "license": "MIT",
+      "totalBytes": 63536868,
+      "fileCount": 3,
+      "primarySha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22"
+    }
+  ],
+  "whisper": {
+    "engine": "whisper",
+    "ok": true,
+    "package": {
+      "packageId": "whisper-tiny.en-q4",
+      "engine": "whisper",
+      "repo": "onnx-community/whisper-tiny.en",
+      "revision": "2575352d61be1bf7225cf8f8b268a4678025fc58",
+      "engineVersion": "@huggingface/transformers@3.8.1",
+      "license": "OpenAI-Whisper-MIT",
+      "totalBytes": 98971117,
+      "fileCount": 11,
+      "primarySha256": "57d4303f3bbc8bb4016273b172285236f5719c75e8a7d23b7265cfa1d71494a4"
+    },
+    "timing": {
+      "firstDownloadMs": 10424,
+      "warmLoadMs": 6287,
+      "inferMs": 1879
+    },
+    "transcript": "Then my day.",
+    "matchedTokens": [
+      "day"
+    ],
+    "sampleCount": 23472,
+    "sampleRateHz": 16000,
+    "error": null
+  },
+  "kokoro": {
+    "engine": "kokoro",
+    "ok": true,
+    "package": {
+      "packageId": "kokoro-82m-v1-q8",
+      "engine": "kokoro",
+      "repo": "onnx-community/Kokoro-82M-v1.0-ONNX",
+      "revision": "1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+      "engineVersion": "kokoro-js@1.2.1",
+      "license": "Apache-2.0",
+      "totalBytes": 92887010,
+      "fileCount": 5,
+      "primarySha256": "fbae9257e1e05ffc727e951ef9b9c98418e6d79f1c9b6b13bd59f5c9028a1478"
+    },
+    "timing": {
+      "firstDownloadMs": 9029,
+      "warmLoadMs": 3300,
+      "inferMs": 4419
+    },
+    "format": "pcm-f32",
+    "sampleRateHz": 24000,
+    "channels": 1,
+    "byteLength": 158400,
+    "durationSeconds": 1.65,
+    "playable": true,
+    "error": null
+  },
+  "piper": {
+    "engine": "piper",
+    "ok": true,
+    "package": {
+      "packageId": "piper-en_US-ljspeech-medium",
+      "engine": "piper",
+      "repo": "rhasspy/piper-voices",
+      "revision": "9f967d15e9ccdf43078586d1476ee70f314401bd",
+      "engineVersion": "@mintplex-labs/piper-tts-web@1.0.4",
+      "license": "MIT",
+      "totalBytes": 63536868,
+      "fileCount": 3,
+      "primarySha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22"
+    },
+    "timing": {
+      "firstDownloadMs": 6749,
+      "warmLoadMs": 2839,
+      "inferMs": 393
+    },
+    "format": "wav",
+    "sampleRateHz": 22050,
+    "channels": 1,
+    "byteLength": 47660,
+    "durationSeconds": 1.0797278911564625,
+    "playable": true,
+    "error": null
+  },
+  "cache": {
+    "firstDownloadUsedNetwork": true,
+    "warmReuseSkippedNetwork": true,
+    "reverifyPassed": true,
+    "cancelledLoadRecovered": true,
+    "failedLoadRecovered": true
+  },
+  "cleanup": {
+    "workersTerminated": true,
+    "audioContextsClosed": true,
+    "mediaTracksStopped": true,
+    "objectUrlsRevoked": true,
+    "notes": [
+      "stopped 1 MediaStream track(s)"
+    ]
+  },
+  "requestLog": [
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/config.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/generation_config.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/preprocessor_config.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/tokenizer.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/tokenizer_config.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/added_tokens.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/special_tokens_map.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/merges.txt",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/normalizer.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/onnx/encoder_model_q4.onnx",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/onnx/decoder_model_merged_q4.onnx",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/config.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/generation_config.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/preprocessor_config.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/tokenizer.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/tokenizer_config.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/added_tokens.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/special_tokens_map.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/merges.txt",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/normalizer.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/onnx/encoder_model_q4.onnx",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/whisper-tiny.en/resolve/2575352d61be1bf7225cf8f8b268a4678025fc58/onnx/decoder_model_merged_q4.onnx",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/config.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/tokenizer.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/tokenizer_config.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/onnx/model_quantized.onnx",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/voices/af_heart.bin",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/9f967d15e9ccdf43078586d1476ee70f314401bd/en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/9f967d15e9ccdf43078586d1476ee70f314401bd/en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx.json",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    },
+    {
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/9f967d15e9ccdf43078586d1476ee70f314401bd/en/en_US/ljspeech/medium/MODEL_CARD",
+      "method": "GET",
+      "resourceType": "fetch",
+      "host": "huggingface.co"
+    }
+  ],
+  "errors": [],
+  "playwright": {
+    "browser": "chromium",
+    "requestCount": 137,
+    "requestHosts": [
+      "127.0.0.1",
+      "huggingface.co",
+      "us.aws.cdn.hf.co"
+    ],
+    "runId": "d14f5aeb-03f0-4383-83ca-5c97bdf656e1"
+  }
+}

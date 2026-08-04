@@ -4,20 +4,26 @@ use std::{future::Future, pin::Pin};
 
 use jiff::Timestamp;
 use junban_domain::{
-    AppSettings, ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId,
-    RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
-    ReminderOccurrence, SavedFilterId, SectionId, SettingsPatch, TagId, Task, TaskActivity,
-    TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId,
-    TimeSlotDraft, TimeSlotId, TransferApply, TransferFormat, TransferPreview,
+    AiApprovalId, AiApprovalStatus, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiMessageId,
+    AiMessageRole, AiMessageStatus, AiRunId, AiRunState, AiSecretKind, AiSecretMetadata, AiSession,
+    AiSessionId, AiToolApproval, AiTurnId, AppSettings, ClaimedReminder, Comment, CommentBody,
+    CommentId, EntityName, OperationId, Project, ProjectId, RelationKind, ReminderChannel,
+    ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence,
+    SavedFilterId, SectionId, SettingsPatch, Tag, TagId, TagName, Task, TaskActivity, TaskDraft,
+    TaskId, TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft,
+    TimeSlotId, TransferApply, TransferFormat, TransferPreview,
 };
 
 use crate::{
-    BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp, ExportFormat,
-    MoveTarget, ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction,
-    ReplanPastBlocksPreview, RepositoryError, SavedFilterDraft, SavedFilterPatch, SectionDraft,
-    SectionPatch, StagedFile, TagDraft, TagPatch, TaskListAsOf, TaskListPage, TaskPatch,
-    TemplateApply, TemplateDraft, TemplatePatch, TemporalContext, TimeBlockPatch,
-    TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
+    AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
+    AiSecretBytes, AiSessionCursor, AiSessionListPage, BulkAction, CatalogSnapshot, CommentPatch,
+    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, PreparedAiResponse, ProjectDraft,
+    ProjectListPage, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    RepositoryError, ReserveDailyAiResponseRequest, RewriteAiResponseRequest, SavedFilterDraft,
+    SavedFilterPatch, SectionDraft, SectionPatch, StagedFile, TagDraft, TagListPage, TagPatch,
+    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
+    TimeblockingRangeQuery,
 };
 
 pub type RepositoryFuture<'a, T> =
@@ -122,6 +128,30 @@ pub trait Repository: Send + Sync + 'static {
     fn list_analysis_tasks(&self, as_of: TaskListAsOf) -> RepositoryFuture<'_, TaskListPage>;
 
     fn list_catalog(&self) -> RepositoryFuture<'_, CatalogSnapshot>;
+
+    /// Bounded project list ordered by `sort_order`, id. `limit` is `1..=MAX_BULK_IDS`.
+    fn list_projects_bounded(&self, limit: u32) -> RepositoryFuture<'_, ProjectListPage>;
+
+    /// Bounded tag list ordered by `name_normalized`. `limit` is `1..=MAX_BULK_IDS`.
+    fn list_tags_bounded(&self, limit: u32) -> RepositoryFuture<'_, TagListPage>;
+
+    /// Exact project lookup by primary key.
+    fn get_project(&self, project_id: ProjectId) -> RepositoryFuture<'_, Project>;
+
+    /// Exact multi-project lookup by primary key.
+    ///
+    /// Accepts at most [`junban_domain::MAX_BULK_IDS`] unique IDs. Missing IDs are
+    /// omitted. Results are ordered by `sort_order`, id and share one revision.
+    fn get_projects_by_ids(
+        &self,
+        project_ids: Vec<ProjectId>,
+    ) -> RepositoryFuture<'_, ProjectListPage>;
+
+    /// Exact project lookup by name (first `sort_order`, id match).
+    fn get_project_by_name(&self, name: EntityName) -> RepositoryFuture<'_, Project>;
+
+    /// Resolve existing tags by exact normalized names. Missing names are `NotFound`.
+    fn resolve_tags_by_names(&self, names: Vec<TagName>) -> RepositoryFuture<'_, Vec<Tag>>;
 
     fn create_project(
         &self,
@@ -537,4 +567,246 @@ pub trait Repository: Send + Sync + 'static {
 
     /// Apply a previously validated and epoch-rotated SQLite candidate.
     fn restore_backup(&self, candidate: StagedFile) -> RepositoryFuture<'_, ()>;
+
+    // ── AI persistence (Wave 3a) ────────────────────────────────────────────
+
+    fn create_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        title: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn rename_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        title: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn delete_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn clear_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn get_ai_session(&self, session_id: AiSessionId) -> RepositoryFuture<'_, AiSession>;
+
+    fn list_ai_sessions(
+        &self,
+        cursor: Option<AiSessionCursor>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, AiSessionListPage>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn upsert_ai_message(
+        &self,
+        operation_id: OperationId,
+        message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        role: AiMessageRole,
+        status: AiMessageStatus,
+        content: AiMessageContent,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn get_ai_message(&self, message_id: AiMessageId) -> RepositoryFuture<'_, AiMessage>;
+
+    fn list_ai_messages(
+        &self,
+        session_id: AiSessionId,
+        after_sequence: Option<u32>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, Vec<AiMessage>>;
+
+    fn create_ai_memory(
+        &self,
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        content: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn update_ai_memory(
+        &self,
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        content: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn delete_ai_memory(
+        &self,
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn link_ai_session_memory(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        memory_id: AiMemoryId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn get_ai_memory(&self, memory_id: AiMemoryId) -> RepositoryFuture<'_, AiMemory>;
+
+    fn list_ai_memories(
+        &self,
+        cursor: Option<AiMemoryCursor>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, AiMemoryListPage>;
+
+    fn select_ai_memories_for_context(
+        &self,
+        session_id: Option<AiSessionId>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, Vec<AiMemory>>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn propose_ai_approval(
+        &self,
+        operation_id: OperationId,
+        approval_id: AiApprovalId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        tool_name: String,
+        arguments_json: String,
+        assistant_content: junban_domain::AiMessageContent,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn set_ai_approval_status(
+        &self,
+        operation_id: OperationId,
+        approval_id: AiApprovalId,
+        status: AiApprovalStatus,
+        dispatch_operation_id: Option<String>,
+        assistant_content: Option<junban_domain::AiMessageContent>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn get_ai_approval(&self, approval_id: AiApprovalId) -> RepositoryFuture<'_, AiToolApproval>;
+
+    /// Bounded exact consumed-approval rows whose run is durably dispatching.
+    fn list_dispatching_ai_approvals(&self) -> RepositoryFuture<'_, Vec<AiToolApproval>>;
+
+    /// Trusted recovery-only lookup of a committed mutation by its server-owned operation ID.
+    ///
+    /// This deliberately does not accept caller request bytes and must never be exposed through
+    /// an HTTP, CLI, MCP, provider, or plugin surface.
+    fn recover_operation_receipt(
+        &self,
+        operation_id: OperationId,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn upsert_ai_run_state(
+        &self,
+        operation_id: OperationId,
+        state: AiRunState,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    fn get_ai_run_state(&self, run_id: AiRunId) -> RepositoryFuture<'_, AiRunState>;
+
+    fn get_ai_run_for_assistant(
+        &self,
+        assistant_message_id: AiMessageId,
+    ) -> RepositoryFuture<'_, AiRunState>;
+
+    /// Fail closed when a run was tombstoned by a later history rewrite.
+    fn ensure_ai_response_current(&self, run_id: AiRunId) -> RepositoryFuture<'_, ()>;
+
+    fn reserve_daily_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: ReserveDailyAiResponseRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, PreparedAiResponse>;
+
+    fn rewrite_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: RewriteAiResponseRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, PreparedAiResponse>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn cancel_ai_response(
+        &self,
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        content: AiMessageContent,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish_ai_response(
+        &self,
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        message_status: AiMessageStatus,
+        content: AiMessageContent,
+        run_phase: junban_domain::AiRunPhase,
+        dispatch_operation_id: Option<String>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    /// Presence-only private credential inventory. Reads publish no event.
+    fn list_ai_secret_metadata(&self) -> RepositoryFuture<'_, Vec<AiSecretMetadata>>;
+
+    /// Resolve one confirmed private credential transiently. Missing/stale IDs fail closed.
+    fn resolve_ai_secret(
+        &self,
+        credential_id: junban_domain::AiCredentialId,
+    ) -> RepositoryFuture<'_, AiSecretBytes>;
+
+    fn bind_ai_credential(
+        &self,
+        operation_id: OperationId,
+        target: AiCredentialBindingTarget,
+        kind: AiSecretKind,
+        secret: Option<AiSecretBytes>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, AiCredentialBindResult>;
+
+    fn clear_ai_credential_binding(
+        &self,
+        operation_id: OperationId,
+        target: AiCredentialBindingTarget,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation>;
+
+    /// Best-effort release of SQLite connection page cache / heap retained by the pager.
+    ///
+    /// Production storage overrides this to run `PRAGMA shrink_memory` on the single
+    /// profile worker and, on Linux, advise DONTNEED for clean pages of the live main
+    /// database and WAL files. It must not mutate durable data, advance revision, open
+    /// another connection, or checkpoint/truncate the WAL. Default is a no-op so test
+    /// doubles need not implement it.
+    fn release_cached_memory(&self) -> RepositoryFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
 }

@@ -1,5 +1,7 @@
 //! SQLite persistence with one profile owner and one dedicated connection thread.
 
+mod ai_ops;
+mod ai_secrets;
 mod backup_ops;
 mod catalog_ops;
 mod detail_ops;
@@ -18,6 +20,9 @@ mod transfer_ops;
 mod tx;
 mod undo_ops;
 
+pub use ai_secrets::{AiSecretStore, AiSecretStoreError};
+pub use junban_app::AiSecretBytes;
+
 use std::{
     collections::HashSet,
     fs::{self, File, OpenOptions},
@@ -35,20 +40,26 @@ use std::{
 use fs4::FileExt;
 use jiff::{Timestamp, civil::Date};
 use junban_app::{
-    AppSettings, BulkAction, CatalogSnapshot, CommentPatch, CommittedMutation, EventCatchUp,
-    ExportFormat, MoveTarget, ProjectDraft, ProjectPatch, ReorderScope, ReplanPastBlocksAction,
-    ReplanPastBlocksPreview, Repository, RepositoryError, RepositoryFuture, SavedFilterDraft,
-    SavedFilterPatch, SectionDraft, SectionPatch, SettingsPatch, StagedFile, SyncState, TagDraft,
-    TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
+    AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
+    AiSessionCursor, AiSessionListPage, AppSettings, BulkAction, CatalogSnapshot, CommentPatch,
+    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, PreparedAiResponse, ProjectDraft,
+    ProjectListPage, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    Repository, RepositoryError, RepositoryFuture, ReserveDailyAiResponseRequest,
+    RewriteAiResponseRequest, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch,
+    SettingsPatch, StagedFile, SyncState, TagDraft, TagListPage, TagPatch, TaskListAsOf,
+    TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch, TemporalContext,
+    TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
     TimeblockingRangeQuery,
 };
 use junban_domain::{
-    ClaimedReminder, Comment, CommentBody, CommentId, OperationId, ProjectId, RelationKind,
-    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
-    ReminderOccurrence, SavedFilterId, SectionId, TagId, Task, TaskActivity, TaskDraft, TaskId,
-    TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId, TimeSlotDraft, TimeSlotId,
-    TransferApply, TransferFormat, TransferPreview,
+    AiApprovalId, AiApprovalStatus, AiCredentialId, AiMemory, AiMemoryId, AiMessage,
+    AiMessageContent, AiMessageId, AiMessageRole, AiMessageStatus, AiRunId, AiRunState,
+    AiSecretKind, AiSecretMetadata, AiSession, AiSessionId, AiToolApproval, AiTurnId,
+    ClaimedReminder, Comment, CommentBody, CommentId, EntityName, OperationId, Project, ProjectId,
+    RelationKind, ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    ReminderOccurrence, SavedFilterId, SectionId, Tag, TagId, TagName, Task, TaskActivity,
+    TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId,
+    TimeSlotDraft, TimeSlotId, TransferApply, TransferFormat, TransferPreview,
 };
 use rusqlite::Connection;
 use thiserror::Error;
@@ -749,11 +760,13 @@ fn protect_file_owner_only_windows(file: &File) -> io::Result<()> {
 
 /// Advise the kernel that clean pages for `file` may leave the page cache.
 ///
-/// Restore keeps a private rollback snapshot durable on disk until apply finishes.
-/// Once that snapshot is fsync'd, its pages need not stay resident: Linux cgroup
-/// memory includes page cache, and holding candidate + rollback + live images at
-/// once is what pushed peak restore over the frozen budget. This is a
-/// Linux-authoritative optimization; other targets are a documented no-op.
+/// Used after restore stages a private rollback snapshot (fsync'd, then dropped
+/// from cache so candidate + rollback + live images do not multiply cgroup file
+/// charge) and after AI/speech reconfigure drains, when `PRAGMA shrink_memory`
+/// has already released SQLite's heap pager cache but the kernel may still hold
+/// clean DB/WAL pages. This is a Linux-authoritative optimization; other targets
+/// are a documented no-op. Callers must not `sync_all` merely to enable advice:
+/// DONTNEED discards clean pages and leaves dirty pages intact.
 ///
 /// # Errors
 ///
@@ -780,6 +793,52 @@ pub(crate) fn advise_dont_need_pages(file: &File) -> io::Result<()> {
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn advise_dont_need_pages(_file: &File) -> io::Result<()> {
     Ok(())
+}
+
+/// Release SQLite heap pager state, then drop clean live DB/WAL page-cache pages.
+///
+/// Does not checkpoint, truncate, sync, or open another connection. Profile paths
+/// never appear in returned error strings.
+fn release_cached_connection_memory(connection: &Connection) -> Result<(), RepositoryError> {
+    connection
+        .execute_batch("PRAGMA shrink_memory")
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    let Some(db_path) = connection.path().filter(|path| !path.is_empty()) else {
+        return Ok(());
+    };
+    advise_live_sqlite_page_cache(Path::new(db_path))
+}
+
+/// Issue DONTNEED against the live main database and its `-wal` sidecar.
+///
+/// The main database file must exist. A missing WAL is normal (pre-write or after
+/// truncate). `-shm` is intentionally skipped: it is small, actively mmap'd by the
+/// live connection, and advising it only forces immediate refaults. No `sync_all`.
+fn advise_live_sqlite_page_cache(db_path: &Path) -> Result<(), RepositoryError> {
+    advise_sqlite_file_pages(db_path, true)?;
+    let mut wal_path = db_path.as_os_str().to_os_string();
+    wal_path.push("-wal");
+    advise_sqlite_file_pages(Path::new(&wal_path), false)?;
+    Ok(())
+}
+
+fn advise_sqlite_file_pages(path: &Path, required: bool) -> Result<(), RepositoryError> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if !required && error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(RepositoryError::Storage(format!(
+                "live database page-cache open failed: {}",
+                error.kind()
+            )));
+        }
+    };
+    advise_dont_need_pages(&file).map_err(|error| {
+        RepositoryError::Storage(format!(
+            "live database page-cache advice failed: {}",
+            error.kind()
+        ))
+    })
 }
 
 #[derive(Clone)]
@@ -1077,6 +1136,27 @@ impl Repository for SqliteRepository {
     }
     fn list_catalog(&self) -> RepositoryFuture<'_, CatalogSnapshot> {
         self.request(Command::ListCatalog)
+    }
+    fn list_projects_bounded(&self, limit: u32) -> RepositoryFuture<'_, ProjectListPage> {
+        mut_cmd!(self, ListProjectsBounded { limit })
+    }
+    fn list_tags_bounded(&self, limit: u32) -> RepositoryFuture<'_, TagListPage> {
+        mut_cmd!(self, ListTagsBounded { limit })
+    }
+    fn get_project(&self, project_id: ProjectId) -> RepositoryFuture<'_, Project> {
+        mut_cmd!(self, GetProject { project_id })
+    }
+    fn get_projects_by_ids(
+        &self,
+        project_ids: Vec<ProjectId>,
+    ) -> RepositoryFuture<'_, ProjectListPage> {
+        mut_cmd!(self, GetProjectsByIds { project_ids })
+    }
+    fn get_project_by_name(&self, name: EntityName) -> RepositoryFuture<'_, Project> {
+        mut_cmd!(self, GetProjectByName { name })
+    }
+    fn resolve_tags_by_names(&self, names: Vec<TagName>) -> RepositoryFuture<'_, Vec<Tag>> {
+        mut_cmd!(self, ResolveTagsByNames { names })
     }
     fn create_project(
         &self,
@@ -1870,6 +1950,466 @@ impl Repository for SqliteRepository {
     fn restore_backup(&self, candidate: StagedFile) -> RepositoryFuture<'_, ()> {
         mut_cmd!(self, RestoreBackup { candidate })
     }
+
+    fn create_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        title: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateAiSession {
+                operation_id,
+                session_id,
+                title,
+                now
+            }
+        )
+    }
+
+    fn rename_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        title: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            RenameAiSession {
+                operation_id,
+                session_id,
+                title,
+                now
+            }
+        )
+    }
+
+    fn delete_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteAiSession {
+                operation_id,
+                session_id,
+                now
+            }
+        )
+    }
+
+    fn clear_ai_session(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            ClearAiSession {
+                operation_id,
+                session_id,
+                now
+            }
+        )
+    }
+
+    fn get_ai_session(&self, session_id: AiSessionId) -> RepositoryFuture<'_, AiSession> {
+        mut_cmd!(self, GetAiSession { session_id })
+    }
+
+    fn list_ai_sessions(
+        &self,
+        cursor: Option<AiSessionCursor>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, AiSessionListPage> {
+        mut_cmd!(self, ListAiSessions { cursor, limit })
+    }
+
+    fn upsert_ai_message(
+        &self,
+        operation_id: OperationId,
+        message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        role: AiMessageRole,
+        status: AiMessageStatus,
+        content: AiMessageContent,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            UpsertAiMessage {
+                operation_id,
+                message_id,
+                session_id,
+                turn_id,
+                role,
+                status,
+                content,
+                now
+            }
+        )
+    }
+
+    fn get_ai_message(&self, message_id: AiMessageId) -> RepositoryFuture<'_, AiMessage> {
+        mut_cmd!(self, GetAiMessage { message_id })
+    }
+
+    fn list_ai_messages(
+        &self,
+        session_id: AiSessionId,
+        after_sequence: Option<u32>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, Vec<AiMessage>> {
+        mut_cmd!(
+            self,
+            ListAiMessages {
+                session_id,
+                after_sequence,
+                limit
+            }
+        )
+    }
+
+    fn create_ai_memory(
+        &self,
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        content: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CreateAiMemory {
+                operation_id,
+                memory_id,
+                content,
+                now
+            }
+        )
+    }
+
+    fn update_ai_memory(
+        &self,
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        content: String,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            UpdateAiMemory {
+                operation_id,
+                memory_id,
+                content,
+                now
+            }
+        )
+    }
+
+    fn delete_ai_memory(
+        &self,
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            DeleteAiMemory {
+                operation_id,
+                memory_id,
+                now
+            }
+        )
+    }
+
+    fn link_ai_session_memory(
+        &self,
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        memory_id: AiMemoryId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            LinkAiSessionMemory {
+                operation_id,
+                session_id,
+                memory_id,
+                now
+            }
+        )
+    }
+
+    fn get_ai_memory(&self, memory_id: AiMemoryId) -> RepositoryFuture<'_, AiMemory> {
+        mut_cmd!(self, GetAiMemory { memory_id })
+    }
+
+    fn list_ai_memories(
+        &self,
+        cursor: Option<AiMemoryCursor>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, AiMemoryListPage> {
+        mut_cmd!(self, ListAiMemories { cursor, limit })
+    }
+
+    fn select_ai_memories_for_context(
+        &self,
+        session_id: Option<AiSessionId>,
+        limit: u32,
+    ) -> RepositoryFuture<'_, Vec<AiMemory>> {
+        mut_cmd!(self, SelectAiMemoriesForContext { session_id, limit })
+    }
+
+    fn propose_ai_approval(
+        &self,
+        operation_id: OperationId,
+        approval_id: AiApprovalId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        tool_name: String,
+        arguments_json: String,
+        assistant_content: AiMessageContent,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            ProposeAiApproval {
+                operation_id,
+                approval_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation,
+                tool_name,
+                arguments_json,
+                assistant_content,
+                now
+            }
+        )
+    }
+
+    fn set_ai_approval_status(
+        &self,
+        operation_id: OperationId,
+        approval_id: AiApprovalId,
+        status: AiApprovalStatus,
+        dispatch_operation_id: Option<String>,
+        assistant_content: Option<AiMessageContent>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            SetAiApprovalStatus {
+                operation_id,
+                approval_id,
+                status,
+                dispatch_operation_id,
+                assistant_content,
+                now
+            }
+        )
+    }
+
+    fn get_ai_approval(&self, approval_id: AiApprovalId) -> RepositoryFuture<'_, AiToolApproval> {
+        mut_cmd!(self, GetAiApproval { approval_id })
+    }
+
+    fn list_dispatching_ai_approvals(&self) -> RepositoryFuture<'_, Vec<AiToolApproval>> {
+        mut_cmd!(self, ListDispatchingAiApprovals {})
+    }
+
+    fn recover_operation_receipt(
+        &self,
+        operation_id: OperationId,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(self, RecoverOperationReceipt { operation_id })
+    }
+
+    fn upsert_ai_run_state(
+        &self,
+        operation_id: OperationId,
+        state: AiRunState,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            UpsertAiRunState {
+                operation_id,
+                state,
+                now
+            }
+        )
+    }
+
+    fn get_ai_run_state(&self, run_id: AiRunId) -> RepositoryFuture<'_, AiRunState> {
+        mut_cmd!(self, GetAiRunState { run_id })
+    }
+
+    fn get_ai_run_for_assistant(
+        &self,
+        assistant_message_id: AiMessageId,
+    ) -> RepositoryFuture<'_, AiRunState> {
+        mut_cmd!(
+            self,
+            GetAiRunForAssistant {
+                assistant_message_id
+            }
+        )
+    }
+
+    fn ensure_ai_response_current(&self, run_id: AiRunId) -> RepositoryFuture<'_, ()> {
+        mut_cmd!(self, EnsureAiResponseCurrent { run_id })
+    }
+
+    fn reserve_daily_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: ReserveDailyAiResponseRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, PreparedAiResponse> {
+        mut_cmd!(
+            self,
+            ReserveDailyAiResponse {
+                operation_id,
+                request,
+                now
+            }
+        )
+    }
+
+    fn rewrite_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: RewriteAiResponseRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, PreparedAiResponse> {
+        mut_cmd!(
+            self,
+            RewriteAiResponse {
+                operation_id,
+                request,
+                now
+            }
+        )
+    }
+
+    fn cancel_ai_response(
+        &self,
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        content: AiMessageContent,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            CancelAiResponse {
+                operation_id,
+                assistant_message_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation,
+                content,
+                now
+            }
+        )
+    }
+
+    fn finish_ai_response(
+        &self,
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        message_status: AiMessageStatus,
+        content: AiMessageContent,
+        run_phase: junban_domain::AiRunPhase,
+        dispatch_operation_id: Option<String>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            FinishAiResponse {
+                operation_id,
+                assistant_message_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation,
+                message_status,
+                content,
+                run_phase,
+                dispatch_operation_id,
+                now
+            }
+        )
+    }
+
+    fn list_ai_secret_metadata(&self) -> RepositoryFuture<'_, Vec<AiSecretMetadata>> {
+        mut_cmd!(self, ListAiSecretMetadata {})
+    }
+
+    fn resolve_ai_secret(
+        &self,
+        credential_id: AiCredentialId,
+    ) -> RepositoryFuture<'_, AiSecretBytes> {
+        mut_cmd!(self, ResolveAiSecret { credential_id })
+    }
+
+    fn bind_ai_credential(
+        &self,
+        operation_id: OperationId,
+        target: AiCredentialBindingTarget,
+        kind: AiSecretKind,
+        secret: Option<AiSecretBytes>,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, AiCredentialBindResult> {
+        mut_cmd!(
+            self,
+            BindAiCredential {
+                operation_id,
+                target,
+                kind,
+                secret,
+                now
+            }
+        )
+    }
+
+    fn clear_ai_credential_binding(
+        &self,
+        operation_id: OperationId,
+        target: AiCredentialBindingTarget,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        mut_cmd!(
+            self,
+            ClearAiCredentialBinding {
+                operation_id,
+                target,
+                now
+            }
+        )
+    }
+
+    fn release_cached_memory(&self) -> RepositoryFuture<'_, ()> {
+        self.request(|reply| Command::ReleaseCachedMemory { reply })
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1956,6 +2496,30 @@ enum Command {
         reply: oneshot::Sender<Result<TaskListPage, RepositoryError>>,
     },
     ListCatalog(oneshot::Sender<Result<CatalogSnapshot, RepositoryError>>),
+    ListProjectsBounded {
+        limit: u32,
+        reply: oneshot::Sender<Result<ProjectListPage, RepositoryError>>,
+    },
+    ListTagsBounded {
+        limit: u32,
+        reply: oneshot::Sender<Result<TagListPage, RepositoryError>>,
+    },
+    GetProject {
+        project_id: ProjectId,
+        reply: oneshot::Sender<Result<Project, RepositoryError>>,
+    },
+    GetProjectsByIds {
+        project_ids: Vec<ProjectId>,
+        reply: oneshot::Sender<Result<ProjectListPage, RepositoryError>>,
+    },
+    GetProjectByName {
+        name: EntityName,
+        reply: oneshot::Sender<Result<Project, RepositoryError>>,
+    },
+    ResolveTagsByNames {
+        names: Vec<TagName>,
+        reply: oneshot::Sender<Result<Vec<Tag>, RepositoryError>>,
+    },
     CreateProject {
         operation_id: OperationId,
         project_id: ProjectId,
@@ -2316,6 +2880,215 @@ enum Command {
         candidate: StagedFile,
         reply: oneshot::Sender<Result<(), RepositoryError>>,
     },
+    CreateAiSession {
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        title: String,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    RenameAiSession {
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        title: String,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteAiSession {
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ClearAiSession {
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    GetAiSession {
+        session_id: AiSessionId,
+        reply: oneshot::Sender<Result<AiSession, RepositoryError>>,
+    },
+    ListAiSessions {
+        cursor: Option<AiSessionCursor>,
+        limit: u32,
+        reply: oneshot::Sender<Result<AiSessionListPage, RepositoryError>>,
+    },
+    UpsertAiMessage {
+        operation_id: OperationId,
+        message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        role: AiMessageRole,
+        status: AiMessageStatus,
+        content: AiMessageContent,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    GetAiMessage {
+        message_id: AiMessageId,
+        reply: oneshot::Sender<Result<AiMessage, RepositoryError>>,
+    },
+    ListAiMessages {
+        session_id: AiSessionId,
+        after_sequence: Option<u32>,
+        limit: u32,
+        reply: oneshot::Sender<Result<Vec<AiMessage>, RepositoryError>>,
+    },
+    CreateAiMemory {
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        content: String,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    UpdateAiMemory {
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        content: String,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    DeleteAiMemory {
+        operation_id: OperationId,
+        memory_id: AiMemoryId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    LinkAiSessionMemory {
+        operation_id: OperationId,
+        session_id: AiSessionId,
+        memory_id: AiMemoryId,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    GetAiMemory {
+        memory_id: AiMemoryId,
+        reply: oneshot::Sender<Result<AiMemory, RepositoryError>>,
+    },
+    ListAiMemories {
+        cursor: Option<AiMemoryCursor>,
+        limit: u32,
+        reply: oneshot::Sender<Result<AiMemoryListPage, RepositoryError>>,
+    },
+    SelectAiMemoriesForContext {
+        session_id: Option<AiSessionId>,
+        limit: u32,
+        reply: oneshot::Sender<Result<Vec<AiMemory>, RepositoryError>>,
+    },
+    ProposeAiApproval {
+        operation_id: OperationId,
+        approval_id: AiApprovalId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        tool_name: String,
+        arguments_json: String,
+        assistant_content: AiMessageContent,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    SetAiApprovalStatus {
+        operation_id: OperationId,
+        approval_id: AiApprovalId,
+        status: AiApprovalStatus,
+        dispatch_operation_id: Option<String>,
+        assistant_content: Option<AiMessageContent>,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    GetAiApproval {
+        approval_id: AiApprovalId,
+        reply: oneshot::Sender<Result<AiToolApproval, RepositoryError>>,
+    },
+    ListDispatchingAiApprovals {
+        reply: oneshot::Sender<Result<Vec<AiToolApproval>, RepositoryError>>,
+    },
+    RecoverOperationReceipt {
+        operation_id: OperationId,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    UpsertAiRunState {
+        operation_id: OperationId,
+        state: AiRunState,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    GetAiRunState {
+        run_id: AiRunId,
+        reply: oneshot::Sender<Result<AiRunState, RepositoryError>>,
+    },
+    GetAiRunForAssistant {
+        assistant_message_id: AiMessageId,
+        reply: oneshot::Sender<Result<AiRunState, RepositoryError>>,
+    },
+    EnsureAiResponseCurrent {
+        run_id: AiRunId,
+        reply: oneshot::Sender<Result<(), RepositoryError>>,
+    },
+    ReserveDailyAiResponse {
+        operation_id: OperationId,
+        request: ReserveDailyAiResponseRequest,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<PreparedAiResponse, RepositoryError>>,
+    },
+    RewriteAiResponse {
+        operation_id: OperationId,
+        request: RewriteAiResponseRequest,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<PreparedAiResponse, RepositoryError>>,
+    },
+    CancelAiResponse {
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        content: AiMessageContent,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    FinishAiResponse {
+        operation_id: OperationId,
+        assistant_message_id: AiMessageId,
+        session_id: AiSessionId,
+        turn_id: AiTurnId,
+        run_id: AiRunId,
+        generation: u64,
+        message_status: AiMessageStatus,
+        content: AiMessageContent,
+        run_phase: junban_domain::AiRunPhase,
+        dispatch_operation_id: Option<String>,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ListAiSecretMetadata {
+        reply: oneshot::Sender<Result<Vec<AiSecretMetadata>, RepositoryError>>,
+    },
+    ResolveAiSecret {
+        credential_id: AiCredentialId,
+        reply: oneshot::Sender<Result<AiSecretBytes, RepositoryError>>,
+    },
+    BindAiCredential {
+        operation_id: OperationId,
+        target: AiCredentialBindingTarget,
+        kind: AiSecretKind,
+        secret: Option<AiSecretBytes>,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<AiCredentialBindResult, RepositoryError>>,
+    },
+    ClearAiCredentialBinding {
+        operation_id: OperationId,
+        target: AiCredentialBindingTarget,
+        now: Timestamp,
+        reply: oneshot::Sender<Result<CommittedMutation, RepositoryError>>,
+    },
+    ReleaseCachedMemory {
+        reply: oneshot::Sender<Result<(), RepositoryError>>,
+    },
     #[cfg(test)]
     Diagnostics(oneshot::Sender<Result<Diagnostics, RepositoryError>>),
     #[cfg(test)]
@@ -2493,6 +3266,24 @@ fn run_worker(
             }
             Command::ListCatalog(reply) => {
                 let _ = reply.send(catalog_ops::list_catalog(connection));
+            }
+            Command::ListProjectsBounded { limit, reply } => {
+                let _ = reply.send(catalog_ops::list_projects_bounded(connection, limit));
+            }
+            Command::ListTagsBounded { limit, reply } => {
+                let _ = reply.send(catalog_ops::list_tags_bounded(connection, limit));
+            }
+            Command::GetProject { project_id, reply } => {
+                let _ = reply.send(catalog_ops::get_project(connection, project_id));
+            }
+            Command::GetProjectsByIds { project_ids, reply } => {
+                let _ = reply.send(catalog_ops::get_projects_by_ids(connection, &project_ids));
+            }
+            Command::GetProjectByName { name, reply } => {
+                let _ = reply.send(catalog_ops::get_project_by_name(connection, &name));
+            }
+            Command::ResolveTagsByNames { names, reply } => {
+                let _ = reply.send(catalog_ops::resolve_tags_by_names(connection, &names));
             }
             Command::CreateProject {
                 operation_id,
@@ -3197,6 +3988,424 @@ fn run_worker(
                     candidate,
                 ));
             }
+            Command::CreateAiSession {
+                operation_id,
+                session_id,
+                title,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::create_ai_session(
+                    connection,
+                    operation_id,
+                    session_id,
+                    title,
+                    now,
+                ));
+            }
+            Command::RenameAiSession {
+                operation_id,
+                session_id,
+                title,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::rename_ai_session(
+                    connection,
+                    operation_id,
+                    session_id,
+                    title,
+                    now,
+                ));
+            }
+            Command::DeleteAiSession {
+                operation_id,
+                session_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::delete_ai_session(
+                    connection,
+                    operation_id,
+                    session_id,
+                    now,
+                ));
+            }
+            Command::ClearAiSession {
+                operation_id,
+                session_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::clear_ai_session(
+                    connection,
+                    operation_id,
+                    session_id,
+                    now,
+                ));
+            }
+            Command::GetAiSession { session_id, reply } => {
+                let _ = reply.send(ai_ops::get_ai_session(connection, session_id));
+            }
+            Command::ListAiSessions {
+                cursor,
+                limit,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::list_ai_sessions(connection, cursor, limit));
+            }
+            Command::UpsertAiMessage {
+                operation_id,
+                message_id,
+                session_id,
+                turn_id,
+                role,
+                status,
+                content,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::upsert_ai_message(
+                    connection,
+                    operation_id,
+                    message_id,
+                    session_id,
+                    turn_id,
+                    role,
+                    status,
+                    content,
+                    now,
+                ));
+            }
+            Command::GetAiMessage { message_id, reply } => {
+                let _ = reply.send(ai_ops::get_ai_message(connection, message_id));
+            }
+            Command::ListAiMessages {
+                session_id,
+                after_sequence,
+                limit,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::list_ai_messages(
+                    connection,
+                    session_id,
+                    after_sequence,
+                    limit,
+                ));
+            }
+            Command::CreateAiMemory {
+                operation_id,
+                memory_id,
+                content,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::create_ai_memory(
+                    connection,
+                    operation_id,
+                    memory_id,
+                    content,
+                    now,
+                ));
+            }
+            Command::UpdateAiMemory {
+                operation_id,
+                memory_id,
+                content,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::update_ai_memory(
+                    connection,
+                    operation_id,
+                    memory_id,
+                    content,
+                    now,
+                ));
+            }
+            Command::DeleteAiMemory {
+                operation_id,
+                memory_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::delete_ai_memory(
+                    connection,
+                    operation_id,
+                    memory_id,
+                    now,
+                ));
+            }
+            Command::LinkAiSessionMemory {
+                operation_id,
+                session_id,
+                memory_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::link_ai_session_memory(
+                    connection,
+                    operation_id,
+                    session_id,
+                    memory_id,
+                    now,
+                ));
+            }
+            Command::GetAiMemory { memory_id, reply } => {
+                let _ = reply.send(ai_ops::get_ai_memory(connection, memory_id));
+            }
+            Command::ListAiMemories {
+                cursor,
+                limit,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::list_ai_memories(connection, cursor, limit));
+            }
+            Command::SelectAiMemoriesForContext {
+                session_id,
+                limit,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::select_ai_memories_for_context(
+                    connection, session_id, limit,
+                ));
+            }
+            Command::ProposeAiApproval {
+                operation_id,
+                approval_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation,
+                tool_name,
+                arguments_json,
+                assistant_content,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::propose_ai_approval_with_content(
+                    connection,
+                    operation_id,
+                    approval_id,
+                    session_id,
+                    turn_id,
+                    run_id,
+                    generation,
+                    tool_name,
+                    arguments_json,
+                    assistant_content,
+                    now,
+                ));
+            }
+            Command::SetAiApprovalStatus {
+                operation_id,
+                approval_id,
+                status,
+                dispatch_operation_id,
+                assistant_content,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::set_ai_approval_status_with_content(
+                    connection,
+                    operation_id,
+                    approval_id,
+                    status,
+                    dispatch_operation_id,
+                    assistant_content,
+                    now,
+                ));
+            }
+            Command::GetAiApproval { approval_id, reply } => {
+                let _ = reply.send(ai_ops::get_ai_approval(connection, approval_id));
+            }
+            Command::ListDispatchingAiApprovals { reply } => {
+                let _ = reply.send(ai_ops::list_dispatching_ai_approvals(connection));
+            }
+            Command::RecoverOperationReceipt {
+                operation_id,
+                reply,
+            } => {
+                let _ = reply.send(tx::recover_operation_receipt(connection, operation_id));
+            }
+            Command::UpsertAiRunState {
+                operation_id,
+                state,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::upsert_ai_run_state(
+                    connection,
+                    operation_id,
+                    state,
+                    now,
+                ));
+            }
+            Command::GetAiRunState { run_id, reply } => {
+                let _ = reply.send(ai_ops::get_ai_run_state(connection, run_id));
+            }
+            Command::GetAiRunForAssistant {
+                assistant_message_id,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::get_ai_run_for_assistant(
+                    connection,
+                    assistant_message_id,
+                ));
+            }
+            Command::EnsureAiResponseCurrent { run_id, reply } => {
+                let _ = reply.send(ai_ops::ensure_ai_response_current(connection, run_id));
+            }
+            Command::ReserveDailyAiResponse {
+                operation_id,
+                request,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::reserve_daily_ai_response(
+                    connection,
+                    operation_id,
+                    request,
+                    now,
+                ));
+            }
+            Command::RewriteAiResponse {
+                operation_id,
+                request,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::rewrite_ai_response(
+                    connection,
+                    operation_id,
+                    request,
+                    now,
+                ));
+            }
+            Command::CancelAiResponse {
+                operation_id,
+                assistant_message_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation,
+                content,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::cancel_ai_response(
+                    connection,
+                    operation_id,
+                    assistant_message_id,
+                    session_id,
+                    turn_id,
+                    run_id,
+                    generation,
+                    content,
+                    now,
+                ));
+            }
+            Command::FinishAiResponse {
+                operation_id,
+                assistant_message_id,
+                session_id,
+                turn_id,
+                run_id,
+                generation,
+                message_status,
+                content,
+                run_phase,
+                dispatch_operation_id,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(ai_ops::finish_ai_response(
+                    connection,
+                    operation_id,
+                    assistant_message_id,
+                    session_id,
+                    turn_id,
+                    run_id,
+                    generation,
+                    message_status,
+                    content,
+                    run_phase,
+                    dispatch_operation_id,
+                    now,
+                ));
+            }
+            Command::ListAiSecretMetadata { reply } => {
+                let result = AiSecretStore::load(&profile_dir)
+                    .map(|store| store.list_metadata())
+                    .map_err(|error| {
+                        RepositoryError::Storage(format!("ai-secrets load failed: {error}"))
+                    });
+                let _ = reply.send(result);
+            }
+            Command::ResolveAiSecret {
+                credential_id,
+                reply,
+            } => {
+                let result = AiSecretStore::load(&profile_dir)
+                    .map_err(|error| {
+                        RepositoryError::Storage(format!("ai-secrets load failed: {error}"))
+                    })
+                    .and_then(|store| {
+                        store
+                            .get_secret(&credential_id)
+                            .map_err(|error| {
+                                RepositoryError::Storage(format!(
+                                    "ai-secrets resolve failed: {error}"
+                                ))
+                            })?
+                            .ok_or(RepositoryError::NotFound)
+                    });
+                let _ = reply.send(result);
+            }
+            Command::BindAiCredential {
+                operation_id,
+                target,
+                kind,
+                secret,
+                now,
+                reply,
+            } => {
+                let result = settings_ops::bind_ai_credential(
+                    connection,
+                    &profile_dir,
+                    operation_id,
+                    target,
+                    kind,
+                    secret,
+                    now,
+                )
+                .map(|(mutation, credential_id)| AiCredentialBindResult {
+                    mutation,
+                    credential_id,
+                });
+                let _ = reply.send(result);
+            }
+            Command::ClearAiCredentialBinding {
+                operation_id,
+                target,
+                now,
+                reply,
+            } => {
+                let _ = reply.send(settings_ops::clear_ai_credential_binding(
+                    connection,
+                    &profile_dir,
+                    operation_id,
+                    target,
+                    now,
+                ));
+            }
+            Command::ReleaseCachedMemory { reply } => {
+                // sqlite3_db_release_memory via PRAGMA, then Linux DONTNEED on the
+                // live main DB + WAL page cache. No durable writes, checkpoint, or
+                // WAL truncate; missing WAL is normal.
+                let result = release_cached_connection_memory(connection);
+                let _ = reply.send(result);
+            }
             #[cfg(test)]
             Command::Diagnostics(reply) => {
                 let _ = reply.send(read_diagnostics(connection));
@@ -3462,7 +4671,50 @@ fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
         )
     })?;
     migration::migrate(&mut connection, profile_dir)?;
+    // Recover ephemeral AI authority before final quota reconciliation on every normal
+    // successful open. One timestamp makes the whole recovery transaction canonical;
+    // neither recovery step emits a global event or operation receipt.
+    let opened_at = Timestamp::now();
+    if let Err(error) = ai_ops::validate_ai_response_authority(&connection) {
+        return Err(ai_open_error("response authority validation", error));
+    }
+    if let Err(error) = ai_ops::expire_ai_runtime_state(&connection, opened_at) {
+        return Err(ai_open_error("runtime expiration", error));
+    }
+    if let Err(error) = ai_ops::recompute_ai_quotas(&connection) {
+        return Err(ai_open_error("quota recompute", error));
+    }
+    // Secret reconciliation is best-effort/diagnostic-only when the private file is dirty.
+    let _ = reconcile_ai_secrets_on_open(&connection, profile_dir);
     Ok(connection)
+}
+
+fn ai_open_error(context: &str, error: RepositoryError) -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error {
+            code: rusqlite::ErrorCode::Unknown,
+            extended_code: 1,
+        },
+        Some(format!("AI {context} failed: {error}")),
+    )
+}
+
+fn reconcile_ai_secrets_on_open(
+    connection: &Connection,
+    profile_dir: &Path,
+) -> Result<(), RepositoryError> {
+    let settings = settings_ops::get_settings(connection)?;
+    let referenced = junban_domain::referenced_ai_credential_ids(&settings.ai, &settings.voice);
+    match AiSecretStore::load(profile_dir) {
+        Ok(store) => {
+            // Failure to clean unreferenced secrets is diagnostic-only: settings remain
+            // the sole binding authority and cannot address orphan file entries.
+            let _ = store.reconcile_unreferenced(&referenced);
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(RepositoryError::Storage(error.to_string())),
+    }
 }
 
 #[cfg(test)]
@@ -3531,5 +4783,9 @@ fn table_count(connection: &Connection, table: &str) -> Result<i64, RepositoryEr
         .map_err(|e| RepositoryError::Storage(e.to_string()))
 }
 
+#[cfg(test)]
+mod ai_wave1_tests;
+#[cfg(test)]
+mod ai_wave3a_tests;
 #[cfg(test)]
 mod tests;

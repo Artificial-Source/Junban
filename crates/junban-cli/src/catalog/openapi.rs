@@ -46,7 +46,10 @@ pub fn parse_openapi() -> Result<Value, String> {
         .map_err(|error| format!("OpenAPI JSON parse failed: {error}"))
 }
 
-pub fn iter_operations(doc: &Value) -> Result<Vec<OpenApiOperation>, String> {
+pub fn iter_operations(
+    doc: &Value,
+    excluded_operation_ids: &[&str],
+) -> Result<Vec<OpenApiOperation>, String> {
     let paths = doc
         .get("paths")
         .and_then(Value::as_object)
@@ -68,6 +71,9 @@ pub fn iter_operations(doc: &Value) -> Result<Vec<OpenApiOperation>, String> {
                 .and_then(Value::as_str)
                 .ok_or_else(|| format!("OpenAPI operation {method} {path} missing operationId"))?
                 .to_owned();
+            if excluded_operation_ids.contains(&operation_id.as_str()) {
+                continue;
+            }
             let summary = op_obj
                 .get("summary")
                 .and_then(Value::as_str)

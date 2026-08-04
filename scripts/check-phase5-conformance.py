@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""Phase 5 cross-surface conformance harness (junban-phase5-conformance-v1).
+"""Cross-surface conformance harness for the frozen Phase 5 corpus.
 
-Runs the frozen 17-revision corpus against four fresh profiles/surfaces:
+Default mode preserves the immutable Phase 5 protocol identity
+(`junban-phase5-conformance-v1`, schema v5 evidence path). Pass `--phase6` to
+rerun the same 17-revision corpus against current head binaries under the
+Phase 6 schema-v6 authority and write Phase 6-labeled evidence.
+
+Surfaces:
 
 1. direct authenticated HTTP to an optimized junban-server
 2. junban --json --server ... --credential-file ... tool call (remote owner)
@@ -39,13 +44,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-# ── Protocol constants (frozen) ──────────────────────────────────────────────
+# ── Protocol constants ───────────────────────────────────────────────────────
+# Phase 5 defaults remain the frozen historical identity. Phase 6 mode overrides
+# protocol name, expected schema, work-root label, and default evidence path only.
 
-PROTOCOL_NAME = "junban-phase5-conformance-v1"
+PHASE5_PROTOCOL_NAME = "junban-phase5-conformance-v1"
+PHASE6_PROTOCOL_NAME = "junban-phase6-conformance-v1"
 PROTOCOL_VERSION = 1
 EXPECTED_FINAL_REVISION = 17
 EXPECTED_EVENT_COUNT = 17
-SCHEMA_VERSION = 5
+PHASE5_SCHEMA_VERSION = 5
+PHASE6_SCHEMA_VERSION = 6
+
+# Active run authority. Defaults preserve Phase 5; main() sets Phase 6 explicitly.
+PROTOCOL_NAME = PHASE5_PROTOCOL_NAME
+SCHEMA_VERSION = PHASE5_SCHEMA_VERSION
+EVIDENCE_PHASE = "phase5"
 
 BACKUP_MAGIC = b"JNBK"
 BACKUP_VERSION = 1
@@ -432,8 +446,10 @@ def create_automation_credential(
     server: OwnedServer,
     token_path: Path,
     *,
-    label: str = "phase5-conformance",
+    label: str | None = None,
 ) -> str:
+    if label is None:
+        label = f"{EVIDENCE_PHASE}-conformance"
     credential_id = uuid.uuid4()
     # uuid4 is fine for harness setup; server accepts any UUID.
     # Prefer UUIDv7-like ordering not required for auth.
@@ -1440,7 +1456,10 @@ class McpRunner(SurfaceRunner):
                 "params": {
                     "protocolVersion": "2025-11-25",
                     "capabilities": {},
-                    "clientInfo": {"name": "phase5-conformance", "version": "0.1.0"},
+                    "clientInfo": {
+                        "name": f"{EVIDENCE_PHASE}-conformance",
+                        "version": "0.1.0",
+                    },
                 },
             }
         )
@@ -2580,15 +2599,54 @@ def run_self_check() -> int:
         except HarnessError:
             check("backup bad magic", True)
 
+    # Phase authority binding must not silently reinterpret Phase 5 evidence.
+    apply_phase_authority(phase6=False)
+    check("phase5 protocol default", PROTOCOL_NAME == PHASE5_PROTOCOL_NAME)
+    check("phase5 schema default", SCHEMA_VERSION == PHASE5_SCHEMA_VERSION)
+    apply_phase_authority(phase6=True)
+    check("phase6 protocol override", PROTOCOL_NAME == PHASE6_PROTOCOL_NAME)
+    check("phase6 schema override", SCHEMA_VERSION == PHASE6_SCHEMA_VERSION)
+    apply_phase_authority(phase6=False)
+    check("phase5 authority restore", SCHEMA_VERSION == PHASE5_SCHEMA_VERSION)
+    repo = default_repo_root()
+    check(
+        "phase evidence paths distinct",
+        default_evidence_path(repo, phase6=False)
+        != default_evidence_path(repo, phase6=True),
+    )
+
     return 1 if failures else 0
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
+def default_evidence_path(repo: Path, *, phase6: bool) -> Path:
+    name = (
+        "phase-6-conformance.json" if phase6 else "phase-5-conformance.json"
+    )
+    return repo / "goals" / "rust-rewrite" / "evidence" / name
+
+
+def apply_phase_authority(*, phase6: bool) -> None:
+    """Bind module-level protocol authority for one harness invocation."""
+    global PROTOCOL_NAME, SCHEMA_VERSION, EVIDENCE_PHASE
+    if phase6:
+        PROTOCOL_NAME = PHASE6_PROTOCOL_NAME
+        SCHEMA_VERSION = PHASE6_SCHEMA_VERSION
+        EVIDENCE_PHASE = "phase6"
+    else:
+        PROTOCOL_NAME = PHASE5_PROTOCOL_NAME
+        SCHEMA_VERSION = PHASE5_SCHEMA_VERSION
+        EVIDENCE_PHASE = "phase5"
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Junban Phase 5 cross-surface conformance harness",
+        description=(
+            "Junban cross-surface conformance harness "
+            "(Phase 5 corpus; use --phase6 for schema-v6 head rerun)"
+        ),
     )
     parser.add_argument(
         "--repo",
@@ -2611,10 +2669,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Run cargo build --release for server/cli/mcp before the run",
     )
     parser.add_argument(
+        "--phase6",
+        action="store_true",
+        help=(
+            "Phase 6 schema-v6 head rerun of the frozen Phase 5 corpus. "
+            "Expects schema version 6, labels evidence as "
+            f"{PHASE6_PROTOCOL_NAME}, and defaults --output to "
+            "goals/rust-rewrite/evidence/phase-6-conformance.json. "
+            "Does not rewrite immutable Phase 5 evidence."
+        ),
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=None,
-        help="Write deterministic detailed JSON evidence (no secrets)",
+        help=(
+            "Write deterministic detailed JSON evidence (no secrets). "
+            "Defaults to the phase-labeled evidence path only when "
+            "--authoritative is set."
+        ),
     )
     parser.add_argument(
         "--surface",
@@ -2646,6 +2719,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_check:
         return run_self_check()
 
+    apply_phase_authority(phase6=bool(args.phase6))
+
     repo = (args.repo or default_repo_root()).resolve()
     if not (repo / "Cargo.toml").is_file():
         eprint(f"error: {repo} does not look like the Junban repo")
@@ -2654,6 +2729,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.authoritative and git_dirty(repo):
         eprint("error: authoritative mode requires a clean git working tree")
         return 2
+
+    # Refuse to silently overwrite immutable Phase 5 evidence from a Phase 6 run
+    # (or the reverse). Callers must pass an explicit matching --output path.
+    output_path = args.output
+    if output_path is None and args.authoritative:
+        output_path = default_evidence_path(repo, phase6=bool(args.phase6))
+    if output_path is not None:
+        output_path = output_path.resolve()
+        phase5_path = default_evidence_path(repo, phase6=False).resolve()
+        phase6_path = default_evidence_path(repo, phase6=True).resolve()
+        if args.phase6 and output_path == phase5_path:
+            eprint(
+                "error: --phase6 must not write immutable Phase 5 evidence; "
+                f"use {phase6_path} or another non-Phase-5 path"
+            )
+            return 2
+        if not args.phase6 and output_path == phase6_path:
+            eprint(
+                "error: Phase 5 mode must not write Phase 6 evidence; "
+                "pass --phase6 for schema-v6 head reruns"
+            )
+            return 2
 
     try:
         binaries = resolve_binaries(
@@ -2670,7 +2767,7 @@ def main(argv: list[str] | None = None) -> int:
 
     surfaces = args.surface or list(SURFACES)
     commit = git_head(repo)
-    work_root = Path(tempfile.mkdtemp(prefix="junban-phase5-conformance-"))
+    work_root = Path(tempfile.mkdtemp(prefix=f"junban-{EVIDENCE_PHASE}-conformance-"))
     os.chmod(work_root, 0o700)
     secrets_acc: set[str] = set()
     results: list[SurfaceResult] = []
@@ -2680,6 +2777,8 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "protocol": PROTOCOL_NAME,
                 "version": PROTOCOL_VERSION,
+                "schema_version": SCHEMA_VERSION,
+                "evidence_phase": EVIDENCE_PHASE,
                 "commit": commit,
                 "surfaces": surfaces,
                 "work_root": str(work_root) if args.keep_work else "<ephemeral>",
@@ -2732,6 +2831,9 @@ def main(argv: list[str] | None = None) -> int:
     summary = {
         "protocol": PROTOCOL_NAME,
         "protocol_version": PROTOCOL_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "evidence_phase": EVIDENCE_PHASE,
+        "corpus": "phase5-17-revision-v1",
         "commit": commit,
         "authoritative": bool(args.authoritative),
         "binaries": {
@@ -2768,7 +2870,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         eprint("CONFORMANCE PASSED")
 
-    if args.output:
+    if output_path is not None:
         # Detailed evidence without secrets: include normalized bundles.
         detailed = {
             **summary,
@@ -2776,9 +2878,9 @@ def main(argv: list[str] | None = None) -> int:
         }
         out_text = canonical_json(detailed) + "\n"
         assert_no_secrets(out_text, secrets_acc, where="--output evidence")
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(out_text, encoding="utf-8")
-        eprint(f"wrote {args.output}")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(out_text, encoding="utf-8")
+        eprint(f"wrote {output_path}")
 
     return 0 if overall else 1
 

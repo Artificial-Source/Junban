@@ -1,0 +1,1139 @@
+{
+  "accepted": true,
+  "authoritative": true,
+  "cleanup_proof": {
+    "compiled_shim_retained": false,
+    "etc_hosts_modified": false,
+    "fixture_listener_released": true,
+    "fixture_process_gone": true,
+    "locks_reacquired": true,
+    "private_keys_retained": false,
+    "profile_directories_removed": true,
+    "server_units_stopped": true,
+    "system_trust_modified": false,
+    "temporary_root_removed": true
+  },
+  "completed_at_utc": "2026-08-04T03:18:55Z",
+  "fixture": {
+    "active_connections": 0,
+    "authenticated_requests": 129,
+    "errors": [],
+    "fragment_max_bytes": 11,
+    "fragment_writes": 6453,
+    "max_active_connections": 1,
+    "quiesced": [
+      "cancel:p0",
+      "cancel:p1",
+      "cancel:p2",
+      "timeout:p0",
+      "timeout:p1",
+      "timeout:p2"
+    ],
+    "requests": {
+      "/v1/audio/speech": 3,
+      "/v1/audio/transcriptions": 3,
+      "/v1/models": 3,
+      "/v1/responses": 120
+    },
+    "scenario_rounds": {
+      "approve:p0": 1,
+      "approve:p1": 1,
+      "approve:p2": 1,
+      "cancel:p0": 1,
+      "cancel:p1": 1,
+      "cancel:p2": 1,
+      "midstream:p0": 1,
+      "midstream:p1": 1,
+      "midstream:p2": 1,
+      "read:p0": 2,
+      "read:p1": 2,
+      "read:p2": 2,
+      "reject:p0": 2,
+      "reject:p1": 2,
+      "reject:p2": 2,
+      "retry:p0": 2,
+      "retry:p1": 2,
+      "retry:p2": 2,
+      "short:p0-00": 1,
+      "short:p0-01": 1,
+      "short:p0-02": 1,
+      "short:p0-03": 1,
+      "short:p0-04": 1,
+      "short:p0-05": 1,
+      "short:p0-06": 1,
+      "short:p0-07": 1,
+      "short:p0-08": 1,
+      "short:p0-09": 1,
+      "short:p0-10": 1,
+      "short:p0-11": 1,
+      "short:p0-12": 1,
+      "short:p0-13": 1,
+      "short:p0-14": 1,
+      "short:p0-15": 1,
+      "short:p0-16": 1,
+      "short:p0-17": 1,
+      "short:p0-18": 1,
+      "short:p0-19": 1,
+      "short:p0-20": 1,
+      "short:p0-21": 1,
+      "short:p0-22": 1,
+      "short:p0-23": 1,
+      "short:p0-24": 1,
+      "short:p0-25": 1,
+      "short:p0-26": 1,
+      "short:p0-27": 1,
+      "short:p0-28": 1,
+      "short:p0-29": 1,
+      "short:p1-00": 1,
+      "short:p1-01": 1,
+      "short:p1-02": 1,
+      "short:p1-03": 1,
+      "short:p1-04": 1,
+      "short:p1-05": 1,
+      "short:p1-06": 1,
+      "short:p1-07": 1,
+      "short:p1-08": 1,
+      "short:p1-09": 1,
+      "short:p1-10": 1,
+      "short:p1-11": 1,
+      "short:p1-12": 1,
+      "short:p1-13": 1,
+      "short:p1-14": 1,
+      "short:p1-15": 1,
+      "short:p1-16": 1,
+      "short:p1-17": 1,
+      "short:p1-18": 1,
+      "short:p1-19": 1,
+      "short:p1-20": 1,
+      "short:p1-21": 1,
+      "short:p1-22": 1,
+      "short:p1-23": 1,
+      "short:p1-24": 1,
+      "short:p1-25": 1,
+      "short:p1-26": 1,
+      "short:p1-27": 1,
+      "short:p1-28": 1,
+      "short:p1-29": 1,
+      "short:p2-00": 1,
+      "short:p2-01": 1,
+      "short:p2-02": 1,
+      "short:p2-03": 1,
+      "short:p2-04": 1,
+      "short:p2-05": 1,
+      "short:p2-06": 1,
+      "short:p2-07": 1,
+      "short:p2-08": 1,
+      "short:p2-09": 1,
+      "short:p2-10": 1,
+      "short:p2-11": 1,
+      "short:p2-12": 1,
+      "short:p2-13": 1,
+      "short:p2-14": 1,
+      "short:p2-15": 1,
+      "short:p2-16": 1,
+      "short:p2-17": 1,
+      "short:p2-18": 1,
+      "short:p2-19": 1,
+      "short:p2-20": 1,
+      "short:p2-21": 1,
+      "short:p2-22": 1,
+      "short:p2-23": 1,
+      "short:p2-24": 1,
+      "short:p2-25": 1,
+      "short:p2-26": 1,
+      "short:p2-27": 1,
+      "short:p2-28": 1,
+      "short:p2-29": 1,
+      "timeout:p0": 1,
+      "timeout:p1": 1,
+      "timeout:p2": 1
+    },
+    "stt_audio_sizes": [
+      1048576,
+      1048576,
+      1048576
+    ],
+    "tts_response_sizes": [
+      1048576,
+      1048576,
+      1048576
+    ],
+    "version": 1
+  },
+  "fixture_cleanup": {
+    "active_connections_before_stop": 0,
+    "errors": [],
+    "exit_code": 0,
+    "listener_released": true,
+    "process_gone": true,
+    "unprivileged_tls_port": 52815
+  },
+  "idle_host_confirmed": true,
+  "interception_evidence": {
+    "delegation_self_checks": {
+      "allowlisted_hostname_to_sentinel": true,
+      "missing_or_invalid_port_fails_closed": true,
+      "sentinel_non_https_port_unchanged": true,
+      "unrelated_address_unchanged": true,
+      "unrelated_hostname_unchanged": true
+    },
+    "etc_hosts_sha256_after": "43e2fe95bdc9444cac51c2caf44c2f84461a672fcc4ae962de8c8375901fab68",
+    "etc_hosts_sha256_before": "43e2fe95bdc9444cac51c2caf44c2f84461a672fcc4ae962de8c8375901fab68",
+    "fixed_origin_model_discovery_passed": true,
+    "ld_preload_scope": "measured server plus isolated delegation probes",
+    "pki": {
+      "ca_pem_sha256": "9d0196c19a236ab5f3aefd19bf34c5b38ea8215592b6d60f2f5276ff531e8cee",
+      "etc_hosts_modified": false,
+      "leaf_pem_sha256": "25d33b05e652599518452c021b09dafb6d097ada3e2b85c034b7f7ba9ac0748b",
+      "official_host": "api.openai.com",
+      "openssl": "OpenSSL 3.0.13 30 Jan 2024 (Library: OpenSSL 3.0.13 30 Jan 2024)",
+      "private_keys_retained": false,
+      "san": "DNS:api.openai.com",
+      "system_trust_modified": false
+    },
+    "privileged_bind_required": false,
+    "shim": {
+      "compiled_object_retained": false,
+      "compiler": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "connect_rewrite": "127.66.0.1:443 -> 127.0.0.1:$JUNBAN_PHASE6_FIXTURE_PORT",
+      "fixture_port_environment": "JUNBAN_PHASE6_FIXTURE_PORT",
+      "mapped_hostnames": [
+        "api.openai.com"
+      ],
+      "object_sha256": "34f9629dd311a82e5ddecdf4d46363a2b0c4aec42ad500527167e7d95cee4d3a",
+      "object_size_bytes": 9384,
+      "sentinel_ip": "127.66.0.1",
+      "source": "scripts/phase6-fixture-getaddrinfo.c",
+      "source_sha256": "80be1fba586f821756ed3852653167fae10feaeb03cc67906d48cf6f613d52ba"
+    },
+    "ssl_cert_file_scope": "measured junban-server unit only",
+    "unprivileged_fixture_port": 52815
+  },
+  "metadata": {
+    "cpu_count": 20,
+    "git_commit": "6401108b31e7768048d154c8b14662bb3a2e9bb1",
+    "git_dirty_before_run": false,
+    "kernel": "7.0.0-28-generic",
+    "machine": "x86_64",
+    "rustc_release": "1.93.0",
+    "server": {
+      "path": "target/release/junban-server",
+      "sha256": "a4bc215ce4cc72f02ba88faf27bd871f43a52586700a92606df5758b05cc043e",
+      "size_bytes": 17039864
+    },
+    "web_dir": "dist"
+  },
+  "profiles": [
+    {
+      "cleanup_passed": true,
+      "fresh_profile": true,
+      "journal_secret_scan_passed": true,
+      "maintenance_status_reachable_after_drain": true,
+      "memory_peak": {
+        "operation_peak_bytes": 13312000,
+        "operation_peak_mib": 12.6953,
+        "samples": 6335,
+        "unit_absolute_peak_bytes": 13963264,
+        "unit_absolute_peak_mib": 13.3164
+      },
+      "post_drain": {
+        "current_bytes": 7925760,
+        "current_mib": 7.5586,
+        "growth_bytes": 3239936,
+        "growth_mib": 3.0898,
+        "memory_stat": {
+          "anon_bytes": 5636096,
+          "anon_mib": 5.375,
+          "file_bytes": 397312,
+          "file_mib": 0.3789
+        }
+      },
+      "post_session": {
+        "current_bytes": 11628544,
+        "current_mib": 11.0898,
+        "memory_stat": {
+          "anon_bytes": 7970816,
+          "anon_mib": 7.6016,
+          "file_bytes": 2129920,
+          "file_mib": 2.0312
+        }
+      },
+      "pre_session": {
+        "current_bytes": 4685824,
+        "current_mib": 4.4688,
+        "memory_stat": {
+          "anon_bytes": 2625536,
+          "anon_mib": 2.5039,
+          "file_bytes": 544768,
+          "file_mib": 0.5195
+        }
+      },
+      "process": {
+        "child_processes": 0,
+        "executable": "junban-server",
+        "fixture_outside_cgroup": true,
+        "fixture_port_environment_exact": true,
+        "ld_preload_exact": true,
+        "pid": 2652892,
+        "process_count": 1,
+        "resident_node_processes": 0,
+        "ssl_cert_file_exact": true
+      },
+      "profile": 0,
+      "profile_artifacts_removed": true,
+      "profile_lock_reacquired": true,
+      "runtime_cleanup_before_shutdown": true,
+      "runtime_metadata_removed": true,
+      "server_stopped": true,
+      "workload": {
+        "cancellation_ms": [
+          1.798082
+        ],
+        "completed_short_ms": [
+          5.921797,
+          9.908503,
+          4.116106,
+          4.008685,
+          3.82895,
+          7.030325,
+          5.281976,
+          4.680057,
+          4.217882,
+          4.194248,
+          8.19207,
+          4.154211,
+          4.283048,
+          4.236344,
+          4.145364,
+          7.93631,
+          4.257377,
+          4.01705,
+          4.029581,
+          7.912147,
+          4.118401,
+          4.75167,
+          4.749894,
+          4.409326,
+          8.727935,
+          4.781311,
+          4.877866,
+          4.402925,
+          7.437366,
+          5.476657
+        ],
+        "duplicate_effects_absent": true,
+        "first_event_ms": [
+          3.534645,
+          7.818492,
+          2.114978,
+          1.964462,
+          1.83457,
+          2.065916,
+          3.071435,
+          2.436712,
+          1.999666,
+          2.02526,
+          6.049314,
+          2.004853,
+          2.119896,
+          2.071896,
+          2.077892,
+          5.844929,
+          2.0606,
+          2.014229,
+          2.02178,
+          4.859147,
+          1.984991,
+          2.517811,
+          2.50999,
+          2.197617,
+          6.408636,
+          2.510652,
+          2.55969,
+          2.286612,
+          2.331809,
+          3.31129
+        ],
+        "operations": {
+          "approved_mutation": {
+            "effects": 1,
+            "exact_replay": true,
+            "passed": true,
+            "provider_rounds": 1
+          },
+          "cancellation": {
+            "latency_ms": 1.7981,
+            "passed": true,
+            "provider_quiesced": true,
+            "terminal": "run_cancelled"
+          },
+          "midstream_failure": {
+            "attempts": 1,
+            "passed": true
+          },
+          "read_tool": {
+            "completed_ms": 7.8638,
+            "first_event_ms": 2.0468,
+            "passed": true,
+            "provider_rounds": 2,
+            "tool_results": 1
+          },
+          "rejected_mutation": {
+            "effects": 0,
+            "passed": true,
+            "provider_rounds": 2
+          },
+          "retry_before_body": {
+            "attempts": 2,
+            "passed": true
+          },
+          "timeout": {
+            "elapsed_ms": 60003.9129,
+            "passed": true,
+            "terminal": "run_failed"
+          }
+        },
+        "speech": {
+          "stt_input_bytes": 1048576,
+          "stt_latency_ms": 6.4133,
+          "stt_transcript_exact": true,
+          "tts_audio_exact": true,
+          "tts_latency_ms": 3.9741,
+          "tts_output_bytes": 1048576
+        },
+        "stale_effects_absent": true,
+        "stt_ms": [
+          6.413275
+        ],
+        "tts_ms": [
+          3.97405
+        ]
+      }
+    },
+    {
+      "cleanup_passed": true,
+      "fresh_profile": true,
+      "journal_secret_scan_passed": true,
+      "maintenance_status_reachable_after_drain": true,
+      "memory_peak": {
+        "operation_peak_bytes": 12537856,
+        "operation_peak_mib": 11.957,
+        "samples": 6332,
+        "unit_absolute_peak_bytes": 12537856,
+        "unit_absolute_peak_mib": 11.957
+      },
+      "post_drain": {
+        "current_bytes": 7348224,
+        "current_mib": 7.0078,
+        "growth_bytes": 1986560,
+        "growth_mib": 1.8945,
+        "memory_stat": {
+          "anon_bytes": 5795840,
+          "anon_mib": 5.5273,
+          "file_bytes": 77824,
+          "file_mib": 0.0742
+        }
+      },
+      "post_session": {
+        "current_bytes": 11259904,
+        "current_mib": 10.7383,
+        "memory_stat": {
+          "anon_bytes": 7610368,
+          "anon_mib": 7.2578,
+          "file_bytes": 1814528,
+          "file_mib": 1.7305
+        }
+      },
+      "pre_session": {
+        "current_bytes": 5361664,
+        "current_mib": 5.1133,
+        "memory_stat": {
+          "anon_bytes": 2646016,
+          "anon_mib": 2.5234,
+          "file_bytes": 229376,
+          "file_mib": 0.2188
+        }
+      },
+      "process": {
+        "child_processes": 0,
+        "executable": "junban-server",
+        "fixture_outside_cgroup": true,
+        "fixture_port_environment_exact": true,
+        "ld_preload_exact": true,
+        "pid": 2655319,
+        "process_count": 1,
+        "resident_node_processes": 0,
+        "ssl_cert_file_exact": true
+      },
+      "profile": 1,
+      "profile_artifacts_removed": true,
+      "profile_lock_reacquired": true,
+      "runtime_cleanup_before_shutdown": true,
+      "runtime_metadata_removed": true,
+      "server_stopped": true,
+      "workload": {
+        "cancellation_ms": [
+          1.8588
+        ],
+        "completed_short_ms": [
+          5.763683,
+          11.155088,
+          4.197066,
+          3.963447,
+          4.014419,
+          7.104553,
+          5.266157,
+          4.343675,
+          4.44115,
+          4.074243,
+          7.671772,
+          4.126747,
+          3.870035,
+          3.862852,
+          4.044613,
+          7.767242,
+          4.107072,
+          3.941336,
+          4.12759,
+          9.205338,
+          4.410353,
+          4.239935,
+          4.544403,
+          4.46162,
+          8.990104,
+          4.407395,
+          4.451999,
+          4.098803,
+          6.983523,
+          5.130753
+        ],
+        "duplicate_effects_absent": true,
+        "first_event_ms": [
+          3.610627,
+          9.004532,
+          2.040329,
+          1.893259,
+          1.873122,
+          2.044053,
+          2.948889,
+          2.099857,
+          2.123778,
+          2.050174,
+          5.57828,
+          2.049927,
+          1.88195,
+          1.830591,
+          1.919104,
+          5.65193,
+          2.03896,
+          1.914715,
+          2.016557,
+          6.038529,
+          2.284185,
+          2.051566,
+          2.250831,
+          2.147886,
+          6.746755,
+          2.165576,
+          2.261008,
+          2.007199,
+          2.048401,
+          3.00087
+        ],
+        "operations": {
+          "approved_mutation": {
+            "effects": 1,
+            "exact_replay": true,
+            "passed": true,
+            "provider_rounds": 1
+          },
+          "cancellation": {
+            "latency_ms": 1.8588,
+            "passed": true,
+            "provider_quiesced": true,
+            "terminal": "run_cancelled"
+          },
+          "midstream_failure": {
+            "attempts": 1,
+            "passed": true
+          },
+          "read_tool": {
+            "completed_ms": 7.65,
+            "first_event_ms": 2.0801,
+            "passed": true,
+            "provider_rounds": 2,
+            "tool_results": 1
+          },
+          "rejected_mutation": {
+            "effects": 0,
+            "passed": true,
+            "provider_rounds": 2
+          },
+          "retry_before_body": {
+            "attempts": 2,
+            "passed": true
+          },
+          "timeout": {
+            "elapsed_ms": 60004.2327,
+            "passed": true,
+            "terminal": "run_failed"
+          }
+        },
+        "speech": {
+          "stt_input_bytes": 1048576,
+          "stt_latency_ms": 6.0196,
+          "stt_transcript_exact": true,
+          "tts_audio_exact": true,
+          "tts_latency_ms": 3.8528,
+          "tts_output_bytes": 1048576
+        },
+        "stale_effects_absent": true,
+        "stt_ms": [
+          6.019609
+        ],
+        "tts_ms": [
+          3.852814
+        ]
+      }
+    },
+    {
+      "cleanup_passed": true,
+      "fresh_profile": true,
+      "journal_secret_scan_passed": true,
+      "maintenance_status_reachable_after_drain": true,
+      "memory_peak": {
+        "operation_peak_bytes": 11399168,
+        "operation_peak_mib": 10.8711,
+        "samples": 6335,
+        "unit_absolute_peak_bytes": 11894784,
+        "unit_absolute_peak_mib": 11.3438
+      },
+      "post_drain": {
+        "current_bytes": 6537216,
+        "current_mib": 6.2344,
+        "growth_bytes": 1949696,
+        "growth_mib": 1.8594,
+        "memory_stat": {
+          "anon_bytes": 5312512,
+          "anon_mib": 5.0664,
+          "file_bytes": 77824,
+          "file_mib": 0.0742
+        }
+      },
+      "post_session": {
+        "current_bytes": 10723328,
+        "current_mib": 10.2266,
+        "memory_stat": {
+          "anon_bytes": 6991872,
+          "anon_mib": 6.668,
+          "file_bytes": 1814528,
+          "file_mib": 1.7305
+        }
+      },
+      "pre_session": {
+        "current_bytes": 4587520,
+        "current_mib": 4.375,
+        "memory_stat": {
+          "anon_bytes": 2609152,
+          "anon_mib": 2.4883,
+          "file_bytes": 229376,
+          "file_mib": 0.2188
+        }
+      },
+      "process": {
+        "child_processes": 0,
+        "executable": "junban-server",
+        "fixture_outside_cgroup": true,
+        "fixture_port_environment_exact": true,
+        "ld_preload_exact": true,
+        "pid": 2657863,
+        "process_count": 1,
+        "resident_node_processes": 0,
+        "ssl_cert_file_exact": true
+      },
+      "profile": 2,
+      "profile_artifacts_removed": true,
+      "profile_lock_reacquired": true,
+      "runtime_cleanup_before_shutdown": true,
+      "runtime_metadata_removed": true,
+      "server_stopped": true,
+      "workload": {
+        "cancellation_ms": [
+          1.543302
+        ],
+        "completed_short_ms": [
+          5.830806,
+          20.508032,
+          4.509263,
+          4.471353,
+          3.866602,
+          11.013966,
+          4.973741,
+          4.336129,
+          4.573197,
+          4.077723,
+          9.121879,
+          4.119899,
+          4.141336,
+          4.08484,
+          3.854768,
+          8.647842,
+          4.431392,
+          4.353474,
+          4.146065,
+          8.349655,
+          4.350578,
+          4.20579,
+          3.992445,
+          4.391202,
+          12.089404,
+          4.174859,
+          3.978584,
+          4.120325,
+          18.251699,
+          6.075523
+        ],
+        "duplicate_effects_absent": true,
+        "first_event_ms": [
+          3.821158,
+          18.153777,
+          2.103818,
+          2.325273,
+          1.862345,
+          1.838645,
+          2.855837,
+          2.253835,
+          1.947419,
+          2.003238,
+          7.013694,
+          1.982279,
+          2.066543,
+          1.948636,
+          1.945521,
+          6.148749,
+          2.122678,
+          2.134936,
+          2.051879,
+          5.361575,
+          2.066016,
+          2.130777,
+          1.946048,
+          2.319104,
+          9.863625,
+          2.160926,
+          1.9264,
+          2.021794,
+          1.976219,
+          3.695612
+        ],
+        "operations": {
+          "approved_mutation": {
+            "effects": 1,
+            "exact_replay": true,
+            "passed": true,
+            "provider_rounds": 1
+          },
+          "cancellation": {
+            "latency_ms": 1.5433,
+            "passed": true,
+            "provider_quiesced": true,
+            "terminal": "run_cancelled"
+          },
+          "midstream_failure": {
+            "attempts": 1,
+            "passed": true
+          },
+          "read_tool": {
+            "completed_ms": 7.8326,
+            "first_event_ms": 2.1957,
+            "passed": true,
+            "provider_rounds": 2,
+            "tool_results": 1
+          },
+          "rejected_mutation": {
+            "effects": 0,
+            "passed": true,
+            "provider_rounds": 2
+          },
+          "retry_before_body": {
+            "attempts": 2,
+            "passed": true
+          },
+          "timeout": {
+            "elapsed_ms": 60003.6812,
+            "passed": true,
+            "terminal": "run_failed"
+          }
+        },
+        "speech": {
+          "stt_input_bytes": 1048576,
+          "stt_latency_ms": 5.8385,
+          "stt_transcript_exact": true,
+          "tts_audio_exact": true,
+          "tts_latency_ms": 3.4968,
+          "tts_output_bytes": 1048576
+        },
+        "stale_effects_absent": true,
+        "stt_ms": [
+          5.838529
+        ],
+        "tts_ms": [
+          3.496846
+        ]
+      }
+    }
+  ],
+  "protocol": {
+    "budgets": {
+      "cancellation_terminal_quiesced_p95_ms": 500.0,
+      "completed_short_turn_p95_ms": 750.0,
+      "first_event_p95_ms": 250.0,
+      "operation_peak_max_mib": 48.0,
+      "post_drain_growth_max_mib": 4.0,
+      "post_session_warm_max_mib": 32.0,
+      "resident_node_processes": 0,
+      "rust_server_processes": 1,
+      "stt_1mib_p95_ms": 1000.0,
+      "tts_1mib_p95_ms": 1000.0
+    },
+    "fresh_profiles": true,
+    "interception": {
+      "connection": "ephemeral LD_PRELOAD exact sentinel:443 high-port rewrite",
+      "fixture_bind": "127.0.0.1:0 (kernel-selected unprivileged high port)",
+      "fixture_port_environment": "JUNBAN_PHASE6_FIXTURE_PORT",
+      "hostname": "api.openai.com",
+      "http_proxy_used": false,
+      "privileged_bind_required": false,
+      "resolver": "ephemeral LD_PRELOAD getaddrinfo exact-host mapping",
+      "sentinel_ip": "127.66.0.1",
+      "system_hosts_or_trust_modified": false,
+      "trust": "ephemeral CA via SSL_CERT_FILE in measured server environment only"
+    },
+    "name": "junban-phase6-enabled-local-mock-v1",
+    "no_waivers": true,
+    "operations_per_profile": [
+      "model_discovery",
+      "30_fragmented_utf8_sse_short_turns",
+      "one_read_tool",
+      "one_rejected_mutation",
+      "one_approved_mutation_exactly_once",
+      "retry_before_body",
+      "production_timeout",
+      "midstream_failure",
+      "cancellation_race",
+      "1_mib_stt",
+      "1_mib_tts",
+      "idle_drain_cleanup"
+    ],
+    "profiles": 3,
+    "provider_fixture": "standalone Python stdlib TLS process outside measured cgroup",
+    "short_streamed_turns_per_profile": 30,
+    "version": 1
+  },
+  "started_at_utc": "2026-08-04T03:15:35Z",
+  "status": "authoritative",
+  "summary": {
+    "all_gates_passed": true,
+    "gates": {
+      "cancellation_terminal_quiesced_p95": true,
+      "cleanup": true,
+      "completed_short_turn_p95": true,
+      "first_event_p95": true,
+      "fixture_bounded": true,
+      "fixture_request_matrix": true,
+      "operation_matrix": true,
+      "operation_peak": true,
+      "post_drain_growth": true,
+      "post_session_warm": true,
+      "process_boundary": true,
+      "secret_scans": true,
+      "speech_exact": true,
+      "stt_1mib_p95": true,
+      "tts_1mib_p95": true
+    },
+    "metrics": {
+      "cancellation_terminal_quiesced_ms": {
+        "count": 3,
+        "max": 1.8588,
+        "min": 1.5433,
+        "p50": 1.7981,
+        "p95": 1.8527,
+        "values": [
+          1.5433,
+          1.7981,
+          1.8588
+        ]
+      },
+      "completed_short_turn_ms": {
+        "count": 90,
+        "max": 20.508,
+        "min": 3.8289,
+        "p50": 4.4084,
+        "p95": 10.5165,
+        "values": [
+          3.8289,
+          3.8548,
+          3.8629,
+          3.8666,
+          3.87,
+          3.9413,
+          3.9634,
+          3.9786,
+          3.9924,
+          4.0087,
+          4.0144,
+          4.0171,
+          4.0296,
+          4.0446,
+          4.0742,
+          4.0777,
+          4.0848,
+          4.0988,
+          4.1071,
+          4.1161,
+          4.1184,
+          4.1199,
+          4.1203,
+          4.1267,
+          4.1276,
+          4.1413,
+          4.1454,
+          4.1461,
+          4.1542,
+          4.1749,
+          4.1942,
+          4.1971,
+          4.2058,
+          4.2179,
+          4.2363,
+          4.2399,
+          4.2574,
+          4.283,
+          4.3361,
+          4.3437,
+          4.3506,
+          4.3535,
+          4.3912,
+          4.4029,
+          4.4074,
+          4.4093,
+          4.4104,
+          4.4314,
+          4.4412,
+          4.452,
+          4.4616,
+          4.4714,
+          4.5093,
+          4.5444,
+          4.5732,
+          4.6801,
+          4.7499,
+          4.7517,
+          4.7813,
+          4.8779,
+          4.9737,
+          5.1308,
+          5.2662,
+          5.282,
+          5.4767,
+          5.7637,
+          5.8308,
+          5.9218,
+          6.0755,
+          6.9835,
+          7.0303,
+          7.1046,
+          7.4374,
+          7.6718,
+          7.7672,
+          7.9121,
+          7.9363,
+          8.1921,
+          8.3497,
+          8.6478,
+          8.7279,
+          8.9901,
+          9.1219,
+          9.2053,
+          9.9085,
+          11.014,
+          11.1551,
+          12.0894,
+          18.2517,
+          20.508
+        ]
+      },
+      "first_event_ms": {
+        "count": 90,
+        "max": 18.1538,
+        "min": 1.8306,
+        "p50": 2.1213,
+        "p95": 6.8936,
+        "values": [
+          1.8306,
+          1.8346,
+          1.8386,
+          1.8623,
+          1.8731,
+          1.882,
+          1.8933,
+          1.9147,
+          1.9191,
+          1.9264,
+          1.9455,
+          1.946,
+          1.9474,
+          1.9486,
+          1.9645,
+          1.9762,
+          1.9823,
+          1.985,
+          1.9997,
+          2.0032,
+          2.0049,
+          2.0072,
+          2.0142,
+          2.0166,
+          2.0218,
+          2.0218,
+          2.0253,
+          2.039,
+          2.0403,
+          2.0441,
+          2.0484,
+          2.0499,
+          2.0502,
+          2.0516,
+          2.0519,
+          2.0606,
+          2.0659,
+          2.066,
+          2.0665,
+          2.0719,
+          2.0779,
+          2.0999,
+          2.1038,
+          2.115,
+          2.1199,
+          2.1227,
+          2.1238,
+          2.1308,
+          2.1349,
+          2.1479,
+          2.1609,
+          2.1656,
+          2.1976,
+          2.2508,
+          2.2538,
+          2.261,
+          2.2842,
+          2.2866,
+          2.3191,
+          2.3253,
+          2.3318,
+          2.4367,
+          2.51,
+          2.5107,
+          2.5178,
+          2.5597,
+          2.8558,
+          2.9489,
+          3.0009,
+          3.0714,
+          3.3113,
+          3.5346,
+          3.6106,
+          3.6956,
+          3.8212,
+          4.8591,
+          5.3616,
+          5.5783,
+          5.6519,
+          5.8449,
+          6.0385,
+          6.0493,
+          6.1487,
+          6.4086,
+          6.7468,
+          7.0137,
+          7.8185,
+          9.0045,
+          9.8636,
+          18.1538
+        ]
+      },
+      "operation_peak_mib": {
+        "count": 3,
+        "max": 12.6953,
+        "min": 10.8711,
+        "p50": 11.957,
+        "p95": 12.6215,
+        "values": [
+          10.8711,
+          11.957,
+          12.6953
+        ]
+      },
+      "post_drain_growth_mib": {
+        "count": 3,
+        "max": 3.0898,
+        "min": 1.8594,
+        "p50": 1.8945,
+        "p95": 2.9703,
+        "values": [
+          1.8594,
+          1.8945,
+          3.0898
+        ]
+      },
+      "post_session_warm_mib": {
+        "count": 3,
+        "max": 11.0898,
+        "min": 10.2266,
+        "p50": 10.7383,
+        "p95": 11.0547,
+        "values": [
+          10.2266,
+          10.7383,
+          11.0898
+        ]
+      },
+      "stt_1mib_ms": {
+        "count": 3,
+        "max": 6.4133,
+        "min": 5.8385,
+        "p50": 6.0196,
+        "p95": 6.3739,
+        "values": [
+          5.8385,
+          6.0196,
+          6.4133
+        ]
+      },
+      "tts_1mib_ms": {
+        "count": 3,
+        "max": 3.9741,
+        "min": 3.4968,
+        "p50": 3.8528,
+        "p95": 3.9619,
+        "values": [
+          3.4968,
+          3.8528,
+          3.9741
+        ]
+      },
+      "unit_absolute_peak_mib": {
+        "count": 3,
+        "max": 13.3164,
+        "min": 11.3438,
+        "p50": 11.957,
+        "p95": 13.1805,
+        "values": [
+          11.3438,
+          11.957,
+          13.3164
+        ]
+      }
+    }
+  }
+}

@@ -54,16 +54,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     ensure_separate_profile_and_web(&data_dir, &config.web_dir)?;
     let token = load_or_create_token(&data_dir)?;
+    // Recover consumed AI dispatch authority before opening any normal listener.
+    let state = ServerState::new(
+        owner.repository(),
+        token,
+        config.additional_hosts,
+        &data_dir,
+    )?;
+    state.recover_ai_dispatches().await?;
+
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
     let address = listener.local_addr()?;
-
-    let mut cli_hosts = config.additional_hosts;
-    cli_hosts.push(address.to_string());
+    let mut listener_hosts = vec![address.to_string()];
     if address.ip().is_loopback() {
-        cli_hosts.push(format!("localhost:{}", address.port()));
+        listener_hosts.push(format!("localhost:{}", address.port()));
     }
-    // CLI hosts merge with any persisted Tailnet hostnames under the profile dir.
-    let state = ServerState::new(owner.repository(), token, cli_hosts, &data_dir)?;
+    state.add_cli_hosts(listener_hosts);
     let instance_id = state.instance_id().to_owned();
     let shutdown = state.shutdown_token();
     // Exactly one process-global reminder coordinator; not started by router tests.
@@ -81,7 +87,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(%address, "Junban server listening");
     // Publish discovery metadata only after the listener is bound and the stack is ready.
-    let runtime_metadata = RuntimeMetadataFile::create(&data_dir, address, &instance_id)?;
+    let runtime_metadata = match RuntimeMetadataFile::create(&data_dir, address, &instance_id) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            // Rollback revokes provider work before general shutdown and profile release.
+            state.begin_ai_shutdown();
+            shutdown.cancel();
+            state
+                .shutdown_ai_runtime(junban_server::AI_SHUTDOWN_DRAIN_DEADLINE)
+                .await;
+            state.stop_reminder_coordinator().await;
+            drop(owner);
+            return Err(error.into());
+        }
+    };
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown({
             let shutdown = shutdown.clone();
@@ -94,12 +113,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     None,
                     "graceful shutdown signal received",
                 );
-                // Cancel coordinator + SSE forwarders before Axum drains responses.
+                // Revoke AI and speech provider authority before general cancellation
+                // and before Axum begins draining active responses.
+                state.begin_ai_shutdown();
                 shutdown.cancel();
             }
         })
         .await;
-    // Idempotent if graceful shutdown already cancelled; covers serve errors too.
+    // Idempotent if graceful shutdown already began; covers serve errors before
+    // general cancellation as well.
+    state.begin_ai_shutdown();
     shutdown.cancel();
     state.log_diagnostic(
         DiagnosticSeverity::Info,
@@ -107,6 +130,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
         "server event loop exited",
     );
+    // AI cancel/drain/drop before reminder join and profile lock release.
+    state
+        .shutdown_ai_runtime(junban_server::AI_SHUTDOWN_DRAIN_DEADLINE)
+        .await;
     state.stop_reminder_coordinator().await;
     drop(runtime_metadata);
     drop(owner);

@@ -46,6 +46,37 @@ const EXCLUDED_OPERATION_IDS: &[&str] = &[
     "settle_reminder_delivered",
     "settle_reminder_failed",
     "mark_owner_lost_reminders",
+    // Phase 6 operator-only AI and voice APIs remain outside the frozen 87-tool catalog.
+    "list_ai_providers",
+    "get_ai_config",
+    "put_ai_config",
+    "delete_ai_config",
+    "put_ai_credential",
+    "delete_ai_credential",
+    "discover_ai_provider_models",
+    "list_ai_sessions",
+    "create_ai_session",
+    "get_ai_session",
+    "patch_ai_session",
+    "delete_ai_session",
+    "list_ai_messages",
+    "create_ai_response",
+    "create_ai_daily_briefing",
+    "edit_ai_response",
+    "retry_ai_response",
+    "regenerate_ai_response",
+    "cancel_ai_run",
+    "get_ai_approval",
+    "approve_ai_approval",
+    "reject_ai_approval",
+    "clear_ai_session",
+    "list_ai_memories",
+    "create_ai_memory",
+    "get_ai_memory",
+    "patch_ai_memory",
+    "delete_ai_memory",
+    "create_voice_transcription",
+    "create_voice_speech",
     // Raw automation secrets are accepted only by the reviewed `auth create
     // --write-token` ambiguity protocol, never by generic tool input.
     "create_automation_credential",
@@ -256,10 +287,7 @@ pub fn build_catalog() -> Result<ToolCatalog, String> {
     let mut seen_operation_ids = BTreeSet::new();
     let mut openapi_ops: BTreeMap<String, openapi::OpenApiOperation> = BTreeMap::new();
 
-    for operation in openapi::iter_operations(&doc)? {
-        if EXCLUDED_OPERATION_IDS.contains(&operation.operation_id.as_str()) {
-            continue;
-        }
+    for operation in openapi::iter_operations(&doc, EXCLUDED_OPERATION_IDS)? {
         if !seen_operation_ids.insert(operation.operation_id.clone()) {
             return Err(format!(
                 "duplicate OpenAPI operationId '{}'",

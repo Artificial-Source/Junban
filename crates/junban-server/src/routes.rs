@@ -3905,7 +3905,25 @@ pub async fn restore_backup(
     // Once quiescence starts this runtime is intentionally non-resumable. Even a
     // validated rollback requires restart so stale scheduler/service state never reopens.
     gate.mark_restart_required();
+    // Wait for any detached reconfiguration worker and retain the permit through cutover.
+    // Its storage commit therefore finishes before permanent AI authority is established.
+    let _ai_reconfigure = Arc::clone(&state.ai_reconfigure).lock_owned().await;
     let deadline = tokio::time::Instant::now() + crate::RESTORE_DRAIN_DEADLINE;
+    // Cancel and drain AI and cloud speech before SSE/request/reminder quiescence so
+    // provider work cannot outlive cutover. Timeout keeps restart-required/maintenance.
+    if !state
+        .drain_ai_runtime(deadline.saturating_duration_since(tokio::time::Instant::now()))
+        .await
+    {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "maintenance_ai_timeout",
+            "could not drain AI or speech work before restore",
+            false,
+            &request_id,
+        ));
+    }
+
     if !state
         .quiesce_streams(deadline.saturating_duration_since(tokio::time::Instant::now()))
         .await

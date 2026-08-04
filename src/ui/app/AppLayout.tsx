@@ -4,9 +4,10 @@
  * mobile drawer and bottom nav, task detail panel, command palette, search,
  * quick add, project modals, and Phase 3 planning/focus/reminder surfaces.
  */
-import { useEffect, useRef, useState, useCallback } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, useCallback } from "react";
 import type { NavigateTarget } from "../hooks/useRouting";
 import { useRouting } from "../hooks/useRouting";
+import { AIChatRouteFallback } from "../ai/AIChatRouteFallback";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { useIsMobile } from "../hooks/useIsMobile";
 import {
@@ -63,8 +64,14 @@ import { isVisualFixture } from "../lib/visualFixture";
 import { shouldApplyStartupDefaultView, startScreenFromDefaultView } from "../lib/startupView";
 import { shouldPlaySoundEvent, soundEventForTaskEvent } from "../lib/soundPolicy";
 import { playSound } from "../lib/sounds";
+import { aiChatFocusedTaskUrl } from "../ai/focused-task";
 
 const MOBILE_DRAWER_ID = "junban-mobile-nav-drawer";
+
+/** Lazy AI shell only — no provider/voice/network runtime in the startup graph. */
+const AIChatRoute = lazy(() =>
+  import("../ai/AIChatRoute").then((module) => ({ default: module.AIChatRoute })),
+);
 
 export function AppLayout() {
   // Route-backed overlays replace the pathname and query. Pin explicit fixture
@@ -329,6 +336,17 @@ export function AppLayout() {
       setDrawerOpen(false);
     },
     [navigate],
+  );
+
+  /** Thin focused-task AI launch — route authority stays in useRouting; query is attached after. */
+  const handleAskAi = useCallback(
+    (taskId: string) => {
+      setSelectedTaskId(null);
+      setDetailTask(null);
+      handleNavigate("ai-chat");
+      window.history.replaceState(null, "", aiChatFocusedTaskUrl(taskId));
+    },
+    [handleNavigate],
   );
 
   const handleAddTask = useCallback(() => {
@@ -885,6 +903,15 @@ export function AppLayout() {
                 {route.name === "timeblocking" && (
                   <Timeblocking onSelectTask={handleSelectTask} onToggleTask={handleToggleTask} />
                 )}
+                {route.name === "ai-chat" && (
+                  <Suspense fallback={<AIChatRouteFallback />}>
+                    <AIChatRoute
+                      onOpenSettings={() => handleNavigate({ name: "settings", tab: "ai" })}
+                      onOpenVoiceSettings={() => handleNavigate({ name: "settings", tab: "voice" })}
+                      onSelectTask={handleSelectTask}
+                    />
+                  </Suspense>
+                )}
               </div>
             </ErrorBoundary>
           </div>
@@ -959,6 +986,7 @@ export function AppLayout() {
               onEnterFocusMode={
                 focusModeEnabled ? (taskId) => handleEnterFocusMode(taskId) : undefined
               }
+              onAskAi={handleAskAi}
               phase3VisualFixture={phase3VisualFixture}
             />
           ))}

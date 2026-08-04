@@ -37,6 +37,8 @@ export const SETTINGS_TAB_META: readonly SettingsTabMeta[] = [
   { id: "essentials", label: "Essentials", subtitle: "Everyday task basics" },
   { id: "appearance", label: "Appearance", subtitle: "Theme & layout" },
   { id: "features", label: "Features", subtitle: "Optional upgrades" },
+  { id: "ai", label: "AI", subtitle: "Provider & memory" },
+  { id: "voice", label: "Voice", subtitle: "Speech & microphone" },
   { id: "keyboard", label: "Keyboard", subtitle: "Shortcuts" },
   { id: "templates", label: "Templates", subtitle: "Repeatable tasks" },
   { id: "data", label: "Data", subtitle: "Backup & transfer" },
@@ -46,7 +48,7 @@ export const SETTINGS_TAB_META: readonly SettingsTabMeta[] = [
 
 export const MOBILE_SETTINGS_SECTIONS: readonly { label: string; tabs: SettingsTabId[] }[] = [
   { label: "Essentials", tabs: ["essentials", "appearance"] },
-  { label: "Advanced", tabs: ["features", "keyboard", "templates"] },
+  { label: "Advanced", tabs: ["features", "ai", "voice", "keyboard", "templates"] },
   { label: "Data", tabs: ["data", "hosted", "diagnostics"] },
 ];
 

@@ -31,7 +31,7 @@ Phases 1 and 2 implement the hosted product in `junban-domain`, `junban-app`, `j
 | `junban-server`      | Axum composition, HTTP DTO/OpenAPI authority, principal/scope auth, static serving, SSE, and reusable API-only owner runtime |
 | `junban-cli`         | Native CLI session, HTTP executor, versioned automation catalog, and human/JSON commands                                     |
 | `junban-mcp`         | Native MCP stdio adapter over the CLI session/catalog (Wave 3 completes tools/resources/prompts)                             |
-| `junban-ai`          | Optional provider clients and orchestration                                                                                  |
+| `junban-ai`          | Optional lazy chat/speech provider clients (no default-startup construct)                                                    |
 | `junban-plugin-sdk`  | WIT contract and package types                                                                                               |
 | `junban-plugin-host` | Optional Wasmtime runtime after a measured spike                                                                             |
 
@@ -41,6 +41,8 @@ Rules:
 - HTTP, CLI, MCP, desktop, AI tools, and plugins invoke the same application use cases.
 - Avoid a generic “shared” crate. A type belongs to the layer that owns its meaning.
 - Transport DTOs are not domain entities.
+- AI chat tools mutate only through `junban-app`; raw provider API keys live outside SQLite in profile-private `ai-secrets.json`.
+- Browser-local speech (Whisper/Kokoro/Piper/VAD) runs in the page with pinned manifests and same-origin workers; it is not a server subsystem. Operator guide: [`ai-and-voice.md`](ai-and-voice.md).
 
 ## Runtime ownership
 
@@ -66,7 +68,7 @@ AI chat uses ordinary schema-v6 session/message/run rows. Daily briefing durably
 
 Edit, retry, and regenerate are typed suffix rewrites. Basic chat and typed actions share the same provider/configuration/context/credential preflight under the AI reconfiguration admission mutex before one storage transaction preserves the exact prefix, rejects an active suffix, tombstones removed run IDs for the 30-day receipt horizon, deletes the suffix, appends one completed user plus streaming assistant/run seed, and recomputes quotas. Invalidation session IDs are historical metadata independent of live session deletion and expire only with their receipt horizon. The setup task owns the response sender, SSE permit, mutex, request, and runtime admission through commit, so a dropped handler still terminalizes its durable run without cancelling unrelated runs. Exact terminal retries replay the retained seed and SSE transcript without provider setup or egress.
 
-The four response-action routes are operator-only HTTP/SSE and intentionally do not extend the frozen CLI/MCP catalog.
+Mutation tools require an approval bound to canonical tool name and arguments before `AppService` dispatch; streaming uses versioned local SSE envelopes rather than vendor frames. The response-action and chat routes are operator-only HTTP/SSE and intentionally do not extend the frozen CLI/MCP catalog. Configuration, credentials, tools, local voice, and operator troubleshooting: [`ai-and-voice.md`](ai-and-voice.md).
 
 ## Frontend boundary
 

@@ -56,6 +56,7 @@ This directory contains canonical documentation for the active Rust implementati
 
 - [`architecture.md`](architecture.md): workspace boundaries and runtime ownership
 - [`security.md`](security.md): standing security posture and supply-chain policy
+- [`ai-and-voice.md`](ai-and-voice.md): optional cloud AI chat, tools/approvals, and browser-local or cloud speech
 - [`cli.md`](cli.md): native CLI setup, catalog, commands, JSON contract, and credentials
 - [`mcp.md`](mcp.md): native MCP stdio server, scopes, resources, prompts, and lifecycle
 - [`accessibility.md`](accessibility.md): accessibility contract for UI phases

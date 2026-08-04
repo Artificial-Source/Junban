@@ -55,11 +55,13 @@ Exact pins:
 4. **Trap / CPU / memory containment**
    In-process and child survived deliberate trap, epoch-interrupted CPU loop, and StoreLimits grow failure for **both Rust and TypeScript**. Missing or failed survival evidence blocks placement selection.
 5. **Child in-flight crash/recovery (P7-ARCH-001)**
-   While the parent is blocked on long-running child work (`cpu_loop`), the child is
-   SIGKILL'd after a short controlled delay. The parent completes the wait within a
-   bound, reaps/clears the session on EOF/error, stays healthy, then recovers with a
-   fresh spawn/instantiate/call/shutdown and no orphan. Required for **both** child
-   Rust and child TypeScript paths. Missing/failed/bound-overrun blocks selection.
+   All child request I/O goes through one `child_exchange` helper that takes session
+   ownership, restores only on successful non-shutdown replies, and on any write/read
+   EOF/error kills/reaps/clears before returning. The in-flight crash probe prestarts a
+   SIGKILL helper, then issues host-side `Sleep` through that same helper so its pass
+   proves ordinary IPC errors cannot wedge a replacement spawn. Graceful Shutdown still
+   waits/cleans without restore. Required for **both** child Rust and child TypeScript.
+   Missing/failed/bound-overrun blocks selection.
 6. **No runtime Node**
    TypeScript is componentized at build time; measured units reject active Node tooling processes.
 7. **IPC frame cap = 256 KiB** (product plugin-output ceiling), with unit rejection of oversized frames.
@@ -111,10 +113,11 @@ from the selected placement only; losing projections are retained separately.
 
 ## TOCTOU component admission (P7-ARCH-003)
 
-Load reads component bytes once (≤32 MiB), hashes that exact buffer, retains the buffer,
-and compiles those exact bytes. Paths are not reopened at compile time. After first
-compile, bytes may be dropped while the compiled `Component` is retained for later
-reinstantiate-after-trap. Replacement-after-load is covered by unit tests.
+Load opens a path once, metadata-prechecks when available, then reads through a bounded
+`take(MAX+1)` buffer (≤32 MiB). The exact retained bytes are hashed and compiled; paths
+are not reopened at compile time. After first compile, bytes may be dropped while the
+compiled `Component` is retained for later reinstantiate-after-trap. Sparse oversize
+rejection and replacement-after-load are covered by unit tests.
 
 ## Actual import inspection (P7-ARCH-004)
 

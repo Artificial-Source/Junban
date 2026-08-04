@@ -152,13 +152,15 @@ impl SpikeRuntime {
         Ok(actual)
     }
 
-    /// Read a path once into memory and admit those exact bytes (TOCTOU-safe).
+    /// Read a path once through a bounded reader and admit those exact bytes.
+    /// Metadata size is checked when available; the body is hard-capped at
+    /// `MAX_COMPONENT_BYTES + 1` so a huge attacker file cannot fully allocate.
     pub fn load_component_path(
         &mut self,
         path: &Path,
         expected_sha256: &str,
     ) -> Result<String, RuntimeError> {
-        let bytes = std::fs::read(path)?;
+        let bytes = read_component_file_bounded(path)?;
         self.load_component_bytes(bytes, expected_sha256)
     }
 
@@ -198,7 +200,7 @@ impl SpikeRuntime {
 
     /// Compatibility helper for in-process path stages: one-shot path admit+compile.
     pub fn compile_component(&mut self, path: &Path) -> Result<Timings, RuntimeError> {
-        let bytes = std::fs::read(path)?;
+        let bytes = read_component_file_bounded(path)?;
         let digest = sha256_bytes_hex(&bytes);
         self.load_component_bytes(bytes, &digest)?;
         self.compile_loaded_bytes()
@@ -454,6 +456,31 @@ impl Timings {
     }
 }
 
+/// Open once, prefer metadata precheck, then read through `take(MAX+1)`.
+pub fn read_component_file_bounded(path: &Path) -> Result<Vec<u8>, RuntimeError> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path)?;
+    if let Ok(meta) = file.metadata() {
+        let len = meta.len();
+        if len > MAX_COMPONENT_BYTES as u64 {
+            return Err(RuntimeError::State(format!(
+                "component exceeds {MAX_COMPONENT_BYTES} byte ceiling (metadata {len})"
+            )));
+        }
+    }
+    let mut limited = file.take((MAX_COMPONENT_BYTES as u64).saturating_add(1));
+    let mut bytes = Vec::new();
+    limited.read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_COMPONENT_BYTES {
+        return Err(RuntimeError::State(format!(
+            "component exceeds {MAX_COMPONENT_BYTES} byte ceiling ({})",
+            bytes.len()
+        )));
+    }
+    Ok(bytes)
+}
+
 /// Helper used by unit tests and the child host to run a full happy path.
 pub async fn smoke_ping(component_path: &Path, kind: ComponentKind) -> Result<u32, RuntimeError> {
     let mut rt = SpikeRuntime::new(SpikeLimits::default(), kind);
@@ -516,5 +543,33 @@ mod tests {
         let digest = sha256_bytes_hex(&huge);
         let err = rt.load_component_bytes(huge, &digest).unwrap_err();
         assert!(err.to_string().contains("ceiling"));
+    }
+
+    #[test]
+    fn bounded_path_rejects_sparse_oversize_without_full_allocation() {
+        let file = NamedTempFile::new().unwrap();
+        // Sparse file: metadata length exceeds ceiling; no full allocation.
+        file.as_file()
+            .set_len((MAX_COMPONENT_BYTES as u64) + 1)
+            .unwrap();
+        let err = read_component_file_bounded(file.path()).unwrap_err();
+        assert!(
+            err.to_string().contains("ceiling"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn bounded_path_admits_exact_small_file() {
+        let mut file = NamedTempFile::new().unwrap();
+        let payload = tiny_invalid_wasm();
+        file.write_all(&payload).unwrap();
+        file.flush().unwrap();
+        let bytes = read_component_file_bounded(file.path()).unwrap();
+        assert_eq!(bytes, payload);
+        let digest = sha256_bytes_hex(&bytes);
+        let mut rt = SpikeRuntime::new(SpikeLimits::default(), ComponentKind::Rust);
+        rt.load_component_path(file.path(), &digest).unwrap();
+        assert_eq!(rt.pending_sha256(), Some(digest.as_str()));
     }
 }

@@ -535,6 +535,7 @@ def self_check() -> dict[str, Any]:
         "load1_threshold_20cpu": load_thresholds(20)["load1_threshold"],
         "load5_threshold_20cpu": load_thresholds(20)["load5_threshold"],
         "evaluate_decision_fixtures": run_evaluate_decision_fixtures(),
+        "cold_total_fixtures": run_cold_total_fixtures(),
     }
     missing = [k for k, v in checks.items() if v is False]
     if missing:
@@ -1748,34 +1749,42 @@ def run_evaluate_decision_fixtures() -> dict[str, Any]:
     }
 
 
+def stage_cold_ms(stage: dict[str, Any], *, component_keys: tuple[str, ...]) -> float | None:
+    """Exact cold aggregation for one stage.
+
+    Prefer timings_ms.total_ms when present; otherwise sum named component fields;
+    otherwise wall_ms. Never add total_ms together with component fields.
+    """
+    resp = stage.get("response") or {}
+    timings = resp.get("timings_ms") or {}
+    if timings.get("total_ms") is not None:
+        return float(timings["total_ms"])
+    parts = [
+        float(timings[key])
+        for key in component_keys
+        if key != "total_ms" and timings.get(key) is not None
+    ]
+    if parts:
+        return float(sum(parts))
+    wall = stage.get("wall_ms")
+    if wall is not None:
+        return float(wall)
+    return None
+
+
 def cold_total_from_stages(stages: dict[str, Any], *, mode: str) -> float | None:
     """Cold total ms from exact stages: engine/compile/instantiate/first call or child spawn path."""
     total = 0.0
     saw = False
 
-    def add_stage(name: str, timing_keys: tuple[str, ...]) -> None:
+    def add_stage(name: str, component_keys: tuple[str, ...]) -> None:
         nonlocal total, saw
         stage = stages.get(name) or {}
-        resp = stage.get("response") or {}
-        timings = resp.get("timings_ms") or {}
-        wall = stage.get("wall_ms")
-        added = False
-        for key in timing_keys:
-            val = timings.get(key)
-            if val is not None:
-                total += float(val)
-                added = True
-        if not added and wall is not None and name in {
-            "spawn",
-            "create_engine",
-            "compile",
-            "instantiate",
-            "first_ping",
-        }:
-            total += float(wall)
-            added = True
-        if added:
-            saw = True
+        value = stage_cold_ms(stage, component_keys=component_keys)
+        if value is None:
+            return
+        total += value
+        saw = True
 
     if mode == "child":
         add_stage("spawn", ("total_ms",))
@@ -1787,6 +1796,63 @@ def cold_total_from_stages(stages: dict[str, Any], *, mode: str) -> float | None
         add_stage("instantiate", ("instantiate_ms", "total_ms"))
         add_stage("first_ping", ("first_call_ms", "total_ms"))
     return total if saw else None
+
+
+def run_cold_total_fixtures() -> dict[str, Any]:
+    """Synthetic exact expected cold totals for in-process and child."""
+    inprocess_stages = {
+        "create_engine": {"response": {"timings_ms": {"engine_create_ms": 1.0, "total_ms": 1.5}}},
+        "compile": {"response": {"timings_ms": {"compile_ms": 10.0, "total_ms": 12.0}}},
+        # No total_ms: sum components only (must not invent double count).
+        "instantiate": {
+            "response": {"timings_ms": {"instantiate_ms": 2.0}},
+            "wall_ms": 99.0,
+        },
+        "first_ping": {"response": {"timings_ms": {"first_call_ms": 0.5, "total_ms": 0.7}}},
+    }
+    # 1.5 + 12.0 + 2.0 + 0.7 = 16.2 (instantiate uses component, not wall)
+    ip = cold_total_from_stages(inprocess_stages, mode="inprocess")
+    if ip != 16.2:
+        raise HarnessError(f"in-process cold total expected 16.2, got {ip}")
+
+    child_stages = {
+        "spawn": {"response": {"timings_ms": {"total_ms": 5.0}}, "wall_ms": 9.0},
+        "instantiate": {
+            "response": {
+                "timings_ms": {
+                    "engine_create_ms": 1.0,
+                    "compile_ms": 10.0,
+                    "instantiate_ms": 2.0,
+                    "total_ms": 13.0,
+                }
+            }
+        },
+        "first_ping": {"wall_ms": 3.0},
+    }
+    # 5.0 + 13.0 + 3.0 = 21.0 (spawn prefers total over wall; first_ping wall only)
+    ch = cold_total_from_stages(child_stages, mode="child")
+    if ch != 21.0:
+        raise HarnessError(f"child cold total expected 21.0, got {ch}")
+
+    # total_ms present must not also add component fields.
+    no_double = {
+        "create_engine": {
+            "response": {"timings_ms": {"engine_create_ms": 100.0, "total_ms": 1.0}}
+        },
+        "compile": {"response": {"timings_ms": {"total_ms": 2.0}}},
+        "instantiate": {"response": {"timings_ms": {"total_ms": 3.0}}},
+        "first_ping": {"response": {"timings_ms": {"total_ms": 4.0}}},
+    }
+    nd = cold_total_from_stages(no_double, mode="inprocess")
+    if nd != 10.0:
+        raise HarnessError(f"no-double cold total expected 10.0, got {nd}")
+
+    return {
+        "inprocess_expected": 16.2,
+        "child_expected": 21.0,
+        "no_double_expected": 10.0,
+        "ok": True,
+    }
 
 
 def summarize_variant(

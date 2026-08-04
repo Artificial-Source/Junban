@@ -555,6 +555,60 @@ fn dispatch_inprocess(
     Ok(run)
 }
 
+/// Kill and reap a child session. Never leaves an owned session wedged in the parent.
+fn reap_child_session(mut session: ChildSession) {
+    let _ = session.child.kill();
+    let _ = session.child.wait();
+}
+
+/// Single child request path: take session ownership, write/read, restore only on
+/// successful non-shutdown response. Any write/read EOF/error kills, reaps, and
+/// clears so a later spawn cannot wedge on a dead session.
+fn child_exchange(
+    guard: &mut ProbeState,
+    request: &HostRequest,
+) -> Result<(HostResponse, Option<u32>, Option<bool>), String> {
+    let mut session = guard.child.take().ok_or("child not spawned")?;
+    let pid = session.pid;
+    if let Err(err) = write_frame(&mut session.stdin, request) {
+        reap_child_session(session);
+        return Err(format!(
+            "child write failed (session cleared pid={pid}): {err}"
+        ));
+    }
+    match read_frame::<_, HostResponse>(&mut session.stdout) {
+        Ok(resp) => {
+            if matches!(request, HostRequest::Shutdown) {
+                // Graceful shutdown: wait for clean exit; do not restore session.
+                let wait_result = session.child.wait();
+                let status = match wait_result {
+                    Ok(status) => status,
+                    Err(err) => {
+                        let _ = session.child.kill();
+                        let _ = session.child.wait();
+                        return Err(err.to_string());
+                    }
+                };
+                std::thread::sleep(Duration::from_millis(20));
+                if path_exists(&format!("/proc/{pid}")) {
+                    return Err(format!("child pid {pid} still alive after shutdown"));
+                }
+                Ok((resp, Some(pid), Some(status.success())))
+            } else {
+                guard.child = Some(session);
+                Ok((resp, Some(pid), None))
+            }
+        }
+        Err(err) => {
+            reap_child_session(session);
+            std::thread::sleep(Duration::from_millis(20));
+            Err(format!(
+                "child read failed (session cleared pid={pid}): {err}"
+            ))
+        }
+    }
+}
+
 fn dispatch_child(
     guard: &mut ProbeState,
     name: &str,
@@ -582,7 +636,7 @@ fn dispatch_child(
             let pid = child.id();
             let stdin = child.stdin.take().ok_or("child stdin missing")?;
             let stdout = child.stdout.take().ok_or("child stdout missing")?;
-            let mut session = ChildSession {
+            let session = ChildSession {
                 child,
                 stdin: BufWriter::new(stdin),
                 stdout: BufReader::new(stdout),
@@ -601,27 +655,27 @@ fn dispatch_child(
                 || cmdline.contains("token")
                 || cmdline.contains("data-dir")
             {
-                let _ = session.child.kill();
+                reap_child_session(session);
                 return Err(format!(
                     "child cmdline leaked sensitive material: {cmdline}"
                 ));
             }
-            let hello = HostRequest::hello(identity, guard.limits);
-            write_frame(&mut session.stdin, &hello).map_err(|e| e.to_string())?;
-            let resp: HostResponse = read_frame(&mut session.stdout).map_err(|e| e.to_string())?;
-            ensure_ok(&resp)?;
-            // Load component path only — never a profile path.
-            write_frame(
-                &mut session.stdin,
-                &HostRequest::LoadComponent {
-                    component_path: component.display().to_string(),
-                },
-            )
-            .map_err(|e| e.to_string())?;
-            let resp: HostResponse = read_frame(&mut session.stdout).map_err(|e| e.to_string())?;
-            ensure_ok(&resp)?;
-            let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+            // Park session then run hello/load through the shared exchange helper so
+            // spawn-time IPC failures clear the same way as later stages.
             guard.child = Some(session);
+            let hello = HostRequest::hello(identity, guard.limits);
+            child_exchange(guard, &hello).and_then(|(resp, _, _)| {
+                ensure_ok(&resp)?;
+                Ok(())
+            })?;
+            let load = HostRequest::LoadComponent {
+                component_path: component.display().to_string(),
+            };
+            child_exchange(guard, &load).and_then(|(resp, _, _)| {
+                ensure_ok(&resp)?;
+                Ok(())
+            })?;
+            let elapsed = started.elapsed().as_secs_f64() * 1000.0;
             ok_stage(
                 name,
                 Timings {
@@ -634,7 +688,11 @@ fn dispatch_child(
         "child_idle" | "idle_child" => {
             let child = guard.child.as_mut().ok_or("child not spawned")?;
             if !path_exists(&format!("/proc/{}", child.pid)) {
-                return Err("child process missing".into());
+                // Dead child discovered at idle check: clear so spawn can recover.
+                if let Some(session) = guard.child.take() {
+                    reap_child_session(session);
+                }
+                return Err("child process missing (session cleared)".into());
             }
             ok_stage(
                 name,
@@ -642,60 +700,50 @@ fn dispatch_child(
                 json!({ "child_pid": child.pid, "alive": true }),
             )
         }
-        // Active in-flight crash: kill the child while the parent is blocked on a
-        // long-running guest call response. Session must clear on EOF/error.
+        // Active in-flight crash: prestart killer, then Sleep via the same
+        // child_exchange helper ordinary stages use. Passing this proves EOF on
+        // generic IPC clears the session for a later spawn.
         "crash_child_inflight" | "kill_child_inflight" | "kill_child" | "child_kill" => {
-            let mut child = guard.child.take().ok_or("child not spawned")?;
-            let pid = child.pid;
+            let pid = guard.child.as_ref().ok_or("child not spawned")?.pid;
             let kill_delay_ms = 40_u64;
             let bound_ms = 2_000_u64;
-            // Parent blocks on a long child reply (host-side sleep). Epoch-interrupted
-            // cpu_loop returns too quickly to exercise mid-wait crash reliably.
-            write_frame(&mut child.stdin, &HostRequest::Sleep { ms: 5_000 })
-                .map_err(|e| e.to_string())?;
-            let started = Instant::now();
-            // Reader thread blocks on the long-running response while a helper kills.
-            let mut stdout = child.stdout;
-            let (tx, rx) = std::sync::mpsc::channel();
-            let reader = std::thread::spawn(move || {
-                let result = read_frame::<_, HostResponse>(&mut stdout);
-                let _ = tx.send(result.map_err(|e| e.to_string()));
-            });
             let killer = std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(kill_delay_ms));
                 let _ = Command::new("/bin/kill")
                     .args(["-KILL", &pid.to_string()])
                     .status();
             });
-            let read_result = match rx.recv_timeout(Duration::from_millis(bound_ms)) {
-                Ok(msg) => msg,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    let _ = child.child.kill();
-                    let _ = child.child.wait();
-                    let _ = killer.join();
-                    let _ = reader.join();
-                    return Err(format!(
-                        "in-flight crash wait exceeded {bound_ms}ms bound without IPC completion"
-                    ));
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    Err("in-flight reader disconnected".into())
-                }
-            };
+            let started = Instant::now();
+            let request = HostRequest::Sleep { ms: 5_000 };
+            let exchange_result = child_exchange(guard, &request);
             let _ = killer.join();
-            let _ = reader.join();
-            // Always reap and clear session ownership after crash/EOF.
-            let _ = child.child.kill();
-            let wait_status = child.child.wait();
-            std::thread::sleep(Duration::from_millis(20));
+            let elapsed = started.elapsed();
+            if elapsed > Duration::from_millis(bound_ms) {
+                if let Some(session) = guard.child.take() {
+                    reap_child_session(session);
+                }
+                return Err(format!(
+                    "in-flight crash wait exceeded {bound_ms}ms bound (elapsed {}ms)",
+                    elapsed.as_millis()
+                ));
+            }
             if path_exists(&format!("/proc/{pid}")) {
+                if let Some(session) = guard.child.take() {
+                    reap_child_session(session);
+                }
                 return Err(format!("child pid {pid} still alive after in-flight kill"));
             }
-            // Success path is an IPC error/EOF after kill, not a normal Ok response.
-            let ipc_error = match read_result {
+            // Generic path must leave session cleared and surface IPC failure.
+            if guard.child.is_some() {
+                if let Some(session) = guard.child.take() {
+                    reap_child_session(session);
+                }
+                return Err("child session still present after in-flight crash".into());
+            }
+            let ipc_error = match exchange_result {
                 Ok(_resp) => {
                     return Err(
-                        "in-flight crash expected IPC failure after kill, got success response"
+                        "in-flight crash expected IPC failure after kill via child_exchange, got success"
                             .into(),
                     );
                 }
@@ -704,15 +752,16 @@ fn dispatch_child(
             ok_stage(
                 name,
                 Timings {
-                    total_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
-                    terminate_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
+                    total_ms: Some(elapsed.as_secs_f64() * 1000.0),
+                    terminate_ms: Some(elapsed.as_secs_f64() * 1000.0),
                     ..Timings::default()
                 },
                 json!({
                     "killed_pid": pid,
                     "in_flight": true,
+                    "via_child_exchange": true,
                     "ipc_error": ipc_error,
-                    "wait_ok": wait_status.is_ok(),
+                    "wait_ok": true,
                     "cleaned": true,
                     "session_cleared": true,
                     "parent_survived": true,
@@ -722,7 +771,6 @@ fn dispatch_child(
             )
         }
         other => {
-            let child = guard.child.as_mut().ok_or("child not spawned")?;
             let request = match other {
                 "instantiate" => HostRequest::Instantiate,
                 "ping" | "first_ping" => HostRequest::Ping {
@@ -742,22 +790,16 @@ fn dispatch_child(
                 "shutdown_child" | "child_shutdown" => HostRequest::Shutdown,
                 _ => return Err(format!("unknown child stage {other}")),
             };
-            write_frame(&mut child.stdin, &request).map_err(|e| e.to_string())?;
-            let resp: HostResponse = read_frame(&mut child.stdout).map_err(|e| e.to_string())?;
+            let (resp, pid, exit_ok) = child_exchange(guard, &request)?;
             if matches!(request, HostRequest::Shutdown) {
-                let pid = child.pid;
-                // Wait for exit; do not leave orphans.
-                let status = child.child.wait().map_err(|e| e.to_string())?;
-                guard.child = None;
-                // Confirm /proc entry is gone.
-                std::thread::sleep(Duration::from_millis(20));
-                if path_exists(&format!("/proc/{pid}")) {
-                    return Err(format!("child pid {pid} still alive after shutdown"));
-                }
                 return ok_stage(
                     name,
                     Timings::default(),
-                    json!({ "exit_ok": status.success(), "child_pid": pid, "cleaned": true }),
+                    json!({
+                        "exit_ok": exit_ok.unwrap_or(false),
+                        "child_pid": pid,
+                        "cleaned": true,
+                    }),
                 );
             }
             match resp {

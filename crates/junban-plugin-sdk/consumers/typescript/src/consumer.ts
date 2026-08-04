@@ -187,10 +187,21 @@ function exercisePublicTypes(): void {
     updatedAt: taskView.updatedAt,
     revision: 1n,
   };
+  const sectionView: T.SectionView = {
+    id: "section",
+    projectId: "project",
+    name: "section",
+    collapsed: false,
+    sortOrder: 0n,
+    createdAt: taskView.createdAt,
+    updatedAt: taskView.updatedAt,
+    revision: 1n,
+  };
   const subjects: T.EventSubject[] = [
     { tag: "task", val: taskView },
     { tag: "project", val: projectView },
     { tag: "tag", val: tagView },
+    { tag: "section", val: sectionView },
     { tag: "deleted-task", val: "task" },
     { tag: "deleted-project", val: "project" },
     { tag: "deleted-tag", val: "tag" },

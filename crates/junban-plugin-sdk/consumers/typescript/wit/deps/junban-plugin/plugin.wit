@@ -74,6 +74,10 @@ interface types {
     updated-at: timestamp, revision: u64,
   }
   record tag-page { items: list<tag-view>, next-cursor: option<string>, revision: u64 }
+  record section-view {
+    id: id, project-id: id, name: string, collapsed: bool, sort-order: s64,
+    created-at: timestamp, updated-at: timestamp, revision: u64,
+  }
 
   variant string-change { unchanged, set(string) }
   variant bool-change { unchanged, set(bool) }
@@ -163,7 +167,7 @@ interface types {
     tag-created, tag-updated, tag-deleted, section-created, section-updated, section-deleted
   }
   variant event-subject {
-    task(task-view), project(project-view-record), tag(tag-view),
+    task(task-view), project(project-view-record), tag(tag-view), section(section-view),
     deleted-task(id), deleted-project(id), deleted-tag(id), deleted-section(id)
   }
   record event-envelope {

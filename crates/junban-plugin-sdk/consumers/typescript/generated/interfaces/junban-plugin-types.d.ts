@@ -267,6 +267,16 @@ declare module 'junban:plugin/types@0.1.0' {
     nextCursor?: string,
     revision: bigint,
   }
+  export interface SectionView {
+    id: Id,
+    projectId: Id,
+    name: string,
+    collapsed: boolean,
+    sortOrder: bigint,
+    createdAt: Timestamp,
+    updatedAt: Timestamp,
+    revision: bigint,
+  }
   export type StringChange = StringChangeUnchanged | StringChangeSet;
   export interface StringChangeUnchanged {
     tag: 'unchanged',
@@ -659,7 +669,7 @@ declare module 'junban:plugin/types@0.1.0' {
    * ## `"section-deleted"`
    */
   export type EventKind = 'task-created' | 'task-updated' | 'task-completed' | 'task-uncompleted' | 'task-cancelled' | 'task-reopened' | 'task-deleted' | 'project-created' | 'project-updated' | 'project-deleted' | 'tag-created' | 'tag-updated' | 'tag-deleted' | 'section-created' | 'section-updated' | 'section-deleted';
-  export type EventSubject = EventSubjectTask | EventSubjectProject | EventSubjectTag | EventSubjectDeletedTask | EventSubjectDeletedProject | EventSubjectDeletedTag | EventSubjectDeletedSection;
+  export type EventSubject = EventSubjectTask | EventSubjectProject | EventSubjectTag | EventSubjectSection | EventSubjectDeletedTask | EventSubjectDeletedProject | EventSubjectDeletedTag | EventSubjectDeletedSection;
   export interface EventSubjectTask {
     tag: 'task',
     val: TaskView,
@@ -671,6 +681,10 @@ declare module 'junban:plugin/types@0.1.0' {
   export interface EventSubjectTag {
     tag: 'tag',
     val: TagView,
+  }
+  export interface EventSubjectSection {
+    tag: 'section',
+    val: SectionView,
   }
   export interface EventSubjectDeletedTask {
     tag: 'deleted-task',

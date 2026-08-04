@@ -287,6 +287,14 @@ impl AuthorityFence {
     pub fn exact_matches(&self, current: &Self) -> bool {
         self == current
     }
+
+    #[must_use]
+    pub fn same_activation(&self, current: &Self) -> bool {
+        self.plugin_id == current.plugin_id
+            && self.package_generation == current.package_generation
+            && self.activation_epoch == current.activation_epoch
+            && self.host_session_id == current.host_session_id
+    }
 }
 
 impl CallbackFence {
@@ -409,6 +417,52 @@ pub fn validate_permission_hash(grants: &[Permission], encoded_hash: &str) -> Re
         });
     }
     Ok(())
+}
+
+/// Bind one invoke and its host-call request to the exact loaded activation and
+/// grant set. The load operation and guest invocation have distinct invocation
+/// IDs, while plugin/generation/epoch/session authority must remain identical.
+pub fn validate_capability_request_authority(
+    load: &ParentFrame,
+    invoke: &ParentFrame,
+    request: &ChildFrame,
+) -> Result<()> {
+    validate_parent_frame(load)?;
+    validate_parent_frame(invoke)?;
+    validate_child_frame(request)?;
+    let ParentFrame::Load {
+        fence: load_fence,
+        grants,
+        permission_hash: loaded_hash,
+        ..
+    } = load
+    else {
+        return Err(SdkError::Protocol { field: "load" });
+    };
+    let ParentFrame::Invoke {
+        fence: invoke_fence,
+        mode,
+        permission_hash: invoke_hash,
+        ..
+    } = invoke
+    else {
+        return Err(SdkError::Protocol { field: "invoke" });
+    };
+    let ChildFrame::CapabilityRequest { callback, kind, .. } = request else {
+        return Err(SdkError::Protocol {
+            field: "callback_request",
+        });
+    };
+    if !load_fence.same_activation(invoke_fence)
+        || loaded_hash != invoke_hash
+        || !callback.authority().exact_matches(invoke_fence)
+    {
+        return Err(SdkError::Protocol {
+            field: "loaded_authority",
+        });
+    }
+    validate_permission_hash(grants, invoke_hash)?;
+    validate_host_call_authority(*kind, *mode, grants)
 }
 
 pub fn validate_callback_correlation(

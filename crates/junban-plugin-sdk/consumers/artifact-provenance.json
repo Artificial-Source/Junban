@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
   "authority": "crates/junban-plugin-sdk/wit/plugin.wit",
-  "witSha256": "5dd725bcd8138e4ed73f7b496249783690d2c3287cb9481802495d0c3062bd95",
+  "witSha256": "5705801973219a0e6981693653f2caefdf1090345b65494750c8d8a9bf4b15f4",
   "rust": {
     "toolchain": "rustc 1.93.0",
     "target": "wasm32-wasip2",
     "witBindgen": "0.51.0",
-    "sizeBytes": 113492,
-    "sha256": "1ad8b9f5d56983d72d0d816811ee78e180acea9131303aaa186465faf475ea0f"
+    "sizeBytes": 114120,
+    "sha256": "5fdaead67e8455ef7420af467f76338ca05753f62aec7b99b0dc04cd07c09372"
   },
   "typescript": {
     "jco": "1.26.1",
     "componentizeJs": "0.22.0",
     "wasi": "--disable all",
     "byteReproducible": false,
-    "sizeBytes": 15294045,
-    "sha256": "6a5954aef2329287ce6933b21ae81322311388d2a1ce3be330bc7a4eedee79fa"
+    "sizeBytes": 15317299,
+    "sha256": "3ab759b2937abda036a830893aaa60d2e3227c3c6c314bcbe354282eff371f0d"
   }
 }

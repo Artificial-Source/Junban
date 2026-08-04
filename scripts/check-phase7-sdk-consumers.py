@@ -9,7 +9,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,7 +98,6 @@ def main() -> int:
     version = run([wit_bindgen, "--version"], ROOT, capture=True).strip()
     if version != "wit-bindgen-cli 0.51.0":
         raise SystemExit(f"expected wit-bindgen 0.51.0, got {version}")
-    generated = RUST / "generated"
     bindgen = [wit_bindgen, "rust", "wit", "--world", "rust-consumer", "--generate-all", "--generate-unused-types", "--out-dir", "generated", "--format"]
     if not options.regenerate:
         bindgen.append("--check")
@@ -128,10 +126,9 @@ def main() -> int:
     run([sys.executable, "-c", "import pathlib; assert pathlib.Path('generated/typescript-consumer.d.ts').is_file()"], TS)
 
     tsc = ROOT / "node_modules/.bin" / ("tsc.cmd" if os.name == "nt" else "tsc")
-    if tsc.exists():
-        run([str(tsc), "-p", "tsconfig.json", "--pretty", "false"], TS)
-    else:
-        print("warning: root TypeScript compiler unavailable; componentizer still compiles source", file=sys.stderr)
+    if not tsc.exists():
+        raise SystemExit("root TypeScript compiler missing; run pnpm install --frozen-lockfile")
+    run([str(tsc), "-p", "tsconfig.json", "--pretty", "false"], TS)
 
     run(["node", "build.mjs", "--build" if options.regenerate else "--check"], TS)
 

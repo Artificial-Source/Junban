@@ -180,11 +180,11 @@ fn exact_wit_parses_and_valid_component_has_structural_guest_abi() {
     let component = valid_component();
     assert_eq!(
         hex(&sha256(WIT_SOURCE.as_bytes())),
-        "5dd725bcd8138e4ed73f7b496249783690d2c3287cb9481802495d0c3062bd95"
+        "5705801973219a0e6981693653f2caefdf1090345b65494750c8d8a9bf4b15f4"
     );
     assert_eq!(
         hex(&sha256(&component)),
-        "1ad8b9f5d56983d72d0d816811ee78e180acea9131303aaa186465faf475ea0f"
+        "5fdaead67e8455ef7420af467f76338ca05753f62aec7b99b0dc04cd07c09372"
     );
     let inspection = inspect_component(
         &component,
@@ -242,7 +242,7 @@ fn deterministic_valid_package_round_trips_and_full_inspects() {
     assert_eq!(first, second);
     assert_eq!(
         hex(&sha256(&first)),
-        "d7a36ba28ef97e8b1f1cfaa3b271fabdd1056faeeb6ff817bac165678169d43d"
+        "7e50dd8c68ae4b7ec7757c761b63da7151da774fe4dad9956c8425d86c8f7488"
     );
     let expected_key_id = hex(&sha256(&test_key().verifying_key().to_bytes()));
     let local_trust = [SignerTrustRecord {
@@ -1107,7 +1107,7 @@ fn component_rejects_core_malformed_export_signature_profile_undeclared_and_meta
     );
     assert_eq!(
         hex(&sha256(&rust_component)),
-        "1ad8b9f5d56983d72d0d816811ee78e180acea9131303aaa186465faf475ea0f"
+        "5fdaead67e8455ef7420af467f76338ca05753f62aec7b99b0dc04cd07c09372"
     );
     let mut wrong_wasi_abi = rust_component.clone();
     replace_all_equal(&mut wrong_wasi_abi, b"exit", b"exix");
@@ -1577,6 +1577,83 @@ fn protocol_exhausts_invocation_modes_host_calls_and_grants() {
             }
         }
     }
+}
+
+#[test]
+fn protocol_callback_authority_binds_exact_load_activation_mode_and_grants() {
+    let load_fence = AuthorityFence {
+        plugin_id: "test-plugin".into(),
+        package_generation: 7,
+        activation_epoch: 9,
+        host_session_id: "00000000-0000-4000-8000-000000000001".into(),
+        invocation_id: "00000000-0000-4000-8000-000000000002".into(),
+    };
+    let grants = vec![Permission {
+        capability: Capability::Logging,
+        scope: PermissionScope::Unscoped(UnscopedPermission {}),
+    }];
+    let permission_hash = canonical_permission_hash(&grants).unwrap();
+    let load = ParentFrame::Load {
+        fence: load_fence.clone(),
+        package_sha256: "1".repeat(64),
+        component_sha256: "2".repeat(64),
+        runtime_profile: RuntimeProfile::Rust,
+        component_size: 1,
+        grants,
+        permission_hash: permission_hash.clone(),
+        limits: RuntimeLimits::for_profile(RuntimeProfile::Rust),
+    };
+    let mut invoke_fence = load_fence;
+    invoke_fence.invocation_id = "00000000-0000-4000-8000-000000000003".into();
+    let invoke = ParentFrame::Invoke {
+        fence: invoke_fence.clone(),
+        kind: InvocationKind::Activate,
+        mode: InvocationMode::Lifecycle,
+        permission_hash,
+        request_sha256: hex(&sha256(b"request")),
+        request_size: 7,
+    };
+    let request = ChildFrame::CapabilityRequest {
+        callback: CallbackFence {
+            plugin_id: invoke_fence.plugin_id.clone(),
+            package_generation: invoke_fence.package_generation,
+            activation_epoch: invoke_fence.activation_epoch,
+            host_session_id: invoke_fence.host_session_id.clone(),
+            invocation_id: invoke_fence.invocation_id.clone(),
+            callback_id: 1,
+        },
+        kind: HostCallKind::Log,
+        request_sha256: hex(&sha256(b"log")),
+        request_size: 3,
+    };
+    validate_capability_request_authority(&load, &invoke, &request).unwrap();
+
+    let mut changed_hash = invoke.clone();
+    if let ParentFrame::Invoke {
+        permission_hash, ..
+    } = &mut changed_hash
+    {
+        *permission_hash = "0".repeat(64);
+    }
+    assert!(validate_capability_request_authority(&load, &changed_hash, &request).is_err());
+
+    let mut stale_request = request.clone();
+    if let ChildFrame::CapabilityRequest { callback, .. } = &mut stale_request {
+        callback.activation_epoch += 1;
+    }
+    assert!(validate_capability_request_authority(&load, &invoke, &stale_request).is_err());
+
+    let mut ungranted = request.clone();
+    if let ChildFrame::CapabilityRequest { kind, .. } = &mut ungranted {
+        *kind = HostCallKind::GetKv;
+    }
+    assert!(validate_capability_request_authority(&load, &invoke, &ungranted).is_err());
+
+    let mut denied_mode = request;
+    if let ChildFrame::CapabilityRequest { kind, .. } = &mut denied_mode {
+        *kind = HostCallKind::HttpRequest;
+    }
+    assert!(validate_capability_request_authority(&load, &invoke, &denied_mode).is_err());
 }
 
 #[test]

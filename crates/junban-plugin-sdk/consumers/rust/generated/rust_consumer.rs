@@ -697,6 +697,34 @@ pub mod junban {
                 }
             }
             #[derive(Clone)]
+            pub struct SectionView {
+                pub id: Id,
+                pub project_id: Id,
+                pub name: _rt::String,
+                pub collapsed: bool,
+                pub sort_order: i64,
+                pub created_at: Timestamp,
+                pub updated_at: Timestamp,
+                pub revision: u64,
+            }
+            impl ::core::fmt::Debug for SectionView {
+                fn fmt(
+                    &self,
+                    f: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    f.debug_struct("SectionView")
+                        .field("id", &self.id)
+                        .field("project-id", &self.project_id)
+                        .field("name", &self.name)
+                        .field("collapsed", &self.collapsed)
+                        .field("sort-order", &self.sort_order)
+                        .field("created-at", &self.created_at)
+                        .field("updated-at", &self.updated_at)
+                        .field("revision", &self.revision)
+                        .finish()
+                }
+            }
+            #[derive(Clone)]
             pub enum StringChange {
                 Unchanged,
                 Set(_rt::String),
@@ -1654,6 +1682,7 @@ pub mod junban {
                 Task(TaskView),
                 Project(ProjectViewRecord),
                 Tag(TagView),
+                Section(SectionView),
                 DeletedTask(Id),
                 DeletedProject(Id),
                 DeletedTag(Id),
@@ -1673,6 +1702,9 @@ pub mod junban {
                         }
                         EventSubject::Tag(e) => {
                             f.debug_tuple("EventSubject::Tag").field(e).finish()
+                        }
+                        EventSubject::Section(e) => {
+                            f.debug_tuple("EventSubject::Section").field(e).finish()
                         }
                         EventSubject::DeletedTask(e) => {
                             f.debug_tuple("EventSubject::DeletedTask").field(e).finish()
@@ -8138,7 +8170,7 @@ pub mod exports {
                 ) -> *mut u8 {
                     unsafe {
                         #[cfg(target_arch = "wasm32")] _rt::run_ctors_once();
-                        let result148 = {
+                        let result166 = {
                             let l0 = *arg0.add(0).cast::<*mut u8>();
                             let l1 = *arg0
                                 .add(::core::mem::size_of::<*const u8>())
@@ -8201,10 +8233,10 @@ pub mod exports {
                                     .add(40 + 10 * ::core::mem::size_of::<*const u8>())
                                     .cast::<u8>(),
                             );
-                            use super::super::super::super::junban::plugin::types::EventSubject as V147;
-                            let v147 = match l20 {
+                            use super::super::super::super::junban::plugin::types::EventSubject as V165;
+                            let v165 = match l20 {
                                 0 => {
-                                    let e147 = {
+                                    let e165 = {
                                         let l21 = *arg0
                                             .add(48 + 10 * ::core::mem::size_of::<*const u8>())
                                             .cast::<*mut u8>();
@@ -8657,10 +8689,10 @@ pub mod exports {
                                             revision: l90 as u64,
                                         }
                                     };
-                                    V147::Task(e147)
+                                    V165::Task(e165)
                                 }
                                 1 => {
-                                    let e147 = {
+                                    let e165 = {
                                         let l91 = *arg0
                                             .add(48 + 10 * ::core::mem::size_of::<*const u8>())
                                             .cast::<*mut u8>();
@@ -8811,10 +8843,10 @@ pub mod exports {
                                             revision: l118 as u64,
                                         }
                                     };
-                                    V147::Project(e147)
+                                    V165::Project(e165)
                                 }
                                 2 => {
-                                    let e147 = {
+                                    let e165 = {
                                         let l119 = *arg0
                                             .add(48 + 10 * ::core::mem::size_of::<*const u8>())
                                             .cast::<*mut u8>();
@@ -8887,10 +8919,10 @@ pub mod exports {
                                             revision: l134 as u64,
                                         }
                                     };
-                                    V147::Tag(e147)
+                                    V165::Tag(e165)
                                 }
                                 3 => {
-                                    let e147 = {
+                                    let e165 = {
                                         let l135 = *arg0
                                             .add(48 + 10 * ::core::mem::size_of::<*const u8>())
                                             .cast::<*mut u8>();
@@ -8903,17 +8935,11 @@ pub mod exports {
                                             len137,
                                             len137,
                                         );
-                                        _rt::string_lift(bytes137)
-                                    };
-                                    V147::DeletedTask(e147)
-                                }
-                                4 => {
-                                    let e147 = {
                                         let l138 = *arg0
-                                            .add(48 + 10 * ::core::mem::size_of::<*const u8>())
+                                            .add(48 + 12 * ::core::mem::size_of::<*const u8>())
                                             .cast::<*mut u8>();
                                         let l139 = *arg0
-                                            .add(48 + 11 * ::core::mem::size_of::<*const u8>())
+                                            .add(48 + 13 * ::core::mem::size_of::<*const u8>())
                                             .cast::<usize>();
                                         let len140 = l139;
                                         let bytes140 = _rt::Vec::from_raw_parts(
@@ -8921,17 +8947,11 @@ pub mod exports {
                                             len140,
                                             len140,
                                         );
-                                        _rt::string_lift(bytes140)
-                                    };
-                                    V147::DeletedProject(e147)
-                                }
-                                5 => {
-                                    let e147 = {
                                         let l141 = *arg0
-                                            .add(48 + 10 * ::core::mem::size_of::<*const u8>())
+                                            .add(48 + 14 * ::core::mem::size_of::<*const u8>())
                                             .cast::<*mut u8>();
                                         let l142 = *arg0
-                                            .add(48 + 11 * ::core::mem::size_of::<*const u8>())
+                                            .add(48 + 15 * ::core::mem::size_of::<*const u8>())
                                             .cast::<usize>();
                                         let len143 = l142;
                                         let bytes143 = _rt::Vec::from_raw_parts(
@@ -8939,28 +8959,126 @@ pub mod exports {
                                             len143,
                                             len143,
                                         );
-                                        _rt::string_lift(bytes143)
+                                        let l144 = i32::from(
+                                            *arg0
+                                                .add(48 + 16 * ::core::mem::size_of::<*const u8>())
+                                                .cast::<u8>(),
+                                        );
+                                        let l145 = *arg0
+                                            .add(56 + 16 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<i64>();
+                                        let l146 = *arg0
+                                            .add(64 + 16 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<*mut u8>();
+                                        let l147 = *arg0
+                                            .add(64 + 17 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<usize>();
+                                        let len148 = l147;
+                                        let bytes148 = _rt::Vec::from_raw_parts(
+                                            l146.cast(),
+                                            len148,
+                                            len148,
+                                        );
+                                        let l149 = *arg0
+                                            .add(64 + 18 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<*mut u8>();
+                                        let l150 = *arg0
+                                            .add(64 + 19 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<usize>();
+                                        let len151 = l150;
+                                        let bytes151 = _rt::Vec::from_raw_parts(
+                                            l149.cast(),
+                                            len151,
+                                            len151,
+                                        );
+                                        let l152 = *arg0
+                                            .add(64 + 20 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<i64>();
+                                        super::super::super::super::junban::plugin::types::SectionView {
+                                            id: _rt::string_lift(bytes137),
+                                            project_id: _rt::string_lift(bytes140),
+                                            name: _rt::string_lift(bytes143),
+                                            collapsed: _rt::bool_lift(l144 as u8),
+                                            sort_order: l145,
+                                            created_at: _rt::string_lift(bytes148),
+                                            updated_at: _rt::string_lift(bytes151),
+                                            revision: l152 as u64,
+                                        }
                                     };
-                                    V147::DeletedTag(e147)
+                                    V165::Section(e165)
                                 }
-                                n => {
-                                    debug_assert_eq!(n, 6, "invalid enum discriminant");
-                                    let e147 = {
-                                        let l144 = *arg0
+                                4 => {
+                                    let e165 = {
+                                        let l153 = *arg0
                                             .add(48 + 10 * ::core::mem::size_of::<*const u8>())
                                             .cast::<*mut u8>();
-                                        let l145 = *arg0
+                                        let l154 = *arg0
                                             .add(48 + 11 * ::core::mem::size_of::<*const u8>())
                                             .cast::<usize>();
-                                        let len146 = l145;
-                                        let bytes146 = _rt::Vec::from_raw_parts(
-                                            l144.cast(),
-                                            len146,
-                                            len146,
+                                        let len155 = l154;
+                                        let bytes155 = _rt::Vec::from_raw_parts(
+                                            l153.cast(),
+                                            len155,
+                                            len155,
                                         );
-                                        _rt::string_lift(bytes146)
+                                        _rt::string_lift(bytes155)
                                     };
-                                    V147::DeletedSection(e147)
+                                    V165::DeletedTask(e165)
+                                }
+                                5 => {
+                                    let e165 = {
+                                        let l156 = *arg0
+                                            .add(48 + 10 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<*mut u8>();
+                                        let l157 = *arg0
+                                            .add(48 + 11 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<usize>();
+                                        let len158 = l157;
+                                        let bytes158 = _rt::Vec::from_raw_parts(
+                                            l156.cast(),
+                                            len158,
+                                            len158,
+                                        );
+                                        _rt::string_lift(bytes158)
+                                    };
+                                    V165::DeletedProject(e165)
+                                }
+                                6 => {
+                                    let e165 = {
+                                        let l159 = *arg0
+                                            .add(48 + 10 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<*mut u8>();
+                                        let l160 = *arg0
+                                            .add(48 + 11 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<usize>();
+                                        let len161 = l160;
+                                        let bytes161 = _rt::Vec::from_raw_parts(
+                                            l159.cast(),
+                                            len161,
+                                            len161,
+                                        );
+                                        _rt::string_lift(bytes161)
+                                    };
+                                    V165::DeletedTag(e165)
+                                }
+                                n => {
+                                    debug_assert_eq!(n, 7, "invalid enum discriminant");
+                                    let e165 = {
+                                        let l162 = *arg0
+                                            .add(48 + 10 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<*mut u8>();
+                                        let l163 = *arg0
+                                            .add(48 + 11 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<usize>();
+                                        let len164 = l163;
+                                        let bytes164 = _rt::Vec::from_raw_parts(
+                                            l162.cast(),
+                                            len164,
+                                            len164,
+                                        );
+                                        _rt::string_lift(bytes164)
+                                    };
+                                    V165::DeletedSection(e165)
                                 }
                             };
                             T::handle_event(
@@ -8999,7 +9117,7 @@ pub mod exports {
                                     kind: super::super::super::super::junban::plugin::types::EventKind::_lift(
                                         l19 as u8,
                                     ),
-                                    subject: v147,
+                                    subject: v165,
                                 },
                             )
                         };
@@ -9008,582 +9126,582 @@ pub mod exports {
                             104 + 48 * ::core::mem::size_of::<*const u8>(),
                             8,
                         );
-                        let ptr149 = (&raw mut _RET_AREA.0).cast::<u8>();
-                        match result148 {
+                        let ptr167 = (&raw mut _RET_AREA.0).cast::<u8>();
+                        match result166 {
                             Ok(e) => {
-                                *ptr149.add(0).cast::<u8>() = (0i32) as u8;
+                                *ptr167.add(0).cast::<u8>() = (0i32) as u8;
                                 let super::super::super::super::junban::plugin::types::PluginOutcome {
-                                    effect: effect150,
+                                    effect: effect168,
                                 } = e;
-                                match effect150 {
+                                match effect168 {
                                     Some(e) => {
-                                        *ptr149.add(8).cast::<u8>() = (1i32) as u8;
-                                        use super::super::super::super::junban::plugin::types::PluginEffect as V273;
+                                        *ptr167.add(8).cast::<u8>() = (1i32) as u8;
+                                        use super::super::super::super::junban::plugin::types::PluginEffect as V291;
                                         match e {
-                                            V273::DomainMutation(e) => {
-                                                *ptr149.add(16).cast::<u8>() = (0i32) as u8;
-                                                use super::super::super::super::junban::plugin::types::DomainMutation as V265;
+                                            V291::DomainMutation(e) => {
+                                                *ptr167.add(16).cast::<u8>() = (0i32) as u8;
+                                                use super::super::super::super::junban::plugin::types::DomainMutation as V283;
                                                 match e {
-                                                    V265::CreateTask(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (0i32) as u8;
+                                                    V283::CreateTask(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (0i32) as u8;
                                                         let super::super::super::super::junban::plugin::types::TaskDraft {
-                                                            title: title151,
-                                                            description: description151,
-                                                            priority: priority151,
-                                                            due_date: due_date151,
-                                                            due_time: due_time151,
-                                                            deadline: deadline151,
-                                                            someday: someday151,
-                                                            estimated_minutes: estimated_minutes151,
-                                                            actual_minutes: actual_minutes151,
-                                                            dread: dread151,
-                                                            project_id: project_id151,
-                                                            section_id: section_id151,
-                                                            parent_id: parent_id151,
-                                                            tag_ids: tag_ids151,
-                                                            sort_order: sort_order151,
-                                                            recurrence_rule: recurrence_rule151,
-                                                            remind_at: remind_at151,
-                                                            recurrence_anchor_day: recurrence_anchor_day151,
+                                                            title: title169,
+                                                            description: description169,
+                                                            priority: priority169,
+                                                            due_date: due_date169,
+                                                            due_time: due_time169,
+                                                            deadline: deadline169,
+                                                            someday: someday169,
+                                                            estimated_minutes: estimated_minutes169,
+                                                            actual_minutes: actual_minutes169,
+                                                            dread: dread169,
+                                                            project_id: project_id169,
+                                                            section_id: section_id169,
+                                                            parent_id: parent_id169,
+                                                            tag_ids: tag_ids169,
+                                                            sort_order: sort_order169,
+                                                            recurrence_rule: recurrence_rule169,
+                                                            remind_at: remind_at169,
+                                                            recurrence_anchor_day: recurrence_anchor_day169,
                                                         } = e;
-                                                        let vec152 = (title151.into_bytes()).into_boxed_slice();
-                                                        let ptr152 = vec152.as_ptr().cast::<u8>();
-                                                        let len152 = vec152.len();
-                                                        ::core::mem::forget(vec152);
-                                                        *ptr149
+                                                        let vec170 = (title169.into_bytes()).into_boxed_slice();
+                                                        let ptr170 = vec170.as_ptr().cast::<u8>();
+                                                        let len170 = vec170.len();
+                                                        ::core::mem::forget(vec170);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len152;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr152.cast_mut();
-                                                        let vec153 = (description151.into_bytes())
+                                                            .cast::<usize>() = len170;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr170.cast_mut();
+                                                        let vec171 = (description169.into_bytes())
                                                             .into_boxed_slice();
-                                                        let ptr153 = vec153.as_ptr().cast::<u8>();
-                                                        let len153 = vec153.len();
-                                                        ::core::mem::forget(vec153);
-                                                        *ptr149
+                                                        let ptr171 = vec171.as_ptr().cast::<u8>();
+                                                        let len171 = vec171.len();
+                                                        ::core::mem::forget(vec171);
+                                                        *ptr167
                                                             .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len153;
-                                                        *ptr149
+                                                            .cast::<usize>() = len171;
+                                                        *ptr167
                                                             .add(32 + 2 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<*mut u8>() = ptr153.cast_mut();
-                                                        match priority151 {
+                                                            .cast::<*mut u8>() = ptr171.cast_mut();
+                                                        match priority169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 4 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(33 + 4 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (e.clone() as i32) as u8;
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 4 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        match due_date151 {
+                                                        match due_date169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 5 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec154 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr154 = vec154.as_ptr().cast::<u8>();
-                                                                let len154 = vec154.len();
-                                                                ::core::mem::forget(vec154);
-                                                                *ptr149
+                                                                let vec172 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr172 = vec172.as_ptr().cast::<u8>();
+                                                                let len172 = vec172.len();
+                                                                ::core::mem::forget(vec172);
+                                                                *ptr167
                                                                     .add(32 + 7 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len154;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len172;
+                                                                *ptr167
                                                                     .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr154.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr172.cast_mut();
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 5 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        match due_time151 {
+                                                        match due_time169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 8 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                                 let super::super::super::super::junban::plugin::types::LocalDueTime {
-                                                                    time: time155,
-                                                                    time_zone: time_zone155,
+                                                                    time: time173,
+                                                                    time_zone: time_zone173,
                                                                 } = e;
-                                                                let vec156 = (time155.into_bytes()).into_boxed_slice();
-                                                                let ptr156 = vec156.as_ptr().cast::<u8>();
-                                                                let len156 = vec156.len();
-                                                                ::core::mem::forget(vec156);
-                                                                *ptr149
+                                                                let vec174 = (time173.into_bytes()).into_boxed_slice();
+                                                                let ptr174 = vec174.as_ptr().cast::<u8>();
+                                                                let len174 = vec174.len();
+                                                                ::core::mem::forget(vec174);
+                                                                *ptr167
                                                                     .add(32 + 10 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len156;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len174;
+                                                                *ptr167
                                                                     .add(32 + 9 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr156.cast_mut();
-                                                                let vec157 = (time_zone155.into_bytes()).into_boxed_slice();
-                                                                let ptr157 = vec157.as_ptr().cast::<u8>();
-                                                                let len157 = vec157.len();
-                                                                ::core::mem::forget(vec157);
-                                                                *ptr149
+                                                                    .cast::<*mut u8>() = ptr174.cast_mut();
+                                                                let vec175 = (time_zone173.into_bytes()).into_boxed_slice();
+                                                                let ptr175 = vec175.as_ptr().cast::<u8>();
+                                                                let len175 = vec175.len();
+                                                                ::core::mem::forget(vec175);
+                                                                *ptr167
                                                                     .add(32 + 12 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len157;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len175;
+                                                                *ptr167
                                                                     .add(32 + 11 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr157.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr175.cast_mut();
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 8 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        match deadline151 {
+                                                        match deadline169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 13 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec158 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr158 = vec158.as_ptr().cast::<u8>();
-                                                                let len158 = vec158.len();
-                                                                ::core::mem::forget(vec158);
-                                                                *ptr149
+                                                                let vec176 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr176 = vec176.as_ptr().cast::<u8>();
+                                                                let len176 = vec176.len();
+                                                                ::core::mem::forget(vec176);
+                                                                *ptr167
                                                                     .add(32 + 15 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len158;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len176;
+                                                                *ptr167
                                                                     .add(32 + 14 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr158.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr176.cast_mut();
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 13 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        *ptr149
+                                                        *ptr167
                                                             .add(32 + 16 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<u8>() = (match someday151 {
+                                                            .cast::<u8>() = (match someday169 {
                                                             true => 1,
                                                             false => 0,
                                                         }) as u8;
-                                                        match estimated_minutes151 {
+                                                        match estimated_minutes169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(36 + 16 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(40 + 16 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<i32>() = _rt::as_i32(e);
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(36 + 16 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        match actual_minutes151 {
+                                                        match actual_minutes169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(44 + 16 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(48 + 16 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<i32>() = _rt::as_i32(e);
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(44 + 16 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        match dread151 {
+                                                        match dread169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(52 + 16 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(53 + 16 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (_rt::as_i32(e)) as u8;
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(52 + 16 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        match project_id151 {
+                                                        match project_id169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(56 + 16 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec159 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr159 = vec159.as_ptr().cast::<u8>();
-                                                                let len159 = vec159.len();
-                                                                ::core::mem::forget(vec159);
-                                                                *ptr149
+                                                                let vec177 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr177 = vec177.as_ptr().cast::<u8>();
+                                                                let len177 = vec177.len();
+                                                                ::core::mem::forget(vec177);
+                                                                *ptr167
                                                                     .add(56 + 18 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len159;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len177;
+                                                                *ptr167
                                                                     .add(56 + 17 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr159.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr177.cast_mut();
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(56 + 16 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        match section_id151 {
+                                                        match section_id169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(56 + 19 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec160 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr160 = vec160.as_ptr().cast::<u8>();
-                                                                let len160 = vec160.len();
-                                                                ::core::mem::forget(vec160);
-                                                                *ptr149
+                                                                let vec178 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr178 = vec178.as_ptr().cast::<u8>();
+                                                                let len178 = vec178.len();
+                                                                ::core::mem::forget(vec178);
+                                                                *ptr167
                                                                     .add(56 + 21 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len160;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len178;
+                                                                *ptr167
                                                                     .add(56 + 20 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr160.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr178.cast_mut();
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(56 + 19 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        match parent_id151 {
+                                                        match parent_id169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(56 + 22 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec161 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr161 = vec161.as_ptr().cast::<u8>();
-                                                                let len161 = vec161.len();
-                                                                ::core::mem::forget(vec161);
-                                                                *ptr149
+                                                                let vec179 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr179 = vec179.as_ptr().cast::<u8>();
+                                                                let len179 = vec179.len();
+                                                                ::core::mem::forget(vec179);
+                                                                *ptr167
                                                                     .add(56 + 24 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len161;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len179;
+                                                                *ptr167
                                                                     .add(56 + 23 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr161.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr179.cast_mut();
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(56 + 22 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        let vec163 = tag_ids151;
-                                                        let len163 = vec163.len();
-                                                        let layout163 = _rt::alloc::Layout::from_size_align(
-                                                                vec163.len() * (2 * ::core::mem::size_of::<*const u8>()),
+                                                        let vec181 = tag_ids169;
+                                                        let len181 = vec181.len();
+                                                        let layout181 = _rt::alloc::Layout::from_size_align(
+                                                                vec181.len() * (2 * ::core::mem::size_of::<*const u8>()),
                                                                 ::core::mem::size_of::<*const u8>(),
                                                             )
                                                             .unwrap();
-                                                        let (result163, _cleanup163) = wit_bindgen::rt::Cleanup::new(
-                                                            layout163,
+                                                        let (result181, _cleanup181) = wit_bindgen::rt::Cleanup::new(
+                                                            layout181,
                                                         );
-                                                        if let Some(cleanup) = _cleanup163 {
+                                                        if let Some(cleanup) = _cleanup181 {
                                                             cleanup.forget();
                                                         }
-                                                        for (i, e) in vec163.into_iter().enumerate() {
-                                                            let base = result163
+                                                        for (i, e) in vec181.into_iter().enumerate() {
+                                                            let base = result181
                                                                 .add(i * (2 * ::core::mem::size_of::<*const u8>()));
                                                             {
-                                                                let vec162 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr162 = vec162.as_ptr().cast::<u8>();
-                                                                let len162 = vec162.len();
-                                                                ::core::mem::forget(vec162);
+                                                                let vec180 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr180 = vec180.as_ptr().cast::<u8>();
+                                                                let len180 = vec180.len();
+                                                                ::core::mem::forget(vec180);
                                                                 *base
                                                                     .add(::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len162;
-                                                                *base.add(0).cast::<*mut u8>() = ptr162.cast_mut();
+                                                                    .cast::<usize>() = len180;
+                                                                *base.add(0).cast::<*mut u8>() = ptr180.cast_mut();
                                                             }
                                                         }
-                                                        *ptr149
+                                                        *ptr167
                                                             .add(56 + 26 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len163;
-                                                        *ptr149
+                                                            .cast::<usize>() = len181;
+                                                        *ptr167
                                                             .add(56 + 25 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<*mut u8>() = result163;
-                                                        *ptr149
+                                                            .cast::<*mut u8>() = result181;
+                                                        *ptr167
                                                             .add(64 + 26 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<i64>() = _rt::as_i64(sort_order151);
-                                                        match recurrence_rule151 {
+                                                            .cast::<i64>() = _rt::as_i64(sort_order169);
+                                                        match recurrence_rule169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(72 + 26 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec164 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr164 = vec164.as_ptr().cast::<u8>();
-                                                                let len164 = vec164.len();
-                                                                ::core::mem::forget(vec164);
-                                                                *ptr149
+                                                                let vec182 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr182 = vec182.as_ptr().cast::<u8>();
+                                                                let len182 = vec182.len();
+                                                                ::core::mem::forget(vec182);
+                                                                *ptr167
                                                                     .add(72 + 28 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len164;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len182;
+                                                                *ptr167
                                                                     .add(72 + 27 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr164.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr182.cast_mut();
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(72 + 26 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        match remind_at151 {
+                                                        match remind_at169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(72 + 29 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec165 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr165 = vec165.as_ptr().cast::<u8>();
-                                                                let len165 = vec165.len();
-                                                                ::core::mem::forget(vec165);
-                                                                *ptr149
+                                                                let vec183 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr183 = vec183.as_ptr().cast::<u8>();
+                                                                let len183 = vec183.len();
+                                                                ::core::mem::forget(vec183);
+                                                                *ptr167
                                                                     .add(72 + 31 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len165;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len183;
+                                                                *ptr167
                                                                     .add(72 + 30 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr165.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr183.cast_mut();
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(72 + 29 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        match recurrence_anchor_day151 {
+                                                        match recurrence_anchor_day169 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(72 + 32 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(73 + 32 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (_rt::as_i32(e)) as u8;
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(72 + 32 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
                                                     }
-                                                    V265::PatchTask(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (1i32) as u8;
+                                                    V283::PatchTask(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (1i32) as u8;
                                                         let super::super::super::super::junban::plugin::types::PatchTask {
-                                                            task_id: task_id166,
-                                                            patch: patch166,
+                                                            task_id: task_id184,
+                                                            patch: patch184,
                                                         } = e;
-                                                        let vec167 = (task_id166.into_bytes()).into_boxed_slice();
-                                                        let ptr167 = vec167.as_ptr().cast::<u8>();
-                                                        let len167 = vec167.len();
-                                                        ::core::mem::forget(vec167);
-                                                        *ptr149
+                                                        let vec185 = (task_id184.into_bytes()).into_boxed_slice();
+                                                        let ptr185 = vec185.as_ptr().cast::<u8>();
+                                                        let len185 = vec185.len();
+                                                        ::core::mem::forget(vec185);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len167;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr167.cast_mut();
+                                                            .cast::<usize>() = len185;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr185.cast_mut();
                                                         let super::super::super::super::junban::plugin::types::TaskPatch {
-                                                            title: title168,
-                                                            description: description168,
-                                                            priority: priority168,
-                                                            due_date: due_date168,
-                                                            due_time: due_time168,
-                                                            deadline: deadline168,
-                                                            someday: someday168,
-                                                            estimated_minutes: estimated_minutes168,
-                                                            actual_minutes: actual_minutes168,
-                                                            dread: dread168,
-                                                            project_id: project_id168,
-                                                            section_id: section_id168,
-                                                            parent_id: parent_id168,
-                                                            tag_ids: tag_ids168,
-                                                            sort_order: sort_order168,
-                                                            recurrence_rule: recurrence_rule168,
-                                                            remind_at: remind_at168,
-                                                            recurrence_anchor_day: recurrence_anchor_day168,
-                                                        } = patch166;
-                                                        use super::super::super::super::junban::plugin::types::StringChange as V170;
-                                                        match title168 {
-                                                            V170::Unchanged => {
-                                                                *ptr149
+                                                            title: title186,
+                                                            description: description186,
+                                                            priority: priority186,
+                                                            due_date: due_date186,
+                                                            due_time: due_time186,
+                                                            deadline: deadline186,
+                                                            someday: someday186,
+                                                            estimated_minutes: estimated_minutes186,
+                                                            actual_minutes: actual_minutes186,
+                                                            dread: dread186,
+                                                            project_id: project_id186,
+                                                            section_id: section_id186,
+                                                            parent_id: parent_id186,
+                                                            tag_ids: tag_ids186,
+                                                            sort_order: sort_order186,
+                                                            recurrence_rule: recurrence_rule186,
+                                                            remind_at: remind_at186,
+                                                            recurrence_anchor_day: recurrence_anchor_day186,
+                                                        } = patch184;
+                                                        use super::super::super::super::junban::plugin::types::StringChange as V188;
+                                                        match title186 {
+                                                            V188::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V170::Set(e) => {
-                                                                *ptr149
+                                                            V188::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec169 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr169 = vec169.as_ptr().cast::<u8>();
-                                                                let len169 = vec169.len();
-                                                                ::core::mem::forget(vec169);
-                                                                *ptr149
+                                                                let vec187 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr187 = vec187.as_ptr().cast::<u8>();
+                                                                let len187 = vec187.len();
+                                                                ::core::mem::forget(vec187);
+                                                                *ptr167
                                                                     .add(32 + 4 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len169;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len187;
+                                                                *ptr167
                                                                     .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr169.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr187.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::StringChange as V172;
-                                                        match description168 {
-                                                            V172::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::StringChange as V190;
+                                                        match description186 {
+                                                            V190::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 5 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V172::Set(e) => {
-                                                                *ptr149
+                                                            V190::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 5 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec171 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr171 = vec171.as_ptr().cast::<u8>();
-                                                                let len171 = vec171.len();
-                                                                ::core::mem::forget(vec171);
-                                                                *ptr149
+                                                                let vec189 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr189 = vec189.as_ptr().cast::<u8>();
+                                                                let len189 = vec189.len();
+                                                                ::core::mem::forget(vec189);
+                                                                *ptr167
                                                                     .add(32 + 7 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len171;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len189;
+                                                                *ptr167
                                                                     .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr171.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr189.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalPriorityChange as V173;
-                                                        match priority168 {
-                                                            V173::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalPriorityChange as V191;
+                                                        match priority186 {
+                                                            V191::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 8 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V173::Clear => {
-                                                                *ptr149
+                                                            V191::Clear => {
+                                                                *ptr167
                                                                     .add(32 + 8 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V173::Set(e) => {
-                                                                *ptr149
+                                                            V191::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 8 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(33 + 8 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (e.clone() as i32) as u8;
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalDateChange as V175;
-                                                        match due_date168 {
-                                                            V175::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalDateChange as V193;
+                                                        match due_date186 {
+                                                            V193::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 9 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V175::Clear => {
-                                                                *ptr149
+                                                            V193::Clear => {
+                                                                *ptr167
                                                                     .add(32 + 9 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V175::Set(e) => {
-                                                                *ptr149
+                                                            V193::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 9 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                let vec174 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr174 = vec174.as_ptr().cast::<u8>();
-                                                                let len174 = vec174.len();
-                                                                ::core::mem::forget(vec174);
-                                                                *ptr149
+                                                                let vec192 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr192 = vec192.as_ptr().cast::<u8>();
+                                                                let len192 = vec192.len();
+                                                                ::core::mem::forget(vec192);
+                                                                *ptr167
                                                                     .add(32 + 11 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len174;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len192;
+                                                                *ptr167
                                                                     .add(32 + 10 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr174.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr192.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalLocalDueTimeChange as V179;
-                                                        match due_time168 {
-                                                            V179::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalLocalDueTimeChange as V197;
+                                                        match due_time186 {
+                                                            V197::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 12 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V179::Clear => {
-                                                                *ptr149
+                                                            V197::Clear => {
+                                                                *ptr167
                                                                     .add(32 + 12 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V179::Set(e) => {
-                                                                *ptr149
+                                                            V197::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 12 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
                                                                 let super::super::super::super::junban::plugin::types::LocalDueTime {
-                                                                    time: time176,
-                                                                    time_zone: time_zone176,
+                                                                    time: time194,
+                                                                    time_zone: time_zone194,
                                                                 } = e;
-                                                                let vec177 = (time176.into_bytes()).into_boxed_slice();
-                                                                let ptr177 = vec177.as_ptr().cast::<u8>();
-                                                                let len177 = vec177.len();
-                                                                ::core::mem::forget(vec177);
-                                                                *ptr149
+                                                                let vec195 = (time194.into_bytes()).into_boxed_slice();
+                                                                let ptr195 = vec195.as_ptr().cast::<u8>();
+                                                                let len195 = vec195.len();
+                                                                ::core::mem::forget(vec195);
+                                                                *ptr167
                                                                     .add(32 + 14 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len177;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len195;
+                                                                *ptr167
                                                                     .add(32 + 13 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr177.cast_mut();
-                                                                let vec178 = (time_zone176.into_bytes()).into_boxed_slice();
-                                                                let ptr178 = vec178.as_ptr().cast::<u8>();
-                                                                let len178 = vec178.len();
-                                                                ::core::mem::forget(vec178);
-                                                                *ptr149
+                                                                    .cast::<*mut u8>() = ptr195.cast_mut();
+                                                                let vec196 = (time_zone194.into_bytes()).into_boxed_slice();
+                                                                let ptr196 = vec196.as_ptr().cast::<u8>();
+                                                                let len196 = vec196.len();
+                                                                ::core::mem::forget(vec196);
+                                                                *ptr167
                                                                     .add(32 + 16 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len178;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len196;
+                                                                *ptr167
                                                                     .add(32 + 15 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr178.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr196.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalTimestampChange as V181;
-                                                        match deadline168 {
-                                                            V181::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalTimestampChange as V199;
+                                                        match deadline186 {
+                                                            V199::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 17 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V181::Clear => {
-                                                                *ptr149
+                                                            V199::Clear => {
+                                                                *ptr167
                                                                     .add(32 + 17 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V181::Set(e) => {
-                                                                *ptr149
+                                                            V199::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 17 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                let vec180 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr180 = vec180.as_ptr().cast::<u8>();
-                                                                let len180 = vec180.len();
-                                                                ::core::mem::forget(vec180);
-                                                                *ptr149
+                                                                let vec198 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr198 = vec198.as_ptr().cast::<u8>();
+                                                                let len198 = vec198.len();
+                                                                ::core::mem::forget(vec198);
+                                                                *ptr167
                                                                     .add(32 + 19 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len180;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len198;
+                                                                *ptr167
                                                                     .add(32 + 18 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr180.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr198.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::BoolChange as V182;
-                                                        match someday168 {
-                                                            V182::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::BoolChange as V200;
+                                                        match someday186 {
+                                                            V200::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V182::Set(e) => {
-                                                                *ptr149
+                                                            V200::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(33 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (match e {
                                                                     true => 1,
@@ -9591,701 +9709,701 @@ pub mod exports {
                                                                 }) as u8;
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalU32Change as V183;
-                                                        match estimated_minutes168 {
-                                                            V183::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalU32Change as V201;
+                                                        match estimated_minutes186 {
+                                                            V201::Unchanged => {
+                                                                *ptr167
                                                                     .add(36 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V183::Clear => {
-                                                                *ptr149
+                                                            V201::Clear => {
+                                                                *ptr167
                                                                     .add(36 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V183::Set(e) => {
-                                                                *ptr149
+                                                            V201::Set(e) => {
+                                                                *ptr167
                                                                     .add(36 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(40 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<i32>() = _rt::as_i32(e);
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalU32Change as V184;
-                                                        match actual_minutes168 {
-                                                            V184::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalU32Change as V202;
+                                                        match actual_minutes186 {
+                                                            V202::Unchanged => {
+                                                                *ptr167
                                                                     .add(44 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V184::Clear => {
-                                                                *ptr149
+                                                            V202::Clear => {
+                                                                *ptr167
                                                                     .add(44 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V184::Set(e) => {
-                                                                *ptr149
+                                                            V202::Set(e) => {
+                                                                *ptr167
                                                                     .add(44 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(48 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<i32>() = _rt::as_i32(e);
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalU8Change as V185;
-                                                        match dread168 {
-                                                            V185::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalU8Change as V203;
+                                                        match dread186 {
+                                                            V203::Unchanged => {
+                                                                *ptr167
                                                                     .add(52 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V185::Clear => {
-                                                                *ptr149
+                                                            V203::Clear => {
+                                                                *ptr167
                                                                     .add(52 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V185::Set(e) => {
-                                                                *ptr149
+                                                            V203::Set(e) => {
+                                                                *ptr167
                                                                     .add(52 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(53 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (_rt::as_i32(e)) as u8;
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalIdChange as V187;
-                                                        match project_id168 {
-                                                            V187::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalIdChange as V205;
+                                                        match project_id186 {
+                                                            V205::Unchanged => {
+                                                                *ptr167
                                                                     .add(56 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V187::Clear => {
-                                                                *ptr149
+                                                            V205::Clear => {
+                                                                *ptr167
                                                                     .add(56 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V187::Set(e) => {
-                                                                *ptr149
+                                                            V205::Set(e) => {
+                                                                *ptr167
                                                                     .add(56 + 20 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                let vec186 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr186 = vec186.as_ptr().cast::<u8>();
-                                                                let len186 = vec186.len();
-                                                                ::core::mem::forget(vec186);
-                                                                *ptr149
+                                                                let vec204 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr204 = vec204.as_ptr().cast::<u8>();
+                                                                let len204 = vec204.len();
+                                                                ::core::mem::forget(vec204);
+                                                                *ptr167
                                                                     .add(56 + 22 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len186;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len204;
+                                                                *ptr167
                                                                     .add(56 + 21 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr186.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr204.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalIdChange as V189;
-                                                        match section_id168 {
-                                                            V189::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalIdChange as V207;
+                                                        match section_id186 {
+                                                            V207::Unchanged => {
+                                                                *ptr167
                                                                     .add(56 + 23 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V189::Clear => {
-                                                                *ptr149
+                                                            V207::Clear => {
+                                                                *ptr167
                                                                     .add(56 + 23 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V189::Set(e) => {
-                                                                *ptr149
+                                                            V207::Set(e) => {
+                                                                *ptr167
                                                                     .add(56 + 23 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                let vec188 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr188 = vec188.as_ptr().cast::<u8>();
-                                                                let len188 = vec188.len();
-                                                                ::core::mem::forget(vec188);
-                                                                *ptr149
+                                                                let vec206 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr206 = vec206.as_ptr().cast::<u8>();
+                                                                let len206 = vec206.len();
+                                                                ::core::mem::forget(vec206);
+                                                                *ptr167
                                                                     .add(56 + 25 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len188;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len206;
+                                                                *ptr167
                                                                     .add(56 + 24 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr188.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr206.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalIdChange as V191;
-                                                        match parent_id168 {
-                                                            V191::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalIdChange as V209;
+                                                        match parent_id186 {
+                                                            V209::Unchanged => {
+                                                                *ptr167
                                                                     .add(56 + 26 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V191::Clear => {
-                                                                *ptr149
+                                                            V209::Clear => {
+                                                                *ptr167
                                                                     .add(56 + 26 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V191::Set(e) => {
-                                                                *ptr149
+                                                            V209::Set(e) => {
+                                                                *ptr167
                                                                     .add(56 + 26 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                let vec190 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr190 = vec190.as_ptr().cast::<u8>();
-                                                                let len190 = vec190.len();
-                                                                ::core::mem::forget(vec190);
-                                                                *ptr149
+                                                                let vec208 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr208 = vec208.as_ptr().cast::<u8>();
+                                                                let len208 = vec208.len();
+                                                                ::core::mem::forget(vec208);
+                                                                *ptr167
                                                                     .add(56 + 28 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len190;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len208;
+                                                                *ptr167
                                                                     .add(56 + 27 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr190.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr208.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::IdListChange as V194;
-                                                        match tag_ids168 {
-                                                            V194::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::IdListChange as V212;
+                                                        match tag_ids186 {
+                                                            V212::Unchanged => {
+                                                                *ptr167
                                                                     .add(56 + 29 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V194::Replace(e) => {
-                                                                *ptr149
+                                                            V212::Replace(e) => {
+                                                                *ptr167
                                                                     .add(56 + 29 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec193 = e;
-                                                                let len193 = vec193.len();
-                                                                let layout193 = _rt::alloc::Layout::from_size_align(
-                                                                        vec193.len() * (2 * ::core::mem::size_of::<*const u8>()),
+                                                                let vec211 = e;
+                                                                let len211 = vec211.len();
+                                                                let layout211 = _rt::alloc::Layout::from_size_align(
+                                                                        vec211.len() * (2 * ::core::mem::size_of::<*const u8>()),
                                                                         ::core::mem::size_of::<*const u8>(),
                                                                     )
                                                                     .unwrap();
-                                                                let (result193, _cleanup193) = wit_bindgen::rt::Cleanup::new(
-                                                                    layout193,
+                                                                let (result211, _cleanup211) = wit_bindgen::rt::Cleanup::new(
+                                                                    layout211,
                                                                 );
-                                                                if let Some(cleanup) = _cleanup193 {
+                                                                if let Some(cleanup) = _cleanup211 {
                                                                     cleanup.forget();
                                                                 }
-                                                                for (i, e) in vec193.into_iter().enumerate() {
-                                                                    let base = result193
+                                                                for (i, e) in vec211.into_iter().enumerate() {
+                                                                    let base = result211
                                                                         .add(i * (2 * ::core::mem::size_of::<*const u8>()));
                                                                     {
-                                                                        let vec192 = (e.into_bytes()).into_boxed_slice();
-                                                                        let ptr192 = vec192.as_ptr().cast::<u8>();
-                                                                        let len192 = vec192.len();
-                                                                        ::core::mem::forget(vec192);
+                                                                        let vec210 = (e.into_bytes()).into_boxed_slice();
+                                                                        let ptr210 = vec210.as_ptr().cast::<u8>();
+                                                                        let len210 = vec210.len();
+                                                                        ::core::mem::forget(vec210);
                                                                         *base
                                                                             .add(::core::mem::size_of::<*const u8>())
-                                                                            .cast::<usize>() = len192;
-                                                                        *base.add(0).cast::<*mut u8>() = ptr192.cast_mut();
+                                                                            .cast::<usize>() = len210;
+                                                                        *base.add(0).cast::<*mut u8>() = ptr210.cast_mut();
                                                                     }
                                                                 }
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(56 + 31 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len193;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len211;
+                                                                *ptr167
                                                                     .add(56 + 30 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = result193;
+                                                                    .cast::<*mut u8>() = result211;
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::S64Change as V195;
-                                                        match sort_order168 {
-                                                            V195::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::S64Change as V213;
+                                                        match sort_order186 {
+                                                            V213::Unchanged => {
+                                                                *ptr167
                                                                     .add(56 + 32 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V195::Set(e) => {
-                                                                *ptr149
+                                                            V213::Set(e) => {
+                                                                *ptr167
                                                                     .add(56 + 32 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(64 + 32 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<i64>() = _rt::as_i64(e);
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalStringChange as V197;
-                                                        match recurrence_rule168 {
-                                                            V197::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalStringChange as V215;
+                                                        match recurrence_rule186 {
+                                                            V215::Unchanged => {
+                                                                *ptr167
                                                                     .add(72 + 32 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V197::Clear => {
-                                                                *ptr149
+                                                            V215::Clear => {
+                                                                *ptr167
                                                                     .add(72 + 32 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V197::Set(e) => {
-                                                                *ptr149
+                                                            V215::Set(e) => {
+                                                                *ptr167
                                                                     .add(72 + 32 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                let vec196 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr196 = vec196.as_ptr().cast::<u8>();
-                                                                let len196 = vec196.len();
-                                                                ::core::mem::forget(vec196);
-                                                                *ptr149
+                                                                let vec214 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr214 = vec214.as_ptr().cast::<u8>();
+                                                                let len214 = vec214.len();
+                                                                ::core::mem::forget(vec214);
+                                                                *ptr167
                                                                     .add(72 + 34 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len196;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len214;
+                                                                *ptr167
                                                                     .add(72 + 33 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr196.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr214.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalTimestampChange as V199;
-                                                        match remind_at168 {
-                                                            V199::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalTimestampChange as V217;
+                                                        match remind_at186 {
+                                                            V217::Unchanged => {
+                                                                *ptr167
                                                                     .add(72 + 35 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V199::Clear => {
-                                                                *ptr149
+                                                            V217::Clear => {
+                                                                *ptr167
                                                                     .add(72 + 35 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V199::Set(e) => {
-                                                                *ptr149
+                                                            V217::Set(e) => {
+                                                                *ptr167
                                                                     .add(72 + 35 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                let vec198 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr198 = vec198.as_ptr().cast::<u8>();
-                                                                let len198 = vec198.len();
-                                                                ::core::mem::forget(vec198);
-                                                                *ptr149
+                                                                let vec216 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr216 = vec216.as_ptr().cast::<u8>();
+                                                                let len216 = vec216.len();
+                                                                ::core::mem::forget(vec216);
+                                                                *ptr167
                                                                     .add(72 + 37 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len198;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len216;
+                                                                *ptr167
                                                                     .add(72 + 36 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr198.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr216.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalU8Change as V200;
-                                                        match recurrence_anchor_day168 {
-                                                            V200::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalU8Change as V218;
+                                                        match recurrence_anchor_day186 {
+                                                            V218::Unchanged => {
+                                                                *ptr167
                                                                     .add(72 + 38 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V200::Clear => {
-                                                                *ptr149
+                                                            V218::Clear => {
+                                                                *ptr167
                                                                     .add(72 + 38 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V200::Set(e) => {
-                                                                *ptr149
+                                                            V218::Set(e) => {
+                                                                *ptr167
                                                                     .add(72 + 38 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(73 + 38 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (_rt::as_i32(e)) as u8;
                                                             }
                                                         }
                                                     }
-                                                    V265::CompleteTask(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (2i32) as u8;
-                                                        let vec201 = (e.into_bytes()).into_boxed_slice();
-                                                        let ptr201 = vec201.as_ptr().cast::<u8>();
-                                                        let len201 = vec201.len();
-                                                        ::core::mem::forget(vec201);
-                                                        *ptr149
+                                                    V283::CompleteTask(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (2i32) as u8;
+                                                        let vec219 = (e.into_bytes()).into_boxed_slice();
+                                                        let ptr219 = vec219.as_ptr().cast::<u8>();
+                                                        let len219 = vec219.len();
+                                                        ::core::mem::forget(vec219);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len201;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr201.cast_mut();
+                                                            .cast::<usize>() = len219;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr219.cast_mut();
                                                     }
-                                                    V265::UncompleteTask(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (3i32) as u8;
-                                                        let vec202 = (e.into_bytes()).into_boxed_slice();
-                                                        let ptr202 = vec202.as_ptr().cast::<u8>();
-                                                        let len202 = vec202.len();
-                                                        ::core::mem::forget(vec202);
-                                                        *ptr149
+                                                    V283::UncompleteTask(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (3i32) as u8;
+                                                        let vec220 = (e.into_bytes()).into_boxed_slice();
+                                                        let ptr220 = vec220.as_ptr().cast::<u8>();
+                                                        let len220 = vec220.len();
+                                                        ::core::mem::forget(vec220);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len202;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr202.cast_mut();
+                                                            .cast::<usize>() = len220;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr220.cast_mut();
                                                     }
-                                                    V265::CancelTask(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (4i32) as u8;
-                                                        let vec203 = (e.into_bytes()).into_boxed_slice();
-                                                        let ptr203 = vec203.as_ptr().cast::<u8>();
-                                                        let len203 = vec203.len();
-                                                        ::core::mem::forget(vec203);
-                                                        *ptr149
+                                                    V283::CancelTask(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (4i32) as u8;
+                                                        let vec221 = (e.into_bytes()).into_boxed_slice();
+                                                        let ptr221 = vec221.as_ptr().cast::<u8>();
+                                                        let len221 = vec221.len();
+                                                        ::core::mem::forget(vec221);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len203;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr203.cast_mut();
+                                                            .cast::<usize>() = len221;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr221.cast_mut();
                                                     }
-                                                    V265::ReopenTask(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (5i32) as u8;
-                                                        let vec204 = (e.into_bytes()).into_boxed_slice();
-                                                        let ptr204 = vec204.as_ptr().cast::<u8>();
-                                                        let len204 = vec204.len();
-                                                        ::core::mem::forget(vec204);
-                                                        *ptr149
+                                                    V283::ReopenTask(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (5i32) as u8;
+                                                        let vec222 = (e.into_bytes()).into_boxed_slice();
+                                                        let ptr222 = vec222.as_ptr().cast::<u8>();
+                                                        let len222 = vec222.len();
+                                                        ::core::mem::forget(vec222);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len204;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr204.cast_mut();
+                                                            .cast::<usize>() = len222;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr222.cast_mut();
                                                     }
-                                                    V265::DeleteTask(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (6i32) as u8;
-                                                        let vec205 = (e.into_bytes()).into_boxed_slice();
-                                                        let ptr205 = vec205.as_ptr().cast::<u8>();
-                                                        let len205 = vec205.len();
-                                                        ::core::mem::forget(vec205);
-                                                        *ptr149
+                                                    V283::DeleteTask(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (6i32) as u8;
+                                                        let vec223 = (e.into_bytes()).into_boxed_slice();
+                                                        let ptr223 = vec223.as_ptr().cast::<u8>();
+                                                        let len223 = vec223.len();
+                                                        ::core::mem::forget(vec223);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len205;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr205.cast_mut();
+                                                            .cast::<usize>() = len223;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr223.cast_mut();
                                                     }
-                                                    V265::BulkTasks(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (7i32) as u8;
+                                                    V283::BulkTasks(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (7i32) as u8;
                                                         let super::super::super::super::junban::plugin::types::BulkTasks {
-                                                            task_ids: task_ids206,
-                                                            action: action206,
+                                                            task_ids: task_ids224,
+                                                            action: action224,
                                                         } = e;
-                                                        let vec208 = task_ids206;
-                                                        let len208 = vec208.len();
-                                                        let layout208 = _rt::alloc::Layout::from_size_align(
-                                                                vec208.len() * (2 * ::core::mem::size_of::<*const u8>()),
+                                                        let vec226 = task_ids224;
+                                                        let len226 = vec226.len();
+                                                        let layout226 = _rt::alloc::Layout::from_size_align(
+                                                                vec226.len() * (2 * ::core::mem::size_of::<*const u8>()),
                                                                 ::core::mem::size_of::<*const u8>(),
                                                             )
                                                             .unwrap();
-                                                        let (result208, _cleanup208) = wit_bindgen::rt::Cleanup::new(
-                                                            layout208,
+                                                        let (result226, _cleanup226) = wit_bindgen::rt::Cleanup::new(
+                                                            layout226,
                                                         );
-                                                        if let Some(cleanup) = _cleanup208 {
+                                                        if let Some(cleanup) = _cleanup226 {
                                                             cleanup.forget();
                                                         }
-                                                        for (i, e) in vec208.into_iter().enumerate() {
-                                                            let base = result208
+                                                        for (i, e) in vec226.into_iter().enumerate() {
+                                                            let base = result226
                                                                 .add(i * (2 * ::core::mem::size_of::<*const u8>()));
                                                             {
-                                                                let vec207 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr207 = vec207.as_ptr().cast::<u8>();
-                                                                let len207 = vec207.len();
-                                                                ::core::mem::forget(vec207);
+                                                                let vec225 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr225 = vec225.as_ptr().cast::<u8>();
+                                                                let len225 = vec225.len();
+                                                                ::core::mem::forget(vec225);
                                                                 *base
                                                                     .add(::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len207;
-                                                                *base.add(0).cast::<*mut u8>() = ptr207.cast_mut();
+                                                                    .cast::<usize>() = len225;
+                                                                *base.add(0).cast::<*mut u8>() = ptr225.cast_mut();
                                                             }
                                                         }
-                                                        *ptr149
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len208;
-                                                        *ptr149.add(32).cast::<*mut u8>() = result208;
-                                                        use super::super::super::super::junban::plugin::types::BulkAction as V232;
-                                                        match action206 {
-                                                            V232::Complete => {
-                                                                *ptr149
+                                                            .cast::<usize>() = len226;
+                                                        *ptr167.add(32).cast::<*mut u8>() = result226;
+                                                        use super::super::super::super::junban::plugin::types::BulkAction as V250;
+                                                        match action224 {
+                                                            V250::Complete => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V232::Uncomplete => {
-                                                                *ptr149
+                                                            V250::Uncomplete => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V232::Cancel => {
-                                                                *ptr149
+                                                            V250::Cancel => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
                                                             }
-                                                            V232::Reopen => {
-                                                                *ptr149
+                                                            V250::Reopen => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (3i32) as u8;
                                                             }
-                                                            V232::Delete => {
-                                                                *ptr149
+                                                            V250::Delete => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (4i32) as u8;
                                                             }
-                                                            V232::Move(e) => {
-                                                                *ptr149
+                                                            V250::Move(e) => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (5i32) as u8;
                                                                 let super::super::super::super::junban::plugin::types::BulkMove {
-                                                                    project_id: project_id209,
-                                                                    section_id: section_id209,
-                                                                    parent_id: parent_id209,
+                                                                    project_id: project_id227,
+                                                                    section_id: section_id227,
+                                                                    parent_id: parent_id227,
                                                                 } = e;
-                                                                use super::super::super::super::junban::plugin::types::OptionalIdChange as V211;
-                                                                match project_id209 {
-                                                                    V211::Unchanged => {
-                                                                        *ptr149
-                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (0i32) as u8;
-                                                                    }
-                                                                    V211::Clear => {
-                                                                        *ptr149
-                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (1i32) as u8;
-                                                                    }
-                                                                    V211::Set(e) => {
-                                                                        *ptr149
-                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (2i32) as u8;
-                                                                        let vec210 = (e.into_bytes()).into_boxed_slice();
-                                                                        let ptr210 = vec210.as_ptr().cast::<u8>();
-                                                                        let len210 = vec210.len();
-                                                                        ::core::mem::forget(vec210);
-                                                                        *ptr149
-                                                                            .add(32 + 5 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<usize>() = len210;
-                                                                        *ptr149
-                                                                            .add(32 + 4 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<*mut u8>() = ptr210.cast_mut();
-                                                                    }
-                                                                }
-                                                                use super::super::super::super::junban::plugin::types::OptionalIdChange as V213;
-                                                                match section_id209 {
-                                                                    V213::Unchanged => {
-                                                                        *ptr149
-                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (0i32) as u8;
-                                                                    }
-                                                                    V213::Clear => {
-                                                                        *ptr149
-                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (1i32) as u8;
-                                                                    }
-                                                                    V213::Set(e) => {
-                                                                        *ptr149
-                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (2i32) as u8;
-                                                                        let vec212 = (e.into_bytes()).into_boxed_slice();
-                                                                        let ptr212 = vec212.as_ptr().cast::<u8>();
-                                                                        let len212 = vec212.len();
-                                                                        ::core::mem::forget(vec212);
-                                                                        *ptr149
-                                                                            .add(32 + 8 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<usize>() = len212;
-                                                                        *ptr149
-                                                                            .add(32 + 7 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<*mut u8>() = ptr212.cast_mut();
-                                                                    }
-                                                                }
-                                                                use super::super::super::super::junban::plugin::types::OptionalIdChange as V215;
-                                                                match parent_id209 {
-                                                                    V215::Unchanged => {
-                                                                        *ptr149
-                                                                            .add(32 + 9 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (0i32) as u8;
-                                                                    }
-                                                                    V215::Clear => {
-                                                                        *ptr149
-                                                                            .add(32 + 9 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (1i32) as u8;
-                                                                    }
-                                                                    V215::Set(e) => {
-                                                                        *ptr149
-                                                                            .add(32 + 9 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (2i32) as u8;
-                                                                        let vec214 = (e.into_bytes()).into_boxed_slice();
-                                                                        let ptr214 = vec214.as_ptr().cast::<u8>();
-                                                                        let len214 = vec214.len();
-                                                                        ::core::mem::forget(vec214);
-                                                                        *ptr149
-                                                                            .add(32 + 11 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<usize>() = len214;
-                                                                        *ptr149
-                                                                            .add(32 + 10 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<*mut u8>() = ptr214.cast_mut();
-                                                                    }
-                                                                }
-                                                            }
-                                                            V232::Tag(e) => {
-                                                                *ptr149
-                                                                    .add(32 + 2 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<u8>() = (6i32) as u8;
-                                                                let super::super::super::super::junban::plugin::types::BulkTag {
-                                                                    add: add216,
-                                                                    remove: remove216,
-                                                                } = e;
-                                                                let vec218 = add216;
-                                                                let len218 = vec218.len();
-                                                                let layout218 = _rt::alloc::Layout::from_size_align(
-                                                                        vec218.len() * (2 * ::core::mem::size_of::<*const u8>()),
-                                                                        ::core::mem::size_of::<*const u8>(),
-                                                                    )
-                                                                    .unwrap();
-                                                                let (result218, _cleanup218) = wit_bindgen::rt::Cleanup::new(
-                                                                    layout218,
-                                                                );
-                                                                if let Some(cleanup) = _cleanup218 {
-                                                                    cleanup.forget();
-                                                                }
-                                                                for (i, e) in vec218.into_iter().enumerate() {
-                                                                    let base = result218
-                                                                        .add(i * (2 * ::core::mem::size_of::<*const u8>()));
-                                                                    {
-                                                                        let vec217 = (e.into_bytes()).into_boxed_slice();
-                                                                        let ptr217 = vec217.as_ptr().cast::<u8>();
-                                                                        let len217 = vec217.len();
-                                                                        ::core::mem::forget(vec217);
-                                                                        *base
-                                                                            .add(::core::mem::size_of::<*const u8>())
-                                                                            .cast::<usize>() = len217;
-                                                                        *base.add(0).cast::<*mut u8>() = ptr217.cast_mut();
-                                                                    }
-                                                                }
-                                                                *ptr149
-                                                                    .add(32 + 4 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len218;
-                                                                *ptr149
-                                                                    .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = result218;
-                                                                let vec220 = remove216;
-                                                                let len220 = vec220.len();
-                                                                let layout220 = _rt::alloc::Layout::from_size_align(
-                                                                        vec220.len() * (2 * ::core::mem::size_of::<*const u8>()),
-                                                                        ::core::mem::size_of::<*const u8>(),
-                                                                    )
-                                                                    .unwrap();
-                                                                let (result220, _cleanup220) = wit_bindgen::rt::Cleanup::new(
-                                                                    layout220,
-                                                                );
-                                                                if let Some(cleanup) = _cleanup220 {
-                                                                    cleanup.forget();
-                                                                }
-                                                                for (i, e) in vec220.into_iter().enumerate() {
-                                                                    let base = result220
-                                                                        .add(i * (2 * ::core::mem::size_of::<*const u8>()));
-                                                                    {
-                                                                        let vec219 = (e.into_bytes()).into_boxed_slice();
-                                                                        let ptr219 = vec219.as_ptr().cast::<u8>();
-                                                                        let len219 = vec219.len();
-                                                                        ::core::mem::forget(vec219);
-                                                                        *base
-                                                                            .add(::core::mem::size_of::<*const u8>())
-                                                                            .cast::<usize>() = len219;
-                                                                        *base.add(0).cast::<*mut u8>() = ptr219.cast_mut();
-                                                                    }
-                                                                }
-                                                                *ptr149
-                                                                    .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len220;
-                                                                *ptr149
-                                                                    .add(32 + 5 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = result220;
-                                                            }
-                                                            V232::Schedule(e) => {
-                                                                *ptr149
-                                                                    .add(32 + 2 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<u8>() = (7i32) as u8;
-                                                                let super::super::super::super::junban::plugin::types::BulkSchedule {
-                                                                    due_date: due_date221,
-                                                                    due_time: due_time221,
-                                                                    deadline: deadline221,
-                                                                    someday: someday221,
-                                                                } = e;
-                                                                use super::super::super::super::junban::plugin::types::OptionalDateChange as V223;
-                                                                match due_date221 {
-                                                                    V223::Unchanged => {
-                                                                        *ptr149
-                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (0i32) as u8;
-                                                                    }
-                                                                    V223::Clear => {
-                                                                        *ptr149
-                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (1i32) as u8;
-                                                                    }
-                                                                    V223::Set(e) => {
-                                                                        *ptr149
-                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (2i32) as u8;
-                                                                        let vec222 = (e.into_bytes()).into_boxed_slice();
-                                                                        let ptr222 = vec222.as_ptr().cast::<u8>();
-                                                                        let len222 = vec222.len();
-                                                                        ::core::mem::forget(vec222);
-                                                                        *ptr149
-                                                                            .add(32 + 5 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<usize>() = len222;
-                                                                        *ptr149
-                                                                            .add(32 + 4 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<*mut u8>() = ptr222.cast_mut();
-                                                                    }
-                                                                }
-                                                                use super::super::super::super::junban::plugin::types::OptionalLocalDueTimeChange as V227;
-                                                                match due_time221 {
-                                                                    V227::Unchanged => {
-                                                                        *ptr149
-                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (0i32) as u8;
-                                                                    }
-                                                                    V227::Clear => {
-                                                                        *ptr149
-                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (1i32) as u8;
-                                                                    }
-                                                                    V227::Set(e) => {
-                                                                        *ptr149
-                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<u8>() = (2i32) as u8;
-                                                                        let super::super::super::super::junban::plugin::types::LocalDueTime {
-                                                                            time: time224,
-                                                                            time_zone: time_zone224,
-                                                                        } = e;
-                                                                        let vec225 = (time224.into_bytes()).into_boxed_slice();
-                                                                        let ptr225 = vec225.as_ptr().cast::<u8>();
-                                                                        let len225 = vec225.len();
-                                                                        ::core::mem::forget(vec225);
-                                                                        *ptr149
-                                                                            .add(32 + 8 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<usize>() = len225;
-                                                                        *ptr149
-                                                                            .add(32 + 7 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<*mut u8>() = ptr225.cast_mut();
-                                                                        let vec226 = (time_zone224.into_bytes()).into_boxed_slice();
-                                                                        let ptr226 = vec226.as_ptr().cast::<u8>();
-                                                                        let len226 = vec226.len();
-                                                                        ::core::mem::forget(vec226);
-                                                                        *ptr149
-                                                                            .add(32 + 10 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<usize>() = len226;
-                                                                        *ptr149
-                                                                            .add(32 + 9 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<*mut u8>() = ptr226.cast_mut();
-                                                                    }
-                                                                }
-                                                                use super::super::super::super::junban::plugin::types::OptionalTimestampChange as V229;
-                                                                match deadline221 {
+                                                                use super::super::super::super::junban::plugin::types::OptionalIdChange as V229;
+                                                                match project_id227 {
                                                                     V229::Unchanged => {
-                                                                        *ptr149
-                                                                            .add(32 + 11 * ::core::mem::size_of::<*const u8>())
+                                                                        *ptr167
+                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
                                                                             .cast::<u8>() = (0i32) as u8;
                                                                     }
                                                                     V229::Clear => {
-                                                                        *ptr149
-                                                                            .add(32 + 11 * ::core::mem::size_of::<*const u8>())
+                                                                        *ptr167
+                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
                                                                             .cast::<u8>() = (1i32) as u8;
                                                                     }
                                                                     V229::Set(e) => {
-                                                                        *ptr149
-                                                                            .add(32 + 11 * ::core::mem::size_of::<*const u8>())
+                                                                        *ptr167
+                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
                                                                             .cast::<u8>() = (2i32) as u8;
                                                                         let vec228 = (e.into_bytes()).into_boxed_slice();
                                                                         let ptr228 = vec228.as_ptr().cast::<u8>();
                                                                         let len228 = vec228.len();
                                                                         ::core::mem::forget(vec228);
-                                                                        *ptr149
-                                                                            .add(32 + 13 * ::core::mem::size_of::<*const u8>())
+                                                                        *ptr167
+                                                                            .add(32 + 5 * ::core::mem::size_of::<*const u8>())
                                                                             .cast::<usize>() = len228;
-                                                                        *ptr149
-                                                                            .add(32 + 12 * ::core::mem::size_of::<*const u8>())
+                                                                        *ptr167
+                                                                            .add(32 + 4 * ::core::mem::size_of::<*const u8>())
                                                                             .cast::<*mut u8>() = ptr228.cast_mut();
                                                                     }
                                                                 }
-                                                                use super::super::super::super::junban::plugin::types::BoolChange as V230;
-                                                                match someday221 {
-                                                                    V230::Unchanged => {
-                                                                        *ptr149
+                                                                use super::super::super::super::junban::plugin::types::OptionalIdChange as V231;
+                                                                match section_id227 {
+                                                                    V231::Unchanged => {
+                                                                        *ptr167
+                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (0i32) as u8;
+                                                                    }
+                                                                    V231::Clear => {
+                                                                        *ptr167
+                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (1i32) as u8;
+                                                                    }
+                                                                    V231::Set(e) => {
+                                                                        *ptr167
+                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (2i32) as u8;
+                                                                        let vec230 = (e.into_bytes()).into_boxed_slice();
+                                                                        let ptr230 = vec230.as_ptr().cast::<u8>();
+                                                                        let len230 = vec230.len();
+                                                                        ::core::mem::forget(vec230);
+                                                                        *ptr167
+                                                                            .add(32 + 8 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<usize>() = len230;
+                                                                        *ptr167
+                                                                            .add(32 + 7 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<*mut u8>() = ptr230.cast_mut();
+                                                                    }
+                                                                }
+                                                                use super::super::super::super::junban::plugin::types::OptionalIdChange as V233;
+                                                                match parent_id227 {
+                                                                    V233::Unchanged => {
+                                                                        *ptr167
+                                                                            .add(32 + 9 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (0i32) as u8;
+                                                                    }
+                                                                    V233::Clear => {
+                                                                        *ptr167
+                                                                            .add(32 + 9 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (1i32) as u8;
+                                                                    }
+                                                                    V233::Set(e) => {
+                                                                        *ptr167
+                                                                            .add(32 + 9 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (2i32) as u8;
+                                                                        let vec232 = (e.into_bytes()).into_boxed_slice();
+                                                                        let ptr232 = vec232.as_ptr().cast::<u8>();
+                                                                        let len232 = vec232.len();
+                                                                        ::core::mem::forget(vec232);
+                                                                        *ptr167
+                                                                            .add(32 + 11 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<usize>() = len232;
+                                                                        *ptr167
+                                                                            .add(32 + 10 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<*mut u8>() = ptr232.cast_mut();
+                                                                    }
+                                                                }
+                                                            }
+                                                            V250::Tag(e) => {
+                                                                *ptr167
+                                                                    .add(32 + 2 * ::core::mem::size_of::<*const u8>())
+                                                                    .cast::<u8>() = (6i32) as u8;
+                                                                let super::super::super::super::junban::plugin::types::BulkTag {
+                                                                    add: add234,
+                                                                    remove: remove234,
+                                                                } = e;
+                                                                let vec236 = add234;
+                                                                let len236 = vec236.len();
+                                                                let layout236 = _rt::alloc::Layout::from_size_align(
+                                                                        vec236.len() * (2 * ::core::mem::size_of::<*const u8>()),
+                                                                        ::core::mem::size_of::<*const u8>(),
+                                                                    )
+                                                                    .unwrap();
+                                                                let (result236, _cleanup236) = wit_bindgen::rt::Cleanup::new(
+                                                                    layout236,
+                                                                );
+                                                                if let Some(cleanup) = _cleanup236 {
+                                                                    cleanup.forget();
+                                                                }
+                                                                for (i, e) in vec236.into_iter().enumerate() {
+                                                                    let base = result236
+                                                                        .add(i * (2 * ::core::mem::size_of::<*const u8>()));
+                                                                    {
+                                                                        let vec235 = (e.into_bytes()).into_boxed_slice();
+                                                                        let ptr235 = vec235.as_ptr().cast::<u8>();
+                                                                        let len235 = vec235.len();
+                                                                        ::core::mem::forget(vec235);
+                                                                        *base
+                                                                            .add(::core::mem::size_of::<*const u8>())
+                                                                            .cast::<usize>() = len235;
+                                                                        *base.add(0).cast::<*mut u8>() = ptr235.cast_mut();
+                                                                    }
+                                                                }
+                                                                *ptr167
+                                                                    .add(32 + 4 * ::core::mem::size_of::<*const u8>())
+                                                                    .cast::<usize>() = len236;
+                                                                *ptr167
+                                                                    .add(32 + 3 * ::core::mem::size_of::<*const u8>())
+                                                                    .cast::<*mut u8>() = result236;
+                                                                let vec238 = remove234;
+                                                                let len238 = vec238.len();
+                                                                let layout238 = _rt::alloc::Layout::from_size_align(
+                                                                        vec238.len() * (2 * ::core::mem::size_of::<*const u8>()),
+                                                                        ::core::mem::size_of::<*const u8>(),
+                                                                    )
+                                                                    .unwrap();
+                                                                let (result238, _cleanup238) = wit_bindgen::rt::Cleanup::new(
+                                                                    layout238,
+                                                                );
+                                                                if let Some(cleanup) = _cleanup238 {
+                                                                    cleanup.forget();
+                                                                }
+                                                                for (i, e) in vec238.into_iter().enumerate() {
+                                                                    let base = result238
+                                                                        .add(i * (2 * ::core::mem::size_of::<*const u8>()));
+                                                                    {
+                                                                        let vec237 = (e.into_bytes()).into_boxed_slice();
+                                                                        let ptr237 = vec237.as_ptr().cast::<u8>();
+                                                                        let len237 = vec237.len();
+                                                                        ::core::mem::forget(vec237);
+                                                                        *base
+                                                                            .add(::core::mem::size_of::<*const u8>())
+                                                                            .cast::<usize>() = len237;
+                                                                        *base.add(0).cast::<*mut u8>() = ptr237.cast_mut();
+                                                                    }
+                                                                }
+                                                                *ptr167
+                                                                    .add(32 + 6 * ::core::mem::size_of::<*const u8>())
+                                                                    .cast::<usize>() = len238;
+                                                                *ptr167
+                                                                    .add(32 + 5 * ::core::mem::size_of::<*const u8>())
+                                                                    .cast::<*mut u8>() = result238;
+                                                            }
+                                                            V250::Schedule(e) => {
+                                                                *ptr167
+                                                                    .add(32 + 2 * ::core::mem::size_of::<*const u8>())
+                                                                    .cast::<u8>() = (7i32) as u8;
+                                                                let super::super::super::super::junban::plugin::types::BulkSchedule {
+                                                                    due_date: due_date239,
+                                                                    due_time: due_time239,
+                                                                    deadline: deadline239,
+                                                                    someday: someday239,
+                                                                } = e;
+                                                                use super::super::super::super::junban::plugin::types::OptionalDateChange as V241;
+                                                                match due_date239 {
+                                                                    V241::Unchanged => {
+                                                                        *ptr167
+                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (0i32) as u8;
+                                                                    }
+                                                                    V241::Clear => {
+                                                                        *ptr167
+                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (1i32) as u8;
+                                                                    }
+                                                                    V241::Set(e) => {
+                                                                        *ptr167
+                                                                            .add(32 + 3 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (2i32) as u8;
+                                                                        let vec240 = (e.into_bytes()).into_boxed_slice();
+                                                                        let ptr240 = vec240.as_ptr().cast::<u8>();
+                                                                        let len240 = vec240.len();
+                                                                        ::core::mem::forget(vec240);
+                                                                        *ptr167
+                                                                            .add(32 + 5 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<usize>() = len240;
+                                                                        *ptr167
+                                                                            .add(32 + 4 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<*mut u8>() = ptr240.cast_mut();
+                                                                    }
+                                                                }
+                                                                use super::super::super::super::junban::plugin::types::OptionalLocalDueTimeChange as V245;
+                                                                match due_time239 {
+                                                                    V245::Unchanged => {
+                                                                        *ptr167
+                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (0i32) as u8;
+                                                                    }
+                                                                    V245::Clear => {
+                                                                        *ptr167
+                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (1i32) as u8;
+                                                                    }
+                                                                    V245::Set(e) => {
+                                                                        *ptr167
+                                                                            .add(32 + 6 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (2i32) as u8;
+                                                                        let super::super::super::super::junban::plugin::types::LocalDueTime {
+                                                                            time: time242,
+                                                                            time_zone: time_zone242,
+                                                                        } = e;
+                                                                        let vec243 = (time242.into_bytes()).into_boxed_slice();
+                                                                        let ptr243 = vec243.as_ptr().cast::<u8>();
+                                                                        let len243 = vec243.len();
+                                                                        ::core::mem::forget(vec243);
+                                                                        *ptr167
+                                                                            .add(32 + 8 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<usize>() = len243;
+                                                                        *ptr167
+                                                                            .add(32 + 7 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<*mut u8>() = ptr243.cast_mut();
+                                                                        let vec244 = (time_zone242.into_bytes()).into_boxed_slice();
+                                                                        let ptr244 = vec244.as_ptr().cast::<u8>();
+                                                                        let len244 = vec244.len();
+                                                                        ::core::mem::forget(vec244);
+                                                                        *ptr167
+                                                                            .add(32 + 10 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<usize>() = len244;
+                                                                        *ptr167
+                                                                            .add(32 + 9 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<*mut u8>() = ptr244.cast_mut();
+                                                                    }
+                                                                }
+                                                                use super::super::super::super::junban::plugin::types::OptionalTimestampChange as V247;
+                                                                match deadline239 {
+                                                                    V247::Unchanged => {
+                                                                        *ptr167
+                                                                            .add(32 + 11 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (0i32) as u8;
+                                                                    }
+                                                                    V247::Clear => {
+                                                                        *ptr167
+                                                                            .add(32 + 11 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (1i32) as u8;
+                                                                    }
+                                                                    V247::Set(e) => {
+                                                                        *ptr167
+                                                                            .add(32 + 11 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<u8>() = (2i32) as u8;
+                                                                        let vec246 = (e.into_bytes()).into_boxed_slice();
+                                                                        let ptr246 = vec246.as_ptr().cast::<u8>();
+                                                                        let len246 = vec246.len();
+                                                                        ::core::mem::forget(vec246);
+                                                                        *ptr167
+                                                                            .add(32 + 13 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<usize>() = len246;
+                                                                        *ptr167
+                                                                            .add(32 + 12 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<*mut u8>() = ptr246.cast_mut();
+                                                                    }
+                                                                }
+                                                                use super::super::super::super::junban::plugin::types::BoolChange as V248;
+                                                                match someday239 {
+                                                                    V248::Unchanged => {
+                                                                        *ptr167
                                                                             .add(32 + 14 * ::core::mem::size_of::<*const u8>())
                                                                             .cast::<u8>() = (0i32) as u8;
                                                                     }
-                                                                    V230::Set(e) => {
-                                                                        *ptr149
+                                                                    V248::Set(e) => {
+                                                                        *ptr167
                                                                             .add(32 + 14 * ::core::mem::size_of::<*const u8>())
                                                                             .cast::<u8>() = (1i32) as u8;
-                                                                        *ptr149
+                                                                        *ptr167
                                                                             .add(33 + 14 * ::core::mem::size_of::<*const u8>())
                                                                             .cast::<u8>() = (match e {
                                                                             true => 1,
@@ -10294,22 +10412,22 @@ pub mod exports {
                                                                     }
                                                                 }
                                                             }
-                                                            V232::Priority(e) => {
-                                                                *ptr149
+                                                            V250::Priority(e) => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (8i32) as u8;
-                                                                use super::super::super::super::junban::plugin::types::BulkPriority as V231;
+                                                                use super::super::super::super::junban::plugin::types::BulkPriority as V249;
                                                                 match e {
-                                                                    V231::Clear => {
-                                                                        *ptr149
+                                                                    V249::Clear => {
+                                                                        *ptr167
                                                                             .add(32 + 3 * ::core::mem::size_of::<*const u8>())
                                                                             .cast::<u8>() = (0i32) as u8;
                                                                     }
-                                                                    V231::Set(e) => {
-                                                                        *ptr149
+                                                                    V249::Set(e) => {
+                                                                        *ptr167
                                                                             .add(32 + 3 * ::core::mem::size_of::<*const u8>())
                                                                             .cast::<u8>() = (1i32) as u8;
-                                                                        *ptr149
+                                                                        *ptr167
                                                                             .add(33 + 3 * ::core::mem::size_of::<*const u8>())
                                                                             .cast::<u8>() = (e.clone() as i32) as u8;
                                                                     }
@@ -10317,238 +10435,238 @@ pub mod exports {
                                                             }
                                                         }
                                                     }
-                                                    V265::CreateProject(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (8i32) as u8;
+                                                    V283::CreateProject(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (8i32) as u8;
                                                         let super::super::super::super::junban::plugin::types::ProjectDraft {
-                                                            name: name233,
-                                                            color: color233,
-                                                            icon: icon233,
-                                                            parent_id: parent_id233,
-                                                            favorite: favorite233,
-                                                            archived: archived233,
-                                                            view: view233,
-                                                            sort_order: sort_order233,
+                                                            name: name251,
+                                                            color: color251,
+                                                            icon: icon251,
+                                                            parent_id: parent_id251,
+                                                            favorite: favorite251,
+                                                            archived: archived251,
+                                                            view: view251,
+                                                            sort_order: sort_order251,
                                                         } = e;
-                                                        let vec234 = (name233.into_bytes()).into_boxed_slice();
-                                                        let ptr234 = vec234.as_ptr().cast::<u8>();
-                                                        let len234 = vec234.len();
-                                                        ::core::mem::forget(vec234);
-                                                        *ptr149
+                                                        let vec252 = (name251.into_bytes()).into_boxed_slice();
+                                                        let ptr252 = vec252.as_ptr().cast::<u8>();
+                                                        let len252 = vec252.len();
+                                                        ::core::mem::forget(vec252);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len234;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr234.cast_mut();
-                                                        let vec235 = (color233.into_bytes()).into_boxed_slice();
-                                                        let ptr235 = vec235.as_ptr().cast::<u8>();
-                                                        let len235 = vec235.len();
-                                                        ::core::mem::forget(vec235);
-                                                        *ptr149
+                                                            .cast::<usize>() = len252;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr252.cast_mut();
+                                                        let vec253 = (color251.into_bytes()).into_boxed_slice();
+                                                        let ptr253 = vec253.as_ptr().cast::<u8>();
+                                                        let len253 = vec253.len();
+                                                        ::core::mem::forget(vec253);
+                                                        *ptr167
                                                             .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len235;
-                                                        *ptr149
+                                                            .cast::<usize>() = len253;
+                                                        *ptr167
                                                             .add(32 + 2 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<*mut u8>() = ptr235.cast_mut();
-                                                        match icon233 {
+                                                            .cast::<*mut u8>() = ptr253.cast_mut();
+                                                        match icon251 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 4 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec236 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr236 = vec236.as_ptr().cast::<u8>();
-                                                                let len236 = vec236.len();
-                                                                ::core::mem::forget(vec236);
-                                                                *ptr149
+                                                                let vec254 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr254 = vec254.as_ptr().cast::<u8>();
+                                                                let len254 = vec254.len();
+                                                                ::core::mem::forget(vec254);
+                                                                *ptr167
                                                                     .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len236;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len254;
+                                                                *ptr167
                                                                     .add(32 + 5 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr236.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr254.cast_mut();
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 4 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        match parent_id233 {
+                                                        match parent_id251 {
                                                             Some(e) => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 7 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec237 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr237 = vec237.as_ptr().cast::<u8>();
-                                                                let len237 = vec237.len();
-                                                                ::core::mem::forget(vec237);
-                                                                *ptr149
+                                                                let vec255 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr255 = vec255.as_ptr().cast::<u8>();
+                                                                let len255 = vec255.len();
+                                                                ::core::mem::forget(vec255);
+                                                                *ptr167
                                                                     .add(32 + 9 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len237;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len255;
+                                                                *ptr167
                                                                     .add(32 + 8 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr237.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr255.cast_mut();
                                                             }
                                                             None => {
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(32 + 7 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
                                                         };
-                                                        *ptr149
+                                                        *ptr167
                                                             .add(32 + 10 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<u8>() = (match favorite233 {
+                                                            .cast::<u8>() = (match favorite251 {
                                                             true => 1,
                                                             false => 0,
                                                         }) as u8;
-                                                        *ptr149
+                                                        *ptr167
                                                             .add(33 + 10 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<u8>() = (match archived233 {
+                                                            .cast::<u8>() = (match archived251 {
                                                             true => 1,
                                                             false => 0,
                                                         }) as u8;
-                                                        *ptr149
+                                                        *ptr167
                                                             .add(34 + 10 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<u8>() = (view233.clone() as i32) as u8;
-                                                        *ptr149
+                                                            .cast::<u8>() = (view251.clone() as i32) as u8;
+                                                        *ptr167
                                                             .add(40 + 10 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<i64>() = _rt::as_i64(sort_order233);
+                                                            .cast::<i64>() = _rt::as_i64(sort_order251);
                                                     }
-                                                    V265::PatchProject(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (9i32) as u8;
+                                                    V283::PatchProject(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (9i32) as u8;
                                                         let super::super::super::super::junban::plugin::types::PatchProject {
-                                                            project_id: project_id238,
-                                                            patch: patch238,
+                                                            project_id: project_id256,
+                                                            patch: patch256,
                                                         } = e;
-                                                        let vec239 = (project_id238.into_bytes())
+                                                        let vec257 = (project_id256.into_bytes())
                                                             .into_boxed_slice();
-                                                        let ptr239 = vec239.as_ptr().cast::<u8>();
-                                                        let len239 = vec239.len();
-                                                        ::core::mem::forget(vec239);
-                                                        *ptr149
+                                                        let ptr257 = vec257.as_ptr().cast::<u8>();
+                                                        let len257 = vec257.len();
+                                                        ::core::mem::forget(vec257);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len239;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr239.cast_mut();
+                                                            .cast::<usize>() = len257;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr257.cast_mut();
                                                         let super::super::super::super::junban::plugin::types::ProjectPatch {
-                                                            name: name240,
-                                                            color: color240,
-                                                            icon: icon240,
-                                                            parent_id: parent_id240,
-                                                            favorite: favorite240,
-                                                            archived: archived240,
-                                                            view: view240,
-                                                            sort_order: sort_order240,
-                                                        } = patch238;
-                                                        use super::super::super::super::junban::plugin::types::StringChange as V242;
-                                                        match name240 {
-                                                            V242::Unchanged => {
-                                                                *ptr149
+                                                            name: name258,
+                                                            color: color258,
+                                                            icon: icon258,
+                                                            parent_id: parent_id258,
+                                                            favorite: favorite258,
+                                                            archived: archived258,
+                                                            view: view258,
+                                                            sort_order: sort_order258,
+                                                        } = patch256;
+                                                        use super::super::super::super::junban::plugin::types::StringChange as V260;
+                                                        match name258 {
+                                                            V260::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V242::Set(e) => {
-                                                                *ptr149
+                                                            V260::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec241 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr241 = vec241.as_ptr().cast::<u8>();
-                                                                let len241 = vec241.len();
-                                                                ::core::mem::forget(vec241);
-                                                                *ptr149
+                                                                let vec259 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr259 = vec259.as_ptr().cast::<u8>();
+                                                                let len259 = vec259.len();
+                                                                ::core::mem::forget(vec259);
+                                                                *ptr167
                                                                     .add(32 + 4 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len241;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len259;
+                                                                *ptr167
                                                                     .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr241.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr259.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::StringChange as V244;
-                                                        match color240 {
-                                                            V244::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::StringChange as V262;
+                                                        match color258 {
+                                                            V262::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 5 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V244::Set(e) => {
-                                                                *ptr149
+                                                            V262::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 5 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec243 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr243 = vec243.as_ptr().cast::<u8>();
-                                                                let len243 = vec243.len();
-                                                                ::core::mem::forget(vec243);
-                                                                *ptr149
+                                                                let vec261 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr261 = vec261.as_ptr().cast::<u8>();
+                                                                let len261 = vec261.len();
+                                                                ::core::mem::forget(vec261);
+                                                                *ptr167
                                                                     .add(32 + 7 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len243;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len261;
+                                                                *ptr167
                                                                     .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr243.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr261.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalStringChange as V246;
-                                                        match icon240 {
-                                                            V246::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalStringChange as V264;
+                                                        match icon258 {
+                                                            V264::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 8 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V246::Clear => {
-                                                                *ptr149
+                                                            V264::Clear => {
+                                                                *ptr167
                                                                     .add(32 + 8 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V246::Set(e) => {
-                                                                *ptr149
+                                                            V264::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 8 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                let vec245 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr245 = vec245.as_ptr().cast::<u8>();
-                                                                let len245 = vec245.len();
-                                                                ::core::mem::forget(vec245);
-                                                                *ptr149
+                                                                let vec263 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr263 = vec263.as_ptr().cast::<u8>();
+                                                                let len263 = vec263.len();
+                                                                ::core::mem::forget(vec263);
+                                                                *ptr167
                                                                     .add(32 + 10 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len245;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len263;
+                                                                *ptr167
                                                                     .add(32 + 9 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr245.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr263.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::OptionalIdChange as V248;
-                                                        match parent_id240 {
-                                                            V248::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::OptionalIdChange as V266;
+                                                        match parent_id258 {
+                                                            V266::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 11 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V248::Clear => {
-                                                                *ptr149
+                                                            V266::Clear => {
+                                                                *ptr167
                                                                     .add(32 + 11 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
                                                             }
-                                                            V248::Set(e) => {
-                                                                *ptr149
+                                                            V266::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 11 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (2i32) as u8;
-                                                                let vec247 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr247 = vec247.as_ptr().cast::<u8>();
-                                                                let len247 = vec247.len();
-                                                                ::core::mem::forget(vec247);
-                                                                *ptr149
+                                                                let vec265 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr265 = vec265.as_ptr().cast::<u8>();
+                                                                let len265 = vec265.len();
+                                                                ::core::mem::forget(vec265);
+                                                                *ptr167
                                                                     .add(32 + 13 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len247;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len265;
+                                                                *ptr167
                                                                     .add(32 + 12 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr247.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr265.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::BoolChange as V249;
-                                                        match favorite240 {
-                                                            V249::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::BoolChange as V267;
+                                                        match favorite258 {
+                                                            V267::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V249::Set(e) => {
-                                                                *ptr149
+                                                            V267::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(33 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (match e {
                                                                     true => 1,
@@ -10556,18 +10674,18 @@ pub mod exports {
                                                                 }) as u8;
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::BoolChange as V250;
-                                                        match archived240 {
-                                                            V250::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::BoolChange as V268;
+                                                        match archived258 {
+                                                            V268::Unchanged => {
+                                                                *ptr167
                                                                     .add(34 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V250::Set(e) => {
-                                                                *ptr149
+                                                            V268::Set(e) => {
+                                                                *ptr167
                                                                     .add(34 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(35 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (match e {
                                                                     true => 1,
@@ -10575,277 +10693,277 @@ pub mod exports {
                                                                 }) as u8;
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::ProjectViewChange as V251;
-                                                        match view240 {
-                                                            V251::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::ProjectViewChange as V269;
+                                                        match view258 {
+                                                            V269::Unchanged => {
+                                                                *ptr167
                                                                     .add(36 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V251::Set(e) => {
-                                                                *ptr149
+                                                            V269::Set(e) => {
+                                                                *ptr167
                                                                     .add(36 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(37 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (e.clone() as i32) as u8;
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::S64Change as V252;
-                                                        match sort_order240 {
-                                                            V252::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::S64Change as V270;
+                                                        match sort_order258 {
+                                                            V270::Unchanged => {
+                                                                *ptr167
                                                                     .add(40 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V252::Set(e) => {
-                                                                *ptr149
+                                                            V270::Set(e) => {
+                                                                *ptr167
                                                                     .add(40 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                *ptr149
+                                                                *ptr167
                                                                     .add(48 + 14 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<i64>() = _rt::as_i64(e);
                                                             }
                                                         }
                                                     }
-                                                    V265::DeleteProject(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (10i32) as u8;
-                                                        let vec253 = (e.into_bytes()).into_boxed_slice();
-                                                        let ptr253 = vec253.as_ptr().cast::<u8>();
-                                                        let len253 = vec253.len();
-                                                        ::core::mem::forget(vec253);
-                                                        *ptr149
+                                                    V283::DeleteProject(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (10i32) as u8;
+                                                        let vec271 = (e.into_bytes()).into_boxed_slice();
+                                                        let ptr271 = vec271.as_ptr().cast::<u8>();
+                                                        let len271 = vec271.len();
+                                                        ::core::mem::forget(vec271);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len253;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr253.cast_mut();
+                                                            .cast::<usize>() = len271;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr271.cast_mut();
                                                     }
-                                                    V265::CreateTag(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (11i32) as u8;
+                                                    V283::CreateTag(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (11i32) as u8;
                                                         let super::super::super::super::junban::plugin::types::TagDraft {
-                                                            name: name254,
-                                                            color: color254,
+                                                            name: name272,
+                                                            color: color272,
                                                         } = e;
-                                                        let vec255 = (name254.into_bytes()).into_boxed_slice();
-                                                        let ptr255 = vec255.as_ptr().cast::<u8>();
-                                                        let len255 = vec255.len();
-                                                        ::core::mem::forget(vec255);
-                                                        *ptr149
+                                                        let vec273 = (name272.into_bytes()).into_boxed_slice();
+                                                        let ptr273 = vec273.as_ptr().cast::<u8>();
+                                                        let len273 = vec273.len();
+                                                        ::core::mem::forget(vec273);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len255;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr255.cast_mut();
-                                                        let vec256 = (color254.into_bytes()).into_boxed_slice();
-                                                        let ptr256 = vec256.as_ptr().cast::<u8>();
-                                                        let len256 = vec256.len();
-                                                        ::core::mem::forget(vec256);
-                                                        *ptr149
+                                                            .cast::<usize>() = len273;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr273.cast_mut();
+                                                        let vec274 = (color272.into_bytes()).into_boxed_slice();
+                                                        let ptr274 = vec274.as_ptr().cast::<u8>();
+                                                        let len274 = vec274.len();
+                                                        ::core::mem::forget(vec274);
+                                                        *ptr167
                                                             .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len256;
-                                                        *ptr149
+                                                            .cast::<usize>() = len274;
+                                                        *ptr167
                                                             .add(32 + 2 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<*mut u8>() = ptr256.cast_mut();
+                                                            .cast::<*mut u8>() = ptr274.cast_mut();
                                                     }
-                                                    V265::PatchTag(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (12i32) as u8;
+                                                    V283::PatchTag(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (12i32) as u8;
                                                         let super::super::super::super::junban::plugin::types::PatchTag {
-                                                            tag_id: tag_id257,
-                                                            patch: patch257,
+                                                            tag_id: tag_id275,
+                                                            patch: patch275,
                                                         } = e;
-                                                        let vec258 = (tag_id257.into_bytes()).into_boxed_slice();
-                                                        let ptr258 = vec258.as_ptr().cast::<u8>();
-                                                        let len258 = vec258.len();
-                                                        ::core::mem::forget(vec258);
-                                                        *ptr149
+                                                        let vec276 = (tag_id275.into_bytes()).into_boxed_slice();
+                                                        let ptr276 = vec276.as_ptr().cast::<u8>();
+                                                        let len276 = vec276.len();
+                                                        ::core::mem::forget(vec276);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len258;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr258.cast_mut();
+                                                            .cast::<usize>() = len276;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr276.cast_mut();
                                                         let super::super::super::super::junban::plugin::types::TagPatch {
-                                                            name: name259,
-                                                            color: color259,
-                                                        } = patch257;
-                                                        use super::super::super::super::junban::plugin::types::StringChange as V261;
-                                                        match name259 {
-                                                            V261::Unchanged => {
-                                                                *ptr149
+                                                            name: name277,
+                                                            color: color277,
+                                                        } = patch275;
+                                                        use super::super::super::super::junban::plugin::types::StringChange as V279;
+                                                        match name277 {
+                                                            V279::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V261::Set(e) => {
-                                                                *ptr149
+                                                            V279::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 2 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec260 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr260 = vec260.as_ptr().cast::<u8>();
-                                                                let len260 = vec260.len();
-                                                                ::core::mem::forget(vec260);
-                                                                *ptr149
+                                                                let vec278 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr278 = vec278.as_ptr().cast::<u8>();
+                                                                let len278 = vec278.len();
+                                                                ::core::mem::forget(vec278);
+                                                                *ptr167
                                                                     .add(32 + 4 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len260;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len278;
+                                                                *ptr167
                                                                     .add(32 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr260.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr278.cast_mut();
                                                             }
                                                         }
-                                                        use super::super::super::super::junban::plugin::types::StringChange as V263;
-                                                        match color259 {
-                                                            V263::Unchanged => {
-                                                                *ptr149
+                                                        use super::super::super::super::junban::plugin::types::StringChange as V281;
+                                                        match color277 {
+                                                            V281::Unchanged => {
+                                                                *ptr167
                                                                     .add(32 + 5 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (0i32) as u8;
                                                             }
-                                                            V263::Set(e) => {
-                                                                *ptr149
+                                                            V281::Set(e) => {
+                                                                *ptr167
                                                                     .add(32 + 5 * ::core::mem::size_of::<*const u8>())
                                                                     .cast::<u8>() = (1i32) as u8;
-                                                                let vec262 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr262 = vec262.as_ptr().cast::<u8>();
-                                                                let len262 = vec262.len();
-                                                                ::core::mem::forget(vec262);
-                                                                *ptr149
+                                                                let vec280 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr280 = vec280.as_ptr().cast::<u8>();
+                                                                let len280 = vec280.len();
+                                                                ::core::mem::forget(vec280);
+                                                                *ptr167
                                                                     .add(32 + 7 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len262;
-                                                                *ptr149
+                                                                    .cast::<usize>() = len280;
+                                                                *ptr167
                                                                     .add(32 + 6 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr262.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr280.cast_mut();
                                                             }
                                                         }
                                                     }
-                                                    V265::DeleteTag(e) => {
-                                                        *ptr149.add(24).cast::<u8>() = (13i32) as u8;
-                                                        let vec264 = (e.into_bytes()).into_boxed_slice();
-                                                        let ptr264 = vec264.as_ptr().cast::<u8>();
-                                                        let len264 = vec264.len();
-                                                        ::core::mem::forget(vec264);
-                                                        *ptr149
+                                                    V283::DeleteTag(e) => {
+                                                        *ptr167.add(24).cast::<u8>() = (13i32) as u8;
+                                                        let vec282 = (e.into_bytes()).into_boxed_slice();
+                                                        let ptr282 = vec282.as_ptr().cast::<u8>();
+                                                        let len282 = vec282.len();
+                                                        ::core::mem::forget(vec282);
+                                                        *ptr167
                                                             .add(32 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>() = len264;
-                                                        *ptr149.add(32).cast::<*mut u8>() = ptr264.cast_mut();
+                                                            .cast::<usize>() = len282;
+                                                        *ptr167.add(32).cast::<*mut u8>() = ptr282.cast_mut();
                                                     }
                                                 }
                                             }
-                                            V273::KvPatch(e) => {
-                                                *ptr149.add(16).cast::<u8>() = (1i32) as u8;
+                                            V291::KvPatch(e) => {
+                                                *ptr167.add(16).cast::<u8>() = (1i32) as u8;
                                                 let super::super::super::super::junban::plugin::types::KvPatch {
-                                                    operations: operations266,
+                                                    operations: operations284,
                                                 } = e;
-                                                let vec272 = operations266;
-                                                let len272 = vec272.len();
-                                                let layout272 = _rt::alloc::Layout::from_size_align(
-                                                        vec272.len() * (5 * ::core::mem::size_of::<*const u8>()),
+                                                let vec290 = operations284;
+                                                let len290 = vec290.len();
+                                                let layout290 = _rt::alloc::Layout::from_size_align(
+                                                        vec290.len() * (5 * ::core::mem::size_of::<*const u8>()),
                                                         ::core::mem::size_of::<*const u8>(),
                                                     )
                                                     .unwrap();
-                                                let (result272, _cleanup272) = wit_bindgen::rt::Cleanup::new(
-                                                    layout272,
+                                                let (result290, _cleanup290) = wit_bindgen::rt::Cleanup::new(
+                                                    layout290,
                                                 );
-                                                if let Some(cleanup) = _cleanup272 {
+                                                if let Some(cleanup) = _cleanup290 {
                                                     cleanup.forget();
                                                 }
-                                                for (i, e) in vec272.into_iter().enumerate() {
-                                                    let base = result272
+                                                for (i, e) in vec290.into_iter().enumerate() {
+                                                    let base = result290
                                                         .add(i * (5 * ::core::mem::size_of::<*const u8>()));
                                                     {
-                                                        use super::super::super::super::junban::plugin::types::KvOperation as V271;
+                                                        use super::super::super::super::junban::plugin::types::KvOperation as V289;
                                                         match e {
-                                                            V271::Set(e) => {
+                                                            V289::Set(e) => {
                                                                 *base.add(0).cast::<u8>() = (0i32) as u8;
                                                                 let super::super::super::super::junban::plugin::types::KvSet {
-                                                                    key: key267,
-                                                                    value: value267,
+                                                                    key: key285,
+                                                                    value: value285,
                                                                 } = e;
-                                                                let vec268 = (key267.into_bytes()).into_boxed_slice();
-                                                                let ptr268 = vec268.as_ptr().cast::<u8>();
-                                                                let len268 = vec268.len();
-                                                                ::core::mem::forget(vec268);
+                                                                let vec286 = (key285.into_bytes()).into_boxed_slice();
+                                                                let ptr286 = vec286.as_ptr().cast::<u8>();
+                                                                let len286 = vec286.len();
+                                                                ::core::mem::forget(vec286);
                                                                 *base
                                                                     .add(2 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len268;
+                                                                    .cast::<usize>() = len286;
                                                                 *base
                                                                     .add(::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr268.cast_mut();
-                                                                let vec269 = <_ as Into<_rt::Vec<_>>>::into(value267)
+                                                                    .cast::<*mut u8>() = ptr286.cast_mut();
+                                                                let vec287 = <_ as Into<_rt::Vec<_>>>::into(value285)
                                                                     .into_boxed_slice();
-                                                                let ptr269 = vec269.as_ptr().cast::<u8>();
-                                                                let len269 = vec269.len();
-                                                                ::core::mem::forget(vec269);
+                                                                let ptr287 = vec287.as_ptr().cast::<u8>();
+                                                                let len287 = vec287.len();
+                                                                ::core::mem::forget(vec287);
                                                                 *base
                                                                     .add(4 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len269;
+                                                                    .cast::<usize>() = len287;
                                                                 *base
                                                                     .add(3 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr269.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr287.cast_mut();
                                                             }
-                                                            V271::Delete(e) => {
+                                                            V289::Delete(e) => {
                                                                 *base.add(0).cast::<u8>() = (1i32) as u8;
-                                                                let vec270 = (e.into_bytes()).into_boxed_slice();
-                                                                let ptr270 = vec270.as_ptr().cast::<u8>();
-                                                                let len270 = vec270.len();
-                                                                ::core::mem::forget(vec270);
+                                                                let vec288 = (e.into_bytes()).into_boxed_slice();
+                                                                let ptr288 = vec288.as_ptr().cast::<u8>();
+                                                                let len288 = vec288.len();
+                                                                ::core::mem::forget(vec288);
                                                                 *base
                                                                     .add(2 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<usize>() = len270;
+                                                                    .cast::<usize>() = len288;
                                                                 *base
                                                                     .add(::core::mem::size_of::<*const u8>())
-                                                                    .cast::<*mut u8>() = ptr270.cast_mut();
+                                                                    .cast::<*mut u8>() = ptr288.cast_mut();
                                                             }
                                                         }
                                                     }
                                                 }
-                                                *ptr149
+                                                *ptr167
                                                     .add(24 + 1 * ::core::mem::size_of::<*const u8>())
-                                                    .cast::<usize>() = len272;
-                                                *ptr149.add(24).cast::<*mut u8>() = result272;
+                                                    .cast::<usize>() = len290;
+                                                *ptr167.add(24).cast::<*mut u8>() = result290;
                                             }
                                         }
                                     }
                                     None => {
-                                        *ptr149.add(8).cast::<u8>() = (0i32) as u8;
+                                        *ptr167.add(8).cast::<u8>() = (0i32) as u8;
                                     }
                                 };
                             }
                             Err(e) => {
-                                *ptr149.add(0).cast::<u8>() = (1i32) as u8;
+                                *ptr167.add(0).cast::<u8>() = (1i32) as u8;
                                 let super::super::super::super::junban::plugin::types::PluginError {
-                                    code: code274,
-                                    field: field274,
-                                    message: message274,
+                                    code: code292,
+                                    field: field292,
+                                    message: message292,
                                 } = e;
-                                *ptr149.add(8).cast::<u8>() = (code274.clone() as i32)
+                                *ptr167.add(8).cast::<u8>() = (code292.clone() as i32)
                                     as u8;
-                                match field274 {
+                                match field292 {
                                     Some(e) => {
-                                        *ptr149
+                                        *ptr167
                                             .add(8 + 1 * ::core::mem::size_of::<*const u8>())
                                             .cast::<u8>() = (1i32) as u8;
-                                        let vec275 = (e.into_bytes()).into_boxed_slice();
-                                        let ptr275 = vec275.as_ptr().cast::<u8>();
-                                        let len275 = vec275.len();
-                                        ::core::mem::forget(vec275);
-                                        *ptr149
+                                        let vec293 = (e.into_bytes()).into_boxed_slice();
+                                        let ptr293 = vec293.as_ptr().cast::<u8>();
+                                        let len293 = vec293.len();
+                                        ::core::mem::forget(vec293);
+                                        *ptr167
                                             .add(8 + 3 * ::core::mem::size_of::<*const u8>())
-                                            .cast::<usize>() = len275;
-                                        *ptr149
+                                            .cast::<usize>() = len293;
+                                        *ptr167
                                             .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                            .cast::<*mut u8>() = ptr275.cast_mut();
+                                            .cast::<*mut u8>() = ptr293.cast_mut();
                                     }
                                     None => {
-                                        *ptr149
+                                        *ptr167
                                             .add(8 + 1 * ::core::mem::size_of::<*const u8>())
                                             .cast::<u8>() = (0i32) as u8;
                                     }
                                 };
-                                let vec276 = (message274.into_bytes()).into_boxed_slice();
-                                let ptr276 = vec276.as_ptr().cast::<u8>();
-                                let len276 = vec276.len();
-                                ::core::mem::forget(vec276);
-                                *ptr149
+                                let vec294 = (message292.into_bytes()).into_boxed_slice();
+                                let ptr294 = vec294.as_ptr().cast::<u8>();
+                                let len294 = vec294.len();
+                                ::core::mem::forget(vec294);
+                                *ptr167
                                     .add(8 + 5 * ::core::mem::size_of::<*const u8>())
-                                    .cast::<usize>() = len276;
-                                *ptr149
+                                    .cast::<usize>() = len294;
+                                *ptr167
                                     .add(8 + 4 * ::core::mem::size_of::<*const u8>())
-                                    .cast::<*mut u8>() = ptr276.cast_mut();
+                                    .cast::<*mut u8>() = ptr294.cast_mut();
                             }
                         };
-                        ptr149
+                        ptr167
                     }
                 }
                 #[doc(hidden)]
@@ -21598,9 +21716,9 @@ pub(crate) use __export_rust_consumer_impl as export;
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 9088] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xfcE\x01A\x02\x01A\"\
-\x01B\xf8\x01\x01s\x04\0\x02id\x03\0\0\x01s\x04\0\x04date\x03\0\x02\x01s\x04\0\x0a\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 9201] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xedF\x01A\x02\x01A\"\
+\x01B\xfa\x01\x01s\x04\0\x02id\x03\0\0\x01s\x04\0\x04date\x03\0\x02\x01s\x04\0\x0a\
 civil-time\x03\0\x04\x01s\x04\0\x0etime-zone-name\x03\0\x06\x01s\x04\0\x09timest\
 amp\x03\0\x08\x01s\x04\0\x0coperation-id\x03\0\x0a\x01m\x04\x02p1\x02p2\x02p3\x02\
 p4\x04\0\x08priority\x03\0\x0c\x01m\x03\x07pending\x09completed\x09cancelled\x04\
@@ -21638,163 +21756,166 @@ created-at\x09\x0aupdated-at\x09\x08revisionw\x04\0\x13project-view-record\x03\0
 ?\x01p\xc0\0\x01r\x03\x05items\xc1\0\x0bnext-cursor\x16\x08revisionw\x04\0\x0cpr\
 oject-page\x03\0B\x01r\x06\x02id\x01\x04names\x05colors\x0acreated-at\x09\x0aupd\
 ated-at\x09\x08revisionw\x04\0\x08tag-view\x03\0D\x01p\xc5\0\x01r\x03\x05items\xc6\
-\0\x0bnext-cursor\x16\x08revisionw\x04\0\x08tag-page\x03\0G\x01q\x02\x09unchange\
-d\0\0\x03set\x01s\0\x04\0\x0dstring-change\x03\0I\x01q\x02\x09unchanged\0\0\x03s\
-et\x01\x7f\0\x04\0\x0bbool-change\x03\0K\x01q\x02\x09unchanged\0\0\x03set\x01x\0\
-\x04\0\x0as64-change\x03\0M\x01q\x02\x09unchanged\0\0\x03set\x01\x11\0\x04\0\x13\
-project-view-change\x03\0O\x01q\x03\x09unchanged\0\0\x05clear\0\0\x03set\x01s\0\x04\
-\0\x16optional-string-change\x03\0Q\x01q\x03\x09unchanged\0\0\x05clear\0\0\x03se\
-t\x01\x01\0\x04\0\x12optional-id-change\x03\0S\x01q\x03\x09unchanged\0\0\x05clea\
-r\0\0\x03set\x01\x03\0\x04\0\x14optional-date-change\x03\0U\x01q\x03\x09unchange\
-d\0\0\x05clear\0\0\x03set\x01\x09\0\x04\0\x19optional-timestamp-change\x03\0W\x01\
-q\x03\x09unchanged\0\0\x05clear\0\0\x03set\x01-\0\x04\0\x1eoptional-local-due-ti\
-me-change\x03\0Y\x01q\x03\x09unchanged\0\0\x05clear\0\0\x03set\x01y\0\x04\0\x13o\
-ptional-u32-change\x03\0[\x01q\x03\x09unchanged\0\0\x05clear\0\0\x03set\x01}\0\x04\
-\0\x12optional-u8-change\x03\0]\x01q\x03\x09unchanged\0\0\x05clear\0\0\x03set\x01\
-\x0d\0\x04\0\x18optional-priority-change\x03\0_\x01q\x02\x09unchanged\0\0\x07rep\
-lace\x01\"\0\x04\0\x0eid-list-change\x03\0a\x01r\x12\x05titles\x0bdescriptions\x08\
-priority3\x08due-date0\x08due-time4\x08deadline5\x07someday\x7f\x11estimated-min\
-utes6\x0eactual-minutes6\x05dread7\x0aproject-id)\x0asection-id)\x09parent-id)\x07\
-tag-ids\"\x0asort-orderx\x0frecurrence-rule\x16\x09remind-at5\x15recurrence-anch\
-or-day7\x04\0\x0atask-draft\x03\0c\x01r\x12\x05title\xca\0\x0bdescription\xca\0\x08\
-priority\xe0\0\x08due-date\xd6\0\x08due-time\xda\0\x08deadline\xd8\0\x07someday\xcc\
-\0\x11estimated-minutes\xdc\0\x0eactual-minutes\xdc\0\x05dread\xde\0\x0aproject-\
-id\xd4\0\x0asection-id\xd4\0\x09parent-id\xd4\0\x07tag-ids\xe2\0\x0asort-order\xce\
-\0\x0frecurrence-rule\xd2\0\x09remind-at\xd8\0\x15recurrence-anchor-day\xde\0\x04\
-\0\x0atask-patch\x03\0e\x01r\x02\x07task-id\x01\x05patch\xe6\0\x04\0\x0apatch-ta\
-sk\x03\0g\x01r\x03\x0aproject-id\xd4\0\x0asection-id\xd4\0\x09parent-id\xd4\0\x04\
-\0\x09bulk-move\x03\0i\x01r\x02\x03add\"\x06remove\"\x04\0\x08bulk-tag\x03\0k\x01\
-r\x04\x08due-date\xd6\0\x08due-time\xda\0\x08deadline\xd8\0\x07someday\xcc\0\x04\
-\0\x0dbulk-schedule\x03\0m\x01q\x02\x05clear\0\0\x03set\x01\x0d\0\x04\0\x0dbulk-\
-priority\x03\0o\x01q\x09\x08complete\0\0\x0auncomplete\0\0\x06cancel\0\0\x06reop\
-en\0\0\x06delete\0\0\x04move\x01\xea\0\0\x03tag\x01\xec\0\0\x08schedule\x01\xee\0\
-\0\x08priority\x01\xf0\0\0\x04\0\x0bbulk-action\x03\0q\x01r\x02\x08task-ids\"\x06\
-action\xf2\0\x04\0\x0abulk-tasks\x03\0s\x01r\x08\x04names\x05colors\x04icon\x16\x09\
+\0\x0bnext-cursor\x16\x08revisionw\x04\0\x08tag-page\x03\0G\x01r\x08\x02id\x01\x0a\
+project-id\x01\x04names\x09collapsed\x7f\x0asort-orderx\x0acreated-at\x09\x0aupd\
+ated-at\x09\x08revisionw\x04\0\x0csection-view\x03\0I\x01q\x02\x09unchanged\0\0\x03\
+set\x01s\0\x04\0\x0dstring-change\x03\0K\x01q\x02\x09unchanged\0\0\x03set\x01\x7f\
+\0\x04\0\x0bbool-change\x03\0M\x01q\x02\x09unchanged\0\0\x03set\x01x\0\x04\0\x0a\
+s64-change\x03\0O\x01q\x02\x09unchanged\0\0\x03set\x01\x11\0\x04\0\x13project-vi\
+ew-change\x03\0Q\x01q\x03\x09unchanged\0\0\x05clear\0\0\x03set\x01s\0\x04\0\x16o\
+ptional-string-change\x03\0S\x01q\x03\x09unchanged\0\0\x05clear\0\0\x03set\x01\x01\
+\0\x04\0\x12optional-id-change\x03\0U\x01q\x03\x09unchanged\0\0\x05clear\0\0\x03\
+set\x01\x03\0\x04\0\x14optional-date-change\x03\0W\x01q\x03\x09unchanged\0\0\x05\
+clear\0\0\x03set\x01\x09\0\x04\0\x19optional-timestamp-change\x03\0Y\x01q\x03\x09\
+unchanged\0\0\x05clear\0\0\x03set\x01-\0\x04\0\x1eoptional-local-due-time-change\
+\x03\0[\x01q\x03\x09unchanged\0\0\x05clear\0\0\x03set\x01y\0\x04\0\x13optional-u\
+32-change\x03\0]\x01q\x03\x09unchanged\0\0\x05clear\0\0\x03set\x01}\0\x04\0\x12o\
+ptional-u8-change\x03\0_\x01q\x03\x09unchanged\0\0\x05clear\0\0\x03set\x01\x0d\0\
+\x04\0\x18optional-priority-change\x03\0a\x01q\x02\x09unchanged\0\0\x07replace\x01\
+\"\0\x04\0\x0eid-list-change\x03\0c\x01r\x12\x05titles\x0bdescriptions\x08priori\
+ty3\x08due-date0\x08due-time4\x08deadline5\x07someday\x7f\x11estimated-minutes6\x0e\
+actual-minutes6\x05dread7\x0aproject-id)\x0asection-id)\x09parent-id)\x07tag-ids\
+\"\x0asort-orderx\x0frecurrence-rule\x16\x09remind-at5\x15recurrence-anchor-day7\
+\x04\0\x0atask-draft\x03\0e\x01r\x12\x05title\xcc\0\x0bdescription\xcc\0\x08prio\
+rity\xe2\0\x08due-date\xd8\0\x08due-time\xdc\0\x08deadline\xda\0\x07someday\xce\0\
+\x11estimated-minutes\xde\0\x0eactual-minutes\xde\0\x05dread\xe0\0\x0aproject-id\
+\xd6\0\x0asection-id\xd6\0\x09parent-id\xd6\0\x07tag-ids\xe4\0\x0asort-order\xd0\
+\0\x0frecurrence-rule\xd4\0\x09remind-at\xda\0\x15recurrence-anchor-day\xe0\0\x04\
+\0\x0atask-patch\x03\0g\x01r\x02\x07task-id\x01\x05patch\xe8\0\x04\0\x0apatch-ta\
+sk\x03\0i\x01r\x03\x0aproject-id\xd6\0\x0asection-id\xd6\0\x09parent-id\xd6\0\x04\
+\0\x09bulk-move\x03\0k\x01r\x02\x03add\"\x06remove\"\x04\0\x08bulk-tag\x03\0m\x01\
+r\x04\x08due-date\xd8\0\x08due-time\xdc\0\x08deadline\xda\0\x07someday\xce\0\x04\
+\0\x0dbulk-schedule\x03\0o\x01q\x02\x05clear\0\0\x03set\x01\x0d\0\x04\0\x0dbulk-\
+priority\x03\0q\x01q\x09\x08complete\0\0\x0auncomplete\0\0\x06cancel\0\0\x06reop\
+en\0\0\x06delete\0\0\x04move\x01\xec\0\0\x03tag\x01\xee\0\0\x08schedule\x01\xf0\0\
+\0\x08priority\x01\xf2\0\0\x04\0\x0bbulk-action\x03\0s\x01r\x02\x08task-ids\"\x06\
+action\xf4\0\x04\0\x0abulk-tasks\x03\0u\x01r\x08\x04names\x05colors\x04icon\x16\x09\
 parent-id)\x08favorite\x7f\x08archived\x7f\x04view\x11\x0asort-orderx\x04\0\x0dp\
-roject-draft\x03\0u\x01r\x08\x04name\xca\0\x05color\xca\0\x04icon\xd2\0\x09paren\
-t-id\xd4\0\x08favorite\xcc\0\x08archived\xcc\0\x04view\xd0\0\x0asort-order\xce\0\
-\x04\0\x0dproject-patch\x03\0w\x01r\x02\x0aproject-id\x01\x05patch\xf8\0\x04\0\x0d\
-patch-project\x03\0y\x01r\x02\x04names\x05colors\x04\0\x09tag-draft\x03\0{\x01r\x02\
-\x04name\xca\0\x05color\xca\0\x04\0\x09tag-patch\x03\0}\x01r\x02\x06tag-id\x01\x05\
-patch\xfe\0\x04\0\x09patch-tag\x03\0\x7f\x01q\x0e\x0bcreate-task\x01\xe4\0\0\x0a\
-patch-task\x01\xe8\0\0\x0dcomplete-task\x01\x01\0\x0funcomplete-task\x01\x01\0\x0b\
-cancel-task\x01\x01\0\x0breopen-task\x01\x01\0\x0bdelete-task\x01\x01\0\x0abulk-\
-tasks\x01\xf4\0\0\x0ecreate-project\x01\xf6\0\0\x0dpatch-project\x01\xfa\0\0\x0e\
-delete-project\x01\x01\0\x0acreate-tag\x01\xfc\0\0\x09patch-tag\x01\x80\x01\0\x0a\
-delete-tag\x01\x01\0\x04\0\x0fdomain-mutation\x03\0\x81\x01\x01p}\x01r\x02\x03ke\
-ys\x05value\x83\x01\x04\0\x06kv-set\x03\0\x84\x01\x01q\x02\x03set\x01\x85\x01\0\x06\
-delete\x01s\0\x04\0\x0ckv-operation\x03\0\x86\x01\x01p\x87\x01\x01r\x01\x0aopera\
-tions\x88\x01\x04\0\x08kv-patch\x03\0\x89\x01\x01q\x02\x0fdomain-mutation\x01\x82\
-\x01\0\x08kv-patch\x01\x8a\x01\0\x04\0\x0dplugin-effect\x03\0\x8b\x01\x01k\x8c\x01\
-\x01r\x01\x06effect\x8d\x01\x04\0\x0eplugin-outcome\x03\0\x8e\x01\x01p&\x01r\x02\
-\x0acommand-id\x01\x06values\x90\x01\x04\0\x0ccommand-call\x03\0\x91\x01\x01m\x10\
-\x0ctask-created\x0ctask-updated\x0etask-completed\x10task-uncompleted\x0etask-c\
-ancelled\x0dtask-reopened\x0ctask-deleted\x0fproject-created\x0fproject-updated\x0f\
-project-deleted\x0btag-created\x0btag-updated\x0btag-deleted\x0fsection-created\x0f\
-section-updated\x0fsection-deleted\x04\0\x0aevent-kind\x03\0\x93\x01\x01q\x07\x04\
-task\x019\0\x07project\x01\xc0\0\0\x03tag\x01\xc5\0\0\x0cdeleted-task\x01\x01\0\x0f\
-deleted-project\x01\x01\0\x0bdeleted-tag\x01\x01\0\x0fdeleted-section\x01\x01\0\x04\
-\0\x0devent-subject\x03\0\x95\x01\x01r\x04\x0bevent-epoch\x01\x08revisionw\x04ki\
-nd\x94\x01\x07subject\x96\x01\x04\0\x0eevent-envelope\x03\0\x97\x01\x01m\x05\x07\
-neutral\x06accent\x08positive\x07warning\x06danger\x04\0\x07ui-tone\x03\0\x99\x01\
-\x01m\x03\x05small\x06medium\x05large\x04\0\x07ui-size\x03\0\x9b\x01\x01m\x04\x05\
-start\x06center\x03end\x07stretch\x04\0\x08ui-align\x03\0\x9d\x01\x01r\x02\x03ga\
-p}\x05align\x9e\x01\x04\0\x0clayout-props\x03\0\x9f\x01\x01r\x03\x04texts\x04ton\
-e\x9a\x01\x04size\x9c\x01\x04\0\x0atext-props\x03\0\xa1\x01\x01r\x03\x05labels\x05\
-values\x04tone\x9a\x01\x04\0\x0cmetric-props\x03\0\xa3\x01\x01r\x03\x05labels\x05\
-value{\x07maximum{\x04\0\x0eprogress-props\x03\0\xa5\x01\x01r\x04\x05labels\x09a\
-ction-id\x01\x04tone\x9a\x01\x04icon)\x04\0\x0cbutton-props\x03\0\xa7\x01\x01p(\x01\
-r\x04\x05labels\x09action-id\x01\x05value\x1c\x07options\xa9\x01\x04\0\x0binput-\
-props\x03\0\xaa\x01\x01r\x01\x08task-ids\"\x04\0\x0ftask-list-props\x03\0\xac\x01\
-\x01q\x11\x05stack\x01\xa0\x01\0\x03row\x01\xa0\x01\0\x07heading\x01\xa2\x01\0\x04\
-text\x01\xa2\x01\0\x05badge\x01\xa2\x01\0\x06metric\x01\xa4\x01\0\x08progress\x01\
-\xa6\x01\0\x06button\x01\xa8\x01\0\x0atext-input\x01\xab\x01\0\x0cnumber-input\x01\
-\xab\x01\0\x06select\x01\xab\x01\0\x06toggle\x01\xab\x01\0\x09task-list\x01\xad\x01\
-\0\x08task-ref\x01\x01\0\x07divider\0\0\x0bempty-state\x01\xa2\x01\0\x0berror-st\
-ate\x01\xa2\x01\0\x04\0\x0aui-content\x03\0\xae\x01\x01k{\x01r\x03\x02id\x01\x0c\
-parent-index\xb0\x01\x07content\xaf\x01\x04\0\x07ui-node\x03\0\xb1\x01\x01p\xb2\x01\
-\x01r\x03\x0asurface-id\x01\x0aroot-index{\x05nodes\xb3\x01\x04\0\x07surface\x03\
-\0\xb4\x01\x01r\x01\x0asurface-id\x01\x04\0\x0fsurface-request\x03\0\xb6\x01\x01\
-r\x03\x0asurface-id\x01\x09action-id\x01\x06values\xa9\x01\x04\0\x0esurface-acti\
-on\x03\0\xb8\x01\x01q\x04\x04text\x01s\0\x07integer\x01x\0\x07boolean\x01\x7f\0\x09\
-option-id\x01\x01\0\x04\0\x0dsetting-value\x03\0\xba\x01\x01r\x02\x02id\x01\x05v\
-alue\xbb\x01\x04\0\x0dnamed-setting\x03\0\xbc\x01\x01r\x02\x0asetting-id\x01\x07\
-messages\x04\0\x10validation-issue\x03\0\xbe\x01\x01p\xbd\x01\x01r\x01\x06values\
-\xc0\x01\x04\0\x0esetting-values\x03\0\xc1\x01\x01r\x03\x09plugin-id\x01\x0aserv\
-ice-id\x01\x06values\x90\x01\x04\0\x0cservice-call\x03\0\xc3\x01\x01r\x01\x06val\
-ues\x90\x01\x04\0\x0cservice-data\x03\0\xc5\x01\x01m\x03\x04task\x07project\x03t\
-ag\x04\0\x0dresource-kind\x03\0\xc7\x01\x01q\x03\x05tasks\x01:\0\x08projects\x01\
-\xc1\0\0\x04tags\x01\xc6\0\0\x04\0\x10snapshot-records\x03\0\xc9\x01\x01r\x07\x0a\
-session-id\x01\x0bevent-epoch\x01\x0dhead-revisionw\x04kind\xc8\x01\x0apage-inde\
-xy\x07records\xca\x01\x13final-snapshot-page\x7f\x04\0\x0dsnapshot-page\x03\0\xcb\
-\x01\x01r\x02\x0asession-id\x01\x0drequest-index}\x04\0\x0fflush-staged-kv\x03\0\
-\xcd\x01\x01r\x01\x0asession-id\x01\x04\0\x0ffinalize-resync\x03\0\xcf\x01\x01q\x03\
-\x08snapshot\x01\xcc\x01\0\x0fflush-staged-kv\x01\xce\x01\0\x08finalize\x01\xd0\x01\
-\0\x04\0\x0bresync-page\x03\0\xd1\x01\x01r\x01\x0aoperations\x88\x01\x04\0\x0akv\
--segment\x03\0\xd3\x01\x01m\x02\x04more\x08complete\x04\0\x0bflush-state\x03\0\xd5\
-\x01\x01m\x02\x08leave-kv\x1freplace-kv-with-staged-segments\x04\0\x0ffinal-kv-c\
-hoice\x03\0\xd7\x01\x01k\xd4\x01\x01r\x04\x0asession-id\x01\x0apage-indexy\x04ki\
-nd\xc8\x01\x07segment\xd9\x01\x04\0\x0csnapshot-ack\x03\0\xda\x01\x01r\x04\x0ase\
-ssion-id\x01\x0drequest-index}\x07segment\xd9\x01\x05state\xd6\x01\x04\0\x09flus\
-h-ack\x03\0\xdc\x01\x01r\x02\x0asession-id\x01\x06choice\xd8\x01\x04\0\x10finali\
-zed-resync\x03\0\xde\x01\x01q\x03\x0csnapshot-ack\x01\xdb\x01\0\x09flush-ack\x01\
-\xdd\x01\0\x09finalized\x01\xdf\x01\0\x04\0\x13resync-page-outcome\x03\0\xe0\x01\
-\x01m\x05\x03get\x04post\x03put\x05patch\x06delete\x04\0\x0bhttp-method\x03\0\xe2\
-\x01\x01r\x02\x04names\x05values\x04\0\x0bhttp-header\x03\0\xe4\x01\x01p\xe5\x01\
-\x01r\x05\x06method\xe3\x01\x06origins\x0epath-and-querys\x07headers\xe6\x01\x04\
-body\x83\x01\x04\0\x0chttp-request\x03\0\xe7\x01\x01r\x04\x06status{\x07headers\xe6\
-\x01\x04body\x83\x01\x09truncated\x7f\x04\0\x0dhttp-response\x03\0\xe9\x01\x01m\x09\
-\x0finvalid-request\x10invalid-response\x11permission-denied\x0adns-denied\x0atl\
-s-failed\x0econnect-failed\x07timeout\x12delivery-ambiguous\x0bunavailable\x04\0\
-\x0fhttp-error-code\x03\0\xeb\x01\x01m\x03\x08not-sent\x12may-have-been-sent\x11\
-response-received\x04\0\x0edelivery-state\x03\0\xed\x01\x01r\x04\x04code\xec\x01\
-\x08delivery\xee\x01\x09retryable\x7f\x07messages\x04\0\x0ahttp-error\x03\0\xef\x01\
-\x01r\x02\x04name\x01\x05value\x1c\x04\0\x09log-field\x03\0\xf1\x01\x01r\x02\x03\
-keys\x05value\x83\x01\x04\0\x08kv-entry\x03\0\xf3\x01\x01p\xf4\x01\x01r\x02\x07e\
-ntries\xf5\x01\x0bnext-cursor\x16\x04\0\x07kv-page\x03\0\xf6\x01\x03\0\x19junban\
-:plugin/types@0.1.0\x05\0\x02\x03\0\0\x0atask-query\x02\x03\0\0\x09task-page\x02\
-\x03\0\0\x0ahost-error\x01B\x09\x02\x03\x02\x01\x01\x04\0\x0atask-query\x03\0\0\x02\
-\x03\x02\x01\x02\x04\0\x09task-page\x03\0\x02\x02\x03\x02\x01\x03\x04\0\x0ahost-\
-error\x03\0\x04\x01j\x01\x03\x01\x05\x01@\x01\x05query\x01\0\x06\x04\0\x0bquery-\
-tasks\x01\x07\x03\0\x1ejunban:plugin/host-tasks@0.1.0\x05\x04\x02\x03\0\0\x0dnam\
-ed-setting\x01B\x08\x02\x03\x02\x01\x05\x04\0\x0dnamed-setting\x03\0\0\x02\x03\x02\
-\x01\x03\x04\0\x0ahost-error\x03\0\x02\x01p\x01\x01j\x01\x04\x01\x03\x01@\0\0\x05\
-\x04\0\x0cget-settings\x01\x06\x03\0!junban:plugin/host-settings@0.1.0\x05\x06\x02\
-\x03\0\0\x08kv-entry\x02\x03\0\0\x07kv-page\x01B\x0f\x02\x03\x02\x01\x07\x04\0\x08\
-kv-entry\x03\0\0\x02\x03\x02\x01\x08\x04\0\x07kv-page\x03\0\x02\x02\x03\x02\x01\x03\
-\x04\0\x0ahost-error\x03\0\x04\x01ps\x01p\x01\x01j\x01\x07\x01\x05\x01@\x01\x04k\
-eys\x06\0\x08\x04\0\x06get-kv\x01\x09\x01ks\x01j\x01\x03\x01\x05\x01@\x02\x06cur\
-sor\x0a\x05limit}\0\x0b\x04\0\x07list-kv\x01\x0c\x03\0\x20junban:plugin/host-sto\
-rage@0.1.0\x05\x09\x02\x03\0\0\x09log-level\x02\x03\0\0\x09log-field\x01B\x07\x02\
-\x03\x02\x01\x0a\x04\0\x09log-level\x03\0\0\x02\x03\x02\x01\x0b\x04\0\x09log-fie\
-ld\x03\0\x02\x01p\x03\x01@\x03\x05level\x01\x07messages\x06fields\x04\x01\0\x04\0\
-\x03log\x01\x05\x03\0\x1cjunban:plugin/host-log@0.1.0\x05\x0c\x02\x03\0\0\x12inv\
-ocation-context\x02\x03\0\0\x0cplugin-error\x02\x03\0\0\x0ccommand-call\x02\x03\0\
-\0\x0eplugin-outcome\x02\x03\0\0\x0eevent-envelope\x02\x03\0\0\x0fsurface-reques\
-t\x02\x03\0\0\x07surface\x02\x03\0\0\x0esurface-action\x02\x03\0\0\x0esetting-va\
-lues\x02\x03\0\0\x10validation-issue\x02\x03\0\0\x0bresync-page\x02\x03\0\0\x13r\
-esync-page-outcome\x02\x03\0\0\x0cservice-call\x02\x03\0\0\x0cservice-data\x01B4\
-\x02\x03\x02\x01\x0d\x04\0\x12invocation-context\x03\0\0\x02\x03\x02\x01\x0e\x04\
-\0\x0cplugin-error\x03\0\x02\x02\x03\x02\x01\x0f\x04\0\x0ccommand-call\x03\0\x04\
-\x02\x03\x02\x01\x10\x04\0\x0eplugin-outcome\x03\0\x06\x02\x03\x02\x01\x11\x04\0\
-\x0eevent-envelope\x03\0\x08\x02\x03\x02\x01\x12\x04\0\x0fsurface-request\x03\0\x0a\
-\x02\x03\x02\x01\x13\x04\0\x07surface\x03\0\x0c\x02\x03\x02\x01\x14\x04\0\x0esur\
-face-action\x03\0\x0e\x02\x03\x02\x01\x15\x04\0\x0esetting-values\x03\0\x10\x02\x03\
-\x02\x01\x16\x04\0\x10validation-issue\x03\0\x12\x02\x03\x02\x01\x17\x04\0\x0bre\
-sync-page\x03\0\x14\x02\x03\x02\x01\x18\x04\0\x13resync-page-outcome\x03\0\x16\x02\
-\x03\x02\x01\x19\x04\0\x0cservice-call\x03\0\x18\x02\x03\x02\x01\x1a\x04\0\x0cse\
-rvice-data\x03\0\x1a\x01j\0\x01\x03\x01@\x01\x07context\x01\0\x1c\x04\0\x08activ\
-ate\x01\x1d\x04\0\x0adeactivate\x01\x1d\x01j\x01\x07\x01\x03\x01@\x02\x07context\
-\x01\x04call\x05\0\x1e\x04\0\x0einvoke-command\x01\x1f\x01@\x02\x07context\x01\x05\
-event\x09\0\x1e\x04\0\x0chandle-event\x01\x20\x01j\x01\x0d\x01\x03\x01@\x02\x07c\
-ontext\x01\x07request\x0b\0!\x04\0\x0erender-surface\x01\"\x01@\x02\x07context\x01\
-\x06action\x0f\0\x1e\x04\0\x15handle-surface-action\x01#\x01p\x13\x01j\x01$\x01\x03\
-\x01@\x02\x07context\x01\x06values\x11\0%\x04\0\x11validate-settings\x01&\x01j\x01\
-\x17\x01\x03\x01@\x02\x07context\x01\x04page\x15\0'\x04\0\x06resync\x01(\x01j\x01\
-\x1b\x01\x03\x01@\x02\x07context\x01\x04call\x19\0)\x04\0\x0ccall-service\x01*\x04\
-\0\x19junban:plugin/guest@0.1.0\x05\x1b\x04\0(junban:rust-consumer/rust-consumer\
-@0.1.0\x04\0\x0b\x13\x01\0\x0drust-consumer\x03\0\0\0G\x09producers\x01\x0cproce\
-ssed-by\x02\x0dwit-component\x070.244.0\x10wit-bindgen-rust\x060.51.0";
+roject-draft\x03\0w\x01r\x08\x04name\xcc\0\x05color\xcc\0\x04icon\xd4\0\x09paren\
+t-id\xd6\0\x08favorite\xce\0\x08archived\xce\0\x04view\xd2\0\x0asort-order\xd0\0\
+\x04\0\x0dproject-patch\x03\0y\x01r\x02\x0aproject-id\x01\x05patch\xfa\0\x04\0\x0d\
+patch-project\x03\0{\x01r\x02\x04names\x05colors\x04\0\x09tag-draft\x03\0}\x01r\x02\
+\x04name\xcc\0\x05color\xcc\0\x04\0\x09tag-patch\x03\0\x7f\x01r\x02\x06tag-id\x01\
+\x05patch\x80\x01\x04\0\x09patch-tag\x03\0\x81\x01\x01q\x0e\x0bcreate-task\x01\xe6\
+\0\0\x0apatch-task\x01\xea\0\0\x0dcomplete-task\x01\x01\0\x0funcomplete-task\x01\
+\x01\0\x0bcancel-task\x01\x01\0\x0breopen-task\x01\x01\0\x0bdelete-task\x01\x01\0\
+\x0abulk-tasks\x01\xf6\0\0\x0ecreate-project\x01\xf8\0\0\x0dpatch-project\x01\xfc\
+\0\0\x0edelete-project\x01\x01\0\x0acreate-tag\x01\xfe\0\0\x09patch-tag\x01\x82\x01\
+\0\x0adelete-tag\x01\x01\0\x04\0\x0fdomain-mutation\x03\0\x83\x01\x01p}\x01r\x02\
+\x03keys\x05value\x85\x01\x04\0\x06kv-set\x03\0\x86\x01\x01q\x02\x03set\x01\x87\x01\
+\0\x06delete\x01s\0\x04\0\x0ckv-operation\x03\0\x88\x01\x01p\x89\x01\x01r\x01\x0a\
+operations\x8a\x01\x04\0\x08kv-patch\x03\0\x8b\x01\x01q\x02\x0fdomain-mutation\x01\
+\x84\x01\0\x08kv-patch\x01\x8c\x01\0\x04\0\x0dplugin-effect\x03\0\x8d\x01\x01k\x8e\
+\x01\x01r\x01\x06effect\x8f\x01\x04\0\x0eplugin-outcome\x03\0\x90\x01\x01p&\x01r\
+\x02\x0acommand-id\x01\x06values\x92\x01\x04\0\x0ccommand-call\x03\0\x93\x01\x01\
+m\x10\x0ctask-created\x0ctask-updated\x0etask-completed\x10task-uncompleted\x0et\
+ask-cancelled\x0dtask-reopened\x0ctask-deleted\x0fproject-created\x0fproject-upd\
+ated\x0fproject-deleted\x0btag-created\x0btag-updated\x0btag-deleted\x0fsection-\
+created\x0fsection-updated\x0fsection-deleted\x04\0\x0aevent-kind\x03\0\x95\x01\x01\
+q\x08\x04task\x019\0\x07project\x01\xc0\0\0\x03tag\x01\xc5\0\0\x07section\x01\xca\
+\0\0\x0cdeleted-task\x01\x01\0\x0fdeleted-project\x01\x01\0\x0bdeleted-tag\x01\x01\
+\0\x0fdeleted-section\x01\x01\0\x04\0\x0devent-subject\x03\0\x97\x01\x01r\x04\x0b\
+event-epoch\x01\x08revisionw\x04kind\x96\x01\x07subject\x98\x01\x04\0\x0eevent-e\
+nvelope\x03\0\x99\x01\x01m\x05\x07neutral\x06accent\x08positive\x07warning\x06da\
+nger\x04\0\x07ui-tone\x03\0\x9b\x01\x01m\x03\x05small\x06medium\x05large\x04\0\x07\
+ui-size\x03\0\x9d\x01\x01m\x04\x05start\x06center\x03end\x07stretch\x04\0\x08ui-\
+align\x03\0\x9f\x01\x01r\x02\x03gap}\x05align\xa0\x01\x04\0\x0clayout-props\x03\0\
+\xa1\x01\x01r\x03\x04texts\x04tone\x9c\x01\x04size\x9e\x01\x04\0\x0atext-props\x03\
+\0\xa3\x01\x01r\x03\x05labels\x05values\x04tone\x9c\x01\x04\0\x0cmetric-props\x03\
+\0\xa5\x01\x01r\x03\x05labels\x05value{\x07maximum{\x04\0\x0eprogress-props\x03\0\
+\xa7\x01\x01r\x04\x05labels\x09action-id\x01\x04tone\x9c\x01\x04icon)\x04\0\x0cb\
+utton-props\x03\0\xa9\x01\x01p(\x01r\x04\x05labels\x09action-id\x01\x05value\x1c\
+\x07options\xab\x01\x04\0\x0binput-props\x03\0\xac\x01\x01r\x01\x08task-ids\"\x04\
+\0\x0ftask-list-props\x03\0\xae\x01\x01q\x11\x05stack\x01\xa2\x01\0\x03row\x01\xa2\
+\x01\0\x07heading\x01\xa4\x01\0\x04text\x01\xa4\x01\0\x05badge\x01\xa4\x01\0\x06\
+metric\x01\xa6\x01\0\x08progress\x01\xa8\x01\0\x06button\x01\xaa\x01\0\x0atext-i\
+nput\x01\xad\x01\0\x0cnumber-input\x01\xad\x01\0\x06select\x01\xad\x01\0\x06togg\
+le\x01\xad\x01\0\x09task-list\x01\xaf\x01\0\x08task-ref\x01\x01\0\x07divider\0\0\
+\x0bempty-state\x01\xa4\x01\0\x0berror-state\x01\xa4\x01\0\x04\0\x0aui-content\x03\
+\0\xb0\x01\x01k{\x01r\x03\x02id\x01\x0cparent-index\xb2\x01\x07content\xb1\x01\x04\
+\0\x07ui-node\x03\0\xb3\x01\x01p\xb4\x01\x01r\x03\x0asurface-id\x01\x0aroot-inde\
+x{\x05nodes\xb5\x01\x04\0\x07surface\x03\0\xb6\x01\x01r\x01\x0asurface-id\x01\x04\
+\0\x0fsurface-request\x03\0\xb8\x01\x01r\x03\x0asurface-id\x01\x09action-id\x01\x06\
+values\xab\x01\x04\0\x0esurface-action\x03\0\xba\x01\x01q\x04\x04text\x01s\0\x07\
+integer\x01x\0\x07boolean\x01\x7f\0\x09option-id\x01\x01\0\x04\0\x0dsetting-valu\
+e\x03\0\xbc\x01\x01r\x02\x02id\x01\x05value\xbd\x01\x04\0\x0dnamed-setting\x03\0\
+\xbe\x01\x01r\x02\x0asetting-id\x01\x07messages\x04\0\x10validation-issue\x03\0\xc0\
+\x01\x01p\xbf\x01\x01r\x01\x06values\xc2\x01\x04\0\x0esetting-values\x03\0\xc3\x01\
+\x01r\x03\x09plugin-id\x01\x0aservice-id\x01\x06values\x92\x01\x04\0\x0cservice-\
+call\x03\0\xc5\x01\x01r\x01\x06values\x92\x01\x04\0\x0cservice-data\x03\0\xc7\x01\
+\x01m\x03\x04task\x07project\x03tag\x04\0\x0dresource-kind\x03\0\xc9\x01\x01q\x03\
+\x05tasks\x01:\0\x08projects\x01\xc1\0\0\x04tags\x01\xc6\0\0\x04\0\x10snapshot-r\
+ecords\x03\0\xcb\x01\x01r\x07\x0asession-id\x01\x0bevent-epoch\x01\x0dhead-revis\
+ionw\x04kind\xca\x01\x0apage-indexy\x07records\xcc\x01\x13final-snapshot-page\x7f\
+\x04\0\x0dsnapshot-page\x03\0\xcd\x01\x01r\x02\x0asession-id\x01\x0drequest-inde\
+x}\x04\0\x0fflush-staged-kv\x03\0\xcf\x01\x01r\x01\x0asession-id\x01\x04\0\x0ffi\
+nalize-resync\x03\0\xd1\x01\x01q\x03\x08snapshot\x01\xce\x01\0\x0fflush-staged-k\
+v\x01\xd0\x01\0\x08finalize\x01\xd2\x01\0\x04\0\x0bresync-page\x03\0\xd3\x01\x01\
+r\x01\x0aoperations\x8a\x01\x04\0\x0akv-segment\x03\0\xd5\x01\x01m\x02\x04more\x08\
+complete\x04\0\x0bflush-state\x03\0\xd7\x01\x01m\x02\x08leave-kv\x1freplace-kv-w\
+ith-staged-segments\x04\0\x0ffinal-kv-choice\x03\0\xd9\x01\x01k\xd6\x01\x01r\x04\
+\x0asession-id\x01\x0apage-indexy\x04kind\xca\x01\x07segment\xdb\x01\x04\0\x0csn\
+apshot-ack\x03\0\xdc\x01\x01r\x04\x0asession-id\x01\x0drequest-index}\x07segment\
+\xdb\x01\x05state\xd8\x01\x04\0\x09flush-ack\x03\0\xde\x01\x01r\x02\x0asession-i\
+d\x01\x06choice\xda\x01\x04\0\x10finalized-resync\x03\0\xe0\x01\x01q\x03\x0csnap\
+shot-ack\x01\xdd\x01\0\x09flush-ack\x01\xdf\x01\0\x09finalized\x01\xe1\x01\0\x04\
+\0\x13resync-page-outcome\x03\0\xe2\x01\x01m\x05\x03get\x04post\x03put\x05patch\x06\
+delete\x04\0\x0bhttp-method\x03\0\xe4\x01\x01r\x02\x04names\x05values\x04\0\x0bh\
+ttp-header\x03\0\xe6\x01\x01p\xe7\x01\x01r\x05\x06method\xe5\x01\x06origins\x0ep\
+ath-and-querys\x07headers\xe8\x01\x04body\x85\x01\x04\0\x0chttp-request\x03\0\xe9\
+\x01\x01r\x04\x06status{\x07headers\xe8\x01\x04body\x85\x01\x09truncated\x7f\x04\
+\0\x0dhttp-response\x03\0\xeb\x01\x01m\x09\x0finvalid-request\x10invalid-respons\
+e\x11permission-denied\x0adns-denied\x0atls-failed\x0econnect-failed\x07timeout\x12\
+delivery-ambiguous\x0bunavailable\x04\0\x0fhttp-error-code\x03\0\xed\x01\x01m\x03\
+\x08not-sent\x12may-have-been-sent\x11response-received\x04\0\x0edelivery-state\x03\
+\0\xef\x01\x01r\x04\x04code\xee\x01\x08delivery\xf0\x01\x09retryable\x7f\x07mess\
+ages\x04\0\x0ahttp-error\x03\0\xf1\x01\x01r\x02\x04name\x01\x05value\x1c\x04\0\x09\
+log-field\x03\0\xf3\x01\x01r\x02\x03keys\x05value\x85\x01\x04\0\x08kv-entry\x03\0\
+\xf5\x01\x01p\xf6\x01\x01r\x02\x07entries\xf7\x01\x0bnext-cursor\x16\x04\0\x07kv\
+-page\x03\0\xf8\x01\x03\0\x19junban:plugin/types@0.1.0\x05\0\x02\x03\0\0\x0atask\
+-query\x02\x03\0\0\x09task-page\x02\x03\0\0\x0ahost-error\x01B\x09\x02\x03\x02\x01\
+\x01\x04\0\x0atask-query\x03\0\0\x02\x03\x02\x01\x02\x04\0\x09task-page\x03\0\x02\
+\x02\x03\x02\x01\x03\x04\0\x0ahost-error\x03\0\x04\x01j\x01\x03\x01\x05\x01@\x01\
+\x05query\x01\0\x06\x04\0\x0bquery-tasks\x01\x07\x03\0\x1ejunban:plugin/host-tas\
+ks@0.1.0\x05\x04\x02\x03\0\0\x0dnamed-setting\x01B\x08\x02\x03\x02\x01\x05\x04\0\
+\x0dnamed-setting\x03\0\0\x02\x03\x02\x01\x03\x04\0\x0ahost-error\x03\0\x02\x01p\
+\x01\x01j\x01\x04\x01\x03\x01@\0\0\x05\x04\0\x0cget-settings\x01\x06\x03\0!junba\
+n:plugin/host-settings@0.1.0\x05\x06\x02\x03\0\0\x08kv-entry\x02\x03\0\0\x07kv-p\
+age\x01B\x0f\x02\x03\x02\x01\x07\x04\0\x08kv-entry\x03\0\0\x02\x03\x02\x01\x08\x04\
+\0\x07kv-page\x03\0\x02\x02\x03\x02\x01\x03\x04\0\x0ahost-error\x03\0\x04\x01ps\x01\
+p\x01\x01j\x01\x07\x01\x05\x01@\x01\x04keys\x06\0\x08\x04\0\x06get-kv\x01\x09\x01\
+ks\x01j\x01\x03\x01\x05\x01@\x02\x06cursor\x0a\x05limit}\0\x0b\x04\0\x07list-kv\x01\
+\x0c\x03\0\x20junban:plugin/host-storage@0.1.0\x05\x09\x02\x03\0\0\x09log-level\x02\
+\x03\0\0\x09log-field\x01B\x07\x02\x03\x02\x01\x0a\x04\0\x09log-level\x03\0\0\x02\
+\x03\x02\x01\x0b\x04\0\x09log-field\x03\0\x02\x01p\x03\x01@\x03\x05level\x01\x07\
+messages\x06fields\x04\x01\0\x04\0\x03log\x01\x05\x03\0\x1cjunban:plugin/host-lo\
+g@0.1.0\x05\x0c\x02\x03\0\0\x12invocation-context\x02\x03\0\0\x0cplugin-error\x02\
+\x03\0\0\x0ccommand-call\x02\x03\0\0\x0eplugin-outcome\x02\x03\0\0\x0eevent-enve\
+lope\x02\x03\0\0\x0fsurface-request\x02\x03\0\0\x07surface\x02\x03\0\0\x0esurfac\
+e-action\x02\x03\0\0\x0esetting-values\x02\x03\0\0\x10validation-issue\x02\x03\0\
+\0\x0bresync-page\x02\x03\0\0\x13resync-page-outcome\x02\x03\0\0\x0cservice-call\
+\x02\x03\0\0\x0cservice-data\x01B4\x02\x03\x02\x01\x0d\x04\0\x12invocation-conte\
+xt\x03\0\0\x02\x03\x02\x01\x0e\x04\0\x0cplugin-error\x03\0\x02\x02\x03\x02\x01\x0f\
+\x04\0\x0ccommand-call\x03\0\x04\x02\x03\x02\x01\x10\x04\0\x0eplugin-outcome\x03\
+\0\x06\x02\x03\x02\x01\x11\x04\0\x0eevent-envelope\x03\0\x08\x02\x03\x02\x01\x12\
+\x04\0\x0fsurface-request\x03\0\x0a\x02\x03\x02\x01\x13\x04\0\x07surface\x03\0\x0c\
+\x02\x03\x02\x01\x14\x04\0\x0esurface-action\x03\0\x0e\x02\x03\x02\x01\x15\x04\0\
+\x0esetting-values\x03\0\x10\x02\x03\x02\x01\x16\x04\0\x10validation-issue\x03\0\
+\x12\x02\x03\x02\x01\x17\x04\0\x0bresync-page\x03\0\x14\x02\x03\x02\x01\x18\x04\0\
+\x13resync-page-outcome\x03\0\x16\x02\x03\x02\x01\x19\x04\0\x0cservice-call\x03\0\
+\x18\x02\x03\x02\x01\x1a\x04\0\x0cservice-data\x03\0\x1a\x01j\0\x01\x03\x01@\x01\
+\x07context\x01\0\x1c\x04\0\x08activate\x01\x1d\x04\0\x0adeactivate\x01\x1d\x01j\
+\x01\x07\x01\x03\x01@\x02\x07context\x01\x04call\x05\0\x1e\x04\0\x0einvoke-comma\
+nd\x01\x1f\x01@\x02\x07context\x01\x05event\x09\0\x1e\x04\0\x0chandle-event\x01\x20\
+\x01j\x01\x0d\x01\x03\x01@\x02\x07context\x01\x07request\x0b\0!\x04\0\x0erender-\
+surface\x01\"\x01@\x02\x07context\x01\x06action\x0f\0\x1e\x04\0\x15handle-surfac\
+e-action\x01#\x01p\x13\x01j\x01$\x01\x03\x01@\x02\x07context\x01\x06values\x11\0\
+%\x04\0\x11validate-settings\x01&\x01j\x01\x17\x01\x03\x01@\x02\x07context\x01\x04\
+page\x15\0'\x04\0\x06resync\x01(\x01j\x01\x1b\x01\x03\x01@\x02\x07context\x01\x04\
+call\x19\0)\x04\0\x0ccall-service\x01*\x04\0\x19junban:plugin/guest@0.1.0\x05\x1b\
+\x04\0(junban:rust-consumer/rust-consumer@0.1.0\x04\0\x0b\x13\x01\0\x0drust-cons\
+umer\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.244.0\
+\x10wit-bindgen-rust\x060.51.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

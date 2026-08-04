@@ -167,7 +167,7 @@ Settings are operator-owned; there is no guest setting write. KV bytes are isola
 
 ## Events and resync
 
-Event envelopes carry event epoch/revision, closed resource event kind, and one typed task/project/tag subject summary or deleted resource reference. They contain no receipt request/response or arbitrary event JSON. The guest may query current state.
+Event envelopes carry event epoch/revision, a closed task/project/tag/section event kind, and one full typed task/project/tag/section subject summary or typed deleted-resource reference. Kind and subject must exact-match. They contain no receipt request/response or arbitrary event JSON. The guest may query current state.
 
 Resync is a frozen paged protocol, never a truncated snapshot accepted as complete. `resync-page` is the closed request variant `snapshot | flush-staged-kv | finalize`; `resync-page-outcome` has corresponding acknowledgement/segment, continuation, and final-choice variants, so generated bindings make sequence errors explicit.
 

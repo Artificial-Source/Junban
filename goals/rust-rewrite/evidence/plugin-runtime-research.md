@@ -1,6 +1,17 @@
 # Portable Plugin Runtime Research
 
-Date: 2026-07-28
+Initial research: 2026-07-28
+Implementation checkpoint: 2026-08-04
+
+## 2026-08-04 implementation checkpoint
+
+- Junban keeps Rust 1.93.0 and pins `wasmtime`/`wasmtime-wasi` **45.0.3**, the newest supported patch line with MSRV 1.93. Wasmtime 46/47 require Rust 1.94 and do not justify a workspace-wide toolchain change in Phase 7.
+- Runtime features start from `default-features = false` and add only the measured Component Model/runtime/compiler/cache/async pieces required by the retained host. `wasmtime-wasi` uses Preview 2 only; Preview 1 and experimental Preview 3 remain off unless a golden component proves an exact Preview-2 baseline need.
+- Host limits require `StoreLimits` on the mutable store owner, on-demand memory allocation unless the placement spike disproves it, epoch interruption plus cancellation of host futures, a selective linker, and separate process RSS/cgroup evidence. Store limits are not described as an RSS limit.
+- Rust authoring uses stable `wasm32-wasip2` and `wit-bindgen`; `cargo-component` is no longer the primary documented path because Bytecode Alliance is deprecating it.
+- TypeScript authoring pins build-only `@bytecodealliance/jco` **1.26.1** and `@bytecodealliance/componentize-js` **0.22.0**. The resulting StarlingMonkey-bearing component receives separate package, cold-start, and active-memory evidence and never launches Node at product runtime.
+- Package verification uses SHA-256 plus strict Ed25519 (`ed25519-dalek` **2.2.0**, `verify_strict`, no legacy/hazmat feature). Phase 7 uses a small release-scoped signed static registry rather than full TUF, Sigstore, Warg/OCI, Minisign-as-runtime-ABI, or a nonexistent marketplace service.
+- The approved detailed authority, package/signing ceremony, effect model, generations, schema, UI, limits, and wave gates live in [`phase-7-context-map.md`](phase-7-context-map.md). This research note does not override it.
 
 ## Decision
 

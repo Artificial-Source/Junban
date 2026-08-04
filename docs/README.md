@@ -50,6 +50,7 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-6-review-ledger.md`](../goals/rust-rewrite/evidence/phase-6-review-ledger.md): Phase 6 specialist findings and closure evidence
 - [`../goals/rust-rewrite/evidence/phase-6-legacy-visual-baseline/README.md`](../goals/rust-rewrite/evidence/phase-6-legacy-visual-baseline/README.md): independent legacy-rendered Phase 6 AI/voice visual authorities and manifest
 - [`../goals/rust-rewrite/evidence/phase-7-context-map.md`](../goals/rust-rewrite/evidence/phase-7-context-map.md): Phase 7 portable-plugin authority, package/trust, runtime, persistence, UI, hostile-test, and evidence contract
+- [`../goals/rust-rewrite/evidence/phase-7-review-ledger.md`](../goals/rust-rewrite/evidence/phase-7-review-ledger.md): Phase 7 specialist findings and closure evidence
 - [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings
 - [`performance.md`](performance.md): hosted memory and scale harness commands
 

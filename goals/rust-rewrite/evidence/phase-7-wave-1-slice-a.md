@@ -1,7 +1,7 @@
 # Phase 7 Wave 1 persistence Slice A
 
 Date: 2026-08-04
-Status: integrated and locally validated; database review opened `P7-DB-001`–`005`, so Slice B remains blocked pending focused correction/recheck
+Status: accepted — focused database recheck closed `P7-DB-001`–`005` and authorized Slice B
 Authority: [`phase-7-schema-contract.md`](phase-7-schema-contract.md)
 
 ## Delivered boundary
@@ -30,7 +30,7 @@ The storage suite passed 211 tests. The first workspace run exposed one recovery
 
 ## Database review checkpoint
 
-The early database review found five material issues: accepted v6 repairs and reminder normalization were ordered after pre-v7 snapshot verification; v7 open/restore still repaired missing v6-era objects; current-v7 open omitted integrity/FK checks; and plugin KV did not enforce SQLite BLOB storage class. These are tracked as open `P7-DB-001`–`005` in the review ledger. Slice B must not begin until focused corrections and recheck close them.
+The early database review found five material issues: accepted v6 repairs and reminder normalization were ordered after pre-v7 snapshot verification; v7 open/restore still repaired missing v6-era objects; current-v7 open omitted integrity/FK checks; and plugin KV did not enforce SQLite BLOB storage class. Focused corrections added exact v6-before-snapshot normalization, v7 validation-only admission, current-open integrity/FK checks and BLOB-only KV schema/semantic authority. The database recheck found `P7-DB-001`–`005` fixed and authorized Slice B.
 
 ## Explicitly remaining
 

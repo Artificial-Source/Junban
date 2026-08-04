@@ -364,11 +364,72 @@ def sample_swap_io(
     }
 
 
-def host_contention(host: dict[str, Any]) -> dict[str, Any]:
+def classify_host_contention(
+    *,
+    phase: str,
+    load1: float,
+    load5: float,
+    cpus: int,
+    active_confounder_count: int,
+    swap_io_active: bool,
+) -> dict[str, Any]:
+    """Pure classifier for pre/post host contention semantics.
+
+    pre: enforce CPU-scaled historical load + active confounders + swap I/O.
+    post: load averages are informational only (include this campaign's own CPU);
+          still enforce active external confounder CPU ticks and swap I/O.
+    """
+    phase = str(phase)
+    if phase not in {"pre", "post"}:
+        raise HarnessError(f"unknown contention phase {phase!r}")
+    thresholds = load_thresholds(cpus)
+    load_reasons = load_contention_reasons(load1, load5, cpus)
+    load_thresholds_enforced = phase == "pre"
+    reasons: list[str] = []
+    informational: list[str] = []
+    if load_thresholds_enforced:
+        reasons.extend(load_reasons)
+    elif load_reasons:
+        informational.extend([f"load_informational: {r}" for r in load_reasons])
+    if active_confounder_count > 0:
+        reasons.append(f"active_build_confounders={active_confounder_count}")
+    if swap_io_active:
+        reasons.append("swap_io_active")
+    contended = bool(reasons)
+    if load_thresholds_enforced:
+        method = (
+            "pre: enforce CPU-scaled historical load thresholds; "
+            "active confounder CPU tick deltas; pswpin/pswpout delta"
+        )
+    else:
+        method = (
+            "post: historical load averages informational only (include campaign CPU); "
+            "still enforce active external confounder CPU tick deltas and pswpin/pswpout delta"
+        )
+    return {
+        "phase": phase,
+        "load_thresholds_enforced": load_thresholds_enforced,
+        "load1_threshold": thresholds["load1_threshold"],
+        "load5_threshold": thresholds["load5_threshold"],
+        "load_reasons": load_reasons,
+        "informational": informational,
+        "contended": contended,
+        "reason": (
+            "; ".join(reasons)
+            if reasons
+            else (
+                "no_contention_signals"
+                if not informational
+                else "no_enforced_contention_signals; " + "; ".join(informational)
+            )
+        ),
+        "method": method,
+    }
+
+
+def host_contention(host: dict[str, Any], *, phase: str = "pre") -> dict[str, Any]:
     load1, load5, load15 = os.getloadavg()
     cpus = max(int(host.get("cpu_count") or os.cpu_count() or 1), 1)
-    thresholds = load_thresholds(cpus)
-    reasons = load_contention_reasons(load1, load5, cpus)
     # One shared activity window: sample confounder CPU and swap I/O together.
     candidates = list_candidate_confounder_pids()
     ticks_before: dict[int, int] = {}
@@ -410,14 +471,14 @@ def host_contention(host: dict[str, Any]) -> dict[str, Any]:
             "active": False,
             "sample_seconds": ACTIVITY_SAMPLE_SECONDS,
         }
-    if active_confounders:
-        reasons.append(f"active_build_confounders={len(active_confounders)}")
-    if swap_io.get("active"):
-        reasons.append(
-            "swap_io_active "
-            f"pswpin_delta={swap_io['pswpin_delta']} "
-            f"pswpout_delta={swap_io['pswpout_delta']}"
-        )
+    classified = classify_host_contention(
+        phase=phase,
+        load1=load1,
+        load5=load5,
+        cpus=cpus,
+        active_confounder_count=len(active_confounders),
+        swap_io_active=bool(swap_io.get("active")),
+    )
     # Informational only: static swap allocation is recorded but never contends.
     swap_used_mib = None
     try:
@@ -432,26 +493,36 @@ def host_contention(host: dict[str, Any]) -> dict[str, Any]:
             swap_used_mib = (total - avail) / 1024.0
     except OSError:
         pass
-    contended = bool(reasons)
+    # Attach swap detail into enforced reason when active (keep numbers).
+    reason = classified["reason"]
+    if swap_io.get("active") and "swap_io_active" in reason:
+        reason = reason.replace(
+            "swap_io_active",
+            "swap_io_active "
+            f"pswpin_delta={swap_io['pswpin_delta']} "
+            f"pswpout_delta={swap_io['pswpout_delta']}",
+            1,
+        )
     return {
+        "phase": classified["phase"],
+        "load_thresholds_enforced": classified["load_thresholds_enforced"],
         "load1": load1,
         "load5": load5,
         "load15": load15,
         "cpu_count": cpus,
-        "load1_threshold": thresholds["load1_threshold"],
-        "load5_threshold": thresholds["load5_threshold"],
+        "load1_threshold": classified["load1_threshold"],
+        "load5_threshold": classified["load5_threshold"],
+        "load_reasons": classified["load_reasons"],
+        "informational": classified["informational"],
         "activity_sample_seconds": ACTIVITY_SAMPLE_SECONDS,
         "min_active_cpu_tick_delta": MIN_ACTIVE_CPU_TICK_DELTA,
         "swap_used_mib_informational": swap_used_mib,
         "swap_io": swap_io,
         "active_build_confounders": active_confounders,
         "candidate_confounder_count": len(candidates),
-        "contended": contended,
-        "reason": "; ".join(reasons) if reasons else "no_contention_signals",
-        "method": (
-            "load CPU-scaled thresholds; confounders require positive CPU tick delta "
-            f"over {ACTIVITY_SAMPLE_SECONDS}s; swap contention uses pswpin/pswpout delta only"
-        ),
+        "contended": classified["contended"],
+        "reason": reason,
+        "method": classified["method"],
     }
 
 
@@ -520,6 +591,52 @@ def self_check() -> dict[str, Any]:
     if not swap_io_is_active(1, 0) or not swap_io_is_active(0, 2):
         raise HarnessError("positive pswpin/pswpout delta must count as active")
 
+    # Post-run historical load alone must not contend; active process/swap still do.
+    post_high_load = classify_host_contention(
+        phase="post",
+        load1=20.0,
+        load5=20.0,
+        cpus=20,
+        active_confounder_count=0,
+        swap_io_active=False,
+    )
+    if post_high_load["contended"] or post_high_load["load_thresholds_enforced"]:
+        raise HarnessError(
+            f"post high historical load alone must not contend: {post_high_load}"
+        )
+    if not post_high_load["informational"]:
+        raise HarnessError("post high load must record informational load reasons")
+    post_active = classify_host_contention(
+        phase="post",
+        load1=0.1,
+        load5=0.1,
+        cpus=20,
+        active_confounder_count=2,
+        swap_io_active=False,
+    )
+    if not post_active["contended"]:
+        raise HarnessError("post active confounders must contend")
+    post_swap = classify_host_contention(
+        phase="post",
+        load1=0.1,
+        load5=0.1,
+        cpus=20,
+        active_confounder_count=0,
+        swap_io_active=True,
+    )
+    if not post_swap["contended"]:
+        raise HarnessError("post swap I/O must contend")
+    pre_high_load = classify_host_contention(
+        phase="pre",
+        load1=20.0,
+        load5=20.0,
+        cpus=20,
+        active_confounder_count=0,
+        swap_io_active=False,
+    )
+    if not pre_high_load["contended"] or not pre_high_load["load_thresholds_enforced"]:
+        raise HarnessError(f"pre high load must enforce and contend: {pre_high_load}")
+
     checks = {
         "linux_cgroup_v2": True,
         "systemd_run_memory_accounting": True,
@@ -536,6 +653,8 @@ def self_check() -> dict[str, Any]:
         "load5_threshold_20cpu": load_thresholds(20)["load5_threshold"],
         "evaluate_decision_fixtures": run_evaluate_decision_fixtures(),
         "cold_total_fixtures": run_cold_total_fixtures(),
+        "post_load_informational_only": True,
+        "post_still_enforces_active_and_swap": True,
     }
     missing = [k for k, v in checks.items() if v is False]
     if missing:
@@ -2076,7 +2195,7 @@ def run_campaign(
     # Authoritative eligibility uses start-of-run tree cleanliness only. Writing
     # the evidence JSON after measurement must not retroactively dirty this bit.
     dirty_at_start = git_dirty(REPO_ROOT)
-    contention_pre = host_contention(host)
+    contention_pre = host_contention(host, phase="pre")
 
     artifacts = build_release_artifacts()
     rust_component = build_rust_component()
@@ -2194,7 +2313,8 @@ def run_campaign(
             samples["child_typescript"], active_stage="warm_ping", mode="child"
         )
 
-    contention_post = host_contention(host)
+    contention_post = host_contention(host, phase="post")
+    # Pre/post use respective semantics: pre enforces historical load; post does not.
     contended = bool(contention_pre["contended"] or contention_post["contended"])
 
     ts_ok = bool(ts_component.get("ok")) and not ts_component.get("skipped")

@@ -142,7 +142,9 @@ that remains an explicit **non-production** linker limitation.
 - Host contention measures **activity**, not mere existence:
   - candidate cargo/node/browser PIDs must show positive CPU tick delta over a short sample window
   - swap contention uses `/proc/vmstat` `pswpin`/`pswpout` delta; allocated-but-inactive swap is informational only
-  - load thresholds are CPU-scaled and must not reject a Phase 6-class idle host solely for load5≈3.28 on ~20 CPUs
+  - **pre-run** enforces CPU-scaled historical load thresholds (must not reject a Phase 6-class idle host solely for load5≈3.28 on ~20 CPUs)
+  - **post-run** still enforces active external confounder CPU ticks and swap I/O, but treats historical load averages as **informational only** because they include this campaign's own compile/invoke CPU (`load_thresholds_enforced=false` on post samples)
+  - authoritative eligibility requires both pre and post uncontended under those respective semantics
 
 ### Projection limitation (critical honesty)
 

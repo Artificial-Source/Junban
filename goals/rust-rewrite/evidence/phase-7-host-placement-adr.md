@@ -176,9 +176,9 @@ projected = server_baseline + max(0, variant - sdk_only_probe)
 
 are **not** an actual SDK-linked or integrated `junban-server` measurement.
 
-They are a temporary cross-check only. They do **not** prove the context-map criterion that a Phase 7 server linked to SDK/protocol-only stays within default memory growth bounds, and they are **not** a prerequisite to freezing placement. After placement freezes, Wave 1's first SDK-only subgate must produce matched release pairs of ordinary server vs server-with-SDK/protocol default path (no Engine, no child) before schema/runtime work proceeds. Wave 5 still measures integrated server+host and may revise active ceilings.
+They are a temporary cross-check only. They do **not** prove the context-map criterion that a Phase 7 server linked to SDK/protocol-only stays within default memory growth bounds, and they were **not** a prerequisite to freezing placement. Wave 1's subsequent clean exact-commit matched release pairs supplied that SDK-only default proof: default warm was 8.6484 MiB median/9.5312 MiB maximum and 9.5820 MiB maximum peak, 0.3868 MiB below feature-off median. Wave 5 still measures integrated server+host and may revise active ceilings.
 
-The accepted ceilings are data-derived from selected-path projections plus explicit headroom only. They are not integrated product measurements; architecture acceptance freezes them as Wave 1 implementation gates subject to the mandatory matched SDK-only default proof and later integrated Wave 5 replacement.
+The accepted ceilings are data-derived from selected-path projections plus explicit headroom only. They are not integrated product measurements; architecture acceptance freezes them as Wave 1 implementation gates. The mandatory matched SDK-only default condition is now fulfilled; the later integrated Wave 5 replacement remains.
 
 Other limits:
 
@@ -195,7 +195,7 @@ Lazy in-process passed the same containment probes but lost the frozen fault-con
 
 ## Follow-ups
 
-1. Wave 1 first subgate: matched ordinary server vs server-with-SDK/protocol default path memory (not satisfied by probe projection; required before schema/runtime work).
+1. Wave 1 SDK-only matched default condition is fulfilled by `phase-7-sdk-matched-release.json` at clean commit `5d05eacbdfd9298eefc16c5b69f730cd2f05494e`.
 2. Wave 5 replaces projections with integrated selected-path measurements and may revise active ceilings only through documented evidence/review.
 3. Resolve Wasmtime advisory via patch, toolchain move, or documented residual risk before a product host ships.
 

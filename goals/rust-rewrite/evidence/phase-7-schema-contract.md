@@ -1,7 +1,7 @@
 # Phase 7 schema-v7 contract
 
 Date: 2026-08-04
-Status: Wave 0 authority draft; implementation starts only after the host-placement architecture gate
+Status: frozen authority; accepted SDK-first matched-memory gate authorizes Wave 1 schema-v7 implementation
 Parent authority: [`phase-7-context-map.md`](phase-7-context-map.md)
 
 ## Purpose

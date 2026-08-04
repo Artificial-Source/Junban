@@ -55,6 +55,9 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-7-schema-contract.md`](../goals/rust-rewrite/evidence/phase-7-schema-contract.md): exact schema-v7 plugin generations, grants, settings/KV, event cursor, invocation, restore, and package reconciliation authority
 - [`../goals/rust-rewrite/evidence/phase-7-host-placement-adr.md`](../goals/rust-rewrite/evidence/phase-7-host-placement-adr.md): accepted Wave 0 host-placement ADR, retained child boundary, and frozen active gates
 - [`../goals/rust-rewrite/evidence/phase-7-host-placement.json`](../goals/rust-rewrite/evidence/phase-7-host-placement.json): authoritative clean idle-host five-sample placement measurements and manual architecture-acceptance metadata
+- [`../goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md`](../goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md): exact Wave 1 default-versus-feature-off optimized server linkage and memory protocol
+- [`../goals/rust-rewrite/evidence/phase-7-sdk-matched-release.json`](../goals/rust-rewrite/evidence/phase-7-sdk-matched-release.json): accepted clean exact-commit five-sample SDK matched-release measurements
+- [`../goals/rust-rewrite/evidence/phase-7-wave-1-sdk-outcome.md`](../goals/rust-rewrite/evidence/phase-7-wave-1-sdk-outcome.md): accepted SDK/package/WIT/review/memory subgate and schema-v7 authorization
 - [`../goals/rust-rewrite/evidence/phase-7-review-ledger.md`](../goals/rust-rewrite/evidence/phase-7-review-ledger.md): Phase 7 specialist findings and closure evidence
 - [`../goals/rust-rewrite/evidence/phase-7-legacy-visual-baseline/README.md`](../goals/rust-rewrite/evidence/phase-7-legacy-visual-baseline/README.md): independent legacy-rendered Phase 7 Extensions/plugin visual authorities and manifest
 - [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings

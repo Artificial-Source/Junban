@@ -1,7 +1,7 @@
 # Phase 7 context map and execution contract
 
 Date: 2026-08-04
-Status: Wave 0 host placement accepted; Wave 1 SDK package-security and WIT/API rechecks accepted; clean exact-commit matched-memory acceptance remains before schema/runtime/routes/UI
+Status: Wave 0 host placement and Wave 1 SDK-first package/WIT/matched-memory subgate accepted; schema v7 implementation is authorized
 Base: Phase 6 commit `18bea1b899108f218074714697759af02fa56670`
 
 ## Purpose and observable outcome
@@ -25,7 +25,7 @@ The phase ends only after the frozen Rust and TypeScript examples build and run 
 
 - Workspace crates: `junban-domain`, `junban-app`, `junban-storage`, `junban-server`, `junban-cli`, `junban-mcp`, lazy `junban-ai`, and pure `junban-plugin-sdk`.
 - `junban-plugin-sdk` now owns bounded package/WIT/trust/component/protocol authority without Wasmtime, storage or runtime construction; `junban-plugin-host` does not yet exist.
-- SQLite schema head remains v6; schema v7 is unused and available until the SDK-first acceptance subgate passes.
+- SQLite schema head remains v6; accepted SDK-first evidence now authorizes the planned schema-v7 migration/persistence implementation.
 - `FeatureSettings` contains only six first-party feature toggles. `/settings/plugins` is intentionally rejected today, and `FeaturesTab` documents that plugin keys are unsupported.
 - `docs/architecture.md` reserves `junban-plugin-sdk` for WIT/package contracts and `junban-plugin-host` for the measured optional runtime.
 - `docs/performance.md` requires no Wasmtime initialization on ordinary startup.
@@ -590,4 +590,4 @@ Largest implementation risks:
 | `P7-PLAN-002` | High     | fixed  | WIT now has one synchronous HTTP-import model only, no outcome intents. Every HTTP invocation is honestly at-least-once with stable delivery identity and no SQLite atomicity; HTTP and a returned SQLite effect are mutually exclusive. Dependency service mode is read-only and forbids HTTP/effects. Event cursor ordering is explicit for HTTP-only and receipt-backed SQLite effects. |
 | `P7-PLAN-003` | High     | fixed  | Separate persisted `package_generation` and `activation_epoch` plus process-local `host_session_id` now define grants, every transition, drain/CAS ordering, restore behavior, IPC outcome fencing, and browser action freshness. Package authority changes invalidate grants; restart/re-enable epochs do not silently broaden them.                                                      |
 
-The focused planning recheck approved all three corrections with no new blocker. Wave 0 then completed its measured architecture gate and retained the on-demand child placement. Wave 1 proceeds only through the SDK-first package/WIT/matched-memory acceptance subgate recorded in the live ExecPlan and review ledger.
+The focused planning recheck approved all three corrections with no new blocker. Wave 0 then completed its measured architecture gate and retained the on-demand child placement. Wave 1's package/WIT/matched-memory subgate is accepted; schema-v7 migration and persistence implementation is the next authorized scope recorded in the live ExecPlan and review ledger.

@@ -1,7 +1,7 @@
 # Phase 7 JBP1 package and registry contract
 
 Date: 2026-08-04
-Status: Wave 0 authority draft; implementation starts only after the host-placement architecture gate
+Status: frozen Wave 1 production authority; package implementation and focused security review accepted
 Parent authority: [`phase-7-context-map.md`](phase-7-context-map.md)
 Schema authority: [`phase-7-schema-contract.md`](phase-7-schema-contract.md)
 WIT authority: [`phase-7-wit-contract.md`](phase-7-wit-contract.md)

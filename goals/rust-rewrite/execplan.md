@@ -2,7 +2,7 @@
 
 This ExecPlan is the live authority for rebuilding Junban around a Rust application core while preserving the approved React interface. It follows `PLANS.md` and must remain current as implementation proceeds.
 
-**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 6 are complete. Phase 7 capability-limited portable plugins are in progress at the Wave 1 SDK-first acceptance gate; Phases 8–10 remain.
+**Status:** approved by the user on 2026-07-28 and expanded with an evidence-driven Phase 10 on 2026-07-29. Phases 0 through 6 are complete. Phase 7 capability-limited portable plugins are in progress at Wave 1 schema-v7 migration and persistence after the accepted SDK-first subgate; Phases 8–10 remain.
 
 ## Purpose and user-visible outcome
 
@@ -728,7 +728,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] Phase 7 Wave 0 host-placement gate: temporary `tools/phase7-host-placement` probes compared protocol-only / lazy in-process / SDK-parent-plus-child with real Rust + pure TypeScript components, actual import inspection, fair warm/peak/cold selection, trap/CPU/memory/in-flight-child-crash/recovery/cleanup containment, exact byte/hash binding and cgroup evidence. The clean idle five-sample campaign and focused architecture recheck closed `P7-ARCH-001`–`004` and accepted `on_demand_child_host`. Frozen projected active gates are Rust 18.6016/19.5078 MiB and TypeScript 357.334/415.6201 MiB warm/peak; ordinary no-plugin 24/32 MiB remains unchanged. See `evidence/phase-7-host-placement-adr.md` and `evidence/phase-7-host-placement.json`.
 - [ ] Phase 7 portable-plugin implementation (Waves 1–5). Contract remains `evidence/phase-7-context-map.md`. Planning, schema, package, WIT and host-placement gates are approved.
   - [x] Wave 1 SDK-first implementation subgate: production `junban-plugin-sdk` owns exact WIT/JBP1/JRI1/manifest/signature/capability/graph/component/protocol authorities; default server linkage is static-only with a matched feature-off baseline, and the superseded Wasmtime probe is deleted.
-  - [ ] Wave 1 SDK-first acceptance: `P7-PKG-001`–`003` and `P7-WIT-001`–`006` are fixed and focused package-security/API rechecks approve the exact SDK, consumers, protocol and frozen WIT. The clean exact-commit parent five-sample matched default/feature-off release memory gate remains; schema v7 must not start earlier. Runtime host, routes, UI, registry artifacts, and reference plugins have not started.
+  - [x] Wave 1 SDK-first acceptance: `P7-PKG-001`–`003` and `P7-WIT-001`–`006` are fixed; focused package-security/API rechecks approve the exact SDK, consumers, protocol and frozen WIT. Clean commit `5d05eacbdfd9298eefc16c5b69f730cd2f05494e` parent evidence passed all five-sample matched gates: default warm 8.6484 MiB median/9.5312 MiB maximum, 9.5820 MiB maximum peak, 0.3868 MiB below feature-off median, one process and complete cleanup. Schema v7 is authorized. Runtime host, routes, UI, registry artifacts, and reference plugins have not started.
 - [ ] Phase 8 implementation.
 - [ ] Phase 9 implementation.
 - [x] User requested sequential execution through a new Phase 10 without pausing at phase boundaries.
@@ -794,6 +794,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-08-04: Phase 6 disabled acceptance uses the same-host Phase 5 parent/Phase 6 head matched protocol, while enabled acceptance is separate local-mock evidence. The final accepted candidate passed at 8.3711 MiB disabled median warm and 11.0898/13.3164 MiB enabled maximum post-session warm/cgroup peak without a waiver.
 - 2026-08-04: completed Phase 6 with lazy Rust provider/chat/tool/speech services, private receipt-first credentials, durable approval/recovery/cancellation, preview-bound schedule application, and hash-gated browser-local voice. Final security review found and closed complete approval-argument visibility; no reviewed finding remains.
 - 2026-08-04: Phase 7 Wave 1 starts SDK-first. `junban-plugin-sdk` owns exact package/WIT/trust/capability/graph/index/component/protocol data authority and bounded pure verification only. Default server linkage touches one static table, feature-off remains the matched baseline, and Wasmtime remains absent. Schema v7, runtime/process I/O, routes, persistence, registry, UI, and reference plugins wait for the parent-run memory gate and package security review.
+- 2026-08-04: Wave 1 SDK-first acceptance passed. Package-security/API rechecks closed `P7-PKG-001`–`003` and `P7-WIT-001`–`006`; WIT SHA-256 `5705801973219a0e6981693653f2caefdf1090345b65494750c8d8a9bf4b15f4` is frozen. The clean exact-commit matched run accepted default warm 8.6484/9.5312 MiB median/max and 9.5820 MiB maximum peak, lower than feature-off by 0.3868 MiB at the median. Schema-v7 implementation may begin.
 
 ## Discoveries and risks
 

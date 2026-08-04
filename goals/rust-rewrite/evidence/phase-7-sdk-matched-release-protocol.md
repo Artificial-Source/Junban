@@ -2,7 +2,7 @@
 
 Date: 2026-08-04
 Protocol: `junban-phase7-sdk-matched-release-v1`
-Status: implementation complete; authoritative parent-run evidence pending
+Status: accepted — authoritative parent-run evidence retained for clean commit `5d05eacbdfd9298eefc16c5b69f730cd2f05494e`
 
 ## Purpose
 
@@ -142,6 +142,4 @@ python3 scripts/check-phase7-sdk-matched-release.py --idle-host-confirmed \
   --output goals/rust-rewrite/evidence/phase-7-sdk-matched-release.json
 ```
 
-No result JSON is committed by this implementation subgate. Wave 1 remains
-blocked until the clean parent-run five-sample report passes and the package
-security review closes all material `P7-PKG-*` findings.
+The retained `phase-7-sdk-matched-release.json` records `accepted=true`, five samples per side, clean start/end, no contention or blocker, one process and complete cleanup. Default measured 8.6484 MiB median/9.5312 MiB maximum warm and 9.5820 MiB maximum peak; its warm median was 0.3868 MiB lower than feature-off and only 0.2773 MiB above the Phase 6 frozen baseline. Package-security/API findings are closed, so this subgate authorizes schema-v7 work.

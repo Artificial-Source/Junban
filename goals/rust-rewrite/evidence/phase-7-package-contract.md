@@ -4,6 +4,7 @@ Date: 2026-08-04
 Status: Wave 0 authority draft; implementation starts only after the host-placement architecture gate
 Parent authority: [`phase-7-context-map.md`](phase-7-context-map.md)
 Schema authority: [`phase-7-schema-contract.md`](phase-7-schema-contract.md)
+WIT authority: [`phase-7-wit-contract.md`](phase-7-wit-contract.md)
 
 ## Purpose
 
@@ -115,7 +116,7 @@ Permissions are sorted by `(capability, canonical scope)` and are requests, not 
 
 An HTTP origin is canonical `https://host[:nondefault-port]` only: no userinfo, path other than `/`, query, fragment, wildcard, IP literal, mixed-script/Unicode host, or default port spelling. Loopback/private/link-local origins are rejected for community packages; deterministic hostile tests use an explicit test-only authority that cannot ship. DNS resolution and every connection hop are checked against the approved public origin/address policy; redirects are disabled. Headers use a host allowlist and cannot set `authorization`, `cookie`, `host`, forwarding/proxy, connection, content-length, or Junban delivery header.
 
-A dedicated plugin HTTP client resolves every request origin immediately before connect, rejects the request if **any** answer is not globally routable, and pins the connection to one validated answer while preserving the canonical hostname for URL authority, TLS certificate verification/SNI, and Host. It disables environment/system proxies, redirect following, automatic credential/cookie stores, and automatic retries. A later retry performs fresh all-answer validation and a new pinned connection.
+A dedicated plugin HTTP client resolves every request origin immediately before connect, rejects the request if **any** answer is not globally routable, and pins the connection to one validated answer while preserving the canonical hostname for URL authority, TLS certificate verification/SNI, and Host. It disables environment/system proxies, redirect following, automatic credential/cookie stores, and automatic retries. A later retry performs fresh all-answer validation and a new pinned connection. Request bodies over 1 MiB fail before send. Responses return at most the first 1 MiB and set the typed WIT `truncated` flag when another byte exists; body oversize is never alternatively reported as an error. Post-send uncertainty uses the typed `may-have-been-sent` delivery state.
 
 The non-global predicate covers the IANA IPv4/IPv6 special-purpose registries and fails closed for unspecified, loopback, private/unique-local, link-local, CGNAT, protocol-assignment, documentation, benchmark, multicast, reserved/future-use, broadcast, IPv4-mapped/compatible, NAT64/local translation, 6to4/Teredo/other transition forms, and zone-scoped addresses. Hostnames `localhost`, `.localhost`, `.local`, and noncanonical trailing-dot/IDNA forms are rejected before DNS. Tests freeze representative boundaries, multi-answer public+private sets, rebinding between requests, mapped/translation forms, cloud metadata, proxy environment variables, TLS hostname/SNI and forbidden Host override.
 
@@ -133,7 +134,7 @@ services      sorted unique service ids expected from that dependency, max 16
 
 Junban installs one version per plugin id and performs no hidden solver/backtracking or automatic package download. Missing/incompatible dependencies return the full bounded closure for explicit operator action. Lock/update/disable/uninstall semantics are frozen in the schema contract.
 
-A service declaration contains id/title and bounded request/response named scalar fields and requires `services:provide`. Calling one requires an exact `services:consume` scope naming the dependency and service. Service data supports only string (≤8 KiB), signed integer, boolean, canonical date/timestamp, and canonical task/project/tag/plugin IDs. Lists are bounded flat lists of those scalars. No arbitrary JSON, nested map/tree, package bytes, bearer/secret, UI node, mutation, KV patch, HTTP request, or opaque byte payload crosses a dependency service. Runtime service invocation mode is read-only and denies HTTP/effects even if the called plugin otherwise has those grants.
+A service declaration contains id/title and bounded request/response named fields and requires `services:provide`. Calling one requires an exact `services:consume` scope naming the dependency and service. Service data uses the exact WIT `data-value`: string (≤8 KiB), signed integer, boolean, canonical date/timestamp, canonical task/project/tag/plugin/option ID, or one homogeneous ≤100-element/aggregate-64-KiB typed list variant of those scalar kinds. No arbitrary JSON, nested map/tree/list, package bytes, bearer/secret, UI node, mutation, KV patch, HTTP request, or opaque byte payload crosses a dependency service. Runtime service invocation mode is read-only and denies HTTP/effects/UI even if the called plugin otherwise has those grants.
 
 ## Capability matrix
 
@@ -218,8 +219,8 @@ Package parsing never constructs Wasmtime. A small bounded component parser/vali
 1. validates WebAssembly Component Model structure and exact component length/hash;
 2. requires a Component Model outer encoding, enumerates all component imports/exports, and treats embedded core modules only as component internals; JBP1 cannot carry a separate core module/native/custom executable sidecar;
 3. requires exports structurally compatible with exact `junban:plugin/plugin@0.1.0` (the required guest interface) and rejects alternate Junban guest versions/exports;
-4. permits only exact `junban:plugin/host-* @0.1.0` interfaces selected by the package target world and maps every actual host import to a requested manifest capability;
-5. permits only the frozen minimal WASI P2 baseline for the signed runtime profile and rejects WASI filesystem, sockets, CLI run/exit, environment, stdio inheritance, HTTP, threads and unknown imports;
+4. permits only exact `junban:plugin/host-*@0.1.0` interfaces selected by the package target world and maps every actual host import to a requested manifest capability;
+5. for `typescript`, permits zero WASI imports; for `rust`, permits exactly `wasi:io/error@0.2.6`, `wasi:io/streams@0.2.6`, `wasi:cli/environment@0.2.6`, `wasi:cli/exit@0.2.6`, and `wasi:cli/stderr@0.2.6`, whose host implementations return empty environment/arguments/cwd, closed or bounded-sink streams and controlled exit termination. It rejects every other WASI import including filesystem/preopens, sockets/network, CLI run, inherited stdio/environment, HTTP, random, clocks, threads and unknown interfaces;
 6. caps custom/name/producers metadata and ignores it as authority;
 7. records exact sorted import/export fingerprint in install evidence.
 

@@ -110,7 +110,7 @@ Wave 0 froze thirteen independent immutable legacy-rendered scenes in [`phase-7-
 | `crates/junban-plugin-host/`            | Optional Wasmtime host binary/runtime, selective linker, store/invocation limits, IPC driver, component lifecycle, capability bridge, dependency service calls, and hostile tests                                  |
 | `plugins/reference/pomodoro-rust/`      | Rust reference proving command, settings, KV, timer/status/view, and declarative actions                                                                                                                           |
 | `plugins/reference/automation-rust/`    | Rust reference proving event subscription, deterministic mutation request, receipt replay, and loop circuit breaker                                                                                                |
-| `plugins/reference/import-typescript/`  | Real TypeScript build-only template/reference proving componentization and bounded bulk-create action                                                                                                              |
+| `plugins/reference/import-typescript/`  | Real TypeScript build-only template/reference proving componentization, typed lists, and one existing bounded bulk-task action                                                                                     |
 | `plugins/registry/`                     | Bundled signed static index and content-addressed immutable reference packages; no private signing key                                                                                                             |
 | `src/ui/plugins/`                       | Lazy plugin transport/state, Extensions UI, registry/permission/settings surfaces, declarative renderer, contribution slots, and tests                                                                             |
 | `docs/plugins.md`                       | Operator security, install/lifecycle, permissions, registry, failure, backup/restore, and troubleshooting guide                                                                                                    |
@@ -193,6 +193,8 @@ Fault containment breaks a close measurement tie in favor of the child process. 
 
 ### WIT world v0.1.0
 
+The exact world composition, interface set, typed queries/effects/events/UI/errors, runtime-profile imports and versioning authority is frozen in [`phase-7-wit-contract.md`](phase-7-wit-contract.md).
+
 Package authority: `package junban:plugin@0.1.0` with one synchronous required `plugin` world that exports the guest interface and has no ambient imports. Each package targets its own WIT world that includes this required world and imports only its declared Junban host-capability interfaces plus its frozen runtime-profile baseline. This avoids impossible optional imports while preserving one exact guest ABI and a selective linker. Host implementations may await bounded Rust work internally; WASI P3/native async guest contracts are excluded.
 
 Guest exports:
@@ -203,12 +205,12 @@ Guest exports:
 - `render-surface` and `handle-surface-action`;
 - `validate-settings`;
 - bounded read-only `call-service` for declared plugin dependencies;
-- bounded read-only `resync` for restore/retention recovery.
+- bounded paged `resync` for restore/retention recovery, with only staged noncommitted KV segments and a final leave/replace decision.
 
 Host imports:
 
 - read-only bounded task/project/tag queries;
-- isolated plugin settings and KV reads;
+- separate isolated plugin settings and KV read interfaces;
 - bounded monotonic/wall clock;
 - one synchronous permission-scoped exact-origin HTTP request interface;
 - bounded structured logging;
@@ -220,7 +222,7 @@ There are no deferred HTTP intents in `plugin-outcome`. HTTP exists only as a sy
 
 The parent validates and commits the one SQLite effect only after the guest returns successfully. Trap, timeout, malformed output, cancellation, or oversized material therefore commits no task/plugin-state mutation. Existing AppService mutations remain the semantic authority; the WIT world does not duplicate domain rules.
 
-Every HTTP-capable command, UI action, event hook, or direct service invocation is honestly **at-least-once** externally. It carries a stable `x-junban-plugin-delivery-id` derived from the operator operation id or event revision; redirects are forbidden. Completed invocation receipts prevent an exact retry after durable terminalization, but a crash after a remote accepted a request and before Junban durably terminalizes may repeat the same delivery id. No atomicity between remote HTTP and SQLite is claimed.
+Every HTTP-capable command, UI action, or event hook is honestly **at-least-once** externally. It carries a stable `x-junban-plugin-delivery-id` derived from the operator operation id or event revision; redirects are forbidden. Completed invocation receipts prevent an exact retry after durable terminalization, but a crash after a remote accepted a request and before Junban durably terminalizes may repeat the same delivery id. No atomicity between remote HTTP and SQLite is claimed.
 
 A dependency `call-service` executes in a read-only invocation mode. It may query allowed Junban/plugin state and return bounded service data/logs, but HTTP imports, application mutations, settings/KV patches, nested UI actions, and any full `plugin-outcome` are rejected. The caller remains the only invocation that may return one post-success effect.
 
@@ -248,7 +250,7 @@ Safe clock/random/WASI I/O required by the selected guest toolchain is a declare
 
 - Commands/UI actions receive an operator operation ID. Event hooks derive a stable operation ID from the durable event revision.
 - One successful invocation yields at most one AppService mutation or one plugin-local KV transaction. Typed plugin settings are operator-owned: guests validate and read them but cannot rewrite user configuration. Existing 500-affected-task and receipt/event/material bounds remain authoritative.
-- Plugin event cursors are durable and advance only after the returned action succeeds or exact-replays. Catch-up is bounded by retained event pages; a cursor behind retention enters explicit resync/suspension. Resync closes admission, reads snapshot + exact epoch/head revision in one serialized repository transaction, runs a read-only/no-HTTP/no-effect guest export, CASes the cursor to that head, catches up only later revisions, then reopens live admission. Epoch change or renewed retention loss retries/suspends rather than skipping.
+- Plugin event cursors are durable and advance only after the returned action succeeds or exact-replays. Catch-up is bounded by retained event pages; a cursor behind retention enters explicit resync/suspension. Resync closes admission, atomically samples epoch/head, then sends count/byte-bounded task/project/tag keyset pages selected by `row_revision <= head` without holding a transaction while guest code runs. Storage-granted snapshot outcomes may stage bounded unique KV segments without committing; after the exhaustive data page, up to nine host-driven flush calls permit the full 2-MiB aggregate under the 256-KiB response cap, then finalize chooses leave-KV or replace-with-all-staged segments. One transaction verifies exact session/epoch/ordered snapshot/flush/finalize acknowledgements/retained later-event tail, performs the KV choice and CASes the cursor to that head; later retained events catch up before admission reopens. Epoch/tail/session/CAS failure abandons guest state/KV and retries or suspends rather than skipping.
 - One plugin invocation runs at a time per plugin; process concurrency is capped at four.
 - Runtime dependency-call depth is capped at eight and detects call cycles. Dependency service mode is read-only and cannot use HTTP or return an effect.
 - HTTP use and a returned SQLite effect are mutually exclusive and fail closed if combined. Every accepted HTTP call is at-least-once with a stable delivery id; only SQLite effects receive exactly-once receipt replay.
@@ -329,7 +331,7 @@ Install publishes a verified immutable package first, then commits a disabled me
 
 Operator-visible plugin mutations each consume one ordinary global revision/event/receipt. Runtime invocation receipts, KV commits, cursor advances, failure counters, and backoff are transactional plugin-local bookkeeping: they do not recursively publish global events or consume global revision. A transition into failed/suspended/degraded state may publish one bounded plugin resource event; plugin event subscriptions cannot subscribe to plugin-internal event kinds.
 
-Complete SQLite backup preserves metadata, grants, settings, KV, and event cursors but not package/cache files. A cursor binds the global event epoch plus revision. Restore validates every typed row and dependency graph, then keeps each `package_generation` and its exact bound grant as inactive historical authority, disables desired state, increments `activation_epoch`, marks packages `reverify_required`, clears backoff, and performs no component compile/activation. Restore cutover rotates the global event epoch, places each plugin cursor at the restored current revision in that new epoch with `resync_required`, and never replays pre-restore hooks; explicit re-enable first receives one bounded read-only resync snapshot, then live events. Reinstall/reverification of the exact digest/signer/manifest may reuse the still-bound grant only after the operator explicitly enables the plugin and sees the permissions again; any authority change increments `package_generation` and requires a new grant. Restore/recovery never constructs Wasmtime.
+Complete SQLite backup preserves metadata, grants, settings, KV, and event cursors but not package/cache files. A cursor binds the global event epoch plus revision. Restore validates every typed row and dependency graph, then keeps each `package_generation` and its exact bound grant as inactive historical authority, disables desired state, increments `activation_epoch`, marks packages `reverify_required`, clears backoff, and performs no component compile/activation. Restore cutover rotates the global event epoch, places each plugin cursor at the restored current revision in that new epoch with `resync_required`, and never replays pre-restore hooks; explicit re-enable first completes the bounded paged resync/final-KV handoff, then live events. Reinstall/reverification of the exact digest/signer/manifest may reuse the still-bound grant only after the operator explicitly enables the plugin and sees the permissions again; any authority change increments `package_generation` and requires a new grant. Restore/recovery never constructs Wasmtime.
 
 ### Package generation, activation epoch, and host session
 

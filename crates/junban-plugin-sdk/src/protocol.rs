@@ -236,7 +236,7 @@ pub enum ChildFrame {
         fence: AuthorityFence,
     },
     Failed {
-        fence: Option<AuthorityFence>,
+        fence: AuthorityFence,
         code: HostFailureCode,
     },
     Unloaded {
@@ -482,6 +482,24 @@ pub fn validate_callback_correlation(
 }
 
 /// Exact-match one reply to the outstanding closed-kind callback request.
+pub fn validate_failed_correlation(
+    failure: &ChildFrame,
+    current_fence: &AuthorityFence,
+) -> Result<()> {
+    let ChildFrame::Failed { fence, .. } = failure else {
+        return Err(SdkError::Protocol {
+            field: "failure_frame",
+        });
+    };
+    fence.validate()?;
+    if !fence.exact_matches(current_fence) {
+        return Err(SdkError::Protocol {
+            field: "failure_correlation",
+        });
+    }
+    Ok(())
+}
+
 pub fn validate_capability_reply(
     request: &ChildFrame,
     reply: &ParentFrame,
@@ -710,8 +728,9 @@ pub fn validate_child_frame(frame: &ChildFrame) -> Result<()> {
                 "outcome_size",
             )
         }
-        ChildFrame::Cancelled { fence } | ChildFrame::Unloaded { fence } => fence.validate(),
-        ChildFrame::Failed { fence, .. } => fence.as_ref().map_or(Ok(()), AuthorityFence::validate),
+        ChildFrame::Cancelled { fence }
+        | ChildFrame::Failed { fence, .. }
+        | ChildFrame::Unloaded { fence } => fence.validate(),
         ChildFrame::ShutdownComplete { host_session_id } => {
             validate_uuid(host_session_id, "host_session_id")
         }

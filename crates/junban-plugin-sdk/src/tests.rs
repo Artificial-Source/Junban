@@ -1405,12 +1405,34 @@ fn protocol_frames_are_canonical_bounded_and_identity_fenced() {
         host_session_id: "x".repeat(HOST_FRAME_BYTES_MAX),
     };
     assert!(encode_parent_frame(&oversized).is_err());
+    let failure_fence = AuthorityFence {
+        plugin_id: "test-plugin".into(),
+        package_generation: 1,
+        activation_epoch: 2,
+        host_session_id: "00000000-0000-4000-8000-000000000001".into(),
+        invocation_id: "00000000-0000-4000-8000-000000000002".into(),
+    };
     let child = ChildFrame::Failed {
-        fence: None,
+        fence: failure_fence.clone(),
         code: HostFailureCode::Unavailable,
     };
     let encoded_child = encode_child_frame(&child).unwrap();
     assert_eq!(decode_child_frame(&encoded_child).unwrap(), child);
+    validate_failed_correlation(&child, &failure_fence).unwrap();
+    let mut stale_failure = child;
+    if let ChildFrame::Failed { fence, .. } = &mut stale_failure {
+        fence.activation_epoch += 1;
+    }
+    assert!(validate_failed_correlation(&stale_failure, &failure_fence).is_err());
+    assert!(
+        validate_failed_correlation(
+            &ChildFrame::ShutdownComplete {
+                host_session_id: failure_fence.host_session_id.clone(),
+            },
+            &failure_fence
+        )
+        .is_err()
+    );
 }
 
 #[test]

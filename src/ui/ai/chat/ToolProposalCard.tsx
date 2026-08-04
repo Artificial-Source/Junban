@@ -25,10 +25,20 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return null;
 }
 
+/** Complete exact canonical args — no char/item/field truncation before approval. */
+function formatCompleteArgsPlain(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function GenericArgsPlain({ args }: { args: unknown }) {
   return (
     <pre className="px-3 py-2 text-xs font-mono whitespace-pre-wrap break-words text-on-surface-secondary max-h-40 overflow-auto">
-      {formatStructuredPlain(args, 2_000)}
+      {formatCompleteArgsPlain(args)}
     </pre>
   );
 }

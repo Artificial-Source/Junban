@@ -194,6 +194,61 @@ describe("ToolProposalCard", () => {
     expect(container.querySelector('[aria-label="Approved schedule blocks"]')).toBeNull();
   });
 
+  it("shows complete generic bulk mutation args beyond the old 2k truncation", () => {
+    // Pretty JSON for many padded entries exceeds the old 2_000-char formatter bound.
+    const finalMarker = "FINAL-BULK-ITEM-MARKER-p6-final-sec-001";
+    const items = Array.from({ length: 48 }, (_, i) => ({
+      id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+      title: `Bulk item ${i + 1} ${"detail-padding-".repeat(10)}`,
+      project_id: `11111111-1111-4111-8111-${String(i + 1).padStart(12, "0")}`,
+      notes: `note-body-${"x".repeat(40)}-${i + 1}`,
+    }));
+    items[items.length - 1] = {
+      ...items[items.length - 1]!,
+      title: finalMarker,
+      notes: `unique-final-field-${finalMarker}`,
+    };
+    const args = { items };
+    const truncated = formatStructuredPlain(args, 2_000);
+    expect(truncated.includes(finalMarker)).toBe(false);
+    expect(truncated.includes("…")).toBe(true);
+
+    const onApprove = vi.fn();
+    const proposal = pendingProposal({
+      tool: "bulk_update_tasks",
+      arguments: args,
+    });
+
+    act(() => {
+      root.render(
+        createElement(ToolProposalCard, {
+          proposal,
+          onApprove,
+          onReject: vi.fn(),
+        }),
+      );
+    });
+
+    const pre = container.querySelector("pre");
+    expect(pre).toBeTruthy();
+    const preText = pre?.textContent ?? "";
+    expect(preText).toContain(finalMarker);
+    expect(preText).toContain(`unique-final-field-${finalMarker}`);
+    expect(preText).toContain(items[items.length - 1]!.id);
+    // Must not hide the suffix behind the old formatter ellipsis.
+    expect(preText.includes("\n…")).toBe(false);
+    expect(preText.endsWith("…")).toBe(false);
+
+    const { approve } = approvalButtons(container);
+    expect(approve.disabled).toBe(false);
+
+    act(() => {
+      approve.click();
+    });
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onApprove).toHaveBeenCalledWith(proposal.approvalId, proposal.actionHash);
+  });
+
   it("leaves Approve/Reject controls unchanged for schedule proposals", () => {
     const onApprove = vi.fn();
     const onReject = vi.fn();

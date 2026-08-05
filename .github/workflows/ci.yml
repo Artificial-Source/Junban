@@ -173,14 +173,24 @@ jobs:
           curl --fail --location --silent --show-error \
             --output /tmp/fonts-noto-mono.deb \
             https://archive.ubuntu.com/ubuntu/pool/main/f/fonts-noto/fonts-noto-mono_20201225-2_all.deb
-          printf '%s  %s\n%s  %s\n' \
+          curl --fail --location --silent --show-error \
+            --output /tmp/fonts-noto-extra.deb \
+            https://archive.ubuntu.com/ubuntu/pool/universe/f/fonts-noto/fonts-noto-extra_20201225-2_all.deb
+          printf '%s  %s\n%s  %s\n%s  %s\n' \
             4fee136cb12fc197703a340e010478f780a41044339fcefbd78ed9aa96c8b617 \
             /tmp/fonts-noto-core.deb \
             ce277a6e2fbbe7562206171e20e0493ac42c9c405758505cb42aaa01c982036c \
-            /tmp/fonts-noto-mono.deb | sha256sum --check --strict
-          sudo dpkg --install /tmp/fonts-noto-mono.deb /tmp/fonts-noto-core.deb
+            /tmp/fonts-noto-mono.deb \
+            425d13b9e5827951c328d9b22034d0443082429107e5a078c46830c7874595b1 \
+            /tmp/fonts-noto-extra.deb | sha256sum --check --strict
+          sudo dpkg --install \
+            /tmp/fonts-noto-mono.deb \
+            /tmp/fonts-noto-core.deb \
+            /tmp/fonts-noto-extra.deb
           fc-cache --force
           test "$(fc-match --format='%{family}' system-ui)" = "Noto Sans"
+          test "$(basename "$(fc-match --format='%{file}' 'Noto Sans:weight=medium')")" = "NotoSans-Medium.ttf"
+          test "$(basename "$(fc-match --format='%{file}' 'Noto Sans:weight=demibold')")" = "NotoSans-SemiBold.ttf"
 
       - name: Record visual environment
         run: |

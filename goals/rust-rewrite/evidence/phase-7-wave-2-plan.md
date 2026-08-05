@@ -1,6 +1,6 @@
 # Phase 7 Wave 2 — hostile plugin runtime plan
 
-Status: Slices 2A and 2A.1 accepted; Slice 2B child runtime implemented through 2B.2; Slices 2C–2E and the Wave 2 security gate remain
+Status: Slice 2B implemented but security-blocked on native-memory amplification; process ceiling/recheck precede Slices 2C–2E
 
 ## Outcome and boundary
 
@@ -59,6 +59,8 @@ Acceptance: every forbidden WASI/network/filesystem/random/clock import fails be
 Implemented on 2026-08-05 at the child-only boundary. One watchdog now owns exact 1,000/250-ms invocation deadlines, epoch interruption, callback cancellation, and active control/EOF draining without correctness sleeps. Failed/stopped Stores enter a completion fence, are destroyed before terminal/control acknowledgement, and are replaced from the retained compiled Component; successful Stores retain state. Finite host-resource, guest-log, stderr, output, memory, table, instance, stack, fuel, and frame/callback bounds have launched hostile Rust/TypeScript coverage, as do forbidden imports, malformed/EOF/kill callback races, late replies, replacement, and process reap. CI adds the required Linux/macOS/Windows Rust containment matrix. See [`phase-7-wave-2-slice-2b2.md`](phase-7-wave-2-slice-2b2.md).
 
 The protocol's exact 10-second compile/load authority is unchanged. It is deliberately enforced by the Slice 2C parent through child kill/reap because child-local Wasmtime compilation/initial instantiation is synchronous and not safely epoch-interruptible; Slice 2B.2 makes no false child-local timeout claim. Package signature verification and the opened verified-source bridge likewise remain parent-owned Slice 2C admission before these component bytes reach the child.
+
+Independent security review found `P7-RUNTIME-SEC-001`: typed canonical ABI lifting can allocate native Rust strings/lists/results from 64/128-MiB guest memory before post-lift 4-MiB callback and 256-KiB output serialization bounds run. Slice 2C is blocked until a hard cross-platform child-process memory ceiling and amplification/replacement evidence pass focused recheck.
 
 ### Slice 2C — lazy parent supervisor and verified source bridge
 

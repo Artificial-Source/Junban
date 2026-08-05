@@ -24,7 +24,7 @@ Open findings: `P7-DEP-001`, `P7-PLAN-RUNTIME-001`, `P7-RUNTIME-SEC-001`
 | Core instances                                |                  14 |                   8 |
 | Table elements                                |              10,000 |              10,000 |
 | Wasm execution fuel per invocation            |         100,000,000 |       2,000,000,000 |
-| Guest-to-host hostcall fuel per call           |     4,464,640 bytes |       4,464,640 bytes |
+| Guest-to-host hostcall fuel per call          |     4,464,640 bytes |     4,464,640 bytes |
 | Wasm stack                                    |               2 MiB |               2 MiB |
 | Host resource table                           |                  64 |                  64 |
 | Canonical host-call copy                      |               4 MiB |               4 MiB |

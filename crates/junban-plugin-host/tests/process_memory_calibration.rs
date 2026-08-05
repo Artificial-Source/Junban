@@ -156,6 +156,7 @@ struct SamplerState {
     phase: &'static str,
     generation: u64,
     samples_in_generation: usize,
+    last_sampling_error: Option<String>,
     stop: bool,
 }
 
@@ -171,6 +172,7 @@ impl SamplerControl {
                 phase: PHASES[0],
                 generation: 0,
                 samples_in_generation: 0,
+                last_sampling_error: None,
                 stop: false,
             }),
             changed: Condvar::new(),
@@ -183,21 +185,29 @@ impl SamplerControl {
             state.phase = phase;
             state.generation += 1;
             state.samples_in_generation = 0;
+            state.last_sampling_error = None;
             self.changed.notify_all();
             state.generation
         };
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + first_sample_deadline();
         let mut state = self.state.lock().unwrap();
         while state.generation == generation && state.samples_in_generation == 0 {
-            let remaining = deadline
-                .checked_duration_since(Instant::now())
-                .expect("child sampler produced no phase sample");
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                panic!("{}", missing_phase_sample_message(&state));
+            };
             let (next, timeout) = self.changed.wait_timeout(state, remaining).unwrap();
             state = next;
-            assert!(
-                !timeout.timed_out(),
-                "child sampler produced no phase sample"
-            );
+            if timeout.timed_out() {
+                panic!("{}", missing_phase_sample_message(&state));
+            }
+        }
+    }
+
+    fn record_sampling_error(&self, generation: u64, error: String) {
+        let mut state = self.state.lock().unwrap();
+        if state.generation == generation {
+            state.last_sampling_error = Some(error);
+            self.changed.notify_all();
         }
     }
 
@@ -506,17 +516,20 @@ fn sample_child(pid: u32, control: Arc<SamplerControl>, samples: Arc<Mutex<Vec<R
         if stop {
             return;
         }
-        if let Ok(metrics) = sample_process(pid) {
-            samples.lock().unwrap().push(RawSample {
-                elapsed_millis: started.elapsed().as_millis() as u64,
-                phase: phase.into(),
-                metrics,
-            });
-            let mut state = control.state.lock().unwrap();
-            if state.generation == generation {
-                state.samples_in_generation += 1;
-                control.changed.notify_all();
+        match sample_process(pid) {
+            Ok(metrics) => {
+                samples.lock().unwrap().push(RawSample {
+                    elapsed_millis: started.elapsed().as_millis() as u64,
+                    phase: phase.into(),
+                    metrics,
+                });
+                let mut state = control.state.lock().unwrap();
+                if state.generation == generation {
+                    state.samples_in_generation += 1;
+                    control.changed.notify_all();
+                }
             }
+            Err(error) => control.record_sampling_error(generation, error),
         }
         let state = control.state.lock().unwrap();
         if state.stop {
@@ -526,6 +539,26 @@ fn sample_child(pid: u32, control: Arc<SamplerControl>, samples: Arc<Mutex<Vec<R
             .changed
             .wait_timeout(state, sampling_interval())
             .unwrap();
+    }
+}
+
+fn missing_phase_sample_message(state: &SamplerState) -> String {
+    match &state.last_sampling_error {
+        Some(error) => format!(
+            "child sampler produced no phase sample for {}: {error}",
+            state.phase
+        ),
+        None => format!("child sampler produced no phase sample for {}", state.phase),
+    }
+}
+
+fn first_sample_deadline() -> Duration {
+    if cfg!(target_os = "windows") {
+        // A cold GitHub Windows runner may take longer than five seconds to
+        // start its first PowerShell process. Later sampling remains paced.
+        Duration::from_secs(30)
+    } else {
+        Duration::from_secs(5)
     }
 }
 
@@ -607,16 +640,34 @@ fn sample_process(pid: u32) -> Result<MemoryMetrics, String> {
         ])
         .output()
         .map_err(|error| error.to_string())?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
-        return Err("Get-Process failed".into());
+        return Err(format!(
+            "Get-Process failed with status {}: stderr={:?}; stdout={:?}",
+            output.status,
+            stderr.trim(),
+            stdout.trim()
+        ));
     }
-    let text = String::from_utf8(output.stdout).map_err(|error| error.to_string())?;
-    let values = text
+    let values = stdout
         .split_whitespace()
         .map(|value| value.parse::<u64>().map_err(|error| error.to_string()))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            format!(
+                "Get-Process returned invalid metrics: {error}; stderr={:?}; stdout={:?}",
+                stderr.trim(),
+                stdout.trim()
+            )
+        })?;
     if values.len() != 7 {
-        return Err("Get-Process returned incomplete metrics".into());
+        return Err(format!(
+            "Get-Process returned {} metrics, expected 7: stderr={:?}; stdout={:?}",
+            values.len(),
+            stderr.trim(),
+            stdout.trim()
+        ));
     }
     Ok(MemoryMetrics {
         private_commit_bytes: Some(values[0]),
@@ -665,6 +716,36 @@ fn assert_release_build() {
 
 #[cfg(not(debug_assertions))]
 fn assert_release_build() {}
+
+#[test]
+fn sampler_retains_current_generation_error() {
+    let control = SamplerControl::new();
+    control.record_sampling_error(0, "Get-Process failed with status exit code: 1".into());
+    let state = control.state.lock().unwrap();
+    assert_eq!(
+        state.last_sampling_error.as_deref(),
+        Some("Get-Process failed with status exit code: 1")
+    );
+    assert_eq!(
+        missing_phase_sample_message(&state),
+        "child sampler produced no phase sample for spawn: Get-Process failed with status exit code: 1"
+    );
+    drop(state);
+
+    control.record_sampling_error(1, "stale sampling error".into());
+    assert_eq!(
+        control.state.lock().unwrap().last_sampling_error.as_deref(),
+        Some("Get-Process failed with status exit code: 1")
+    );
+}
+
+#[test]
+fn first_sample_deadline_matches_platform_startup_cost() {
+    #[cfg(target_os = "windows")]
+    assert_eq!(first_sample_deadline(), Duration::from_secs(30));
+    #[cfg(not(target_os = "windows"))]
+    assert_eq!(first_sample_deadline(), Duration::from_secs(5));
+}
 
 #[test]
 #[ignore = "opt-in release-only cross-platform process-memory calibration"]

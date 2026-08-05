@@ -50,7 +50,7 @@ For each child, the harness:
 5. performs one representative successful service invocation;
 6. samples shutdown, receives `ShutdownComplete`, and requires successful reap and empty diagnostics.
 
-The private protocol intentionally exposes one atomic Load response only after compilation and initial instantiation. The JSON therefore reports the honest combined phase `compile_and_instantiate`; it does not invent an unobservable split. Sampling is evidence-only polling. Runtime timeout, cancellation, and containment correctness continue to use the watchdog/condition-variable authorities and never depend on the sampler or a sleep.
+The private protocol intentionally exposes one atomic Load response only after compilation and initial instantiation. The JSON therefore reports the honest combined phase `compile_and_instantiate`; it does not invent an unobservable split. Sampling is evidence-only polling. Each phase requires a sample: Linux and macOS allow five seconds for its first sample, while Windows allows thirty seconds because a cold GitHub runner can take longer to start the first `powershell.exe Get-Process`; later polls remain paced. A failed sampling command is retained and reported with its platform diagnostic if that required sample deadline expires. Runtime timeout, cancellation, and containment correctness continue to use the watchdog/condition-variable authorities and never depend on the sampler or a sleep.
 
 Each canonical JSON campaign records:
 

@@ -3,6 +3,7 @@
 mod bindings;
 mod generated_body_adapters;
 mod runtime;
+mod transfer_bounds;
 
 use std::{
     io::{self, Read, Write},

@@ -5,13 +5,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use junban_plugin_sdk::{
-    AuthorityFence, CallbackFence, Capability, ChildFrame, HOST_FRAME_BYTES_MAX,
-    HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION, HostCallKind, HostCallReply, HostCallRequest,
-    HostFailureCode, InvocationOutcome, InvocationRequest, ParentFrame, Permission,
-    PermissionScope, RuntimeLimits, RuntimeProfile, TypedParentMessage, UnscopedPermission,
-    canonical_permission_hash, child_body_len, decode_child_frame, decode_host_call_request,
-    decode_invocation_outcome, encode_parent_frame, inspect_component_for_runtime,
-    private_body_types as body, validate_child_body,
+    AuthorityFence, CallbackFence, Capability, ChildFrame, HOST_CALLBACK_BODY_BYTES_MAX,
+    HOST_FRAME_BYTES_MAX, HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION, HostCallKind, HostCallReply,
+    HostCallRequest, HostFailureCode, InvocationOutcome, InvocationRequest, ParentFrame,
+    Permission, PermissionScope, RuntimeLimits, RuntimeProfile, TypedParentMessage,
+    UnscopedPermission, canonical_permission_hash, child_body_len, decode_child_frame,
+    decode_host_call_request, decode_invocation_outcome, encode_parent_frame,
+    inspect_component_for_runtime, private_body_types as body, validate_child_body,
 };
 use sha2::{Digest, Sha256};
 
@@ -419,6 +419,112 @@ fn activate(host: &mut HostProcess) {
         expect_outcome(frame, &bytes),
         InvocationOutcome::Activate(body::WitResult::Ok(()))
     );
+}
+
+#[test]
+fn maximum_valid_import_reaches_callback_and_returns_normally() {
+    let mut host = HostProcess::spawn();
+    host.hello();
+    host.load(RUST_COMPONENT, RuntimeProfile::Rust);
+
+    host.command("hostcall-valid-import");
+    let (frame, bytes) = host.receive();
+    let (callback, request) = expect_capability(frame, &bytes);
+    let HostCallRequest::QueryTasks(query) = &request else {
+        panic!("expected boundary task query, got {request:?}");
+    };
+    assert_eq!(query.search.as_ref().map(String::len), Some(8 * 1024));
+    host.reply(
+        callback,
+        HostCallReply::QueryTasks(body::WitResult::Ok(body::TaskPage {
+            items: Vec::new(),
+            next_cursor: None,
+            revision: 1,
+        })),
+    );
+    let (frame, bytes) = host.receive();
+    assert_eq!(
+        expect_outcome(frame, &bytes),
+        InvocationOutcome::InvokeCommand(body::WitResult::Ok(body::PluginOutcome { effect: None }))
+    );
+
+    // Debug serde/validation of a near-4-MiB callback exceeds the frozen
+    // one-second product deadline on slower builders. The optimized campaign is
+    // the authoritative large-transfer evidence; the semantic maximum above
+    // remains in every test profile.
+    #[cfg(not(debug_assertions))]
+    {
+        host.command("hostcall-near-bound-import");
+        let (frame, bytes) = host.receive();
+        let (callback, request) = expect_capability(frame, &bytes);
+        let HostCallRequest::QueryTasks(query) = request else {
+            panic!("expected near-bound task query");
+        };
+        assert_eq!(
+            query.search.map(|search| search.len()),
+            Some(4 * 1024 * 1024 - 4 * 1024)
+        );
+        host.reply(
+            callback,
+            HostCallReply::QueryTasks(body::WitResult::Ok(body::TaskPage {
+                items: Vec::new(),
+                next_cursor: None,
+                revision: 1,
+            })),
+        );
+        let (frame, bytes) = host.receive();
+        assert_eq!(
+            expect_outcome(frame, &bytes),
+            InvocationOutcome::InvokeCommand(body::WitResult::Ok(body::PluginOutcome {
+                effect: None,
+            }))
+        );
+    }
+
+    assert!(host.shutdown().is_empty());
+}
+
+#[test]
+fn oversized_import_is_rejected_before_callback_and_replaces_rust_store() {
+    let mut host = HostProcess::spawn();
+    host.hello();
+    host.load(RUST_COMPONENT, RuntimeProfile::Rust);
+
+    // Without explicit Store hostcall fuel this canonical list would lift and
+    // its compact request would fit the later callback-body authority. Keep
+    // this control coupled to the retained guest cardinality so omission of
+    // `set_hostcall_fuel` cannot pass via a later protocol-size rejection.
+    let control = HostCallRequest::QueryTasks(body::TaskQuery {
+        task_id: None,
+        project_id: None,
+        section_id: None,
+        parent_id: None,
+        tag_ids: vec![String::new(); 558_081],
+        statuses: Vec::new(),
+        priorities: Vec::new(),
+        due_from: None,
+        due_before: None,
+        search: None,
+        cursor: None,
+        limit: 1,
+    })
+    .into_child_message(CallbackFence {
+        plugin_id: "test-plugin".into(),
+        package_generation: 7,
+        activation_epoch: 9,
+        host_session_id: SESSION.into(),
+        invocation_id: "00000000-0000-4000-8000-000000000099".into(),
+        callback_id: 1,
+    })
+    .unwrap();
+    assert!(control.body().len() < HOST_CALLBACK_BODY_BYTES_MAX);
+
+    let hostile = host.command("hostcall-oversized-import");
+    expect_failure(host.receive(), hostile, HostFailureCode::ResourceLimit);
+
+    host.service();
+    expect_service(&mut host, 0);
+    assert!(host.shutdown().is_empty());
 }
 
 #[test]

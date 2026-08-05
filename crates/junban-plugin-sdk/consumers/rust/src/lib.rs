@@ -14,6 +14,9 @@ struct Component;
 
 static ACTIVATION_COUNT: AtomicI64 = AtomicI64::new(0);
 const CALIBRATION_WORKING_SET_BYTES: usize = 48 * 1024 * 1024;
+const MAX_VALID_SEARCH_BYTES: usize = 8 * 1024;
+const NEAR_BOUND_CANONICAL_LIFT_BYTES: usize = 4 * 1024 * 1024 - 4 * 1024;
+const HOSTILE_CANONICAL_LIST_ITEMS: usize = 558_081;
 
 fn no_effect() -> PluginOutcome {
     PluginOutcome { effect: None }
@@ -64,6 +67,23 @@ fn calibration_working_set_barrier() {
     }
     let _ = junban::plugin::host_settings::get_settings();
     std::hint::black_box(bytes);
+}
+
+fn canonical_lift_host_call(search: Option<String>, tag_ids: Vec<String>) {
+    let _ = junban::plugin::host_tasks::query_tasks(&TaskQuery {
+        task_id: None,
+        project_id: None,
+        section_id: None,
+        parent_id: None,
+        tag_ids,
+        statuses: Vec::new(),
+        priorities: Vec::new(),
+        due_from: None,
+        due_before: None,
+        search,
+        cursor: None,
+        limit: 1,
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -237,6 +257,24 @@ impl Guest for Component {
             "memory-grow" => exhaust_memory_growth(),
             "memory-calibration-barrier" => {
                 calibration_working_set_barrier();
+                return Ok(no_effect());
+            }
+            "hostcall-valid-import" => {
+                canonical_lift_host_call(Some("x".repeat(MAX_VALID_SEARCH_BYTES)), Vec::new());
+                return Ok(no_effect());
+            }
+            "hostcall-near-bound-import" => {
+                canonical_lift_host_call(
+                    Some("x".repeat(NEAR_BOUND_CANONICAL_LIFT_BYTES)),
+                    Vec::new(),
+                );
+                return Ok(no_effect());
+            }
+            "hostcall-oversized-import" => {
+                canonical_lift_host_call(
+                    None,
+                    vec![String::new(); HOSTILE_CANONICAL_LIST_ITEMS],
+                );
                 return Ok(no_effect());
             }
             "host-resources" => exhaust_host_resources(),

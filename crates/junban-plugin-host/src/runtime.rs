@@ -16,7 +16,7 @@ use wasmtime::{
 use wasmtime::{component::HasData, component::HasSelf, component::Linker};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use crate::{HostError, ParentMessage, bindings};
+use crate::{HostError, ParentMessage, bindings, transfer_bounds::HOSTCALL_TRANSFER_FUEL};
 
 pub(crate) struct OutboundMessage {
     pub frame: ChildFrame,
@@ -1111,6 +1111,8 @@ impl LoadedRuntime {
             },
         );
         store.limiter(|state| &mut state.limiter);
+        store.set_hostcall_fuel(HOSTCALL_TRANSFER_FUEL);
+        assert_eq!(store.hostcall_fuel(), HOSTCALL_TRANSFER_FUEL);
         store
             .set_fuel(self.limits.fuel)
             .map_err(|_| HostFailureCode::Internal)?;
@@ -1246,6 +1248,8 @@ impl RuntimeInstance {
     }
 }
 
+const HOSTCALL_FUEL_EXHAUSTED: &str = "too much data is being copied between the host and the guest: fuel allocated for hostcalls has been exhausted";
+
 fn classify_wasmtime_failure(
     store: &Store<StoreState>,
     error: &wasmtime::Error,
@@ -1259,6 +1263,9 @@ fn classify_wasmtime_failure(
         return code;
     }
     if state.limiter.resource_failure
+        || error
+            .chain()
+            .any(|cause| cause.to_string() == HOSTCALL_FUEL_EXHAUSTED)
         || error
             .downcast_ref::<wasmtime::component::ResourceTableError>()
             .is_some_and(|error| {
@@ -1448,11 +1455,14 @@ mod tests {
     use std::{cell::Cell, sync::mpsc, time::Duration};
 
     use junban_plugin_sdk::{
-        AuthorityFence, CallbackFence, ChildFrame, HostCallKind, InvocationOutcome,
-        private_body_types as neutral,
+        AuthorityFence, CallbackFence, ChildFrame, HOST_CALL_KINDS, HostCallKind,
+        InvocationOutcome, private_body_types as neutral,
     };
+    use wasmtime::{Config, Engine, component::Linker};
 
-    use super::{OutboundMessage, PendingCallback, SharedRuntimeStatus};
+    use super::{
+        OutboundMessage, PendingCallback, SharedRuntimeStatus, StoreState, add_actual_imports,
+    };
 
     fn fence() -> AuthorityFence {
         AuthorityFence {
@@ -1462,6 +1472,32 @@ mod tests {
             host_session_id: "00000000-0000-4000-8000-000000000001".into(),
             invocation_id: "00000000-0000-4000-8000-000000000002".into(),
         }
+    }
+
+    #[test]
+    fn selective_linker_covers_all_generated_host_import_adapters() {
+        const INTERFACES: &[&str] = &[
+            "junban:plugin/host-tasks@0.1.0",
+            "junban:plugin/host-projects@0.1.0",
+            "junban:plugin/host-tags@0.1.0",
+            "junban:plugin/host-settings@0.1.0",
+            "junban:plugin/host-storage@0.1.0",
+            "junban:plugin/host-clock@0.1.0",
+            "junban:plugin/host-http@0.1.0",
+            "junban:plugin/host-log@0.1.0",
+            "junban:plugin/host-services@0.1.0",
+        ];
+        assert_eq!(HOST_CALL_KINDS.len(), 11);
+
+        let mut config = Config::new();
+        config.wasm_component_model(true);
+        let engine = Engine::new(&config).unwrap();
+        let mut linker = Linker::<StoreState>::new(&engine);
+        let imports = INTERFACES
+            .iter()
+            .map(|interface| (*interface).to_owned())
+            .collect::<Vec<_>>();
+        add_actual_imports(&mut linker, &imports).unwrap();
     }
 
     #[test]

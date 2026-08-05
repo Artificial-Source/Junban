@@ -189,7 +189,7 @@ fn expect_capability(
 }
 
 #[test]
-fn retained_typescript_component_invokes_all_exports_and_retains_state() {
+fn retained_typescript_invokes_all_exports_and_contains_hostcall_transfer() {
     let grants = permissions();
     let inspection =
         inspect_component_for_runtime(TYPESCRIPT_COMPONENT, RuntimeProfile::Typescript, &grants)
@@ -415,6 +415,49 @@ fn retained_typescript_component_invokes_all_exports_and_retains_state() {
         )
     );
 
+    let hostcall_oversized = host.invoke(
+        InvocationRequest::invoke_command(
+            Some("hostcall-oversized-output".into()),
+            body::CommandCall {
+                command_id: "hostcall-oversized-output".into(),
+                values: Vec::new(),
+            },
+        ),
+        "00000000-0000-4000-8000-00000000000f",
+        &permission_hash,
+    );
+    assert_eq!(
+        (hostcall_oversized.1, hostcall_oversized.2),
+        (
+            ChildFrame::Failed {
+                fence: hostcall_oversized.0,
+                code: HostFailureCode::ResourceLimit,
+            },
+            Vec::new(),
+        )
+    );
+
+    let hostcall_replacement = host.invoke(
+        InvocationRequest::call_service(
+            None,
+            body::ServiceCall {
+                plugin_id: "dependency".into(),
+                service_id: "service".into(),
+                values: Vec::new(),
+            },
+        ),
+        "00000000-0000-4000-8000-000000000010",
+        &permission_hash,
+    );
+    assert!(matches!(
+        expect_outcome(hostcall_replacement.1, &hostcall_replacement.2),
+        InvocationOutcome::CallService(body::WitResult::Ok(body::ServiceData { values }))
+            if values == vec![body::NamedValue {
+                name: "activation-count".into(),
+                value: body::DataValue::Scalar(body::ScalarValue::IntegerValue(0)),
+            }]
+    ));
+
     let oversized = host.invoke(
         InvocationRequest::invoke_command(
             Some("oversized-output".into()),
@@ -423,7 +466,7 @@ fn retained_typescript_component_invokes_all_exports_and_retains_state() {
                 values: Vec::new(),
             },
         ),
-        "00000000-0000-4000-8000-00000000000f",
+        "00000000-0000-4000-8000-000000000011",
         &permission_hash,
     );
     assert_eq!(
@@ -445,7 +488,7 @@ fn retained_typescript_component_invokes_all_exports_and_retains_state() {
                 values: Vec::new(),
             },
         ),
-        "00000000-0000-4000-8000-000000000010",
+        "00000000-0000-4000-8000-000000000012",
         &permission_hash,
     );
     assert_eq!(
@@ -469,7 +512,7 @@ fn retained_typescript_component_invokes_all_exports_and_retains_state() {
                 subject: body::EventSubject::DeletedTask("task".into()),
             },
         ),
-        "00000000-0000-4000-8000-000000000011",
+        "00000000-0000-4000-8000-000000000013",
         &permission_hash,
     );
     assert_eq!(
@@ -492,7 +535,7 @@ fn retained_typescript_component_invokes_all_exports_and_retains_state() {
                 values: Vec::new(),
             },
         ),
-        "00000000-0000-4000-8000-000000000012",
+        "00000000-0000-4000-8000-000000000014",
         &permission_hash,
     );
     assert_eq!(

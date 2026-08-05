@@ -2,7 +2,7 @@
 
 Date: 2026-08-05
 
-Status: **cross-platform calibration complete; macOS cap authority blocked; calibration only**
+Status: **cross-platform calibration complete; macOS `RLIMIT_AS` remedy rejected; narrower correction implemented pending recheck**
 
 Protocol: `junban-phase7-process-memory-calibration-v1`
 
@@ -83,11 +83,21 @@ Authority maxima and the mechanical 125% minima are:
 | Windows Rust       |       57,274,368-byte private commit |       71,592,960 bytes |
 | Windows TypeScript |      456,949,760-byte private commit |      571,187,200 bytes |
 
-The macOS result is a blocker, not a candidate 519-GiB cap. Modern macOS reported roughly 415 GiB of process virtual address for both otherwise-valid profiles. A process ceiling above 519 GiB would not materially contain a 64/128-MiB typed-lift amplification and therefore fails this protocol's separation rule. `P7-PLAN-RUNTIME-001` remains open while an effective public macOS authority or a narrower pre-lift/native-allocation defense is validated.
+The macOS result rejects the proposed `RLIMIT_AS` remedy rather than producing a candidate 519-GiB cap. Modern macOS reported roughly 415 GiB of process virtual address for both otherwise-valid profiles. A process ceiling above 519 GiB would not materially contain a 64/128-MiB typed-lift amplification and therefore fails this protocol's separation rule. No process cap, Windows Job Object, spawn restriction, unsafe code, or new dependency was adopted.
+
+## Approved narrower correction
+
+The approved minimal correction uses Wasmtime 36.0.13's public `Store::set_hostcall_fuel` authority. Every initial and replacement Store is explicitly set to **4,464,640 bytes** before Component instantiation and immediately checked through `Store::hostcall_fuel`; no Store may rely on Wasmtime's implicit 128-MiB default. This is guest-to-host canonical-lift fuel, not wasm execution fuel, and Wasmtime does not charge host-to-guest lowering.
+
+The constant is derived from the current WIT and SDK/private-body bounds: 4,194,304 callback-body bytes + 139,264 bytes for the largest valid nested canonical structure (`256 × (named-value SIZE32 32 + 64 × list-element SIZE32 8)`) + an explicit 131,072-byte margin. A generated-ABI test locks those `ComponentType::SIZE32` values, enumerates all 11 imports and 9 exports, and proves the largest output shape remains below the import maximum. The public WIT, SDK protocol caps, guest memories, wasm execution fuel, wall deadlines, and Wasmtime reservation tuning are unchanged.
+
+Retained Rust fixtures prove both an 8-KiB maximum-valid search and a 4,190,208-byte near-callback-bound canonical transfer reach the generated adapter/callback and return normally, while a 558,081-element empty-ID list (4,464,648 canonical flat bytes) traps before callback publication, returns only normalized `resource-limit`, destroys the Store, and succeeds from a clean replacement in the same child process. The retained TypeScript all-nine-export path returns a high-cardinality nested result that exhausts hostcall fuel before generated post-return processing or protocol serialization, then proves clean same-process replacement. Five optimized exact-child Linux runs for each campaign are retained in [`phase-7-hostcall-transfer-linux.json`](phase-7-hostcall-transfer-linux.json). Aggregate exact test-process plus descendant RSS peaks were 66,592 / 45,608 / 46,620 / 44,328 / 46,568 KiB for Rust (66,592 KiB maximum) and 486,080 / 489,956 / 471,068 / 476,712 / 454,136 KiB for TypeScript (489,956 KiB maximum). The TypeScript figure includes its ordinary compile/instantiate peak and is not relabeled as transfer-only allocation.
+
+This correction supersedes the process-cap candidate direction but does not silently close review findings. `P7-PLAN-RUNTIME-001`, `P7-RUNTIME-SEC-001`, and `P7-DEP-001` remain open pending focused recheck; Slice 2C remains unauthorized.
 
 The first campaign run `31007358850` passed Linux/macOS but failed Windows because a cold per-sample PowerShell process did not produce a sample within five seconds and the harness discarded sampling errors. Commit `9bb5941` retained current-generation errors with diagnostics and uses a 30-second first-sample deadline on Windows only; the exact rerun then passed all phases. No failed-run numbers informed this table.
 
-These three hosts establish the planned platform sample shape but do not select a cap, prove ordinary fleet variance, run the later hostile amplification fixture, or close either finding.
+These three hosts establish the planned platform sample shape but do not select a cap or prove ordinary fleet variance. The separate approved hostcall-fuel campaign now runs the hostile amplification fixtures; this historical calibration run itself does not close either finding.
 
 ## Platform metrics
 
@@ -97,9 +107,9 @@ Metrics are bytes and remain platform-specific rather than being mislabeled as i
 - **macOS:** exact-child `ps` virtual size and RSS. Peak fields remain null because this standard exact-process interface does not expose them reliably.
 - **Windows:** exact-child PowerShell `Get-Process` private committed bytes (`PrivateMemorySize64`), pagefile bytes (`PagedMemorySize64`), working set, virtual size, and the available pagefile/working-set/virtual peaks.
 
-A future Unix `RLIMIT_AS` candidate must be calibrated from the maximum valid **virtual-address** result, not RSS. A future Windows Job Object process-memory candidate must be calibrated from maximum valid **private commit**; working set and virtual size remain diagnostic. Platform values are not compared as if they measured the same resource.
+Under the rejected process-cap candidate protocol, Unix `RLIMIT_AS` would have required the maximum valid **virtual-address** result rather than RSS, while a Windows Job Object process-memory candidate would have required maximum valid **private commit**. Platform values are not compared as if they measured the same resource. These historical rules do not authorize either mechanism now that macOS failed the separation rule.
 
-## Candidate-cap rule and later hostile proof
+## Rejected candidate-cap rule and required hostile proof
 
 For each supported platform/profile metric authority, any candidate process cap must satisfy:
 

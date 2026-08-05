@@ -6,15 +6,15 @@
     "toolchain": "rustc 1.93.0",
     "target": "wasm32-wasip2",
     "witBindgen": "0.51.0",
-    "sizeBytes": 130430,
-    "sha256": "7b14a85ec91105cafd174e0cd65e3e2064512deefe1ba7fa981ece5683e24d62"
+    "sizeBytes": 132483,
+    "sha256": "c1811fdf9a9ebe11ca9586267db130ca6b735cf789d9a0efedab703cd9455833"
   },
   "typescript": {
     "jco": "1.26.1",
     "componentizeJs": "0.22.0",
     "wasi": "--disable all",
     "byteReproducible": false,
-    "sizeBytes": 15315737,
-    "sha256": "95c6dc4b94af838453d2236b47c270b5e8ceaa2b36eb31729610a1d9777ab5ca"
+    "sizeBytes": 15315871,
+    "sha256": "d34e5f3bed56c30632b909345521cc0d0fb6c8267e393c9c537ba60967a7e0d9"
   }
 }

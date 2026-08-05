@@ -4,10 +4,11 @@ use std::{
 };
 
 use junban_plugin_sdk::{
-    AuthorityFence, Capability, ChildFrame, HOST_FRAME_BYTES_MAX, HOST_PROTOCOL_NAME,
-    HOST_PROTOCOL_VERSION, HostCallKind, HostCallReply, HostCallRequest, HostFailureCode,
-    InvocationOutcome, InvocationRequest, ParentFrame, Permission, PermissionScope, RuntimeLimits,
-    RuntimeProfile, UnscopedPermission, canonical_permission_hash, child_body_len,
+    AuthorityFence, CallbackFence, Capability, ChildFrame, HOST_CALLBACK_BODY_BYTES_MAX,
+    HOST_FRAME_BYTES_MAX, HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION, HostCallKind, HostCallReply,
+    HostCallRequest, HostFailureCode, InvocationOutcome, InvocationRequest, ParentFrame,
+    Permission, PermissionScope, RuntimeLimits, RuntimeProfile, ServiceConsumeScope,
+    ServiceReference, UnscopedPermission, canonical_permission_hash, child_body_len,
     decode_child_frame, decode_host_call_request, decode_invocation_outcome, encode_parent_frame,
     inspect_component_for_runtime, private_body_types as body, validate_child_body,
 };
@@ -166,6 +167,26 @@ fn permissions() -> Vec<Permission> {
     .collect()
 }
 
+/// Retained TypeScript consumer grants: the shared four plus the scoped
+/// `services:consume` authority its host-services import requires. Sorted
+/// canonically so `canonical_permission_hash` accepts the set.
+fn typescript_permissions() -> Vec<Permission> {
+    let mut grants = permissions();
+    grants.insert(
+        1,
+        Permission {
+            capability: Capability::ServicesConsume,
+            scope: PermissionScope::Services(ServiceConsumeScope {
+                services: vec![ServiceReference {
+                    plugin_id: "dependency".into(),
+                    service_id: "service".into(),
+                }],
+            }),
+        },
+    );
+    grants
+}
+
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -189,8 +210,8 @@ fn expect_capability(
 }
 
 #[test]
-fn retained_typescript_invokes_all_exports_and_contains_oversized_result_string() {
-    let grants = permissions();
+fn retained_typescript_invokes_all_exports_and_contains_oversized_import() {
+    let grants = typescript_permissions();
     let inspection =
         inspect_component_for_runtime(TYPESCRIPT_COMPONENT, RuntimeProfile::Typescript, &grants)
             .unwrap();
@@ -393,6 +414,56 @@ fn retained_typescript_invokes_all_exports_and_contains_oversized_result_string(
         }))
     ));
 
+    // Omission control: the equivalent compact canonical callback body for the
+    // hostile service call stays below the 4-MiB protocol cap, so only the
+    // explicit Store hostcall fuel can reject this transfer before publication.
+    let control = HostCallRequest::CallService(body::ServiceCall {
+        plugin_id: "dependency".into(),
+        service_id: "service".into(),
+        values: vec![body::NamedValue {
+            name: "payload".into(),
+            value: body::DataValue::IntegerList(vec![0; 558_081]),
+        }],
+    })
+    .into_child_message(CallbackFence {
+        plugin_id: "test-plugin".into(),
+        package_generation: 7,
+        activation_epoch: 9,
+        host_session_id: SESSION.into(),
+        invocation_id: "00000000-0000-4000-8000-000000000099".into(),
+        callback_id: 1,
+    })
+    .unwrap();
+    assert!(control.body().len() < HOST_CALLBACK_BODY_BYTES_MAX);
+
+    // The hostile import runs on the original healthy Store before any
+    // deliberate trap or replacement. The guest lowers its 558,081-element
+    // BigInt64Array through the bulk typed-array path, and the 4,464,648
+    // canonical flat bytes exhaust hostcall fuel during argument lifting.
+    // Receiving the terminal failure as the direct response proves no
+    // CapabilityRequest was published.
+    let hostcall_oversized = host.invoke(
+        InvocationRequest::invoke_command(
+            Some("hostcall-oversized-import".into()),
+            body::CommandCall {
+                command_id: "hostcall-oversized-import".into(),
+                values: Vec::new(),
+            },
+        ),
+        "00000000-0000-4000-8000-00000000000f",
+        &permission_hash,
+    );
+    assert_eq!(
+        (hostcall_oversized.1, hostcall_oversized.2),
+        (
+            ChildFrame::Failed {
+                fence: hostcall_oversized.0,
+                code: HostFailureCode::ResourceLimit,
+            },
+            Vec::new(),
+        )
+    );
+
     let trap = host.invoke(
         InvocationRequest::invoke_command(
             Some("trap".into()),
@@ -410,28 +481,6 @@ fn retained_typescript_invokes_all_exports_and_contains_oversized_result_string(
             ChildFrame::Failed {
                 fence: trap.0,
                 code: HostFailureCode::GuestError,
-            },
-            Vec::new(),
-        )
-    );
-
-    let hostcall_oversized = host.invoke(
-        InvocationRequest::invoke_command(
-            Some("hostcall-oversized-output".into()),
-            body::CommandCall {
-                command_id: "hostcall-oversized-output".into(),
-                values: Vec::new(),
-            },
-        ),
-        "00000000-0000-4000-8000-00000000000f",
-        &permission_hash,
-    );
-    assert_eq!(
-        (hostcall_oversized.1, hostcall_oversized.2),
-        (
-            ChildFrame::Failed {
-                fence: hostcall_oversized.0,
-                code: HostFailureCode::ResourceLimit,
             },
             Vec::new(),
         )
@@ -553,7 +602,7 @@ fn retained_typescript_invokes_all_exports_and_contains_oversized_result_string(
 #[test]
 fn retained_typescript_table_pressure_fails_at_the_store_limit() {
     let mut component = TYPESCRIPT_COMPONENT.to_vec();
-    let table = [0x01, 0x70, 0x01, 0x8c, 0x3c, 0x8c, 0x3c];
+    let table = [0x01, 0x70, 0x01, 0x8d, 0x3c, 0x8d, 0x3c];
     let offsets = component
         .windows(table.len())
         .enumerate()
@@ -564,7 +613,7 @@ fn retained_typescript_table_pressure_fails_at_the_store_limit() {
     component[offset + 3..offset + 5].copy_from_slice(&[0x91, 0x4e]);
     component[offset + 5..offset + 7].copy_from_slice(&[0x91, 0x4e]);
 
-    let grants = permissions();
+    let grants = typescript_permissions();
     let inspection =
         inspect_component_for_runtime(&component, RuntimeProfile::Typescript, &grants).unwrap();
     let load_fence = fence("00000000-0000-4000-8000-000000000002");

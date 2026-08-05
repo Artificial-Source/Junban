@@ -14,7 +14,7 @@
     "componentizeJs": "0.22.0",
     "wasi": "--disable all",
     "byteReproducible": false,
-    "sizeBytes": 15315929,
-    "sha256": "57365a076e1394a141b8dd6c2fe4e9e28bb78e13473df34a57a62cbd1707d233"
+    "sizeBytes": 15480272,
+    "sha256": "78abc3d8e07de4a6e399f12da523c2e52b76236416171b82bd7fbbf26b66d6c4"
   }
 }

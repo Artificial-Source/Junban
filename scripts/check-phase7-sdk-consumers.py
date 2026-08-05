@@ -32,7 +32,9 @@ EXPECTED_RUST = {
     "wasi:cli/exit@0.2.6",
     "wasi:cli/stderr@0.2.6",
 }
-EXPECTED_TS = {name for name in EXPECTED_RUST if not name.startswith("wasi:")}
+EXPECTED_TS = {name for name in EXPECTED_RUST if not name.startswith("wasi:")} | {
+    "junban:plugin/host-services@0.1.0",
+}
 
 
 def run(args: list[str], cwd: Path, capture: bool = False) -> str:

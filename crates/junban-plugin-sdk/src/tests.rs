@@ -19,8 +19,8 @@ fn valid_component() -> Vec<u8> {
     include_bytes!("../consumers/rust/rust-consumer.wasm").to_vec()
 }
 
-fn consumer_permissions() -> Vec<Permission> {
-    [
+fn consumer_permissions(profile: RuntimeProfile) -> Vec<Permission> {
+    let mut permissions = [
         Capability::Logging,
         Capability::Settings,
         Capability::Storage,
@@ -31,7 +31,23 @@ fn consumer_permissions() -> Vec<Permission> {
         capability,
         scope: PermissionScope::Unscoped(UnscopedPermission {}),
     })
-    .collect()
+    .collect::<Vec<_>>();
+    if profile == RuntimeProfile::Typescript {
+        // Canonically sorted: "logging" < "services:consume" < "settings".
+        permissions.insert(
+            1,
+            Permission {
+                capability: Capability::ServicesConsume,
+                scope: PermissionScope::Services(ServiceConsumeScope {
+                    services: vec![ServiceReference {
+                        plugin_id: "dependency".into(),
+                        service_id: "service".into(),
+                    }],
+                }),
+            },
+        );
+    }
+    permissions
 }
 
 fn replace_all_equal(bytes: &mut [u8], from: &[u8], to: &[u8]) {
@@ -128,7 +144,16 @@ fn valid_manifest(component: &[u8]) -> RuntimeManifest {
 fn consumer_manifest(component: &[u8], profile: RuntimeProfile) -> RuntimeManifest {
     let mut manifest = valid_manifest(component);
     manifest.runtime_profile = profile;
-    manifest.permissions = consumer_permissions();
+    manifest.permissions = consumer_permissions(profile);
+    if profile == RuntimeProfile::Typescript {
+        // The retained TypeScript consumer's host-services import requires the
+        // matching scoped dependency/consume authority in its manifest.
+        manifest.dependencies = vec![Dependency {
+            id: "dependency".into(),
+            requirement: "^0.1".into(),
+            services: vec!["service".into()],
+        }];
+    }
     manifest
 }
 
@@ -210,7 +235,7 @@ fn exact_wit_parses_and_valid_component_has_structural_guest_abi() {
     );
     assert_eq!(inspection.exports, [REQUIRED_GUEST_EXPORT]);
     assert_eq!(inspection.guest_abi_sha256.len(), 64);
-    let grants = consumer_permissions();
+    let grants = consumer_permissions(RuntimeProfile::Rust);
     assert_eq!(
         inspect_component_for_runtime(&component, RuntimeProfile::Rust, &grants)
             .unwrap()
@@ -236,6 +261,7 @@ fn exact_wit_parses_and_valid_component_has_structural_guest_abi() {
         typescript_inspection.imports,
         [
             "junban:plugin/host-log@0.1.0",
+            "junban:plugin/host-services@0.1.0",
             "junban:plugin/host-settings@0.1.0",
             "junban:plugin/host-storage@0.1.0",
             "junban:plugin/host-tasks@0.1.0",

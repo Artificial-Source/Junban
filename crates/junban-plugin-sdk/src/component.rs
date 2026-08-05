@@ -832,7 +832,7 @@ mod tests {
         let typescript =
             include_bytes!("../consumers/typescript/artifacts/typescript-consumer.wasm");
         assert_eq!(core_resource_baseline(rust), (14, 1, 2, 17, 60));
-        assert_eq!(core_resource_baseline(typescript), (8, 1, 2, 178, 7_692));
+        assert_eq!(core_resource_baseline(typescript), (9, 1, 2, 179, 7_693));
     }
 
     #[test]

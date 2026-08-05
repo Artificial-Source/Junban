@@ -18,10 +18,11 @@ use junban_plugin_host::{
 use junban_plugin_sdk::{
     AuthorityFence, Capability, ChildFrame, HOST_FRAME_BYTES_MAX, HOST_PROTOCOL_NAME,
     HOST_PROTOCOL_VERSION, HostCallReply, HostCallRequest, InvocationOutcome, InvocationRequest,
-    ParentFrame, Permission, PermissionScope, RuntimeLimits, RuntimeProfile, TypedParentMessage,
-    UnscopedPermission, canonical_permission_hash, child_body_len, decode_child_frame,
-    decode_host_call_request, decode_invocation_outcome, encode_parent_frame,
-    inspect_component_for_runtime, private_body_types as body, validate_child_body,
+    ParentFrame, Permission, PermissionScope, RuntimeLimits, RuntimeProfile, ServiceConsumeScope,
+    ServiceReference, TypedParentMessage, UnscopedPermission, canonical_permission_hash,
+    child_body_len, decode_child_frame, decode_host_call_request, decode_invocation_outcome,
+    encode_parent_frame, inspect_component_for_runtime, private_body_types as body,
+    validate_child_body,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -227,7 +228,7 @@ struct HostProcess {
 }
 
 impl HostProcess {
-    fn spawn(executable: &Path) -> Self {
+    fn spawn(executable: &Path, grants: Vec<Permission>) -> Self {
         let mut child = Command::new(executable)
             .env_clear()
             .stdin(Stdio::piped())
@@ -237,12 +238,12 @@ impl HostProcess {
             .unwrap();
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
-        let grants = permissions();
+        let permission_hash = canonical_permission_hash(&grants).unwrap();
         Self {
             child,
             stdin: Some(stdin),
             stdout,
-            permission_hash: canonical_permission_hash(&grants).unwrap(),
+            permission_hash,
             next_invocation: 2,
         }
     }
@@ -323,6 +324,25 @@ fn permissions() -> Vec<Permission> {
     .collect()
 }
 
+/// Retained TypeScript consumer grants: the shared four plus the scoped
+/// `services:consume` authority its host-services import requires.
+fn typescript_permissions() -> Vec<Permission> {
+    let mut grants = permissions();
+    grants.insert(
+        1,
+        Permission {
+            capability: Capability::ServicesConsume,
+            scope: PermissionScope::Services(ServiceConsumeScope {
+                services: vec![ServiceReference {
+                    plugin_id: "dependency".into(),
+                    service_id: "service".into(),
+                }],
+            }),
+        },
+    );
+    grants
+}
+
 fn profile_name(profile: RuntimeProfile) -> &'static str {
     match profile {
         RuntimeProfile::Rust => "rust",
@@ -351,9 +371,12 @@ fn run_once(
     warm_up: bool,
 ) -> RunRecord {
     let bytes = component(profile);
-    let grants = permissions();
+    let grants = match profile {
+        RuntimeProfile::Rust => permissions(),
+        RuntimeProfile::Typescript => typescript_permissions(),
+    };
     let inspection = inspect_component_for_runtime(bytes, profile, &grants).unwrap();
-    let mut host = HostProcess::spawn(executable);
+    let mut host = HostProcess::spawn(executable, grants.clone());
     let pid = host.child.id();
     let control = Arc::new(SamplerControl::new());
     let samples = Arc::new(Mutex::new(Vec::new()));

@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex, mpsc};
+use std::{
+    sync::{Arc, Condvar, Mutex, mpsc},
+    time::{Duration, Instant},
+};
 
 use junban_plugin_sdk::{
     AuthorityFence, CallbackFence, ChildFrame, HostCallKind, HostCallReply, HostCallRequest,
@@ -7,13 +10,13 @@ use junban_plugin_sdk::{
     decode_host_call_reply, decode_invocation_request, inspect_component_for_runtime,
     private_body_types as neutral, validate_callback_correlation, validate_host_call_authority,
 };
-use wasmtime::{Engine, Store, StoreLimits, StoreLimitsBuilder, component::Component};
+use wasmtime::{
+    Engine, ResourceLimiter, Store, StoreLimits, StoreLimitsBuilder, Trap, component::Component,
+};
 use wasmtime::{component::HasData, component::HasSelf, component::Linker};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::{HostError, ParentMessage, bindings};
-
-const WASI_STDERR_BYTES_MAX: usize = 32 * 1024;
 
 pub(crate) struct OutboundMessage {
     pub frame: ChildFrame,
@@ -40,16 +43,34 @@ struct PendingCallback {
     reply: mpsc::SyncSender<HostCallReply>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StopReason {
+    Timeout,
+    Cancelled,
+    Aborted,
+}
+
+struct ActiveInvocation {
+    fence: AuthorityFence,
+    deadline: Instant,
+    stop: Option<StopReason>,
+    epoch_advanced: bool,
+    completing: bool,
+}
+
 #[derive(Default)]
 struct RuntimeStatus {
     loaded: bool,
-    active: Option<AuthorityFence>,
+    worker_stopped: bool,
+    active: Option<ActiveInvocation>,
     pending: Option<PendingCallback>,
+    watchdog_shutdown: bool,
 }
 
 #[derive(Default)]
 pub(crate) struct SharedRuntimeStatus {
     inner: Mutex<RuntimeStatus>,
+    changed: Condvar,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -64,80 +85,303 @@ pub(crate) enum CallbackRouteError {
     Wrong,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CancelResult {
+    Won,
+    Lost,
+    Stale,
+    WorkerStopped,
+}
+
 impl SharedRuntimeStatus {
+    fn lock(&self) -> std::sync::MutexGuard<'_, RuntimeStatus> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     pub fn mark_loaded(&self) {
-        self.inner.lock().expect("runtime status poisoned").loaded = true;
+        self.lock().loaded = true;
     }
 
     pub fn mark_unloaded(&self) {
-        let mut status = self.inner.lock().expect("runtime status poisoned");
-        status.loaded = false;
-        status.active = None;
-        status.pending = None;
+        let pending = {
+            let mut status = self.lock();
+            status.loaded = false;
+            status.active = None;
+            let pending = status.pending.take();
+            self.changed.notify_all();
+            pending
+        };
+        cancel_pending(pending);
     }
 
     pub fn is_loaded(&self) -> bool {
-        self.inner.lock().expect("runtime status poisoned").loaded
+        self.lock().loaded
     }
 
-    pub fn active(&self) -> Option<AuthorityFence> {
-        self.inner
-            .lock()
-            .expect("runtime status poisoned")
-            .active
-            .clone()
-    }
-
-    pub fn start(&self, fence: AuthorityFence) -> Result<(), StartError> {
-        let mut status = self.inner.lock().expect("runtime status poisoned");
+    pub fn start(&self, fence: AuthorityFence, timeout: Duration) -> Result<(), StartError> {
+        let mut status = self.lock();
         if !status.loaded {
             return Err(StartError::NotLoaded);
         }
         if status.active.is_some() {
             return Err(StartError::Busy);
         }
-        status.active = Some(fence);
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .ok_or(StartError::Busy)?;
+        status.active = Some(ActiveInvocation {
+            fence,
+            deadline,
+            stop: None,
+            epoch_advanced: false,
+            completing: false,
+        });
+        self.changed.notify_all();
         Ok(())
     }
 
-    pub fn finish(&self, fence: &AuthorityFence, keep_loaded: bool) {
-        let mut status = self.inner.lock().expect("runtime status poisoned");
-        if status
+    /// Linearize an exact cancel against natural completion. The winning
+    /// cancel waits until the runtime owner has dropped the active Store; a
+    /// timeout that won first remains authoritative.
+    pub fn cancel_and_wait(&self, fence: &AuthorityFence) -> CancelResult {
+        let mut status = self.lock();
+        let Some(active) = status.active.as_mut() else {
+            return CancelResult::Stale;
+        };
+        if !active.fence.exact_matches(fence) {
+            return CancelResult::Stale;
+        }
+        let won = if active.stop.is_none() && !active.completing {
+            active.stop = Some(StopReason::Cancelled);
+            self.changed.notify_all();
+            true
+        } else {
+            false
+        };
+        while status
             .active
             .as_ref()
-            .is_some_and(|active| active.exact_matches(fence))
+            .is_some_and(|active| active.fence.exact_matches(fence))
         {
-            status.active = None;
-            status.pending = None;
+            status = self
+                .changed
+                .wait(status)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
-        if !keep_loaded {
-            status.loaded = false;
+        if status.worker_stopped {
+            CancelResult::WorkerStopped
+        } else if won {
+            CancelResult::Won
+        } else {
+            CancelResult::Lost
         }
     }
 
-    fn register_callback(&self, pending: PendingCallback) -> Result<(), HostError> {
-        let mut status = self.inner.lock().expect("runtime status poisoned");
-        let authority = pending.callback.authority();
-        if status.pending.is_some()
-            || !status
+    /// Stop whichever invocation belongs to the loaded activation and wait for
+    /// Store destruction. Used by unload and shutdown before their own ack.
+    pub fn cancel_active_and_wait(&self) {
+        let mut status = self.lock();
+        let Some(fence) = status.active.as_ref().map(|active| active.fence.clone()) else {
+            return;
+        };
+        if let Some(active) = status.active.as_mut()
+            && active.stop.is_none()
+            && !active.completing
+        {
+            active.stop = Some(StopReason::Cancelled);
+            self.changed.notify_all();
+        }
+        while status
+            .active
+            .as_ref()
+            .is_some_and(|active| active.fence.exact_matches(&fence))
+        {
+            status = self
+                .changed
+                .wait(status)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+
+    /// Fatal input/EOF has no peer to consume a terminal frame. Interrupt and
+    /// drain silently so all scoped child threads can join without emitting a
+    /// fabricated result after the protocol stream ended.
+    pub fn abort_active_and_wait(&self) {
+        let mut status = self.lock();
+        let Some(fence) = status.active.as_ref().map(|active| active.fence.clone()) else {
+            return;
+        };
+        if let Some(active) = status.active.as_mut() {
+            active.stop = Some(StopReason::Aborted);
+            self.changed.notify_all();
+        }
+        while status
+            .active
+            .as_ref()
+            .is_some_and(|active| active.fence.exact_matches(&fence))
+        {
+            status = self
+                .changed
+                .wait(status)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+
+    /// Linearize natural completion against controls. Successful Stores are
+    /// retained and their terminal is enqueued under the control lock. A
+    /// failed/stopped Store can take nontrivial time to drop, so completion is
+    /// frozen first, destruction happens without the lock, and only then is
+    /// the terminal enqueued and `active` cleared.
+    fn complete(
+        &self,
+        fence: &AuthorityFence,
+        result: Result<TypedChildMessage, HostFailureCode>,
+        outbound: &mpsc::SyncSender<OutboundMessage>,
+        discard_failed_store: impl FnOnce(),
+    ) {
+        let mut status = self.lock();
+        let Some(active) = status.active.as_ref() else {
+            return;
+        };
+        if !active.fence.exact_matches(fence) {
+            return;
+        }
+        if active.stop.is_none() && Instant::now() >= active.deadline {
+            status
+                .active
+                .as_mut()
+                .expect("active invocation disappeared")
+                .stop = Some(StopReason::Timeout);
+        }
+
+        let result = match (
+            status
                 .active
                 .as_ref()
-                .is_some_and(|active| active.exact_matches(&authority))
+                .expect("active invocation disappeared")
+                .stop,
+            result,
+        ) {
+            (None, Ok(message)) => {
+                if outbound.try_send(OutboundMessage::typed(message)).is_ok() {
+                    status.active = None;
+                    let pending = status.pending.take();
+                    self.changed.notify_all();
+                    drop(status);
+                    cancel_pending(pending);
+                    return;
+                }
+
+                // A terminal that cannot reserve bounded writer capacity is a
+                // transport failure, not a successful retained invocation.
+                // Destroy the Store and fail this activation closed without
+                // blocking watchdog/control ownership on the writer.
+                status
+                    .active
+                    .as_mut()
+                    .expect("active invocation disappeared")
+                    .completing = true;
+                status.loaded = false;
+                self.changed.notify_all();
+                drop(status);
+                discard_failed_store();
+                let pending = {
+                    let mut status = self.lock();
+                    if status
+                        .active
+                        .as_ref()
+                        .is_some_and(|active| active.fence.exact_matches(fence))
+                    {
+                        status.active = None;
+                    }
+                    let pending = status.pending.take();
+                    self.changed.notify_all();
+                    pending
+                };
+                cancel_pending(pending);
+                return;
+            }
+            (_, result) => result,
+        };
+
+        status
+            .active
+            .as_mut()
+            .expect("active invocation disappeared")
+            .completing = true;
+        self.changed.notify_all();
+        drop(status);
+
+        discard_failed_store();
+
+        let pending = {
+            let mut status = self.lock();
+            let Some(active) = status.active.as_ref() else {
+                return;
+            };
+            if !active.fence.exact_matches(fence) {
+                return;
+            }
+            let message = match (active.stop, result) {
+                (Some(StopReason::Timeout), _) => {
+                    Some(OutboundMessage::frame(ChildFrame::Failed {
+                        fence: fence.clone(),
+                        code: HostFailureCode::Timeout,
+                    }))
+                }
+                (Some(StopReason::Cancelled), _) => {
+                    Some(OutboundMessage::frame(ChildFrame::Cancelled {
+                        fence: fence.clone(),
+                    }))
+                }
+                (Some(StopReason::Aborted), _) => None,
+                (None, Err(code)) => Some(OutboundMessage::frame(ChildFrame::Failed {
+                    fence: fence.clone(),
+                    code,
+                })),
+                (None, Ok(_)) => unreachable!("successful Store was selected for destruction"),
+            };
+            if message.is_some_and(|message| outbound.try_send(message).is_err()) {
+                status.loaded = false;
+            }
+            status.active = None;
+            let pending = status.pending.take();
+            self.changed.notify_all();
+            pending
+        };
+        cancel_pending(pending);
+    }
+
+    fn register_callback(
+        &self,
+        pending: PendingCallback,
+        message: OutboundMessage,
+        outbound: &mpsc::SyncSender<OutboundMessage>,
+    ) -> Result<(), HostError> {
+        let mut status = self.lock();
+        let authority = pending.callback.authority();
+        if status.pending.is_some()
+            || !status.active.as_ref().is_some_and(|active| {
+                active.fence.exact_matches(&authority)
+                    && active.stop.is_none()
+                    && !active.completing
+            })
         {
             return Err(HostError::Runtime);
         }
         status.pending = Some(pending);
-        Ok(())
-    }
-
-    fn remove_callback(&self, callback: &CallbackFence) {
-        let mut status = self.inner.lock().expect("runtime status poisoned");
-        if status
-            .pending
-            .as_ref()
-            .is_some_and(|pending| pending.callback.exact_matches(callback))
-        {
-            status.pending = None;
+        match outbound.try_send(message) {
+            Ok(()) => {
+                self.changed.notify_all();
+                Ok(())
+            }
+            Err(_) => {
+                status.pending = None;
+                self.changed.notify_all();
+                Err(HostError::Runtime)
+            }
         }
     }
 
@@ -152,14 +396,17 @@ impl SharedRuntimeStatus {
             return Err(CallbackRouteError::Wrong);
         };
 
-        let mut status = self.inner.lock().expect("runtime status poisoned");
+        let mut status = self.lock();
         let Some(pending) = status.pending.as_ref() else {
             return Err(CallbackRouteError::Stale);
         };
         let Some(active) = status.active.as_ref() else {
             return Err(CallbackRouteError::Stale);
         };
-        if validate_callback_correlation(active, pending.callback.callback_id, callback).is_err() {
+        if active.stop.is_some()
+            || validate_callback_correlation(&active.fence, pending.callback.callback_id, callback)
+                .is_err()
+        {
             return Err(CallbackRouteError::Stale);
         }
         if pending.callback != *callback || pending.kind != *kind {
@@ -168,6 +415,7 @@ impl SharedRuntimeStatus {
         let reply = decode_host_call_reply(*kind, *result, &message.body)
             .map_err(|_| CallbackRouteError::Wrong)?;
         let pending = status.pending.take().expect("pending callback disappeared");
+        self.changed.notify_all();
         drop(status);
         pending
             .reply
@@ -175,16 +423,87 @@ impl SharedRuntimeStatus {
             .map_err(|_| CallbackRouteError::Stale)
     }
 
-    pub fn cancel_pending_for_eof(&self) {
-        let pending = self
-            .inner
-            .lock()
-            .expect("runtime status poisoned")
-            .pending
-            .take();
-        if let Some(pending) = pending {
-            let _ = pending.reply.send(HostCallReply::Cancelled(pending.kind));
+    /// The only owner that advances the Engine epoch. It sleeps on a condition
+    /// variable while idle, wakes for control requests, and advances once for
+    /// an active deadline/cancel before returning to the idle state.
+    pub fn run_watchdog(&self, engine: &Engine) {
+        loop {
+            let pending = {
+                let mut status = self.lock();
+                loop {
+                    if status.watchdog_shutdown {
+                        return;
+                    }
+                    let Some(active) = status.active.as_mut() else {
+                        status = self
+                            .changed
+                            .wait(status)
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        continue;
+                    };
+                    if active.completing {
+                        status = self
+                            .changed
+                            .wait(status)
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        continue;
+                    }
+                    if active.stop.is_none() {
+                        let now = Instant::now();
+                        if now >= active.deadline {
+                            active.stop = Some(StopReason::Timeout);
+                            continue;
+                        }
+                        let duration = active.deadline.saturating_duration_since(now);
+                        let (next, _) = self
+                            .changed
+                            .wait_timeout(status, duration)
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        status = next;
+                        continue;
+                    }
+                    if active.epoch_advanced {
+                        status = self
+                            .changed
+                            .wait(status)
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        continue;
+                    }
+                    active.epoch_advanced = true;
+                    let pending = status.pending.take();
+                    // Advance before releasing the authority lock so an old
+                    // stop can never interrupt a newly admitted invocation.
+                    engine.increment_epoch();
+                    break pending;
+                }
+            };
+            cancel_pending(pending);
         }
+    }
+
+    pub fn shutdown_watchdog(&self) {
+        let mut status = self.lock();
+        status.watchdog_shutdown = true;
+        self.changed.notify_all();
+    }
+
+    pub fn worker_stopped(&self) {
+        let pending = {
+            let mut status = self.lock();
+            status.loaded = false;
+            status.worker_stopped = true;
+            status.active = None;
+            let pending = status.pending.take();
+            self.changed.notify_all();
+            pending
+        };
+        cancel_pending(pending);
+    }
+}
+
+fn cancel_pending(pending: Option<PendingCallback>) {
+    if let Some(pending) = pending {
+        let _ = pending.reply.send(HostCallReply::Cancelled(pending.kind));
     }
 }
 
@@ -223,6 +542,14 @@ pub(crate) fn run_runtime(
     outbound: mpsc::SyncSender<OutboundMessage>,
     status: Arc<SharedRuntimeStatus>,
 ) {
+    struct WorkerGuard(Arc<SharedRuntimeStatus>);
+    impl Drop for WorkerGuard {
+        fn drop(&mut self) {
+            self.0.worker_stopped();
+        }
+    }
+
+    let _guard = WorkerGuard(status.clone());
     let mut loaded = None;
     while let Ok(command) = commands.recv() {
         match command {
@@ -243,16 +570,11 @@ pub(crate) fn run_runtime(
                     .as_mut()
                     .ok_or(HostFailureCode::StaleAuthority)
                     .and_then(|runtime| runtime.invoke(request));
-                let keep_loaded = result.is_ok();
-                status.finish(&fence, keep_loaded);
-                if !keep_loaded {
-                    loaded = None;
-                }
-                let message = match result {
-                    Ok(message) => OutboundMessage::typed(message),
-                    Err(code) => OutboundMessage::frame(ChildFrame::Failed { fence, code }),
-                };
-                let _ = outbound.send(message);
+                status.complete(&fence, result, &outbound, || {
+                    if let Some(runtime) = loaded.as_mut() {
+                        runtime.discard_instance();
+                    }
+                });
             }
             RuntimeCommand::Unload { reply } => {
                 loaded = None;
@@ -274,14 +596,81 @@ struct InvocationState {
     mode: InvocationMode,
     grants: Vec<Permission>,
     next_callback_id: u32,
+    log_bytes: usize,
+    host_failure: Option<HostFailureCode>,
+}
+
+struct RuntimeLimiter {
+    inner: StoreLimits,
+    resource_failure: bool,
+}
+
+impl RuntimeLimiter {
+    fn reset(&mut self) {
+        self.resource_failure = false;
+    }
+
+    fn record(&mut self, result: &wasmtime::Result<bool>) {
+        if !matches!(result, Ok(true)) {
+            self.resource_failure = true;
+        }
+    }
+}
+
+impl ResourceLimiter for RuntimeLimiter {
+    fn memory_growing(
+        &mut self,
+        current: usize,
+        desired: usize,
+        maximum: Option<usize>,
+    ) -> wasmtime::Result<bool> {
+        let result = self.inner.memory_growing(current, desired, maximum);
+        self.record(&result);
+        result
+    }
+
+    fn memory_grow_failed(&mut self, error: wasmtime::Error) -> wasmtime::Result<()> {
+        self.resource_failure = true;
+        self.inner.memory_grow_failed(error)
+    }
+
+    fn table_growing(
+        &mut self,
+        current: usize,
+        desired: usize,
+        maximum: Option<usize>,
+    ) -> wasmtime::Result<bool> {
+        let result = self.inner.table_growing(current, desired, maximum);
+        self.record(&result);
+        result
+    }
+
+    fn table_grow_failed(&mut self, error: wasmtime::Error) -> wasmtime::Result<()> {
+        self.resource_failure = true;
+        self.inner.table_grow_failed(error)
+    }
+
+    fn instances(&self) -> usize {
+        self.inner.instances()
+    }
+
+    fn tables(&self) -> usize {
+        self.inner.tables()
+    }
+
+    fn memories(&self) -> usize {
+        self.inner.memories()
+    }
 }
 
 struct StoreState {
-    limits: StoreLimits,
+    limiter: RuntimeLimiter,
     table: wasmtime::component::ResourceTable,
     wasi: WasiCtx,
+    stderr: wasmtime_wasi::p2::pipe::MemoryOutputPipe,
     bridge: CallbackBridge,
     grants: Vec<Permission>,
+    runtime_limits: RuntimeLimits,
     invocation: Option<InvocationState>,
 }
 
@@ -315,14 +704,15 @@ impl CallbackBridge {
         &self,
         invocation: &mut InvocationState,
         request: HostCallRequest,
-    ) -> wasmtime::Result<HostCallReply> {
+        log_bytes_max: usize,
+    ) -> Result<HostCallReply, HostFailureCode> {
         let kind = request.kind();
         validate_host_call_authority(kind, invocation.mode, &invocation.grants)
-            .map_err(|_| wasmtime::Error::msg("capability call denied"))?;
+            .map_err(|_| HostFailureCode::PermissionDenied)?;
         let callback_id = invocation.next_callback_id;
         invocation.next_callback_id = callback_id
             .checked_add(1)
-            .ok_or_else(|| wasmtime::Error::msg("callback limit exceeded"))?;
+            .ok_or(HostFailureCode::ResourceLimit)?;
         let callback = CallbackFence {
             plugin_id: invocation.fence.plugin_id.clone(),
             package_generation: invocation.fence.package_generation,
@@ -333,33 +723,55 @@ impl CallbackBridge {
         };
         let message = request
             .into_child_message(callback.clone())
-            .map_err(|_| wasmtime::Error::msg("capability request rejected"))?;
+            .map_err(|_| HostFailureCode::ResourceLimit)?;
+        let message = OutboundMessage::typed(message);
+        if kind == HostCallKind::Log {
+            invocation.log_bytes = invocation
+                .log_bytes
+                .checked_add(message.body.len())
+                .ok_or(HostFailureCode::ResourceLimit)?;
+            if invocation.log_bytes > log_bytes_max {
+                return Err(HostFailureCode::ResourceLimit);
+            }
+        }
         let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
         self.status
-            .register_callback(PendingCallback {
-                callback: callback.clone(),
-                kind,
-                reply: reply_sender,
-            })
-            .map_err(|_| wasmtime::Error::msg("capability callback unavailable"))?;
-        if self.outbound.send(OutboundMessage::typed(message)).is_err() {
-            self.status.remove_callback(&callback);
-            return Err(wasmtime::Error::msg("capability transport unavailable"));
-        }
+            .register_callback(
+                PendingCallback {
+                    callback: callback.clone(),
+                    kind,
+                    reply: reply_sender,
+                },
+                message,
+                &self.outbound,
+            )
+            .map_err(|_| HostFailureCode::Unavailable)?;
         reply_receiver
             .recv()
-            .map_err(|_| wasmtime::Error::msg("capability reply unavailable"))
+            .map_err(|_| HostFailureCode::Unavailable)
     }
 }
 
 impl StoreState {
+    fn failure(&mut self, code: HostFailureCode) -> wasmtime::Error {
+        if let Some(invocation) = self.invocation.as_mut() {
+            invocation.host_failure = Some(code);
+        }
+        wasmtime::Error::msg("guest host call rejected")
+    }
+
     fn callback(&mut self, request: HostCallRequest) -> wasmtime::Result<HostCallReply> {
         let bridge = self.bridge.clone();
+        let log_bytes_max = usize::try_from(self.runtime_limits.guest_log_invocation_bytes)
+            .map_err(|_| self.failure(HostFailureCode::Internal))?;
         let invocation = self
             .invocation
             .as_mut()
             .ok_or_else(|| wasmtime::Error::msg("capability call outside invocation"))?;
-        bridge.call(invocation, request)
+        match bridge.call(invocation, request, log_bytes_max) {
+            Ok(reply) => Ok(reply),
+            Err(code) => Err(self.failure(code)),
+        }
     }
 }
 
@@ -386,7 +798,7 @@ impl bindings::junban::plugin::host_tasks::Host for StoreState {
     > {
         let query = query
             .try_into()
-            .map_err(|_| wasmtime::Error::msg("capability argument rejected"))?;
+            .map_err(|_| self.failure(HostFailureCode::ResourceLimit))?;
         match self.callback(HostCallRequest::QueryTasks(query))? {
             HostCallReply::QueryTasks(neutral::WitResult::Ok(page)) => Ok(Ok(page.into())),
             HostCallReply::QueryTasks(neutral::WitResult::Err(error)) => Ok(Err(error.into())),
@@ -408,7 +820,7 @@ impl bindings::junban::plugin::host_projects::Host for StoreState {
     > {
         let query = query
             .try_into()
-            .map_err(|_| wasmtime::Error::msg("capability argument rejected"))?;
+            .map_err(|_| self.failure(HostFailureCode::ResourceLimit))?;
         match self.callback(HostCallRequest::QueryProjects(query))? {
             HostCallReply::QueryProjects(neutral::WitResult::Ok(page)) => Ok(Ok(page.into())),
             HostCallReply::QueryProjects(neutral::WitResult::Err(error)) => Ok(Err(error.into())),
@@ -432,7 +844,7 @@ impl bindings::junban::plugin::host_tags::Host for StoreState {
     > {
         let query = query
             .try_into()
-            .map_err(|_| wasmtime::Error::msg("capability argument rejected"))?;
+            .map_err(|_| self.failure(HostFailureCode::ResourceLimit))?;
         match self.callback(HostCallRequest::QueryTags(query))? {
             HostCallReply::QueryTags(neutral::WitResult::Ok(page)) => Ok(Ok(page.into())),
             HostCallReply::QueryTags(neutral::WitResult::Err(error)) => Ok(Err(error.into())),
@@ -534,7 +946,7 @@ impl bindings::junban::plugin::host_http::Host for StoreState {
     > {
         let request = request
             .try_into()
-            .map_err(|_| wasmtime::Error::msg("capability argument rejected"))?;
+            .map_err(|_| self.failure(HostFailureCode::ResourceLimit))?;
         match self.callback(HostCallRequest::HttpRequest(request))? {
             HostCallReply::HttpRequest(neutral::WitResult::Ok(response)) => Ok(Ok(response.into())),
             HostCallReply::HttpRequest(neutral::WitResult::Err(error)) => Ok(Err(error.into())),
@@ -557,14 +969,19 @@ impl bindings::junban::plugin::host_log::Host for StoreState {
         message: String,
         fields: Vec<bindings::junban::plugin::types::LogField>,
     ) -> wasmtime::Result<()> {
+        if message.len() > usize::from(self.runtime_limits.guest_log_message_bytes)
+            || fields.len() > usize::from(self.runtime_limits.guest_log_fields)
+        {
+            return Err(self.failure(HostFailureCode::ResourceLimit));
+        }
         let level = level
             .try_into()
-            .map_err(|_| wasmtime::Error::msg("capability argument rejected"))?;
+            .map_err(|_| self.failure(HostFailureCode::ResourceLimit))?;
         let fields = fields
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| wasmtime::Error::msg("capability argument rejected"))?;
+            .map_err(|_| self.failure(HostFailureCode::ResourceLimit))?;
         match self.callback(HostCallRequest::Log(neutral::HostLogLogArguments {
             level,
             message,
@@ -591,7 +1008,7 @@ impl bindings::junban::plugin::host_services::Host for StoreState {
     > {
         let call = call
             .try_into()
-            .map_err(|_| wasmtime::Error::msg("capability argument rejected"))?;
+            .map_err(|_| self.failure(HostFailureCode::ResourceLimit))?;
         match self.callback(HostCallRequest::CallService(call))? {
             HostCallReply::CallService(neutral::WitResult::Ok(data)) => Ok(Ok(data.into())),
             HostCallReply::CallService(neutral::WitResult::Err(error)) => Ok(Err(error.into())),
@@ -601,11 +1018,19 @@ impl bindings::junban::plugin::host_services::Host for StoreState {
     }
 }
 
-struct LoadedRuntime {
-    _component: Component,
+struct RuntimeInstance {
     store: Store<StoreState>,
     bindings: bindings::Runtime,
+}
+
+struct LoadedRuntime {
+    engine: Engine,
+    component: Component,
+    linker: Linker<StoreState>,
     limits: RuntimeLimits,
+    grants: Vec<Permission>,
+    bridge: CallbackBridge,
+    instance: Option<RuntimeInstance>,
 }
 
 impl LoadedRuntime {
@@ -634,65 +1059,106 @@ impl LoadedRuntime {
         add_actual_imports(&mut linker, &inspection.imports)
             .map_err(|_| HostFailureCode::InvalidComponent)?;
 
-        let stderr = wasmtime_wasi::p2::pipe::MemoryOutputPipe::new(WASI_STDERR_BYTES_MAX);
+        let mut runtime = Self {
+            engine: engine.clone(),
+            component,
+            linker,
+            limits: request.limits,
+            grants: request.grants,
+            bridge: CallbackBridge { outbound, status },
+            instance: None,
+        };
+        runtime.instance = Some(runtime.instantiate()?);
+        Ok(runtime)
+    }
+
+    fn instantiate(&self) -> Result<RuntimeInstance, HostFailureCode> {
+        let stderr_capacity = usize::try_from(self.limits.wasi_stderr_bytes)
+            .map_err(|_| HostFailureCode::ResourceLimit)?;
+        let stderr = wasmtime_wasi::p2::pipe::MemoryOutputPipe::new(stderr_capacity);
         let mut wasi = WasiCtxBuilder::new();
-        wasi.stderr(stderr);
+        wasi.stderr(stderr.clone());
         let store_limits = StoreLimitsBuilder::new()
             .memory_size(
-                usize::try_from(request.limits.linear_memory_bytes)
+                usize::try_from(self.limits.linear_memory_bytes)
                     .map_err(|_| HostFailureCode::ResourceLimit)?,
             )
             .table_elements(
-                usize::try_from(request.limits.table_elements)
+                usize::try_from(self.limits.table_elements)
                     .map_err(|_| HostFailureCode::ResourceLimit)?,
             )
-            .memories(usize::from(request.limits.memories))
-            .tables(usize::from(request.limits.tables))
-            .instances(usize::from(request.limits.instances))
+            .memories(usize::from(self.limits.memories))
+            .tables(usize::from(self.limits.tables))
+            .instances(usize::from(self.limits.instances))
             .trap_on_grow_failure(true)
             .build();
+        let mut table = wasmtime::component::ResourceTable::new();
+        table.set_max_capacity(usize::from(self.limits.host_resources));
         let mut store = Store::new(
-            engine,
+            &self.engine,
             StoreState {
-                limits: store_limits,
-                table: wasmtime::component::ResourceTable::new(),
+                limiter: RuntimeLimiter {
+                    inner: store_limits,
+                    resource_failure: false,
+                },
+                table,
                 wasi: wasi.build(),
-                bridge: CallbackBridge { outbound, status },
-                grants: request.grants,
+                stderr,
+                bridge: self.bridge.clone(),
+                grants: self.grants.clone(),
+                runtime_limits: self.limits.clone(),
                 invocation: None,
             },
         );
-        store.limiter(|state| &mut state.limits);
+        store.limiter(|state| &mut state.limiter);
         store
-            .set_fuel(request.limits.fuel)
+            .set_fuel(self.limits.fuel)
             .map_err(|_| HostFailureCode::Internal)?;
         store.set_epoch_deadline(1);
-        let runtime = bindings::Runtime::instantiate(&mut store, &component, &linker)
+        let bindings = bindings::Runtime::instantiate(&mut store, &self.component, &self.linker)
             .map_err(|_| HostFailureCode::ResourceLimit)?;
-        Ok(Self {
-            _component: component,
-            store,
-            bindings: runtime,
-            limits: request.limits,
-        })
+        Ok(RuntimeInstance { store, bindings })
     }
 
     fn invoke(&mut self, request: InvokeRequest) -> Result<TypedChildMessage, HostFailureCode> {
+        if self.instance.is_none() {
+            self.instance = Some(self.instantiate()?);
+        }
+        self.instance
+            .as_mut()
+            .expect("runtime instance disappeared")
+            .invoke(request, &self.limits)
+    }
+
+    fn discard_instance(&mut self) {
+        self.instance = None;
+    }
+}
+
+impl RuntimeInstance {
+    fn invoke(
+        &mut self,
+        request: InvokeRequest,
+        limits: &RuntimeLimits,
+    ) -> Result<TypedChildMessage, HostFailureCode> {
         let invocation = decode_invocation_request(request.kind, &request.body)
             .map_err(|_| HostFailureCode::InvalidFrame)?;
         let context = invocation
             .context(&request.fence)
             .map_err(|_| HostFailureCode::InvalidFrame)?;
         self.store
-            .set_fuel(self.limits.fuel)
+            .set_fuel(limits.fuel)
             .map_err(|_| HostFailureCode::Internal)?;
         self.store.set_epoch_deadline(1);
+        self.store.data_mut().limiter.reset();
         let grants = self.store.data().grants.clone();
         self.store.data_mut().invocation = Some(InvocationState {
             fence: request.fence.clone(),
             mode: request.mode,
             grants,
             next_callback_id: 1,
+            log_bytes: 0,
+            host_failure: None,
         });
         let result = self.invoke_inner(invocation, context);
         self.store.data_mut().invocation = None;
@@ -713,42 +1179,42 @@ impl LoadedRuntime {
                 let (_, ()) = payload.into_parts();
                 let result = guest
                     .call_activate(&mut self.store, &context)
-                    .map_err(|_| HostFailureCode::GuestError)?;
+                    .map_err(|error| classify_wasmtime_failure(&self.store, &error))?;
                 Ok(InvocationOutcome::Activate(binding_unit_result(result)?))
             }
             InvocationRequest::Deactivate(payload) => {
                 let (_, ()) = payload.into_parts();
                 let result = guest
                     .call_deactivate(&mut self.store, &context)
-                    .map_err(|_| HostFailureCode::GuestError)?;
+                    .map_err(|error| classify_wasmtime_failure(&self.store, &error))?;
                 Ok(InvocationOutcome::Deactivate(binding_unit_result(result)?))
             }
             InvocationRequest::InvokeCommand(payload) => {
                 let (_, argument) = payload.into_parts();
                 let result = guest
                     .call_invoke_command(&mut self.store, &context, &argument.into())
-                    .map_err(|_| HostFailureCode::GuestError)?;
+                    .map_err(|error| classify_wasmtime_failure(&self.store, &error))?;
                 Ok(InvocationOutcome::InvokeCommand(binding_result(result)?))
             }
             InvocationRequest::HandleEvent(payload) => {
                 let (_, argument) = payload.into_parts();
                 let result = guest
                     .call_handle_event(&mut self.store, &context, &argument.into())
-                    .map_err(|_| HostFailureCode::GuestError)?;
+                    .map_err(|error| classify_wasmtime_failure(&self.store, &error))?;
                 Ok(InvocationOutcome::HandleEvent(binding_result(result)?))
             }
             InvocationRequest::RenderSurface(payload) => {
                 let (_, argument) = payload.into_parts();
                 let result = guest
                     .call_render_surface(&mut self.store, &context, &argument.into())
-                    .map_err(|_| HostFailureCode::GuestError)?;
+                    .map_err(|error| classify_wasmtime_failure(&self.store, &error))?;
                 Ok(InvocationOutcome::RenderSurface(binding_result(result)?))
             }
             InvocationRequest::HandleSurfaceAction(payload) => {
                 let (_, argument) = payload.into_parts();
                 let result = guest
                     .call_handle_surface_action(&mut self.store, &context, &argument.into())
-                    .map_err(|_| HostFailureCode::GuestError)?;
+                    .map_err(|error| classify_wasmtime_failure(&self.store, &error))?;
                 Ok(InvocationOutcome::HandleSurfaceAction(binding_result(
                     result,
                 )?))
@@ -757,7 +1223,7 @@ impl LoadedRuntime {
                 let (_, argument) = payload.into_parts();
                 let result = guest
                     .call_validate_settings(&mut self.store, &context, &argument.into())
-                    .map_err(|_| HostFailureCode::GuestError)?;
+                    .map_err(|error| classify_wasmtime_failure(&self.store, &error))?;
                 Ok(InvocationOutcome::ValidateSettings(binding_result_vec(
                     result,
                 )?))
@@ -766,17 +1232,57 @@ impl LoadedRuntime {
                 let (_, argument) = payload.into_parts();
                 let result = guest
                     .call_resync(&mut self.store, &context, &argument.into())
-                    .map_err(|_| HostFailureCode::GuestError)?;
+                    .map_err(|error| classify_wasmtime_failure(&self.store, &error))?;
                 Ok(InvocationOutcome::Resync(binding_result(result)?))
             }
             InvocationRequest::CallService(payload) => {
                 let (_, argument) = payload.into_parts();
                 let result = guest
                     .call_call_service(&mut self.store, &context, &argument.into())
-                    .map_err(|_| HostFailureCode::GuestError)?;
+                    .map_err(|error| classify_wasmtime_failure(&self.store, &error))?;
                 Ok(InvocationOutcome::CallService(binding_result(result)?))
             }
         }
+    }
+}
+
+fn classify_wasmtime_failure(
+    store: &Store<StoreState>,
+    error: &wasmtime::Error,
+) -> HostFailureCode {
+    let state = store.data();
+    if let Some(code) = state
+        .invocation
+        .as_ref()
+        .and_then(|invocation| invocation.host_failure)
+    {
+        return code;
+    }
+    if state.limiter.resource_failure
+        || error
+            .downcast_ref::<wasmtime::component::ResourceTableError>()
+            .is_some_and(|error| {
+                matches!(
+                    error,
+                    wasmtime::component::ResourceTableError::Full
+                        | wasmtime::component::ResourceTableError::HasChildren
+                )
+            })
+        || state.stderr.contents().len()
+            >= usize::try_from(state.runtime_limits.wasi_stderr_bytes).unwrap_or(usize::MAX)
+    {
+        return HostFailureCode::ResourceLimit;
+    }
+    match error.downcast_ref::<Trap>() {
+        Some(
+            Trap::StackOverflow
+            | Trap::MemoryOutOfBounds
+            | Trap::TableOutOfBounds
+            | Trap::AllocationTooLarge
+            | Trap::OutOfFuel,
+        ) => HostFailureCode::ResourceLimit,
+        Some(Trap::Interrupt) => HostFailureCode::Cancelled,
+        _ => HostFailureCode::GuestError,
     }
 }
 
@@ -935,4 +1441,78 @@ fn add_actual_imports(linker: &mut Linker<StoreState>, imports: &[String]) -> wa
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::Cell, sync::mpsc, time::Duration};
+
+    use junban_plugin_sdk::{
+        AuthorityFence, CallbackFence, ChildFrame, HostCallKind, InvocationOutcome,
+        private_body_types as neutral,
+    };
+
+    use super::{OutboundMessage, PendingCallback, SharedRuntimeStatus};
+
+    fn fence() -> AuthorityFence {
+        AuthorityFence {
+            plugin_id: "test-plugin".into(),
+            package_generation: 7,
+            activation_epoch: 9,
+            host_session_id: "00000000-0000-4000-8000-000000000001".into(),
+            invocation_id: "00000000-0000-4000-8000-000000000002".into(),
+        }
+    }
+
+    #[test]
+    fn full_writer_queue_rejects_callback_and_discards_unpublished_success() {
+        let status = SharedRuntimeStatus::default();
+        status.mark_loaded();
+        let fence = fence();
+        status.start(fence.clone(), Duration::from_secs(1)).unwrap();
+
+        let (outbound, _receiver) = mpsc::sync_channel(1);
+        outbound
+            .send(OutboundMessage::frame(ChildFrame::Failed {
+                fence: fence.clone(),
+                code: junban_plugin_sdk::HostFailureCode::Unavailable,
+            }))
+            .unwrap();
+        let (reply, _reply_receiver) = mpsc::sync_channel(1);
+        let callback = CallbackFence {
+            plugin_id: fence.plugin_id.clone(),
+            package_generation: fence.package_generation,
+            activation_epoch: fence.activation_epoch,
+            host_session_id: fence.host_session_id.clone(),
+            invocation_id: fence.invocation_id.clone(),
+            callback_id: 1,
+        };
+        assert!(
+            status
+                .register_callback(
+                    PendingCallback {
+                        callback,
+                        kind: HostCallKind::Log,
+                        reply,
+                    },
+                    OutboundMessage::frame(ChildFrame::Failed {
+                        fence: fence.clone(),
+                        code: junban_plugin_sdk::HostFailureCode::Unavailable,
+                    }),
+                    &outbound,
+                )
+                .is_err()
+        );
+        assert!(status.lock().pending.is_none());
+
+        let outcome = InvocationOutcome::Activate(neutral::WitResult::Ok(()))
+            .into_child_message(fence.clone())
+            .unwrap();
+        let discarded = Cell::new(false);
+        status.complete(&fence, Ok(outcome), &outbound, || discarded.set(true));
+
+        assert!(discarded.get());
+        assert!(!status.is_loaded());
+        assert!(status.lock().active.is_none());
+    }
 }

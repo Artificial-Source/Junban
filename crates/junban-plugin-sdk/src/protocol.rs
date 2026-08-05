@@ -33,9 +33,14 @@ pub const RUST_INVOCATION_FUEL: u64 = 100_000_000;
 pub const TYPESCRIPT_INVOCATION_FUEL: u64 = 2_000_000_000;
 pub const GUEST_STACK_BYTES: u64 = 2 * 1024 * 1024;
 pub const TABLE_ELEMENTS_MAX: u32 = 10_000;
+pub const HOST_RESOURCE_TABLE_ENTRIES_MAX: u16 = 64;
+pub const GUEST_LOG_MESSAGE_BYTES_MAX: u16 = 4 * 1024;
+pub const GUEST_LOG_FIELDS_MAX: u8 = 16;
+pub const GUEST_LOG_INVOCATION_BYTES_MAX: u32 = 32 * 1024;
+pub const WASI_STDERR_BYTES_MAX: u32 = 32 * 1024;
 pub const RUST_MEMORIES_MAX: u8 = 1;
 pub const RUST_TABLES_MAX: u8 = 2;
-pub const RUST_INSTANCES_MAX: u8 = 13;
+pub const RUST_INSTANCES_MAX: u8 = 14;
 pub const TYPESCRIPT_MEMORIES_MAX: u8 = 1;
 pub const TYPESCRIPT_TABLES_MAX: u8 = 2;
 pub const TYPESCRIPT_INSTANCES_MAX: u8 = 8;
@@ -139,8 +144,13 @@ pub struct RuntimeLimits {
     pub tables: u8,
     pub instances: u8,
     pub fuel: u64,
+    pub host_resources: u16,
     pub hostcall_copy_bytes: u32,
     pub output_bytes: u32,
+    pub guest_log_message_bytes: u16,
+    pub guest_log_fields: u8,
+    pub guest_log_invocation_bytes: u32,
+    pub wasi_stderr_bytes: u32,
     pub compile_timeout_ms: u32,
     pub command_timeout_ms: u32,
     pub event_render_timeout_ms: u32,
@@ -173,8 +183,13 @@ impl RuntimeLimits {
                 RuntimeProfile::Rust => RUST_INVOCATION_FUEL,
                 RuntimeProfile::Typescript => TYPESCRIPT_INVOCATION_FUEL,
             },
+            host_resources: HOST_RESOURCE_TABLE_ENTRIES_MAX,
             hostcall_copy_bytes: HOST_CALLBACK_BODY_BYTES_MAX as u32,
             output_bytes: HOST_OUTCOME_BODY_BYTES_MAX as u32,
+            guest_log_message_bytes: GUEST_LOG_MESSAGE_BYTES_MAX,
+            guest_log_fields: GUEST_LOG_FIELDS_MAX,
+            guest_log_invocation_bytes: GUEST_LOG_INVOCATION_BYTES_MAX,
+            wasi_stderr_bytes: WASI_STDERR_BYTES_MAX,
             compile_timeout_ms: COMPILE_TIMEOUT_MS,
             command_timeout_ms: COMMAND_TIMEOUT_MS,
             event_render_timeout_ms: EVENT_RENDER_TIMEOUT_MS,
@@ -189,6 +204,24 @@ impl RuntimeLimits {
             Err(SdkError::Protocol {
                 field: "runtime_limits",
             })
+        }
+    }
+
+    /// Exact wall deadline for one closed invocation kind. Lifecycle, command,
+    /// action, and service calls use the command/UI budget; event, render,
+    /// validation, and resync calls use the short callback budget.
+    #[must_use]
+    pub const fn invocation_timeout_ms(&self, kind: InvocationKind) -> u32 {
+        match kind {
+            InvocationKind::HandleEvent
+            | InvocationKind::RenderSurface
+            | InvocationKind::ValidateSettings
+            | InvocationKind::Resync => self.event_render_timeout_ms,
+            InvocationKind::Activate
+            | InvocationKind::Deactivate
+            | InvocationKind::InvokeCommand
+            | InvocationKind::HandleSurfaceAction
+            | InvocationKind::CallService => self.command_timeout_ms,
         }
     }
 }

@@ -4,13 +4,118 @@
 // this checked-in output rather than trusting an opaque component fixture.
 include!("../generated/rust_consumer.rs");
 
+use std::io::Write;
+use std::sync::atomic::{AtomicI64, Ordering};
+
 use exports::junban::plugin::guest::Guest;
 use junban::plugin::types::*;
 
 struct Component;
 
+static ACTIVATION_COUNT: AtomicI64 = AtomicI64::new(0);
+
 fn no_effect() -> PluginOutcome {
     PluginOutcome { effect: None }
+}
+
+#[allow(unconditional_recursion)]
+#[inline(never)]
+fn exhaust_stack(depth: u64) -> u64 {
+    let frame = [depth; 128];
+    std::hint::black_box(&frame);
+    depth.wrapping_add(exhaust_stack(depth.wrapping_add(1)))
+}
+
+#[inline(never)]
+fn exhaust_fuel() -> ! {
+    let mut value = 1_u64;
+    loop {
+        for _ in 0..1_024 {
+            value = value.wrapping_mul(6364136223846793005).wrapping_add(1);
+        }
+        std::hint::black_box(value);
+    }
+}
+
+#[inline(never)]
+fn spin_on_bulk_memory() -> ! {
+    let mut bytes = vec![0x5a; 64 * 1024];
+    loop {
+        bytes.copy_within(0..32 * 1024, 32 * 1024);
+        std::hint::black_box(&bytes);
+    }
+}
+
+fn bounded_bulk_memory() {
+    let mut bytes = vec![0x5a; 64 * 1024];
+    bytes.copy_within(0..32 * 1024, 32 * 1024);
+    std::hint::black_box(bytes);
+}
+
+fn exhaust_memory_growth() {
+    let _ = core::arch::wasm32::memory_grow::<0>(2_048);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn raw_stderr_handle() -> i32 {
+    #[link(wasm_import_module = "wasi:cli/stderr@0.2.6")]
+    unsafe extern "C" {
+        #[link_name = "get-stderr"]
+        fn get_stderr() -> i32;
+    }
+    // This test-only fixture intentionally retains raw owned resource handles
+    // to exhaust the host table. The exact canonical ABI comes from the
+    // hash-frozen Rust WASI 0.2.6 baseline imported by this component.
+    unsafe { get_stderr() }
+}
+
+fn exhaust_host_resources() {
+    let mut handles = Vec::new();
+    for _ in 0..=64 {
+        handles.push(raw_stderr_handle());
+    }
+    std::hint::black_box(handles);
+}
+
+fn exhaust_stderr() {
+    let mut stderr = std::io::stderr().lock();
+    let block = vec![b'x'; 4 * 1024];
+    for _ in 0..=8 {
+        stderr.write_all(&block).unwrap();
+        stderr.flush().unwrap();
+    }
+}
+
+fn oversized_output() -> PluginOutcome {
+    PluginOutcome {
+        effect: Some(PluginEffect::KvPatch(KvPatch {
+            operations: vec![KvOperation::Set(KvSet {
+                key: "oversized".into(),
+                value: vec![7; 300 * 1024],
+            })],
+        })),
+    }
+}
+
+fn oversized_log_message() {
+    junban::plugin::host_log::log(LogLevel::Info, &"x".repeat(4 * 1024 + 1), &[]);
+}
+
+fn too_many_log_fields() {
+    let fields = (0..17)
+        .map(|index| LogField {
+            name: format!("field-{index}"),
+            value: ScalarValue::IntegerValue(index),
+        })
+        .collect::<Vec<_>>();
+    junban::plugin::host_log::log(LogLevel::Info, "fields", &fields);
+}
+
+fn exhaust_log_total() {
+    let message = "x".repeat(4 * 1024);
+    for _ in 0..16 {
+        junban::plugin::host_log::log(LogLevel::Info, &message, &[]);
+    }
 }
 
 /// Exact `TaskDraft::new` defaults before parent/domain validation.
@@ -100,6 +205,7 @@ fn exercise_change_variants() {
 impl Guest for Component {
     fn activate(_context: InvocationContext) -> Result<(), PluginError> {
         exercise_change_variants();
+        ACTIVATION_COUNT.fetch_add(1, Ordering::Relaxed);
         let _ = junban::plugin::host_settings::get_settings();
         let _ = junban::plugin::host_storage::get_kv(&[]);
         let _ = junban::plugin::host_storage::list_kv(None, 1);
@@ -111,8 +217,25 @@ impl Guest for Component {
     }
     fn invoke_command(
         _context: InvocationContext,
-        _call: CommandCall,
+        call: CommandCall,
     ) -> Result<PluginOutcome, PluginError> {
+        match call.command_id.as_str() {
+            "trap" => panic!("retained hostile trap marker"),
+            "spin" => spin_on_bulk_memory(),
+            "fuel" => exhaust_fuel(),
+            "bulk-memory" => bounded_bulk_memory(),
+            "memory-grow" => exhaust_memory_growth(),
+            "host-resources" => exhaust_host_resources(),
+            "stack" => {
+                std::hint::black_box(exhaust_stack(0));
+            }
+            "oversized-output" => return Ok(oversized_output()),
+            "log-message" => oversized_log_message(),
+            "log-fields" => too_many_log_fields(),
+            "log-total" => exhaust_log_total(),
+            "stderr" => exhaust_stderr(),
+            _ => {}
+        }
         let _ = junban::plugin::host_tasks::query_tasks(&TaskQuery {
             task_id: None,
             project_id: None,
@@ -131,8 +254,11 @@ impl Guest for Component {
     }
     fn handle_event(
         _context: InvocationContext,
-        _event: EventEnvelope,
+        event: EventEnvelope,
     ) -> Result<PluginOutcome, PluginError> {
+        if event.event_epoch == "spin" {
+            spin_on_bulk_memory();
+        }
         Ok(no_effect())
     }
     fn render_surface(
@@ -191,7 +317,14 @@ impl Guest for Component {
         _context: InvocationContext,
         _call: ServiceCall,
     ) -> Result<ServiceData, PluginError> {
-        Ok(ServiceData { values: Vec::new() })
+        Ok(ServiceData {
+            values: vec![NamedValue {
+                name: "activation-count".into(),
+                value: DataValue::Scalar(ScalarValue::IntegerValue(
+                    ACTIVATION_COUNT.load(Ordering::Relaxed),
+                )),
+            }],
+        })
     }
 }
 

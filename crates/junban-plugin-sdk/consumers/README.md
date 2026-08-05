@@ -2,10 +2,10 @@
 
 These are build/test authorities for `junban:plugin@0.1.0`, not shipped runtime code or reference plugins. Both target worlds include canonical `plugin` and select only `host-tasks`, `host-settings`, `host-storage`, and `host-log`. Their copied `wit/deps` package must byte-match `../../wit/plugin.wit`; the check script enforces that single authority.
 
-- `rust/`: Rust 1.93.0, `wasm32-wasip2`, exact `wit-bindgen`/CLI 0.51.0. Checked-in generated Rust bindings compile directly. The retained component imports the selected Junban interfaces plus exactly the frozen five WASI 0.2.6 interfaces.
+- `rust/`: Rust 1.93.0, `wasm32-wasip2`, exact `wit-bindgen`/CLI 0.51.0. Checked-in generated Rust bindings compile directly. The retained component imports the selected Junban interfaces plus exactly the frozen five WASI 0.2.6 interfaces. Its test-only resource-table fixture retains raw handles from the already-frozen `wasi:cli/stderr@0.2.6` canonical ABI without adding an interface or broadening that actual import set.
 - `typescript/`: build-only Node with exact jco 1.26.1 and ComponentizeJS 0.22.0 (the package override pins jco's componentizer edge), `--disable all`. Checked-in strict guest `.d.ts` bindings and the retained component have zero WASI imports.
 
-Both source consumers implement all required guest exports and compile exercises for public types, including P1–P4 nullable priority, every unchanged/clear/set form, bulk priority clear/set, all project views, closed resync snapshots, and exact `TaskDraft::new` defaults.
+Both source consumers implement all required guest exports and compile exercises for public types, including P1–P4 nullable priority, every unchanged/clear/set form, bulk priority clear/set, all project views, closed resync snapshots, and exact `TaskDraft::new` defaults. They also retain test-only hostile entry IDs. Rust covers ordinary trap, finite-fuel exhaustion, epoch-interrupted spin, bounded bulk memory, denied memory growth, stack exhaustion, host-resource-table saturation, bounded stderr, oversized output, and per-message/field-list/per-invocation guest-log limits. TypeScript covers trap, spin/fuel containment, oversized output, and clean Store replacement. These are SDK test authorities, not reference-plugin behavior.
 
 The private parent↔child JSON body representation is separate from these guest consumers. Its checked-in pure Rust serde values and function adapters are generated from the same WIT without changing or supplementing the guest ABI. Check it without Node or runtime code generation:
 

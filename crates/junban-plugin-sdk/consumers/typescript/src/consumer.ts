@@ -280,6 +280,13 @@ function exercisePublicTypes(): void {
 
 let activationCount = 0n;
 
+function spin(): never {
+  let value = 1n;
+  while (true) {
+    value = BigInt.asUintN(64, value * 6364136223846793005n + 1n);
+  }
+}
+
 export const guest = {
   activate(_context: T.InvocationContext): void {
     exercisePublicTypes();
@@ -295,11 +302,32 @@ export const guest = {
       } satisfies T.PluginError;
     }
     if (call.commandId === "trap") {
-      throw new Error("retained fixture trap");
+      throw new Error("retained TypeScript hostile trap marker");
+    }
+    if (call.commandId === "spin") {
+      spin();
+    }
+    if (call.commandId === "oversized-output") {
+      return {
+        effect: {
+          tag: "kv-patch",
+          val: {
+            operations: [
+              {
+                tag: "set",
+                val: { key: "oversized", value: new Uint8Array(300 * 1024) },
+              },
+            ],
+          },
+        },
+      };
     }
     return {};
   },
-  handleEvent(_context: T.InvocationContext, _event: T.EventEnvelope): T.PluginOutcome {
+  handleEvent(_context: T.InvocationContext, event: T.EventEnvelope): T.PluginOutcome {
+    if (event.eventEpoch === "spin") {
+      spin();
+    }
     return {};
   },
   renderSurface(_context: T.InvocationContext, request: T.SurfaceRequest): T.Surface {

@@ -1,7 +1,7 @@
 # Phase 7 context map and execution contract
 
 Date: 2026-08-04
-Status: Wave 0 and Wave 1 accepted; Wave 2 Slice 2B.1 selective-sandbox execution implemented, hostile containment and later runtime slices remain
+Status: Wave 0 and Wave 1 accepted; Wave 2 child runtime implemented through Slice 2B.2, parent/integrated runtime slices remain
 Base: Phase 6 commit `18bea1b899108f218074714697759af02fa56670`
 
 ## Purpose and observable outcome
@@ -24,7 +24,7 @@ The phase ends only after the frozen Rust and TypeScript examples build and run 
 ### Current repository
 
 - Workspace crates: `junban-domain`, `junban-app`, `junban-storage`, `junban-server`, `junban-cli`, `junban-mcp`, lazy `junban-ai`, and pure `junban-plugin-sdk`.
-- `junban-plugin-sdk` owns bounded package/WIT/trust/component/protocol authority without Wasmtime, storage or runtime construction. The isolated `junban-plugin-host` Slice 2B.1 child now owns strict protocol I/O, one Engine and load attempt, an actual-import/grant-selective linker, one limited mutable Store/instance owner, typed callback transport, and serial execution of all nine guest exports. Hostile interruption/recovery remains Slice 2B.2.
+- `junban-plugin-sdk` owns bounded package/WIT/trust/component/protocol authority without Wasmtime, storage or runtime construction. The isolated `junban-plugin-host` child now owns strict protocol I/O, one Engine and load attempt, an actual-import/grant-selective linker, one limited mutable Store/instance owner, typed callback transport, serial execution of all nine guest exports, exact invocation watchdog interruption, active drain, failed-Store destruction and clean replacement. Parent supervision and capability/effect execution remain Slices 2C–2D.
 - SQLite schema head is v7; accepted Wave 1 persistence owns normalized plugin package, trust, grants, settings, KV, dependencies, cursors, invocations and health authority.
 - `FeatureSettings` contains only six first-party feature toggles. `/settings/plugins` is intentionally rejected today, and `FeaturesTab` documents that plugin keys are unsupported.
 - `docs/architecture.md` reserves `junban-plugin-sdk` for WIT/package contracts and `junban-plugin-host` for the measured optional runtime.
@@ -38,7 +38,7 @@ Verified on 2026-08-04:
 
 - Production pins Wasmtime/`wasmtime-wasi` **36.0.13**, the patched 24-month LTS line compatible with Junban's Rust 1.93.0 pin. Newly issued `RUSTSEC-2026-0222` blocks the historical 45.0.3 spike line; 36.0.13 is unaffected by `RUSTSEC-2026-0223`. The 45.0.3 measurements retain placement history only and must be replaced for active-runtime acceptance.
 - Product runtime uses Component Model + WASI Preview 2. Wasmtime 36.0.13 starts from defaults off with only `runtime`, `cranelift`, `component-model`, and `async`; `wasmtime-wasi` defaults stay off. Preview 1, Preview 3, pooling, GC, cache, profiling, and component-model async guest ABI are out of scope.
-- The accepted product placement is one on-demand child host. Slice 2B.1 now applies profile-specific `StoreLimits`, per-invocation fuel, a 2-MiB Wasm stack, on-demand allocation and epoch-interruption configuration around one mutable Store owner and bounded callback buffers. Its deny-by-default linker defines only actual Junban imports, requires grants for every capability-bearing one and, for Rust only, defines the exact five frozen WASI interfaces. Slice 2B.2 owns wall-deadline interruption, host-future cancellation, hostile exhaustion, discard/recovery and replacement proofs.
+- The accepted product placement is one on-demand child host. Slices 2B.1–2B.2 apply profile-specific `StoreLimits`, finite per-invocation fuel, a 2-MiB Wasm stack, bounded host resources/logs/stderr/output, exact 1,000/250-ms watchdog deadlines, and epoch/cancel/drain ownership around one mutable Store owner and callback rendezvous. The deny-by-default linker defines only actual Junban imports, requires grants for every capability-bearing one and, for Rust only, defines the exact five frozen WASI interfaces. Failed and stopped Stores are destroyed before terminal/control acknowledgement and cleanly replaced from retained compiled authority. The exact 10-second compile/load timeout remains parent-supervisor kill/reap authority in Slice 2C because synchronous child compilation is not safely interrupted locally.
 - Rust guests use stable `wasm32-wasip2` plus `wit-bindgen`; `cargo-component` is being deprecated and is not the authoring authority.
 - TypeScript uses exact build-only `@bytecodealliance/jco` 1.26.1 and `@bytecodealliance/componentize-js` 0.22.0. A component embeds StarlingMonkey and is expected to add roughly 8 MiB or more before guest heap; its package/memory/cold-start evidence remains separate.
 - Package signatures use strict Ed25519 verification (`ed25519-dalek` 2.2.0) and existing SHA-256. Full TUF, Sigstore, Warg, OCI registry clients, Minisign as a runtime ABI, Extism, WASI P3, and resident Node are excluded from v1.

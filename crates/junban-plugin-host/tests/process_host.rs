@@ -130,6 +130,14 @@ impl HostProcess {
         );
         drop(self.stdin);
         assert!(self.child.wait().unwrap().success());
+        let mut stderr = Vec::new();
+        self.child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_end(&mut stderr)
+            .unwrap();
+        assert!(stderr.is_empty(), "child diagnostics were not empty");
     }
 }
 
@@ -406,6 +414,142 @@ fn retained_typescript_component_invokes_all_exports_and_retains_state() {
             Vec::new(),
         )
     );
+
+    let oversized = host.invoke(
+        InvocationRequest::invoke_command(
+            Some("oversized-output".into()),
+            body::CommandCall {
+                command_id: "oversized-output".into(),
+                values: Vec::new(),
+            },
+        ),
+        "00000000-0000-4000-8000-00000000000f",
+        &permission_hash,
+    );
+    assert_eq!(
+        (oversized.1, oversized.2),
+        (
+            ChildFrame::Failed {
+                fence: oversized.0,
+                code: HostFailureCode::ResourceLimit,
+            },
+            Vec::new(),
+        )
+    );
+
+    let spin = host.invoke(
+        InvocationRequest::invoke_command(
+            Some("spin".into()),
+            body::CommandCall {
+                command_id: "spin".into(),
+                values: Vec::new(),
+            },
+        ),
+        "00000000-0000-4000-8000-000000000010",
+        &permission_hash,
+    );
+    assert_eq!(
+        (spin.1, spin.2),
+        (
+            ChildFrame::Failed {
+                fence: spin.0,
+                code: HostFailureCode::ResourceLimit,
+            },
+            Vec::new(),
+        )
+    );
+
+    let wall_spin = host.invoke(
+        InvocationRequest::handle_event(
+            None,
+            body::EventEnvelope {
+                event_epoch: "spin".into(),
+                revision: 1,
+                kind: body::EventKind::TaskDeleted,
+                subject: body::EventSubject::DeletedTask("task".into()),
+            },
+        ),
+        "00000000-0000-4000-8000-000000000011",
+        &permission_hash,
+    );
+    assert_eq!(
+        (wall_spin.1, wall_spin.2),
+        (
+            ChildFrame::Failed {
+                fence: wall_spin.0,
+                code: HostFailureCode::Timeout,
+            },
+            Vec::new(),
+        )
+    );
+
+    let replacement = host.invoke(
+        InvocationRequest::call_service(
+            None,
+            body::ServiceCall {
+                plugin_id: "dependency".into(),
+                service_id: "service".into(),
+                values: Vec::new(),
+            },
+        ),
+        "00000000-0000-4000-8000-000000000012",
+        &permission_hash,
+    );
+    assert_eq!(
+        expect_outcome(replacement.1, &replacement.2),
+        InvocationOutcome::CallService(body::WitResult::Ok(body::ServiceData {
+            values: vec![body::NamedValue {
+                name: "activation-count".into(),
+                value: body::DataValue::Scalar(body::ScalarValue::IntegerValue(0)),
+            }],
+        }))
+    );
+    host.shutdown();
+}
+
+#[test]
+fn retained_typescript_table_pressure_fails_at_the_store_limit() {
+    let mut component = TYPESCRIPT_COMPONENT.to_vec();
+    let table = [0x01, 0x70, 0x01, 0x8c, 0x3c, 0x8c, 0x3c];
+    let offsets = component
+        .windows(table.len())
+        .enumerate()
+        .filter_map(|(offset, window)| (window == table).then_some(offset))
+        .collect::<Vec<_>>();
+    assert_eq!(offsets.len(), 1, "retained table authority drifted");
+    let offset = offsets[0];
+    component[offset + 3..offset + 5].copy_from_slice(&[0x91, 0x4e]);
+    component[offset + 5..offset + 7].copy_from_slice(&[0x91, 0x4e]);
+
+    let grants = permissions();
+    let inspection =
+        inspect_component_for_runtime(&component, RuntimeProfile::Typescript, &grants).unwrap();
+    let load_fence = fence("00000000-0000-4000-8000-000000000002");
+    let frame = ParentFrame::Load {
+        fence: load_fence.clone(),
+        package_sha256: "1".repeat(64),
+        component_sha256: sha256(&component),
+        import_export_fingerprint: inspection.import_export_fingerprint,
+        runtime_profile: RuntimeProfile::Typescript,
+        component_size: component.len() as u64,
+        grants: grants.clone(),
+        permission_hash: canonical_permission_hash(&grants).unwrap(),
+        limits: RuntimeLimits::for_profile(RuntimeProfile::Typescript),
+    };
+
+    let mut host = HostProcess::spawn();
+    host.hello();
+    host.send(&frame, &component);
+    assert_eq!(
+        host.receive(),
+        (
+            ChildFrame::Failed {
+                fence: load_fence,
+                code: HostFailureCode::ResourceLimit,
+            },
+            Vec::new(),
+        )
+    );
     host.shutdown();
 }
 
@@ -471,56 +615,6 @@ fn retained_rust_callbacks_reject_mismatch_and_preserve_serial_authority() {
         )
     );
 
-    host.send(
-        &ParentFrame::Cancel {
-            fence: active_fence.clone(),
-        },
-        &[],
-    );
-    assert_eq!(
-        host.receive(),
-        (
-            ChildFrame::Failed {
-                fence: active_fence.clone(),
-                code: HostFailureCode::Unavailable,
-            },
-            Vec::new(),
-        )
-    );
-    let active_unload_fence = fence("00000000-0000-4000-8000-000000000015");
-    host.send(
-        &ParentFrame::Unload {
-            fence: active_unload_fence.clone(),
-        },
-        &[],
-    );
-    assert_eq!(
-        host.receive(),
-        (
-            ChildFrame::Failed {
-                fence: active_unload_fence,
-                code: HostFailureCode::Unavailable,
-            },
-            Vec::new(),
-        )
-    );
-    host.send(
-        &ParentFrame::Shutdown {
-            host_session_id: SESSION.into(),
-        },
-        &[],
-    );
-    assert_eq!(
-        host.receive(),
-        (
-            ChildFrame::Failed {
-                fence: active_fence,
-                code: HostFailureCode::Unavailable,
-            },
-            Vec::new(),
-        )
-    );
-
     let settings_error = HostCallReply::GetSettings(body::WitResult::Err(body::HostError {
         code: body::ErrorCode::Unavailable,
         field: None,
@@ -554,6 +648,7 @@ fn retained_rust_callbacks_reject_mismatch_and_preserve_serial_authority() {
             Vec::new(),
         )
     );
+
     host.reply(settings_callback, settings_error);
 
     let (storage_frame, storage_body) = host.receive();

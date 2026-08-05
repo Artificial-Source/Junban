@@ -7,6 +7,7 @@ mod runtime;
 use std::{
     io::{self, Read, Write},
     sync::{Arc, mpsc},
+    time::Duration,
 };
 
 use junban_plugin_sdk::{
@@ -17,7 +18,7 @@ use junban_plugin_sdk::{
 use wasmtime::{Config, Engine, InstanceAllocationStrategy, ProfilingStrategy};
 
 use runtime::{
-    CallbackRouteError, InvokeRequest, LoadRequest, OutboundMessage, RuntimeCommand,
+    CallbackRouteError, CancelResult, InvokeRequest, LoadRequest, OutboundMessage, RuntimeCommand,
     SharedRuntimeStatus, StartError,
 };
 
@@ -125,6 +126,7 @@ struct LoadedAuthority {
     fence: AuthorityFence,
     permission_hash: String,
     import_export_fingerprint: String,
+    limits: junban_plugin_sdk::RuntimeLimits,
 }
 
 struct ProtocolState {
@@ -172,12 +174,12 @@ pub fn run_child(
         .max_wasm_stack(usize::try_from(GUEST_STACK_BYTES).map_err(|_| HostError::Engine)?);
     let engine = Engine::new(&config).map_err(|_| HostError::Engine)?;
 
-    let (outbound_sender, outbound_receiver) =
-        mpsc::sync_channel::<OutboundMessage>(OUTBOUND_CHANNEL_CAPACITY);
-    let (runtime_sender, runtime_receiver) = mpsc::sync_channel::<RuntimeCommand>(1);
-    let status = Arc::new(SharedRuntimeStatus::default());
-
     std::thread::scope(|scope| {
+        let (outbound_sender, outbound_receiver) =
+            mpsc::sync_channel::<OutboundMessage>(OUTBOUND_CHANNEL_CAPACITY);
+        let (runtime_sender, runtime_receiver) = mpsc::sync_channel::<RuntimeCommand>(1);
+        let status = Arc::new(SharedRuntimeStatus::default());
+
         let writer_handle = std::thread::Builder::new()
             .name("junban-plugin-writer".into())
             .spawn_scoped(scope, move || {
@@ -187,6 +189,24 @@ pub fn run_child(
                 Ok::<(), HostError>(())
             })
             .map_err(|_| HostError::Runtime)?;
+
+        let watchdog_status = status.clone();
+        let watchdog_engine = engine.clone();
+        let watchdog_handle = std::thread::Builder::new()
+            .name("junban-plugin-watchdog".into())
+            .spawn_scoped(scope, move || {
+                watchdog_status.run_watchdog(&watchdog_engine);
+            })
+            .map_err(|_| HostError::Runtime)?;
+        struct WatchdogShutdown(Arc<SharedRuntimeStatus>);
+        impl Drop for WatchdogShutdown {
+            fn drop(&mut self) {
+                self.0.abort_active_and_wait();
+                self.0.shutdown_watchdog();
+            }
+        }
+        // Also releases the watchdog if a later scoped-thread spawn fails.
+        let _watchdog_shutdown = WatchdogShutdown(status.clone());
 
         let runtime_status = status.clone();
         let runtime_outbound = outbound_sender.clone();
@@ -200,7 +220,7 @@ pub fn run_child(
 
         let protocol_result = run_protocol_loop(reader, &runtime_sender, &outbound_sender, &status);
 
-        status.cancel_pending_for_eof();
+        status.abort_active_and_wait();
         let (shutdown_sender, shutdown_receiver) = mpsc::sync_channel(1);
         if runtime_sender
             .send(RuntimeCommand::Shutdown {
@@ -212,6 +232,8 @@ pub fn run_child(
         }
         drop(runtime_sender);
         runtime_handle.join().map_err(|_| HostError::Runtime)?;
+        status.shutdown_watchdog();
+        watchdog_handle.join().map_err(|_| HostError::Runtime)?;
         drop(outbound_sender);
         let writer_result = writer_handle.join().map_err(|_| HostError::Runtime)?;
 
@@ -290,6 +312,7 @@ fn handle_message(
                 fence: fence.clone(),
                 permission_hash: permission_hash.clone(),
                 import_export_fingerprint: import_export_fingerprint.clone(),
+                limits: limits.clone(),
             };
             let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
             runtime
@@ -335,7 +358,9 @@ fn handle_message(
                 send_failed(outbound, fence, HostFailureCode::PermissionDenied)?;
                 return Ok(false);
             }
-            match status.start(fence.clone()) {
+            let timeout =
+                Duration::from_millis(u64::from(loaded.limits.invocation_timeout_ms(kind)));
+            match status.start(fence.clone(), timeout) {
                 Ok(()) => {
                     if runtime
                         .send(RuntimeCommand::Invoke(InvokeRequest {
@@ -346,7 +371,7 @@ fn handle_message(
                         }))
                         .is_err()
                     {
-                        status.finish(&fence, false);
+                        status.worker_stopped();
                         return Err(HostError::Runtime);
                     }
                 }
@@ -370,24 +395,21 @@ fn handle_message(
         ParentFrame::Cancel { fence } => {
             if !state.loaded_matches(&fence, status) {
                 send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
-            } else if status
-                .active()
-                .as_ref()
-                .is_some_and(|active| active.exact_matches(&fence))
-            {
-                // Slice 2B.2 owns interruption and recovery. Do not acknowledge
-                // cancellation before the guest has actually stopped.
-                send_failed(outbound, fence, HostFailureCode::Unavailable)?;
             } else {
-                send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
+                match status.cancel_and_wait(&fence) {
+                    CancelResult::Won => {}
+                    CancelResult::Lost | CancelResult::Stale => {
+                        send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
+                    }
+                    CancelResult::WorkerStopped => return Err(HostError::Runtime),
+                }
             }
         }
         ParentFrame::Unload { fence } => {
             if !state.loaded_matches(&fence, status) {
                 send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
-            } else if status.active().is_some() {
-                send_failed(outbound, fence, HostFailureCode::Unavailable)?;
             } else {
+                status.cancel_active_and_wait();
                 let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
                 runtime
                     .send(RuntimeCommand::Unload {
@@ -403,20 +425,17 @@ fn handle_message(
             if state.host_session_id.as_deref() != Some(host_session_id.as_str()) {
                 return Err(HostError::Input);
             }
-            if let Some(active) = status.active() {
-                send_failed(outbound, active, HostFailureCode::Unavailable)?;
-            } else {
-                let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
-                runtime
-                    .send(RuntimeCommand::Shutdown {
-                        reply: reply_sender,
-                    })
-                    .map_err(|_| HostError::Runtime)?;
-                reply_receiver.recv().map_err(|_| HostError::Runtime)?;
-                state.loaded = None;
-                send_frame(outbound, ChildFrame::ShutdownComplete { host_session_id })?;
-                return Ok(true);
-            }
+            status.cancel_active_and_wait();
+            let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
+            runtime
+                .send(RuntimeCommand::Shutdown {
+                    reply: reply_sender,
+                })
+                .map_err(|_| HostError::Runtime)?;
+            reply_receiver.recv().map_err(|_| HostError::Runtime)?;
+            state.loaded = None;
+            send_frame(outbound, ChildFrame::ShutdownComplete { host_session_id })?;
+            return Ok(true);
         }
     }
     Ok(false)

@@ -186,7 +186,7 @@ fn exact_wit_parses_and_valid_component_has_structural_guest_abi() {
     );
     assert_eq!(
         hex(&sha256(&component)),
-        "73f7c8902ef58d244357ee5dda7bcadfe523c1b26b7ccc1fa320646ed56ddfdf"
+        "0bd13500bddde8baecd79a974a3f32951c13b187b2e22eeb07ae8b51a536d0e1"
     );
     let inspection = inspect_component(
         &component,
@@ -261,7 +261,7 @@ fn deterministic_valid_package_round_trips_and_full_inspects() {
     assert_eq!(first, second);
     assert_eq!(
         hex(&sha256(&first)),
-        "b7a3bead2d612abbdb1bee80dc222c5f2c9b574bd1b4306d3da899c3975c15f3"
+        "58c12ca50250b4fdae03b37477b534f60a1f4fe0f8e5fee85c49d9c954477662"
     );
     let expected_key_id = hex(&sha256(&test_key().verifying_key().to_bytes()));
     let local_trust = [SignerTrustRecord {
@@ -1173,7 +1173,7 @@ fn component_rejects_core_malformed_export_signature_profile_undeclared_and_meta
     );
     assert_eq!(
         hex(&sha256(&rust_component)),
-        "73f7c8902ef58d244357ee5dda7bcadfe523c1b26b7ccc1fa320646ed56ddfdf"
+        "0bd13500bddde8baecd79a974a3f32951c13b187b2e22eeb07ae8b51a536d0e1"
     );
     let mut wrong_wasi_abi = rust_component.clone();
     replace_all_equal(&mut wrong_wasi_abi, b"exit", b"exix");
@@ -1759,10 +1759,30 @@ fn protocol_load_callback_cancellation_and_limits_are_fenced() {
     assert_eq!(
         serde_json::to_string(&rust_limits).unwrap(),
         format!(
-            "{{\"linear_memory_bytes\":67108864,\"guest_stack_bytes\":2097152,\"table_elements\":10000,\"memories\":1,\"tables\":2,\"instances\":13,\"fuel\":{},\"hostcall_copy_bytes\":4194304,\"output_bytes\":262144,\"compile_timeout_ms\":10000,\"command_timeout_ms\":1000,\"event_render_timeout_ms\":250,\"http_timeout_ms\":5000}}",
+            "{{\"linear_memory_bytes\":67108864,\"guest_stack_bytes\":2097152,\"table_elements\":10000,\"memories\":1,\"tables\":2,\"instances\":14,\"fuel\":{},\"host_resources\":64,\"hostcall_copy_bytes\":4194304,\"output_bytes\":262144,\"guest_log_message_bytes\":4096,\"guest_log_fields\":16,\"guest_log_invocation_bytes\":32768,\"wasi_stderr_bytes\":32768,\"compile_timeout_ms\":10000,\"command_timeout_ms\":1000,\"event_render_timeout_ms\":250,\"http_timeout_ms\":5000}}",
             RUST_INVOCATION_FUEL
         )
     );
+    for kind in [
+        InvocationKind::Activate,
+        InvocationKind::Deactivate,
+        InvocationKind::InvokeCommand,
+        InvocationKind::HandleSurfaceAction,
+        InvocationKind::CallService,
+    ] {
+        assert_eq!(rust_limits.invocation_timeout_ms(kind), COMMAND_TIMEOUT_MS);
+    }
+    for kind in [
+        InvocationKind::HandleEvent,
+        InvocationKind::RenderSurface,
+        InvocationKind::ValidateSettings,
+        InvocationKind::Resync,
+    ] {
+        assert_eq!(
+            rust_limits.invocation_timeout_ms(kind),
+            EVENT_RENDER_TIMEOUT_MS
+        );
+    }
 
     let fence = AuthorityFence {
         plugin_id: "test-plugin".into(),

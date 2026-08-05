@@ -77,6 +77,8 @@ const RECOVERY_CUTOVER_FILE: &str = "recovery-cutover.json";
 const RECOVERY_MARKER_VERSION: u8 = 1;
 const RECOVERY_CUTOVER_VERSION: u8 = 1;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(2_500);
+/// Bounds pending commands retained ahead of the single SQLite owner.
+const WORKER_QUEUE_CAPACITY: usize = 8;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -915,7 +917,7 @@ pub struct SqliteRepository {
 
 struct Worker {
     _lock: File,
-    sender: Mutex<Option<mpsc::Sender<Command>>>,
+    sender: Mutex<Option<mpsc::SyncSender<Command>>>,
     join: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
@@ -939,7 +941,7 @@ impl SqliteRepository {
                 ))
             })?
             .to_path_buf();
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::sync_channel(WORKER_QUEUE_CAPACITY);
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let join = thread::Builder::new()
             .name("junban-sqlite".to_owned())
@@ -1011,9 +1013,19 @@ impl SqliteRepository {
                 RepositoryError::Storage("database worker has stopped".to_owned())
             })?;
             let (reply_sender, reply_receiver) = oneshot::channel();
-            sender
-                .send(command(reply_sender))
-                .map_err(|_| RepositoryError::Storage("database worker has stopped".to_owned()))?;
+            match sender.try_send(command(reply_sender)) {
+                Ok(()) => {}
+                Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                    return Err(RepositoryError::Storage(
+                        "database worker queue is full".to_owned(),
+                    ));
+                }
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                    return Err(RepositoryError::Storage(
+                        "database worker has stopped".to_owned(),
+                    ));
+                }
+            }
             reply_receiver
                 .await
                 .map_err(|_| RepositoryError::Storage("database worker did not reply".to_owned()))?
@@ -1033,6 +1045,20 @@ impl SqliteRepository {
             job: Box::new(move |connection, store| {
                 let _ = reply.send(operation(connection, store));
             }),
+        })
+    }
+
+    #[cfg(test)]
+    fn block_worker(
+        &self,
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    ) -> RepositoryFuture<'_, ()> {
+        self.plugin_request(move |_, _| {
+            let _ = entered.send(());
+            release
+                .recv()
+                .map_err(|_| RepositoryError::Storage("test worker release dropped".to_owned()))
         })
     }
 
@@ -1057,12 +1083,31 @@ macro_rules! mut_cmd {
 impl PluginRepository for SqliteRepository {
     fn publish_plugin_package(
         &self,
-        bytes: Vec<u8>,
+        staged: StagedFile,
     ) -> RepositoryFuture<'_, junban_app::PluginPackageAuthority> {
         self.plugin_request(move |_, store| {
             store
-                .publish(&bytes)
+                .publish(staged)
                 .map_err(|error| RepositoryError::Storage(error.to_string()))
+        })
+    }
+
+    fn install_plugin_admission(
+        &self,
+        operation_id: OperationId,
+        admission: junban_app::PluginPackageAdmission,
+        request: junban_app::InstallPluginRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginMutationOutcome> {
+        self.plugin_request(move |connection, store| {
+            plugin_ops::install_plugin_admission(
+                connection,
+                store,
+                operation_id,
+                admission,
+                request,
+                now,
+            )
         })
     }
 
@@ -1343,7 +1388,8 @@ impl PluginRepository for SqliteRepository {
         plugin_id: junban_plugin_sdk::PluginId,
         package_generation: u64,
         activation_epoch: u64,
-    ) -> RepositoryFuture<'_, ()> {
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::CommittedPluginInvocation> {
         self.plugin_request(move |connection, _| {
             plugin_ops::complete_plugin_invocation(
                 connection,
@@ -1351,13 +1397,14 @@ impl PluginRepository for SqliteRepository {
                 plugin_id,
                 package_generation,
                 activation_epoch,
+                now,
             )
         })
     }
 
     fn commit_plugin_invocation(
         &self,
-        request: junban_app::CommitPluginInvocationRequest,
+        request: junban_app::PlannedPluginInvocationCommit,
         now: Timestamp,
     ) -> RepositoryFuture<'_, junban_app::CommittedPluginInvocation> {
         self.plugin_request(move |connection, _| {
@@ -1372,6 +1419,17 @@ impl PluginRepository for SqliteRepository {
     ) -> RepositoryFuture<'_, junban_app::InstalledPlugin> {
         self.plugin_request(move |connection, _| {
             plugin_ops::update_plugin_bookkeeping(connection, update, now)
+        })
+    }
+
+    fn transition_plugin_health(
+        &self,
+        operation_id: OperationId,
+        update: junban_app::PluginBookkeepingUpdate,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::transition_plugin_health(connection, operation_id, update, now)
         })
     }
 }

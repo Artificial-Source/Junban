@@ -1,7 +1,13 @@
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    io::{Read, Seek, SeekFrom},
+};
 
 use sha2::{Digest, Sha256};
-use wasmparser::{Encoding, Parser, Payload, Validator, WasmFeatures};
+use wasmparser::{
+    Chunk, Encoding, FuncValidatorAllocations, Parser, Payload, ValidPayload, Validator,
+    WasmFeatures,
+};
 use wit_parser::{
     Function, InterfaceId, Resolve, Type, TypeDefKind, WorldItem, decoding::DecodedWasm,
 };
@@ -74,6 +80,48 @@ pub fn inspect_component(
         .map_err(|_| SdkError::ComponentMalformed)?;
     let decoded =
         wit_parser::decoding::decode(component_bytes).map_err(|_| SdkError::ComponentMalformed)?;
+    inspect_decoded_component(
+        decoded,
+        manifest,
+        authority_metadata_bytes(component_bytes)?,
+    )
+}
+
+/// Inspect a hard-capped component from a seekable source without requiring a
+/// caller-owned component `Vec`.
+///
+/// The source is consumed only within `component_len`, then restored to its
+/// initial position. A bounded first pass performs structural validation and
+/// retains Junban's stricter nesting, section-count and custom-metadata ceilings
+/// before the dependency decoder receives the already-validated capped input.
+pub fn inspect_component_reader<R: Read + Seek>(
+    reader: &mut R,
+    component_len: u64,
+    manifest: &RuntimeManifest,
+) -> Result<ComponentInspection> {
+    if component_len == 0 || component_len > COMPONENT_BYTES_MAX as u64 {
+        return Err(SdkError::Length { field: "component" });
+    }
+    let start = reader
+        .stream_position()
+        .map_err(|_| SdkError::ComponentMalformed)?;
+    let metadata_bytes = streaming_component_metadata(reader.take(component_len))?;
+    reader
+        .seek(SeekFrom::Start(start))
+        .map_err(|_| SdkError::ComponentMalformed)?;
+    let decoded = wit_parser::decoding::decode_reader(reader.take(component_len))
+        .map_err(|_| SdkError::ComponentMalformed)?;
+    reader
+        .seek(SeekFrom::Start(start))
+        .map_err(|_| SdkError::ComponentMalformed)?;
+    inspect_decoded_component(decoded, manifest, metadata_bytes)
+}
+
+fn inspect_decoded_component(
+    decoded: DecodedWasm,
+    manifest: &RuntimeManifest,
+    metadata_bytes: usize,
+) -> Result<ComponentInspection> {
     let DecodedWasm::Component(resolve, world_id) = decoded else {
         return Err(SdkError::ComponentEncoding);
     };
@@ -133,7 +181,6 @@ pub fn inspect_component(
     }
     validate_imports(&imports, manifest)?;
 
-    let metadata_bytes = authority_metadata_bytes(component_bytes)?;
     let guest_hash: [u8; 32] = Sha256::digest(&actual_abi).into();
     let mut combined = Vec::new();
     put_u32(&mut combined, imports.len())?;
@@ -156,6 +203,141 @@ pub fn inspect_component(
             field: "component metadata",
         })?,
     })
+}
+
+fn streaming_component_metadata(mut reader: impl Read) -> Result<usize> {
+    let mut parser = Parser::new(0);
+    let mut validator = Validator::new_with_features(WasmFeatures::all());
+    let mut function_allocations = FuncValidatorAllocations::default();
+    let mut parsers = Vec::new();
+    let mut buffer = Vec::new();
+    let mut eof = false;
+    let mut first = true;
+    let mut outer_component = false;
+    let mut nesting = 0_usize;
+    let mut sections = 0_usize;
+    let mut metadata_bytes = 0_usize;
+
+    loop {
+        let (payload, consumed) = match parser
+            .parse(&buffer, eof)
+            .map_err(|_| SdkError::ComponentMalformed)?
+        {
+            Chunk::NeedMoreData(hint) => {
+                if eof {
+                    return Err(SdkError::ComponentMalformed);
+                }
+                let hint =
+                    usize::try_from(hint).map_err(|_| SdkError::Length { field: "component" })?;
+                let read_len = hint.clamp(1, 64 * 1024);
+                let old_len = buffer.len();
+                buffer.resize(
+                    old_len
+                        .checked_add(read_len)
+                        .ok_or(SdkError::Length { field: "component" })?,
+                    0,
+                );
+                let count = reader
+                    .read(&mut buffer[old_len..])
+                    .map_err(|_| SdkError::ComponentMalformed)?;
+                buffer.truncate(old_len + count);
+                eof = count == 0;
+                continue;
+            }
+            Chunk::Parsed { consumed, payload } => (payload, consumed),
+        };
+        match validator
+            .payload(&payload)
+            .map_err(|_| SdkError::ComponentMalformed)?
+        {
+            ValidPayload::Func(function, body) => {
+                let mut function = function.into_validator(function_allocations);
+                function
+                    .validate(&body)
+                    .map_err(|_| SdkError::ComponentMalformed)?;
+                function_allocations = function.into_allocations();
+            }
+            ValidPayload::Ok | ValidPayload::Parser(_) | ValidPayload::End(_) => {}
+        }
+        sections = sections.checked_add(1).ok_or(SdkError::Length {
+            field: "component sections",
+        })?;
+        if sections > COMPONENT_SECTIONS_MAX {
+            return Err(SdkError::ComponentAuthority {
+                field: "component sections",
+            });
+        }
+        if first {
+            first = false;
+            match payload {
+                Payload::Version {
+                    encoding: Encoding::Component,
+                    ..
+                } => outer_component = true,
+                Payload::Version { .. } => return Err(SdkError::ComponentEncoding),
+                _ => return Err(SdkError::ComponentMalformed),
+            }
+        } else {
+            match &payload {
+                Payload::ModuleSection { parser: nested, .. }
+                | Payload::ComponentSection { parser: nested, .. } => {
+                    nesting += 1;
+                    if nesting > COMPONENT_NESTING_MAX {
+                        return Err(SdkError::ComponentAuthority {
+                            field: "component nesting",
+                        });
+                    }
+                    parsers.push(parser.clone());
+                    parser = nested.clone();
+                }
+                Payload::CustomSection(section) => {
+                    let range = section.range();
+                    let size = range.end.checked_sub(range.start).ok_or(SdkError::Length {
+                        field: "component metadata",
+                    })?;
+                    if size > COMPONENT_AUTHORITY_METADATA_SECTION_MAX {
+                        return Err(SdkError::ComponentAuthority {
+                            field: "metadata section",
+                        });
+                    }
+                    metadata_bytes = metadata_bytes.checked_add(size).ok_or(SdkError::Length {
+                        field: "component metadata",
+                    })?;
+                    if metadata_bytes > COMPONENT_AUTHORITY_METADATA_MAX {
+                        return Err(SdkError::ComponentAuthority {
+                            field: "metadata aggregate",
+                        });
+                    }
+                }
+                Payload::End(_) => {
+                    if let Some(parent) = parsers.pop() {
+                        parser = parent;
+                        nesting = nesting.saturating_sub(1);
+                    } else {
+                        buffer.drain(..consumed);
+                        if !buffer.is_empty() || !eof {
+                            let mut trailing = [0_u8; 1];
+                            if !buffer.is_empty()
+                                || reader
+                                    .read(&mut trailing)
+                                    .map_err(|_| SdkError::ComponentMalformed)?
+                                    != 0
+                            {
+                                return Err(SdkError::ComponentMalformed);
+                            }
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        buffer.drain(..consumed);
+    }
+    if !outer_component {
+        return Err(SdkError::ComponentEncoding);
+    }
+    Ok(metadata_bytes)
 }
 
 fn require_component_encoding_and_metadata_bounds(bytes: &[u8]) -> Result<()> {
@@ -523,6 +705,8 @@ pub fn capability_for_import(interface: &str) -> Option<Option<Capability>> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
 
     fn leb(mut value: usize, output: &mut Vec<u8>) {
@@ -559,11 +743,13 @@ mod tests {
         let mut oversized_name = bare_component();
         let name = vec![b'n'; COMPONENT_AUTHORITY_METADATA_SECTION_MAX + 1];
         append_custom_section(&mut oversized_name, &name, 0);
+        let oversized_error = Err(SdkError::ComponentAuthority {
+            field: "metadata section",
+        });
+        assert_eq!(authority_metadata_bytes(&oversized_name), oversized_error);
         assert_eq!(
-            authority_metadata_bytes(&oversized_name),
-            Err(SdkError::ComponentAuthority {
-                field: "metadata section",
-            })
+            streaming_component_metadata(Cursor::new(&oversized_name)),
+            oversized_error
         );
 
         // Data alone stays under the 64 KiB aggregate, but counting name bytes
@@ -596,6 +782,10 @@ mod tests {
         append_custom_section(&mut ordinary, b"name", 16);
         append_custom_section(&mut ordinary, b"producers", 16);
         let total = authority_metadata_bytes(&ordinary).unwrap();
+        assert_eq!(
+            streaming_component_metadata(Cursor::new(&ordinary)).unwrap(),
+            total
+        );
         assert!(total > 32);
         assert!(total <= COMPONENT_AUTHORITY_METADATA_MAX);
 

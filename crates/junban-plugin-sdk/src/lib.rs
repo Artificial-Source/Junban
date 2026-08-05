@@ -26,6 +26,7 @@ pub use component::{
     COMPONENT_AUTHORITY_METADATA_MAX, COMPONENT_AUTHORITY_METADATA_SECTION_MAX,
     COMPONENT_NESTING_MAX, COMPONENT_SECTIONS_MAX, ComponentInspection, REQUIRED_GUEST_EXPORT,
     RUST_WASI_ABI_SHA256, RUST_WASI_BASELINE, WIT_SOURCE, capability_for_import, inspect_component,
+    inspect_component_reader,
 };
 pub use error::SdkError;
 pub use graph::{
@@ -48,7 +49,8 @@ pub use linkage::{
 pub use manifest::*;
 pub use package::{
     COMPONENT_BYTES_MAX, JBP1_MAGIC, PACKAGE_BYTES_MAX, PackageIdentities, ParsedPackage,
-    VerifiedPackage, pack_package, parse_package, verify_package,
+    VerifiedPackage, VerifiedPackageReader, pack_package, parse_package, verify_package,
+    verify_package_reader,
 };
 pub use permission::{
     PERMISSIONS_MAX, PermissionGrantAuthority, permission_set_hash, scope_hash,

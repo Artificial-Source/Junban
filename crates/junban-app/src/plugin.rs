@@ -4,15 +4,18 @@
 //! wrappers. The SQLite owner implements [`PluginRepository`]; later runtime
 //! waves consume this bounded port.
 
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    io::{Read, Seek},
+};
 
 use jiff::Timestamp;
 use junban_domain::{OperationId, Project, ProjectId, Tag, TagId, Task, TaskDraft, TaskId};
 use junban_plugin_sdk::{
     Capability, DependencyLock, GraphError, InvocationKind, OutcomeKind, Permission, PluginId,
     RuntimeManifest, SdkError, SettingValue, Sha256Digest, compare_versions, inspect_component,
-    outcome_authority, parse_package, permission_set_hash, signer_key_id, verify_package,
-    version_matches,
+    inspect_component_reader, outcome_authority, parse_package, permission_set_hash, signer_key_id,
+    verify_package, verify_package_reader, version_matches,
 };
 use serde::{Deserialize, Serialize};
 
@@ -58,24 +61,43 @@ impl PluginPackageAuthority {
         let publisher_public_key = *parse_package(bytes)?.public_key;
         let package = verify_package(bytes)?;
         inspect_component(package.component_bytes, &package.manifest)?;
-        if !version_matches(
-            &package.manifest.junban_compatibility,
-            env!("CARGO_PKG_VERSION"),
-        )? {
+        Self::from_verified(package.manifest, package.identities, publisher_public_key)
+    }
+
+    /// Inspect a bounded seekable JBP1 source without retaining package bytes.
+    pub fn inspect_reader<R: Read + Seek>(
+        reader: &mut R,
+        package_len: u64,
+    ) -> Result<Self, SdkError> {
+        let package = verify_package_reader(reader, package_len)?;
+        inspect_component_reader(reader, package.identities.component_size, &package.manifest)?;
+        Self::from_verified(
+            package.manifest,
+            package.identities,
+            package.publisher_public_key,
+        )
+    }
+
+    fn from_verified(
+        manifest: RuntimeManifest,
+        identities: junban_plugin_sdk::PackageIdentities,
+        publisher_public_key: [u8; 32],
+    ) -> Result<Self, SdkError> {
+        if !version_matches(&manifest.junban_compatibility, env!("CARGO_PKG_VERSION"))? {
             return Err(SdkError::Manifest {
                 field: "compatibility.junban",
             });
         }
         Ok(Self {
-            plugin_id: PluginId::parse(package.manifest.id.clone())?,
-            manifest: package.manifest,
-            package_sha256: Sha256Digest::parse(package.identities.package_sha256)?,
-            manifest_sha256: Sha256Digest::parse(package.identities.manifest_sha256)?,
-            component_sha256: Sha256Digest::parse(package.identities.component_sha256)?,
-            publisher_key_id: Sha256Digest::parse(package.identities.key_id)?,
+            plugin_id: PluginId::parse(manifest.id.clone())?,
+            manifest,
+            package_sha256: Sha256Digest::parse(identities.package_sha256)?,
+            manifest_sha256: Sha256Digest::parse(identities.manifest_sha256)?,
+            component_sha256: Sha256Digest::parse(identities.component_sha256)?,
+            publisher_key_id: Sha256Digest::parse(identities.key_id)?,
             publisher_public_key,
-            package_size: package.identities.package_size,
-            component_size: package.identities.component_size,
+            package_size: identities.package_size,
+            component_size: identities.component_size,
         })
     }
 
@@ -131,6 +153,40 @@ pub enum PluginInstallSource {
     BundledRegistry,
     CommunityRegistry,
     LocalPackage,
+}
+
+#[derive(Debug)]
+pub struct PluginPackageAdmission {
+    staged: crate::StagedFile,
+    package: PluginPackageAuthority,
+}
+
+impl PluginPackageAdmission {
+    pub fn inspect(staged: crate::StagedFile) -> Result<Self, SdkError> {
+        if staged.is_empty() || staged.len() > junban_plugin_sdk::PACKAGE_BYTES_MAX as u64 {
+            return Err(SdkError::Length { field: "package" });
+        }
+        let mut file = std::fs::File::open(staged.path())
+            .map_err(|_| SdkError::Truncated { format: "JBP1" })?;
+        let metadata = file
+            .metadata()
+            .map_err(|_| SdkError::Truncated { format: "JBP1" })?;
+        if !metadata.is_file() || metadata.len() != staged.len() {
+            return Err(SdkError::Length { field: "package" });
+        }
+        let package = PluginPackageAuthority::inspect_reader(&mut file, staged.len())?;
+        Ok(Self { staged, package })
+    }
+
+    #[must_use]
+    pub const fn package(&self) -> &PluginPackageAuthority {
+        &self.package
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (crate::StagedFile, PluginPackageAuthority) {
+        (self.staged, self.package)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -358,7 +414,7 @@ pub struct PluginDependency {
     pub lock: DependencyLock,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PluginEventCursor {
     pub plugin_id: PluginId,
     pub event_epoch: String,
@@ -504,6 +560,116 @@ impl PluginHookKind {
     }
 }
 
+/// Exact manifest contribution selected by one durable invocation.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PluginManifestEntry {
+    Command {
+        command_id: PluginId,
+    },
+    Event {
+        event_id: PluginId,
+    },
+    SurfaceAction {
+        surface_id: PluginId,
+        action_id: PluginId,
+    },
+    Resync,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginManifestEntryAuthority {
+    pub entry: PluginManifestEntry,
+    pub persisted_id: PluginId,
+    pub required_capability: Option<Capability>,
+}
+
+#[derive(Clone, Copy)]
+pub enum PluginManifestEntrySelector<'a> {
+    Requested(&'a PluginManifestEntry),
+    Persisted(&'a PluginId),
+}
+
+/// Resolve one exact requested or persisted manifest entry through the same
+/// canonical authority. Surface actions are persisted as a domain-separated
+/// digest of both local IDs, so duplicate action IDs on different surfaces
+/// remain unambiguous without changing schema v7.
+#[must_use]
+pub fn plugin_manifest_entry_authority(
+    manifest: &RuntimeManifest,
+    hook: PluginHookKind,
+    selector: PluginManifestEntrySelector<'_>,
+) -> Option<PluginManifestEntryAuthority> {
+    fn surface_action_id(surface_id: &str, action_id: &str) -> Option<PluginId> {
+        let mut material = b"junban.plugin.surface-action-entry.v1\0".to_vec();
+        for value in [surface_id, action_id] {
+            material.extend_from_slice(&u32::try_from(value.len()).ok()?.to_be_bytes());
+            material.extend_from_slice(value.as_bytes());
+        }
+        PluginId::parse(Sha256Digest::of(&material).into_string()).ok()
+    }
+
+    let mut candidates = Vec::new();
+    match hook {
+        PluginHookKind::InvokeCommand => {
+            for command in &manifest.commands {
+                let command_id = PluginId::parse(command.id.clone()).ok()?;
+                candidates.push(PluginManifestEntryAuthority {
+                    persisted_id: command_id.clone(),
+                    entry: PluginManifestEntry::Command { command_id },
+                    required_capability: Some(Capability::Commands),
+                });
+            }
+        }
+        PluginHookKind::HandleEvent => {
+            for event in &manifest.subscriptions {
+                let event_id = PluginId::parse(event.as_str()).ok()?;
+                candidates.push(PluginManifestEntryAuthority {
+                    persisted_id: event_id.clone(),
+                    entry: PluginManifestEntry::Event { event_id },
+                    required_capability: Some(Capability::EventsSubscribe),
+                });
+            }
+        }
+        PluginHookKind::HandleSurfaceAction => {
+            for surface in &manifest.surfaces {
+                let surface_id = PluginId::parse(surface.id.clone()).ok()?;
+                let required_capability = Some(match surface.kind {
+                    junban_plugin_sdk::SurfaceKind::View => Capability::UiView,
+                    junban_plugin_sdk::SurfaceKind::Panel => Capability::UiPanel,
+                    junban_plugin_sdk::SurfaceKind::Status => Capability::UiStatus,
+                });
+                for action in &surface.actions {
+                    let action_id = PluginId::parse(action.clone()).ok()?;
+                    candidates.push(PluginManifestEntryAuthority {
+                        persisted_id: surface_action_id(surface_id.as_str(), action_id.as_str())?,
+                        entry: PluginManifestEntry::SurfaceAction {
+                            surface_id: surface_id.clone(),
+                            action_id,
+                        },
+                        required_capability,
+                    });
+                }
+            }
+        }
+        PluginHookKind::Resync => candidates.push(PluginManifestEntryAuthority {
+            entry: PluginManifestEntry::Resync,
+            persisted_id: PluginId::parse("resync").ok()?,
+            required_capability: None,
+        }),
+    }
+    let matches: Vec<_> = candidates
+        .into_iter()
+        .filter(|candidate| match selector {
+            PluginManifestEntrySelector::Requested(requested) => candidate.entry == *requested,
+            PluginManifestEntrySelector::Persisted(persisted) => {
+                candidate.persisted_id == *persisted
+            }
+        })
+        .collect();
+    (matches.len() == 1).then(|| matches.into_iter().next().expect("one manifest entry"))
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginInvocationState {
@@ -520,7 +686,7 @@ pub struct PluginInvocation {
     pub package_generation: u64,
     pub activation_epoch: u64,
     pub hook_kind: PluginHookKind,
-    pub entry_id: PluginId,
+    pub entry: PluginManifestEntry,
     pub request_sha256: Sha256Digest,
     pub delivery_operation_id: OperationId,
     pub state: PluginInvocationState,
@@ -537,7 +703,7 @@ pub struct ReservePluginInvocationRequest {
     pub package_generation: u64,
     pub activation_epoch: u64,
     pub hook_kind: PluginHookKind,
-    pub entry_id: PluginId,
+    pub entry: PluginManifestEntry,
     pub request_sha256: Sha256Digest,
     pub delivery_operation_id: OperationId,
     #[serde(skip)]
@@ -545,9 +711,33 @@ pub struct ReservePluginInvocationRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReservedPluginInvocation {
-    pub invocation: PluginInvocation,
-    pub replayed: bool,
+pub enum ReservedPluginInvocation {
+    Reserved(PluginInvocation),
+    InFlightReplay(PluginInvocation),
+    TerminalReplay(Box<CommittedPluginInvocation>),
+}
+
+impl ReservedPluginInvocation {
+    #[must_use]
+    pub fn invocation(&self) -> Option<&PluginInvocation> {
+        match self {
+            Self::Reserved(invocation) | Self::InFlightReplay(invocation) => Some(invocation),
+            Self::TerminalReplay(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn terminal(&self) -> Option<&CommittedPluginInvocation> {
+        match self {
+            Self::TerminalReplay(committed) => Some(committed),
+            Self::Reserved(_) | Self::InFlightReplay(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn replayed(&self) -> bool {
+        !matches!(self, Self::Reserved(_))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -560,7 +750,7 @@ pub struct TransitionPluginInvocationRequest {
     pub next_state: PluginInvocationState,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PluginBookkeepingUpdate {
     pub plugin_id: PluginId,
     pub package_generation: u64,
@@ -673,10 +863,242 @@ pub struct CommitPluginInvocationRequest {
     pub resync_session: Option<PluginResyncSession>,
 }
 
-#[derive(Clone, Debug)]
+/// Transaction-local form of the first-party mutation repository. Storage
+/// implements this over its current SQLite transaction; application plans never
+/// receive a connection or storage-specific type.
+pub trait ApplicationMutationUnitOfWork {
+    fn create_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        draft: TaskDraft,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn patch_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        patch: TaskPatch,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn complete_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        temporal: TemporalContext,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn uncomplete_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        temporal: TemporalContext,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn cancel_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn reopen_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn delete_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn bulk_tasks(
+        &mut self,
+        operation_id: OperationId,
+        task_ids: Vec<TaskId>,
+        action: BulkAction,
+        temporal: TemporalContext,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn create_project(
+        &mut self,
+        operation_id: OperationId,
+        project_id: ProjectId,
+        draft: ProjectDraft,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn patch_project(
+        &mut self,
+        operation_id: OperationId,
+        project_id: ProjectId,
+        patch: ProjectPatch,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn delete_project(
+        &mut self,
+        operation_id: OperationId,
+        project_id: ProjectId,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn create_tag(
+        &mut self,
+        operation_id: OperationId,
+        tag_id: TagId,
+        draft: TagDraft,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn patch_tag(
+        &mut self,
+        operation_id: OperationId,
+        tag_id: TagId,
+        patch: TagPatch,
+    ) -> Result<CommittedMutation, RepositoryError>;
+    fn delete_tag(
+        &mut self,
+        operation_id: OperationId,
+        tag_id: TagId,
+    ) -> Result<CommittedMutation, RepositoryError>;
+}
+
+type MutationPlan = Box<
+    dyn FnOnce(&mut dyn ApplicationMutationUnitOfWork) -> Result<CommittedMutation, RepositoryError>
+        + Send,
+>;
+
+pub struct PlannedPluginDomainMutation {
+    required_capability: Capability,
+    plan: MutationPlan,
+}
+
+impl PlannedPluginDomainMutation {
+    #[must_use]
+    pub const fn required_capability(&self) -> Capability {
+        self.required_capability
+    }
+
+    pub fn execute(
+        self,
+        unit_of_work: &mut dyn ApplicationMutationUnitOfWork,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        (self.plan)(unit_of_work)
+    }
+}
+
+/// AppService-selected invocation commit authority passed to storage.
+pub struct PlannedPluginInvocationCommit {
+    pub invocation_operation_id: OperationId,
+    pub plugin_id: PluginId,
+    pub package_generation: u64,
+    pub activation_epoch: u64,
+    pub domain_mutation: Option<PlannedPluginDomainMutation>,
+    pub kv_patch: Option<PluginKvPatch>,
+    pub resync_kv: Option<PluginResyncKvCommit>,
+    pub cursor: Option<AdvancePluginCursorRequest>,
+    pub resync_session: Option<PluginResyncSession>,
+}
+
+/// Select the exact first-party use case in the application layer. The selected
+/// closure later executes inside storage's caller-owned transaction.
+pub fn plan_plugin_invocation_commit(
+    request: CommitPluginInvocationRequest,
+) -> Result<PlannedPluginInvocationCommit, RepositoryError> {
+    let CommitPluginInvocationRequest {
+        invocation_operation_id,
+        plugin_id,
+        package_generation,
+        activation_epoch,
+        child_operation_id,
+        domain_effect,
+        kv_patch,
+        resync_kv,
+        cursor,
+        resync_session,
+    } = request;
+    if domain_effect.is_some() != child_operation_id.is_some()
+        || (domain_effect.is_some() && kv_patch.is_some())
+        || child_operation_id == Some(invocation_operation_id)
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    let domain_mutation = match (child_operation_id, domain_effect) {
+        (Some(operation_id), Some(effect)) => {
+            let required_capability = effect.required_capability();
+            let plan: MutationPlan = match effect {
+                PluginDomainEffect::CreateTask { task_id, draft } => {
+                    Box::new(move |unit| unit.create_task(operation_id, task_id, draft))
+                }
+                PluginDomainEffect::PatchTask { task_id, patch } => {
+                    Box::new(move |unit| unit.patch_task(operation_id, task_id, patch))
+                }
+                PluginDomainEffect::CompleteTask { task_id, temporal } => {
+                    Box::new(move |unit| unit.complete_task(operation_id, task_id, temporal))
+                }
+                PluginDomainEffect::UncompleteTask { task_id, temporal } => {
+                    Box::new(move |unit| unit.uncomplete_task(operation_id, task_id, temporal))
+                }
+                PluginDomainEffect::CancelTask { task_id } => {
+                    Box::new(move |unit| unit.cancel_task(operation_id, task_id))
+                }
+                PluginDomainEffect::ReopenTask { task_id } => {
+                    Box::new(move |unit| unit.reopen_task(operation_id, task_id))
+                }
+                PluginDomainEffect::DeleteTask { task_id } => {
+                    Box::new(move |unit| unit.delete_task(operation_id, task_id))
+                }
+                PluginDomainEffect::BulkTasks {
+                    task_ids,
+                    action,
+                    temporal,
+                } => {
+                    Box::new(move |unit| unit.bulk_tasks(operation_id, task_ids, action, temporal))
+                }
+                PluginDomainEffect::CreateProject { project_id, draft } => {
+                    Box::new(move |unit| unit.create_project(operation_id, project_id, draft))
+                }
+                PluginDomainEffect::PatchProject { project_id, patch } => {
+                    Box::new(move |unit| unit.patch_project(operation_id, project_id, patch))
+                }
+                PluginDomainEffect::DeleteProject { project_id } => {
+                    Box::new(move |unit| unit.delete_project(operation_id, project_id))
+                }
+                PluginDomainEffect::CreateTag { tag_id, draft } => {
+                    Box::new(move |unit| unit.create_tag(operation_id, tag_id, draft))
+                }
+                PluginDomainEffect::PatchTag { tag_id, patch } => {
+                    Box::new(move |unit| unit.patch_tag(operation_id, tag_id, patch))
+                }
+                PluginDomainEffect::DeleteTag { tag_id } => {
+                    Box::new(move |unit| unit.delete_tag(operation_id, tag_id))
+                }
+            };
+            Some(PlannedPluginDomainMutation {
+                required_capability,
+                plan,
+            })
+        }
+        (None, None) => None,
+        _ => unreachable!("operation and effect pairing validated"),
+    };
+    Ok(PlannedPluginInvocationCommit {
+        invocation_operation_id,
+        plugin_id,
+        package_generation,
+        activation_epoch,
+        domain_mutation,
+        kv_patch,
+        resync_kv,
+        cursor,
+        resync_session,
+    })
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginInvocationTerminalKind {
+    ReadOnly,
+    Http,
+    Kv,
+    DomainEffect,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CommittedPluginInvocation {
+    pub terminal_kind: PluginInvocationTerminalKind,
     pub mutation: Option<CommittedMutation>,
     pub cursor: Option<PluginEventCursor>,
+    /// Set only when reservation explicitly replays a terminal receipt.
+    #[serde(skip, default)]
+    pub replayed: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -777,11 +1199,26 @@ fn plugin_unavailable<T: Send + 'static>() -> RepositoryFuture<'static, T> {
 /// Storage-only plugin persistence port. Defaults keep application test doubles
 /// focused; the production SQLite repository overrides every method.
 pub trait PluginRepository: Send + Sync + 'static {
-    /// Verify and durably publish immutable JBP1 bytes before metadata admission.
+    /// Verify and durably publish one cleanup-owning private staged JBP1 package.
+    /// The transport must retain its staged-artifact permit until this future
+    /// completes; the repository owns cleanup even if the caller cancels.
     fn publish_plugin_package(
         &self,
-        _bytes: Vec<u8>,
+        _staged: crate::StagedFile,
     ) -> RepositoryFuture<'_, PluginPackageAuthority> {
+        plugin_unavailable()
+    }
+
+    /// Publish and admit one cleanup-owning staged package in one worker
+    /// command, preventing cancellation or failed metadata admission from
+    /// abandoning staged or unreferenced immutable files.
+    fn install_plugin_admission(
+        &self,
+        _operation_id: OperationId,
+        _admission: PluginPackageAdmission,
+        _request: InstallPluginRequest,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, PluginMutationOutcome> {
         plugin_unavailable()
     }
 
@@ -989,13 +1426,14 @@ pub trait PluginRepository: Send + Sync + 'static {
         _plugin_id: PluginId,
         _package_generation: u64,
         _activation_epoch: u64,
-    ) -> RepositoryFuture<'_, ()> {
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedPluginInvocation> {
         plugin_unavailable()
     }
 
     fn commit_plugin_invocation(
         &self,
-        _request: CommitPluginInvocationRequest,
+        _request: PlannedPluginInvocationCommit,
         _now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedPluginInvocation> {
         plugin_unavailable()
@@ -1008,8 +1446,281 @@ pub trait PluginRepository: Send + Sync + 'static {
     ) -> RepositoryFuture<'_, InstalledPlugin> {
         plugin_unavailable()
     }
+
+    fn transition_plugin_health(
+        &self,
+        _operation_id: OperationId,
+        _update: PluginBookkeepingUpdate,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        plugin_unavailable()
+    }
 }
 
 pub fn is_plugin_downgrade(candidate: &str, installed: &str) -> Result<bool, SdkError> {
     Ok(compare_versions(candidate, installed)? == Ordering::Less)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use junban_domain::{EntityName, HexColor, ProjectView, SortOrder, TagName, TaskTitle};
+
+    #[derive(Default)]
+    struct RecordingUnitOfWork {
+        called: Option<&'static str>,
+    }
+
+    impl RecordingUnitOfWork {
+        fn record(&mut self, name: &'static str) -> Result<CommittedMutation, RepositoryError> {
+            self.called = Some(name);
+            Err(RepositoryError::Conflict)
+        }
+    }
+
+    impl ApplicationMutationUnitOfWork for RecordingUnitOfWork {
+        fn create_task(
+            &mut self,
+            _: OperationId,
+            _: TaskId,
+            _: TaskDraft,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("create_task")
+        }
+        fn patch_task(
+            &mut self,
+            _: OperationId,
+            _: TaskId,
+            _: TaskPatch,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("patch_task")
+        }
+        fn complete_task(
+            &mut self,
+            _: OperationId,
+            _: TaskId,
+            _: TemporalContext,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("complete_task")
+        }
+        fn uncomplete_task(
+            &mut self,
+            _: OperationId,
+            _: TaskId,
+            _: TemporalContext,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("uncomplete_task")
+        }
+        fn cancel_task(
+            &mut self,
+            _: OperationId,
+            _: TaskId,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("cancel_task")
+        }
+        fn reopen_task(
+            &mut self,
+            _: OperationId,
+            _: TaskId,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("reopen_task")
+        }
+        fn delete_task(
+            &mut self,
+            _: OperationId,
+            _: TaskId,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("delete_task")
+        }
+        fn bulk_tasks(
+            &mut self,
+            _: OperationId,
+            _: Vec<TaskId>,
+            _: BulkAction,
+            _: TemporalContext,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("bulk_tasks")
+        }
+        fn create_project(
+            &mut self,
+            _: OperationId,
+            _: ProjectId,
+            _: ProjectDraft,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("create_project")
+        }
+        fn patch_project(
+            &mut self,
+            _: OperationId,
+            _: ProjectId,
+            _: ProjectPatch,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("patch_project")
+        }
+        fn delete_project(
+            &mut self,
+            _: OperationId,
+            _: ProjectId,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("delete_project")
+        }
+        fn create_tag(
+            &mut self,
+            _: OperationId,
+            _: TagId,
+            _: TagDraft,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("create_tag")
+        }
+        fn patch_tag(
+            &mut self,
+            _: OperationId,
+            _: TagId,
+            _: TagPatch,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("patch_tag")
+        }
+        fn delete_tag(
+            &mut self,
+            _: OperationId,
+            _: TagId,
+        ) -> Result<CommittedMutation, RepositoryError> {
+            self.record("delete_tag")
+        }
+    }
+
+    #[test]
+    fn app_planner_selects_every_supported_first_party_mutation() {
+        let task_id = TaskId::new();
+        let project_id = ProjectId::new();
+        let tag_id = TagId::new();
+        let temporal = TemporalContext::sample_now();
+        let project = ProjectDraft {
+            name: EntityName::new("Project").unwrap(),
+            color: HexColor::new("#112233").unwrap(),
+            icon: None,
+            parent_id: None,
+            favorite: false,
+            archived: false,
+            view: ProjectView::default(),
+            sort_order: SortOrder::default(),
+        };
+        let tag = TagDraft {
+            name: TagName::new("tag").unwrap(),
+            color: HexColor::new("#445566").unwrap(),
+        };
+        let effects = vec![
+            (
+                "create_task",
+                PluginDomainEffect::CreateTask {
+                    task_id,
+                    draft: TaskDraft::new(TaskTitle::new("Task").unwrap()),
+                },
+            ),
+            (
+                "patch_task",
+                PluginDomainEffect::PatchTask {
+                    task_id,
+                    patch: TaskPatch::default(),
+                },
+            ),
+            (
+                "complete_task",
+                PluginDomainEffect::CompleteTask {
+                    task_id,
+                    temporal: temporal.clone(),
+                },
+            ),
+            (
+                "uncomplete_task",
+                PluginDomainEffect::UncompleteTask {
+                    task_id,
+                    temporal: temporal.clone(),
+                },
+            ),
+            ("cancel_task", PluginDomainEffect::CancelTask { task_id }),
+            ("reopen_task", PluginDomainEffect::ReopenTask { task_id }),
+            ("delete_task", PluginDomainEffect::DeleteTask { task_id }),
+            (
+                "bulk_tasks",
+                PluginDomainEffect::BulkTasks {
+                    task_ids: vec![task_id],
+                    action: BulkAction::Cancel,
+                    temporal,
+                },
+            ),
+            (
+                "create_project",
+                PluginDomainEffect::CreateProject {
+                    project_id,
+                    draft: project,
+                },
+            ),
+            (
+                "patch_project",
+                PluginDomainEffect::PatchProject {
+                    project_id,
+                    patch: ProjectPatch::default(),
+                },
+            ),
+            (
+                "delete_project",
+                PluginDomainEffect::DeleteProject { project_id },
+            ),
+            (
+                "create_tag",
+                PluginDomainEffect::CreateTag { tag_id, draft: tag },
+            ),
+            (
+                "patch_tag",
+                PluginDomainEffect::PatchTag {
+                    tag_id,
+                    patch: TagPatch::default(),
+                },
+            ),
+            ("delete_tag", PluginDomainEffect::DeleteTag { tag_id }),
+        ];
+        for (expected, effect) in effects {
+            let planned = plan_plugin_invocation_commit(CommitPluginInvocationRequest {
+                invocation_operation_id: OperationId::new(),
+                plugin_id: PluginId::parse("planner-test").unwrap(),
+                package_generation: 1,
+                activation_epoch: 1,
+                child_operation_id: Some(OperationId::new()),
+                domain_effect: Some(effect),
+                kv_patch: None,
+                resync_kv: None,
+                cursor: None,
+                resync_session: None,
+            })
+            .unwrap();
+            let mut unit = RecordingUnitOfWork::default();
+            assert_eq!(
+                planned
+                    .domain_mutation
+                    .unwrap()
+                    .execute(&mut unit)
+                    .unwrap_err(),
+                RepositoryError::Conflict
+            );
+            assert_eq!(unit.called, Some(expected));
+        }
+
+        let operation_id = OperationId::new();
+        assert!(matches!(
+            plan_plugin_invocation_commit(CommitPluginInvocationRequest {
+                invocation_operation_id: operation_id,
+                plugin_id: PluginId::parse("planner-test").unwrap(),
+                package_generation: 1,
+                activation_epoch: 1,
+                child_operation_id: Some(operation_id),
+                domain_effect: Some(PluginDomainEffect::DeleteTask { task_id }),
+                kv_patch: None,
+                resync_kv: None,
+                cursor: None,
+                resync_session: None,
+            }),
+            Err(RepositoryError::Conflict)
+        ));
+    }
 }

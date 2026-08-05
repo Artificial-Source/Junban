@@ -277,7 +277,19 @@ fn read_receipt(
     operation_id: OperationId,
     request_json: &str,
 ) -> Result<Option<CommittedMutation>, RepositoryError> {
-    let receipt = transaction
+    read_receipt_response(transaction, operation_id, request_json)?
+        .map(|response| serde_json::from_str(&response).map_err(storage_error))
+        .transpose()
+}
+
+/// Read exact request-matched response material from the ordinary receipt
+/// authority. Callers deserialize only their own closed response type.
+pub(crate) fn read_receipt_response(
+    connection: &Connection,
+    operation_id: OperationId,
+    request_json: &str,
+) -> Result<Option<String>, RepositoryError> {
+    let receipt = connection
         .query_row(
             "SELECT request_json, response_json FROM operation_receipts WHERE operation_id = ?1",
             [operation_id.to_string()],
@@ -291,8 +303,44 @@ fn read_receipt(
     if stored_request != request_json {
         return Err(RepositoryError::IdempotencyMismatch);
     }
-    let response = serde_json::from_str(&stored_response).map_err(storage_error)?;
-    Ok(Some(response))
+    Ok(Some(stored_response))
+}
+
+/// Store a bounded non-event terminal response in the existing ordinary
+/// receipt table inside a caller-owned transaction.
+pub(crate) fn write_receipt_response_in_transaction(
+    connection: &Connection,
+    operation_id: OperationId,
+    request_json: &str,
+    response_json: &str,
+    now: Timestamp,
+) -> Result<(), RepositoryError> {
+    if connection.is_autocommit() {
+        return Err(RepositoryError::Storage(
+            "caller-owned receipt transaction is not active".to_owned(),
+        ));
+    }
+    if request_json.len().saturating_add(response_json.len()) > RECEIPT_MATERIAL_MAX_BYTES {
+        return Err(RepositoryError::OperationTooLarge);
+    }
+    let expires_at = now
+        .checked_add((RECEIPT_TTL_DAYS * 24).hours())
+        .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    connection
+        .execute(
+            "INSERT INTO operation_receipts(
+                operation_id, request_json, response_json, created_at, expires_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                operation_id.to_string(),
+                request_json,
+                response_json,
+                now.to_string(),
+                expires_at.to_string(),
+            ],
+        )
+        .map_err(storage_error)?;
+    Ok(())
 }
 
 pub(crate) fn cleanup_expired_receipts(

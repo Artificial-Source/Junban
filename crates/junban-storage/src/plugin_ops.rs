@@ -3,46 +3,53 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
+    fmt::Write as _,
     rc::Rc,
 };
 
 use jiff::{Timestamp, ToSpan};
 use junban_app::{
-    AdvancePluginCursorRequest, AffectedIds, BeginPluginResyncRequest,
-    CommitPluginInvocationRequest, CommittedMutation, CommittedPluginInvocation,
-    CommunityPluginPolicy, DeletePluginSettingRequest, EventType, InstallPluginRequest,
-    InstalledPlugin, InstalledPluginProfile, PLUGIN_DEPENDENTS_MAX,
-    PLUGIN_INVOCATION_MATERIAL_BYTES_MAX, PLUGIN_INVOCATION_MATERIAL_PER_PLUGIN_BYTES_MAX,
-    PLUGIN_INVOCATION_RETENTION_DAYS, PLUGIN_INVOCATIONS_MAX, PLUGIN_INVOCATIONS_PER_PLUGIN_MAX,
-    PLUGIN_KV_BYTES_MAX, PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX,
-    PLUGIN_RESYNC_PAGE_BYTES_MAX, PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX,
-    PLUGIN_SETTINGS_KEYS_MAX, PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX, PluginBookkeepingUpdate,
-    PluginCursorPosition, PluginDomainEffect, PluginEventCursor, PluginGrant, PluginGraphRejection,
-    PluginHookKind, PluginInstallSource, PluginInvocation, PluginInvocationState, PluginKvEntry,
-    PluginKvPatch, PluginMutationOutcome, PluginPackageReconciliation, PluginResyncKvCommit,
-    PluginResyncPage, PluginResyncPageRequest, PluginResyncSession, PluginRuntimeState,
-    PluginSetting, PluginSnapshotItem, PluginSnapshotKind, PublisherTrust, PublisherTrustStatus,
+    AdvancePluginCursorRequest, AffectedIds, ApplicationMutationUnitOfWork,
+    BeginPluginResyncRequest, CommittedMutation, CommittedPluginInvocation, CommunityPluginPolicy,
+    DeletePluginSettingRequest, EventType, InstallPluginRequest, InstalledPlugin,
+    InstalledPluginProfile, PLUGIN_DEPENDENTS_MAX, PLUGIN_INVOCATION_MATERIAL_BYTES_MAX,
+    PLUGIN_INVOCATION_MATERIAL_PER_PLUGIN_BYTES_MAX, PLUGIN_INVOCATION_RETENTION_DAYS,
+    PLUGIN_INVOCATIONS_MAX, PLUGIN_INVOCATIONS_PER_PLUGIN_MAX, PLUGIN_KV_BYTES_MAX,
+    PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX, PLUGIN_RESYNC_PAGE_BYTES_MAX,
+    PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX, PLUGIN_SETTINGS_KEYS_MAX,
+    PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX, PlannedPluginInvocationCommit,
+    PluginBookkeepingUpdate, PluginCursorPosition, PluginEventCursor, PluginGrant,
+    PluginGraphRejection, PluginHookKind, PluginInstallSource, PluginInvocation,
+    PluginInvocationState, PluginInvocationTerminalKind, PluginKvEntry, PluginKvPatch,
+    PluginManifestEntry, PluginManifestEntrySelector, PluginMutationOutcome,
+    PluginPackageAdmission, PluginPackageReconciliation, PluginResyncKvCommit, PluginResyncPage,
+    PluginResyncPageRequest, PluginResyncSession, PluginRuntimeState, PluginSetting,
+    PluginSnapshotItem, PluginSnapshotKind, PublisherTrust, PublisherTrustStatus,
     ReplacePluginGrantsRequest, RepositoryError, ReservePluginInvocationRequest,
     ReservedPluginInvocation, ResourceRef, ResourceSnapshot, ResyncScope,
     RevokePluginGrantsRequest, SetPluginSettingRequest, TransitionPluginInvocationRequest,
-    TrustPublisherRequest, plugin_resync_request_hash,
+    TrustPublisherRequest, plugin_manifest_entry_authority, plugin_resync_request_hash,
 };
 use junban_domain::{OperationId, ProjectId, TagId, TaskId};
 use junban_plugin_sdk::{
     Capability, DependencyLock, EventKind, GraphError, InstalledPackage, Permission,
-    PermissionScope, PluginId, RuntimeManifest, SettingValue, Sha256Digest, SurfaceKind,
-    compare_versions, permission_set_hash, scope_hash, validate_dependency_graph,
-    validate_dependency_locks, validate_permission_grants, version_matches,
+    PermissionScope, PluginId, RuntimeManifest, SettingValue, Sha256Digest, compare_versions,
+    permission_set_hash, scope_hash, validate_dependency_graph, validate_dependency_locks,
+    validate_permission_grants, version_matches,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::{
     catalog_ops,
     package_store::PluginPackageStore,
     rows::{load_project, load_tag, load_task, revision_to_i64, storage_error},
     task_ops,
-    tx::{MutationEffect, canonical_json, cleanup_expired_receipts, mutate, prune_retained_events},
+    tx::{
+        MutationEffect, canonical_json, cleanup_expired_receipts, mutate, mutate_in_transaction,
+        prune_retained_events, read_receipt_response, write_receipt_response_in_transaction,
+    },
 };
 
 const FAILURE_CODE_BYTES_MAX: usize = 64;
@@ -982,6 +989,51 @@ pub(crate) fn install_plugin(
         }
         Err(error) => Err(error),
     }
+}
+
+pub(crate) fn install_plugin_admission(
+    connection: &mut Connection,
+    store: &PluginPackageStore,
+    operation_id: OperationId,
+    admission: PluginPackageAdmission,
+    request: InstallPluginRequest,
+    now: Timestamp,
+) -> Result<PluginMutationOutcome, RepositoryError> {
+    let (staged, inspected) = admission.into_parts();
+    if request.package != inspected {
+        return Err(RepositoryError::Conflict);
+    }
+    let published = store
+        .publish_expected(staged, &inspected)
+        .map_err(|_| RepositoryError::Conflict)?;
+    if published != inspected {
+        let _ = store.remove_if_unreferenced(connection, published.package_sha256());
+        return Err(RepositoryError::Conflict);
+    }
+    let digest = published.package_sha256().clone();
+    let result = install_plugin(
+        connection,
+        store,
+        operation_id,
+        InstallPluginRequest {
+            package: published,
+            source: request.source,
+            replace_existing: request.replace_existing,
+            allow_downgrade: request.allow_downgrade,
+        },
+        now,
+    );
+    let should_cleanup = match &result {
+        Ok(PluginMutationOutcome::Committed(mutation)) => !mutation.newly_committed,
+        Ok(
+            PluginMutationOutcome::BlockedByDependents(_) | PluginMutationOutcome::GraphRejected(_),
+        )
+        | Err(_) => true,
+    };
+    if should_cleanup {
+        let _ = store.remove_if_unreferenced(connection, &digest);
+    }
+    result
 }
 
 pub(crate) fn uninstall_plugin(
@@ -2717,6 +2769,18 @@ fn invocation_state(value: &str) -> Result<PluginInvocationState, RepositoryErro
     }
 }
 
+const fn runtime_state_name(value: PluginRuntimeState) -> &'static str {
+    match value {
+        PluginRuntimeState::Disabled => "disabled",
+        PluginRuntimeState::Starting => "starting",
+        PluginRuntimeState::Active => "active",
+        PluginRuntimeState::Degraded => "degraded",
+        PluginRuntimeState::Failed => "failed",
+        PluginRuntimeState::Suspended => "suspended",
+        PluginRuntimeState::ReverifyRequired => "reverify_required",
+    }
+}
+
 const fn invocation_state_name(value: PluginInvocationState) -> &'static str {
     match value {
         PluginInvocationState::Reserved => "reserved",
@@ -2801,13 +2865,26 @@ fn load_invocation(
                         "invalid invocation failure code".to_owned(),
                     ));
                 }
+                let plugin_id = PluginId::parse(plugin_id).map_err(storage_error)?;
+                let hook_kind = hook_kind(&hook)?;
+                let persisted_entry = PluginId::parse(entry_id).map_err(storage_error)?;
+                let plugin = load_installed_plugin(connection, &plugin_id)?;
+                let entry = plugin_manifest_entry_authority(
+                    &plugin.manifest,
+                    hook_kind,
+                    PluginManifestEntrySelector::Persisted(&persisted_entry),
+                )
+                .ok_or_else(|| {
+                    RepositoryError::Storage("invalid plugin invocation entry".to_owned())
+                })?
+                .entry;
                 Ok(PluginInvocation {
                     operation_id,
-                    plugin_id: PluginId::parse(plugin_id).map_err(storage_error)?,
+                    plugin_id,
                     package_generation: parse_u64(package_generation, "invocation generation")?,
                     activation_epoch: parse_u64(activation_epoch, "invocation epoch")?,
-                    hook_kind: hook_kind(&hook)?,
-                    entry_id: PluginId::parse(entry_id).map_err(storage_error)?,
+                    hook_kind,
+                    entry,
                     request_sha256: Sha256Digest::parse(request_sha256).map_err(storage_error)?,
                     delivery_operation_id: OperationId::parse(&delivery_operation_id)
                         .map_err(storage_error)?,
@@ -2821,6 +2898,118 @@ fn load_invocation(
         )
 }
 
+fn derived_operation_id(domain: &[u8], material: &[u8]) -> OperationId {
+    let mut hasher = Sha256::new();
+    hasher.update(domain);
+    hasher.update(material);
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let mut encoded = String::with_capacity(36);
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 4 | 6 | 8 | 10) {
+            encoded.push('-');
+        }
+        write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    OperationId::parse(&encoded).expect("derived UUID is a valid operation id")
+}
+
+fn resource_health_operation_id(operation_id: OperationId) -> OperationId {
+    derived_operation_id(
+        b"junban.plugin.resource-health.v1\0",
+        operation_id.as_uuid().as_bytes(),
+    )
+}
+
+#[derive(Serialize)]
+struct ResourceHealthReceiptRequest<'a> {
+    op: &'static str,
+    invocation: &'a ReservePluginInvocationRequest,
+}
+
+fn resource_health_request_json(
+    request: &ReservePluginInvocationRequest,
+) -> Result<String, RepositoryError> {
+    canonical_json(&ResourceHealthReceiptRequest {
+        op: "suspend_plugin_resource_limit",
+        invocation: request,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(
+    rename = "plugin_invocation_terminal",
+    tag = "op",
+    rename_all = "snake_case"
+)]
+struct InvocationReceiptRequest<'a> {
+    plugin_id: &'a PluginId,
+    package_generation: u64,
+    activation_epoch: u64,
+    hook_kind: PluginHookKind,
+    entry: &'a PluginManifestEntry,
+    request_sha256: &'a Sha256Digest,
+    delivery_operation_id: OperationId,
+}
+
+fn invocation_receipt_request_json(
+    plugin_id: &PluginId,
+    package_generation: u64,
+    activation_epoch: u64,
+    hook_kind: PluginHookKind,
+    entry: &PluginManifestEntry,
+    request_sha256: &Sha256Digest,
+    delivery_operation_id: OperationId,
+) -> Result<String, RepositoryError> {
+    canonical_json(&InvocationReceiptRequest {
+        plugin_id,
+        package_generation,
+        activation_epoch,
+        hook_kind,
+        entry,
+        request_sha256,
+        delivery_operation_id,
+    })
+}
+
+fn reservation_receipt_request_json(
+    request: &ReservePluginInvocationRequest,
+) -> Result<String, RepositoryError> {
+    invocation_receipt_request_json(
+        &request.plugin_id,
+        request.package_generation,
+        request.activation_epoch,
+        request.hook_kind,
+        &request.entry,
+        &request.request_sha256,
+        request.delivery_operation_id,
+    )
+}
+
+fn stored_invocation_receipt_request_json(
+    invocation: &PluginInvocation,
+) -> Result<String, RepositoryError> {
+    invocation_receipt_request_json(
+        &invocation.plugin_id,
+        invocation.package_generation,
+        invocation.activation_epoch,
+        invocation.hook_kind,
+        &invocation.entry,
+        &invocation.request_sha256,
+        invocation.delivery_operation_id,
+    )
+}
+
+const fn operator_origin(hook: PluginHookKind) -> bool {
+    matches!(
+        hook,
+        PluginHookKind::InvokeCommand | PluginHookKind::HandleSurfaceAction
+    )
+}
+
 fn invocation_identity_matches(
     invocation: &PluginInvocation,
     request: &ReservePluginInvocationRequest,
@@ -2830,67 +3019,26 @@ fn invocation_identity_matches(
         && invocation.package_generation == request.package_generation
         && invocation.activation_epoch == request.activation_epoch
         && invocation.hook_kind == request.hook_kind
-        && invocation.entry_id == request.entry_id
+        && invocation.entry == request.entry
         && invocation.request_sha256 == request.request_sha256
         && invocation.delivery_operation_id == request.delivery_operation_id
 }
 
 fn event_kind_matches_entry(kind: &EventKind, entry: &PluginId) -> bool {
-    serde_json::to_string(kind)
-        .ok()
-        .and_then(|raw| {
-            raw.strip_prefix('"')
-                .and_then(|value| value.strip_suffix('"'))
-                .map(str::to_owned)
-        })
-        .is_some_and(|value| value == entry.as_str())
-}
-
-fn hook_capability(
-    manifest: &RuntimeManifest,
-    hook: PluginHookKind,
-    entry: &PluginId,
-) -> Option<Option<Capability>> {
-    match hook {
-        PluginHookKind::InvokeCommand => manifest
-            .commands
-            .iter()
-            .any(|item| item.id == entry.as_str())
-            .then_some(Some(Capability::Commands)),
-        // The durable entry identity is the surface ID. Action IDs are only
-        // unique inside one surface and remain bound by the hashed request.
-        PluginHookKind::HandleSurfaceAction => manifest
-            .surfaces
-            .iter()
-            .find(|surface| surface.id == entry.as_str())
-            .map(|surface| {
-                Some(match surface.kind {
-                    SurfaceKind::View => Capability::UiView,
-                    SurfaceKind::Panel => Capability::UiPanel,
-                    SurfaceKind::Status => Capability::UiStatus,
-                })
-            }),
-        PluginHookKind::HandleEvent => manifest
-            .subscriptions
-            .iter()
-            .any(|kind| event_kind_matches_entry(kind, entry))
-            .then_some(Some(Capability::EventsSubscribe)),
-        PluginHookKind::Resync => (entry.as_str() == "resync").then_some(None),
-    }
+    kind.as_str() == entry.as_str()
 }
 
 fn hook_capability_granted(
     connection: &Connection,
     plugin: &InstalledPlugin,
-    hook: PluginHookKind,
-    entry: &PluginId,
+    entry: &PluginManifestEntry,
     required: Option<Capability>,
 ) -> Result<bool, RepositoryError> {
-    if hook != PluginHookKind::HandleEvent {
+    let PluginManifestEntry::Event { event_id } = entry else {
         return required.map_or(Ok(true), |capability| {
             has_capability(connection, plugin, capability)
         });
-    }
+    };
     if required != Some(Capability::EventsSubscribe) {
         return Ok(false);
     }
@@ -2904,7 +3052,7 @@ fn hook_capability_granted(
                         if scope
                             .event_kinds
                             .iter()
-                            .any(|kind| event_kind_matches_entry(kind, entry))
+                            .any(|kind| event_kind_matches_entry(kind, event_id))
                 )
         }))
 }
@@ -2931,6 +3079,25 @@ fn invocation_material_bytes(connection: &Connection) -> Result<i64, RepositoryE
         .map_err(storage_error)
 }
 
+fn has_other_active_invocation(
+    connection: &Connection,
+    plugin_id: &PluginId,
+    except: Option<OperationId>,
+) -> Result<bool, RepositoryError> {
+    connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM plugin_invocations
+                WHERE plugin_id = ?1
+                  AND state IN ('reserved', 'dispatching_http', 'effect_committing')
+                  AND (?2 IS NULL OR operation_id <> ?2)
+             )",
+            params![plugin_id.as_str(), except.map(|value| value.to_string())],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)
+}
+
 fn runtime_admits_ordinary(plugin: &InstalledPlugin, now: Timestamp) -> bool {
     now >= plugin.updated_at
         && (plugin.runtime_state == PluginRuntimeState::Active
@@ -2945,7 +3112,7 @@ fn invocation_request_material(request: &ReservePluginInvocationRequest, now: Ti
         + request.plugin_id.as_str().len()
         + 16
         + hook_kind_name(request.hook_kind).len()
-        + request.entry_id.as_str().len()
+        + 64
         + request.request_sha256.as_str().len()
         + request.delivery_operation_id.to_string().len()
         + invocation_state_name(PluginInvocationState::Reserved).len()
@@ -2960,12 +3127,44 @@ pub(crate) fn reserve_plugin_invocation(
     request: ReservePluginInvocationRequest,
     now: Timestamp,
 ) -> Result<ReservedPluginInvocation, RepositoryError> {
+    cleanup_expired_receipts(connection, now)?;
+    let resource_health_operation_id = resource_health_operation_id(request.operation_id);
+    let resource_health_request = resource_health_request_json(&request)?;
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(storage_error)?;
+    // Receipt authority is checked under the same immediate reservation lock.
+    // A concurrent terminalization cannot commit between this read and insert.
+    if read_receipt_response(
+        &transaction,
+        resource_health_operation_id,
+        &resource_health_request,
+    )?
+    .is_some()
+    {
+        return Err(RepositoryError::OperationTooLarge);
+    }
+    if operator_origin(request.hook_kind) {
+        let receipt_request = reservation_receipt_request_json(&request)?;
+        if let Some(response) =
+            read_receipt_response(&transaction, request.operation_id, &receipt_request)?
+        {
+            let mut committed: CommittedPluginInvocation =
+                serde_json::from_str(&response).map_err(storage_error)?;
+            committed.replayed = true;
+            transaction.commit().map_err(storage_error)?;
+            return Ok(ReservedPluginInvocation::TerminalReplay(Box::new(
+                committed,
+            )));
+        }
+    }
     let plugin = load_installed_plugin(&transaction, &request.plugin_id)?;
-    let hook_capability = hook_capability(&plugin.manifest, request.hook_kind, &request.entry_id)
-        .ok_or(RepositoryError::Conflict)?;
+    let entry_authority = plugin_manifest_entry_authority(
+        &plugin.manifest,
+        request.hook_kind,
+        PluginManifestEntrySelector::Requested(&request.entry),
+    )
+    .ok_or(RepositoryError::Conflict)?;
     let runtime_admits_hook = match request.hook_kind {
         PluginHookKind::Resync => plugin.runtime_state == PluginRuntimeState::Starting,
         _ => runtime_admits_ordinary(&plugin, now),
@@ -3002,9 +3201,8 @@ pub(crate) fn reserve_plugin_invocation(
     if !hook_capability_granted(
         &transaction,
         &plugin,
-        request.hook_kind,
-        &request.entry_id,
-        hook_capability,
+        &entry_authority.entry,
+        entry_authority.required_capability,
     )? {
         return Err(RepositoryError::Conflict);
     }
@@ -3017,10 +3215,7 @@ pub(crate) fn reserve_plugin_invocation(
                 return Err(RepositoryError::Conflict);
             }
             transaction.commit().map_err(storage_error)?;
-            return Ok(ReservedPluginInvocation {
-                invocation: existing,
-                replayed: true,
-            });
+            return Ok(ReservedPluginInvocation::InFlightReplay(existing));
         }
         Err(RepositoryError::NotFound) => {}
         Err(error) => return Err(error),
@@ -3033,6 +3228,9 @@ pub(crate) fn reserve_plugin_invocation(
             [now.to_string()],
         )
         .map_err(storage_error)?;
+    if has_other_active_invocation(&transaction, &request.plugin_id, None)? {
+        return Err(RepositoryError::Conflict);
+    }
 
     let retained_count: i64 = transaction
         .query_row("SELECT COUNT(*) FROM plugin_invocations", [], |row| {
@@ -3094,11 +3292,37 @@ pub(crate) fn reserve_plugin_invocation(
         for dependent in &enabled_dependents {
             next_activation_epoch(dependent.activation_epoch)?;
         }
-        force_suspend_plugin(&transaction, &plugin, "resource_limit", now)?;
-        for dependent in &enabled_dependents {
-            force_suspend_plugin(&transaction, dependent, "dependency_failed", now)?;
-        }
+        let affected: Vec<_> = std::iter::once(plugin.plugin_id.clone())
+            .chain(
+                enabled_dependents
+                    .iter()
+                    .map(|dependent| dependent.plugin_id.clone()),
+            )
+            .collect();
+        let plugin_id = plugin.plugin_id.clone();
+        let committed = mutate_in_transaction(
+            &transaction,
+            resource_health_operation_id,
+            resource_health_request,
+            now,
+            |tx, _| {
+                force_suspend_plugin(tx, &plugin, "resource_limit", now)?;
+                for dependent in &enabled_dependents {
+                    force_suspend_plugin(tx, dependent, "dependency_failed", now)?;
+                }
+                let stored = load_installed_plugin(tx, &plugin_id)?;
+                Ok(plugin_effect(
+                    EventType::PLUGIN_HEALTH_CHANGED,
+                    Some(&stored),
+                    affected,
+                    Some(stored.plugin_id.to_string()),
+                ))
+            },
+        )?;
         transaction.commit().map_err(storage_error)?;
+        if committed.newly_committed {
+            let _ = prune_retained_events(connection);
+        }
         return Err(RepositoryError::OperationTooLarge);
     }
     let retain_until = now
@@ -3117,7 +3341,7 @@ pub(crate) fn reserve_plugin_invocation(
                 as_i64(request.package_generation, "invocation generation")?,
                 as_i64(request.activation_epoch, "invocation epoch")?,
                 hook_kind_name(request.hook_kind),
-                request.entry_id.as_str(),
+                entry_authority.persisted_id.as_str(),
                 request.request_sha256.as_str(),
                 request.delivery_operation_id.to_string(),
                 now.to_string(),
@@ -3130,10 +3354,7 @@ pub(crate) fn reserve_plugin_invocation(
         return Err(RepositoryError::OperationTooLarge);
     }
     transaction.commit().map_err(storage_error)?;
-    Ok(ReservedPluginInvocation {
-        invocation,
-        replayed: false,
-    })
+    Ok(ReservedPluginInvocation::Reserved(invocation))
 }
 
 fn legal_invocation_transition(from: PluginInvocationState, to: PluginInvocationState) -> bool {
@@ -3172,15 +3393,17 @@ pub(crate) fn transition_plugin_invocation(
     {
         return Err(RepositoryError::Conflict);
     }
-    let required_capability =
-        hook_capability(&plugin.manifest, invocation.hook_kind, &invocation.entry_id)
-            .ok_or(RepositoryError::Conflict)?;
+    let entry_authority = plugin_manifest_entry_authority(
+        &plugin.manifest,
+        invocation.hook_kind,
+        PluginManifestEntrySelector::Requested(&invocation.entry),
+    )
+    .ok_or(RepositoryError::Conflict)?;
     let required_capability_granted = hook_capability_granted(
         &transaction,
         &plugin,
-        invocation.hook_kind,
-        &invocation.entry_id,
-        required_capability,
+        &entry_authority.entry,
+        entry_authority.required_capability,
     )?;
     if !legal_invocation_transition(request.expected_state, request.next_state)
         || (request.next_state == PluginInvocationState::DispatchingHttp
@@ -3212,7 +3435,15 @@ pub(crate) fn transition_plugin_invocation(
                         && plugin.runtime_state == PluginRuntimeState::Starting)
             }
         };
-    if !runtime_admits_transition {
+    if !runtime_admits_transition
+        || (request.expected_state == PluginInvocationState::AmbiguousHttp
+            && request.next_state == PluginInvocationState::DispatchingHttp
+            && has_other_active_invocation(
+                &transaction,
+                &request.plugin_id,
+                Some(request.operation_id),
+            )?)
+    {
         return Err(RepositoryError::Conflict);
     }
     let changed = transaction
@@ -3294,7 +3525,29 @@ pub(crate) fn complete_plugin_invocation(
     plugin_id: PluginId,
     package_generation: u64,
     activation_epoch: u64,
-) -> Result<(), RepositoryError> {
+    now: Timestamp,
+) -> Result<CommittedPluginInvocation, RepositoryError> {
+    complete_plugin_invocation_with(
+        connection,
+        operation_id,
+        plugin_id,
+        package_generation,
+        activation_epoch,
+        now,
+        || Ok(()),
+    )
+}
+
+fn complete_plugin_invocation_with(
+    connection: &mut Connection,
+    operation_id: OperationId,
+    plugin_id: PluginId,
+    package_generation: u64,
+    activation_epoch: u64,
+    now: Timestamp,
+    before_commit: impl FnOnce() -> Result<(), RepositoryError>,
+) -> Result<CommittedPluginInvocation, RepositoryError> {
+    cleanup_expired_receipts(connection, now)?;
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(storage_error)?;
@@ -3305,81 +3558,190 @@ pub(crate) fn complete_plugin_invocation(
         package_generation,
         activation_epoch,
     )?;
-    if !matches!(
-        invocation.state,
-        PluginInvocationState::Reserved
-            | PluginInvocationState::DispatchingHttp
-            | PluginInvocationState::EffectCommitting
-            | PluginInvocationState::AmbiguousHttp
-    ) {
+    if !operator_origin(invocation.hook_kind)
+        || !matches!(
+            invocation.state,
+            PluginInvocationState::Reserved | PluginInvocationState::DispatchingHttp
+        )
+    {
         return Err(RepositoryError::Conflict);
     }
-    transaction
+    let terminal_kind = if invocation.state == PluginInvocationState::DispatchingHttp {
+        PluginInvocationTerminalKind::Http
+    } else {
+        PluginInvocationTerminalKind::ReadOnly
+    };
+    let deleted = transaction
         .execute(
-            "DELETE FROM plugin_invocations WHERE operation_id = ?1",
-            [operation_id.to_string()],
+            "DELETE FROM plugin_invocations WHERE operation_id = ?1 AND state = ?2",
+            params![
+                operation_id.to_string(),
+                invocation_state_name(invocation.state)
+            ],
         )
         .map_err(storage_error)?;
-    transaction.commit().map_err(storage_error)
+    if deleted != 1 {
+        return Err(RepositoryError::Conflict);
+    }
+    let committed = CommittedPluginInvocation {
+        terminal_kind,
+        mutation: None,
+        cursor: None,
+        replayed: false,
+    };
+    let receipt_request = stored_invocation_receipt_request_json(&invocation)?;
+    let response = serde_json::to_string(&committed).map_err(storage_error)?;
+    write_receipt_response_in_transaction(
+        &transaction,
+        invocation.operation_id,
+        &receipt_request,
+        &response,
+        now,
+    )?;
+    before_commit()?;
+    transaction.commit().map_err(storage_error)?;
+    Ok(committed)
 }
 
-fn run_domain_effect(
-    connection: &mut Connection,
-    operation_id: OperationId,
-    effect: PluginDomainEffect,
+struct StorageMutationUnitOfWork<'a> {
+    connection: &'a mut Connection,
     now: Timestamp,
-) -> Result<CommittedMutation, RepositoryError> {
-    match effect {
-        PluginDomainEffect::CreateTask { task_id, draft } => {
-            task_ops::create_task(connection, operation_id, task_id, draft, now)
-        }
-        PluginDomainEffect::PatchTask { task_id, patch } => {
-            task_ops::patch_task(connection, operation_id, task_id, patch, now)
-        }
-        PluginDomainEffect::CompleteTask { task_id, temporal } => {
-            task_ops::complete_task(connection, operation_id, task_id, now, temporal)
-        }
-        PluginDomainEffect::UncompleteTask { task_id, temporal } => {
-            task_ops::uncomplete_task(connection, operation_id, task_id, now, temporal)
-        }
-        PluginDomainEffect::CancelTask { task_id } => {
-            task_ops::cancel_task(connection, operation_id, task_id, now)
-        }
-        PluginDomainEffect::ReopenTask { task_id } => {
-            task_ops::reopen_task(connection, operation_id, task_id, now)
-        }
-        PluginDomainEffect::DeleteTask { task_id } => {
-            task_ops::delete_task(connection, operation_id, task_id, now)
-        }
-        PluginDomainEffect::BulkTasks {
+}
+
+impl ApplicationMutationUnitOfWork for StorageMutationUnitOfWork<'_> {
+    fn create_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        draft: junban_domain::TaskDraft,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        task_ops::create_task(self.connection, operation_id, task_id, draft, self.now)
+    }
+
+    fn patch_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        patch: junban_app::TaskPatch,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        task_ops::patch_task(self.connection, operation_id, task_id, patch, self.now)
+    }
+
+    fn complete_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        temporal: junban_app::TemporalContext,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        task_ops::complete_task(self.connection, operation_id, task_id, self.now, temporal)
+    }
+
+    fn uncomplete_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+        temporal: junban_app::TemporalContext,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        task_ops::uncomplete_task(self.connection, operation_id, task_id, self.now, temporal)
+    }
+
+    fn cancel_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        task_ops::cancel_task(self.connection, operation_id, task_id, self.now)
+    }
+
+    fn reopen_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        task_ops::reopen_task(self.connection, operation_id, task_id, self.now)
+    }
+
+    fn delete_task(
+        &mut self,
+        operation_id: OperationId,
+        task_id: TaskId,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        task_ops::delete_task(self.connection, operation_id, task_id, self.now)
+    }
+
+    fn bulk_tasks(
+        &mut self,
+        operation_id: OperationId,
+        task_ids: Vec<TaskId>,
+        action: junban_app::BulkAction,
+        temporal: junban_app::TemporalContext,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        task_ops::bulk_tasks(
+            self.connection,
+            operation_id,
             task_ids,
             action,
+            self.now,
             temporal,
-        } => task_ops::bulk_tasks(connection, operation_id, task_ids, action, now, temporal),
-        PluginDomainEffect::CreateProject { project_id, draft } => {
-            catalog_ops::create_project(connection, operation_id, project_id, draft, now)
-        }
-        PluginDomainEffect::PatchProject { project_id, patch } => {
-            catalog_ops::patch_project(connection, operation_id, project_id, patch, now)
-        }
-        PluginDomainEffect::DeleteProject { project_id } => {
-            catalog_ops::delete_project(connection, operation_id, project_id, now)
-        }
-        PluginDomainEffect::CreateTag { tag_id, draft } => {
-            catalog_ops::create_tag(connection, operation_id, tag_id, draft, now)
-        }
-        PluginDomainEffect::PatchTag { tag_id, patch } => {
-            catalog_ops::patch_tag(connection, operation_id, tag_id, patch, now)
-        }
-        PluginDomainEffect::DeleteTag { tag_id } => {
-            catalog_ops::delete_tag(connection, operation_id, tag_id, now)
-        }
+        )
+    }
+
+    fn create_project(
+        &mut self,
+        operation_id: OperationId,
+        project_id: ProjectId,
+        draft: junban_app::ProjectDraft,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        catalog_ops::create_project(self.connection, operation_id, project_id, draft, self.now)
+    }
+
+    fn patch_project(
+        &mut self,
+        operation_id: OperationId,
+        project_id: ProjectId,
+        patch: junban_app::ProjectPatch,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        catalog_ops::patch_project(self.connection, operation_id, project_id, patch, self.now)
+    }
+
+    fn delete_project(
+        &mut self,
+        operation_id: OperationId,
+        project_id: ProjectId,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        catalog_ops::delete_project(self.connection, operation_id, project_id, self.now)
+    }
+
+    fn create_tag(
+        &mut self,
+        operation_id: OperationId,
+        tag_id: TagId,
+        draft: junban_app::TagDraft,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        catalog_ops::create_tag(self.connection, operation_id, tag_id, draft, self.now)
+    }
+
+    fn patch_tag(
+        &mut self,
+        operation_id: OperationId,
+        tag_id: TagId,
+        patch: junban_app::TagPatch,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        catalog_ops::patch_tag(self.connection, operation_id, tag_id, patch, self.now)
+    }
+
+    fn delete_tag(
+        &mut self,
+        operation_id: OperationId,
+        tag_id: TagId,
+    ) -> Result<CommittedMutation, RepositoryError> {
+        catalog_ops::delete_tag(self.connection, operation_id, tag_id, self.now)
     }
 }
 
 pub(crate) fn commit_plugin_invocation(
     connection: &mut Connection,
-    request: CommitPluginInvocationRequest,
+    request: PlannedPluginInvocationCommit,
     now: Timestamp,
 ) -> Result<CommittedPluginInvocation, RepositoryError> {
     commit_plugin_invocation_with(connection, request, now, || Ok(()))
@@ -3387,13 +3749,11 @@ pub(crate) fn commit_plugin_invocation(
 
 pub(crate) fn commit_plugin_invocation_with(
     connection: &mut Connection,
-    request: CommitPluginInvocationRequest,
+    request: PlannedPluginInvocationCommit,
     now: Timestamp,
     after_domain_effect: impl FnOnce() -> Result<(), RepositoryError>,
 ) -> Result<CommittedPluginInvocation, RepositoryError> {
-    if request.domain_effect.is_some() != request.child_operation_id.is_some()
-        || (request.domain_effect.is_some() && request.kv_patch.is_some())
-    {
+    if request.domain_mutation.is_some() && request.kv_patch.is_some() {
         return Err(RepositoryError::Conflict);
     }
     if request.cursor.as_ref().is_some_and(|cursor| {
@@ -3425,15 +3785,17 @@ pub(crate) fn commit_plugin_invocation_with(
         if !plugin.desired_enabled || now < plugin.updated_at || !runtime_admits_terminal {
             return Err(RepositoryError::Conflict);
         }
-        let required_hook_capability =
-            hook_capability(&plugin.manifest, invocation.hook_kind, &invocation.entry_id)
-                .ok_or(RepositoryError::Conflict)?;
+        let entry_authority = plugin_manifest_entry_authority(
+            &plugin.manifest,
+            invocation.hook_kind,
+            PluginManifestEntrySelector::Requested(&invocation.entry),
+        )
+        .ok_or(RepositoryError::Conflict)?;
         if !hook_capability_granted(
             connection,
             &plugin,
-            invocation.hook_kind,
-            &invocation.entry_id,
-            required_hook_capability,
+            &entry_authority.entry,
+            entry_authority.required_capability,
         )? {
             return Err(RepositoryError::Conflict);
         }
@@ -3470,19 +3832,20 @@ pub(crate) fn commit_plugin_invocation_with(
             _ => false,
         };
         if (!effect_committing && !dispatching_http)
-            || (dispatching_http && (request.domain_effect.is_some() || request.kv_patch.is_some()))
+            || (dispatching_http
+                && (request.domain_mutation.is_some() || request.kv_patch.is_some()))
             || invalid_cursor_mode
             || !resync_identity_valid
             || (resync
-                && (request.domain_effect.is_some()
+                && (request.domain_mutation.is_some()
                     || request.kv_patch.is_some()
                     || request.resync_kv.is_none()))
             || (!resync && request.resync_kv.is_some())
         {
             return Err(RepositoryError::Conflict);
         }
-        if let Some(effect) = &request.domain_effect
-            && !has_capability(connection, &plugin, effect.required_capability())?
+        if let Some(mutation) = &request.domain_mutation
+            && !has_capability(connection, &plugin, mutation.required_capability())?
         {
             return Err(RepositoryError::Conflict);
         }
@@ -3520,12 +3883,21 @@ pub(crate) fn commit_plugin_invocation_with(
             }
         }
 
-        let mutation = match (request.child_operation_id, request.domain_effect) {
-            (Some(operation_id), Some(effect)) => {
-                Some(run_domain_effect(connection, operation_id, effect, now)?)
+        let terminal_kind = if dispatching_http {
+            PluginInvocationTerminalKind::Http
+        } else if request.domain_mutation.is_some() {
+            PluginInvocationTerminalKind::DomainEffect
+        } else if request.kv_patch.is_some() || request.resync_kv.is_some() {
+            PluginInvocationTerminalKind::Kv
+        } else {
+            PluginInvocationTerminalKind::ReadOnly
+        };
+        let mutation = match request.domain_mutation {
+            Some(mutation) => {
+                let mut unit_of_work = StorageMutationUnitOfWork { connection, now };
+                Some(mutation.execute(&mut unit_of_work)?)
             }
-            (None, None) => None,
-            _ => unreachable!("validated operation/effect pairing"),
+            None => None,
         };
         after_domain_effect()?;
         if let Some(patch) = &request.kv_patch {
@@ -3560,7 +3932,24 @@ pub(crate) fn commit_plugin_invocation_with(
         if deleted != 1 {
             return Err(RepositoryError::Conflict);
         }
-        Ok(CommittedPluginInvocation { mutation, cursor })
+        let committed = CommittedPluginInvocation {
+            terminal_kind,
+            mutation,
+            cursor,
+            replayed: false,
+        };
+        if operator_origin(invocation.hook_kind) {
+            let receipt_request = stored_invocation_receipt_request_json(&invocation)?;
+            let response = serde_json::to_string(&committed).map_err(storage_error)?;
+            write_receipt_response_in_transaction(
+                connection,
+                invocation.operation_id,
+                &receipt_request,
+                &response,
+                now,
+            )?;
+        }
+        Ok(committed)
     })();
     match result {
         Ok(committed) => {
@@ -3584,11 +3973,13 @@ pub(crate) fn commit_plugin_invocation_with(
     }
 }
 
-pub(crate) fn update_plugin_bookkeeping(
-    connection: &mut Connection,
-    update: PluginBookkeepingUpdate,
-    now: Timestamp,
-) -> Result<InstalledPlugin, RepositoryError> {
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum HealthUpdateMode {
+    Bookkeeping,
+    MaterialTransition,
+}
+
+fn validate_bookkeeping_update(update: &PluginBookkeepingUpdate) -> Result<(), RepositoryError> {
     if update.last_error_code.as_ref().is_some_and(|code| {
         code.is_empty()
             || code.len() > FAILURE_CODE_BYTES_MAX
@@ -3603,13 +3994,17 @@ pub(crate) fn update_plugin_bookkeeping(
     {
         return Err(RepositoryError::OperationTooLarge);
     }
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(storage_error)?;
-    transaction
-        .execute_batch("PRAGMA defer_foreign_keys = ON;")
-        .map_err(storage_error)?;
-    let plugins = load_plugins(&transaction)?;
+    Ok(())
+}
+
+fn apply_plugin_health_update(
+    connection: &Connection,
+    update: &PluginBookkeepingUpdate,
+    now: Timestamp,
+    mode: HealthUpdateMode,
+) -> Result<(InstalledPlugin, Vec<PluginId>), RepositoryError> {
+    validate_bookkeeping_update(update)?;
+    let plugins = load_plugins(connection)?;
     let plugin = plugins
         .iter()
         .find(|plugin| plugin.plugin_id == update.plugin_id)
@@ -3622,7 +4017,7 @@ pub(crate) fn update_plugin_bookkeeping(
     {
         return Err(RepositoryError::Conflict);
     }
-    let cursor = load_plugin_cursor(&transaction, &update.plugin_id)?;
+    let cursor = load_plugin_cursor(connection, &update.plugin_id)?;
     let legal_transition = match update.failure_count {
         0 => {
             matches!(
@@ -3633,10 +4028,11 @@ pub(crate) fn update_plugin_bookkeeping(
                     | PluginRuntimeState::Failed
             ) && plugin.next_retry_at.is_none_or(|retry_at| retry_at <= now)
         }
-        1 => plugin.failure_count == 0,
+        1 => matches!(plugin.failure_count, 0 | 1),
         2 => {
             plugin.failure_count == 1
                 && plugin.next_retry_at.is_some_and(|retry_at| retry_at <= now)
+                || plugin.failure_count == 2
         }
         3 => {
             plugin.failure_count == 2
@@ -3663,8 +4059,20 @@ pub(crate) fn update_plugin_bookkeeping(
     {
         return Err(RepositoryError::Conflict);
     }
-    let failed = update.failure_count > 0;
-    let auto_disabled = update.failure_count == 3;
+    let target_state = match update.failure_count {
+        0 if cursor.resync_required => PluginRuntimeState::Starting,
+        0 => PluginRuntimeState::Active,
+        1 => PluginRuntimeState::Degraded,
+        2 => PluginRuntimeState::Failed,
+        3 => PluginRuntimeState::Suspended,
+        _ => unreachable!("validated failure count"),
+    };
+    let material = target_state != plugin.runtime_state;
+    if (mode == HealthUpdateMode::MaterialTransition) != material {
+        return Err(RepositoryError::Conflict);
+    }
+
+    let auto_disabled = target_state == PluginRuntimeState::Suspended;
     let enabled_dependents: Vec<_> = if auto_disabled {
         dependent_closure(&plugins, &update.plugin_id)
             .into_iter()
@@ -3678,7 +4086,7 @@ pub(crate) fn update_plugin_bookkeeping(
     } else {
         Vec::new()
     };
-    let activation_epoch = if failed {
+    let activation_epoch = if material {
         next_activation_epoch(plugin.activation_epoch)?
     } else {
         plugin.activation_epoch
@@ -3686,10 +4094,10 @@ pub(crate) fn update_plugin_bookkeeping(
     for dependent in &enabled_dependents {
         next_activation_epoch(dependent.activation_epoch)?;
     }
-    if failed {
+    if material {
         // A crash after durable pre-send transition remains honestly ambiguous.
         // Guest-local work is safe to abandon and deterministically retry.
-        transaction
+        connection
             .execute(
                 "UPDATE plugin_invocations
                  SET state = 'ambiguous_http', error_code = 'http_ambiguous'
@@ -3697,7 +4105,7 @@ pub(crate) fn update_plugin_bookkeeping(
                 [update.plugin_id.as_str()],
             )
             .map_err(storage_error)?;
-        transaction
+        connection
             .execute(
                 "DELETE FROM plugin_invocations
                  WHERE plugin_id = ?1 AND state IN ('reserved', 'effect_committing')",
@@ -3705,15 +4113,7 @@ pub(crate) fn update_plugin_bookkeeping(
             )
             .map_err(storage_error)?;
     }
-    let runtime_state = match update.failure_count {
-        0 if cursor.resync_required => "starting",
-        0 => "active",
-        1 => "degraded",
-        2 => "failed",
-        3 => "suspended",
-        _ => unreachable!("validated failure count"),
-    };
-    transaction
+    connection
         .execute(
             "UPDATE plugins SET activation_epoch = ?2, desired_enabled = ?3,
                 runtime_state = ?4, failure_count = ?5, last_error_code = ?6,
@@ -3722,7 +4122,7 @@ pub(crate) fn update_plugin_bookkeeping(
                 update.plugin_id.as_str(),
                 as_i64(activation_epoch, "activation epoch")?,
                 i64::from(!auto_disabled),
-                runtime_state,
+                runtime_state_name(target_state),
                 i64::from(update.failure_count),
                 update.last_error_code,
                 update.next_retry_at.map(|value| value.to_string()),
@@ -3730,8 +4130,8 @@ pub(crate) fn update_plugin_bookkeeping(
             ],
         )
         .map_err(storage_error)?;
-    if failed {
-        transaction
+    if material {
+        connection
             .execute(
                 "UPDATE plugin_invocations SET activation_epoch = ?2
                  WHERE plugin_id = ?1 AND state = 'ambiguous_http'",
@@ -3743,7 +4143,7 @@ pub(crate) fn update_plugin_bookkeeping(
             .map_err(storage_error)?;
     }
     if auto_disabled {
-        transaction
+        connection
             .execute(
                 "UPDATE plugin_event_cursors SET resync_required = 1, updated_at = ?2
                  WHERE plugin_id = ?1",
@@ -3751,12 +4151,64 @@ pub(crate) fn update_plugin_bookkeeping(
             )
             .map_err(storage_error)?;
         for dependent in &enabled_dependents {
-            force_suspend_plugin(&transaction, dependent, "dependency_failed", now)?;
+            force_suspend_plugin(connection, dependent, "dependency_failed", now)?;
         }
     }
-    let stored = load_installed_plugin(&transaction, &update.plugin_id)?;
+    let stored = load_installed_plugin(connection, &update.plugin_id)?;
+    let mut affected = vec![update.plugin_id.clone()];
+    affected.extend(
+        enabled_dependents
+            .into_iter()
+            .map(|dependent| dependent.plugin_id),
+    );
+    Ok((stored, affected))
+}
+
+pub(crate) fn update_plugin_bookkeeping(
+    connection: &mut Connection,
+    update: PluginBookkeepingUpdate,
+    now: Timestamp,
+) -> Result<InstalledPlugin, RepositoryError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(storage_error)?;
+    transaction
+        .execute_batch("PRAGMA defer_foreign_keys = ON;")
+        .map_err(storage_error)?;
+    let (stored, _) =
+        apply_plugin_health_update(&transaction, &update, now, HealthUpdateMode::Bookkeeping)?;
     transaction.commit().map_err(storage_error)?;
     Ok(stored)
+}
+
+#[derive(Serialize)]
+struct PluginHealthTransitionRequest<'a> {
+    op: &'static str,
+    update: &'a PluginBookkeepingUpdate,
+}
+
+pub(crate) fn transition_plugin_health(
+    connection: &mut Connection,
+    operation_id: OperationId,
+    update: PluginBookkeepingUpdate,
+    now: Timestamp,
+) -> Result<CommittedMutation, RepositoryError> {
+    let request = canonical_json(&PluginHealthTransitionRequest {
+        op: "transition_plugin_health",
+        update: &update,
+    })?;
+    mutate(connection, operation_id, request, now, move |tx, _| {
+        tx.execute_batch("PRAGMA defer_foreign_keys = ON;")
+            .map_err(storage_error)?;
+        let (stored, affected) =
+            apply_plugin_health_update(tx, &update, now, HealthUpdateMode::MaterialTransition)?;
+        Ok(plugin_effect(
+            EventType::PLUGIN_HEALTH_CHANGED,
+            Some(&stored),
+            affected,
+            Some(stored.plugin_id.to_string()),
+        ))
+    })
 }
 
 fn reconciliation_epoch_already_fenced(
@@ -3772,6 +4224,20 @@ fn reconciliation_epoch_already_fenced(
             || (dependency_unavailable
                 && plugin.runtime_state == PluginRuntimeState::Suspended
                 && plugin.last_error_code.as_deref() == Some("dependency_failed")))
+}
+
+#[derive(Serialize)]
+struct ReconciliationHealthTransition {
+    plugin_id: PluginId,
+    package_generation: u64,
+    activation_epoch: u64,
+    reason: &'static str,
+}
+
+#[derive(Serialize)]
+struct ReconciliationHealthRequest<'a> {
+    op: &'static str,
+    transitions: &'a [ReconciliationHealthTransition],
 }
 
 pub(crate) fn reconcile_packages(
@@ -3904,95 +4370,125 @@ pub(crate) fn reconcile_packages(
         )
         .map_err(storage_error)?;
 
-    let mut disabled = BTreeSet::new();
-    for plugin in &plugins {
-        let invalid_package = invalid.contains(&plugin.plugin_id);
-        let expired_http = expired_ambiguity.contains(&plugin.plugin_id);
-        let lost_events = retention_lost.contains(&plugin.plugin_id);
-        let dependency_unavailable = dependency_impacted.contains(&plugin.plugin_id);
-        let restart_activation =
-            plugin.desired_enabled || plugin.runtime_state == PluginRuntimeState::ReverifyRequired;
-        if !invalid_package
-            && !expired_http
-            && !lost_events
-            && !dependency_unavailable
-            && !restart_activation
-        {
-            continue;
-        }
-        let requires_new_epoch = invalid_package
-            || expired_http
-            || dependency_unavailable
-            || plugin.desired_enabled
-            || plugin.runtime_state == PluginRuntimeState::ReverifyRequired;
-        let epoch = if !requires_new_epoch
-            || reconciliation_epoch_already_fenced(plugin, expired_http, dependency_unavailable)
-        {
-            plugin.activation_epoch
-        } else {
-            next_activation_epoch(plugin.activation_epoch)?
-        };
-        let (desired_enabled, runtime_state, failure_count, error_code, next_retry_at) =
-            if invalid_package {
-                disabled.insert(plugin.plugin_id.clone());
-                (false, "reverify_required", 3, Some("package_invalid"), None)
-            } else if expired_http {
-                disabled.insert(plugin.plugin_id.clone());
-                (false, "suspended", 3, Some("http_ambiguous"), None)
-            } else if dependency_unavailable {
-                disabled.insert(plugin.plugin_id.clone());
-                (false, "suspended", 3, Some("dependency_failed"), None)
-            } else if lost_events {
-                (
-                    plugin.desired_enabled,
-                    if plugin.desired_enabled {
-                        "starting"
-                    } else {
-                        "disabled"
-                    },
-                    0,
-                    None,
-                    None,
-                )
-            } else if matches!(
-                plugin.runtime_state,
-                PluginRuntimeState::Degraded | PluginRuntimeState::Failed
-            ) && plugin.next_retry_at.is_some_and(|retry_at| retry_at > now)
-            {
-                (
-                    true,
-                    if plugin.runtime_state == PluginRuntimeState::Degraded {
-                        "degraded"
-                    } else {
-                        "failed"
-                    },
-                    i64::from(plugin.failure_count),
-                    plugin.last_error_code.as_deref(),
-                    plugin.next_retry_at.map(|retry_at| retry_at.to_string()),
-                )
+    let disabled: BTreeSet<_> = plugins
+        .iter()
+        .filter(|plugin| {
+            invalid.contains(&plugin.plugin_id)
+                || expired_ambiguity.contains(&plugin.plugin_id)
+                || dependency_impacted.contains(&plugin.plugin_id)
+        })
+        .map(|plugin| plugin.plugin_id.clone())
+        .collect();
+    let material_transitions: Vec<_> = plugins
+        .iter()
+        .filter_map(|plugin| {
+            let reason = if expired_ambiguity.contains(&plugin.plugin_id) {
+                Some("http_ambiguous")
+            } else if dependency_impacted.contains(&plugin.plugin_id) {
+                Some("dependency_failed")
             } else {
-                (
-                    plugin.desired_enabled,
-                    if plugin.desired_enabled {
-                        "starting"
-                    } else {
-                        "disabled"
-                    },
-                    0,
-                    None,
-                    None,
-                )
+                None
+            }?;
+            if reconciliation_epoch_already_fenced(
+                plugin,
+                reason == "http_ambiguous",
+                reason == "dependency_failed",
+            ) {
+                return None;
+            }
+            Some(ReconciliationHealthTransition {
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                reason,
+            })
+        })
+        .collect();
+    let apply_updates = |tx: &Connection| -> Result<(), RepositoryError> {
+        for plugin in &plugins {
+            let invalid_package = invalid.contains(&plugin.plugin_id);
+            let expired_http = expired_ambiguity.contains(&plugin.plugin_id);
+            let lost_events = retention_lost.contains(&plugin.plugin_id);
+            let dependency_unavailable = dependency_impacted.contains(&plugin.plugin_id);
+            let restart_activation = plugin.desired_enabled
+                || plugin.runtime_state == PluginRuntimeState::ReverifyRequired;
+            if !invalid_package
+                && !expired_http
+                && !lost_events
+                && !dependency_unavailable
+                && !restart_activation
+            {
+                continue;
+            }
+            let requires_new_epoch = invalid_package
+                || expired_http
+                || dependency_unavailable
+                || plugin.desired_enabled
+                || plugin.runtime_state == PluginRuntimeState::ReverifyRequired;
+            let epoch = if !requires_new_epoch
+                || reconciliation_epoch_already_fenced(plugin, expired_http, dependency_unavailable)
+            {
+                plugin.activation_epoch
+            } else {
+                next_activation_epoch(plugin.activation_epoch)?
             };
-        let authority_timestamp = if now < plugin.updated_at {
-            plugin.updated_at
-        } else {
-            now
-        };
-        transaction
-            .execute(
+            let (desired_enabled, runtime_state, failure_count, error_code, next_retry_at) =
+                if invalid_package {
+                    (false, "reverify_required", 3, Some("package_invalid"), None)
+                } else if expired_http {
+                    (false, "suspended", 3, Some("http_ambiguous"), None)
+                } else if dependency_unavailable {
+                    (false, "suspended", 3, Some("dependency_failed"), None)
+                } else if lost_events {
+                    (
+                        plugin.desired_enabled,
+                        if plugin.desired_enabled {
+                            "starting"
+                        } else {
+                            "disabled"
+                        },
+                        0,
+                        None,
+                        None,
+                    )
+                } else if matches!(
+                    plugin.runtime_state,
+                    PluginRuntimeState::Degraded | PluginRuntimeState::Failed
+                ) && plugin.next_retry_at.is_some_and(|retry_at| retry_at > now)
+                {
+                    (
+                        true,
+                        if plugin.runtime_state == PluginRuntimeState::Degraded {
+                            "degraded"
+                        } else {
+                            "failed"
+                        },
+                        i64::from(plugin.failure_count),
+                        plugin.last_error_code.as_deref(),
+                        plugin.next_retry_at.map(|retry_at| retry_at.to_string()),
+                    )
+                } else {
+                    (
+                        plugin.desired_enabled,
+                        if plugin.desired_enabled {
+                            "starting"
+                        } else {
+                            "disabled"
+                        },
+                        0,
+                        None,
+                        None,
+                    )
+                };
+            let authority_timestamp = if now < plugin.updated_at {
+                plugin.updated_at
+            } else {
+                now
+            };
+            tx.execute(
                 "UPDATE plugins SET activation_epoch = ?2, desired_enabled = ?3,
-                    runtime_state = ?4, failure_count = ?5, last_error_code = ?6,
-                    next_retry_at = ?7, updated_at = ?8 WHERE plugin_id = ?1",
+                        runtime_state = ?4, failure_count = ?5, last_error_code = ?6,
+                        next_retry_at = ?7, updated_at = ?8 WHERE plugin_id = ?1",
                 params![
                     plugin.plugin_id.as_str(),
                     as_i64(epoch, "activation epoch")?,
@@ -4005,38 +4501,75 @@ pub(crate) fn reconcile_packages(
                 ],
             )
             .map_err(storage_error)?;
-        if expired_http {
-            transaction
-                .execute(
+            if expired_http {
+                tx.execute(
                     "DELETE FROM plugin_invocations
-                     WHERE plugin_id = ?1 AND state = 'ambiguous_http' AND retain_until <= ?2",
+                         WHERE plugin_id = ?1 AND state = 'ambiguous_http' AND retain_until <= ?2",
                     params![plugin.plugin_id.as_str(), now.to_string()],
                 )
                 .map_err(storage_error)?;
-        }
-        // Even when code, a dependency, or one older delivery becomes unavailable,
-        // every still-retained HTTP ambiguity keeps its stable delivery identity.
-        transaction
-            .execute(
+            }
+            // Even when code, a dependency, or one older delivery becomes unavailable,
+            // every still-retained HTTP ambiguity keeps its stable delivery identity.
+            tx.execute(
                 "UPDATE plugin_invocations SET activation_epoch = ?2
-                 WHERE plugin_id = ?1 AND state = 'ambiguous_http'",
+                     WHERE plugin_id = ?1 AND state = 'ambiguous_http'",
                 params![
                     plugin.plugin_id.as_str(),
                     as_i64(epoch, "activation epoch")?,
                 ],
             )
             .map_err(storage_error)?;
-        if invalid_package || expired_http || lost_events || dependency_unavailable {
-            transaction
-                .execute(
+            if invalid_package || expired_http || lost_events || dependency_unavailable {
+                tx.execute(
                     "UPDATE plugin_event_cursors SET resync_required = 1, updated_at = ?2
-                     WHERE plugin_id = ?1",
+                         WHERE plugin_id = ?1",
                     params![plugin.plugin_id.as_str(), now.to_string()],
                 )
                 .map_err(storage_error)?;
+            }
         }
+        Ok(())
+    };
+    let mut material_commit = None;
+    if material_transitions.is_empty() {
+        apply_updates(&transaction)?;
+    } else {
+        let request = canonical_json(&ReconciliationHealthRequest {
+            op: "reconcile_plugin_health",
+            transitions: &material_transitions,
+        })?;
+        let operation_id =
+            derived_operation_id(b"junban.plugin.reconcile-health.v1\0", request.as_bytes());
+        let affected: Vec<_> = material_transitions
+            .iter()
+            .map(|transition| transition.plugin_id.clone())
+            .collect();
+        let primary_id = affected.first().cloned();
+        material_commit = Some(mutate_in_transaction(
+            &transaction,
+            operation_id,
+            request,
+            now,
+            |tx, _| {
+                apply_updates(tx)?;
+                let primary = primary_id
+                    .as_ref()
+                    .map(|plugin_id| load_installed_plugin(tx, plugin_id))
+                    .transpose()?;
+                Ok(plugin_effect(
+                    EventType::PLUGIN_HEALTH_CHANGED,
+                    primary.as_ref(),
+                    affected,
+                    Some("plugin reconciliation changed material health".to_owned()),
+                ))
+            },
+        )?);
     }
     transaction.commit().map_err(storage_error)?;
+    if material_commit.is_some_and(|committed| committed.newly_committed) {
+        let _ = prune_retained_events(connection);
+    }
     let cleanup = store
         .cleanup_orphans(&referenced)
         .map_err(|error| RepositoryError::Storage(error.to_string()))?;
@@ -4054,8 +4587,9 @@ mod tests {
 
     use ed25519_dalek::SigningKey;
     use junban_app::{
+        CommitPluginInvocationRequest, PlannedPluginInvocationCommit, PluginDomainEffect,
         PluginPackageAuthority, PluginRepository, ProjectDraft, ProjectPatch, Repository,
-        SetPluginSettingRequest,
+        SetPluginSettingRequest, StagedFile, plan_plugin_invocation_commit,
     };
     use junban_domain::{
         EntityName, HexColor, ProjectId, SortOrder, TagId, TagName, TaskDraft, TaskId, TaskTitle,
@@ -4063,14 +4597,41 @@ mod tests {
     use junban_plugin_sdk::{
         Capability, CommandDeclaration, Dependency, EventKind, EventScope, HttpMethod, HttpOrigin,
         HttpScope, Permission, PermissionScope, Publisher, RuntimeProfile, SettingDeclaration,
-        SettingSchema, SurfaceDeclaration, SurfaceLocation, UnscopedPermission, WitAuthority,
-        pack_package, signer_key_id,
+        SettingSchema, SurfaceDeclaration, SurfaceKind, SurfaceLocation, UnscopedPermission,
+        WitAuthority, pack_package, signer_key_id,
     };
     use uuid::Uuid;
 
     use super::*;
 
     const KEY_BYTES: [u8; 32] = [23; 32];
+    static PACKAGE_MEMORY_TEST_ACTIVE: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
+    struct PackageMemoryTestGuard;
+
+    impl PackageMemoryTestGuard {
+        fn acquire() -> Self {
+            while PACKAGE_MEMORY_TEST_ACTIVE
+                .compare_exchange(
+                    false,
+                    true,
+                    std::sync::atomic::Ordering::AcqRel,
+                    std::sync::atomic::Ordering::Acquire,
+                )
+                .is_err()
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Self
+        }
+    }
+
+    impl Drop for PackageMemoryTestGuard {
+        fn drop(&mut self) {
+            PACKAGE_MEMORY_TEST_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
 
     struct TestProfile {
         path: PathBuf,
@@ -4097,6 +4658,151 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+
+    fn encode_leb(mut value: usize, output: &mut Vec<u8>) {
+        loop {
+            let mut byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            output.push(byte);
+            if value == 0 {
+                break;
+            }
+        }
+    }
+
+    const fn leb_len(mut value: usize) -> usize {
+        let mut len = 1;
+        while value >= 0x80 {
+            value >>= 7;
+            len += 1;
+        }
+        len
+    }
+
+    fn component_with_size(target: usize) -> Vec<u8> {
+        let base = include_bytes!("../../junban-plugin-sdk/consumers/rust/rust-consumer.wasm");
+        let data_len = (target - base.len() - 64..target - base.len())
+            .find(|data_len| {
+                let payload_len = 2 + leb_len(*data_len) + data_len;
+                let module_len = 8 + 1 + leb_len(payload_len) + payload_len;
+                base.len() + 1 + leb_len(module_len) + module_len == target
+            })
+            .expect("component padding has an exact bounded encoding");
+        let mut module = b"\0asm\x01\0\0\0".to_vec();
+        let mut payload = vec![1, 1]; // one passive data segment
+        encode_leb(data_len, &mut payload);
+        payload.resize(payload.len() + data_len, 0);
+        module.push(11); // core data section
+        encode_leb(payload.len(), &mut module);
+        module.extend(payload);
+        let mut component = Vec::with_capacity(target);
+        component.extend_from_slice(base);
+        component.push(1); // component core-module section
+        encode_leb(module.len(), &mut component);
+        component.extend(module);
+        assert_eq!(component.len(), target);
+        component
+    }
+
+    fn stage_bytes(bytes: &[u8]) -> StagedFile {
+        let path = std::env::temp_dir().join(format!("junban-plugin-stage-{}", Uuid::now_v7()));
+        fs::write(&path, bytes).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        StagedFile::new(path, bytes.len() as u64)
+    }
+
+    fn stage_sparse_package(len: u64) -> StagedFile {
+        let path = std::env::temp_dir().join(format!("junban-plugin-stage-{}", Uuid::now_v7()));
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(len).unwrap();
+        drop(file);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        StagedFile::new(path, len)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn resident_kib() -> u64 {
+        fs::read_to_string("/proc/self/status")
+            .unwrap()
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("VmRSS:")?
+                    .split_whitespace()
+                    .next()?
+                    .parse()
+                    .ok()
+            })
+            .unwrap()
+    }
+
+    fn publish_bytes(
+        store: &PluginPackageStore,
+        bytes: &[u8],
+    ) -> Result<PluginPackageAuthority, crate::package_store::PackageStoreError> {
+        store.publish(stage_bytes(bytes))
+    }
+
+    fn plan(request: CommitPluginInvocationRequest) -> PlannedPluginInvocationCommit {
+        plan_plugin_invocation_commit(request).unwrap()
+    }
+
+    fn transition_health(
+        connection: &mut Connection,
+        update: PluginBookkeepingUpdate,
+        now: Timestamp,
+    ) -> Result<InstalledPlugin, RepositoryError> {
+        let plugin_id = update.plugin_id.clone();
+        transition_plugin_health(connection, OperationId::new(), update, now)?;
+        get_installed_plugin(connection, plugin_id)
+    }
+
+    fn reserve_ambiguous(
+        connection: &mut Connection,
+        request: ReservePluginInvocationRequest,
+        now: Timestamp,
+    ) -> OperationId {
+        let operation_id = request.operation_id;
+        let plugin_id = request.plugin_id.clone();
+        let package_generation = request.package_generation;
+        let activation_epoch = request.activation_epoch;
+        reserve_plugin_invocation(connection, request, now).unwrap();
+        for (expected_state, next_state) in [
+            (
+                PluginInvocationState::Reserved,
+                PluginInvocationState::DispatchingHttp,
+            ),
+            (
+                PluginInvocationState::DispatchingHttp,
+                PluginInvocationState::AmbiguousHttp,
+            ),
+        ] {
+            transition_plugin_invocation(
+                connection,
+                TransitionPluginInvocationRequest {
+                    operation_id,
+                    plugin_id: plugin_id.clone(),
+                    package_generation,
+                    activation_epoch,
+                    expected_state,
+                    next_state,
+                },
+                now,
+            )
+            .unwrap();
+        }
+        operation_id
     }
 
     fn package(id: &str, version: &str) -> (Vec<u8>, PluginPackageAuthority, [u8; 32]) {
@@ -4133,6 +4839,24 @@ mod tests {
         key_bytes: &[u8; 32],
         subscriptions: Vec<EventKind>,
     ) -> (Vec<u8>, PluginPackageAuthority, [u8; 32]) {
+        package_with_surfaces(
+            id,
+            version,
+            dependencies,
+            key_bytes,
+            subscriptions,
+            Vec::new(),
+        )
+    }
+
+    fn package_with_surfaces(
+        id: &str,
+        version: &str,
+        dependencies: Vec<Dependency>,
+        key_bytes: &[u8; 32],
+        subscriptions: Vec<EventKind>,
+        surfaces: Vec<SurfaceDeclaration>,
+    ) -> (Vec<u8>, PluginPackageAuthority, [u8; 32]) {
         let component = include_bytes!("../../junban-plugin-sdk/consumers/rust/rust-consumer.wasm");
         let key = SigningKey::from_bytes(key_bytes);
         let public_key = key.verifying_key().to_bytes();
@@ -4165,6 +4889,18 @@ mod tests {
             unscoped(Capability::TasksRead),
             unscoped(Capability::TasksWrite),
         ]);
+        if surfaces
+            .iter()
+            .any(|surface| surface.kind == SurfaceKind::Panel)
+        {
+            permissions.push(unscoped(Capability::UiPanel));
+        }
+        if surfaces
+            .iter()
+            .any(|surface| surface.kind == SurfaceKind::View)
+        {
+            permissions.push(unscoped(Capability::UiView));
+        }
         let manifest = RuntimeManifest {
             schema_version: 1,
             id: id.to_owned(),
@@ -4195,7 +4931,7 @@ mod tests {
                 inputs: Vec::new(),
             }],
             subscriptions,
-            surfaces: Vec::new(),
+            surfaces,
             settings: {
                 let mut settings = vec![SettingDeclaration {
                     id: "enabled".to_owned(),
@@ -4248,10 +4984,11 @@ mod tests {
                 params![starting.plugin_id.as_str(), now.to_string()],
             )
             .unwrap();
-        update_plugin_bookkeeping(
+        transition_plugin_health(
             connection,
+            OperationId::new(),
             PluginBookkeepingUpdate {
-                plugin_id: starting.plugin_id,
+                plugin_id: starting.plugin_id.clone(),
                 package_generation: starting.package_generation,
                 activation_epoch: starting.activation_epoch,
                 failure_count: 0,
@@ -4260,7 +4997,8 @@ mod tests {
             },
             now,
         )
-        .unwrap()
+        .unwrap();
+        get_installed_plugin(connection, starting.plugin_id).unwrap()
     }
 
     fn grant_capabilities(
@@ -4298,7 +5036,7 @@ mod tests {
         now: Timestamp,
     ) -> InstalledPlugin {
         let (bytes, authority, public_key) = package("test-plugin", "1.0.0");
-        assert_eq!(store.publish(&bytes).unwrap(), authority);
+        assert_eq!(publish_bytes(store, &bytes).unwrap(), authority);
         trust_publisher(
             connection,
             OperationId::new(),
@@ -4350,29 +5088,209 @@ mod tests {
             },
         ];
 
-        assert_eq!(
-            hook_capability(
-                &manifest,
-                PluginHookKind::HandleSurfaceAction,
-                &PluginId::parse("dashboard").unwrap(),
-            ),
-            Some(Some(Capability::UiView))
+        let dashboard = PluginManifestEntry::SurfaceAction {
+            surface_id: PluginId::parse("dashboard").unwrap(),
+            action_id: PluginId::parse("refresh").unwrap(),
+        };
+        let sidebar = PluginManifestEntry::SurfaceAction {
+            surface_id: PluginId::parse("sidebar").unwrap(),
+            action_id: PluginId::parse("refresh").unwrap(),
+        };
+        let dashboard = plugin_manifest_entry_authority(
+            &manifest,
+            PluginHookKind::HandleSurfaceAction,
+            PluginManifestEntrySelector::Requested(&dashboard),
+        )
+        .unwrap();
+        let sidebar = plugin_manifest_entry_authority(
+            &manifest,
+            PluginHookKind::HandleSurfaceAction,
+            PluginManifestEntrySelector::Requested(&sidebar),
+        )
+        .unwrap();
+        assert_eq!(dashboard.required_capability, Some(Capability::UiView));
+        assert_eq!(sidebar.required_capability, Some(Capability::UiPanel));
+        assert_ne!(dashboard.persisted_id, sidebar.persisted_id);
+    }
+
+    #[test]
+    fn surface_pair_authority_survives_persistence_and_reopen() {
+        let surfaces = vec![
+            SurfaceDeclaration {
+                id: "dashboard".to_owned(),
+                kind: SurfaceKind::View,
+                title: "Dashboard".to_owned(),
+                icon: None,
+                location: SurfaceLocation::Navigation,
+                actions: vec!["refresh".to_owned()],
+            },
+            SurfaceDeclaration {
+                id: "sidebar".to_owned(),
+                kind: SurfaceKind::Panel,
+                title: "Sidebar".to_owned(),
+                icon: None,
+                location: SurfaceLocation::Sidebar,
+                actions: vec!["refresh".to_owned()],
+            },
+        ];
+        let (bytes, authority, public_key) = package_with_surfaces(
+            "surface-plugin",
+            "1.0.0",
+            Vec::new(),
+            &KEY_BYTES,
+            vec![EventKind::TaskCreated],
+            surfaces,
         );
-        assert_eq!(
-            hook_capability(
-                &manifest,
-                PluginHookKind::HandleSurfaceAction,
-                &PluginId::parse("sidebar").unwrap(),
-            ),
-            Some(Some(Capability::UiPanel))
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_001, 0);
+        publish_bytes(&store, &bytes).unwrap();
+        trust_publisher(
+            &mut connection,
+            OperationId::new(),
+            TrustPublisherRequest::new(public_key),
+            now,
+        )
+        .unwrap();
+        set_community_plugin_policy(&mut connection, OperationId::new(), true, now).unwrap();
+        assert!(matches!(
+            install_plugin(
+                &mut connection,
+                &store,
+                OperationId::new(),
+                InstallPluginRequest {
+                    package: authority,
+                    source: PluginInstallSource::CommunityRegistry,
+                    replace_existing: false,
+                    allow_downgrade: false,
+                },
+                now,
+            )
+            .unwrap(),
+            PluginMutationOutcome::Committed(_)
+        ));
+        let installed =
+            get_installed_plugin(&connection, PluginId::parse("surface-plugin").unwrap()).unwrap();
+        let granted = grant_capabilities(
+            &mut connection,
+            &installed,
+            &[Capability::UiPanel, Capability::UiView],
+            now,
         );
+        let plugin = activate_plugin(&mut connection, &store, &granted, now);
+        let dashboard_entry = PluginManifestEntry::SurfaceAction {
+            surface_id: PluginId::parse("dashboard").unwrap(),
+            action_id: PluginId::parse("refresh").unwrap(),
+        };
+        let dashboard_operation = OperationId::new();
+        let request = ReservePluginInvocationRequest {
+            operation_id: dashboard_operation,
+            plugin_id: plugin.plugin_id.clone(),
+            package_generation: plugin.package_generation,
+            activation_epoch: plugin.activation_epoch,
+            hook_kind: PluginHookKind::HandleSurfaceAction,
+            entry: dashboard_entry.clone(),
+            request_sha256: Sha256Digest::of(b"dashboard-refresh"),
+            delivery_operation_id: OperationId::new(),
+            resync_session: None,
+        };
+        reserve_plugin_invocation(&mut connection, request, now).unwrap();
+        let dashboard_persisted: String = connection
+            .query_row(
+                "SELECT entry_id FROM plugin_invocations WHERE operation_id = ?1",
+                [dashboard_operation.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(
-            hook_capability(
-                &manifest,
-                PluginHookKind::HandleSurfaceAction,
-                &PluginId::parse("refresh").unwrap(),
-            ),
-            None
+            dashboard_persisted,
+            "219e3b484ebb41ff219f1747e05fab560d81655e92e10bfa985171883c4421a4"
+        );
+        let backup = crate::backup_ops::create_backup(&connection, &profile.path).unwrap();
+        assert!(backup.path().is_file());
+        drop(backup);
+        drop(connection);
+
+        let mut connection = profile.connection();
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+        assert_eq!(
+            load_invocation(&connection, dashboard_operation)
+                .unwrap()
+                .entry,
+            dashboard_entry
+        );
+        complete_plugin_invocation(
+            &mut connection,
+            dashboard_operation,
+            plugin.plugin_id.clone(),
+            plugin.package_generation,
+            plugin.activation_epoch,
+            now,
+        )
+        .unwrap();
+        let sidebar_operation = OperationId::new();
+        reserve_plugin_invocation(
+            &mut connection,
+            ReservePluginInvocationRequest {
+                operation_id: sidebar_operation,
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                hook_kind: PluginHookKind::HandleSurfaceAction,
+                entry: PluginManifestEntry::SurfaceAction {
+                    surface_id: PluginId::parse("sidebar").unwrap(),
+                    action_id: PluginId::parse("refresh").unwrap(),
+                },
+                request_sha256: Sha256Digest::of(b"sidebar-refresh"),
+                delivery_operation_id: OperationId::new(),
+                resync_session: None,
+            },
+            now,
+        )
+        .unwrap();
+        let sidebar_persisted: String = connection
+            .query_row(
+                "SELECT entry_id FROM plugin_invocations WHERE operation_id = ?1",
+                [sidebar_operation.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            sidebar_persisted,
+            "cf9341a91359732fb9146d2cd6426495c7eecb3e344be53fbfa3301e82457e33"
+        );
+        assert_ne!(dashboard_persisted, sidebar_persisted);
+        complete_plugin_invocation(
+            &mut connection,
+            sidebar_operation,
+            plugin.plugin_id.clone(),
+            plugin.package_generation,
+            plugin.activation_epoch,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            reserve_plugin_invocation(
+                &mut connection,
+                ReservePluginInvocationRequest {
+                    operation_id: OperationId::new(),
+                    plugin_id: plugin.plugin_id,
+                    package_generation: plugin.package_generation,
+                    activation_epoch: plugin.activation_epoch,
+                    hook_kind: PluginHookKind::HandleSurfaceAction,
+                    entry: PluginManifestEntry::SurfaceAction {
+                        surface_id: PluginId::parse("dashboard").unwrap(),
+                        action_id: PluginId::parse("missing").unwrap(),
+                    },
+                    request_sha256: Sha256Digest::of(b"forged-pair"),
+                    delivery_operation_id: OperationId::new(),
+                    resync_session: None,
+                },
+                now,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
         );
     }
 
@@ -4389,7 +5307,7 @@ mod tests {
             &KEY_BYTES,
             vec![EventKind::TaskCreated, EventKind::TaskDeleted],
         );
-        store.publish(&bytes).unwrap();
+        publish_bytes(&store, &bytes).unwrap();
         trust_publisher(
             &mut connection,
             OperationId::new(),
@@ -4422,7 +5340,9 @@ mod tests {
             package_generation: plugin.package_generation,
             activation_epoch: plugin.activation_epoch,
             hook_kind: PluginHookKind::HandleEvent,
-            entry_id: PluginId::parse(entry).unwrap(),
+            entry: PluginManifestEntry::Event {
+                event_id: PluginId::parse(entry).unwrap(),
+            },
             request_sha256: Sha256Digest::of(entry.as_bytes()),
             delivery_operation_id: OperationId::new(),
             resync_session: None,
@@ -4465,7 +5385,9 @@ mod tests {
             package_generation: active.package_generation,
             activation_epoch: active.activation_epoch,
             hook_kind: PluginHookKind::HandleEvent,
-            entry_id: PluginId::parse(entry).unwrap(),
+            entry: PluginManifestEntry::Event {
+                event_id: PluginId::parse(entry).unwrap(),
+            },
             request_sha256: Sha256Digest::of(entry.as_bytes()),
             delivery_operation_id: OperationId::new(),
             resync_session: None,
@@ -4474,12 +5396,42 @@ mod tests {
         let reserved =
             reserve_plugin_invocation(&mut connection, granted_reservation("task-deleted"), now)
                 .unwrap();
-        complete_plugin_invocation(
+        let invocation = reserved.invocation().unwrap().clone();
+        transition_plugin_invocation(
             &mut connection,
-            reserved.invocation.operation_id,
-            active.plugin_id,
-            active.package_generation,
-            active.activation_epoch,
+            TransitionPluginInvocationRequest {
+                operation_id: invocation.operation_id,
+                plugin_id: invocation.plugin_id.clone(),
+                package_generation: invocation.package_generation,
+                activation_epoch: invocation.activation_epoch,
+                expected_state: PluginInvocationState::Reserved,
+                next_state: PluginInvocationState::EffectCommitting,
+            },
+            now,
+        )
+        .unwrap();
+        let cursor = get_plugin_cursor(&connection, invocation.plugin_id.clone()).unwrap();
+        commit_plugin_invocation(
+            &mut connection,
+            plan(CommitPluginInvocationRequest {
+                invocation_operation_id: invocation.operation_id,
+                plugin_id: invocation.plugin_id.clone(),
+                package_generation: invocation.package_generation,
+                activation_epoch: invocation.activation_epoch,
+                child_operation_id: None,
+                domain_effect: None,
+                kv_patch: None,
+                resync_kv: None,
+                cursor: Some(AdvancePluginCursorRequest {
+                    plugin_id: invocation.plugin_id,
+                    package_generation: invocation.package_generation,
+                    activation_epoch: invocation.activation_epoch,
+                    expected: PluginCursorPosition::from(&cursor),
+                    next: PluginCursorPosition::from(&cursor),
+                }),
+                resync_session: None,
+            }),
+            now,
         )
         .unwrap();
     }
@@ -4565,7 +5517,9 @@ mod tests {
                     package_generation: active.package_generation,
                     activation_epoch: active.activation_epoch,
                     hook_kind: PluginHookKind::InvokeCommand,
-                    entry_id: PluginId::parse("run").unwrap(),
+                    entry: PluginManifestEntry::Command {
+                        command_id: PluginId::parse("run").unwrap()
+                    },
                     request_sha256: Sha256Digest::of(b"missing-command-grant"),
                     delivery_operation_id: OperationId::new(),
                     resync_session: None,
@@ -4613,7 +5567,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(revision, 7);
+        assert_eq!(revision, 8);
     }
 
     #[test]
@@ -4624,7 +5578,7 @@ mod tests {
         let now = Timestamp::constant(1_800_000_025, 0);
         let (local_bytes, local, public_key) = package("local-plugin", "1.0.0");
         assert_eq!(local.publisher_public_key(), &public_key);
-        store.publish(&local_bytes).unwrap();
+        publish_bytes(&store, &local_bytes).unwrap();
         let local_request = InstallPluginRequest {
             package: local,
             source: PluginInstallSource::LocalPackage,
@@ -4675,7 +5629,7 @@ mod tests {
         );
 
         let (community_bytes, community, _) = package("community-plugin", "1.0.0");
-        store.publish(&community_bytes).unwrap();
+        publish_bytes(&store, &community_bytes).unwrap();
         assert!(
             install_plugin(
                 &mut connection,
@@ -4811,7 +5765,7 @@ mod tests {
         let store = PluginPackageStore::open(&profile.path).unwrap();
         let now = Timestamp::constant(1_800_000_100, 0);
         let (bytes, authority, public_key) = package("receipt-plugin", "1.0.0");
-        store.publish(&bytes).unwrap();
+        publish_bytes(&store, &bytes).unwrap();
         let trust_operation_id = OperationId::new();
         let trust_request = TrustPublisherRequest::new(public_key);
         trust_publisher(
@@ -4919,7 +5873,7 @@ mod tests {
         assert!(uninstalled.event.snapshot.is_none());
 
         let (bytes, authority, _) = package("test-plugin", "1.0.0");
-        store.publish(&bytes).unwrap();
+        publish_bytes(&store, &bytes).unwrap();
         let reinstalled = install_plugin(
             &mut connection,
             &store,
@@ -4996,7 +5950,7 @@ mod tests {
         let key = SigningKey::from_bytes(&KEY_BYTES);
         let candidate_bytes = pack_package(&manifest, verified.component_bytes, &key).unwrap();
         let candidate = PluginPackageAuthority::inspect(&candidate_bytes).unwrap();
-        store.publish(&candidate_bytes).unwrap();
+        publish_bytes(&store, &candidate_bytes).unwrap();
         let revision_before: i64 = connection
             .query_row(
                 "SELECT global_revision FROM app_state WHERE singleton = 1",
@@ -5062,8 +6016,8 @@ mod tests {
         let now = Timestamp::constant(1_800_000_122, 0);
         let (left_bytes, left, public_key) = package("concurrent-left", "1.0.0");
         let (right_bytes, right, _) = package("concurrent-right", "1.0.0");
-        store.publish(&left_bytes).unwrap();
-        store.publish(&right_bytes).unwrap();
+        publish_bytes(&store, &left_bytes).unwrap();
+        publish_bytes(&store, &right_bytes).unwrap();
         trust_publisher(
             &mut connection,
             OperationId::new(),
@@ -5140,7 +6094,7 @@ mod tests {
         for index in 0..=PLUGINS_ENABLED_MAX {
             let plugin_id = format!("enabled-{index:02}");
             let (bytes, package, _) = package(&plugin_id, "1.0.0");
-            store.publish(&bytes).unwrap();
+            publish_bytes(&store, &bytes).unwrap();
             install_plugin(
                 &mut connection,
                 &store,
@@ -5219,7 +6173,7 @@ mod tests {
         let rotated_key = [29_u8; 32];
         let (bytes, replacement, public_key) =
             package_with_key("test-plugin", "1.1.0", Vec::new(), &rotated_key);
-        store.publish(&bytes).unwrap();
+        publish_bytes(&store, &bytes).unwrap();
         trust_publisher(
             &mut connection,
             OperationId::new(),
@@ -5327,7 +6281,7 @@ mod tests {
         let now = Timestamp::constant(1_800_000_150, 0);
         let (base_bytes, base, public_key) = package("base-plugin", "1.0.0");
         let original_base_path = store.package_path(base.package_sha256());
-        store.publish(&base_bytes).unwrap();
+        publish_bytes(&store, &base_bytes).unwrap();
         trust_publisher(
             &mut connection,
             OperationId::new(),
@@ -5364,7 +6318,7 @@ mod tests {
                 services: Vec::new(),
             }],
         );
-        store.publish(&child_bytes).unwrap();
+        publish_bytes(&store, &child_bytes).unwrap();
         assert!(install(&mut connection, child, false).committed().is_some());
         for plugin_id in ["base-plugin", "child-plugin"] {
             assert!(
@@ -5478,7 +6432,7 @@ mod tests {
             get_installed_plugin(&connection, PluginId::parse("child-plugin").unwrap()).unwrap();
 
         let (compatible_bytes, compatible, _) = package("base-plugin", "1.1.0");
-        store.publish(&compatible_bytes).unwrap();
+        publish_bytes(&store, &compatible_bytes).unwrap();
         assert!(
             install(&mut connection, compatible, true)
                 .committed()
@@ -5536,7 +6490,7 @@ mod tests {
                 services: Vec::new(),
             }],
         );
-        store.publish(&missing_bytes).unwrap();
+        publish_bytes(&store, &missing_bytes).unwrap();
         assert!(matches!(
             install(&mut connection, missing, true),
             PluginMutationOutcome::GraphRejected(
@@ -5552,7 +6506,7 @@ mod tests {
             )
             .unwrap();
         let (incompatible_bytes, incompatible, _) = package("base-plugin", "2.0.0");
-        store.publish(&incompatible_bytes).unwrap();
+        publish_bytes(&store, &incompatible_bytes).unwrap();
         match install(&mut connection, incompatible, true) {
             PluginMutationOutcome::BlockedByDependents(ids) => {
                 assert_eq!(ids, vec![PluginId::parse("child-plugin").unwrap()])
@@ -5590,7 +6544,7 @@ mod tests {
             (3, now.checked_add(3.hours()).unwrap()),
         ] {
             let retry_at = (failure_count < 3).then(|| failure_now.checked_add(1.hours()).unwrap());
-            failed = update_plugin_bookkeeping(
+            failed = transition_health(
                 &mut connection,
                 PluginBookkeepingUpdate {
                     plugin_id: failed.plugin_id.clone(),
@@ -5624,7 +6578,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap(),
-            revision_after
+            revision_after + 3
         );
 
         connection
@@ -5725,7 +6679,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap(),
-            revision_before
+            revision_before + 3
         );
         crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
     }
@@ -5772,7 +6726,9 @@ mod tests {
             package_generation: plugin.package_generation,
             activation_epoch: plugin.activation_epoch,
             hook_kind: PluginHookKind::HandleEvent,
-            entry_id: PluginId::parse("task-created").unwrap(),
+            entry: PluginManifestEntry::Event {
+                event_id: PluginId::parse("task-created").unwrap(),
+            },
             request_sha256: Sha256Digest::of(b"request"),
             delivery_operation_id: OperationId::new(),
             resync_session: None,
@@ -5780,12 +6736,12 @@ mod tests {
         assert!(
             !reserve_plugin_invocation(&mut connection, reservation.clone(), now)
                 .unwrap()
-                .replayed
+                .replayed()
         );
         assert!(
             reserve_plugin_invocation(&mut connection, reservation.clone(), now)
                 .unwrap()
-                .replayed
+                .replayed()
         );
         let mut changed_reservation = reservation;
         changed_reservation.request_sha256 = Sha256Digest::of(b"changed");
@@ -5846,12 +6802,12 @@ mod tests {
             set: vec![("result/id".to_owned(), task_id.to_string().into_bytes())],
             delete: Vec::new(),
         });
-        assert_eq!(
-            commit_plugin_invocation(&mut connection, combined_effect, now).unwrap_err(),
-            RepositoryError::Conflict
-        );
+        assert!(matches!(
+            plan_plugin_invocation_commit(combined_effect),
+            Err(RepositoryError::Conflict)
+        ));
         assert!(
-            commit_plugin_invocation_with(&mut connection, request.clone(), now, || Err(
+            commit_plugin_invocation_with(&mut connection, plan(request.clone()), now, || Err(
                 RepositoryError::Storage("injected terminal failure".to_owned())
             ),)
             .is_err()
@@ -5877,7 +6833,7 @@ mod tests {
             PluginInvocationState::EffectCommitting
         );
 
-        let committed = commit_plugin_invocation(&mut connection, request, now).unwrap();
+        let committed = commit_plugin_invocation(&mut connection, plan(request), now).unwrap();
         assert_eq!(
             committed.mutation.unwrap().event.revision,
             revision_before as u64 + 1
@@ -5895,6 +6851,314 @@ mod tests {
             RepositoryError::NotFound
         );
         crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+    }
+
+    #[test]
+    fn operator_terminal_receipts_survive_reopen_match_hash_expire_and_roll_back() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_183, 0);
+        let installed = install_fixture(&mut connection, &store, now);
+        let granted = grant_capabilities(
+            &mut connection,
+            &installed,
+            &[Capability::Commands, Capability::Http],
+            now,
+        );
+        let plugin = activate_plugin(&mut connection, &store, &granted, now);
+        let operation_id = OperationId::new();
+        let request = ReservePluginInvocationRequest {
+            operation_id,
+            plugin_id: plugin.plugin_id.clone(),
+            package_generation: plugin.package_generation,
+            activation_epoch: plugin.activation_epoch,
+            hook_kind: PluginHookKind::InvokeCommand,
+            entry: PluginManifestEntry::Command {
+                command_id: PluginId::parse("run").unwrap(),
+            },
+            request_sha256: Sha256Digest::of(b"terminal-read-only"),
+            delivery_operation_id: OperationId::new(),
+            resync_session: None,
+        };
+        reserve_plugin_invocation(&mut connection, request.clone(), now).unwrap();
+        assert!(
+            complete_plugin_invocation_with(
+                &mut connection,
+                operation_id,
+                plugin.plugin_id.clone(),
+                plugin.package_generation,
+                plugin.activation_epoch,
+                now,
+                || Err(RepositoryError::Storage(
+                    "injected receipt rollback".to_owned()
+                )),
+            )
+            .is_err()
+        );
+        assert_eq!(
+            load_invocation(&connection, operation_id).unwrap().state,
+            PluginInvocationState::Reserved
+        );
+        let receipt_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?1",
+                [operation_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(receipt_count, 0);
+        let committed = complete_plugin_invocation(
+            &mut connection,
+            operation_id,
+            plugin.plugin_id.clone(),
+            plugin.package_generation,
+            plugin.activation_epoch,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            committed.terminal_kind,
+            PluginInvocationTerminalKind::ReadOnly
+        );
+        let committed_json = serde_json::to_string(&committed).unwrap();
+        let backup = crate::backup_ops::create_backup(&connection, &profile.path).unwrap();
+        drop(backup);
+        drop(connection);
+
+        let mut connection = profile.connection();
+        let replay = reserve_plugin_invocation(&mut connection, request.clone(), now).unwrap();
+        let terminal = replay.terminal().unwrap();
+        assert!(terminal.replayed);
+        assert_eq!(serde_json::to_string(terminal).unwrap(), committed_json);
+        let mut changed = request.clone();
+        changed.request_sha256 = Sha256Digest::of(b"changed-terminal-request");
+        assert_eq!(
+            reserve_plugin_invocation(&mut connection, changed, now).unwrap_err(),
+            RepositoryError::IdempotencyMismatch
+        );
+
+        let expired = now
+            .checked_add((PLUGIN_INVOCATION_RETENTION_DAYS * 24).hours())
+            .unwrap();
+        let fresh = reserve_plugin_invocation(&mut connection, request, expired).unwrap();
+        assert!(matches!(fresh, ReservedPluginInvocation::Reserved(_)));
+    }
+
+    #[test]
+    fn operator_domain_and_kv_terminal_receipts_replay_typed_results() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_184, 0);
+        let installed = install_fixture(&mut connection, &store, now);
+        let granted = grant_capabilities(
+            &mut connection,
+            &installed,
+            &[
+                Capability::Commands,
+                Capability::Http,
+                Capability::TasksWrite,
+                Capability::Storage,
+            ],
+            now,
+        );
+        let plugin = activate_plugin(&mut connection, &store, &granted, now);
+        let reservation = |operation_id, hash: &'static [u8]| ReservePluginInvocationRequest {
+            operation_id,
+            plugin_id: plugin.plugin_id.clone(),
+            package_generation: plugin.package_generation,
+            activation_epoch: plugin.activation_epoch,
+            hook_kind: PluginHookKind::InvokeCommand,
+            entry: PluginManifestEntry::Command {
+                command_id: PluginId::parse("run").unwrap(),
+            },
+            request_sha256: Sha256Digest::of(hash),
+            delivery_operation_id: OperationId::new(),
+            resync_session: None,
+        };
+
+        let domain_operation = OperationId::new();
+        let domain_reservation = reservation(domain_operation, b"domain-terminal");
+        reserve_plugin_invocation(&mut connection, domain_reservation.clone(), now).unwrap();
+        transition_plugin_invocation(
+            &mut connection,
+            TransitionPluginInvocationRequest {
+                operation_id: domain_operation,
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                expected_state: PluginInvocationState::Reserved,
+                next_state: PluginInvocationState::EffectCommitting,
+            },
+            now,
+        )
+        .unwrap();
+        let task_id = TaskId::new();
+        let domain = commit_plugin_invocation(
+            &mut connection,
+            plan(CommitPluginInvocationRequest {
+                invocation_operation_id: domain_operation,
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                child_operation_id: Some(OperationId::new()),
+                domain_effect: Some(PluginDomainEffect::CreateTask {
+                    task_id,
+                    draft: TaskDraft::new(TaskTitle::new("Typed terminal").unwrap()),
+                }),
+                kv_patch: None,
+                resync_kv: None,
+                cursor: None,
+                resync_session: None,
+            }),
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            domain.terminal_kind,
+            PluginInvocationTerminalKind::DomainEffect
+        );
+        assert!(domain.mutation.as_ref().unwrap().newly_committed);
+        let replay = reserve_plugin_invocation(&mut connection, domain_reservation, now).unwrap();
+        let replay = replay.terminal().unwrap();
+        assert_eq!(
+            replay.terminal_kind,
+            PluginInvocationTerminalKind::DomainEffect
+        );
+        assert!(!replay.mutation.as_ref().unwrap().newly_committed);
+        assert_eq!(replay.mutation, domain.mutation);
+
+        let kv_operation = OperationId::new();
+        let kv_reservation = reservation(kv_operation, b"kv-terminal");
+        reserve_plugin_invocation(&mut connection, kv_reservation.clone(), now).unwrap();
+        transition_plugin_invocation(
+            &mut connection,
+            TransitionPluginInvocationRequest {
+                operation_id: kv_operation,
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                expected_state: PluginInvocationState::Reserved,
+                next_state: PluginInvocationState::EffectCommitting,
+            },
+            now,
+        )
+        .unwrap();
+        let kv = commit_plugin_invocation(
+            &mut connection,
+            plan(CommitPluginInvocationRequest {
+                invocation_operation_id: kv_operation,
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                child_operation_id: None,
+                domain_effect: None,
+                kv_patch: Some(PluginKvPatch {
+                    set: vec![("result/value".to_owned(), vec![1, 2, 3])],
+                    delete: Vec::new(),
+                }),
+                resync_kv: None,
+                cursor: None,
+                resync_session: None,
+            }),
+            now,
+        )
+        .unwrap();
+        assert_eq!(kv.terminal_kind, PluginInvocationTerminalKind::Kv);
+        assert!(kv.mutation.is_none());
+        let mut expected_kv_replay = kv.clone();
+        expected_kv_replay.replayed = true;
+        assert_eq!(
+            reserve_plugin_invocation(&mut connection, kv_reservation.clone(), now)
+                .unwrap()
+                .terminal()
+                .unwrap(),
+            &expected_kv_replay
+        );
+        let mut changed_kv = kv_reservation.clone();
+        changed_kv.request_sha256 = Sha256Digest::of(b"changed-kv-terminal");
+        assert_eq!(
+            reserve_plugin_invocation(&mut connection, changed_kv, now).unwrap_err(),
+            RepositoryError::IdempotencyMismatch
+        );
+
+        let http_operation = OperationId::new();
+        let http_reservation = reservation(http_operation, b"http-terminal");
+        reserve_plugin_invocation(&mut connection, http_reservation.clone(), now).unwrap();
+        transition_plugin_invocation(
+            &mut connection,
+            TransitionPluginInvocationRequest {
+                operation_id: http_operation,
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                expected_state: PluginInvocationState::Reserved,
+                next_state: PluginInvocationState::DispatchingHttp,
+            },
+            now,
+        )
+        .unwrap();
+        let http = commit_plugin_invocation(
+            &mut connection,
+            plan(CommitPluginInvocationRequest {
+                invocation_operation_id: http_operation,
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                child_operation_id: None,
+                domain_effect: None,
+                kv_patch: None,
+                resync_kv: None,
+                cursor: None,
+                resync_session: None,
+            }),
+            now,
+        )
+        .unwrap();
+        assert_eq!(http.terminal_kind, PluginInvocationTerminalKind::Http);
+        let mut expected_http_replay = http.clone();
+        expected_http_replay.replayed = true;
+        assert_eq!(
+            reserve_plugin_invocation(&mut connection, http_reservation.clone(), now)
+                .unwrap()
+                .terminal()
+                .unwrap(),
+            &expected_http_replay
+        );
+        let mut changed_http = http_reservation.clone();
+        changed_http.request_sha256 = Sha256Digest::of(b"changed-http-terminal");
+        assert_eq!(
+            reserve_plugin_invocation(&mut connection, changed_http, now).unwrap_err(),
+            RepositoryError::IdempotencyMismatch
+        );
+        let backup = crate::backup_ops::create_backup(&connection, &profile.path).unwrap();
+        drop(backup);
+
+        let expired = now
+            .checked_add((PLUGIN_INVOCATION_RETENTION_DAYS * 24).hours())
+            .unwrap();
+        assert!(
+            reserve_plugin_invocation(&mut connection, http_reservation.clone(), expired)
+                .unwrap()
+                .invocation()
+                .is_some()
+        );
+        complete_plugin_invocation(
+            &mut connection,
+            http_operation,
+            plugin.plugin_id.clone(),
+            plugin.package_generation,
+            plugin.activation_epoch,
+            expired,
+        )
+        .unwrap();
+        assert!(
+            reserve_plugin_invocation(&mut connection, kv_reservation, expired)
+                .unwrap()
+                .invocation()
+                .is_some()
+        );
     }
 
     #[test]
@@ -5921,7 +7185,9 @@ mod tests {
                 package_generation: plugin.package_generation,
                 activation_epoch: plugin.activation_epoch,
                 hook_kind: PluginHookKind::HandleEvent,
-                entry_id: PluginId::parse("task-created").unwrap(),
+                entry: PluginManifestEntry::Event {
+                    event_id: PluginId::parse("task-created").unwrap(),
+                },
                 request_sha256: Sha256Digest::of(b"receipt-replay-event"),
                 delivery_operation_id: OperationId::new(),
                 resync_session: None,
@@ -5983,7 +7249,7 @@ mod tests {
             draft: TaskDraft::new(TaskTitle::new("Changed task").unwrap()),
         });
         assert_eq!(
-            commit_plugin_invocation(&mut connection, changed, now).unwrap_err(),
+            commit_plugin_invocation(&mut connection, plan(changed), now).unwrap_err(),
             RepositoryError::IdempotencyMismatch
         );
         assert_eq!(
@@ -5997,7 +7263,7 @@ mod tests {
             PluginInvocationState::EffectCommitting
         );
 
-        let committed = commit_plugin_invocation(&mut connection, request, now).unwrap();
+        let committed = commit_plugin_invocation(&mut connection, plan(request), now).unwrap();
         assert!(!committed.mutation.unwrap().newly_committed);
         assert_eq!(committed.cursor.unwrap().revision, revision_after_effect);
         assert_eq!(
@@ -6047,7 +7313,9 @@ mod tests {
                 package_generation: plugin.package_generation,
                 activation_epoch: plugin.activation_epoch,
                 hook_kind: PluginHookKind::HandleEvent,
-                entry_id: PluginId::parse("task-created").unwrap(),
+                entry: PluginManifestEntry::Event {
+                    event_id: PluginId::parse("task-created").unwrap(),
+                },
                 request_sha256: Sha256Digest::of(b"event"),
                 delivery_operation_id: OperationId::new(),
                 resync_session: None,
@@ -6105,7 +7373,7 @@ mod tests {
             resync_session: None,
         };
         assert!(
-            commit_plugin_invocation_with(&mut connection, request.clone(), now, || Err(
+            commit_plugin_invocation_with(&mut connection, plan(request.clone()), now, || Err(
                 RepositoryError::Storage("injected HTTP terminal failure".to_owned())
             ),)
             .is_err()
@@ -6119,7 +7387,7 @@ mod tests {
             PluginInvocationState::DispatchingHttp
         );
 
-        let committed = commit_plugin_invocation(&mut connection, request, now).unwrap();
+        let committed = commit_plugin_invocation(&mut connection, plan(request), now).unwrap();
         assert_eq!(committed.cursor.unwrap().revision, head);
         assert!(committed.mutation.is_none());
         assert_eq!(
@@ -6433,7 +7701,9 @@ mod tests {
                 package_generation: plugin.package_generation,
                 activation_epoch: plugin.activation_epoch,
                 hook_kind: PluginHookKind::HandleEvent,
-                entry_id: PluginId::parse("task-created").unwrap(),
+                entry: PluginManifestEntry::Event {
+                    event_id: PluginId::parse("task-created").unwrap(),
+                },
                 request_sha256: Sha256Digest::of(b"retention-loss-http"),
                 delivery_operation_id: delivery_operation,
                 resync_session: None,
@@ -6514,7 +7784,9 @@ mod tests {
             package_generation: resyncing.package_generation,
             activation_epoch: resyncing.activation_epoch,
             hook_kind: PluginHookKind::HandleEvent,
-            entry_id: PluginId::parse("task-created").unwrap(),
+            entry: PluginManifestEntry::Event {
+                event_id: PluginId::parse("task-created").unwrap(),
+            },
             request_sha256: Sha256Digest::of(b"retained-event"),
             delivery_operation_id: OperationId::new(),
             resync_session: None,
@@ -6543,20 +7815,53 @@ mod tests {
                 package_generation: resyncing.package_generation,
                 activation_epoch: resyncing.activation_epoch,
                 hook_kind: PluginHookKind::Resync,
-                entry_id: PluginId::parse("resync").unwrap(),
+                entry: PluginManifestEntry::Resync,
                 request_sha256: plugin_resync_request_hash(&session),
                 delivery_operation_id: OperationId::new(),
-                resync_session: Some(session),
+                resync_session: Some(session.clone()),
             },
             now,
         )
         .unwrap();
-        complete_plugin_invocation(
+        let invocation = resync_invocation.invocation().unwrap().clone();
+        transition_plugin_invocation(
             &mut connection,
-            resync_invocation.invocation.operation_id,
-            resync_invocation.invocation.plugin_id,
-            resync_invocation.invocation.package_generation,
-            resync_invocation.invocation.activation_epoch,
+            TransitionPluginInvocationRequest {
+                operation_id: invocation.operation_id,
+                plugin_id: invocation.plugin_id.clone(),
+                package_generation: invocation.package_generation,
+                activation_epoch: invocation.activation_epoch,
+                expected_state: PluginInvocationState::Reserved,
+                next_state: PluginInvocationState::EffectCommitting,
+            },
+            now,
+        )
+        .unwrap();
+        commit_plugin_invocation(
+            &mut connection,
+            plan(CommitPluginInvocationRequest {
+                invocation_operation_id: invocation.operation_id,
+                plugin_id: invocation.plugin_id.clone(),
+                package_generation: invocation.package_generation,
+                activation_epoch: invocation.activation_epoch,
+                child_operation_id: None,
+                domain_effect: None,
+                kv_patch: None,
+                resync_kv: Some(PluginResyncKvCommit::Leave),
+                cursor: Some(AdvancePluginCursorRequest {
+                    plugin_id: invocation.plugin_id,
+                    package_generation: invocation.package_generation,
+                    activation_epoch: invocation.activation_epoch,
+                    expected: session.expected_cursor.clone(),
+                    next: PluginCursorPosition {
+                        event_epoch: session.snapshot_event_epoch.clone(),
+                        revision: session.snapshot_revision,
+                        resync_required: false,
+                    },
+                }),
+                resync_session: Some(session),
+            }),
+            now,
         )
         .unwrap();
         assert_eq!(
@@ -6643,7 +7948,7 @@ mod tests {
             package_generation: plugin.package_generation,
             activation_epoch: plugin.activation_epoch,
             hook_kind: PluginHookKind::Resync,
-            entry_id: PluginId::parse("resync").unwrap(),
+            entry: PluginManifestEntry::Resync,
             request_sha256: plugin_resync_request_hash(&session),
             delivery_operation_id: OperationId::new(),
             resync_session: Some(session.clone()),
@@ -6673,7 +7978,7 @@ mod tests {
         .unwrap();
         let committed = commit_plugin_invocation(
             &mut connection,
-            CommitPluginInvocationRequest {
+            plan(CommitPluginInvocationRequest {
                 invocation_operation_id: operation_id,
                 plugin_id: plugin.plugin_id.clone(),
                 package_generation: plugin.package_generation,
@@ -6697,7 +8002,7 @@ mod tests {
                     },
                 }),
                 resync_session: Some(session),
-            },
+            }),
             now,
         )
         .unwrap();
@@ -6749,7 +8054,9 @@ mod tests {
             package_generation: plugin.package_generation,
             activation_epoch: plugin.activation_epoch,
             hook_kind: PluginHookKind::InvokeCommand,
-            entry_id: PluginId::parse("run").unwrap(),
+            entry: PluginManifestEntry::Command {
+                command_id: PluginId::parse("run").unwrap(),
+            },
             request_sha256: Sha256Digest::of(operation_id.to_string().as_bytes()),
             delivery_operation_id: OperationId::new(),
             resync_session: None,
@@ -6769,8 +8076,6 @@ mod tests {
             now,
         )
         .unwrap();
-        let abandoned = OperationId::new();
-        reserve_plugin_invocation(&mut connection, reserve(abandoned), now).unwrap();
         let revision_before: i64 = connection
             .query_row(
                 "SELECT global_revision FROM app_state WHERE singleton = 1",
@@ -6783,13 +8088,10 @@ mod tests {
         let ambiguous = load_invocation(&connection, http_operation).unwrap();
         assert_eq!(ambiguous.state, PluginInvocationState::AmbiguousHttp);
         assert_eq!(ambiguous.error_code.as_deref(), Some("http_ambiguous"));
-        assert_eq!(
-            load_invocation(&connection, abandoned).unwrap_err(),
-            RepositoryError::NotFound
-        );
         let starting = get_installed_plugin(&connection, plugin.plugin_id).unwrap();
-        let active = update_plugin_bookkeeping(
+        transition_plugin_health(
             &mut connection,
+            OperationId::new(),
             PluginBookkeepingUpdate {
                 plugin_id: starting.plugin_id.clone(),
                 package_generation: starting.package_generation,
@@ -6801,6 +8103,7 @@ mod tests {
             now,
         )
         .unwrap();
+        let active = get_installed_plugin(&connection, starting.plugin_id).unwrap();
         let retry = transition_plugin_invocation(
             &mut connection,
             TransitionPluginInvocationRequest {
@@ -6822,6 +8125,7 @@ mod tests {
             retry.plugin_id,
             retry.package_generation,
             retry.activation_epoch,
+            now,
         )
         .unwrap();
         assert!(list_plugin_invocations(&connection).unwrap().is_empty());
@@ -6833,7 +8137,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap(),
-            revision_before
+            revision_before + 1
         );
     }
 
@@ -6868,7 +8172,9 @@ mod tests {
                 package_generation: plugin.package_generation,
                 activation_epoch: plugin.activation_epoch,
                 hook_kind: PluginHookKind::InvokeCommand,
-                entry_id: PluginId::parse("run").unwrap(),
+                entry: PluginManifestEntry::Command {
+                    command_id: PluginId::parse("run").unwrap(),
+                },
                 request_sha256: Sha256Digest::of(b"host-failure-http"),
                 delivery_operation_id,
                 resync_session: None,
@@ -6890,7 +8196,7 @@ mod tests {
         )
         .unwrap();
         let retry_at = now.checked_add(1.hours()).unwrap();
-        let degraded = update_plugin_bookkeeping(
+        let degraded = transition_health(
             &mut connection,
             PluginBookkeepingUpdate {
                 plugin_id: plugin.plugin_id.clone(),
@@ -6943,7 +8249,7 @@ mod tests {
         .unwrap();
         commit_plugin_invocation(
             &mut connection,
-            CommitPluginInvocationRequest {
+            plan(CommitPluginInvocationRequest {
                 invocation_operation_id: operation_id,
                 plugin_id: degraded.plugin_id,
                 package_generation: degraded.package_generation,
@@ -6954,7 +8260,7 @@ mod tests {
                 resync_kv: None,
                 cursor: None,
                 resync_session: None,
-            },
+            }),
             retry_at,
         )
         .unwrap();
@@ -6970,7 +8276,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap(),
-            revision_before
+            revision_before + 1
         );
     }
 
@@ -6997,7 +8303,9 @@ mod tests {
                 package_generation: plugin.package_generation,
                 activation_epoch: plugin.activation_epoch,
                 hook_kind: PluginHookKind::InvokeCommand,
-                entry_id: PluginId::parse("run").unwrap(),
+                entry: PluginManifestEntry::Command {
+                    command_id: PluginId::parse("run").unwrap(),
+                },
                 request_sha256: Sha256Digest::of(b"revoked-http"),
                 delivery_operation_id: OperationId::new(),
                 resync_session: None,
@@ -7019,7 +8327,7 @@ mod tests {
         )
         .unwrap();
         let retry_at = now.checked_add(1.hours()).unwrap();
-        let degraded = update_plugin_bookkeeping(
+        let degraded = transition_health(
             &mut connection,
             PluginBookkeepingUpdate {
                 plugin_id: plugin.plugin_id.clone(),
@@ -7087,14 +8395,10 @@ mod tests {
             RepositoryError::Conflict
         );
         crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
-        complete_plugin_invocation(
-            &mut connection,
-            operation_id,
-            disabled.plugin_id,
-            disabled.package_generation,
-            disabled.activation_epoch,
-        )
-        .unwrap();
+        assert_eq!(
+            load_invocation(&connection, operation_id).unwrap().state,
+            PluginInvocationState::AmbiguousHttp
+        );
     }
 
     #[test]
@@ -7120,7 +8424,9 @@ mod tests {
                 package_generation: plugin.package_generation,
                 activation_epoch: plugin.activation_epoch,
                 hook_kind: PluginHookKind::InvokeCommand,
-                entry_id: PluginId::parse("run").unwrap(),
+                entry: PluginManifestEntry::Command {
+                    command_id: PluginId::parse("run").unwrap(),
+                },
                 request_sha256: Sha256Digest::of(b"http"),
                 delivery_operation_id: OperationId::new(),
                 resync_session: None,
@@ -7141,38 +8447,13 @@ mod tests {
             now,
         )
         .unwrap();
-        let recent_operation_id = OperationId::new();
-        let recent_delivery_id = OperationId::new();
-        let recent_now = now.checked_add(24.hours()).unwrap();
-        reserve_plugin_invocation(
-            &mut connection,
-            ReservePluginInvocationRequest {
-                operation_id: recent_operation_id,
-                plugin_id: plugin.plugin_id.clone(),
-                package_generation: plugin.package_generation,
-                activation_epoch: plugin.activation_epoch,
-                hook_kind: PluginHookKind::InvokeCommand,
-                entry_id: PluginId::parse("run").unwrap(),
-                request_sha256: Sha256Digest::of(b"recent-http"),
-                delivery_operation_id: recent_delivery_id,
-                resync_session: None,
-            },
-            recent_now,
-        )
-        .unwrap();
-        transition_plugin_invocation(
-            &mut connection,
-            TransitionPluginInvocationRequest {
-                operation_id: recent_operation_id,
-                plugin_id: plugin.plugin_id.clone(),
-                package_generation: plugin.package_generation,
-                activation_epoch: plugin.activation_epoch,
-                expected_state: PluginInvocationState::Reserved,
-                next_state: PluginInvocationState::DispatchingHttp,
-            },
-            recent_now,
-        )
-        .unwrap();
+        let revision_before: i64 = connection
+            .query_row(
+                "SELECT global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         let later = now.checked_add((30 * 24 + 12).hours()).unwrap();
         let result = reconcile_packages(&mut connection, &store, later).unwrap();
         assert_eq!(result.disabled, vec![plugin.plugin_id.clone()]);
@@ -7184,10 +8465,250 @@ mod tests {
             load_invocation(&connection, operation_id).unwrap_err(),
             RepositoryError::NotFound
         );
-        let retained = load_invocation(&connection, recent_operation_id).unwrap();
-        assert_eq!(retained.state, PluginInvocationState::AmbiguousHttp);
-        assert_eq!(retained.delivery_operation_id, recent_delivery_id);
-        assert_eq!(retained.activation_epoch, suspended.activation_epoch);
+        assert!(list_plugin_invocations(&connection).unwrap().is_empty());
+        let revision_after: i64 = connection
+            .query_row(
+                "SELECT global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(revision_after, revision_before + 1);
+        let event_type: String = connection
+            .query_row(
+                "SELECT event_type FROM events WHERE revision = ?1",
+                [revision_after],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_type, EventType::PLUGIN_HEALTH_CHANGED);
+        reconcile_packages(&mut connection, &store, later).unwrap();
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT global_revision FROM app_state WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            revision_after
+        );
+    }
+
+    #[test]
+    fn concurrent_reservation_and_ambiguous_retry_share_one_active_gate() {
+        use std::sync::{Arc, Barrier};
+
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_194, 0);
+        let installed = install_fixture(&mut connection, &store, now);
+        let granted = grant_capabilities(
+            &mut connection,
+            &installed,
+            &[Capability::Commands, Capability::Http],
+            now,
+        );
+        let plugin = activate_plugin(&mut connection, &store, &granted, now);
+        drop(connection);
+
+        let request = |operation_id| ReservePluginInvocationRequest {
+            operation_id,
+            plugin_id: plugin.plugin_id.clone(),
+            package_generation: plugin.package_generation,
+            activation_epoch: plugin.activation_epoch,
+            hook_kind: PluginHookKind::InvokeCommand,
+            entry: PluginManifestEntry::Command {
+                command_id: PluginId::parse("run").unwrap(),
+            },
+            request_sha256: Sha256Digest::of(operation_id.to_string().as_bytes()),
+            delivery_operation_id: OperationId::new(),
+            resync_session: None,
+        };
+        let first = request(OperationId::new());
+        let second = request(OperationId::new());
+        let database = profile.path.join("junban.sqlite3");
+        let connections = [
+            crate::open_connection(&database).unwrap(),
+            crate::open_connection(&database).unwrap(),
+        ];
+        let barrier = Arc::new(Barrier::new(3));
+        let mut handles = Vec::new();
+        for (mut connection, candidate) in
+            connections.into_iter().zip([first.clone(), second.clone()])
+        {
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                reserve_plugin_invocation(&mut connection, candidate, now)
+            }));
+        }
+        barrier.wait();
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(RepositoryError::Conflict)))
+                .count(),
+            1
+        );
+        let winner = if results[0].is_ok() { first } else { second };
+        let mut connection = profile.connection();
+        transition_plugin_invocation(
+            &mut connection,
+            TransitionPluginInvocationRequest {
+                operation_id: winner.operation_id,
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                expected_state: PluginInvocationState::Reserved,
+                next_state: PluginInvocationState::DispatchingHttp,
+            },
+            now,
+        )
+        .unwrap();
+        transition_plugin_invocation(
+            &mut connection,
+            TransitionPluginInvocationRequest {
+                operation_id: winner.operation_id,
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                expected_state: PluginInvocationState::DispatchingHttp,
+                next_state: PluginInvocationState::AmbiguousHttp,
+            },
+            now,
+        )
+        .unwrap();
+        let newcomer = request(OperationId::new());
+        reserve_plugin_invocation(&mut connection, newcomer.clone(), now).unwrap();
+        assert_eq!(
+            transition_plugin_invocation(
+                &mut connection,
+                TransitionPluginInvocationRequest {
+                    operation_id: winner.operation_id,
+                    plugin_id: plugin.plugin_id.clone(),
+                    package_generation: plugin.package_generation,
+                    activation_epoch: plugin.activation_epoch,
+                    expected_state: PluginInvocationState::AmbiguousHttp,
+                    next_state: PluginInvocationState::DispatchingHttp,
+                },
+                now,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        complete_plugin_invocation(
+            &mut connection,
+            newcomer.operation_id,
+            plugin.plugin_id.clone(),
+            plugin.package_generation,
+            plugin.activation_epoch,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            transition_plugin_invocation(
+                &mut connection,
+                TransitionPluginInvocationRequest {
+                    operation_id: winner.operation_id,
+                    plugin_id: plugin.plugin_id,
+                    package_generation: plugin.package_generation,
+                    activation_epoch: plugin.activation_epoch,
+                    expected_state: PluginInvocationState::AmbiguousHttp,
+                    next_state: PluginInvocationState::DispatchingHttp,
+                },
+                now,
+            )
+            .unwrap()
+            .state,
+            PluginInvocationState::DispatchingHttp
+        );
+    }
+
+    #[test]
+    fn terminalization_and_exact_retry_race_cannot_reinsert_an_invocation() {
+        use std::sync::{Arc, Barrier};
+
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_193, 0);
+        let installed = install_fixture(&mut connection, &store, now);
+        let granted = grant_capabilities(&mut connection, &installed, &[Capability::Commands], now);
+        let plugin = activate_plugin(&mut connection, &store, &granted, now);
+        let database = profile.path.join("junban.sqlite3");
+
+        for iteration in 0..24 {
+            let operation_id = OperationId::new();
+            let request = ReservePluginInvocationRequest {
+                operation_id,
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                hook_kind: PluginHookKind::InvokeCommand,
+                entry: PluginManifestEntry::Command {
+                    command_id: PluginId::parse("run").unwrap(),
+                },
+                request_sha256: Sha256Digest::of(format!("terminal-race-{iteration}").as_bytes()),
+                delivery_operation_id: OperationId::new(),
+                resync_session: None,
+            };
+            reserve_plugin_invocation(&mut connection, request.clone(), now).unwrap();
+
+            let complete_connection = crate::open_connection(&database).unwrap();
+            let retry_connection = crate::open_connection(&database).unwrap();
+            let barrier = Arc::new(Barrier::new(3));
+            let complete_barrier = Arc::clone(&barrier);
+            let complete_plugin = plugin.clone();
+            let complete = std::thread::spawn(move || {
+                let mut connection = complete_connection;
+                complete_barrier.wait();
+                complete_plugin_invocation(
+                    &mut connection,
+                    operation_id,
+                    complete_plugin.plugin_id,
+                    complete_plugin.package_generation,
+                    complete_plugin.activation_epoch,
+                    now,
+                )
+            });
+            let retry_barrier = Arc::clone(&barrier);
+            let retry_request = request.clone();
+            let retry = std::thread::spawn(move || {
+                let mut connection = retry_connection;
+                retry_barrier.wait();
+                reserve_plugin_invocation(&mut connection, retry_request, now)
+            });
+            barrier.wait();
+            complete.join().unwrap().unwrap();
+            assert!(matches!(
+                retry.join().unwrap().unwrap(),
+                ReservedPluginInvocation::InFlightReplay(_)
+                    | ReservedPluginInvocation::TerminalReplay(_)
+            ));
+
+            let terminal = reserve_plugin_invocation(&mut connection, request, now).unwrap();
+            assert!(matches!(
+                terminal,
+                ReservedPluginInvocation::TerminalReplay(_)
+            ));
+            assert_eq!(
+                connection
+                    .query_row::<i64, _, _>(
+                        "SELECT COUNT(*) FROM plugin_invocations WHERE operation_id = ?1",
+                        [operation_id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .unwrap(),
+                0
+            );
+        }
     }
 
     #[test]
@@ -7197,7 +8718,12 @@ mod tests {
         let store = PluginPackageStore::open(&profile.path).unwrap();
         let now = Timestamp::constant(1_800_000_195, 0);
         let installed = install_fixture(&mut connection, &store, now);
-        let granted = grant_capabilities(&mut connection, &installed, &[Capability::Commands], now);
+        let granted = grant_capabilities(
+            &mut connection,
+            &installed,
+            &[Capability::Commands, Capability::Http],
+            now,
+        );
         let plugin = activate_plugin(&mut connection, &store, &granted, now);
         let revision_before: i64 = connection
             .query_row(
@@ -7212,43 +8738,56 @@ mod tests {
             package_generation: plugin.package_generation,
             activation_epoch: plugin.activation_epoch,
             hook_kind: PluginHookKind::InvokeCommand,
-            entry_id: PluginId::parse("run").unwrap(),
+            entry: PluginManifestEntry::Command {
+                command_id: PluginId::parse("run").unwrap(),
+            },
             request_sha256: Sha256Digest::of(operation_id.to_string().as_bytes()),
             delivery_operation_id: OperationId::new(),
             resync_session: None,
         };
-        let mut operations = Vec::new();
-        for _ in 0..PLUGIN_INVOCATIONS_PER_PLUGIN_MAX {
-            let operation_id = OperationId::new();
-            reserve_plugin_invocation(&mut connection, reserve(operation_id), now).unwrap();
-            operations.push(operation_id);
-        }
+        reserve_plugin_invocation(&mut connection, reserve(OperationId::new()), now).unwrap();
+        assert_eq!(list_plugin_invocations(&connection).unwrap().len(), 1);
+        let later = now.checked_add((31 * 24).hours()).unwrap();
+        let current = OperationId::new();
+        reserve_plugin_invocation(&mut connection, reserve(current), later).unwrap();
+        assert_eq!(list_plugin_invocations(&connection).unwrap().len(), 1);
         complete_plugin_invocation(
             &mut connection,
-            operations[0],
+            current,
             plugin.plugin_id.clone(),
             plugin.package_generation,
             plugin.activation_epoch,
+            later,
         )
         .unwrap();
-        reserve_plugin_invocation(&mut connection, reserve(OperationId::new()), now).unwrap();
-        assert_eq!(
-            list_plugin_invocations(&connection).unwrap().len(),
-            PLUGIN_INVOCATIONS_PER_PLUGIN_MAX
-        );
-        let later = now.checked_add((31 * 24).hours()).unwrap();
-        reserve_plugin_invocation(&mut connection, reserve(OperationId::new()), later).unwrap();
+        reserve_ambiguous(&mut connection, reserve(OperationId::new()), later);
         assert_eq!(list_plugin_invocations(&connection).unwrap().len(), 1);
         for _ in 1..PLUGIN_INVOCATIONS_PER_PLUGIN_MAX {
-            reserve_plugin_invocation(&mut connection, reserve(OperationId::new()), later).unwrap();
+            reserve_ambiguous(&mut connection, reserve(OperationId::new()), later);
         }
+        let limit_operation = OperationId::new();
+        let limit_request = reserve(limit_operation);
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, reserve(OperationId::new()), later)
-                .unwrap_err(),
+            reserve_plugin_invocation(&mut connection, limit_request.clone(), later).unwrap_err(),
             RepositoryError::OperationTooLarge
         );
-        assert!(list_plugin_invocations(&connection).unwrap().is_empty());
+        assert_eq!(
+            reserve_plugin_invocation(&mut connection, limit_request.clone(), later).unwrap_err(),
+            RepositoryError::OperationTooLarge
+        );
+        let mut changed_limit = limit_request;
+        changed_limit.request_sha256 = Sha256Digest::of(b"changed-resource-limit");
+        assert_eq!(
+            reserve_plugin_invocation(&mut connection, changed_limit, later).unwrap_err(),
+            RepositoryError::IdempotencyMismatch
+        );
         let suspended = get_installed_plugin(&connection, plugin.plugin_id).unwrap();
+        let retained = list_plugin_invocations(&connection).unwrap();
+        assert_eq!(retained.len(), PLUGIN_INVOCATIONS_PER_PLUGIN_MAX);
+        assert!(retained.iter().all(|invocation| {
+            invocation.state == PluginInvocationState::AmbiguousHttp
+                && invocation.activation_epoch == suspended.activation_epoch
+        }));
         assert!(!suspended.desired_enabled);
         assert_eq!(suspended.runtime_state, PluginRuntimeState::Suspended);
         assert_eq!(suspended.failure_count, 3);
@@ -7261,11 +8800,11 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(revision, revision_before);
+        assert_eq!(revision, revision_before + 1);
     }
 
     #[test]
-    fn failure_bookkeeping_auto_disables_and_fences_without_global_revision() {
+    fn material_health_transitions_emit_revisions_while_bookkeeping_does_not() {
         let profile = TestProfile::new();
         let mut connection = profile.connection();
         let store = PluginPackageStore::open(&profile.path).unwrap();
@@ -7290,12 +8829,39 @@ mod tests {
             )
             .unwrap();
         let retry_at = now.checked_add(1.hours()).unwrap();
+        let first_operation = OperationId::new();
+        let first_update = PluginBookkeepingUpdate {
+            plugin_id: plugin.plugin_id.clone(),
+            package_generation: plugin.package_generation,
+            activation_epoch: plugin.activation_epoch,
+            failure_count: 1,
+            last_error_code: Some("timeout".to_owned()),
+            next_retry_at: Some(retry_at),
+        };
+        let first =
+            transition_plugin_health(&mut connection, first_operation, first_update.clone(), now)
+                .unwrap();
+        assert!(first.newly_committed);
+        let replay =
+            transition_plugin_health(&mut connection, first_operation, first_update.clone(), now)
+                .unwrap();
+        assert!(!replay.newly_committed);
+        let mut changed = first_update;
+        changed.last_error_code = Some("changed_timeout".to_owned());
+        assert_eq!(
+            transition_plugin_health(&mut connection, first_operation, changed, now).unwrap_err(),
+            RepositoryError::IdempotencyMismatch
+        );
+        let degraded = get_installed_plugin(&connection, plugin.plugin_id.clone()).unwrap();
+        assert_eq!(degraded.runtime_state, PluginRuntimeState::Degraded);
+        assert!(degraded.desired_enabled);
+        assert_eq!(degraded.activation_epoch, plugin.activation_epoch + 1);
         let degraded = update_plugin_bookkeeping(
             &mut connection,
             PluginBookkeepingUpdate {
-                plugin_id: plugin.plugin_id.clone(),
-                package_generation: plugin.package_generation,
-                activation_epoch: plugin.activation_epoch,
+                plugin_id: degraded.plugin_id,
+                package_generation: degraded.package_generation,
+                activation_epoch: degraded.activation_epoch,
                 failure_count: 1,
                 last_error_code: Some("timeout".to_owned()),
                 next_retry_at: Some(retry_at),
@@ -7303,11 +8869,18 @@ mod tests {
             now,
         )
         .unwrap();
-        assert_eq!(degraded.runtime_state, PluginRuntimeState::Degraded);
-        assert!(degraded.desired_enabled);
-        assert_eq!(degraded.activation_epoch, plugin.activation_epoch + 1);
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT global_revision FROM app_state WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            revision + 1
+        );
         let second_retry_at = retry_at.checked_add(2.hours()).unwrap();
-        let degraded_again = update_plugin_bookkeeping(
+        let degraded_again = transition_health(
             &mut connection,
             PluginBookkeepingUpdate {
                 plugin_id: degraded.plugin_id.clone(),
@@ -7325,7 +8898,7 @@ mod tests {
             degraded.activation_epoch + 1
         );
         assert_eq!(degraded_again.runtime_state, PluginRuntimeState::Failed);
-        let failed = update_plugin_bookkeeping(
+        let failed = transition_health(
             &mut connection,
             PluginBookkeepingUpdate {
                 plugin_id: degraded_again.plugin_id.clone(),
@@ -7373,7 +8946,28 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap(),
-            revision
+            revision + 3
+        );
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT COUNT(*) FROM events WHERE event_type = ?1",
+                    [EventType::PLUGIN_HEALTH_CHANGED],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT COUNT(*) FROM operation_receipts
+                     WHERE request_json LIKE '%\"op\":\"transition_plugin_health\"%'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            3
         );
         let retried = retry_plugin(
             &mut connection,
@@ -7383,7 +8977,7 @@ mod tests {
             second_retry_at,
         )
         .unwrap();
-        assert_eq!(retried.event.revision, revision as u64 + 1);
+        assert_eq!(retried.event.revision, revision as u64 + 4);
         let retried =
             get_installed_plugin(&connection, PluginId::parse("test-plugin").unwrap()).unwrap();
         assert!(retried.desired_enabled);
@@ -7408,7 +9002,7 @@ mod tests {
         .unwrap();
         let active = get_installed_plugin(&connection, installed.plugin_id).unwrap();
         let retry_at = now.checked_add(2.hours()).unwrap();
-        let degraded = update_plugin_bookkeeping(
+        let degraded = transition_health(
             &mut connection,
             PluginBookkeepingUpdate {
                 plugin_id: active.plugin_id.clone(),
@@ -7452,10 +9046,11 @@ mod tests {
             .unwrap_err(),
             RepositoryError::Conflict
         );
-        let resyncing = update_plugin_bookkeeping(
+        transition_plugin_health(
             &mut connection,
+            OperationId::new(),
             PluginBookkeepingUpdate {
-                plugin_id: recovered.plugin_id,
+                plugin_id: recovered.plugin_id.clone(),
                 package_generation: recovered.package_generation,
                 activation_epoch: recovered.activation_epoch,
                 failure_count: 0,
@@ -7465,8 +9060,9 @@ mod tests {
             retry_at,
         )
         .unwrap();
+        let resyncing = get_installed_plugin(&connection, recovered.plugin_id).unwrap();
         assert_eq!(resyncing.runtime_state, PluginRuntimeState::Starting);
-        assert_eq!(resyncing.activation_epoch, recovered.activation_epoch);
+        assert_eq!(resyncing.activation_epoch, recovered.activation_epoch + 1);
         assert_eq!(
             connection
                 .query_row::<i64, _, _>(
@@ -7475,7 +9071,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap(),
-            revision_before
+            revision_before + 1
         );
     }
 
@@ -7542,7 +9138,9 @@ mod tests {
             repo.set_community_plugin_policy(OperationId::new(), true, now)
                 .await
                 .unwrap();
-            repo.publish_plugin_package(bytes).await.unwrap();
+            repo.publish_plugin_package(stage_bytes(&bytes))
+                .await
+                .unwrap();
             repo.install_plugin(
                 OperationId::new(),
                 InstallPluginRequest {
@@ -7657,7 +9255,12 @@ mod tests {
                 .len(),
             0
         );
-        assert_eq!(repo.publish_plugin_package(bytes).await.unwrap(), authority);
+        assert_eq!(
+            repo.publish_plugin_package(stage_bytes(&bytes))
+                .await
+                .unwrap(),
+            authority
+        );
         assert!(profile.path.join("plugins/packages/sha256").is_dir());
         assert!(
             repo.install_plugin(OperationId::new(), request, now)
@@ -7669,6 +9272,209 @@ mod tests {
         repo.create_backup().await.unwrap();
     }
 
+    #[tokio::test]
+    async fn staged_package_admission_cleans_failure_success_and_oversize_paths() {
+        let profile = TestProfile::new();
+        let owner = crate::ProfileOwner::open(profile.path.clone()).unwrap();
+        let repo = owner.repository();
+        let now = Timestamp::constant(1_800_000_251, 0);
+        let (bytes, authority, public_key) = package("admission-plugin", "1.0.0");
+        let request = || InstallPluginRequest {
+            package: authority.clone(),
+            source: PluginInstallSource::CommunityRegistry,
+            replace_existing: false,
+            allow_downgrade: false,
+        };
+
+        let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let mut blocker = repo.block_worker(entered_sender, release_receiver);
+        let waker = std::task::Waker::noop();
+        let mut context = std::task::Context::from_waker(waker);
+        assert!(matches!(
+            blocker.as_mut().poll(&mut context),
+            std::task::Poll::Pending
+        ));
+        entered_receiver.recv().unwrap();
+        let cancelled_stage = stage_bytes(&bytes);
+        let cancelled_path = cancelled_stage.path().to_path_buf();
+        let admission = PluginPackageAdmission::inspect(cancelled_stage).unwrap();
+        let mut cancelled =
+            repo.install_plugin_admission(OperationId::new(), admission, request(), now);
+        assert!(matches!(
+            cancelled.as_mut().poll(&mut context),
+            std::task::Poll::Pending
+        ));
+        drop(cancelled);
+        release_sender.send(()).unwrap();
+        blocker.await.unwrap();
+        // This command is ordered after the cancelled admission and flushes it.
+        repo.get_installed_plugin_profile().await.unwrap();
+        assert!(!cancelled_path.exists());
+        assert!(
+            !profile
+                .path
+                .join("plugins/packages/sha256")
+                .join(format!("{}.jbp", authority.package_sha256().as_str()))
+                .exists()
+        );
+
+        let changed_stage = stage_bytes(&bytes);
+        let changed_path = changed_stage.path().to_path_buf();
+        let admission = PluginPackageAdmission::inspect(changed_stage).unwrap();
+        let mut changed_bytes = bytes.clone();
+        *changed_bytes.last_mut().unwrap() ^= 1;
+        fs::write(&changed_path, changed_bytes).unwrap();
+        assert!(
+            repo.install_plugin_admission(OperationId::new(), admission, request(), now)
+                .await
+                .is_err()
+        );
+        assert!(!changed_path.exists());
+
+        let rejected_stage = stage_bytes(&bytes);
+        let rejected_path = rejected_stage.path().to_path_buf();
+        let admission = PluginPackageAdmission::inspect(rejected_stage).unwrap();
+        assert!(
+            repo.install_plugin_admission(OperationId::new(), admission, request(), now)
+                .await
+                .is_err()
+        );
+        assert!(!rejected_path.exists());
+        assert!(
+            !profile
+                .path
+                .join("plugins/packages/sha256")
+                .join(format!("{}.jbp", authority.package_sha256().as_str()))
+                .exists()
+        );
+
+        repo.trust_publisher(
+            OperationId::new(),
+            TrustPublisherRequest::new(public_key),
+            now,
+        )
+        .await
+        .unwrap();
+        repo.set_community_plugin_policy(OperationId::new(), true, now)
+            .await
+            .unwrap();
+        let accepted_stage = stage_bytes(&bytes);
+        let accepted_path = accepted_stage.path().to_path_buf();
+        let admission = PluginPackageAdmission::inspect(accepted_stage).unwrap();
+        let install_operation = OperationId::new();
+        assert!(
+            repo.install_plugin_admission(install_operation, admission, request(), now)
+                .await
+                .unwrap()
+                .committed()
+                .is_some()
+        );
+        assert!(!accepted_path.exists());
+        let package_path = profile
+            .path
+            .join("plugins/packages/sha256")
+            .join(format!("{}.jbp", authority.package_sha256().as_str()));
+        assert!(package_path.exists());
+
+        repo.uninstall_plugin(OperationId::new(), authority.plugin_id().clone(), now)
+            .await
+            .unwrap();
+        assert!(!package_path.exists());
+        let replay_stage = stage_bytes(&bytes);
+        let replay_path = replay_stage.path().to_path_buf();
+        let admission = PluginPackageAdmission::inspect(replay_stage).unwrap();
+        let replay = repo
+            .install_plugin_admission(install_operation, admission, request(), now)
+            .await
+            .unwrap();
+        assert!(!replay.committed().unwrap().newly_committed);
+        assert!(!replay_path.exists());
+        assert!(!package_path.exists());
+        assert!(
+            repo.get_installed_plugin_profile()
+                .await
+                .unwrap()
+                .plugins
+                .is_empty()
+        );
+
+        let malformed = stage_bytes(b"not-a-package");
+        let malformed_path = malformed.path().to_path_buf();
+        assert!(PluginPackageAdmission::inspect(malformed).is_err());
+        assert!(!malformed_path.exists());
+
+        let oversize_path =
+            std::env::temp_dir().join(format!("junban-plugin-oversize-{}", Uuid::now_v7()));
+        let oversize = fs::File::create(&oversize_path).unwrap();
+        oversize
+            .set_len(junban_plugin_sdk::PACKAGE_BYTES_MAX as u64 + 1)
+            .unwrap();
+        drop(oversize);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&oversize_path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let oversize = StagedFile::new(
+            oversize_path.clone(),
+            junban_plugin_sdk::PACKAGE_BYTES_MAX as u64 + 1,
+        );
+        assert!(PluginPackageAdmission::inspect(oversize).is_err());
+        assert!(!oversize_path.exists());
+    }
+
+    #[tokio::test]
+    async fn bounded_worker_queue_retains_only_metadata_for_concurrent_maximum_packages() {
+        use std::task::Poll;
+
+        let _memory_guard = PackageMemoryTestGuard::acquire();
+        let profile = TestProfile::new();
+        let owner = crate::ProfileOwner::open(profile.path.clone()).unwrap();
+        let repo = owner.repository();
+        let package_len = junban_plugin_sdk::PACKAGE_BYTES_MAX as u64;
+        let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let mut blocker = repo.block_worker(entered_sender, release_receiver);
+        let waker = std::task::Waker::noop();
+        let mut context = std::task::Context::from_waker(waker);
+        assert!(matches!(blocker.as_mut().poll(&mut context), Poll::Pending));
+        entered_receiver.recv().unwrap();
+        #[cfg(target_os = "linux")]
+        let resident_before = resident_kib();
+
+        let mut stage_paths = Vec::new();
+        let mut queued = Vec::new();
+        for _ in 0..crate::WORKER_QUEUE_CAPACITY {
+            let stage = stage_sparse_package(package_len);
+            stage_paths.push(stage.path().to_path_buf());
+            let mut future = repo.publish_plugin_package(stage);
+            assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+            queued.push(future);
+        }
+        #[cfg(target_os = "linux")]
+        assert!(resident_kib().saturating_sub(resident_before) < 64 * 1_024);
+
+        let rejected = stage_sparse_package(package_len);
+        let rejected_path = rejected.path().to_path_buf();
+        let mut rejected_future = repo.publish_plugin_package(rejected);
+        assert!(matches!(
+            rejected_future.as_mut().poll(&mut context),
+            Poll::Ready(Err(RepositoryError::Storage(message)))
+                if message == "database worker queue is full"
+        ));
+        drop(rejected_future);
+        assert!(!rejected_path.exists());
+
+        queued.drain(..crate::WORKER_QUEUE_CAPACITY / 2);
+        release_sender.send(()).unwrap();
+        blocker.await.unwrap();
+        for future in queued {
+            assert!(matches!(future.await, Err(RepositoryError::Storage(_))));
+        }
+        assert!(stage_paths.iter().all(|path| !path.exists()));
+    }
+
     #[test]
     fn package_store_cleanup_removes_only_old_unreferenced_digest_objects() {
         use std::time::{Duration, SystemTime};
@@ -7676,7 +9482,7 @@ mod tests {
         let profile = TestProfile::new();
         let store = PluginPackageStore::open(&profile.path).unwrap();
         let (bytes, authority, _) = package("orphan-plugin", "1.0.0");
-        store.publish(&bytes).unwrap();
+        publish_bytes(&store, &bytes).unwrap();
         let path = store.package_path(authority.package_sha256());
         let file = fs::File::open(&path).unwrap();
         file.set_times(
@@ -7700,6 +9506,85 @@ mod tests {
         assert!(non_digest.exists());
     }
 
+    #[tokio::test]
+    async fn concurrent_streamed_publication_is_bounded() {
+        let _memory_guard = PackageMemoryTestGuard::acquire();
+        let profile = TestProfile::new();
+        let owner = crate::ProfileOwner::open(profile.path.clone()).unwrap();
+        let repo = owner.repository();
+        // Keep ordinary parallel workspace runs responsive. Optimized RSS evidence
+        // opts in to two exact component-cap packages through the same path.
+        let maximum_evidence = std::env::var_os("JUNBAN_ASSERT_PLUGIN_PACKAGE_RSS").is_some();
+        let component_size = if maximum_evidence {
+            junban_plugin_sdk::COMPONENT_BYTES_MAX
+        } else {
+            128 * 1024
+        };
+        let component = component_with_size(component_size);
+        let (_, base, _) = package("maximum-plugin", "1.0.0");
+        let mut manifest = base.manifest().clone();
+        manifest.component_sha256 = Sha256Digest::of(&component).to_string();
+        let key = SigningKey::from_bytes(&KEY_BYTES);
+        let bytes = pack_package(&manifest, &component, &key).unwrap();
+        drop(component);
+        let package_len = bytes.len() as u64;
+        let first_stage = stage_bytes(&bytes);
+        let second_stage = stage_bytes(&bytes);
+        drop(bytes);
+        #[cfg(target_os = "linux")]
+        let (resident_before, resident_peak, monitoring, monitor) = {
+            use std::sync::{
+                Arc,
+                atomic::{AtomicBool, AtomicU64, Ordering},
+            };
+
+            let resident_before = resident_kib();
+            let resident_peak = Arc::new(AtomicU64::new(resident_before));
+            let monitoring = Arc::new(AtomicBool::new(true));
+            let monitor_peak = Arc::clone(&resident_peak);
+            let monitor_running = Arc::clone(&monitoring);
+            let monitor = std::thread::spawn(move || {
+                while monitor_running.load(Ordering::Acquire) {
+                    monitor_peak.fetch_max(resident_kib(), Ordering::AcqRel);
+                    std::thread::yield_now();
+                }
+                monitor_peak.fetch_max(resident_kib(), Ordering::AcqRel);
+            });
+            (resident_before, resident_peak, monitoring, monitor)
+        };
+        let (first, second) = tokio::join!(
+            repo.publish_plugin_package(first_stage),
+            repo.publish_plugin_package(second_stage),
+        );
+        let authority = first.unwrap();
+        assert_eq!(second.unwrap(), authority);
+        #[cfg(target_os = "linux")]
+        {
+            use std::sync::atomic::Ordering;
+
+            monitoring.store(false, Ordering::Release);
+            monitor.join().unwrap();
+            let resident_peak = resident_peak.load(Ordering::Acquire);
+            let resident_delta = resident_peak.saturating_sub(resident_before);
+            eprintln!(
+                "concurrent package RSS: baseline={resident_before} KiB, peak={resident_peak} KiB, delta={resident_delta} KiB"
+            );
+            // Other storage tests share this process and can change global RSS.
+            // The optimized exact-test evidence opts into the isolated bound.
+            if maximum_evidence {
+                assert!(
+                    resident_delta < 96 * 1_024,
+                    "concurrent streamed publication retained {resident_delta} KiB"
+                );
+            }
+        }
+        assert_eq!(authority.component_size(), component_size as u64);
+        let path = PluginPackageStore::open(&profile.path)
+            .unwrap()
+            .package_path(authority.package_sha256());
+        assert_eq!(fs::metadata(&path).unwrap().len(), package_len);
+    }
+
     #[cfg(unix)]
     #[test]
     fn package_store_rejects_links_executables_and_corrupt_overwrites() {
@@ -7713,16 +9598,47 @@ mod tests {
         fs::write(&source, &bytes).unwrap();
         fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
 
+        let source_link = profile.path.join("source-link.jbp");
+        symlink(&source, &source_link).unwrap();
+        assert!(matches!(
+            store.publish(StagedFile::new(source_link.clone(), bytes.len() as u64)),
+            Err(crate::PackageStoreError::UnsafePath)
+        ));
+        assert!(fs::symlink_metadata(&source_link).is_err());
+
+        let source_hard_link = profile.path.join("source-hard-link.jbp");
+        fs::hard_link(&source, &source_hard_link).unwrap();
+        assert!(matches!(
+            store.publish(StagedFile::new(
+                source_hard_link.clone(),
+                bytes.len() as u64
+            )),
+            Err(crate::PackageStoreError::UnsafePath)
+        ));
+        assert!(!source_hard_link.exists());
+
+        let executable_source = profile.path.join("source-executable.jbp");
+        fs::write(&executable_source, &bytes).unwrap();
+        fs::set_permissions(&executable_source, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(
+            store.publish(StagedFile::new(
+                executable_source.clone(),
+                bytes.len() as u64
+            )),
+            Err(crate::PackageStoreError::UnsafePath)
+        ));
+        assert!(!executable_source.exists());
+
         symlink(&source, &destination).unwrap();
         assert!(matches!(
-            store.publish(&bytes),
+            publish_bytes(&store, &bytes),
             Err(crate::PackageStoreError::UnsafePath)
         ));
         fs::remove_file(&destination).unwrap();
 
         fs::hard_link(&source, &destination).unwrap();
         assert!(matches!(
-            store.publish(&bytes),
+            publish_bytes(&store, &bytes),
             Err(crate::PackageStoreError::UnsafePath)
         ));
         fs::remove_file(&destination).unwrap();
@@ -7730,7 +9646,7 @@ mod tests {
         fs::write(&destination, &bytes).unwrap();
         fs::set_permissions(&destination, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(matches!(
-            store.publish(&bytes),
+            publish_bytes(&store, &bytes),
             Err(crate::PackageStoreError::UnsafePath)
         ));
         fs::remove_file(&destination).unwrap();
@@ -7738,7 +9654,7 @@ mod tests {
         fs::write(&destination, b"different bytes").unwrap();
         fs::set_permissions(&destination, fs::Permissions::from_mode(0o600)).unwrap();
         assert!(matches!(
-            store.publish(&bytes),
+            publish_bytes(&store, &bytes),
             Err(crate::PackageStoreError::AuthorityMismatch)
         ));
         assert_eq!(fs::read(&destination).unwrap(), b"different bytes");

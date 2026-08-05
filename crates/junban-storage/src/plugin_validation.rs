@@ -3,11 +3,13 @@
 use std::collections::BTreeMap;
 
 use jiff::{Timestamp, ToSpan};
-use junban_app::RepositoryError;
+use junban_app::{
+    PluginHookKind, PluginManifestEntrySelector, RepositoryError, plugin_manifest_entry_authority,
+};
 use junban_domain::{OperationId, TaskId, decode_sha256_hex};
 use junban_plugin_sdk::{
     Capability, DependencyLock, HostFailureCode, InstalledPackage, Permission, PermissionScope,
-    RuntimeManifest, SettingSchema, SettingValue, permission_set_hash, scope_hash,
+    PluginId, RuntimeManifest, SettingSchema, SettingValue, permission_set_hash, scope_hash,
     validate_dependency_locks, validate_permission_grants, validate_signer_public_key,
 };
 use rusqlite::Connection;
@@ -596,7 +598,7 @@ fn validate_invocations(
         )
         .map_err(storage)?;
     let mut rows = statement.query([]).map_err(storage)?;
-    let mut aggregates: BTreeMap<String, (i64, i64)> = BTreeMap::new();
+    let mut aggregates: BTreeMap<String, (i64, i64, i64)> = BTreeMap::new();
     let mut total_bytes = 0_i64;
     while let Some(row) = rows.next().map_err(storage)? {
         let operation_id: String = row.get(0).map_err(storage)?;
@@ -723,11 +725,15 @@ fn validate_invocations(
             .1
             .checked_add(material_bytes)
             .ok_or_else(|| invalid_error("plugin invocation material"))?;
+        if state != "ambiguous_http" {
+            aggregate.2 += 1;
+        }
         total_bytes = total_bytes
             .checked_add(material_bytes)
             .ok_or_else(|| invalid_error("plugin invocation material"))?;
         if aggregate.0 > INVOCATIONS_PER_PLUGIN_MAX
             || aggregate.1 > INVOCATION_BYTES_PER_PLUGIN_MAX
+            || aggregate.2 > 1
             || total_bytes > INVOCATION_BYTES_PROFILE_MAX
         {
             return invalid("plugin invocation material ceiling");
@@ -741,45 +747,22 @@ fn validate_hook(
     hook_kind: &str,
     entry_id: &str,
 ) -> Result<Option<&'static str>, RepositoryError> {
-    let capability = match hook_kind {
-        "invoke_command"
-            if plugin
-                .manifest
-                .commands
-                .iter()
-                .any(|command| command.id == entry_id) =>
-        {
-            Some(Capability::Commands.as_str())
-        }
-        "handle_event"
-            if plugin.manifest.subscriptions.iter().any(|event| {
-                serde_json::to_string(event)
-                    .ok()
-                    .and_then(|json| json.strip_prefix('"')?.strip_suffix('"').map(str::to_owned))
-                    .is_some_and(|id| id == entry_id)
-            }) =>
-        {
-            Some(Capability::EventsSubscribe.as_str())
-        }
-        "handle_surface_action" => {
-            let Some(surface) = plugin
-                .manifest
-                .surfaces
-                .iter()
-                .find(|surface| surface.actions.iter().any(|action| action == entry_id))
-            else {
-                return invalid("plugin invocation hook");
-            };
-            Some(match surface.kind {
-                junban_plugin_sdk::SurfaceKind::View => Capability::UiView.as_str(),
-                junban_plugin_sdk::SurfaceKind::Panel => Capability::UiPanel.as_str(),
-                junban_plugin_sdk::SurfaceKind::Status => Capability::UiStatus.as_str(),
-            })
-        }
-        "resync" if entry_id == "resync" => None,
+    let hook = match hook_kind {
+        "invoke_command" => PluginHookKind::InvokeCommand,
+        "handle_event" => PluginHookKind::HandleEvent,
+        "handle_surface_action" => PluginHookKind::HandleSurfaceAction,
+        "resync" => PluginHookKind::Resync,
         _ => return invalid("plugin invocation hook"),
     };
-    Ok(capability)
+    let persisted =
+        PluginId::parse(entry_id).map_err(|_| invalid_error("plugin invocation hook"))?;
+    let authority = plugin_manifest_entry_authority(
+        &plugin.manifest,
+        hook,
+        PluginManifestEntrySelector::Persisted(&persisted),
+    )
+    .ok_or_else(|| invalid_error("plugin invocation hook"))?;
+    Ok(authority.required_capability.map(Capability::as_str))
 }
 
 fn plugin<'a>(

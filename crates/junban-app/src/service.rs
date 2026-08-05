@@ -2091,15 +2091,29 @@ where
         })
     }
 
+    /// Inspect a cleanup-owning staged package without putting package bytes on
+    /// an asynchronous queue.
+    pub fn inspect_plugin_package(
+        &self,
+        staged: StagedFile,
+    ) -> Result<crate::PluginPackageAdmission, AppError> {
+        if staged.is_empty() || staged.len() > junban_plugin_sdk::PACKAGE_BYTES_MAX as u64 {
+            return Err(AppError::OperationTooLarge);
+        }
+        crate::PluginPackageAdmission::inspect(staged).map_err(|_| AppError::Conflict)
+    }
+
+    /// Publish a private staged package while the caller retains the global
+    /// staged-artifact permit through completion.
     pub async fn publish_plugin_package(
         &self,
-        bytes: Vec<u8>,
+        staged: StagedFile,
     ) -> Result<crate::PluginPackageAuthority, AppError> {
-        if bytes.len() > junban_plugin_sdk::PACKAGE_BYTES_MAX {
+        if staged.is_empty() || staged.len() > junban_plugin_sdk::PACKAGE_BYTES_MAX as u64 {
             return Err(AppError::OperationTooLarge);
         }
         self.repository
-            .publish_plugin_package(bytes)
+            .publish_plugin_package(staged)
             .await
             .map_err(AppError::from)
     }
@@ -2131,6 +2145,30 @@ where
             .get_installed_plugin(plugin_id)
             .await
             .map_err(AppError::from)
+    }
+
+    pub async fn install_plugin_admission(
+        &self,
+        operation_id: OperationId,
+        admission: crate::PluginPackageAdmission,
+        source: crate::PluginInstallSource,
+        replace_existing: bool,
+        allow_downgrade: bool,
+        now: Timestamp,
+    ) -> Result<crate::PluginMutationOutcome, AppError> {
+        let request = crate::InstallPluginRequest {
+            package: admission.package().clone(),
+            source,
+            replace_existing,
+            allow_downgrade,
+        };
+        let outcome = self
+            .repository
+            .install_plugin_admission(operation_id, admission, request, now)
+            .await
+            .map_err(AppError::from)?;
+        self.publish_plugin_outcome(&outcome);
+        Ok(outcome)
     }
 
     pub async fn install_plugin(
@@ -2432,13 +2470,15 @@ where
         plugin_id: junban_plugin_sdk::PluginId,
         package_generation: u64,
         activation_epoch: u64,
-    ) -> Result<(), AppError> {
+        now: Timestamp,
+    ) -> Result<crate::CommittedPluginInvocation, AppError> {
         self.repository
             .complete_plugin_invocation(
                 operation_id,
                 plugin_id,
                 package_generation,
                 activation_epoch,
+                now,
             )
             .await
             .map_err(AppError::from)
@@ -2449,9 +2489,10 @@ where
         request: crate::CommitPluginInvocationRequest,
         now: Timestamp,
     ) -> Result<crate::CommittedPluginInvocation, AppError> {
+        let planned = crate::plan_plugin_invocation_commit(request).map_err(AppError::from)?;
         let committed = self
             .repository
-            .commit_plugin_invocation(request, now)
+            .commit_plugin_invocation(planned, now)
             .await
             .map_err(AppError::from)?;
         if let Some(mutation) = &committed.mutation
@@ -2471,6 +2512,19 @@ where
             .update_plugin_bookkeeping(update, now)
             .await
             .map_err(AppError::from)
+    }
+
+    pub async fn transition_plugin_health(
+        &self,
+        operation_id: OperationId,
+        update: crate::PluginBookkeepingUpdate,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .transition_plugin_health(operation_id, update, now)
+            .await;
+        self.commit(result)
     }
 
     fn publish_plugin_outcome(&self, outcome: &crate::PluginMutationOutcome) {
@@ -2666,14 +2720,16 @@ mod tests {
 
         fn commit_plugin_invocation(
             &self,
-            _: crate::CommitPluginInvocationRequest,
+            _: crate::PlannedPluginInvocationCommit,
             _: Timestamp,
         ) -> crate::RepositoryFuture<'_, crate::CommittedPluginInvocation> {
             self.calls.lock().unwrap().push("plugin-commit");
             let result = self.result.lock().unwrap().clone().map(|mutation| {
                 crate::CommittedPluginInvocation {
+                    terminal_kind: crate::PluginInvocationTerminalKind::DomainEffect,
                     mutation: Some(mutation),
                     cursor: None,
+                    replayed: false,
                 }
             });
             Box::pin(async move { result })

@@ -82,6 +82,7 @@ impl EventType {
     pub const PLUGIN_GRANTS_REVOKED: &'static str = "plugin.grants_revoked";
     pub const PLUGIN_SETTING_UPDATED: &'static str = "plugin.setting_updated";
     pub const PLUGIN_SETTING_DELETED: &'static str = "plugin.setting_deleted";
+    pub const PLUGIN_HEALTH_CHANGED: &'static str = "plugin.health_changed";
 
     #[must_use]
     pub fn new(value: impl Into<String>) -> Self {

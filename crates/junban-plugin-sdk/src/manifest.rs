@@ -272,6 +272,30 @@ pub enum EventKind {
     SectionDeleted,
 }
 
+impl EventKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TaskCreated => "task-created",
+            Self::TaskUpdated => "task-updated",
+            Self::TaskCompleted => "task-completed",
+            Self::TaskUncompleted => "task-uncompleted",
+            Self::TaskCancelled => "task-cancelled",
+            Self::TaskReopened => "task-reopened",
+            Self::TaskDeleted => "task-deleted",
+            Self::ProjectCreated => "project-created",
+            Self::ProjectUpdated => "project-updated",
+            Self::ProjectDeleted => "project-deleted",
+            Self::TagCreated => "tag-created",
+            Self::TagUpdated => "tag-updated",
+            Self::TagDeleted => "tag-deleted",
+            Self::SectionCreated => "section-created",
+            Self::SectionUpdated => "section-updated",
+            Self::SectionDeleted => "section-deleted",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SurfaceKind {

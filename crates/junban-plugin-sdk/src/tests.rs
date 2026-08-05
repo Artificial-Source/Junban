@@ -1,3 +1,5 @@
+use std::io::Cursor;
+
 use super::*;
 use crate::util::{hex, sha256};
 use ed25519_dalek::{Signer, SigningKey};
@@ -315,6 +317,41 @@ fn deterministic_valid_package_round_trips_and_full_inspects() {
     assert!(matches!(
         inspect_and_verify_package(&first, &oversized_policy),
         Err(SdkError::TrustPolicy)
+    ));
+}
+
+#[test]
+fn seekable_package_verification_matches_bytes_and_rejects_claimed_bounds() {
+    let bytes = valid_package();
+    let expected = verify_package(&bytes).unwrap();
+    let mut reader = Cursor::new(bytes.clone());
+    let streamed = verify_package_reader(&mut reader, bytes.len() as u64).unwrap();
+    assert_eq!(streamed.manifest, expected.manifest);
+    assert_eq!(streamed.identities, expected.identities);
+    assert_eq!(
+        streamed.publisher_public_key,
+        *parse_package(&bytes).unwrap().public_key
+    );
+
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    assert!(matches!(
+        verify_package_reader(&mut Cursor::new(trailing.clone()), trailing.len() as u64),
+        Err(SdkError::Trailing { format: "JBP1" })
+    ));
+    assert!(matches!(
+        verify_package_reader(
+            &mut Cursor::new(bytes.clone()),
+            bytes.len().saturating_sub(1) as u64,
+        ),
+        Err(SdkError::Truncated { format: "JBP1" })
+    ));
+    assert!(matches!(
+        verify_package_reader(
+            &mut Cursor::new(Vec::<u8>::new()),
+            PACKAGE_BYTES_MAX as u64 + 1,
+        ),
+        Err(SdkError::Length { field: "package" })
     ));
 }
 
@@ -1013,6 +1050,18 @@ fn component_rejects_core_malformed_export_signature_profile_undeclared_and_meta
         Err(SdkError::ComponentEncoding)
     ));
     assert!(inspect_component(b"bad wasm", &manifest).is_err());
+    assert!(matches!(
+        inspect_component_reader(&mut Cursor::new(core), core.len() as u64, &manifest),
+        Err(SdkError::ComponentEncoding)
+    ));
+    assert!(
+        inspect_component_reader(
+            &mut Cursor::new(b"bad wasm"),
+            b"bad wasm".len() as u64,
+            &manifest,
+        )
+        .is_err()
+    );
     let nested = nested_component(COMPONENT_NESTING_MAX + 1);
     assert!(matches!(
         inspect_component(&nested, &valid_manifest(&nested)),

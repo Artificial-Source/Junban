@@ -3,14 +3,15 @@
 use std::{
     collections::HashSet,
     fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
 
-use junban_app::PluginPackageAuthority;
+use junban_app::{PluginPackageAuthority, StagedFile};
 use junban_plugin_sdk::{PACKAGE_BYTES_MAX, Sha256Digest};
 use rusqlite::Connection;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[cfg(windows)]
@@ -93,15 +94,60 @@ impl PluginPackageStore {
             .join(format!("{}.{}", digest.as_str(), PACKAGE_EXTENSION))
     }
 
-    /// Verify and durably publish one immutable package before metadata admission.
-    pub fn publish(&self, bytes: &[u8]) -> Result<PluginPackageAuthority, PackageStoreError> {
-        let authority = PluginPackageAuthority::inspect(bytes)
-            .map_err(|_| PackageStoreError::InvalidPackage)?;
+    /// Verify and durably publish one immutable staged package before metadata
+    /// admission. Only bounded metadata and a staged path cross the worker
+    /// queue; package and component bytes are streamed from strict open handles.
+    pub fn publish(&self, staged: StagedFile) -> Result<PluginPackageAuthority, PackageStoreError> {
+        self.publish_inner(staged, None)
+    }
+
+    /// Publish an admission authority already produced from this staged owner.
+    /// Exact package hashing closes the inspection-to-publication race without
+    /// repeating Component Model decoding on the SQLite worker.
+    pub(crate) fn publish_expected(
+        &self,
+        staged: StagedFile,
+        expected: &PluginPackageAuthority,
+    ) -> Result<PluginPackageAuthority, PackageStoreError> {
+        self.publish_inner(staged, Some(expected))
+    }
+
+    fn publish_inner(
+        &self,
+        staged: StagedFile,
+        expected: Option<&PluginPackageAuthority>,
+    ) -> Result<PluginPackageAuthority, PackageStoreError> {
+        if staged.is_empty() || staged.len() > PACKAGE_BYTES_MAX as u64 {
+            return Err(PackageStoreError::InvalidPackage);
+        }
+        let source_path = staged.path();
+        let source_metadata = strict_regular_metadata(source_path)?;
+        if source_metadata.len() != staged.len() {
+            return Err(PackageStoreError::AuthorityMismatch);
+        }
+        let mut source = open_strict_regular(source_path, &source_metadata)?;
+        let authority = match expected {
+            Some(expected) => {
+                if expected.package_size() != staged.len() {
+                    return Err(PackageStoreError::AuthorityMismatch);
+                }
+                verify_open_digest(&mut source, staged.len(), expected.package_sha256())?;
+                expected.clone()
+            }
+            None => PluginPackageAuthority::inspect_reader(&mut source, staged.len())
+                .map_err(|_| PackageStoreError::InvalidPackage)?,
+        };
+        verify_stable_open_path(&source, source_path, &source_metadata)?;
+
         self.ensure_root()?;
         let destination = self.package_path(authority.package_sha256());
         match fs::symlink_metadata(&destination) {
             Ok(_) => {
-                self.verify_exact_file(&destination, Some(bytes), Some(&authority))?;
+                self.verify_exact_digest_file(
+                    &destination,
+                    authority.package_sha256(),
+                    staged.len(),
+                )?;
                 crate::sync_directory(&self.root).map_err(|_| PackageStoreError::Io)?;
                 return Ok(authority);
             }
@@ -112,10 +158,19 @@ impl PluginPackageStore {
         let (mut file, temp) =
             create_private_artifact_temp(&destination).map_err(|_| PackageStoreError::Io)?;
         let publication = (|| {
-            file.write_all(bytes).map_err(|_| PackageStoreError::Io)?;
+            source
+                .seek(SeekFrom::Start(0))
+                .map_err(|_| PackageStoreError::Io)?;
+            let copied = io::copy(&mut Read::by_ref(&mut source).take(staged.len()), &mut file)
+                .map_err(|_| PackageStoreError::Io)?;
+            if copied != staged.len() {
+                return Err(PackageStoreError::AuthorityMismatch);
+            }
+            verify_stable_open_path(&source, source_path, &source_metadata)?;
             set_private_file_permissions(&temp).map_err(|_| PackageStoreError::Io)?;
             file.sync_all().map_err(|_| PackageStoreError::Io)?;
             drop(file);
+            self.verify_exact_digest_file(&temp, authority.package_sha256(), staged.len())?;
             match publish_private_artifact(&temp, &destination, false) {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
@@ -123,7 +178,7 @@ impl PluginPackageStore {
                 }
                 Err(_) => return Err(PackageStoreError::Io),
             }
-            self.verify_exact_file(&destination, Some(bytes), Some(&authority))
+            self.verify_exact_digest_file(&destination, authority.package_sha256(), staged.len())
         })();
         if publication.is_err() {
             let _ = remove_private_file_durable(&temp);
@@ -139,7 +194,7 @@ impl PluginPackageStore {
         digest: &Sha256Digest,
     ) -> Result<PluginPackageAuthority, PackageStoreError> {
         let path = self.package_path(digest);
-        let authority = self.verify_exact_file(&path, None, None)?;
+        let authority = self.verify_exact_file(&path)?;
         if authority.package_sha256() != digest {
             return Err(PackageStoreError::AuthorityMismatch);
         }
@@ -218,79 +273,56 @@ impl PluginPackageStore {
         Ok(cleanup)
     }
 
-    fn verify_exact_file(
+    fn verify_exact_digest_file(
         &self,
         path: &Path,
-        expected_bytes: Option<&[u8]>,
-        expected_authority: Option<&PluginPackageAuthority>,
-    ) -> Result<PluginPackageAuthority, PackageStoreError> {
+        expected: &Sha256Digest,
+        expected_len: u64,
+    ) -> Result<(), PackageStoreError> {
         let path_metadata = strict_regular_metadata(path)?;
-        if path_metadata.len() > PACKAGE_BYTES_MAX as u64 {
+        if path_metadata.len() != expected_len {
             return Err(PackageStoreError::AuthorityMismatch);
         }
-        let mut options = OpenOptions::new();
-        options.read(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.custom_flags(libc::O_NOFOLLOW);
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            // Open a reparse point itself instead of following it; the regular-file
-            // metadata check below then rejects links and other reparse objects.
-            const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-            options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-        }
-        let mut file = options.open(path).map_err(|_| PackageStoreError::Io)?;
-        strict_open_file_metadata(&file, &path_metadata)?;
-        if let Some(expected) = expected_bytes {
-            if expected.len() as u64 != path_metadata.len() {
-                return Err(PackageStoreError::AuthorityMismatch);
-            }
-            let mut offset = 0_usize;
-            let mut buffer = [0_u8; 64 * 1024];
-            while offset < expected.len() {
-                let count = file.read(&mut buffer).map_err(|_| PackageStoreError::Io)?;
-                if count == 0
-                    || expected[offset..]
-                        .get(..count)
-                        .is_none_or(|chunk| chunk != &buffer[..count])
-                {
-                    return Err(PackageStoreError::AuthorityMismatch);
-                }
-                offset += count;
-            }
-            let mut trailing = [0_u8; 1];
-            if file
-                .read(&mut trailing)
-                .map_err(|_| PackageStoreError::Io)?
-                != 0
-            {
-                return Err(PackageStoreError::AuthorityMismatch);
-            }
-            verify_stable_open_path(&file, path, &path_metadata)?;
-            return expected_authority
-                .cloned()
-                .ok_or(PackageStoreError::AuthorityMismatch);
-        }
-        let mut bytes = Vec::new();
-        Read::by_ref(&mut file)
-            .take((PACKAGE_BYTES_MAX + 1) as u64)
-            .read_to_end(&mut bytes)
-            .map_err(|_| PackageStoreError::Io)?;
-        if bytes.len() > PACKAGE_BYTES_MAX || bytes.len() as u64 != path_metadata.len() {
+        let mut file = open_strict_regular(path, &path_metadata)?;
+        verify_open_digest(&mut file, expected_len, expected)?;
+        verify_stable_open_path(&file, path, &path_metadata)
+    }
+
+    fn verify_exact_file(&self, path: &Path) -> Result<PluginPackageAuthority, PackageStoreError> {
+        let path_metadata = strict_regular_metadata(path)?;
+        if path_metadata.len() == 0 || path_metadata.len() > PACKAGE_BYTES_MAX as u64 {
             return Err(PackageStoreError::AuthorityMismatch);
         }
-        verify_stable_open_path(&file, path, &path_metadata)?;
-        let authority = PluginPackageAuthority::inspect(&bytes)
+        let mut file = open_strict_regular(path, &path_metadata)?;
+        let authority = PluginPackageAuthority::inspect_reader(&mut file, path_metadata.len())
             .map_err(|_| PackageStoreError::AuthorityMismatch)?;
-        if expected_authority.is_some_and(|expected| expected != &authority) {
-            return Err(PackageStoreError::AuthorityMismatch);
-        }
+        verify_stable_open_path(&file, path, &path_metadata)?;
         Ok(authority)
     }
+}
+
+fn open_strict_regular(
+    path: &Path,
+    path_metadata: &fs::Metadata,
+) -> Result<File, PackageStoreError> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Open a reparse point itself instead of following it; strict metadata
+        // validation below rejects links and other reparse objects.
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path).map_err(|_| PackageStoreError::Io)?;
+    strict_open_file_metadata(&file, path_metadata)?;
+    Ok(file)
 }
 
 fn verify_stable_open_path(
@@ -301,6 +333,13 @@ fn verify_stable_open_path(
     let final_metadata = file.metadata().map_err(|_| PackageStoreError::Io)?;
     let final_path_metadata = strict_regular_metadata(path)?;
     strict_open_file_metadata(file, &final_path_metadata)?;
+    #[cfg(windows)]
+    {
+        let final_path_file = open_strict_regular(path, &final_path_metadata)?;
+        if windows_file_identity(file)? != windows_file_identity(&final_path_file)? {
+            return Err(PackageStoreError::UnsafePath);
+        }
+    }
     if final_metadata.len() != initial_metadata.len() {
         return Err(PackageStoreError::AuthorityMismatch);
     }
@@ -368,6 +407,40 @@ fn ensure_strict_private_directory(path: &Path) -> Result<(), PackageStoreError>
     Ok(())
 }
 
+fn verify_open_digest(
+    file: &mut File,
+    len: u64,
+    expected: &Sha256Digest,
+) -> Result<(), PackageStoreError> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| PackageStoreError::Io)?;
+    let mut hasher = Sha256::new();
+    let mut remaining = len;
+    let mut buffer = [0_u8; 64 * 1024];
+    while remaining != 0 {
+        let limit = usize::try_from(remaining.min(buffer.len() as u64))
+            .map_err(|_| PackageStoreError::AuthorityMismatch)?;
+        let read = file
+            .read(&mut buffer[..limit])
+            .map_err(|_| PackageStoreError::Io)?;
+        if read == 0 {
+            return Err(PackageStoreError::AuthorityMismatch);
+        }
+        hasher.update(&buffer[..read]);
+        remaining -= read as u64;
+    }
+    let mut trailing = [0_u8; 1];
+    if file
+        .read(&mut trailing)
+        .map_err(|_| PackageStoreError::Io)?
+        != 0
+        || format!("{:x}", hasher.finalize()) != expected.as_str()
+    {
+        return Err(PackageStoreError::AuthorityMismatch);
+    }
+    Ok(())
+}
+
 fn strict_regular_metadata(path: &Path) -> Result<fs::Metadata, PackageStoreError> {
     let metadata = fs::symlink_metadata(path).map_err(|_| PackageStoreError::Io)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -387,14 +460,8 @@ fn strict_open_file_metadata(
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt;
-
         validate_windows_file_handle(file)?;
-        if metadata.volume_serial_number().is_none()
-            || metadata.volume_serial_number() != path_metadata.volume_serial_number()
-            || metadata.file_index().is_none()
-            || metadata.file_index() != path_metadata.file_index()
-        {
+        if metadata.len() != path_metadata.len() {
             return Err(PackageStoreError::UnsafePath);
         }
     }
@@ -417,7 +484,16 @@ fn windows_metadata_is_reparse(metadata: &fs::Metadata) -> bool {
 }
 
 #[cfg(windows)]
-fn validate_windows_file_handle(file: &File) -> Result<(), PackageStoreError> {
+#[derive(Eq, PartialEq)]
+struct WindowsFileIdentity {
+    volume_serial: u32,
+    file_index_high: u32,
+    file_index_low: u32,
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn windows_file_identity(file: &File) -> Result<WindowsFileIdentity, PackageStoreError> {
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, GetFileInformationByHandle,
     };
@@ -435,7 +511,16 @@ fn validate_windows_file_handle(file: &File) -> Result<(), PackageStoreError> {
     {
         return Err(PackageStoreError::UnsafePath);
     }
-    Ok(())
+    Ok(WindowsFileIdentity {
+        volume_serial: information.dwVolumeSerialNumber,
+        file_index_high: information.nFileIndexHigh,
+        file_index_low: information.nFileIndexLow,
+    })
+}
+
+#[cfg(windows)]
+fn validate_windows_file_handle(file: &File) -> Result<(), PackageStoreError> {
+    windows_file_identity(file).map(|_| ())
 }
 
 fn validate_file_metadata(metadata: &fs::Metadata) -> Result<(), PackageStoreError> {

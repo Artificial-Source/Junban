@@ -5,8 +5,8 @@ Implementation checkpoint: 2026-08-04
 
 ## 2026-08-04 implementation checkpoint
 
-- Junban keeps Rust 1.93.0 and pins `wasmtime`/`wasmtime-wasi` **45.0.3**, the newest supported patch line with MSRV 1.93. Wasmtime 46/47 require Rust 1.94 and do not justify a workspace-wide toolchain change in Phase 7.
-- Runtime features start from `default-features = false` and add only the measured Component Model/runtime/compiler/cache/async pieces required by the retained host. `wasmtime-wasi` uses Preview 2 only; Preview 1 and experimental Preview 3 remain off unless a golden component proves an exact Preview-2 baseline need.
+- Junban keeps Rust 1.93.0 and pins production `wasmtime`/`wasmtime-wasi` **36.0.13**. Newly issued `RUSTSEC-2026-0222` blocks the 45.0.3 placement-spike line; 36.0.13 is the patched 24-month LTS line, remains compatible with Rust 1.93, and is unaffected by `RUSTSEC-2026-0223`. The historical 45.0.3 measurements still select child-process placement but do not accept the production runtime.
+- Runtime features start from `default-features = false` and add only `runtime`, `cranelift`, `component-model`, and `async` on Wasmtime. `wasmtime-wasi` 36.0.13 has Preview 2 directly with defaults off; Preview 1, experimental Preview 3, pooling, GC, cache, profiling, and unrelated defaults remain absent.
 - Host limits require `StoreLimits` on the mutable store owner, on-demand memory allocation unless the placement spike disproves it, epoch interruption plus cancellation of host futures, a selective linker, and separate process RSS/cgroup evidence. Store limits are not described as an RSS limit.
 - Rust authoring uses stable `wasm32-wasip2` and `wit-bindgen`; `cargo-component` is no longer the primary documented path because Bytecode Alliance is deprecating it.
 - TypeScript authoring pins build-only `@bytecodealliance/jco` **1.26.1** and `@bytecodealliance/componentize-js` **0.22.0**. The resulting StarlingMonkey-bearing component receives separate package, cold-start, and active-memory evidence and never launches Node at product runtime.

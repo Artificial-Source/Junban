@@ -121,6 +121,14 @@ Initial Slice A database verdict: **blocked**. Focused database recheck found al
 
 Initial Slice B database verdict: **blocked**. Focused database recheck found all six IDs fixed and explicitly approved Wave 1 persistence.
 
+## Wave 2 dependency gate
+
+| ID           | Severity | Status | Finding                                                                                                                                                        | Required correction and focused evidence                                                                                                                                                                                                   |
+| ------------ | -------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `P7-DEP-001` | high     | open   | Newly issued `RUSTSEC-2026-0222` affects Wasmtime 45.0.3, the historical host-placement spike line; a production host cannot ship on it or carry an exception. | Pin production `wasmtime`/`wasmtime-wasi` 36.0.13 LTS with defaults off and Rust 1.93 retained; prove one exact line, clean audit/deny, selected features, selective imports, hostile containment and replacement active-runtime evidence. |
+
+Dependency security verdict: **blocked on 45.0.3**. Exact 36.0.13 LTS is approved as the Wave 2 correction; no RustSec exception or Rust toolchain bump is approved.
+
 ## Required implementation gates
 
 | Gate                          | Dominant reviewer      | Status   | Acceptance                                                                                                                                                                                            |
@@ -135,4 +143,4 @@ Initial Slice B database verdict: **blocked**. Focused database recheck found al
 
 ## Current open findings
 
-No named finding is open. Wave 0 placement, SDK-first package/WIT/matched-memory, and Wave 1 schema/persistence authority are accepted. Database review and focused recheck closed `P7-DB-001`–`011`, including migration, restore, normalized lifecycle, receipts, AppService effects, cursor/invocation recovery, material health events, one-invocation fencing and staged package publication. Runtime host, operator routes, registry UI, React UI, and reference plugins have not started.
+`P7-DEP-001` is open for Wave 2: vulnerable historical Wasmtime 45.0.3 is blocked, while exact patched 36.0.13 LTS is approved for implementation and must receive clean dependency/feature/hostile-runtime evidence before closure. Wave 0 placement, SDK-first package/WIT/matched-memory, and Wave 1 schema/persistence authority remain accepted; `P7-DB-001`–`011` are fixed. Runtime host, operator routes, registry UI, React UI, and reference plugins have not started.

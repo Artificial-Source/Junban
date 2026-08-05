@@ -25,7 +25,7 @@ The phase ends only after the frozen Rust and TypeScript examples build and run 
 
 - Workspace crates: `junban-domain`, `junban-app`, `junban-storage`, `junban-server`, `junban-cli`, `junban-mcp`, lazy `junban-ai`, and pure `junban-plugin-sdk`.
 - `junban-plugin-sdk` now owns bounded package/WIT/trust/component/protocol authority without Wasmtime, storage or runtime construction; `junban-plugin-host` does not yet exist.
-- SQLite schema head remains v6; accepted SDK-first evidence now authorizes the planned schema-v7 migration/persistence implementation.
+- SQLite schema head is v7; accepted Wave 1 persistence now owns normalized plugin package, trust, grants, settings, KV, dependencies, cursors, invocations and health authority. `junban-plugin-host` does not yet exist.
 - `FeatureSettings` contains only six first-party feature toggles. `/settings/plugins` is intentionally rejected today, and `FeaturesTab` documents that plugin keys are unsupported.
 - `docs/architecture.md` reserves `junban-plugin-sdk` for WIT/package contracts and `junban-plugin-host` for the measured optional runtime.
 - `docs/performance.md` requires no Wasmtime initialization on ordinary startup.
@@ -36,8 +36,8 @@ The phase ends only after the frozen Rust and TypeScript examples build and run 
 
 Verified on 2026-08-04:
 
-- Wasmtime/`wasmtime-wasi` **45.0.3** are the newest patch line compatible with Junban's Rust 1.93.0 pin. Wasmtime 46/47 require Rust 1.94. Phase 7 pins exact 45.0.3 and re-evaluates only through a separate toolchain decision.
-- Product runtime uses Component Model + WASI Preview 2. WASI Preview 3 and component-model async guest ABI are experimental/out of scope.
+- Production pins Wasmtime/`wasmtime-wasi` **36.0.13**, the patched 24-month LTS line compatible with Junban's Rust 1.93.0 pin. Newly issued `RUSTSEC-2026-0222` blocks the historical 45.0.3 spike line; 36.0.13 is unaffected by `RUSTSEC-2026-0223`. The 45.0.3 measurements retain placement history only and must be replaced for active-runtime acceptance.
+- Product runtime uses Component Model + WASI Preview 2. Wasmtime 36.0.13 starts from defaults off with only `runtime`, `cranelift`, `component-model`, and `async`; `wasmtime-wasi` defaults stay off. Preview 1, Preview 3, pooling, GC, cache, profiling, and component-model async guest ABI are out of scope.
 - The accepted product placement is one on-demand child host. Host limits use `StoreLimits`, on-demand allocation, epoch interruption plus host-future cancellation, one mutable store owner, bounded buffers, and a deny-by-default/selective linker.
 - Rust guests use stable `wasm32-wasip2` plus `wit-bindgen`; `cargo-component` is being deprecated and is not the authoring authority.
 - TypeScript uses exact build-only `@bytecodealliance/jco` 1.26.1 and `@bytecodealliance/componentize-js` 0.22.0. A component embeds StarlingMonkey and is expected to add roughly 8 MiB or more before guest heap; its package/memory/cold-start evidence remains separate.
@@ -46,8 +46,10 @@ Verified on 2026-08-04:
 Primary upstream sources are retained in [`plugin-runtime-research.md`](plugin-runtime-research.md) and include:
 
 - <https://docs.wasmtime.dev/api/wasmtime/component/index.html>
-- <https://docs.rs/wasmtime/45.0.3/wasmtime/>
-- <https://docs.rs/wasmtime-wasi/45.0.3/wasmtime_wasi/>
+- <https://docs.rs/wasmtime/36.0.13/wasmtime/>
+- <https://docs.rs/wasmtime-wasi/36.0.13/wasmtime_wasi/>
+- <https://rustsec.org/advisories/RUSTSEC-2026-0222.html>
+- <https://rustsec.org/advisories/RUSTSEC-2026-0223.html>
 - <https://component-model.bytecodealliance.org/language-support/building-a-simple-component/rust.html>
 - <https://component-model.bytecodealliance.org/language-support/building-a-simple-component/javascript.html>
 - <https://bytecodealliance.github.io/jco/>
@@ -420,7 +422,7 @@ Contribution slots remain the legacy-authorized navigation/tools/workspace views
 
 ### Wave 2 — optional runtime and capability bridge
 
-- build the selected lazy host, exact Wasmtime 45.0.3 feature set, selective WASI P2 linker, import/grant enforcement, limits, stores, IPC, dependency services, callbacks, cancellation, crash/restart/suspension, and no-orphan shutdown;
+- build the selected lazy host on exact Wasmtime/`wasmtime-wasi` 36.0.13, selective WASI P2 linker, import/grant enforcement, limits, stores, IPC, dependency services, callbacks, cancellation, crash/restart/suspension, and no-orphan shutdown;
 - execute guest outcomes through application services only after successful bounded return;
 - add denied import/network/filesystem, CPU, memory, stack, output, malformed UI, dependency recursion, host crash, and partial-effect tests on Linux/macOS/Windows;
 - pass the security-dominant sandbox gate.
@@ -563,11 +565,11 @@ Largest implementation risks:
 4. Event loops or crash windows duplicate mutations. Deterministic receipt identities and cursor-after-effect replay prevent duplicate domain commits; rolling suspension contains intentional loops.
 5. Signature UI is mistaken for behavioral safety. UI separately displays signer trust and requested capabilities; permissions remain required for signed packages.
 6. Declarative UI becomes an alternate web framework. Freeze a small node/action set and reject arbitrary style/HTML/URLs instead of adding escape hatches.
-7. Wasmtime 45 leaves the latest MSRV line. Exact pin, advisories, and Phase 8/10 dependency review are mandatory; no quiet toolchain bump.
+7. Wasmtime 36 is an older but patched LTS line. Exact pins, clean advisories, hostile selected-runtime evidence, and Phase 8/10 dependency review are mandatory; no quiet toolchain bump or return to vulnerable 45.x.
 
 ## Decisions and rejected alternatives
 
-- Keep Rust 1.93 and pin Wasmtime 45.0.3 instead of silently raising the whole workspace for 47.x.
+- Keep Rust 1.93 and pin patched Wasmtime/`wasmtime-wasi` 36.0.13 LTS; reject vulnerable 45.0.3, short-lived 46/47 lines, a RustSec exception, and a workspace toolchain bump without product need.
 - Use WASI P2/custom WIT; reject P3/native component async for v1.
 - Use native `wasm32-wasip2` + `wit-bindgen`; reject deprecated `cargo-component` as primary Rust path.
 - Use real jco/componentize-js TypeScript with honest separate memory; reject AssemblyScript marketed as TypeScript and any runtime Node.

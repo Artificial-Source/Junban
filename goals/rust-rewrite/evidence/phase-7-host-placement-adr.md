@@ -41,6 +41,8 @@ Exact pins:
 - jco **1.26.1**, componentize-js **0.22.0** (build-only Node)
 - Rustc **1.93.0**
 
+These are immutable historical measurement inputs, not the production dependency selection. After this spike, `RUSTSEC-2026-0222` made 45.0.3 unacceptable. Production Wave 2 keeps Rust 1.93 and selects exact `wasmtime`/`wasmtime-wasi` **36.0.13**, the patched 24-month LTS line; active-runtime containment and performance evidence must be regenerated on that line.
+
 ## Non-negotiables proven in this spike
 
 1. **Ordinary `junban-server` does not link or construct Wasmtime**
@@ -183,7 +185,7 @@ The accepted ceilings are data-derived from selected-path projections plus expli
 Other limits:
 
 - `invoke_wall_ms` is recorded but **not** enforced as a general per-call wall deadline; only the explicit CPU-loop epoch ticker is measured. Product Wave 2 must enforce epoch + wall deadlines on every guest call.
-- Advisory `RUSTSEC-2026-0222` has no 45.x patch; ignored in `deny.toml` only for this throwaway spike. Product host must re-evaluate before shipping.
+- Advisory `RUSTSEC-2026-0222` has no 45.x patch. The throwaway spike's historical dependency result is not production acceptance, and the workspace `deny.toml` contains no advisory exception. Product Wave 2 selects patched 36.0.13 and must pass clean audit/deny checks.
 
 ## Evidence posture
 
@@ -197,7 +199,7 @@ Lazy in-process passed the same containment probes but lost the frozen fault-con
 
 1. Wave 1 SDK-only matched default condition is fulfilled by `phase-7-sdk-matched-release.json` at clean commit `5d05eacbdfd9298eefc16c5b69f730cd2f05494e`.
 2. Wave 5 replaces projections with integrated selected-path measurements and may revise active ceilings only through documented evidence/review.
-3. Resolve Wasmtime advisory via patch, toolchain move, or documented residual risk before a product host ships.
+3. Production resolution selected exact Wasmtime/`wasmtime-wasi` 36.0.13 LTS on Rust 1.93 with no advisory exception; Wave 2 must replace active-runtime containment/performance evidence before acceptance.
 
 ## Commands
 

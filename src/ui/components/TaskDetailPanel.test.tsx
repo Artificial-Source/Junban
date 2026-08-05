@@ -142,7 +142,7 @@ function mutationOk(): MutationResponse {
       event_type: "task.updated",
       occurred_at: "2026-07-23T10:01:00Z",
       affected: { task_ids: [] },
-      resync: { tasks: false, catalog: false },
+      resync: { tasks: false, catalog: false, settings: false },
     },
   };
 }
@@ -579,6 +579,29 @@ describe("TaskDetailPanel", () => {
 
     // Close control retained
     expect(container.querySelector('button[aria-label="Close task details"]')).toBeTruthy();
+  });
+
+  it("invokes onAskAi callback without requiring routing imports", async () => {
+    const onAskAi = vi.fn();
+    const task = makeTask({ id: "01234567-0123-4123-8123-0123456789ab" });
+    render(
+      createElement(TaskDetailPanel, {
+        task,
+        onClose: () => {},
+        onAskAi,
+      }),
+    );
+
+    const ask = container.querySelector('button[aria-label="Ask AI"]') as HTMLButtonElement;
+    expect(ask).toBeTruthy();
+    await act(async () => {
+      ask.click();
+    });
+    expect(onAskAi).toHaveBeenCalledWith(task.id);
+
+    // Without the callback the control is omitted (callback seam only).
+    render(createElement(TaskDetailPanel, { task, onClose: () => {} }));
+    expect(container.querySelector('button[aria-label="Ask AI"]')).toBeNull();
   });
 
   it("asks for in-product confirmation before deleting", async () => {

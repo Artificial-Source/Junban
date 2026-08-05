@@ -10,6 +10,3484 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/v1/ai/approvals/{approval_id}": {
+      "get": {
+        "tags": ["routes_ai_approvals"],
+        "operationId": "get_ai_approval",
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiApprovalResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/approvals/{approval_id}/approve": {
+      "post": {
+        "tags": ["routes_ai_approvals"],
+        "operationId": "approve_ai_approval",
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiApprovalDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiApprovalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/approvals/{approval_id}/reject": {
+      "post": {
+        "tags": ["routes_ai_approvals"],
+        "operationId": "reject_ai_approval",
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiApprovalDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiApprovalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/config": {
+      "get": {
+        "tags": ["routes_ai"],
+        "operationId": "get_ai_config",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": ["routes_ai"],
+        "operationId": "put_ai_config",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiConfigPutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes_ai"],
+        "operationId": "delete_ai_config",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/credentials/{target}": {
+      "put": {
+        "tags": ["routes_ai"],
+        "operationId": "put_ai_credential",
+        "parameters": [
+          {
+            "name": "target",
+            "in": "path",
+            "description": "credential binding target",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AiCredentialTargetDto"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutAiCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiCredentialBindingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes_ai"],
+        "operationId": "delete_ai_credential",
+        "parameters": [
+          {
+            "name": "target",
+            "in": "path",
+            "description": "credential binding target",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AiCredentialTargetDto"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiCredentialBindingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/memories": {
+      "get": {
+        "tags": ["routes_ai"],
+        "operationId": "list_ai_memories",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size in `1..=100`. Defaults to 100 when omitted.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemoryListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": ["routes_ai"],
+        "operationId": "create_ai_memory",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAiMemoryHttpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemoryMutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/memories/{memory_id}": {
+      "get": {
+        "tags": ["routes_ai"],
+        "operationId": "get_ai_memory",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemoryDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes_ai"],
+        "operationId": "delete_ai_memory",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": ["routes_ai"],
+        "operationId": "patch_ai_memory",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchAiMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemoryMutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/providers": {
+      "get": {
+        "tags": ["routes_ai"],
+        "operationId": "list_ai_providers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiProviderRegistryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/providers/{provider}/models": {
+      "get": {
+        "tags": ["routes_ai"],
+        "operationId": "discover_ai_provider_models",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "description": "canonical provider id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AiProviderPresetDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelDiscoveryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/runs/{run_id}/cancel": {
+      "post": {
+        "tags": ["routes_ai"],
+        "operationId": "cancel_ai_run",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelAiRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/sessions": {
+      "get": {
+        "tags": ["routes_ai"],
+        "operationId": "list_ai_sessions",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size in `1..=100`. Defaults to 100 when omitted.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiSessionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": ["routes_ai"],
+        "operationId": "create_ai_session",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAiSessionHttpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiSessionMutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/sessions/{session_id}": {
+      "get": {
+        "tags": ["routes_ai"],
+        "operationId": "get_ai_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiSessionDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes_ai"],
+        "operationId": "delete_ai_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": ["routes_ai"],
+        "operationId": "patch_ai_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchAiSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiSessionMutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/sessions/{session_id}/clear": {
+      "post": {
+        "tags": ["routes_ai"],
+        "operationId": "clear_ai_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiSessionMutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/sessions/{session_id}/daily-briefing": {
+      "post": {
+        "tags": ["routes_ai_turns"],
+        "operationId": "create_ai_daily_briefing",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyAiResponseActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiRunSseEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/sessions/{session_id}/messages": {
+      "get": {
+        "tags": ["routes_ai"],
+        "operationId": "list_ai_messages",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after_sequence",
+            "in": "query",
+            "description": "Return messages with `sequence` strictly greater than this value.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size in `1..=100`. Defaults to 100 when omitted.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiMessageListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/sessions/{session_id}/messages/{message_id}/edit": {
+      "post": {
+        "tags": ["routes_ai_turns"],
+        "operationId": "edit_ai_response",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditAiResponseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiRunSseEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/sessions/{session_id}/messages/{message_id}/regenerate": {
+      "post": {
+        "tags": ["routes_ai_turns"],
+        "operationId": "regenerate_ai_response",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyAiResponseActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiRunSseEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/sessions/{session_id}/messages/{message_id}/retry": {
+      "post": {
+        "tags": ["routes_ai_turns"],
+        "operationId": "retry_ai_response",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyAiResponseActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiRunSseEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/sessions/{session_id}/responses": {
+      "post": {
+        "tags": ["routes_ai"],
+        "operationId": "create_ai_response",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAiResponseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiRunSseEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/credentials": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "list_automation_credentials",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationCredentialListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": ["routes"],
+        "operationId": "create_automation_credential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAutomationCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationCredentialDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/credentials/{credential_id}": {
+      "delete": {
+        "tags": ["routes"],
+        "operationId": "revoke_automation_credential",
+        "parameters": [
+          {
+            "name": "credential_id",
+            "in": "path",
+            "description": "Credential UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Credential revoked or already absent"
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/principal": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_principal",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrincipalResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/rotate": {
+      "post": {
+        "tags": ["routes"],
+        "operationId": "rotate_token",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenRotationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backup": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "create_backup",
+        "responses": {
+          "200": {
+            "description": "Framed .junban-backup artifact"
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backup/restore": {
+      "post": {
+        "tags": ["routes"],
+        "operationId": "restore_backup",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/calendar/tasks": {
       "get": {
         "tags": ["routes"],
@@ -19,18 +3497,20 @@
             "name": "from",
             "in": "query",
             "description": "Inclusive civil start date (`YYYY-MM-DD`). Required.",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "to",
             "in": "query",
             "description": "Inclusive civil end date (`YYYY-MM-DD`). Required.",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -349,6 +3829,83 @@
         ]
       }
     },
+    "/api/v1/diagnostics": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_diagnostics",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosticsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes"],
+        "operationId": "clear_diagnostics",
+        "responses": {
+          "204": {
+            "description": "diagnostic ring cleared"
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/events": {
       "get": {
         "tags": ["routes"],
@@ -362,6 +3919,14 @@
               "type": "integer",
               "format": "int64",
               "minimum": 0
+            }
+          },
+          {
+            "name": "event_epoch",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           },
           {
@@ -393,6 +3958,83 @@
             }
           },
           "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/exports/tasks": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "export_tasks",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "path",
+            "description": "One of `json`, `csv`, or `markdown`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transfer document body"
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
             "description": "",
             "content": {
               "application/json": {
@@ -438,6 +4080,360 @@
         }
       }
     },
+    "/api/v1/hosts": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_allowed_hosts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": ["routes"],
+        "operationId": "put_allowed_hosts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/imports/apply": {
+      "post": {
+        "tags": ["routes"],
+        "operationId": "apply_import",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/imports/preview": {
+      "post": {
+        "tags": ["routes"],
+        "operationId": "preview_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferPreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/maintenance/status": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_maintenance_status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/motivation/dopamine-menu": {
       "get": {
         "tags": ["routes"],
@@ -449,7 +4445,8 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           }
         ],
@@ -513,7 +4510,8 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           }
         ],
@@ -577,7 +4575,8 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           }
         ],
@@ -641,18 +4640,20 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "capacity_minutes",
             "in": "query",
-            "description": "Daily capacity in whole minutes. Defaults to 480.",
+            "description": "Daily capacity in whole minutes (`60..=1440`). Defaults to 480.",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 1440,
+              "minimum": 60
             }
           }
         ],
@@ -1038,18 +5039,20 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "capacity_minutes",
             "in": "query",
-            "description": "Daily capacity in whole minutes. Defaults to 480.",
+            "description": "Daily capacity in whole minutes (`60..=1440`). Defaults to 480.",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 1440,
+              "minimum": 60
             }
           }
         ],
@@ -1113,18 +5116,20 @@
             "description": "Civil date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "capacity_minutes",
             "in": "query",
-            "description": "Daily capacity in whole minutes. Defaults to 480.",
+            "description": "Daily capacity in whole minutes (`60..=1440`). Defaults to 480.",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 1440,
+              "minimum": 60
             }
           }
         ],
@@ -1188,7 +5193,8 @@
             "description": "Civil date inside the current week (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -1629,6 +5635,24 @@
             "bearer_auth": []
           }
         ]
+      }
+    },
+    "/api/v1/recovery/status": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_recovery_status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryStatusResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/reminders/claim": {
@@ -2980,6 +7004,151 @@
         ]
       }
     },
+    "/api/v1/settings": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_settings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppSettingsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": ["routes"],
+        "operationId": "patch_settings",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/settings/temporal": {
       "get": {
         "tags": ["routes"],
@@ -3032,18 +7201,20 @@
             "name": "from",
             "in": "query",
             "description": "Inclusive civil start date (`YYYY-MM-DD`). Required.",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "to",
             "in": "query",
             "description": "Inclusive civil end date (`YYYY-MM-DD`). Required.",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           }
         ],
@@ -3069,6 +7240,49 @@
             }
           },
           "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sync-state": {
+      "get": {
+        "tags": ["routes"],
+        "operationId": "get_sync_state",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncStateResponse"
+                }
+              }
+            }
+          },
+          "401": {
             "description": "",
             "content": {
               "application/json": {
@@ -3500,35 +7714,43 @@
           {
             "name": "priority",
             "in": "query",
+            "description": "Task priority P1 (highest) through P4 (lowest).",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 4,
+              "minimum": 1
             }
           },
           {
             "name": "due_on",
             "in": "query",
+            "description": "Civil due date filter (`YYYY-MM-DD`).",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "due_before",
             "in": "query",
+            "description": "Inclusive upper bound on due date (`YYYY-MM-DD`).",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "due_after",
             "in": "query",
+            "description": "Inclusive lower bound on due date (`YYYY-MM-DD`).",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -3566,11 +7788,13 @@
           {
             "name": "limit",
             "in": "query",
+            "description": "Page size in `1..=100`. Defaults to 100 when omitted.",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 100,
+              "minimum": 1
             }
           }
         ],
@@ -4266,11 +8490,13 @@
           {
             "name": "limit",
             "in": "query",
+            "description": "Page size in `1..=100`. Defaults to 50 when omitted.",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
-              "minimum": 0
+              "maximum": 100,
+              "minimum": 1
             }
           }
         ],
@@ -6121,7 +10347,8 @@
             "description": "Inclusive civil start date (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -6130,7 +10357,8 @@
             "description": "Inclusive civil end date (`YYYY-MM-DD`). Defaults to `from`.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           }
         ],
@@ -6933,7 +11161,8 @@
             "description": "Civil date filter (`YYYY-MM-DD`). Defaults to server-local today.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -7686,6 +11915,237 @@
           }
         ]
       }
+    },
+    "/api/v1/voice/speech": {
+      "post": {
+        "tags": ["routes_voice"],
+        "operationId": "create_voice_speech",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeechSynthesisRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Canonical provider audio",
+            "content": {
+              "audio/mpeg": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechBinaryResponse"
+                }
+              },
+              "audio/wav": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechBinaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/voice/transcriptions": {
+      "post": {
+        "tags": ["routes_voice"],
+        "operationId": "create_voice_transcription",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeechTranscriptionMultipart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -7776,6 +12236,864 @@
           }
         }
       },
+      "AiApprovalDecisionRequest": {
+        "type": "object",
+        "required": ["action_hash"],
+        "properties": {
+          "action_hash": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AiApprovalDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "turn_id",
+          "run_id",
+          "generation",
+          "tool_name",
+          "arguments",
+          "action_hash",
+          "status",
+          "expires_at",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "action_hash": {
+            "type": "string"
+          },
+          "arguments": {},
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "AiApprovalMessageDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "turn_id",
+          "role",
+          "status",
+          "content",
+          "sequence",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "content": {},
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "AiApprovalResponse": {
+        "type": "object",
+        "required": ["approval", "message", "run"],
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/AiApprovalDto"
+          },
+          "message": {
+            "$ref": "#/components/schemas/AiApprovalMessageDto"
+          },
+          "result": {},
+          "run": {
+            "$ref": "#/components/schemas/AiApprovalRunDto"
+          }
+        }
+      },
+      "AiApprovalRunDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "turn_id",
+          "assistant_message_id",
+          "generation",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "approval_id": {
+            "type": ["string", "null"]
+          },
+          "assistant_message_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "AiConfigInput": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "custom_instructions",
+          "daily_briefing_enabled",
+          "auto_send",
+          "smart_endpoint"
+        ],
+        "properties": {
+          "auto_send": {
+            "type": "boolean"
+          },
+          "base_url": {
+            "type": ["string", "null"]
+          },
+          "custom_instructions": {
+            "type": "string"
+          },
+          "daily_briefing_enabled": {
+            "type": "boolean"
+          },
+          "default_energy": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": ["string", "null"]
+          },
+          "provider": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiProviderPresetDto"
+              }
+            ]
+          },
+          "smart_endpoint": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AiConfigPutRequest": {
+        "type": "object",
+        "required": ["ai", "voice"],
+        "properties": {
+          "ai": {
+            "$ref": "#/components/schemas/AiConfigInput"
+          },
+          "voice": {
+            "$ref": "#/components/schemas/VoiceConfigInput"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AiConfigResponse": {
+        "type": "object",
+        "required": ["ai", "voice", "credentials"],
+        "properties": {
+          "ai": {
+            "$ref": "#/components/schemas/AiSettingsDto"
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/AiCredentialBindingsDto"
+          },
+          "voice": {
+            "$ref": "#/components/schemas/VoiceSettingsDto"
+          }
+        }
+      },
+      "AiContextMetadata": {
+        "type": "object",
+        "required": [
+          "history_rows_loaded",
+          "history_messages_included",
+          "memories_considered",
+          "memories_included",
+          "focused_task_included",
+          "truncated",
+          "utf8_bytes",
+          "approximate_tokens"
+        ],
+        "properties": {
+          "approximate_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "focused_task_included": {
+            "type": "boolean"
+          },
+          "history_messages_included": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "history_rows_loaded": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "memories_considered": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "memories_included": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "utf8_bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "AiCredentialBindingResponse": {
+        "type": "object",
+        "required": ["target"],
+        "properties": {
+          "credential": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiCredentialMetadataDto"
+              }
+            ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/AiCredentialTargetDto"
+          }
+        }
+      },
+      "AiCredentialBindingsDto": {
+        "type": "object",
+        "properties": {
+          "ai_provider": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiCredentialMetadataDto"
+              }
+            ]
+          },
+          "voice_stt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiCredentialMetadataDto"
+              }
+            ]
+          },
+          "voice_tts": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiCredentialMetadataDto"
+              }
+            ]
+          }
+        }
+      },
+      "AiCredentialMetadataDto": {
+        "type": "object",
+        "required": ["id", "kind", "updated_at", "present"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AiSecretKindDto"
+          },
+          "present": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AiCredentialTargetDto": {
+        "type": "string",
+        "enum": ["ai_provider", "voice_stt", "voice_tts"]
+      },
+      "AiMemoryDto": {
+        "type": "object",
+        "required": ["id", "content", "content_bytes", "created_at", "updated_at"],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "content_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AiMemoryListResponse": {
+        "type": "object",
+        "required": ["memories"],
+        "properties": {
+          "memories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiMemoryDto"
+            }
+          },
+          "next_cursor": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "AiMemoryMutationResponse": {
+        "type": "object",
+        "description": "Create/update memory responses carry the canonical resource plus the committed event.",
+        "required": ["memory", "event"],
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/CommittedEventDto"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/AiMemoryDto"
+          }
+        }
+      },
+      "AiMessageContentDto": {
+        "type": "object",
+        "properties": {
+          "briefing_date": {
+            "type": ["string", "null"]
+          },
+          "focused_task_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string"
+          },
+          "tool_arguments_json": {
+            "type": ["string", "null"]
+          },
+          "tool_events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiToolEventDto"
+            }
+          },
+          "tool_name": {
+            "type": ["string", "null"]
+          },
+          "tool_result_json": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "AiMessageDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "turn_id",
+          "sequence",
+          "role",
+          "status",
+          "content",
+          "content_bytes",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "content": {
+            "$ref": "#/components/schemas/AiMessageContentDto"
+          },
+          "content_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AiMessageRoleDto"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AiMessageStatusDto"
+          },
+          "turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AiMessageListResponse": {
+        "type": "object",
+        "required": ["messages"],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiMessageDto"
+            }
+          }
+        }
+      },
+      "AiMessageRoleDto": {
+        "type": "string",
+        "enum": ["user", "assistant", "system", "tool"]
+      },
+      "AiMessageStatusDto": {
+        "type": "string",
+        "enum": ["pending", "streaming", "completed", "failed", "cancelled"]
+      },
+      "AiProviderPresetDto": {
+        "type": "string",
+        "enum": [
+          "openai",
+          "anthropic",
+          "gemini",
+          "openrouter",
+          "ollama",
+          "lm_studio",
+          "deepseek",
+          "mistral",
+          "kimi",
+          "dashscope",
+          "groq",
+          "z_ai",
+          "custom"
+        ]
+      },
+      "AiProviderRegistryEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "display_name",
+          "origin_class",
+          "auth_scheme",
+          "credential_required",
+          "capabilities"
+        ],
+        "properties": {
+          "auth_scheme": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderCapabilityDto"
+            }
+          },
+          "credential_required": {
+            "type": "boolean"
+          },
+          "default_base_url": {
+            "type": ["string", "null"]
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/AiProviderPresetDto"
+          },
+          "origin_class": {
+            "$ref": "#/components/schemas/ProviderOriginClassDto"
+          }
+        }
+      },
+      "AiProviderRegistryResponse": {
+        "type": "object",
+        "required": ["providers"],
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiProviderRegistryEntry"
+            }
+          }
+        }
+      },
+      "AiRunEventType": {
+        "type": "string",
+        "enum": [
+          "run_started",
+          "text_delta",
+          "reasoning_status",
+          "usage",
+          "tool_proposed",
+          "tool_approved",
+          "tool_rejected",
+          "tool_result",
+          "run_completed",
+          "run_cancelled",
+          "run_failed"
+        ]
+      },
+      "AiRunSseEnvelope": {
+        "type": "object",
+        "required": ["version", "run_id", "generation", "sequence", "type", "payload"],
+        "properties": {
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "payload": {},
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "type": {
+            "$ref": "#/components/schemas/AiRunEventType"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "AiSecretKindDto": {
+        "type": "string",
+        "enum": ["api_key", "bearer", "inworld_basic", "inworld_jwt"]
+      },
+      "AiSessionDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "status",
+          "message_count",
+          "content_bytes",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "content_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_message_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "message_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/AiSessionStatusDto"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AiSessionListResponse": {
+        "type": "object",
+        "required": ["sessions"],
+        "properties": {
+          "next_cursor": {
+            "type": ["string", "null"]
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiSessionDto"
+            }
+          }
+        }
+      },
+      "AiSessionMutationResponse": {
+        "type": "object",
+        "description": "Create/rename/clear responses carry the canonical resource plus the committed event.",
+        "required": ["session", "event"],
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/CommittedEventDto"
+          },
+          "session": {
+            "$ref": "#/components/schemas/AiSessionDto"
+          }
+        }
+      },
+      "AiSessionStatusDto": {
+        "type": "string",
+        "enum": ["active", "archived"]
+      },
+      "AiSettingsDto": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "custom_instructions",
+          "daily_briefing_enabled",
+          "auto_send",
+          "smart_endpoint"
+        ],
+        "properties": {
+          "auto_send": {
+            "type": "boolean"
+          },
+          "base_url": {
+            "type": ["string", "null"]
+          },
+          "credential_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "custom_instructions": {
+            "type": "string"
+          },
+          "daily_briefing_enabled": {
+            "type": "boolean"
+          },
+          "default_energy": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": ["string", "null"]
+          },
+          "provider": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AiProviderPresetDto"
+              }
+            ]
+          },
+          "smart_endpoint": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AiToolEventDto": {
+        "type": "object",
+        "required": ["version", "assistant_utf8_offset", "event_type", "payload"],
+        "properties": {
+          "assistant_utf8_offset": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "payload": {},
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "AppSettingsResponse": {
+        "type": "object",
+        "required": [
+          "appearance",
+          "date_time",
+          "task_defaults",
+          "notifications",
+          "features",
+          "planning",
+          "keyboard_shortcuts"
+        ],
+        "properties": {
+          "appearance": {
+            "$ref": "#/components/schemas/AppearanceSettingsDto"
+          },
+          "date_time": {
+            "$ref": "#/components/schemas/DateTimeSettingsDto"
+          },
+          "features": {
+            "$ref": "#/components/schemas/FeatureSettingsDto"
+          },
+          "keyboard_shortcuts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeyboardShortcutDto"
+            }
+          },
+          "notifications": {
+            "$ref": "#/components/schemas/NotificationSettingsDto"
+          },
+          "planning": {
+            "$ref": "#/components/schemas/PlanningSettingsDto"
+          },
+          "task_defaults": {
+            "$ref": "#/components/schemas/TaskDefaultsDto"
+          }
+        }
+      },
+      "AppearanceSettingsDto": {
+        "type": "object",
+        "required": ["theme", "accent", "density", "font_size", "font_family", "reduced_motion"],
+        "properties": {
+          "accent": {
+            "type": "string",
+            "pattern": "^#[0-9A-Fa-f]{6}$"
+          },
+          "density": {
+            "$ref": "#/components/schemas/DensityDto"
+          },
+          "font_family": {
+            "$ref": "#/components/schemas/FontFamilyDto"
+          },
+          "font_size": {
+            "$ref": "#/components/schemas/FontSizeDto"
+          },
+          "reduced_motion": {
+            "type": "boolean"
+          },
+          "theme": {
+            "$ref": "#/components/schemas/ThemeDto"
+          }
+        },
+        "additionalProperties": false
+      },
       "AppendTimeSlotTaskRequest": {
         "type": "object",
         "required": ["task_id"],
@@ -7804,6 +13122,108 @@
           }
         },
         "additionalProperties": false
+      },
+      "AutomationCredentialDto": {
+        "type": "object",
+        "description": "Public automation credential metadata (never includes secrets or hashes).",
+        "required": ["id", "label", "created_at", "scopes"],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationScope"
+            }
+          }
+        }
+      },
+      "AutomationCredentialListResponse": {
+        "type": "object",
+        "description": "Operator-only list of automation credentials.",
+        "required": ["credentials"],
+        "properties": {
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationCredentialDto"
+            }
+          }
+        }
+      },
+      "AutomationScope": {
+        "type": "string",
+        "description": "Issuable automation scopes. None implies another.",
+        "enum": ["read", "write", "data"]
+      },
+      "BackupManifestDto": {
+        "type": "object",
+        "description": "Inventory snapshot embedded in a backup artifact (wire projection).",
+        "required": [
+          "artifact_version",
+          "schema_version",
+          "created_at",
+          "payload_sha256",
+          "task_count",
+          "project_count",
+          "tag_count",
+          "event_count",
+          "revision"
+        ],
+        "properties": {
+          "artifact_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "event_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "payload_sha256": {
+            "type": "string"
+          },
+          "project_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tag_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "task_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       },
       "BulkActionDto": {
         "oneOf": [
@@ -7903,7 +13323,8 @@
               "priority": {
                 "type": ["integer", "null"],
                 "format": "int32",
-                "minimum": 0
+                "maximum": 4,
+                "minimum": 1
               },
               "type": {
                 "type": "string",
@@ -7975,6 +13396,10 @@
         },
         "additionalProperties": false
       },
+      "CalendarDefaultDto": {
+        "type": "string",
+        "enum": ["day", "week", "month"]
+      },
       "CalendarTasksResponse": {
         "type": "object",
         "required": ["tasks", "revision"],
@@ -7989,6 +13414,19 @@
             "items": {
               "$ref": "#/components/schemas/TaskDto"
             }
+          }
+        }
+      },
+      "CancelAiRunResponse": {
+        "type": "object",
+        "required": ["run_id", "status"],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
           }
         }
       },
@@ -8048,7 +13486,9 @@
           "limit": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "description": "Claim batch size in `1..=100`. Defaults to 20 when omitted.",
+            "maximum": 100,
+            "minimum": 1
           }
         },
         "additionalProperties": false
@@ -8209,6 +13649,72 @@
           }
         }
       },
+      "CreateAiMemoryHttpRequest": {
+        "type": "object",
+        "required": ["content"],
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateAiResponseRequest": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "focused_task_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateAiSessionHttpRequest": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateAutomationCredentialRequest": {
+        "type": "object",
+        "description": "Operator-only create body. The client generates the id and one-time token.",
+        "required": ["id", "label", "scopes", "token"],
+        "properties": {
+          "expires_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Optional expiry instant; must be strictly after creation time."
+          },
+          "id": {
+            "type": "string",
+            "description": "Client-generated credential UUID."
+          },
+          "label": {
+            "type": "string",
+            "description": "Human label for operator listing."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationScope"
+            },
+            "description": "Exact scopes requested (duplicates rejected)."
+          },
+          "token": {
+            "type": "string",
+            "description": "Full high-entropy automation bearer. Persisted only as a one-way hash."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateCommentRequest": {
         "type": "object",
         "required": ["content"],
@@ -8360,7 +13866,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],
@@ -8405,7 +13912,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],
@@ -8591,6 +14099,94 @@
           }
         }
       },
+      "DateFormatDto": {
+        "type": "string",
+        "enum": ["relative", "short", "long", "iso"]
+      },
+      "DateTimeSettingsDto": {
+        "type": "object",
+        "required": ["week_start", "calendar_default", "date_format", "time_format"],
+        "properties": {
+          "calendar_default": {
+            "$ref": "#/components/schemas/CalendarDefaultDto"
+          },
+          "date_format": {
+            "$ref": "#/components/schemas/DateFormatDto"
+          },
+          "time_format": {
+            "$ref": "#/components/schemas/TimeFormatDto"
+          },
+          "week_start": {
+            "$ref": "#/components/schemas/WeekStartDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DensityDto": {
+        "type": "string",
+        "enum": ["compact", "default", "comfortable"]
+      },
+      "DiagnosticEntry": {
+        "type": "object",
+        "description": "One structured diagnostic record. Messages must already be redacted.",
+        "required": ["timestamp", "severity", "code", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable machine-facing event code."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable detail; never includes raw secrets."
+          },
+          "request_id": {
+            "type": ["string", "null"]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/DiagnosticSeverity"
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "RFC3339 / ISO-8601 timestamp from the server clock."
+          }
+        }
+      },
+      "DiagnosticSeverity": {
+        "type": "string",
+        "description": "Severity of a diagnostic entry.",
+        "enum": ["info", "warning", "error"]
+      },
+      "DiagnosticsResponse": {
+        "type": "object",
+        "description": "Bounded diagnostic ring snapshot.",
+        "required": ["entries"],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticEntry"
+            }
+          }
+        }
+      },
+      "DiscoveredModelDto": {
+        "type": "object",
+        "required": ["id", "capabilities"],
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderCapabilityDto"
+            }
+          },
+          "display_name": {
+            "type": ["string", "null"]
+          },
+          "id": {
+            "type": "string"
+          }
+        }
+      },
       "DopamineMenuResponse": {
         "type": "object",
         "required": ["task_ids", "tasks", "revision"],
@@ -8635,6 +14231,24 @@
             ]
           }
         }
+      },
+      "EditAiResponseRequest": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "focused_task_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EmptyAiResponseActionRequest": {
+        "type": "object",
+        "additionalProperties": false
       },
       "EndOfDayResponse": {
         "type": "object",
@@ -8754,14 +14368,183 @@
           }
         }
       },
+      "ExportTasksQuery": {
+        "type": "object",
+        "required": ["format"],
+        "properties": {
+          "format": {
+            "type": "string",
+            "description": "One of `json`, `csv`, or `markdown`."
+          }
+        }
+      },
+      "FeatureSettingsDto": {
+        "type": "object",
+        "required": [
+          "nudges_enabled",
+          "eat_the_frog_enabled",
+          "task_jar_enabled",
+          "focus_mode_enabled",
+          "daily_planning_enabled",
+          "weekly_review_enabled"
+        ],
+        "properties": {
+          "daily_planning_enabled": {
+            "type": "boolean"
+          },
+          "eat_the_frog_enabled": {
+            "type": "boolean"
+          },
+          "focus_mode_enabled": {
+            "type": "boolean"
+          },
+          "nudges_enabled": {
+            "type": "boolean"
+          },
+          "task_jar_enabled": {
+            "type": "boolean"
+          },
+          "weekly_review_enabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FontFamilyDto": {
+        "type": "string",
+        "enum": ["outfit", "inter", "system"]
+      },
+      "FontSizeDto": {
+        "type": "string",
+        "enum": ["small", "medium", "large"]
+      },
       "HealthResponse": {
         "type": "object",
-        "required": ["status"],
+        "required": ["status", "instance_id"],
         "properties": {
+          "instance_id": {
+            "type": "string",
+            "description": "Random per-process id mirrored from private runtime metadata."
+          },
           "status": {
             "type": "string"
           }
         }
+      },
+      "HostListRequest": {
+        "type": "object",
+        "description": "Replace the persisted Host allowlist (CLI hosts are always retained).",
+        "required": ["hosts"],
+        "properties": {
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "HostListResponse": {
+        "type": "object",
+        "description": "Effective Host allowlist (CLI hosts plus persisted extras).",
+        "required": ["hosts"],
+        "properties": {
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ImportApplyRequest": {
+        "type": "object",
+        "required": ["format", "content", "fingerprint"],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/TransferFormatDto"
+          },
+          "project_name_mapping": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameMappingDto"
+            }
+          },
+          "tag_name_mapping": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameMappingDto"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImportDraftDto": {
+        "type": "object",
+        "required": ["title", "tag_names", "line"],
+        "properties": {
+          "description": {
+            "type": ["string", "null"]
+          },
+          "due_date": {
+            "type": ["string", "null"]
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "priority": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "maximum": 4,
+            "minimum": 1
+          },
+          "project_name": {
+            "type": ["string", "null"]
+          },
+          "tag_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "ImportPreviewRequest": {
+        "type": "object",
+        "required": ["format", "content"],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/TransferFormatDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "KeyboardShortcutDto": {
+        "type": "object",
+        "required": ["action", "chord"],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "chord": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "LocalDueTimeDto": {
         "type": "object",
@@ -8776,6 +14559,31 @@
           }
         }
       },
+      "MaintenanceStatusResponse": {
+        "type": "object",
+        "description": "Process-wide maintenance barrier snapshot.",
+        "required": [
+          "maintenance_active",
+          "restart_required",
+          "recovery_mode",
+          "admitted_requests"
+        ],
+        "properties": {
+          "admitted_requests": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maintenance_active": {
+            "type": "boolean"
+          },
+          "recovery_mode": {
+            "type": "boolean"
+          },
+          "restart_required": {
+            "type": "boolean"
+          }
+        }
+      },
       "MarkOwnerLostRemindersRequest": {
         "type": "object",
         "required": ["fence_term"],
@@ -8786,7 +14594,9 @@
           "limit": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "description": "Batch size in `1..=100`. Defaults to 20 when omitted.",
+            "maximum": 100,
+            "minimum": 1
           }
         },
         "additionalProperties": false
@@ -8799,6 +14609,21 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "ModelDiscoveryResponse": {
+        "type": "object",
+        "required": ["provider", "models"],
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredModelDto"
+            }
+          },
+          "provider": {
+            "$ref": "#/components/schemas/AiProviderPresetDto"
           }
         }
       },
@@ -8871,6 +14696,19 @@
           }
         }
       },
+      "NameMappingDto": {
+        "type": "object",
+        "required": ["from", "to"],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "NeglectedProjectFactDto": {
         "type": "object",
         "required": ["project_id", "overdue_count", "reason"],
@@ -8892,6 +14730,47 @@
       "NeglectedProjectReasonDto": {
         "type": "string",
         "enum": ["overdue_tasks", "no_activity"]
+      },
+      "NotificationSettingsDto": {
+        "type": "object",
+        "required": [
+          "channels",
+          "sound_enabled",
+          "volume_percent",
+          "task_completed_sound",
+          "task_created_sound",
+          "task_deleted_sound",
+          "reminder_sound"
+        ],
+        "properties": {
+          "channels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReminderChannelDto"
+            }
+          },
+          "reminder_sound": {
+            "type": "boolean"
+          },
+          "sound_enabled": {
+            "type": "boolean"
+          },
+          "task_completed_sound": {
+            "type": "boolean"
+          },
+          "task_created_sound": {
+            "type": "boolean"
+          },
+          "task_deleted_sound": {
+            "type": "boolean"
+          },
+          "volume_percent": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "NudgeRuleFactsDto": {
         "type": "object",
@@ -8915,6 +14794,24 @@
       "NudgeRuleKindDto": {
         "type": "string",
         "enum": ["overdue", "approaching_deadline", "stale_task", "empty_today", "overloaded_day"]
+      },
+      "NudgeRuleSettingsDto": {
+        "type": "object",
+        "required": ["kind", "enabled"],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NudgeRuleKindDto"
+          },
+          "threshold": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "NudgesResponse": {
         "type": "object",
@@ -9036,6 +14933,26 @@
           }
         }
       },
+      "PatchAiMemoryRequest": {
+        "type": "object",
+        "required": ["content"],
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PatchAiSessionRequest": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "PatchCommentRequest": {
         "type": "object",
         "required": ["content"],
@@ -9120,6 +15037,78 @@
         },
         "additionalProperties": false
       },
+      "PatchSettingsRequest": {
+        "type": "object",
+        "properties": {
+          "appearance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AppearanceSettingsDto"
+              }
+            ]
+          },
+          "date_time": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DateTimeSettingsDto"
+              }
+            ]
+          },
+          "features": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FeatureSettingsDto"
+              }
+            ]
+          },
+          "keyboard_shortcuts": {
+            "type": ["array", "null"],
+            "items": {
+              "$ref": "#/components/schemas/KeyboardShortcutDto"
+            }
+          },
+          "notifications": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NotificationSettingsDto"
+              }
+            ]
+          },
+          "planning": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlanningSettingsDto"
+              }
+            ]
+          },
+          "task_defaults": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskDefaultsDto"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "PatchTagRequest": {
         "type": "object",
         "properties": {
@@ -9179,7 +15168,8 @@
             "type": ["integer", "null"],
             "format": "int32",
             "description": "`null` clears priority; omit leaves unchanged.",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],
@@ -9223,7 +15213,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],
@@ -9319,6 +15310,55 @@
         },
         "additionalProperties": false
       },
+      "PlanningSettingsDto": {
+        "type": "object",
+        "required": ["capacity_minutes", "nudge_rules"],
+        "properties": {
+          "capacity_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "nudge_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NudgeRuleSettingsDto"
+            }
+          },
+          "work_hours": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WorkHoursDto"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "PrincipalKindDto": {
+        "type": "string",
+        "description": "Authenticated principal kind (never includes ids, tokens, or secrets).",
+        "enum": ["operator", "automation"]
+      },
+      "PrincipalResponse": {
+        "type": "object",
+        "description": "Capability snapshot for the active bearer.\n\nOperator always reports the full routine scope set (`read`, `write`, `data`).\nAutomation reports only the exact issued scopes. Identifiers and secrets are\nintentionally omitted so CLI/MCP clients can filter tools without learning\ncredential identity material.",
+        "required": ["kind", "scopes"],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/PrincipalKindDto"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationScope"
+            }
+          }
+        }
+      },
       "ProfileResponse": {
         "type": "object",
         "required": ["revision"],
@@ -9388,6 +15428,37 @@
         "type": "string",
         "enum": ["list", "board", "calendar"]
       },
+      "ProviderCapabilityDto": {
+        "type": "string",
+        "enum": [
+          "chat_streaming",
+          "chat_completion",
+          "tools",
+          "streaming_tools",
+          "vision",
+          "reasoning_status",
+          "model_discovery"
+        ]
+      },
+      "ProviderOriginClassDto": {
+        "type": "string",
+        "enum": ["fixed_cloud_https", "loopback", "operator_custom"]
+      },
+      "PutAiCredentialRequest": {
+        "type": "object",
+        "required": ["kind", "secret"],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/AiSecretKindDto"
+          },
+          "secret": {
+            "type": "string",
+            "writeOnly": true,
+            "maxLength": 8192
+          }
+        },
+        "additionalProperties": false
+      },
       "QuickEntryDto": {
         "type": "object",
         "required": ["title", "tag_names", "someday"],
@@ -9413,7 +15484,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_name": {
             "type": ["string", "null"]
@@ -9432,6 +15504,19 @@
           },
           "title": {
             "type": "string"
+          }
+        }
+      },
+      "RecoveryStatusResponse": {
+        "type": "object",
+        "description": "Narrow recovery-mode status (no auth).",
+        "required": ["mode", "restart_required"],
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "restart_required": {
+            "type": "boolean"
           }
         }
       },
@@ -9875,14 +15960,31 @@
           "relation",
           "operation",
           "time_block",
-          "time_slot"
+          "time_slot",
+          "settings",
+          "ai_session",
+          "ai_memory",
+          "ai_approval"
         ]
+      },
+      "RestoreResponse": {
+        "type": "object",
+        "description": "Successful restore response; process must restart before normal traffic resumes.",
+        "required": ["restart_required"],
+        "properties": {
+          "restart_required": {
+            "type": "boolean"
+          }
+        }
       },
       "ResyncScopeDto": {
         "type": "object",
-        "required": ["tasks", "catalog"],
+        "required": ["tasks", "catalog", "settings"],
         "properties": {
           "catalog": {
+            "type": "boolean"
+          },
+          "settings": {
             "type": "boolean"
           },
           "tasks": {
@@ -10015,6 +16117,36 @@
         },
         "additionalProperties": false
       },
+      "SpeechBinaryResponse": {
+        "type": "string",
+        "format": "binary"
+      },
+      "SpeechProviderPresetDto": {
+        "type": "string",
+        "enum": ["browser", "openai", "groq", "inworld"]
+      },
+      "SpeechSynthesisRequest": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SpeechTranscriptionMultipart": {
+        "type": "object",
+        "description": "OpenAPI-only strict multipart shape. Runtime parsing enforces exactly this\none field, its media type, and the independent 25 MiB payload ceiling.",
+        "required": ["audio"],
+        "properties": {
+          "audio": {
+            "type": "string",
+            "format": "binary"
+          }
+        },
+        "additionalProperties": false
+      },
       "StatsResponse": {
         "type": "object",
         "required": [
@@ -10086,6 +16218,21 @@
           "total_creations": {
             "type": "integer",
             "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "SyncStateResponse": {
+        "type": "object",
+        "description": "Atomic event-stream identity and head revision snapshot.",
+        "required": ["event_epoch", "revision"],
+        "properties": {
+          "event_epoch": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
             "minimum": 0
           }
         }
@@ -10166,6 +16313,30 @@
           }
         }
       },
+      "TaskDefaultsDto": {
+        "type": "object",
+        "required": ["default_view", "confirm_before_delete"],
+        "properties": {
+          "confirm_before_delete": {
+            "type": "boolean"
+          },
+          "default_estimated_minutes": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
+          "default_priority": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "maximum": 4,
+            "minimum": 1
+          },
+          "default_view": {
+            "$ref": "#/components/schemas/TaskViewPresetDto"
+          }
+        },
+        "additionalProperties": false
+      },
       "TaskDto": {
         "type": "object",
         "required": [
@@ -10236,7 +16407,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],
@@ -10306,7 +16478,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_name": {
             "type": ["string", "null"]
@@ -10430,7 +16603,8 @@
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
-            "minimum": 0
+            "maximum": 4,
+            "minimum": 1
           },
           "project_id": {
             "type": ["string", "null"],
@@ -10531,6 +16705,10 @@
           }
         }
       },
+      "ThemeDto": {
+        "type": "string",
+        "enum": ["system", "light", "dark", "nord"]
+      },
       "TimeBlockDto": {
         "type": "object",
         "required": [
@@ -10624,6 +16802,10 @@
           }
         }
       },
+      "TimeFormatDto": {
+        "type": "string",
+        "enum": ["h24", "h12"]
+      },
       "TimeSlotDto": {
         "type": "object",
         "required": [
@@ -10715,14 +16897,192 @@
           }
         }
       },
+      "TokenRotationResponse": {
+        "type": "object",
+        "description": "One-time response after a successful access-token rotation.",
+        "required": ["token"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Fresh bearer token. Never logged or cached by intermediaries."
+          }
+        }
+      },
+      "TranscriptionResponse": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TransferFormatDto": {
+        "type": "string",
+        "enum": ["json", "csv", "markdown", "todoist_json"]
+      },
+      "TransferPreviewResponse": {
+        "type": "object",
+        "required": [
+          "format",
+          "drafts",
+          "project_names",
+          "tag_names",
+          "warnings",
+          "content_fingerprint"
+        ],
+        "properties": {
+          "content_fingerprint": {
+            "type": "string"
+          },
+          "drafts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportDraftDto"
+            }
+          },
+          "format": {
+            "$ref": "#/components/schemas/TransferFormatDto"
+          },
+          "project_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tag_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TransferWarningDto"
+            }
+          }
+        }
+      },
+      "TransferWarningDto": {
+        "type": "object",
+        "required": ["line", "message"],
+        "properties": {
+          "line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
       "UncompleteOutcomeDto": {
         "type": "string",
         "description": "How an ordinary uncomplete handled recurring work.",
         "enum": ["exact", "source_only"]
       },
+      "VoiceConfigInput": {
+        "type": "object",
+        "required": [
+          "cloud_speech_enabled",
+          "stt_provider",
+          "tts_provider",
+          "tts_enabled",
+          "voice_mode",
+          "grace_period_ms"
+        ],
+        "properties": {
+          "cloud_speech_enabled": {
+            "type": "boolean"
+          },
+          "grace_period_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "stt_model": {
+            "type": ["string", "null"]
+          },
+          "stt_provider": {
+            "$ref": "#/components/schemas/SpeechProviderPresetDto"
+          },
+          "tts_enabled": {
+            "type": "boolean"
+          },
+          "tts_model": {
+            "type": ["string", "null"]
+          },
+          "tts_provider": {
+            "$ref": "#/components/schemas/SpeechProviderPresetDto"
+          },
+          "tts_voice": {
+            "type": ["string", "null"]
+          },
+          "voice_mode": {
+            "$ref": "#/components/schemas/VoiceModeDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "VoiceModeDto": {
+        "type": "string",
+        "enum": ["push_to_talk", "hands_free"]
+      },
+      "VoiceSettingsDto": {
+        "type": "object",
+        "required": [
+          "cloud_speech_enabled",
+          "stt_provider",
+          "tts_provider",
+          "tts_enabled",
+          "voice_mode",
+          "grace_period_ms"
+        ],
+        "properties": {
+          "cloud_speech_enabled": {
+            "type": "boolean"
+          },
+          "grace_period_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "stt_credential_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "stt_model": {
+            "type": ["string", "null"]
+          },
+          "stt_provider": {
+            "$ref": "#/components/schemas/SpeechProviderPresetDto"
+          },
+          "tts_credential_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "tts_enabled": {
+            "type": "boolean"
+          },
+          "tts_model": {
+            "type": ["string", "null"]
+          },
+          "tts_provider": {
+            "$ref": "#/components/schemas/SpeechProviderPresetDto"
+          },
+          "tts_voice": {
+            "type": ["string", "null"]
+          },
+          "voice_mode": {
+            "$ref": "#/components/schemas/VoiceModeDto"
+          }
+        }
+      },
       "WeekStartDto": {
         "type": "string",
-        "enum": ["sunday", "monday"]
+        "enum": ["sunday", "monday", "saturday"]
       },
       "WeeklyDayStatsDto": {
         "type": "object",
@@ -10932,6 +17292,23 @@
             }
           }
         ]
+      },
+      "WorkHoursDto": {
+        "type": "object",
+        "required": ["start_minute", "end_minute"],
+        "properties": {
+          "end_minute": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "start_minute": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {

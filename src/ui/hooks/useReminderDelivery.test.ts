@@ -1,5 +1,5 @@
 /**
- * Reminder lease/claim/settle + toast fallback with fake timers.
+ * Reminder lease/claim/settle + channel-gated presentation with fake timers.
  * Control-plane paths never send Idempotency-Key (covered by client tests too).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,7 +28,72 @@ vi.mock("../api/client", () => ({
   subscribeReminderWakes: (...args: unknown[]) => subscribeReminderWakes(...args),
 }));
 
-import { useReminderDelivery } from "./useReminderDelivery";
+import { presentReminderChannels, useReminderDelivery } from "./useReminderDelivery";
+
+describe("presentReminderChannels", () => {
+  it("only attempts web notification when allowed", async () => {
+    const tryWeb = vi.fn().mockResolvedValue(true);
+    const onInApp = vi.fn();
+    const result = await presentReminderChannels({
+      title: "Ship",
+      allowedChannels: ["in_app"],
+      soundEnabled: false,
+      onInApp,
+      tryWebNotification: tryWeb,
+    });
+    expect(tryWeb).not.toHaveBeenCalled();
+    expect(onInApp).toHaveBeenCalled();
+    expect(result).toEqual({ channel: "in_app" });
+  });
+
+  it("acks web_notification when that channel presents", async () => {
+    const result = await presentReminderChannels({
+      title: "Ship",
+      allowedChannels: ["web_notification", "in_app"],
+      soundEnabled: false,
+      onInApp: vi.fn(),
+      tryWebNotification: async () => true,
+    });
+    expect(result).toEqual({ channel: "web_notification" });
+  });
+
+  it("allows sound as the sole successful delivery channel", async () => {
+    const result = await presentReminderChannels({
+      title: "Ship",
+      allowedChannels: ["sound"],
+      soundEnabled: true,
+      onInApp: vi.fn(),
+      playSound: async () => true,
+      tryWebNotification: async () => true,
+    });
+    expect(result).toEqual({ channel: "sound" });
+  });
+
+  it("never acks a channel that was not presented and fails when none succeed", async () => {
+    const onInApp = vi.fn();
+    const result = await presentReminderChannels({
+      title: "Ship",
+      allowedChannels: ["web_notification", "sound"],
+      soundEnabled: true,
+      onInApp,
+      playSound: async () => false,
+      tryWebNotification: async () => false,
+    });
+    expect(onInApp).not.toHaveBeenCalled();
+    expect(result).toEqual({ failed: true });
+  });
+
+  it("does not treat locked audio as presentation", async () => {
+    const result = await presentReminderChannels({
+      title: "Ship",
+      allowedChannels: ["sound"],
+      soundEnabled: true,
+      onInApp: vi.fn(),
+      playSound: async () => false,
+    });
+    expect(result).toEqual({ failed: true });
+  });
+});
 
 describe("useReminderDelivery", () => {
   beforeEach(() => {
@@ -88,7 +153,13 @@ describe("useReminderDelivery", () => {
   it("acquires, claims, presents via toast fallback, and settles delivered", async () => {
     const onInApp = vi.fn().mockResolvedValue(undefined);
 
-    const { result: _result } = renderHook(() => useReminderDelivery({ enabled: true, onInApp }));
+    const { result: _result } = renderHook(() =>
+      useReminderDelivery({
+        enabled: true,
+        onInApp,
+        allowedChannels: ["in_app"],
+      }),
+    );
 
     await act(async () => {
       await Promise.resolve();
@@ -119,7 +190,13 @@ describe("useReminderDelivery", () => {
     const onInApp = vi.fn().mockResolvedValue(undefined);
     markOwnerLostReminders.mockResolvedValue({ marked: 1 });
 
-    renderHook(() => useReminderDelivery({ enabled: true, onInApp }));
+    renderHook(() =>
+      useReminderDelivery({
+        enabled: true,
+        onInApp,
+        allowedChannels: ["in_app"],
+      }),
+    );
 
     await act(async () => {
       await Promise.resolve();
@@ -140,7 +217,13 @@ describe("useReminderDelivery", () => {
   it("settles failed when presentation throws", async () => {
     const onInApp = vi.fn().mockRejectedValue(new Error("toast failed"));
 
-    renderHook(() => useReminderDelivery({ enabled: true, onInApp }));
+    renderHook(() =>
+      useReminderDelivery({
+        enabled: true,
+        onInApp,
+        allowedChannels: ["in_app"],
+      }),
+    );
 
     await act(async () => {
       await Promise.resolve();
@@ -159,6 +242,30 @@ describe("useReminderDelivery", () => {
     expect(settleReminderDelivered).not.toHaveBeenCalled();
   });
 
+  it("settles failed when no permitted channel can present", async () => {
+    renderHook(() =>
+      useReminderDelivery({
+        enabled: true,
+        onInApp: vi.fn(),
+        allowedChannels: ["web_notification"],
+        soundEnabled: false,
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(settleReminderFailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "channel_failed",
+      }),
+    );
+    expect(settleReminderDelivered).not.toHaveBeenCalled();
+  });
+
   it("renews the lease on the 30s timer", async () => {
     renewReminderLease.mockResolvedValue({
       fence_term: "fence-2",
@@ -167,7 +274,13 @@ describe("useReminderDelivery", () => {
     });
     claimDueReminders.mockResolvedValue({ reminders: [] });
 
-    renderHook(() => useReminderDelivery({ enabled: true, onInApp: vi.fn() }));
+    renderHook(() =>
+      useReminderDelivery({
+        enabled: true,
+        onInApp: vi.fn(),
+        allowedChannels: ["in_app"],
+      }),
+    );
 
     await act(async () => {
       await Promise.resolve();

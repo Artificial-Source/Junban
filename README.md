@@ -13,7 +13,9 @@ This repository contains a ground-up implementation with:
 
 ## Status
 
-Phase 2 provides complete day-to-day task management on the Rust server: task organization and search, projects and sections, tags, templates, hierarchy, relations, comments, activity, saved filters, bulk actions, undo, live multi-client convergence, and the preserved React views. Planning/time, data portability, CLI/MCP, AI/voice, plugins, and desktop packaging remain later phases. There is no packaged product release yet.
+Phases 1–5 deliver the hosted Rust server through backup/restore plus the native `junban` CLI and `junban-mcp` stdio server over one shared 87-tool automation catalog. Phase 6 adds optional cloud AI chat (tools, approvals, history, memories) and browser-local or cloud speech. AI and voice stay disabled by default and load lazily. Phase 7 now has its package/WIT/trust SDK, schema-v7 persistence, and isolated compile-only plugin-host child foundation. Selective guest linking/execution, routes, registry, and UI remain later Phase 7 work; desktop packaging remains Phase 8. There is no packaged product release yet.
+
+Operator docs: [`docs/ai-and-voice.md`](docs/ai-and-voice.md), [`docs/cli.md`](docs/cli.md), [`docs/mcp.md`](docs/mcp.md). Phase 7 evidence starts with the [SDK matched-release protocol](goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md).
 
 The optimized Phase 2 server measured 6.89 MiB median / 7.17 MiB maximum warm cgroup memory in the frozen five-sample workload, versus 179.25 MiB for the retired implementation on the same host. The 10,000-task scale run remained below the 24 MiB warm / 32 MiB peak budget. See the [performance evidence](docs/performance.md) and follow the [live ExecPlan](goals/rust-rewrite/execplan.md) for exact scope and progress.
 

@@ -1,6 +1,17 @@
 # Portable Plugin Runtime Research
 
-Date: 2026-07-28
+Initial research: 2026-07-28
+Implementation checkpoint: 2026-08-04
+
+## 2026-08-04 implementation checkpoint
+
+- Junban keeps Rust 1.93.0 and pins production `wasmtime`/`wasmtime-wasi` **36.0.13**. Newly issued `RUSTSEC-2026-0222` blocks the 45.0.3 placement-spike line; 36.0.13 is the patched 24-month LTS line, remains compatible with Rust 1.93, and is unaffected by `RUSTSEC-2026-0223`. The historical 45.0.3 measurements still select child-process placement but do not accept the production runtime.
+- Runtime features start from `default-features = false` and add only `runtime`, `cranelift`, `component-model`, and `async` on Wasmtime. `wasmtime-wasi` 36.0.13 has Preview 2 directly with defaults off; Preview 1, experimental Preview 3, pooling, GC, cache, profiling, and unrelated defaults remain absent.
+- Host limits require `StoreLimits` on the mutable store owner, on-demand memory allocation unless the placement spike disproves it, epoch interruption plus cancellation of host futures, a selective linker, and separate process RSS/cgroup evidence. Store limits are not described as an RSS limit.
+- Rust authoring uses stable `wasm32-wasip2` and `wit-bindgen`; `cargo-component` is no longer the primary documented path because Bytecode Alliance is deprecating it.
+- TypeScript authoring pins build-only `@bytecodealliance/jco` **1.26.1** and `@bytecodealliance/componentize-js` **0.22.0**. The resulting StarlingMonkey-bearing component receives separate package, cold-start, and active-memory evidence and never launches Node at product runtime.
+- Package verification uses SHA-256 plus strict Ed25519 (`ed25519-dalek` **2.2.0**, `verify_strict`, no legacy/hazmat feature). Phase 7 uses a small release-scoped signed static registry rather than full TUF, Sigstore, Warg/OCI, Minisign-as-runtime-ABI, or a nonexistent marketplace service.
+- The approved detailed authority, package/signing ceremony, effect model, generations, schema, UI, limits, and wave gates live in [`phase-7-context-map.md`](phase-7-context-map.md). This research note does not override it.
 
 ## Decision
 

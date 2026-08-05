@@ -31,6 +31,9 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
+      - name: Check generated plugin private bodies
+        run: cargo run --locked -p junban-plugin-sdk --features codegen --bin junban-plugin-body-codegen -- --check
+
       - name: Clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
@@ -39,6 +42,31 @@ jobs:
 
       - name: Release build
         run: cargo build --locked --release -p junban-server
+
+  plugin-host-containment:
+    name: Plugin host containment (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: "1.93.0"
+
+      - name: Run launched-child containment matrix
+        shell: bash
+        run: |
+          cargo test --locked -p junban-plugin-host --test containment -- --test-threads=1
+          cargo test --locked -p junban-plugin-host --test process_host retained_typescript_invokes_all_exports_and_contains_oversized_import -- --exact --test-threads=1
 
   supply-chain:
     name: Rust supply chain
@@ -145,14 +173,24 @@ jobs:
           curl --fail --location --silent --show-error \
             --output /tmp/fonts-noto-mono.deb \
             https://archive.ubuntu.com/ubuntu/pool/main/f/fonts-noto/fonts-noto-mono_20201225-2_all.deb
-          printf '%s  %s\n%s  %s\n' \
+          curl --fail --location --silent --show-error \
+            --output /tmp/fonts-noto-extra.deb \
+            https://archive.ubuntu.com/ubuntu/pool/universe/f/fonts-noto/fonts-noto-extra_20201225-2_all.deb
+          printf '%s  %s\n%s  %s\n%s  %s\n' \
             4fee136cb12fc197703a340e010478f780a41044339fcefbd78ed9aa96c8b617 \
             /tmp/fonts-noto-core.deb \
             ce277a6e2fbbe7562206171e20e0493ac42c9c405758505cb42aaa01c982036c \
-            /tmp/fonts-noto-mono.deb | sha256sum --check --strict
-          sudo dpkg --install /tmp/fonts-noto-mono.deb /tmp/fonts-noto-core.deb
+            /tmp/fonts-noto-mono.deb \
+            425d13b9e5827951c328d9b22034d0443082429107e5a078c46830c7874595b1 \
+            /tmp/fonts-noto-extra.deb | sha256sum --check --strict
+          sudo dpkg --install \
+            /tmp/fonts-noto-mono.deb \
+            /tmp/fonts-noto-core.deb \
+            /tmp/fonts-noto-extra.deb
           fc-cache --force
           test "$(fc-match --format='%{family}' system-ui)" = "Noto Sans"
+          test "$(basename "$(fc-match --format='%{file}' 'Noto Sans:weight=medium')")" = "NotoSans-Medium.ttf"
+          test "$(basename "$(fc-match --format='%{file}' 'Noto Sans:weight=demibold')")" = "NotoSans-SemiBold.ttf"
 
       - name: Record visual environment
         run: |

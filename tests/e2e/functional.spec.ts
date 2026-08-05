@@ -287,13 +287,17 @@ test("cross-tab SSE convergence covers create, update, completion reversal, and 
 
   await page1.clock.setFixedTime(new Date("2026-07-23T10:30:00-07:00"));
   await page2.clock.setFixedTime(new Date("2026-07-23T10:30:00-07:00"));
-  await page1.goto(appUrlWithToken(server.baseUrl, server.token, "/today"));
+  await page1.goto(appUrlWithToken(server.baseUrl, server.token, "/inbox"));
   await page2.goto(appUrlWithToken(server.baseUrl, server.token, "/inbox"));
   await page1.waitForSelector("h1");
   await page2.waitForSelector("h1");
 
-  await page1.getByPlaceholder("Add a task for today...").fill("Cross-tab convergence test");
-  await page1.getByPlaceholder("Add a task for today...").press("Enter");
+  await page1
+    .getByPlaceholder('Add a task... (e.g., "buy milk tomorrow p1 #groceries")')
+    .fill("Cross-tab convergence test");
+  await page1
+    .getByPlaceholder('Add a task... (e.g., "buy milk tomorrow p1 #groceries")')
+    .press("Enter");
   await expect(page2.getByText("Cross-tab convergence test")).toBeVisible({ timeout: 10000 });
 
   await page1.getByRole("button", { name: "Edit task: Cross-tab convergence test" }).click();
@@ -449,18 +453,46 @@ test("board move control is keyboard-operable across sections (P2-FE-008)", asyn
   await expect(page.getByText("Task moved")).toBeVisible({ timeout: 5000 });
 });
 
-test("templates can be created from Filters & Labels (P2-FE-007)", async ({ page }) => {
+test("templates are owned and created from Settings (P4-UI-004)", async ({ page }) => {
   await authenticate(page);
-  await page.goto(appUrlWithToken(server.baseUrl, server.token, "/filters-labels"));
-  await expect(page.getByRole("heading", { name: "Filters & Labels" })).toBeVisible();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await expect(settings).toBeVisible();
+  await settings.getByRole("button", { name: /Templates/ }).click();
 
-  await page.getByRole("button", { name: "New Template" }).click();
+  await settings.getByRole("button", { name: "New Template" }).click();
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("E2E Template");
   await page.getByRole("textbox", { name: "Title Template", exact: true }).fill("Ship {{feature}}");
   await page.getByRole("button", { name: "Create" }).click();
 
   await expect(page.getByText("E2E Template")).toBeVisible({ timeout: 5000 });
   await expect(page.getByText("Ship {{feature}}")).toBeVisible();
+});
+
+test("confirmed density changes task-row spacing (P4-UI-R1)", async ({ page }) => {
+  await authenticate(page);
+  await page.getByPlaceholder("Add a task for today...").fill("Density test task");
+  await page.getByPlaceholder("Add a task for today...").press("Enter");
+  const row = page.locator("[data-density-row]").first();
+  await expect(row).toBeVisible();
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("button", { name: /Appearance/ }).click();
+
+  const compact = settings.getByRole("radio", { name: "Compact", exact: true });
+  await settings.getByText("Compact", { exact: true }).click();
+  await expect(compact).toBeChecked();
+  await expect
+    .poll(() => row.evaluate((element) => getComputedStyle(element).paddingTop))
+    .toBe("4px");
+
+  const comfortable = settings.getByRole("radio", { name: "Comfortable", exact: true });
+  await settings.getByText("Comfortable", { exact: true }).click();
+  await expect(comfortable).toBeChecked();
+  await expect
+    .poll(() => row.evaluate((element) => getComputedStyle(element).paddingTop))
+    .toBe("8px");
 });
 
 // ── Phase 3 functional coverage ─────────────────────────────────────────────
@@ -663,6 +695,16 @@ test("Focus Mode all-pending navigation and exit", async ({ page }) => {
   await authenticate(page);
   await page.setViewportSize({ width: 390, height: 844 });
 
+  const currentSettings = await apiJson(page, "GET", "/api/v1/settings");
+  expect(currentSettings.status).toBe(200);
+  const enabled = await apiJson(page, "PATCH", "/api/v1/settings", {
+    features: {
+      ...(currentSettings.body.features as Record<string, unknown>),
+      focus_mode_enabled: true,
+    },
+  });
+  expect(enabled.status).toBe(200);
+
   await apiJson(page, "POST", "/api/v1/tasks", {
     title: "Focus first fixture",
     due_date: "2026-07-23",
@@ -692,9 +734,13 @@ test("Focus Mode all-pending navigation and exit", async ({ page }) => {
 test("task reminder and recurrence editing", async ({ page }) => {
   await authenticate(page);
 
+  const now = new Date();
+  const serverToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+    now.getDate(),
+  ).padStart(2, "0")}`;
   const created = await apiJson(page, "POST", "/api/v1/tasks", {
     title: "Reminder recurrence fixture",
-    due_date: "2026-07-23",
+    due_date: serverToday,
     priority: 1,
     recurrence_rule: "daily",
   });

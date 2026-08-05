@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use junban_app::{MoveTarget, OrderAnchor, RepositoryError};
 use junban_domain::{
-    Comment, CommentId, ReminderOccurrence, SortOrder, Task, TaskActivity, TaskId, TaskRelation,
-    TimeBlockId, TimeSlotId,
+    Comment, CommentId, Project, ReminderOccurrence, SortOrder, Tag, Task, TaskActivity, TaskId,
+    TaskRelation, TimeBlockId, TimeSlotId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +17,18 @@ use crate::tx::UndoRecord;
 pub(crate) enum Inverse {
     DeleteTasks {
         task_ids: Vec<TaskId>,
+    },
+    /// Undo an import and remove only catalog rows created and still owned by it.
+    DeleteImport {
+        task_ids: Vec<TaskId>,
+        projects: Vec<Project>,
+        tags: Vec<Tag>,
+    },
+    /// Redo an undone import after verifying its generated ids remain absent.
+    RestoreImport {
+        tasks: Vec<Task>,
+        projects: Vec<Project>,
+        tags: Vec<Tag>,
     },
     RestoreClosure {
         closure: TaskClosure,
@@ -112,6 +124,15 @@ pub(crate) struct PostImage {
     pub comments: BTreeMap<String, Comment>,
     #[serde(default)]
     pub absent_comment_ids: Vec<CommentId>,
+    /// Exact post-import catalog images used to reject changed/reused resources.
+    #[serde(default)]
+    pub projects: BTreeMap<String, Project>,
+    #[serde(default)]
+    pub absent_project_ids: Vec<crate::ProjectId>,
+    #[serde(default)]
+    pub tags: BTreeMap<String, Tag>,
+    #[serde(default)]
+    pub absent_tag_ids: Vec<crate::TagId>,
     #[serde(default)]
     pub relations_present: Vec<TaskRelation>,
     #[serde(default)]

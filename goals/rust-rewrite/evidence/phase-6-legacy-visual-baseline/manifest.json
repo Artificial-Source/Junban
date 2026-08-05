@@ -1,0 +1,397 @@
+{
+  "version": 1,
+  "kind": "phase-6-legacy-visual-baseline",
+  "source": {
+    "repository": "Artificial-Source/Junban-legacy",
+    "commit": "5e2b2b5adc865f401843c5030285293c5fabccc5",
+    "captured_at": "2026-08-02",
+    "capture_host_font": "NotoSans-Regular.ttf: \"Noto Sans\" \"Regular\""
+  },
+  "environment": {
+    "node": "v24.13.1",
+    "platform": "linux",
+    "arch": "x64",
+    "browser": "playwright-chromium",
+    "deviceScaleFactor": 1,
+    "reducedMotion": "reduce",
+    "network": "blocked-non-local",
+    "providers": "none",
+    "microphone": "none",
+    "modelDownloads": "none",
+    "clock": "2026-08-02T15:00:00.000Z",
+    "typography": "Noto Sans via system-ui fallback (Outfit network font blocked)"
+  },
+  "capture": {
+    "command": "node scripts/capture-phase-6-legacy-visual-baseline.mjs",
+    "harness": "scripts/phase-6-legacy-visual-baseline/harness/** (ephemeral overlay)",
+    "worktree_policy": "git worktree add --detach at pinned commit; removed after capture"
+  },
+  "hashes": {
+    "capture_script_sha256": "2ea688b92b73ac2ee588c1f853205c5eccfaf494dfeee5acb32756d6b25484b5",
+    "capture_spec_sha256": "a9981bc1e445c69d936bc4df5fa35b36b23a58519d214e1d0ad5c7f20c082aa7",
+    "harness_tree_sha256": "862ab7ae42bb18fee7e5a1a0f6ac44ad81025a530faf2bd10f76829b6fdc6fd6",
+    "harness_files": [
+      "fixture-state.ts",
+      "index.html",
+      "main.tsx",
+      "mocks/AIContext.tsx",
+      "mocks/AIFeatureProvider.tsx",
+      "mocks/TaskContext.tsx",
+      "mocks/VoiceContext.tsx",
+      "mocks/VoiceFeatureProvider.tsx",
+      "mocks/api-ai.ts",
+      "mocks/api-index.ts",
+      "mocks/audio-utils.ts",
+      "mocks/read-fixture.ts",
+      "scenes.tsx",
+      "vite.config.ts"
+    ],
+    "legacy_sources_sha256": {
+      "src/ui/components/chat/AIChatNotConfigured.tsx": "d2bc26ac2602812cb5c203f1d9e99eebbd5b9a6eb85f371f9734192573dbf0b8",
+      "src/ui/components/chat/WelcomeScreen.tsx": "64a4083b87f3c15c07344e1f8e6b157ee0807590395a9b61b7fbc83688c4edf2",
+      "src/ui/components/chat/MessageBubble.tsx": "1fad97711f888dde57aa35f490c1d3a74ab8a228088555bb4a366d65e15ec6ed",
+      "src/ui/components/chat/ChatToolResultCard.tsx": "fdce5ff2fdfe9f1de852d58dfa36fdbdc77298af0ca352d352b9dbcc7bfa34ce",
+      "src/ui/components/chat/ToolCallBadge.tsx": "9795d818217812c0bd550fd0a5afbe69e642e3e1fb2b8e974069437e5d70ebf3",
+      "src/ui/components/chat/ChatHistory.tsx": "941e7eb9996c2e8a85be2f70a68b1715548c102a362f0aa448177277a0fee7b2",
+      "src/ui/components/chat/VoiceButton.tsx": "e59c29438ad8dff7040d163ddbdc673242e7cfd3e3d93fef33f9a2990886a34a",
+      "src/ui/components/chat/ChatInput.tsx": "36086d6296e8c95eedaf4becbabc59c12206d920eecbf25f0ecc5cb88bd115d0",
+      "src/ui/components/VoiceCallOverlay.tsx": "ac5dceb6c46005a8b920d13baf49d06a7655673bff1d9cbcb54276b99b38c3bb",
+      "src/ui/components/BottomNavBar.tsx": "4d08772fdaa3618e4c335b502a0fcbb8efe0035c34d7b96079aec607100c5364",
+      "src/ui/components/onboarding/StepAI.tsx": "02ad1892c2ed832538f9c7c777f3c488e0c27eaf8b52ad0a0755469254c644f8",
+      "src/ui/views/settings/AITab.tsx": "d237b1e1bec29aae770fd8b82a30959b3d11d9bb2a81988512dc13ff1269d162",
+      "src/ui/views/settings/VoiceTab.tsx": "2008187d1702b9b29a1acf0a01ffc074f145843f97cf5f2c6fa7096b0dcc8fe1",
+      "src/ui/views/AIChat.tsx": "9c53da3a4a33edbc6d94ced14870f16adc356e0ce46108999972e334f74850c7",
+      "src/ui/components/AIChatPanel.tsx": "e5da0506a4ea67155a29ea8b2fa76da841dfd4f230c676741c16d09d3cde3378",
+      "src/ui/index.css": "75a6da7a632e6b4b56d9f00235f984205ec4be4eddfe560d6cec093b12a6f231",
+      "src/ui/themes/light.css": "ff1304cc3c1cb520404b566012ce5b5739e44500581b9d51f0a4758762c0c91a",
+      "src/ui/themes/dark.css": "4c08fe8ea3332ad8fd2a97f7e39a35ceaeb0b5aa70a7e58eed64bde911eca1dd"
+    }
+  },
+  "policy": {
+    "maxDiffPixelRatio": 0.01,
+    "immutable": true,
+    "rewrite_may_not_regenerate": true
+  },
+  "scenes": [
+    {
+      "id": "ai-not-configured-panel-desktop-light",
+      "file": "ai-not-configured-panel-desktop-light.png",
+      "width": 320,
+      "height": 720,
+      "bytes": 11822,
+      "sha256": "2b7e1b50c8bb81ff91c7de3b3691f1dcf10e0788f0ca74a5d95cb74ad59cfef6",
+      "theme": "light",
+      "viewport": {
+        "width": 320,
+        "height": 720,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/chat/AIChatNotConfigured.tsx",
+      "testAuthority": "tests/ui/components/AIChatPanel.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "ai-welcome-briefing-desktop-light",
+      "file": "ai-welcome-briefing-desktop-light.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 31918,
+      "sha256": "26aebcb4a437aa66a9a7233d3c7f88d10537c3a6f57bfbdd2a7003bffdaf1dbd",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/chat/WelcomeScreen.tsx",
+      "testAuthority": "tests/ui/components/AIChatPanel.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "ai-conversation-tools-desktop-light",
+      "file": "ai-conversation-tools-desktop-light.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 63917,
+      "sha256": "1560fc94a9a2dbf2ba0a2019d9bfbe75cb7b88a41376f2032005c3b5bdcb692d",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/chat/MessageBubble.tsx + ChatToolResultCard.tsx + ToolCallBadge.tsx",
+      "testAuthority": "tests/ui/components/chat/MessageBubble.test.tsx + ChatToolResultCard.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "ai-chat-history-desktop-light",
+      "file": "ai-chat-history-desktop-light.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 40104,
+      "sha256": "af8dd403948f0d248bcb6eaa0988292c8d5043eb70943bd9b4108a9e01c458ec",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/chat/ChatHistory.tsx",
+      "testAuthority": "tests/ui/components/chat/ChatHistory.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "ai-mobile-view-nav-light",
+      "file": "ai-mobile-view-nav-light.png",
+      "width": 390,
+      "height": 844,
+      "bytes": 16649,
+      "sha256": "c1aae47dc030c19fa2cfaa3d293b20286a25d3b6031c9497eff11e6b4fce08b2",
+      "theme": "light",
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/chat/AIChatNotConfigured.tsx + BottomNavBar.tsx",
+      "testAuthority": "tests/ui/BottomNavBar.test.tsx + AIChatPanel.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "settings-ai-unconfigured-desktop-light",
+      "file": "settings-ai-unconfigured-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 60602,
+      "sha256": "1f8b2d58906fb4e3037857ac953d682d42d24e7c21eef80ebb27c77ec4209f73",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/views/settings/AITab.tsx",
+      "testAuthority": "tests/ui/settings/AITab.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "settings-ai-configured-masked-desktop-light",
+      "file": "settings-ai-configured-masked-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 76082,
+      "sha256": "bb324be93a478b3fcec09d3bc4ae1d10cd57e8af07ab88018c188814ad2a640c",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/views/settings/AITab.tsx",
+      "testAuthority": "tests/ui/settings/AITab.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "settings-voice-defaults-desktop-light",
+      "file": "settings-voice-defaults-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 56630,
+      "sha256": "3b31d11c9bbcfb86ad9d0ad853b897549e6b2ab3211f4068ca7c1a1172367c9a",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/views/settings/VoiceTab.tsx",
+      "testAuthority": "tests/ui/settings/VoiceTab.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "settings-voice-cloud-desktop-dark",
+      "file": "settings-voice-cloud-desktop-dark.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 71270,
+      "sha256": "6544e499eeba0f0d5c6e7cbf99b8b5476270f886213e89e1709dd445d9db6519",
+      "theme": "dark",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/views/settings/VoiceTab.tsx + voice/ProviderApiKeyInput.tsx",
+      "testAuthority": "tests/ui/settings/VoiceTab.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "ptt-listening-desktop-light",
+      "file": "ptt-listening-desktop-light.png",
+      "width": 480,
+      "height": 320,
+      "bytes": 8009,
+      "sha256": "8109cdf60ea3fd5eed6039e8f023462db477eeedc62f845990ecf48dc7537ac4",
+      "theme": "light",
+      "viewport": {
+        "width": 480,
+        "height": 320,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/chat/VoiceButton.tsx",
+      "testAuthority": "tests/ui/components/chat/VoiceButton.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "ptt-transcribing-desktop-light",
+      "file": "ptt-transcribing-desktop-light.png",
+      "width": 480,
+      "height": 320,
+      "bytes": 8368,
+      "sha256": "b0a358c5bf8d4ade32c28dab100d9e70adaf42faa49b9498d1c298861dc3c5a6",
+      "theme": "light",
+      "viewport": {
+        "width": 480,
+        "height": 320,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/chat/VoiceButton.tsx",
+      "testAuthority": "tests/ui/components/chat/VoiceButton.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "ptt-error-desktop-light",
+      "file": "ptt-error-desktop-light.png",
+      "width": 480,
+      "height": 320,
+      "bytes": 15762,
+      "sha256": "37009833eb20b276af6e2926bfabf2970e7a6c9baf03d23267d7721a09d1edf5",
+      "theme": "light",
+      "viewport": {
+        "width": 480,
+        "height": 320,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/chat/VoiceButton.tsx",
+      "testAuthority": "tests/ui/components/chat/VoiceButton.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "vad-grace-desktop-light",
+      "file": "vad-grace-desktop-light.png",
+      "width": 480,
+      "height": 420,
+      "bytes": 5581,
+      "sha256": "40708bf055211d9bc8af837a834ad34ce86c3eaf626a8dc6963781b555e4080c",
+      "theme": "light",
+      "viewport": {
+        "width": 480,
+        "height": 420,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/VoiceCallOverlay.tsx (+ useVAD grace props)",
+      "testAuthority": "tests/ui/components/AIChatPanel.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "voice-call-states-desktop-light",
+      "file": "voice-call-states-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 31286,
+      "sha256": "1beb831c10361440dc6c9e0e5e476949b7b95d57a995b7df9f63664d6609429d",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/VoiceCallOverlay.tsx",
+      "testAuthority": "tests/ui/components/AIChatPanel.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "focused-task-launch-desktop-light",
+      "file": "focused-task-launch-desktop-light.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 71379,
+      "sha256": "9e70bcb6b7d847b5ff0bf6e5db4de2954f0f1e38e3ce40b1fedd11b8107acc1b",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/views/AIChat.tsx + AIChatPanel focusedTaskId wiring",
+      "testAuthority": "tests/ui/components/AIChatPanel.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "onboarding-step-ai-desktop-light",
+      "file": "onboarding-step-ai-desktop-light.png",
+      "width": 720,
+      "height": 720,
+      "bytes": 29138,
+      "sha256": "83a30e97a36fd8e779957b67639f922869d038be87cd5b0fbd519c2a169c089c",
+      "theme": "light",
+      "viewport": {
+        "width": 720,
+        "height": 720,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/onboarding/StepAI.tsx",
+      "testAuthority": "tests/ui/components/OnboardingModal.test.tsx",
+      "clock": "2026-08-02T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    }
+  ]
+}

@@ -25,7 +25,7 @@ function makeEvent(overrides: Partial<CommittedEventDto> = {}): CommittedEventDt
     event_type: "task.updated",
     occurred_at: "2026-07-23T10:01:00Z",
     affected: { task_ids: [] },
-    resync: { tasks: false, catalog: false },
+    resync: { tasks: false, catalog: false, settings: false },
     ...overrides,
   };
 }
@@ -37,7 +37,7 @@ describe("detailRefreshFromEvent (P2-FE-001)", () => {
       makeEvent({
         event_type: "project.updated",
         affected: { project_ids: ["p1"] },
-        resync: { tasks: false, catalog: false },
+        resync: { tasks: false, catalog: false, settings: false },
       }),
     );
     expect(action).toEqual({ kind: "none" });
@@ -77,7 +77,7 @@ describe("detailRefreshFromEvent (P2-FE-001)", () => {
       makeEvent({
         event_type: "task.bulk",
         affected: { task_ids: [id, "22222222-2222-4222-8222-222222222222"] },
-        resync: { tasks: true, catalog: false },
+        resync: { tasks: true, catalog: false, settings: false },
       }),
     );
     expect(action).toEqual({ kind: "refetch" });

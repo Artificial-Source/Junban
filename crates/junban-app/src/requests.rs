@@ -13,6 +13,10 @@ use junban_domain::{
     Template, TemplateId, TimeBlock, TimeBlockId, TimeSlot, TimeSlotId, TimeZoneName, WeekStart,
     WeeklyReviewSummary,
 };
+
+pub use junban_domain::{
+    AppSettings, SettingsPatch, TransferApply, TransferFormat, TransferPreview,
+};
 use serde::{Deserialize, Serialize};
 
 pub const ACTIVITY_PAGE_DEFAULT: u32 = 50;
@@ -308,6 +312,22 @@ pub struct CatalogSnapshot {
     pub templates: Vec<Template>,
     pub saved_filters: Vec<SavedFilter>,
     pub revision: u64,
+}
+
+/// Bounded project page for callers that must not load the full catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectListPage {
+    pub projects: Vec<Project>,
+    pub revision: u64,
+    pub truncated: bool,
+}
+
+/// Bounded tag page for callers that must not load the full catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TagListPage {
+    pub tags: Vec<Tag>,
+    pub revision: u64,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -705,7 +725,7 @@ pub struct NudgesPage {
     pub revision: u64,
 }
 
-/// Phase 3 read-only temporal defaults until Phase 4 settings mutations exist.
+/// Compatibility projection of the settings aggregate for Phase 3 temporal callers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TemporalSettings {
     pub time_zone: String,
@@ -714,6 +734,24 @@ pub struct TemporalSettings {
     pub nudges_enabled: bool,
     pub eat_the_frog_enabled: bool,
     pub task_jar_enabled: bool,
+}
+
+impl TemporalSettings {
+    /// Project persisted settings plus the currently sampled system IANA zone.
+    ///
+    /// `time_zone` is not a user-persisted authority; callers must pass the live
+    /// server-local/system zone name.
+    #[must_use]
+    pub fn from_app_settings(settings: &AppSettings, time_zone: impl Into<String>) -> Self {
+        Self {
+            time_zone: time_zone.into(),
+            capacity_minutes: settings.planning.capacity_minutes,
+            week_start: settings.date_time.week_start,
+            nudges_enabled: settings.features.nudges_enabled,
+            eat_the_frog_enabled: settings.features.eat_the_frog_enabled,
+            task_jar_enabled: settings.features.task_jar_enabled,
+        }
+    }
 }
 
 /// Eat-the-Frog selection (single task or none).
@@ -757,6 +795,85 @@ impl TimeBlockPatch {
                 time_zone: Some(range.time_zone),
             }),
             ..Self::default()
+        }
+    }
+}
+
+/// Preview a transfer import without writing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportPreviewRequest {
+    pub format: TransferFormat,
+    pub content: String,
+}
+
+/// Apply a previously previewed transfer import.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportApplyRequest {
+    pub format: TransferFormat,
+    pub content: String,
+    pub fingerprint: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub project_name_mapping: Vec<(String, String)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tag_name_mapping: Vec<(String, String)>,
+}
+
+impl ImportApplyRequest {
+    #[must_use]
+    pub fn into_apply(self) -> TransferApply {
+        TransferApply {
+            format: self.format,
+            content: self.content,
+            fingerprint: self.fingerprint,
+            project_name_mapping: self.project_name_mapping,
+            tag_name_mapping: self.tag_name_mapping,
+        }
+    }
+}
+
+/// Export format for task transfer downloads (`todoist_json` is import-only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportFormat {
+    Json,
+    Csv,
+    Markdown,
+}
+
+impl ExportFormat {
+    pub fn parse(value: &str) -> Result<Self, junban_domain::TransferError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "json" => Ok(Self::Json),
+            "csv" => Ok(Self::Csv),
+            "markdown" | "md" => Ok(Self::Markdown),
+            _ => Err(junban_domain::TransferError::UnsupportedFormat),
+        }
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Json => "json",
+            Self::Csv => "csv",
+            Self::Markdown => "markdown",
+        }
+    }
+
+    #[must_use]
+    pub const fn content_type(self) -> &'static str {
+        match self {
+            Self::Json => "application/json; charset=utf-8",
+            Self::Csv => "text/csv; charset=utf-8",
+            Self::Markdown => "text/markdown; charset=utf-8",
+        }
+    }
+
+    #[must_use]
+    pub const fn file_name(self) -> &'static str {
+        match self {
+            Self::Json => "junban-tasks.json",
+            Self::Csv => "junban-tasks.csv",
+            Self::Markdown => "junban-tasks.md",
         }
     }
 }

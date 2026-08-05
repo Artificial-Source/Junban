@@ -3,11 +3,12 @@
  *
  * After authenticated app load: one random client id, fenced lease
  * acquire/renew/release, wake-only SSE, claim due work, present via
- * Notification (when granted) or in-app toast, optional WebAudio after user
- * activation, settle delivered only after presentation succeeds.
+ * confirmed notification channels only, settle delivered only after a
+ * permitted presentation succeeds.
  *
  * Control-plane calls never send idempotency keys. Delivery is at-least-once
- * across crash-before-ack. No polling loop.
+ * across crash-before-ack. No polling loop. Permission is never requested
+ * automatically.
  */
 import { useEffect, useRef } from "react";
 import {
@@ -38,9 +39,14 @@ export type ReminderPresentation = {
 export type UseReminderDeliveryOptions = {
   enabled: boolean;
   onInApp: (reminder: ReminderPresentation) => void | Promise<void>;
-  /** Optional short sound after user activation; never required for delivery. */
-  playSound?: () => void | Promise<void>;
+  /**
+   * Optional sound presentation. Must return whether audio actually played
+   * (AudioContext unavailable/locked → false).
+   */
+  playSound?: () => boolean | Promise<boolean>;
   soundEnabled?: boolean;
+  /** Confirmed `notifications.channels`. Omitted channels are never presented or acked. */
+  allowedChannels?: readonly ReminderChannelDto[];
 };
 
 function createClientId(): string {
@@ -64,7 +70,7 @@ async function presentBrowserNotification(title: string): Promise<boolean> {
 
 /**
  * Request notification permission without blocking the caller.
- * Returns the resulting permission string.
+ * Callers must invoke this only from an explicit user gesture — never on load.
  */
 export function requestNotificationPermissionNonBlocking(): void {
   if (typeof Notification === "undefined") return;
@@ -72,8 +78,51 @@ export function requestNotificationPermissionNonBlocking(): void {
   try {
     void Notification.requestPermission();
   } catch {
-    // Ignore — toast delivery remains available.
+    // Ignore — toast delivery remains available when allowed.
   }
+}
+
+/** Pure channel selection for tests and delivery. */
+export async function presentReminderChannels(args: {
+  title: string;
+  allowedChannels: readonly ReminderChannelDto[];
+  soundEnabled: boolean;
+  onInApp: () => void | Promise<void>;
+  playSound?: () => boolean | Promise<boolean>;
+  tryWebNotification?: (title: string) => boolean | Promise<boolean>;
+}): Promise<{ channel: ReminderChannelDto } | { failed: true }> {
+  const allowed = new Set(args.allowedChannels);
+  const tryWeb = args.tryWebNotification ?? presentBrowserNotification;
+
+  let presented: ReminderChannelDto | null = null;
+
+  if (allowed.has("web_notification")) {
+    if (await tryWeb(args.title)) {
+      presented = "web_notification";
+    }
+  }
+
+  if (!presented && allowed.has("in_app")) {
+    await args.onInApp();
+    presented = "in_app";
+  }
+
+  let soundPresented = false;
+  if (args.soundEnabled && allowed.has("sound") && args.playSound) {
+    try {
+      soundPresented = Boolean(await args.playSound());
+    } catch {
+      soundPresented = false;
+    }
+  }
+
+  if (presented) {
+    return { channel: presented };
+  }
+  if (soundPresented) {
+    return { channel: "sound" };
+  }
+  return { failed: true };
 }
 
 export function useReminderDelivery({
@@ -81,13 +130,16 @@ export function useReminderDelivery({
   onInApp,
   playSound,
   soundEnabled = false,
+  allowedChannels,
 }: UseReminderDeliveryOptions): void {
   const onInAppRef = useRef(onInApp);
   const playSoundRef = useRef(playSound);
   const soundEnabledRef = useRef(soundEnabled);
+  const allowedChannelsRef = useRef(allowedChannels);
   onInAppRef.current = onInApp;
   playSoundRef.current = playSound;
   soundEnabledRef.current = soundEnabled;
+  allowedChannelsRef.current = allowedChannels;
 
   const clientIdRef = useRef<string | null>(null);
   clientIdRef.current ??= createClientId();
@@ -157,29 +209,25 @@ export function useReminderDelivery({
         // Presentation can still proceed with a generic title.
       }
 
-      let channel: ReminderChannelDto | null = null;
+      const channels = allowedChannelsRef.current ?? [];
       try {
-        const notified = await presentBrowserNotification(title);
-        if (notified) {
-          channel = "web_notification";
-        } else {
-          await onInAppRef.current({
-            taskId: reminder.task_id,
-            title,
-            remindAt: reminder.remind_at,
-          });
-          channel = "in_app";
+        const result = await presentReminderChannels({
+          title,
+          allowedChannels: channels,
+          soundEnabled: soundEnabledRef.current,
+          onInApp: () =>
+            onInAppRef.current({
+              taskId: reminder.task_id,
+              title,
+              remindAt: reminder.remind_at,
+            }),
+          playSound: playSoundRef.current,
+        });
+        if ("failed" in result) {
+          await settleFailed(reminder, "channel_failed", term);
+          return;
         }
-
-        if (soundEnabledRef.current && playSoundRef.current) {
-          try {
-            await playSoundRef.current();
-          } catch {
-            // Sound is optional and never required for delivery ack.
-          }
-        }
-
-        await settleDelivered(reminder, channel, term);
+        await settleDelivered(reminder, result.channel, term);
       } catch {
         try {
           await settleFailed(reminder, "channel_failed", term);

@@ -10,7 +10,7 @@ use junban_domain::{
     TaskActivityAction, TaskId, TaskRelation, TaskStatus, TaskTitle, Template, TemplateId,
     TimeZoneName,
 };
-use rusqlite::{OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::helpers::constraint_conflict;
 
@@ -43,7 +43,7 @@ pub(crate) fn invalid_sql(error: impl std::fmt::Display) -> rusqlite::Error {
     )
 }
 
-pub(crate) fn load_task(tx: &Transaction<'_>, id: TaskId) -> Result<Task, RepositoryError> {
+pub(crate) fn load_task(tx: &Connection, id: TaskId) -> Result<Task, RepositoryError> {
     let mut task = tx
         .query_row(
             "SELECT id, title, description, due_date, due_time, due_timezone, deadline,
@@ -61,7 +61,7 @@ pub(crate) fn load_task(tx: &Transaction<'_>, id: TaskId) -> Result<Task, Reposi
 }
 
 pub(crate) fn load_task_tag_ids(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     id: TaskId,
 ) -> Result<Vec<TagId>, RepositoryError> {
     let mut statement = tx
@@ -202,7 +202,7 @@ pub(crate) fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     Ok(task)
 }
 
-pub(crate) fn insert_task(tx: &Transaction<'_>, task: &Task) -> Result<(), RepositoryError> {
+pub(crate) fn insert_task(tx: &Connection, task: &Task) -> Result<(), RepositoryError> {
     tx.execute(
         "INSERT INTO tasks(
             id, title, description, due_date, due_time, due_timezone, deadline,
@@ -254,7 +254,7 @@ pub(crate) fn insert_task(tx: &Transaction<'_>, task: &Task) -> Result<(), Repos
     Ok(())
 }
 
-pub(crate) fn update_task_row(tx: &Transaction<'_>, task: &Task) -> Result<(), RepositoryError> {
+pub(crate) fn update_task_row(tx: &Connection, task: &Task) -> Result<(), RepositoryError> {
     let changed = tx
         .execute(
             "UPDATE tasks SET
@@ -307,7 +307,7 @@ pub(crate) fn update_task_row(tx: &Transaction<'_>, task: &Task) -> Result<(), R
 }
 
 pub(crate) fn replace_task_tags(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_id: TaskId,
     tag_ids: &[TagId],
 ) -> Result<(), RepositoryError> {
@@ -332,10 +332,7 @@ pub(crate) fn replace_task_tags(
     Ok(())
 }
 
-pub(crate) fn delete_task_row(
-    tx: &Transaction<'_>,
-    task_id: TaskId,
-) -> Result<(), RepositoryError> {
+pub(crate) fn delete_task_row(tx: &Connection, task_id: TaskId) -> Result<(), RepositoryError> {
     let changed = tx
         .execute("DELETE FROM tasks WHERE id = ?1", [task_id.to_string()])
         .map_err(storage_error)?;
@@ -373,7 +370,7 @@ pub(crate) fn is_fk_error(error: &rusqlite::Error) -> bool {
     )
 }
 
-pub(crate) fn task_exists(tx: &Transaction<'_>, id: TaskId) -> Result<bool, RepositoryError> {
+pub(crate) fn task_exists(tx: &Connection, id: TaskId) -> Result<bool, RepositoryError> {
     let found: Option<i64> = tx
         .query_row(
             "SELECT 1 FROM tasks WHERE id = ?1",
@@ -385,9 +382,7 @@ pub(crate) fn task_exists(tx: &Transaction<'_>, id: TaskId) -> Result<bool, Repo
     Ok(found.is_some())
 }
 
-pub(crate) fn load_parent_edges(
-    tx: &Transaction<'_>,
-) -> Result<Vec<(TaskId, TaskId)>, RepositoryError> {
+pub(crate) fn load_parent_edges(tx: &Connection) -> Result<Vec<(TaskId, TaskId)>, RepositoryError> {
     let mut statement = tx
         .prepare_cached("SELECT id, parent_id FROM tasks WHERE parent_id IS NOT NULL")
         .map_err(storage_error)?;
@@ -405,7 +400,7 @@ pub(crate) fn load_parent_edges(
 }
 
 pub(crate) fn collect_descendants(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     root: TaskId,
 ) -> Result<Vec<TaskId>, RepositoryError> {
     // BFS over parent_id edges. Root is included first.
@@ -434,7 +429,7 @@ pub(crate) fn collect_descendants(
 }
 
 pub(crate) fn ensure_section_in_project(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     project_id: Option<ProjectId>,
     section_id: Option<SectionId>,
 ) -> Result<(), RepositoryError> {
@@ -468,7 +463,7 @@ pub(crate) fn ensure_section_in_project(
 }
 
 pub(crate) fn ensure_project_exists(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     project_id: ProjectId,
 ) -> Result<(), RepositoryError> {
     let found: Option<i64> = tx
@@ -485,10 +480,7 @@ pub(crate) fn ensure_project_exists(
     Ok(())
 }
 
-pub(crate) fn ensure_tags_exist(
-    tx: &Transaction<'_>,
-    tag_ids: &[TagId],
-) -> Result<(), RepositoryError> {
+pub(crate) fn ensure_tags_exist(tx: &Connection, tag_ids: &[TagId]) -> Result<(), RepositoryError> {
     for tag_id in tag_ids {
         let found: Option<i64> = tx
             .query_row(
@@ -505,10 +497,7 @@ pub(crate) fn ensure_tags_exist(
     Ok(())
 }
 
-pub(crate) fn load_project(
-    tx: &Transaction<'_>,
-    id: ProjectId,
-) -> Result<Project, RepositoryError> {
+pub(crate) fn load_project(tx: &Connection, id: ProjectId) -> Result<Project, RepositoryError> {
     tx.query_row(
         "SELECT id, name, color, icon, parent_id, favorite, archived, view_style,
                 sort_order, created_at, updated_at
@@ -555,10 +544,7 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     })
 }
 
-pub(crate) fn load_section(
-    tx: &Transaction<'_>,
-    id: SectionId,
-) -> Result<Section, RepositoryError> {
+pub(crate) fn load_section(tx: &Connection, id: SectionId) -> Result<Section, RepositoryError> {
     tx.query_row(
         "SELECT id, project_id, name, collapsed, sort_order, created_at, updated_at
          FROM sections WHERE id = ?1",
@@ -587,7 +573,7 @@ fn section_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Section> {
     })
 }
 
-pub(crate) fn load_tag(tx: &Transaction<'_>, id: TagId) -> Result<Tag, RepositoryError> {
+pub(crate) fn load_tag(tx: &Connection, id: TagId) -> Result<Tag, RepositoryError> {
     tx.query_row(
         "SELECT id, name, color, created_at, updated_at FROM tags WHERE id = ?1",
         [id.to_string()],
@@ -615,10 +601,7 @@ pub(crate) fn normalize_tag_name(name: &str) -> String {
     name.to_lowercase()
 }
 
-pub(crate) fn load_template(
-    tx: &Transaction<'_>,
-    id: TemplateId,
-) -> Result<Template, RepositoryError> {
+pub(crate) fn load_template(tx: &Connection, id: TemplateId) -> Result<Template, RepositoryError> {
     let mut template = tx
         .query_row(
             "SELECT id, name, title, description, priority, project_id, recurrence_rule,
@@ -668,7 +651,7 @@ fn template_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Template> {
 }
 
 fn load_template_tag_names(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     id: TemplateId,
 ) -> Result<Vec<TagName>, RepositoryError> {
     let mut statement = tx
@@ -689,7 +672,7 @@ fn load_template_tag_names(
 }
 
 pub(crate) fn resolve_tag_names(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     names: &[TagName],
 ) -> Result<Vec<TagId>, RepositoryError> {
     let mut ids = Vec::with_capacity(names.len());
@@ -707,7 +690,7 @@ pub(crate) fn resolve_tag_names(
 }
 
 pub(crate) fn load_saved_filter(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     id: SavedFilterId,
 ) -> Result<SavedFilter, RepositoryError> {
     tx.query_row(
@@ -740,10 +723,7 @@ fn saved_filter_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SavedFilte
     })
 }
 
-pub(crate) fn load_comment(
-    tx: &Transaction<'_>,
-    id: CommentId,
-) -> Result<Comment, RepositoryError> {
+pub(crate) fn load_comment(tx: &Connection, id: CommentId) -> Result<Comment, RepositoryError> {
     tx.query_row(
         "SELECT id, task_id, content, created_at, updated_at FROM comments WHERE id = ?1",
         [id.to_string()],
@@ -767,9 +747,7 @@ fn comment_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
     })
 }
 
-pub(crate) fn load_blocks_edges(
-    tx: &Transaction<'_>,
-) -> Result<Vec<(TaskId, TaskId)>, RepositoryError> {
+pub(crate) fn load_blocks_edges(tx: &Connection) -> Result<Vec<(TaskId, TaskId)>, RepositoryError> {
     let mut statement = tx
         .prepare_cached("SELECT from_task_id, to_task_id FROM task_relations WHERE kind = 'blocks'")
         .map_err(storage_error)?;
@@ -816,7 +794,7 @@ pub(crate) fn parse_activity_action(raw: &str) -> Result<TaskActivityAction, Rep
 }
 
 pub(crate) fn load_task_activity_for_tasks(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_ids: &[TaskId],
 ) -> Result<Vec<TaskActivity>, RepositoryError> {
     if task_ids.is_empty() {
@@ -842,7 +820,7 @@ pub(crate) fn load_task_activity_for_tasks(
     Ok(out)
 }
 
-fn activity_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskActivity> {
+pub(crate) fn activity_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskActivity> {
     let revision: i64 = row.get(0)?;
     let sequence: i64 = row.get(1)?;
     let operation_id: String = row.get(2)?;
@@ -866,7 +844,7 @@ fn activity_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskActivity> 
 }
 
 pub(crate) fn load_comments_for_tasks(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_ids: &[TaskId],
 ) -> Result<Vec<Comment>, RepositoryError> {
     let mut out = Vec::new();
@@ -888,7 +866,7 @@ pub(crate) fn load_comments_for_tasks(
 }
 
 pub(crate) fn load_relations_touching(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_ids: &[TaskId],
 ) -> Result<Vec<TaskRelation>, RepositoryError> {
     if task_ids.is_empty() {
@@ -943,7 +921,7 @@ pub(crate) fn view_style_str(view: ProjectView) -> &'static str {
 }
 
 pub(crate) fn load_project_parent_edges(
-    tx: &Transaction<'_>,
+    tx: &Connection,
 ) -> Result<Vec<(ProjectId, ProjectId)>, RepositoryError> {
     let mut statement = tx
         .prepare_cached("SELECT id, parent_id FROM projects WHERE parent_id IS NOT NULL")

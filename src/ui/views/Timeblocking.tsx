@@ -78,7 +78,7 @@ interface TimeblockingProps {
 }
 
 export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) {
-  const { catalog, runMutation } = useWorkspace();
+  const { catalog, runMutation, settings: appSettings } = useWorkspace();
   const { completeTask, uncompleteTask } = useTaskMutations();
   const taskQuery = useViewTasks({ status: "pending", limit: 100 });
 
@@ -101,8 +101,13 @@ export function Timeblocking({ onSelectTask, onToggleTask }: TimeblockingProps) 
   const requestSeq = useRef(0);
   const mutationPendingRef = useRef(false);
 
-  const workDayStart = DEFAULT_WORK_DAY_START;
-  const workDayEnd = DEFAULT_WORK_DAY_END;
+  const configuredWorkHours = appSettings?.planning.work_hours;
+  const workDayStart = configuredWorkHours
+    ? minutesToCivilTime(configuredWorkHours.start_minute)
+    : DEFAULT_WORK_DAY_START;
+  const workDayEnd = configuredWorkHours
+    ? minutesToCivilTime(configuredWorkHours.end_minute)
+    : DEFAULT_WORK_DAY_END;
   const gridInterval = DEFAULT_GRID_INTERVAL_MINUTES;
   const defaultDuration = DEFAULT_BLOCK_DURATION_MINUTES;
   // The immutable legacy screenshot uses its original label only on the dedicated

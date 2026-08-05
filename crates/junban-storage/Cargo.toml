@@ -15,16 +15,27 @@ scale-bench = []
 
 [dependencies]
 fs4.workspace = true
+getrandom.workspace = true
+hmac.workspace = true
 jiff.workspace = true
 junban-app = { path = "../junban-app", version = "0.1.0" }
 junban-domain = { path = "../junban-domain", version = "0.1.0" }
+junban-plugin-sdk = { path = "../junban-plugin-sdk", version = "0.1.0" }
 rusqlite = { workspace = true, features = ["backup"] }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
+ed25519-dalek.workspace = true
 uuid.workspace = true
 
 [[bin]]

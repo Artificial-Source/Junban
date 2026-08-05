@@ -1,9 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { describe, it, expect, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   ChordIndicator,
+  formatShortcutBinding,
   isAppleHotkeyPlatform,
   normalizeKey,
+  shortcutBindingFor,
+  useChord,
   type HotkeyPlatform,
 } from "./useChord";
 
@@ -52,6 +57,42 @@ describe("isAppleHotkeyPlatform", () => {
     expect(isAppleHotkeyPlatform(ipad)).toBe(true);
     expect(isAppleHotkeyPlatform(linux)).toBe(false);
     expect(isAppleHotkeyPlatform(windows)).toBe(false);
+  });
+});
+
+describe("persisted shortcut helpers", () => {
+  it("resolves by canonical action id and formats the platform modifier", () => {
+    const shortcuts = [{ action: "quick-add", chord: "cmd+j" }];
+    expect(shortcutBindingFor(shortcuts, "quick-add", "cmd+a")).toBe("cmd+j");
+    expect(shortcutBindingFor(shortcuts, "search", "cmd+k")).toBe("cmd+k");
+    expect(formatShortcutBinding("cmd+shift+p", true)).toBe("⌘⇧P");
+    expect(formatShortcutBinding("cmd+shift+p", false)).toBe("Ctrl+Shift+P");
+    expect(formatShortcutBinding("g t", false)).toBe("G T");
+  });
+
+  it("switches command handling when the confirmed binding snapshot reloads", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const action = vi.fn();
+
+    function Harness({ binding }: { binding: string }) {
+      useChord([{ id: "quick-add", description: "Quick Add", binding, action }], true);
+      return null;
+    }
+
+    act(() => root.render(<Harness binding="cmd+k" />));
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true })));
+    expect(action).toHaveBeenCalledOnce();
+
+    act(() => root.render(<Harness binding="cmd+j" />));
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true })));
+    expect(action).toHaveBeenCalledOnce();
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "j", ctrlKey: true })));
+    expect(action).toHaveBeenCalledTimes(2);
+
+    act(() => root.unmount());
+    container.remove();
   });
 });
 

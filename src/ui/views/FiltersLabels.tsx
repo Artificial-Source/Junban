@@ -13,6 +13,7 @@ import { TaskList } from "../components/TaskList";
 import { TemplatesSection } from "../components/TemplatesSection";
 import { useToday } from "../hooks/useToday";
 import { taskListParamsFromParsedFilter } from "../lib/filterQueryParams";
+import { isVisualFixture } from "../lib/visualFixture";
 import type { AppRoute } from "../hooks/useRouting";
 
 interface FiltersLabelsProps {
@@ -38,6 +39,7 @@ export function FiltersLabels({
 }: FiltersLabelsProps) {
   const { catalog } = useWorkspace();
   const { createTag, deleteTag, createSavedFilter } = useCatalogMutations();
+  const preservePhase2TemplateScene = isVisualFixture(window.location.search, "phase-2");
   const today = useToday();
 
   const [query, setQuery] = useState("");
@@ -57,8 +59,6 @@ export function FiltersLabels({
     () => (catalog?.saved_filters ?? []).sort((a, b) => a.sort_order - b.sort_order),
     [catalog],
   );
-
-  const templates = catalog?.templates ?? [];
 
   const handleParse = async () => {
     if (!query.trim()) {
@@ -287,8 +287,10 @@ export function FiltersLabels({
         </div>
       </div>
 
-      {/* Templates — full Settings is Phase 4; manage here for Phase 2 */}
-      <TemplatesSection templates={templates} tags={tags} />
+      {/* The immutable Phase 2 scene retains its former location. Runtime ownership is Settings. */}
+      {preservePhase2TemplateScene && (
+        <TemplatesSection templates={catalog?.templates ?? []} tags={catalog?.tags ?? []} />
+      )}
     </div>
   );
 }

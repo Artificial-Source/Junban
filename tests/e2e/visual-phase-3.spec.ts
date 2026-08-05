@@ -635,7 +635,7 @@ test("visual phase-3: calendar-month-mobile-light", async ({ page }) => {
 
 // ── Scene 4: Matrix — desktop Nord ──────────────────────────────────────────
 test("visual phase-3: matrix-desktop-nord", async ({ page }) => {
-  await openView(page, "/matrix", "nord");
+  await openView(page, "/matrix?visual-fixture=phase-3", "nord");
   await expect(page.getByRole("heading", { name: "Matrix", exact: true })).toBeVisible({
     timeout: 15_000,
   });
@@ -650,7 +650,7 @@ test("visual phase-3: matrix-desktop-nord", async ({ page }) => {
 
 // ── Scene 5: Plan My Day — desktop light ────────────────────────────────────
 test("visual phase-3: plan-my-day-desktop-light", async ({ page }) => {
-  await openView(page, "/today", "light");
+  await openView(page, "/today?visual-fixture=phase-3", "light");
   await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
   await dismissNudges(page);
   await page.getByRole("button", { name: "Plan My Day" }).click();
@@ -663,7 +663,7 @@ test("visual phase-3: plan-my-day-desktop-light", async ({ page }) => {
 
 // ── Scene 6: End of Day — desktop dark ──────────────────────────────────────
 test("visual phase-3: end-of-day-desktop-dark", async ({ page }) => {
-  await openView(page, "/today", "dark");
+  await openView(page, "/today?visual-fixture=phase-3", "dark");
   await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
   await dismissNudges(page);
   await page.getByRole("button", { name: "End of Day" }).click();
@@ -688,7 +688,7 @@ test("visual phase-3: weekly-review-desktop-light", async ({ page }) => {
 
 // ── Scene 8: Focus Mode — mobile light ──────────────────────────────────────
 test("visual phase-3: focus-mobile-light", async ({ page }) => {
-  await openView(page, "/today?focus=1", "light", MOBILE);
+  await openView(page, "/today?focus=1&visual-fixture=phase-3", "light", MOBILE);
   await expect(page.getByRole("dialog", { name: "Focus mode" })).toBeVisible({
     timeout: 15_000,
   });

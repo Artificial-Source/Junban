@@ -24,7 +24,7 @@ use junban_domain::{
     TaskId, TaskStatus, format_reminder_timestamp, reminder_failure_backoff,
     validate_owner_lost_mark_limit, validate_reminder_claim_limit, validate_reminder_lease_secs,
 };
-use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::Serialize;
 
 use crate::helpers::{apply_patch, diff_task_fields, validation};
@@ -52,7 +52,7 @@ enum ReminderUserReq {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn load_reminder_occurrence(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_id: TaskId,
     remind_at: Timestamp,
 ) -> Result<Option<ReminderOccurrence>, RepositoryError> {
@@ -68,7 +68,7 @@ pub(crate) fn load_reminder_occurrence(
     .map_err(storage_error)
 }
 
-fn map_occurrence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderOccurrence> {
+pub(crate) fn map_occurrence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderOccurrence> {
     let task_id = parse_sql(row.get::<_, String>(0)?, TaskId::parse)?;
     let remind_at = parse_sql(row.get::<_, String>(1)?, |value| {
         value
@@ -150,7 +150,7 @@ fn parse_optional_timestamp(value: Option<String>) -> rusqlite::Result<Option<Ti
 /// Call this before user-mutation reminder snapshots so receipt/undo material
 /// cannot grow past the frozen global audit bounds plus current intents.
 pub(crate) fn load_reminder_snapshot(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_ids: &[TaskId],
     now: Timestamp,
 ) -> Result<Vec<ReminderOccurrence>, RepositoryError> {
@@ -159,7 +159,7 @@ pub(crate) fn load_reminder_snapshot(
 }
 
 pub(crate) fn load_reminders_for_tasks(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_ids: &[TaskId],
 ) -> Result<Vec<ReminderOccurrence>, RepositoryError> {
     if task_ids.is_empty() {
@@ -204,7 +204,7 @@ pub(crate) fn load_reminders_for_tasks(
 /// of serialized terminal audit material remain. Control-plane only: no revision,
 /// event, or receipt.
 pub(crate) fn compact_terminal_reminder_audit(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     now: Timestamp,
 ) -> Result<(), RepositoryError> {
     // Timestamp arithmetic rejects calendar-day units; express retention in hours.
@@ -287,7 +287,7 @@ pub(crate) fn compact_terminal_reminder_audit(
 }
 
 pub(crate) fn upsert_reminder_occurrence(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     occurrence: &ReminderOccurrence,
 ) -> Result<(), RepositoryError> {
     tx.execute(
@@ -329,7 +329,7 @@ pub(crate) fn upsert_reminder_occurrence(
 }
 
 pub(crate) fn delete_reminders_for_tasks(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_ids: &[TaskId],
 ) -> Result<(), RepositoryError> {
     for task_id in task_ids {
@@ -344,7 +344,7 @@ pub(crate) fn delete_reminders_for_tasks(
 
 /// Replace all occurrence rows for the given tasks with the provided snapshot.
 pub(crate) fn replace_reminders_for_tasks(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_ids: &[TaskId],
     reminders: &[ReminderOccurrence],
 ) -> Result<(), RepositoryError> {
@@ -362,7 +362,7 @@ pub(crate) fn replace_reminders_for_tasks(
 
 /// Cancel still-pending occurrences so they cannot be claimed for delivery.
 pub(crate) fn cancel_pending_occurrences(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_id: TaskId,
     now: Timestamp,
 ) -> Result<(), RepositoryError> {
@@ -385,7 +385,7 @@ pub(crate) fn cancel_pending_occurrences(
 /// Claimed/delivered/failed rows for the same instant are left alone so terminal
 /// ownership cannot be overwritten by an ordinary schedule write.
 pub(crate) fn ensure_pending_occurrence(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_id: TaskId,
     remind_at: Timestamp,
     now: Timestamp,
@@ -433,7 +433,7 @@ pub(crate) fn ensure_pending_occurrence(
 /// pending intent for the active `remind_at`, without clobbering claimed or
 /// terminal ownership of the same instant.
 pub(crate) fn sync_task_reminder_intent(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task: &Task,
     now: Timestamp,
 ) -> Result<(), RepositoryError> {
@@ -702,7 +702,9 @@ fn new_fence_term() -> Result<ReminderFenceTerm, RepositoryError> {
     ReminderFenceTerm::parse(&TaskId::new().to_string()).map_err(validation)
 }
 
-fn read_lease(tx: &Transaction<'_>) -> Result<Option<ReminderDeliveryLease>, RepositoryError> {
+pub(crate) fn read_lease(
+    tx: &Connection,
+) -> Result<Option<ReminderDeliveryLease>, RepositoryError> {
     tx.query_row(
         "SELECT fence_term, expires_at, updated_at
          FROM reminder_delivery_lease
@@ -737,7 +739,7 @@ fn read_lease(tx: &Transaction<'_>) -> Result<Option<ReminderDeliveryLease>, Rep
     .map_err(storage_error)
 }
 
-fn write_lease(tx: &Transaction<'_>, lease: &ReminderDeliveryLease) -> Result<(), RepositoryError> {
+fn write_lease(tx: &Connection, lease: &ReminderDeliveryLease) -> Result<(), RepositoryError> {
     tx.execute(
         "INSERT INTO reminder_delivery_lease(singleton, fence_term, expires_at, updated_at)
          VALUES (1, ?1, ?2, ?3)
@@ -757,7 +759,7 @@ fn write_lease(tx: &Transaction<'_>, lease: &ReminderDeliveryLease) -> Result<()
 
 /// Require the caller's term to still be the durable lease owner (term only).
 fn require_current_term(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     fence_term: &ReminderFenceTerm,
 ) -> Result<ReminderDeliveryLease, RepositoryError> {
     let Some(lease) = read_lease(tx)? else {
@@ -770,7 +772,7 @@ fn require_current_term(
 }
 
 fn require_unexpired_owner(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     fence_term: &ReminderFenceTerm,
     now: Timestamp,
 ) -> Result<ReminderDeliveryLease, RepositoryError> {
@@ -850,7 +852,7 @@ pub(crate) fn release_reminder_lease(
 }
 
 fn read_claimed_row(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_id: TaskId,
     remind_at: Timestamp,
     fence_term: &ReminderFenceTerm,

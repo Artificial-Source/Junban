@@ -182,7 +182,7 @@ export function TaskSidebar({
         <TaskGroup
           label="Overdue"
           icon={<AlertCircle size={12} className="text-error" />}
-          accentClass="text-error"
+          accentClass="text-[#c62838] dark:text-error"
           tasks={groups.overdue}
           scheduledTaskIds={scheduledTaskIds}
           onSelectTask={onSelectTask}

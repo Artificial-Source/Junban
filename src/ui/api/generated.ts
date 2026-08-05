@@ -4,6 +4,406 @@
  */
 
 export interface paths {
+  "/api/v1/ai/approvals/{approval_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_ai_approval"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/approvals/{approval_id}/approve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["approve_ai_approval"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/approvals/{approval_id}/reject": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["reject_ai_approval"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/config": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_ai_config"];
+    put: operations["put_ai_config"];
+    post?: never;
+    delete: operations["delete_ai_config"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/credentials/{target}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put: operations["put_ai_credential"];
+    post?: never;
+    delete: operations["delete_ai_credential"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/memories": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_ai_memories"];
+    put?: never;
+    post: operations["create_ai_memory"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/memories/{memory_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_ai_memory"];
+    put?: never;
+    post?: never;
+    delete: operations["delete_ai_memory"];
+    options?: never;
+    head?: never;
+    patch: operations["patch_ai_memory"];
+    trace?: never;
+  };
+  "/api/v1/ai/providers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_ai_providers"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/providers/{provider}/models": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["discover_ai_provider_models"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/runs/{run_id}/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["cancel_ai_run"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_ai_sessions"];
+    put?: never;
+    post: operations["create_ai_session"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/sessions/{session_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_ai_session"];
+    put?: never;
+    post?: never;
+    delete: operations["delete_ai_session"];
+    options?: never;
+    head?: never;
+    patch: operations["patch_ai_session"];
+    trace?: never;
+  };
+  "/api/v1/ai/sessions/{session_id}/clear": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["clear_ai_session"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/sessions/{session_id}/daily-briefing": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["create_ai_daily_briefing"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/sessions/{session_id}/messages": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_ai_messages"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/sessions/{session_id}/messages/{message_id}/edit": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["edit_ai_response"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/sessions/{session_id}/messages/{message_id}/regenerate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["regenerate_ai_response"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/sessions/{session_id}/messages/{message_id}/retry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["retry_ai_response"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/ai/sessions/{session_id}/responses": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["create_ai_response"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/credentials": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_automation_credentials"];
+    put?: never;
+    post: operations["create_automation_credential"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/credentials/{credential_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete: operations["revoke_automation_credential"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/principal": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_principal"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/rotate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["rotate_token"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/backup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["create_backup"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/backup/restore": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["restore_backup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/calendar/tasks": {
     parameters: {
       query?: never;
@@ -52,6 +452,22 @@ export interface paths {
     patch: operations["patch_comment"];
     trace?: never;
   };
+  "/api/v1/diagnostics": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_diagnostics"];
+    put?: never;
+    post?: never;
+    delete: operations["clear_diagnostics"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/events": {
     parameters: {
       query?: never;
@@ -68,6 +484,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/exports/tasks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["export_tasks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/health": {
     parameters: {
       query?: never;
@@ -76,6 +508,70 @@ export interface paths {
       cookie?: never;
     };
     get: operations["health"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/hosts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_allowed_hosts"];
+    put: operations["put_allowed_hosts"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/imports/apply": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["apply_import"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/imports/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["preview_import"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/maintenance/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_maintenance_status"];
     put?: never;
     post?: never;
     delete?: never;
@@ -308,6 +804,22 @@ export interface paths {
     patch: operations["patch_project"];
     trace?: never;
   };
+  "/api/v1/recovery/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_recovery_status"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/reminders/claim": {
     parameters: {
       query?: never;
@@ -500,6 +1012,22 @@ export interface paths {
     patch: operations["patch_section"];
     trace?: never;
   };
+  "/api/v1/settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_settings"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch: operations["patch_settings"];
+    trace?: never;
+  };
   "/api/v1/settings/temporal": {
     parameters: {
       query?: never;
@@ -524,6 +1052,22 @@ export interface paths {
       cookie?: never;
     };
     get: operations["stats"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sync-state": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_sync_state"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1028,6 +1572,38 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/voice/speech": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["create_voice_speech"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/voice/transcriptions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["create_voice_transcription"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1056,6 +1632,280 @@ export interface components {
       time_block_ids?: string[];
       time_slot_ids?: string[];
     };
+    AiApprovalDecisionRequest: {
+      action_hash: string;
+    };
+    AiApprovalDto: {
+      action_hash: string;
+      arguments: unknown;
+      created_at: string;
+      expires_at: string;
+      /** Format: int64 */
+      generation: number;
+      id: string;
+      run_id: string;
+      session_id: string;
+      status: string;
+      tool_name: string;
+      turn_id: string;
+      updated_at: string;
+    };
+    AiApprovalMessageDto: {
+      content: unknown;
+      created_at: string;
+      id: string;
+      role: string;
+      /** Format: int32 */
+      sequence: number;
+      session_id: string;
+      status: string;
+      turn_id: string;
+      updated_at: string;
+    };
+    AiApprovalResponse: {
+      approval: components["schemas"]["AiApprovalDto"];
+      message: components["schemas"]["AiApprovalMessageDto"];
+      result?: unknown;
+      run: components["schemas"]["AiApprovalRunDto"];
+    };
+    AiApprovalRunDto: {
+      approval_id?: string | null;
+      assistant_message_id: string;
+      created_at: string;
+      /** Format: int64 */
+      generation: number;
+      id: string;
+      session_id: string;
+      state: string;
+      turn_id: string;
+      updated_at: string;
+    };
+    AiConfigInput: {
+      auto_send: boolean;
+      base_url?: string | null;
+      custom_instructions: string;
+      daily_briefing_enabled: boolean;
+      /** Format: int32 */
+      default_energy?: number | null;
+      enabled: boolean;
+      model?: string | null;
+      provider?: null | components["schemas"]["AiProviderPresetDto"];
+      smart_endpoint: boolean;
+    };
+    AiConfigPutRequest: {
+      ai: components["schemas"]["AiConfigInput"];
+      voice: components["schemas"]["VoiceConfigInput"];
+    };
+    AiConfigResponse: {
+      ai: components["schemas"]["AiSettingsDto"];
+      credentials: components["schemas"]["AiCredentialBindingsDto"];
+      voice: components["schemas"]["VoiceSettingsDto"];
+    };
+    AiContextMetadata: {
+      approximate_tokens: number;
+      focused_task_included: boolean;
+      history_messages_included: number;
+      history_rows_loaded: number;
+      memories_considered: number;
+      memories_included: number;
+      truncated: boolean;
+      utf8_bytes: number;
+    };
+    AiCredentialBindingResponse: {
+      credential?: null | components["schemas"]["AiCredentialMetadataDto"];
+      target: components["schemas"]["AiCredentialTargetDto"];
+    };
+    AiCredentialBindingsDto: {
+      ai_provider?: null | components["schemas"]["AiCredentialMetadataDto"];
+      voice_stt?: null | components["schemas"]["AiCredentialMetadataDto"];
+      voice_tts?: null | components["schemas"]["AiCredentialMetadataDto"];
+    };
+    AiCredentialMetadataDto: {
+      /** Format: uuid */
+      id: string;
+      kind: components["schemas"]["AiSecretKindDto"];
+      present: boolean;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @enum {string} */
+    AiCredentialTargetDto: "ai_provider" | "voice_stt" | "voice_tts";
+    AiMemoryDto: {
+      content: string;
+      /** Format: int64 */
+      content_bytes: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: uuid */
+      id: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AiMemoryListResponse: {
+      memories: components["schemas"]["AiMemoryDto"][];
+      next_cursor?: string | null;
+    };
+    /** @description Create/update memory responses carry the canonical resource plus the committed event. */
+    AiMemoryMutationResponse: {
+      event: components["schemas"]["CommittedEventDto"];
+      memory: components["schemas"]["AiMemoryDto"];
+    };
+    AiMessageContentDto: {
+      briefing_date?: string | null;
+      /** Format: uuid */
+      focused_task_id?: string | null;
+      text?: string;
+      tool_arguments_json?: string | null;
+      tool_events?: components["schemas"]["AiToolEventDto"][];
+      tool_name?: string | null;
+      tool_result_json?: string | null;
+    };
+    AiMessageDto: {
+      content: components["schemas"]["AiMessageContentDto"];
+      /** Format: int64 */
+      content_bytes: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: uuid */
+      id: string;
+      role: components["schemas"]["AiMessageRoleDto"];
+      /** Format: int32 */
+      sequence: number;
+      /** Format: uuid */
+      session_id: string;
+      status: components["schemas"]["AiMessageStatusDto"];
+      /** Format: uuid */
+      turn_id: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AiMessageListResponse: {
+      messages: components["schemas"]["AiMessageDto"][];
+    };
+    /** @enum {string} */
+    AiMessageRoleDto: "user" | "assistant" | "system" | "tool";
+    /** @enum {string} */
+    AiMessageStatusDto: "pending" | "streaming" | "completed" | "failed" | "cancelled";
+    /** @enum {string} */
+    AiProviderPresetDto:
+      | "openai"
+      | "anthropic"
+      | "gemini"
+      | "openrouter"
+      | "ollama"
+      | "lm_studio"
+      | "deepseek"
+      | "mistral"
+      | "kimi"
+      | "dashscope"
+      | "groq"
+      | "z_ai"
+      | "custom";
+    AiProviderRegistryEntry: {
+      auth_scheme: string;
+      capabilities: components["schemas"]["ProviderCapabilityDto"][];
+      credential_required: boolean;
+      default_base_url?: string | null;
+      display_name: string;
+      id: components["schemas"]["AiProviderPresetDto"];
+      origin_class: components["schemas"]["ProviderOriginClassDto"];
+    };
+    AiProviderRegistryResponse: {
+      providers: components["schemas"]["AiProviderRegistryEntry"][];
+    };
+    /** @enum {string} */
+    AiRunEventType:
+      | "run_started"
+      | "text_delta"
+      | "reasoning_status"
+      | "usage"
+      | "tool_proposed"
+      | "tool_approved"
+      | "tool_rejected"
+      | "tool_result"
+      | "run_completed"
+      | "run_cancelled"
+      | "run_failed";
+    AiRunSseEnvelope: {
+      /** Format: int64 */
+      generation: number;
+      payload: unknown;
+      /** Format: uuid */
+      run_id: string;
+      /** Format: int64 */
+      sequence: number;
+      type: components["schemas"]["AiRunEventType"];
+      /** Format: int32 */
+      version: number;
+    };
+    /** @enum {string} */
+    AiSecretKindDto: "api_key" | "bearer" | "inworld_basic" | "inworld_jwt";
+    AiSessionDto: {
+      /** Format: int64 */
+      content_bytes: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: uuid */
+      id: string;
+      /** Format: date-time */
+      last_message_at?: string | null;
+      /** Format: int32 */
+      message_count: number;
+      status: components["schemas"]["AiSessionStatusDto"];
+      title: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AiSessionListResponse: {
+      next_cursor?: string | null;
+      sessions: components["schemas"]["AiSessionDto"][];
+    };
+    /** @description Create/rename/clear responses carry the canonical resource plus the committed event. */
+    AiSessionMutationResponse: {
+      event: components["schemas"]["CommittedEventDto"];
+      session: components["schemas"]["AiSessionDto"];
+    };
+    /** @enum {string} */
+    AiSessionStatusDto: "active" | "archived";
+    AiSettingsDto: {
+      auto_send: boolean;
+      base_url?: string | null;
+      /** Format: uuid */
+      credential_id?: string | null;
+      custom_instructions: string;
+      daily_briefing_enabled: boolean;
+      /** Format: int32 */
+      default_energy?: number | null;
+      enabled: boolean;
+      model?: string | null;
+      provider?: null | components["schemas"]["AiProviderPresetDto"];
+      smart_endpoint: boolean;
+    };
+    AiToolEventDto: {
+      /** Format: int32 */
+      assistant_utf8_offset: number;
+      event_type: string;
+      payload: unknown;
+      /** Format: int32 */
+      version: number;
+    };
+    AppSettingsResponse: {
+      appearance: components["schemas"]["AppearanceSettingsDto"];
+      date_time: components["schemas"]["DateTimeSettingsDto"];
+      features: components["schemas"]["FeatureSettingsDto"];
+      keyboard_shortcuts: components["schemas"]["KeyboardShortcutDto"][];
+      notifications: components["schemas"]["NotificationSettingsDto"];
+      planning: components["schemas"]["PlanningSettingsDto"];
+      task_defaults: components["schemas"]["TaskDefaultsDto"];
+    };
+    AppearanceSettingsDto: {
+      accent: string;
+      density: components["schemas"]["DensityDto"];
+      font_family: components["schemas"]["FontFamilyDto"];
+      font_size: components["schemas"]["FontSizeDto"];
+      reduced_motion: boolean;
+      theme: components["schemas"]["ThemeDto"];
+    };
     AppendTimeSlotTaskRequest: {
       /** Format: uuid */
       task_id: string;
@@ -1065,6 +1915,44 @@ export interface components {
       template_id: string;
       /** @description Placeholder values keyed by name without braces. Bounded by request body size. */
       variables?: components["schemas"]["TemplateVariableDto"][];
+    };
+    /** @description Public automation credential metadata (never includes secrets or hashes). */
+    AutomationCredentialDto: {
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      expires_at?: string | null;
+      id: string;
+      label: string;
+      scopes: components["schemas"]["AutomationScope"][];
+    };
+    /** @description Operator-only list of automation credentials. */
+    AutomationCredentialListResponse: {
+      credentials: components["schemas"]["AutomationCredentialDto"][];
+    };
+    /**
+     * @description Issuable automation scopes. None implies another.
+     * @enum {string}
+     */
+    AutomationScope: "read" | "write" | "data";
+    /** @description Inventory snapshot embedded in a backup artifact (wire projection). */
+    BackupManifestDto: {
+      /** Format: int32 */
+      artifact_version: number;
+      created_at: string;
+      /** Format: int64 */
+      event_count: number;
+      payload_sha256: string;
+      /** Format: int64 */
+      project_count: number;
+      /** Format: int64 */
+      revision: number;
+      /** Format: int64 */
+      schema_version: number;
+      /** Format: int64 */
+      tag_count: number;
+      /** Format: int64 */
+      task_count: number;
     };
     BulkActionDto:
       | {
@@ -1124,10 +2012,17 @@ export interface components {
       action: components["schemas"]["BulkActionDto"];
       task_ids: string[];
     };
+    /** @enum {string} */
+    CalendarDefaultDto: "day" | "week" | "month";
     CalendarTasksResponse: {
       /** Format: int64 */
       revision: number;
       tasks: components["schemas"]["TaskDto"][];
+    };
+    CancelAiRunResponse: {
+      /** Format: uuid */
+      run_id: string;
+      status: string;
     };
     CatalogResponse: {
       projects: components["schemas"]["ProjectDto"][];
@@ -1142,7 +2037,10 @@ export interface components {
       /** Format: int64 */
       claim_secs?: number | null;
       fence_term: string;
-      /** Format: int32 */
+      /**
+       * Format: int32
+       * @description Claim batch size in `1..=100`. Defaults to 20 when omitted.
+       */
       limit?: number | null;
     };
     ClaimRemindersResponse: {
@@ -1202,6 +2100,33 @@ export interface components {
       morning: number;
       /** Format: int32 */
       night: number;
+    };
+    CreateAiMemoryHttpRequest: {
+      content: string;
+    };
+    CreateAiResponseRequest: {
+      /** Format: uuid */
+      focused_task_id?: string | null;
+      message: string;
+    };
+    CreateAiSessionHttpRequest: {
+      title: string;
+    };
+    /** @description Operator-only create body. The client generates the id and one-time token. */
+    CreateAutomationCredentialRequest: {
+      /**
+       * Format: date-time
+       * @description Optional expiry instant; must be strictly after creation time.
+       */
+      expires_at?: string | null;
+      /** @description Client-generated credential UUID. */
+      id: string;
+      /** @description Human label for operator listing. */
+      label: string;
+      /** @description Exact scopes requested (duplicates rejected). */
+      scopes: components["schemas"]["AutomationScope"][];
+      /** @description Full high-entropy automation bearer. Persisted only as a one-way hash. */
+      token: string;
     };
     CreateCommentRequest: {
       content: string;
@@ -1334,6 +2259,41 @@ export interface components {
       /** Format: date */
       date: string;
     };
+    /** @enum {string} */
+    DateFormatDto: "relative" | "short" | "long" | "iso";
+    DateTimeSettingsDto: {
+      calendar_default: components["schemas"]["CalendarDefaultDto"];
+      date_format: components["schemas"]["DateFormatDto"];
+      time_format: components["schemas"]["TimeFormatDto"];
+      week_start: components["schemas"]["WeekStartDto"];
+    };
+    /** @enum {string} */
+    DensityDto: "compact" | "default" | "comfortable";
+    /** @description One structured diagnostic record. Messages must already be redacted. */
+    DiagnosticEntry: {
+      /** @description Stable machine-facing event code. */
+      code: string;
+      /** @description Human-readable detail; never includes raw secrets. */
+      message: string;
+      request_id?: string | null;
+      severity: components["schemas"]["DiagnosticSeverity"];
+      /** @description RFC3339 / ISO-8601 timestamp from the server clock. */
+      timestamp: string;
+    };
+    /**
+     * @description Severity of a diagnostic entry.
+     * @enum {string}
+     */
+    DiagnosticSeverity: "info" | "warning" | "error";
+    /** @description Bounded diagnostic ring snapshot. */
+    DiagnosticsResponse: {
+      entries: components["schemas"]["DiagnosticEntry"][];
+    };
+    DiscoveredModelDto: {
+      capabilities: components["schemas"]["ProviderCapabilityDto"][];
+      display_name?: string | null;
+      id: string;
+    };
     DopamineMenuResponse: {
       /** Format: int64 */
       revision: number;
@@ -1345,6 +2305,12 @@ export interface components {
       revision: number;
       task?: null | components["schemas"]["TaskDto"];
     };
+    EditAiResponseRequest: {
+      /** Format: uuid */
+      focused_task_id?: string | null;
+      message: string;
+    };
+    EmptyAiResponseActionRequest: Record<string, never>;
     EndOfDayResponse: {
       /**
        * Format: date
@@ -1378,22 +2344,87 @@ export interface components {
       error: components["schemas"]["ErrorBody"];
       request_id: string;
     };
+    ExportTasksQuery: {
+      /** @description One of `json`, `csv`, or `markdown`. */
+      format: string;
+    };
+    FeatureSettingsDto: {
+      daily_planning_enabled: boolean;
+      eat_the_frog_enabled: boolean;
+      focus_mode_enabled: boolean;
+      nudges_enabled: boolean;
+      task_jar_enabled: boolean;
+      weekly_review_enabled: boolean;
+    };
+    /** @enum {string} */
+    FontFamilyDto: "outfit" | "inter" | "system";
+    /** @enum {string} */
+    FontSizeDto: "small" | "medium" | "large";
     HealthResponse: {
+      /** @description Random per-process id mirrored from private runtime metadata. */
+      instance_id: string;
       status: string;
+    };
+    /** @description Replace the persisted Host allowlist (CLI hosts are always retained). */
+    HostListRequest: {
+      hosts: string[];
+    };
+    /** @description Effective Host allowlist (CLI hosts plus persisted extras). */
+    HostListResponse: {
+      hosts: string[];
+    };
+    ImportApplyRequest: {
+      content: string;
+      fingerprint: string;
+      format: components["schemas"]["TransferFormatDto"];
+      project_name_mapping?: components["schemas"]["NameMappingDto"][];
+      tag_name_mapping?: components["schemas"]["NameMappingDto"][];
+    };
+    ImportDraftDto: {
+      description?: string | null;
+      due_date?: string | null;
+      line: number;
+      /** Format: int32 */
+      priority?: number | null;
+      project_name?: string | null;
+      tag_names: string[];
+      title: string;
+    };
+    ImportPreviewRequest: {
+      content: string;
+      format: components["schemas"]["TransferFormatDto"];
+    };
+    KeyboardShortcutDto: {
+      action: string;
+      chord: string;
     };
     LocalDueTimeDto: {
       /** @description Civil wall-clock time `HH:MM[:SS]`. */
       time: string;
       time_zone: string;
     };
+    /** @description Process-wide maintenance barrier snapshot. */
+    MaintenanceStatusResponse: {
+      admitted_requests: number;
+      maintenance_active: boolean;
+      recovery_mode: boolean;
+      restart_required: boolean;
+    };
     MarkOwnerLostRemindersRequest: {
       fence_term: string;
-      /** Format: int32 */
+      /**
+       * Format: int32
+       * @description Batch size in `1..=100`. Defaults to 20 when omitted.
+       */
       limit?: number | null;
     };
     MarkOwnerLostRemindersResponse: {
       /** Format: int32 */
       marked: number;
+    };
+    ModelDiscoveryResponse: {
+      models: components["schemas"]["DiscoveredModelDto"][];
+      provider: components["schemas"]["AiProviderPresetDto"];
     };
     MoveTaskRequest: {
       order?: null | components["schemas"]["OrderAnchorDto"];
@@ -1416,6 +2447,10 @@ export interface components {
       event: components["schemas"]["CommittedEventDto"];
       uncomplete_outcome?: null | components["schemas"]["UncompleteOutcomeDto"];
     };
+    NameMappingDto: {
+      from: string;
+      to: string;
+    };
     NeglectedProjectFactDto: {
       /** Format: int32 */
       overdue_count: number;
@@ -1425,6 +2460,16 @@ export interface components {
     };
     /** @enum {string} */
     NeglectedProjectReasonDto: "overdue_tasks" | "no_activity";
+    NotificationSettingsDto: {
+      channels: components["schemas"]["ReminderChannelDto"][];
+      reminder_sound: boolean;
+      sound_enabled: boolean;
+      task_completed_sound: boolean;
+      task_created_sound: boolean;
+      task_deleted_sound: boolean;
+      /** Format: int32 */
+      volume_percent: number;
+    };
     NudgeRuleFactsDto: {
       has_more: boolean;
       kind: components["schemas"]["NudgeRuleKindDto"];
@@ -1433,6 +2478,12 @@ export interface components {
     /** @enum {string} */
     NudgeRuleKindDto:
       "overdue" | "approaching_deadline" | "stale_task" | "empty_today" | "overloaded_day";
+    NudgeRuleSettingsDto: {
+      enabled: boolean;
+      kind: components["schemas"]["NudgeRuleKindDto"];
+      /** Format: int32 */
+      threshold?: number | null;
+    };
     NudgesResponse: {
       has_more: boolean;
       /** Format: int64 */
@@ -1471,6 +2522,12 @@ export interface components {
       filter: components["schemas"]["TaskFilterDto"];
       sort: components["schemas"]["TaskSortDto"];
     };
+    PatchAiMemoryRequest: {
+      content: string;
+    };
+    PatchAiSessionRequest: {
+      title: string;
+    };
     PatchCommentRequest: {
       content: string;
     };
@@ -1498,6 +2555,15 @@ export interface components {
       name?: string | null;
       /** Format: int64 */
       sort_order?: number | null;
+    };
+    PatchSettingsRequest: {
+      appearance?: null | components["schemas"]["AppearanceSettingsDto"];
+      date_time?: null | components["schemas"]["DateTimeSettingsDto"];
+      features?: null | components["schemas"]["FeatureSettingsDto"];
+      keyboard_shortcuts?: components["schemas"]["KeyboardShortcutDto"][] | null;
+      notifications?: null | components["schemas"]["NotificationSettingsDto"];
+      planning?: null | components["schemas"]["PlanningSettingsDto"];
+      task_defaults?: null | components["schemas"]["TaskDefaultsDto"];
     };
     PatchTagRequest: {
       color?: string | null;
@@ -1574,6 +2640,29 @@ export interface components {
       time_zone?: string | null;
       title?: string | null;
     };
+    PlanningSettingsDto: {
+      /** Format: int32 */
+      capacity_minutes: number;
+      nudge_rules: components["schemas"]["NudgeRuleSettingsDto"][];
+      work_hours?: null | components["schemas"]["WorkHoursDto"];
+    };
+    /**
+     * @description Authenticated principal kind (never includes ids, tokens, or secrets).
+     * @enum {string}
+     */
+    PrincipalKindDto: "operator" | "automation";
+    /**
+     * @description Capability snapshot for the active bearer.
+     *
+     *     Operator always reports the full routine scope set (`read`, `write`, `data`).
+     *     Automation reports only the exact issued scopes. Identifiers and secrets are
+     *     intentionally omitted so CLI/MCP clients can filter tools without learning
+     *     credential identity material.
+     */
+    PrincipalResponse: {
+      kind: components["schemas"]["PrincipalKindDto"];
+      scopes: components["schemas"]["AutomationScope"][];
+    };
     ProfileResponse: {
       /** Format: int64 */
       revision: number;
@@ -1598,6 +2687,21 @@ export interface components {
     };
     /** @enum {string} */
     ProjectViewDto: "list" | "board" | "calendar";
+    /** @enum {string} */
+    ProviderCapabilityDto:
+      | "chat_streaming"
+      | "chat_completion"
+      | "tools"
+      | "streaming_tools"
+      | "vision"
+      | "reasoning_status"
+      | "model_discovery";
+    /** @enum {string} */
+    ProviderOriginClassDto: "fixed_cloud_https" | "loopback" | "operator_custom";
+    PutAiCredentialRequest: {
+      kind: components["schemas"]["AiSecretKindDto"];
+      secret: string;
+    };
     QuickEntryDto: {
       /** Format: date-time */
       deadline?: string | null;
@@ -1614,6 +2718,11 @@ export interface components {
       someday: boolean;
       tag_names: string[];
       title: string;
+    };
+    /** @description Narrow recovery-mode status (no auth). */
+    RecoveryStatusResponse: {
+      mode: string;
+      restart_required: boolean;
     };
     RelationDto: {
       /** Format: uuid */
@@ -1783,9 +2892,18 @@ export interface components {
       | "relation"
       | "operation"
       | "time_block"
-      | "time_slot";
+      | "time_slot"
+      | "settings"
+      | "ai_session"
+      | "ai_memory"
+      | "ai_approval";
+    /** @description Successful restore response; process must restart before normal traffic resumes. */
+    RestoreResponse: {
+      restart_required: boolean;
+    };
     ResyncScopeDto: {
       catalog: boolean;
+      settings: boolean;
       tasks: boolean;
     };
     SavedFilterDto: {
@@ -1841,6 +2959,21 @@ export interface components {
       /** Format: uuid */
       task_id: string;
     };
+    /** Format: binary */
+    SpeechBinaryResponse: string;
+    /** @enum {string} */
+    SpeechProviderPresetDto: "browser" | "openai" | "groq" | "inworld";
+    SpeechSynthesisRequest: {
+      text: string;
+    };
+    /**
+     * @description OpenAPI-only strict multipart shape. Runtime parsing enforces exactly this
+     *     one field, its media type, and the independent 25 MiB payload ceiling.
+     */
+    SpeechTranscriptionMultipart: {
+      /** Format: binary */
+      audio: string;
+    };
     StatsResponse: {
       /** Format: int32 */
       average_actual_minutes?: number | null;
@@ -1865,6 +2998,12 @@ export interface components {
       total_completions: number;
       /** Format: int32 */
       total_creations: number;
+    };
+    /** @description Atomic event-stream identity and head revision snapshot. */
+    SyncStateResponse: {
+      event_epoch: string;
+      /** Format: int64 */
+      revision: number;
     };
     TagDto: {
       color: string;
@@ -1894,6 +3033,14 @@ export interface components {
     };
     TaskActivityResponse: {
       activity: components["schemas"]["TaskActivityDto"][];
+    };
+    TaskDefaultsDto: {
+      confirm_before_delete: boolean;
+      /** Format: int32 */
+      default_estimated_minutes?: number | null;
+      /** Format: int32 */
+      default_priority?: number | null;
+      default_view: components["schemas"]["TaskViewPresetDto"];
     };
     TaskDto: {
       /** Format: int32 */
@@ -2021,6 +3168,8 @@ export interface components {
     TextImportResponse: {
       drafts: components["schemas"]["TextImportDraftDto"][];
     };
+    /** @enum {string} */
+    ThemeDto: "system" | "light" | "dark" | "nord";
     TimeBlockDto: {
       color?: string | null;
       /** Format: date-time */
@@ -2053,6 +3202,8 @@ export interface components {
       revision: number;
       time_blocks: components["schemas"]["TimeBlockDto"][];
     };
+    /** @enum {string} */
+    TimeFormatDto: "h24" | "h12";
     TimeSlotDto: {
       color?: string | null;
       /** Format: date-time */
@@ -2083,13 +3234,65 @@ export interface components {
       revision: number;
       time_slots: components["schemas"]["TimeSlotDto"][];
     };
+    /** @description One-time response after a successful access-token rotation. */
+    TokenRotationResponse: {
+      /** @description Fresh bearer token. Never logged or cached by intermediaries. */
+      token: string;
+    };
+    TranscriptionResponse: {
+      text: string;
+    };
+    /** @enum {string} */
+    TransferFormatDto: "json" | "csv" | "markdown" | "todoist_json";
+    TransferPreviewResponse: {
+      content_fingerprint: string;
+      drafts: components["schemas"]["ImportDraftDto"][];
+      format: components["schemas"]["TransferFormatDto"];
+      project_names: string[];
+      tag_names: string[];
+      warnings: components["schemas"]["TransferWarningDto"][];
+    };
+    TransferWarningDto: {
+      line: number;
+      message: string;
+    };
     /**
      * @description How an ordinary uncomplete handled recurring work.
      * @enum {string}
      */
     UncompleteOutcomeDto: "exact" | "source_only";
+    VoiceConfigInput: {
+      cloud_speech_enabled: boolean;
+      /** Format: int32 */
+      grace_period_ms: number;
+      stt_model?: string | null;
+      stt_provider: components["schemas"]["SpeechProviderPresetDto"];
+      tts_enabled: boolean;
+      tts_model?: string | null;
+      tts_provider: components["schemas"]["SpeechProviderPresetDto"];
+      tts_voice?: string | null;
+      voice_mode: components["schemas"]["VoiceModeDto"];
+    };
     /** @enum {string} */
-    WeekStartDto: "sunday" | "monday";
+    VoiceModeDto: "push_to_talk" | "hands_free";
+    VoiceSettingsDto: {
+      cloud_speech_enabled: boolean;
+      /** Format: int32 */
+      grace_period_ms: number;
+      /** Format: uuid */
+      stt_credential_id?: string | null;
+      stt_model?: string | null;
+      stt_provider: components["schemas"]["SpeechProviderPresetDto"];
+      /** Format: uuid */
+      tts_credential_id?: string | null;
+      tts_enabled: boolean;
+      tts_model?: string | null;
+      tts_provider: components["schemas"]["SpeechProviderPresetDto"];
+      tts_voice?: string | null;
+      voice_mode: components["schemas"]["VoiceModeDto"];
+    };
+    /** @enum {string} */
+    WeekStartDto: "sunday" | "monday" | "saturday";
     WeeklyDayStatsDto: {
       /** Format: int32 */
       completed: number;
@@ -2154,6 +3357,12 @@ export interface components {
           /** @enum {string} */
           kind: "keep_streak";
         };
+    WorkHoursDto: {
+      /** Format: int32 */
+      end_minute: number;
+      /** Format: int32 */
+      start_minute: number;
+    };
   };
   responses: never;
   parameters: never;
@@ -2163,13 +3372,2484 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-  calendar_tasks: {
+  get_ai_approval: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        approval_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiApprovalResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  approve_ai_approval: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        approval_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AiApprovalDecisionRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiApprovalResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  reject_ai_approval: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        approval_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AiApprovalDecisionRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiApprovalResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_ai_config: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiConfigResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  put_ai_config: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AiConfigPutRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiConfigResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  delete_ai_config: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiConfigResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  put_ai_credential: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        /** @description credential binding target */
+        target: components["schemas"]["AiCredentialTargetDto"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PutAiCredentialRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiCredentialBindingResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  delete_ai_credential: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        /** @description credential binding target */
+        target: components["schemas"]["AiCredentialTargetDto"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiCredentialBindingResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_ai_memories: {
     parameters: {
       query?: {
+        cursor?: string;
+        /** @description Page size in `1..=100`. Defaults to 100 when omitted. */
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiMemoryListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  create_ai_memory: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateAiMemoryHttpRequest"];
+      };
+    };
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiMemoryMutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_ai_memory: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        memory_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiMemoryDto"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  delete_ai_memory: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        memory_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  patch_ai_memory: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        memory_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PatchAiMemoryRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiMemoryMutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_ai_providers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiProviderRegistryResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  discover_ai_provider_models: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description canonical provider id */
+        provider: components["schemas"]["AiProviderPresetDto"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelDiscoveryResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  cancel_ai_run: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CancelAiRunResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_ai_sessions: {
+    parameters: {
+      query?: {
+        cursor?: string;
+        /** @description Page size in `1..=100`. Defaults to 100 when omitted. */
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiSessionListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  create_ai_session: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateAiSessionHttpRequest"];
+      };
+    };
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiSessionMutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_ai_session: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiSessionDto"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  delete_ai_session: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  patch_ai_session: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PatchAiSessionRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiSessionMutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  clear_ai_session: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiSessionMutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  create_ai_daily_briefing: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EmptyAiResponseActionRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["AiRunSseEnvelope"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_ai_messages: {
+    parameters: {
+      query?: {
+        /** @description Return messages with `sequence` strictly greater than this value. */
+        after_sequence?: number;
+        /** @description Page size in `1..=100`. Defaults to 100 when omitted. */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AiMessageListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  edit_ai_response: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        session_id: string;
+        message_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EditAiResponseRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["AiRunSseEnvelope"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  regenerate_ai_response: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        session_id: string;
+        message_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EmptyAiResponseActionRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["AiRunSseEnvelope"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  retry_ai_response: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        session_id: string;
+        message_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EmptyAiResponseActionRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["AiRunSseEnvelope"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  create_ai_response: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description UUID operation id */
+        "Idempotency-Key": string;
+      };
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateAiResponseRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["AiRunSseEnvelope"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_automation_credentials: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AutomationCredentialListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  create_automation_credential: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateAutomationCredentialRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AutomationCredentialDto"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  revoke_automation_credential: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Credential UUID */
+        credential_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Credential revoked or already absent */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_principal: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PrincipalResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  rotate_token: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TokenRotationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  create_backup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Framed .junban-backup artifact */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  restore_backup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/octet-stream": unknown;
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RestoreResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  calendar_tasks: {
+    parameters: {
+      query: {
         /** @description Inclusive civil start date (`YYYY-MM-DD`). Required. */
-        from?: string;
+        from: string;
         /** @description Inclusive civil end date (`YYYY-MM-DD`). Required. */
-        to?: string;
+        to: string;
         /** @description Optional exact project filter. */
         project_id?: string;
       };
@@ -2394,10 +6074,80 @@ export interface operations {
       };
     };
   };
+  get_diagnostics: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DiagnosticsResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  clear_diagnostics: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description diagnostic ring cleared */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   events: {
     parameters: {
-      query?: {
+      query: {
         since?: number;
+        event_epoch: string;
       };
       header?: {
         "Last-Event-ID"?: number | null;
@@ -2432,6 +6182,67 @@ export interface operations {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
       };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  export_tasks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description One of `json`, `csv`, or `markdown`. */
+        format: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Transfer document body */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
       503: {
         headers: {
           [name: string]: unknown;
@@ -2457,6 +6268,275 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HealthResponse"];
+        };
+      };
+    };
+  };
+  get_allowed_hosts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HostListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  put_allowed_hosts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["HostListRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HostListResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  apply_import: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ImportApplyRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  preview_import: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ImportPreviewRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TransferPreviewResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_maintenance_status: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MaintenanceStatusResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
         };
       };
     };
@@ -2604,7 +6684,7 @@ export interface operations {
       query?: {
         /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
         date?: string;
-        /** @description Daily capacity in whole minutes. Defaults to 480. */
+        /** @description Daily capacity in whole minutes (`60..=1440`). Defaults to 480. */
         capacity_minutes?: number;
       };
       header?: never;
@@ -2888,7 +6968,7 @@ export interface operations {
       query?: {
         /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
         date?: string;
-        /** @description Daily capacity in whole minutes. Defaults to 480. */
+        /** @description Daily capacity in whole minutes (`60..=1440`). Defaults to 480. */
         capacity_minutes?: number;
       };
       header?: never;
@@ -2936,7 +7016,7 @@ export interface operations {
       query?: {
         /** @description Civil date (`YYYY-MM-DD`). Defaults to server-local today. */
         date?: string;
-        /** @description Daily capacity in whole minutes. Defaults to 480. */
+        /** @description Daily capacity in whole minutes (`60..=1440`). Defaults to 480. */
         capacity_minutes?: number;
       };
       header?: never;
@@ -3293,6 +7373,25 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_recovery_status: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RecoveryStatusResponse"];
         };
       };
     };
@@ -4294,6 +8393,114 @@ export interface operations {
       };
     };
   };
+  get_settings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppSettingsResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  patch_settings: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PatchSettingsRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   get_temporal_settings: {
     parameters: {
       query?: never;
@@ -4331,11 +8538,11 @@ export interface operations {
   };
   stats: {
     parameters: {
-      query?: {
+      query: {
         /** @description Inclusive civil start date (`YYYY-MM-DD`). Required. */
-        from?: string;
+        from: string;
         /** @description Inclusive civil end date (`YYYY-MM-DD`). Required. */
-        to?: string;
+        to: string;
       };
       header?: never;
       path?: never;
@@ -4360,6 +8567,41 @@ export interface operations {
         };
       };
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_sync_state: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SyncStateResponse"];
+        };
+      };
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -4619,14 +8861,19 @@ export interface operations {
         tag_id?: string;
         /** @description Comma-separated tag IDs. Tasks must include every listed tag (AND). */
         tag_ids?: string;
+        /** @description Task priority P1 (highest) through P4 (lowest). */
         priority?: number;
+        /** @description Civil due date filter (`YYYY-MM-DD`). */
         due_on?: string;
+        /** @description Inclusive upper bound on due date (`YYYY-MM-DD`). */
         due_before?: string;
+        /** @description Inclusive lower bound on due date (`YYYY-MM-DD`). */
         due_after?: string;
         someday?: boolean;
         overdue?: boolean;
         sort?: components["schemas"]["TaskSortDto"];
         cursor?: string;
+        /** @description Page size in `1..=100`. Defaults to 100 when omitted. */
         limit?: number;
       };
       header?: never;
@@ -5100,6 +9347,7 @@ export interface operations {
       query?: {
         after_revision?: number;
         after_sequence?: number;
+        /** @description Page size in `1..=100`. Defaults to 50 when omitted. */
         limit?: number;
       };
       header?: never;
@@ -7433,6 +11681,182 @@ export interface operations {
         };
       };
       413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  create_voice_speech: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SpeechSynthesisRequest"];
+      };
+    };
+    responses: {
+      /** @description Canonical provider audio */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "audio/mpeg": components["schemas"]["SpeechBinaryResponse"];
+          "audio/wav": components["schemas"]["SpeechBinaryResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  create_voice_transcription: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["SpeechTranscriptionMultipart"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      415: {
         headers: {
           [name: string]: unknown;
         };

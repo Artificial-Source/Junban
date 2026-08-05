@@ -4,7 +4,10 @@ use std::collections::BTreeMap;
 
 use axum::{
     Json,
-    extract::rejection::JsonRejection,
+    extract::{
+        Query,
+        rejection::{JsonRejection, QueryRejection},
+    },
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -110,6 +113,13 @@ impl ApiError {
                 true,
                 request_id,
             ),
+            AppError::CatastrophicRestore => Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "recovery_required",
+                "restore failed and database recovery is required",
+                false,
+                request_id,
+            ),
         }
     }
 }
@@ -175,12 +185,21 @@ pub fn extract_json<T>(
     payload: Result<Json<T>, JsonRejection>,
     request_id: &RequestId,
 ) -> Result<T, ApiError> {
+    extract_json_with_limit(payload, request_id, MAX_BODY_BYTES)
+}
+
+/// Decode a JSON body rejection using the effective transport ceiling for this route.
+pub fn extract_json_with_limit<T>(
+    payload: Result<Json<T>, JsonRejection>,
+    request_id: &RequestId,
+    max_bytes: usize,
+) -> Result<T, ApiError> {
     payload.map(|Json(value)| value).map_err(|rejection| {
         if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
             ApiError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "body_too_large",
-                format!("request body must not exceed {MAX_BODY_BYTES} bytes"),
+                format!("request body must not exceed {max_bytes} bytes"),
                 false,
                 request_id,
             )
@@ -193,6 +212,23 @@ pub fn extract_json<T>(
                 request_id,
             )
         }
+    })
+}
+
+/// Map query extractor failures to the documented stable 422 envelope.
+pub fn extract_query<T>(
+    query: Result<Query<T>, QueryRejection>,
+    request_id: &RequestId,
+) -> Result<T, ApiError> {
+    query.map(|Query(value)| value).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "request validation failed",
+            false,
+            request_id,
+        )
+        .with_field("query", "must be a valid query string for this route")
     })
 }
 

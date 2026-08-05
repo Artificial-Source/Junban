@@ -4,29 +4,41 @@ use std::sync::Arc;
 
 use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 use junban_domain::{
+    AiApprovalId, AiCredentialId, AiMemory, AiMemoryId, AiMessage, AiMessageId, AiRunId,
+    AiRunState, AiSecretMetadata, AiSession, AiSessionId, AiToolApproval, AppSettings,
     ClaimedReminder, Comment, CommentBody, CommentId, DEFAULT_REMINDER_CLAIM_LIMIT,
     DEFAULT_REMINDER_CLAIM_SECS, DEFAULT_REMINDER_LEASE_SECS, DailyCapacityMinutes, EntityName,
-    FilterQuery, HexColor, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT, MAX_TIMEBLOCK_RANGE_ITEMS,
-    MarkdownText, OperationId, ProjectId, RelationKind, ReminderChannel, ReminderDeliveryLease,
-    ReminderFailureCode, ReminderFenceTerm, ReminderOccurrence, SavedFilterId, SectionId, TagId,
-    TagName, Task, TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort, TaskStatus,
-    TaskTitle, TemplateId, TimeBlock, TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft,
-    TimeSlotId, ValidationError, WeekStart, civil_occurrences_in_range, daily_plan_summary,
-    dopamine_menu_task_ids, end_of_day_summary, evaluate_nudges, select_eat_the_frog,
-    stats_summary, task_jar_candidates, validate_calendar_date_range,
-    validate_owner_lost_mark_limit, validate_reminder_claim_limit, validate_reminder_lease_secs,
-    validate_stats_date_range, validate_timeblock_date_range, weekly_review_summary,
+    FilterQuery, HexColor, MAX_BULK_IDS, MAX_CALENDAR_TASKS, MAX_QUERY_PAGE_LIMIT,
+    MAX_TIMEBLOCK_RANGE_ITEMS, MarkdownText, NudgeRuleKind, OperationId, ProjectId, RelationKind,
+    ReminderChannel, ReminderDeliveryLease, ReminderFailureCode, ReminderFenceTerm,
+    ReminderOccurrence, SavedFilterId, SectionId, SettingsPatch, TagId, TagName, Task,
+    TaskActivity, TaskDraft, TaskId, TaskQuery, TaskRelation, TaskSort, TaskStatus, TaskTitle,
+    TemplateId, TimeBlock, TimeBlockDraft, TimeBlockId, TimeSlot, TimeSlotDraft, TimeSlotId,
+    TransferApply, TransferError, TransferFormat, TransferPreview, ValidationError, WeekStart,
+    civil_occurrences_in_range, daily_plan_summary, dopamine_menu_task_ids, end_of_day_summary,
+    evaluate_nudges, preview_transfer, select_eat_the_frog, stats_summary, task_jar_candidates,
+    validate_calendar_date_range, validate_owner_lost_mark_limit, validate_preview_matches_apply,
+    validate_reminder_claim_limit, validate_reminder_lease_secs, validate_stats_date_range,
+    validate_timeblock_date_range, weekly_review_summary,
 };
 
 use crate::{
-    AppError, BulkAction, CalendarTasksPage, CatalogSnapshot, CollectedTasks, CommentPatch,
-    CommittedEvent, CommittedMutation, DailyPlanPage, DopamineMenuPage, EatTheFrogPage,
-    EndOfDayPage, EventCatchUp, MoveTarget, NudgesPage, ProjectDraft, ProjectPatch, ReorderScope,
-    ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError, SavedFilterDraft,
-    SavedFilterPatch, SectionDraft, SectionPatch, StatsPage, TagDraft, TagPatch, TaskJarPage,
+    AiCredentialBindResult, AiMemoryListPage, AiSessionListPage, AppError, BindAiCredentialRequest,
+    BulkAction, CalendarTasksPage, CancelAiResponseRequest, CatalogSnapshot,
+    ClearAiCredentialRequest, ClearAiSessionRequest, CollectedTasks, CommentPatch, CommittedEvent,
+    CommittedMutation, CreateAiMemoryRequest, CreateAiSessionRequest, DailyPlanPage,
+    DeleteAiMemoryRequest, DeleteAiSessionRequest, DopamineMenuPage, EatTheFrogPage, EndOfDayPage,
+    EventCatchUp, ExportFormat, FinishAiResponseRequest, LinkAiSessionMemoryRequest,
+    ListAiMemoriesRequest, ListAiMessagesRequest, ListAiSessionsRequest, MoveTarget, NudgesPage,
+    PreparedAiResponse, ProjectDraft, ProjectPatch, ProposeAiApprovalRequest,
+    RenameAiSessionRequest, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
+    Repository, RepositoryError, ReserveDailyAiResponseRequest, RewriteAiResponseRequest,
+    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, SelectAiMemoriesRequest,
+    SetAiApprovalStatusRequest, StagedFile, StatsPage, SyncState, TagDraft, TagPatch, TaskJarPage,
     TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
     TemporalContext, TemporalSettings, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
-    TimeblockingRangePage, TimeblockingRangeQuery, WeeklyReviewPage,
+    TimeblockingRangePage, TimeblockingRangeQuery, UpdateAiMemoryRequest, UpsertAiMessageRequest,
+    UpsertAiRunStateRequest, WeeklyReviewPage,
 };
 
 /// Cursor page size used when collecting multi-page task reads.
@@ -379,6 +391,78 @@ where
         self.repository.list_catalog().await.map_err(Into::into)
     }
 
+    /// Bounded project page (`limit` clamped into `1..=MAX_BULK_IDS`).
+    pub async fn list_projects_bounded(
+        &self,
+        limit: u32,
+    ) -> Result<crate::ProjectListPage, AppError> {
+        let limit = limit.clamp(1, MAX_BULK_IDS as u32);
+        self.repository
+            .list_projects_bounded(limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Bounded tag page (`limit` clamped into `1..=MAX_BULK_IDS`).
+    pub async fn list_tags_bounded(&self, limit: u32) -> Result<crate::TagListPage, AppError> {
+        let limit = limit.clamp(1, MAX_BULK_IDS as u32);
+        self.repository
+            .list_tags_bounded(limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Exact project lookup by id.
+    pub async fn get_project(
+        &self,
+        project_id: junban_domain::ProjectId,
+    ) -> Result<junban_domain::Project, AppError> {
+        self.repository
+            .get_project(project_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Exact multi-project lookup by id (≤ [`MAX_BULK_IDS`] unique IDs).
+    pub async fn get_projects_by_ids(
+        &self,
+        project_ids: Vec<ProjectId>,
+    ) -> Result<crate::ProjectListPage, AppError> {
+        if project_ids.len() > MAX_BULK_IDS {
+            return Err(AppError::Validation(ValidationError::TooMany {
+                field: "project_ids",
+                count: project_ids.len(),
+                max: MAX_BULK_IDS,
+            }));
+        }
+        self.repository
+            .get_projects_by_ids(project_ids)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Exact project lookup by name.
+    pub async fn get_project_by_name(
+        &self,
+        name: junban_domain::EntityName,
+    ) -> Result<junban_domain::Project, AppError> {
+        self.repository
+            .get_project_by_name(name)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Resolve tags by exact normalized names without loading the full catalog.
+    pub async fn resolve_tags_by_names(
+        &self,
+        names: Vec<junban_domain::TagName>,
+    ) -> Result<Vec<junban_domain::Tag>, AppError> {
+        self.repository
+            .resolve_tags_by_names(names)
+            .await
+            .map_err(Into::into)
+    }
+
     pub async fn create_project(
         &self,
         operation_id: OperationId,
@@ -698,6 +782,10 @@ where
 
     pub async fn list_events(&self, since: u64) -> Result<EventCatchUp, AppError> {
         self.repository.list_events(since).await.map_err(Into::into)
+    }
+
+    pub async fn get_sync_state(&self) -> Result<SyncState, AppError> {
+        self.repository.get_sync_state().await.map_err(Into::into)
     }
 
     pub async fn undo(
@@ -1202,12 +1290,576 @@ where
         })
     }
 
+    pub async fn get_settings(&self) -> Result<AppSettings, AppError> {
+        self.repository.get_settings().await.map_err(AppError::from)
+    }
+
+    pub async fn patch_settings(
+        &self,
+        operation_id: OperationId,
+        patch: SettingsPatch,
+    ) -> Result<CommittedMutation, AppError> {
+        patch.validate()?;
+        self.commit(
+            self.repository
+                .patch_settings(operation_id, patch, Timestamp::now())
+                .await,
+        )
+    }
+
+    /// Parse transfer content into a fingerprint-bound import preview.
+    pub async fn preview_import(
+        &self,
+        format: TransferFormat,
+        content: String,
+    ) -> Result<TransferPreview, AppError> {
+        self.repository
+            .preview_import(format, content)
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Apply a transfer import after re-validating the content fingerprint.
+    pub async fn apply_import(
+        &self,
+        operation_id: OperationId,
+        apply: TransferApply,
+    ) -> Result<CommittedMutation, AppError> {
+        let fresh = preview_transfer(apply.format, &apply.content).map_err(map_transfer_error)?;
+        if fresh.content_fingerprint != apply.fingerprint
+            || !validate_preview_matches_apply(&fresh, &apply)
+        {
+            return Err(AppError::Conflict);
+        }
+        self.commit(
+            self.repository
+                .apply_import(operation_id, apply, Timestamp::now())
+                .await,
+        )
+    }
+
+    /// Create a complete framed profile backup artifact on private staged disk.
+    pub async fn create_backup(&self) -> Result<StagedFile, AppError> {
+        self.repository
+            .create_backup()
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Fully validate an uploaded backup and rotate its candidate epoch before maintenance.
+    pub async fn prepare_restore(&self, upload: StagedFile) -> Result<StagedFile, AppError> {
+        if upload.is_empty() {
+            return Err(AppError::Validation(ValidationError::Empty {
+                field: "backup",
+            }));
+        }
+        self.repository
+            .prepare_restore(upload)
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Cut over to a previously validated and epoch-rotated candidate.
+    pub async fn restore_backup(&self, candidate: StagedFile) -> Result<(), AppError> {
+        self.repository
+            .restore_backup(candidate)
+            .await
+            .map_err(AppError::from)
+    }
+
+    // ── AI persistence (Wave 3a) ────────────────────────────────────────────
+
+    pub async fn create_ai_session(
+        &self,
+        operation_id: OperationId,
+        request: CreateAiSessionRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        // Fresh ID per attempt; excluded from receipt request bytes so exact retries
+        // replay the original committed resource even when this throwaway differs.
+        self.commit(
+            self.repository
+                .create_ai_session(
+                    operation_id,
+                    AiSessionId::new(),
+                    request.title,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn rename_ai_session(
+        &self,
+        operation_id: OperationId,
+        request: RenameAiSessionRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .rename_ai_session(
+                    operation_id,
+                    request.session_id,
+                    request.title,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn delete_ai_session(
+        &self,
+        operation_id: OperationId,
+        request: DeleteAiSessionRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .delete_ai_session(operation_id, request.session_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn clear_ai_session(
+        &self,
+        operation_id: OperationId,
+        request: ClearAiSessionRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .clear_ai_session(operation_id, request.session_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn get_ai_session(&self, session_id: AiSessionId) -> Result<AiSession, AppError> {
+        self.repository
+            .get_ai_session(session_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn list_ai_sessions(
+        &self,
+        request: ListAiSessionsRequest,
+    ) -> Result<AiSessionListPage, AppError> {
+        let limit = request.validated_limit()?;
+        self.repository
+            .list_ai_sessions(request.cursor, limit)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn upsert_ai_message(
+        &self,
+        operation_id: OperationId,
+        request: UpsertAiMessageRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .upsert_ai_message(
+                    operation_id,
+                    request.message_id,
+                    request.session_id,
+                    request.turn_id,
+                    request.role,
+                    request.status,
+                    request.content,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn get_ai_message(&self, message_id: AiMessageId) -> Result<AiMessage, AppError> {
+        self.repository
+            .get_ai_message(message_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn list_ai_messages(
+        &self,
+        request: ListAiMessagesRequest,
+    ) -> Result<Vec<AiMessage>, AppError> {
+        let limit = request.validated_limit()?;
+        self.repository
+            .list_ai_messages(request.session_id, request.after_sequence, limit)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn create_ai_memory(
+        &self,
+        operation_id: OperationId,
+        request: CreateAiMemoryRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        // Fresh ID per attempt; excluded from receipt request bytes so exact retries
+        // replay the original committed resource even when this throwaway differs.
+        self.commit(
+            self.repository
+                .create_ai_memory(
+                    operation_id,
+                    AiMemoryId::new(),
+                    request.content,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn update_ai_memory(
+        &self,
+        operation_id: OperationId,
+        request: UpdateAiMemoryRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .update_ai_memory(
+                    operation_id,
+                    request.memory_id,
+                    request.content,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn delete_ai_memory(
+        &self,
+        operation_id: OperationId,
+        request: DeleteAiMemoryRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .delete_ai_memory(operation_id, request.memory_id, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn link_ai_session_memory(
+        &self,
+        operation_id: OperationId,
+        request: LinkAiSessionMemoryRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .link_ai_session_memory(
+                    operation_id,
+                    request.session_id,
+                    request.memory_id,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn get_ai_memory(&self, memory_id: AiMemoryId) -> Result<AiMemory, AppError> {
+        self.repository
+            .get_ai_memory(memory_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn list_ai_memories(
+        &self,
+        request: ListAiMemoriesRequest,
+    ) -> Result<AiMemoryListPage, AppError> {
+        let limit = request.validated_limit()?;
+        self.repository
+            .list_ai_memories(request.cursor, limit)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn select_ai_memories_for_context(
+        &self,
+        request: SelectAiMemoriesRequest,
+    ) -> Result<Vec<AiMemory>, AppError> {
+        let limit = request.validated_limit()?;
+        self.repository
+            .select_ai_memories_for_context(request.session_id, limit)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn propose_ai_approval(
+        &self,
+        operation_id: OperationId,
+        request: ProposeAiApprovalRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .propose_ai_approval(
+                    operation_id,
+                    request.approval_id,
+                    request.session_id,
+                    request.turn_id,
+                    request.run_id,
+                    request.generation,
+                    request.tool_name,
+                    request.arguments_json,
+                    request.assistant_content,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn set_ai_approval_status(
+        &self,
+        operation_id: OperationId,
+        request: SetAiApprovalStatusRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .set_ai_approval_status(
+                    operation_id,
+                    request.approval_id,
+                    request.status,
+                    request.dispatch_operation_id.map(|id| id.to_string()),
+                    request.assistant_content,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn get_ai_approval(
+        &self,
+        approval_id: AiApprovalId,
+    ) -> Result<AiToolApproval, AppError> {
+        self.repository
+            .get_ai_approval(approval_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn list_dispatching_ai_approvals(&self) -> Result<Vec<AiToolApproval>, AppError> {
+        self.repository
+            .list_dispatching_ai_approvals()
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Replay trusted mutation receipt material without re-evaluating changed product state.
+    pub async fn recover_operation_receipt(
+        &self,
+        operation_id: OperationId,
+    ) -> Result<CommittedMutation, AppError> {
+        self.repository
+            .recover_operation_receipt(operation_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn upsert_ai_run_state(
+        &self,
+        operation_id: OperationId,
+        request: UpsertAiRunStateRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .upsert_ai_run_state(operation_id, request.state, Timestamp::now())
+                .await,
+        )
+    }
+
+    pub async fn get_ai_run_state(&self, run_id: AiRunId) -> Result<AiRunState, AppError> {
+        self.repository
+            .get_ai_run_state(run_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn get_ai_run_for_assistant(
+        &self,
+        assistant_message_id: AiMessageId,
+    ) -> Result<AiRunState, AppError> {
+        self.repository
+            .get_ai_run_for_assistant(assistant_message_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn ensure_ai_response_current(&self, run_id: AiRunId) -> Result<(), AppError> {
+        self.repository
+            .ensure_ai_response_current(run_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn reserve_daily_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: ReserveDailyAiResponseRequest,
+    ) -> Result<PreparedAiResponse, AppError> {
+        let result = self
+            .repository
+            .reserve_daily_ai_response(operation_id, request, Timestamp::now())
+            .await
+            .map_err(AppError::from)?;
+        if result.mutation.newly_committed {
+            self.events.publish(result.mutation.event.clone());
+        }
+        Ok(result)
+    }
+
+    pub async fn rewrite_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: RewriteAiResponseRequest,
+    ) -> Result<PreparedAiResponse, AppError> {
+        let result = self
+            .repository
+            .rewrite_ai_response(operation_id, request, Timestamp::now())
+            .await
+            .map_err(AppError::from)?;
+        if result.mutation.newly_committed {
+            self.events.publish(result.mutation.event.clone());
+        }
+        Ok(result)
+    }
+
+    pub async fn cancel_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: CancelAiResponseRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .cancel_ai_response(
+                    operation_id,
+                    request.assistant_message_id,
+                    request.session_id,
+                    request.turn_id,
+                    request.run_id,
+                    request.generation,
+                    request.content,
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    pub async fn finish_ai_response(
+        &self,
+        operation_id: OperationId,
+        request: FinishAiResponseRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .finish_ai_response(
+                    operation_id,
+                    request.assistant_message_id,
+                    request.session_id,
+                    request.turn_id,
+                    request.run_id,
+                    request.generation,
+                    request.message_status,
+                    request.content,
+                    request.run_phase,
+                    request.dispatch_operation_id.map(|id| id.to_string()),
+                    Timestamp::now(),
+                )
+                .await,
+        )
+    }
+
+    /// Read presence-only private credential metadata without publishing an event.
+    pub async fn list_ai_secret_metadata(&self) -> Result<Vec<AiSecretMetadata>, AppError> {
+        self.repository
+            .list_ai_secret_metadata()
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Resolve private credential material transiently for provider endpoint construction.
+    pub async fn resolve_ai_secret(
+        &self,
+        credential_id: AiCredentialId,
+    ) -> Result<crate::AiSecretBytes, AppError> {
+        self.repository
+            .resolve_ai_secret(credential_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn bind_ai_credential(
+        &self,
+        operation_id: OperationId,
+        request: BindAiCredentialRequest,
+    ) -> Result<AiCredentialBindResult, AppError> {
+        let result = self
+            .repository
+            .bind_ai_credential(
+                operation_id,
+                request.target,
+                request.kind,
+                request.secret,
+                Timestamp::now(),
+            )
+            .await
+            .map_err(AppError::from)?;
+        if result.mutation.newly_committed {
+            self.events.publish(result.mutation.event.clone());
+        }
+        Ok(result)
+    }
+
+    pub async fn clear_ai_credential(
+        &self,
+        operation_id: OperationId,
+        request: ClearAiCredentialRequest,
+    ) -> Result<CommittedMutation, AppError> {
+        self.commit(
+            self.repository
+                .clear_ai_credential_binding(operation_id, request.target, Timestamp::now())
+                .await,
+        )
+    }
+
+    /// Best-effort SQLite pager cache release through the profile repository worker.
+    ///
+    /// Operational reclaim only: no events, receipts, or durable mutation.
+    pub async fn release_cached_memory(&self) -> Result<(), AppError> {
+        self.repository
+            .release_cached_memory()
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Serialize transferable tasks into a private staged file using bounded storage pages.
+    pub async fn export_tasks(&self, format: ExportFormat) -> Result<StagedFile, AppError> {
+        self.repository
+            .create_export(format)
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Compatibility projection of persisted settings for Phase 3 temporal callers.
+    ///
+    /// Samples the current system IANA zone on each read; zone is not persisted.
+    pub async fn temporal_settings_from_store(&self) -> Result<TemporalSettings, AppError> {
+        let settings = self.get_settings().await?;
+        let time_zone = Zoned::now()
+            .time_zone()
+            .iana_name()
+            .unwrap_or("UTC")
+            .to_owned();
+        Ok(TemporalSettings::from_app_settings(&settings, time_zone))
+    }
+
     pub async fn daily_plan(
         &self,
         date: Date,
         capacity: Option<DailyCapacityMinutes>,
         zone: &TimeZone,
     ) -> Result<DailyPlanPage, AppError> {
+        let settings = self.get_settings().await?;
+        let capacity = match capacity {
+            Some(value) => Some(value),
+            None => Some(DailyCapacityMinutes::new(
+                settings.planning.capacity_minutes,
+            )?),
+        };
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
         let summary = daily_plan_summary(&collected.tasks, date, capacity);
@@ -1224,10 +1876,14 @@ where
         capacity: Option<DailyCapacityMinutes>,
         zone: &TimeZone,
     ) -> Result<EndOfDayPage, AppError> {
+        let settings = self.get_settings().await?;
+        let capacity_minutes = match capacity {
+            Some(value) => value.get(),
+            None => settings.planning.capacity_minutes,
+        };
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
         let summary = end_of_day_summary(&collected.tasks, date, zone);
-        let capacity_minutes = capacity.unwrap_or(DailyCapacityMinutes::DEFAULT).get();
         Ok(EndOfDayPage::from_summary(
             summary,
             &collected.tasks,
@@ -1239,9 +1895,11 @@ where
     pub async fn weekly_review(
         &self,
         date: Date,
-        week_start: WeekStart,
+        week_start: Option<WeekStart>,
         zone: &TimeZone,
     ) -> Result<WeeklyReviewPage, AppError> {
+        let settings = self.get_settings().await?;
+        let week_start = week_start.unwrap_or(settings.date_time.week_start);
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
         let catalog = self.list_catalog().await?;
@@ -1255,6 +1913,44 @@ where
             return Self::weekly_from_parts(collected, &catalog.projects, date, week_start, zone);
         }
         Self::weekly_from_parts(collected, &catalog.projects, date, week_start, zone)
+    }
+
+    /// AI/tool weekly review: bounded task snapshot + exact lookup of referenced projects only.
+    ///
+    /// Does not call `list_catalog`. When unique referenced project IDs exceed
+    /// [`MAX_BULK_IDS`], the ID set is truncated deterministically and
+    /// `projects_truncated` is set.
+    pub async fn weekly_review_bounded(
+        &self,
+        date: Date,
+        week_start: Option<WeekStart>,
+        zone: &TimeZone,
+    ) -> Result<(WeeklyReviewPage, bool), AppError> {
+        let settings = self.get_settings().await?;
+        let week_start = week_start.unwrap_or(settings.date_time.week_start);
+        let as_of = TaskListAsOf::for_local_date(date, zone)?;
+        let collected = self.load_analysis_tasks(as_of).await?;
+        let (project_ids, projects_truncated) = referenced_project_ids(&collected.tasks);
+        let projects_page = self.get_projects_by_ids(project_ids).await?;
+        if projects_page.revision != collected.revision {
+            let collected = self.load_analysis_tasks(as_of).await?;
+            let (project_ids, projects_truncated) = referenced_project_ids(&collected.tasks);
+            let projects_page = self.get_projects_by_ids(project_ids).await?;
+            if projects_page.revision != collected.revision {
+                return Err(AppError::Conflict);
+            }
+            let page = Self::weekly_from_parts(
+                collected,
+                &projects_page.projects,
+                date,
+                week_start,
+                zone,
+            )?;
+            return Ok((page, projects_truncated));
+        }
+        let page =
+            Self::weekly_from_parts(collected, &projects_page.projects, date, week_start, zone)?;
+        Ok((page, projects_truncated))
     }
 
     fn weekly_from_parts(
@@ -1299,10 +1995,35 @@ where
         capacity: Option<DailyCapacityMinutes>,
         zone: &TimeZone,
     ) -> Result<NudgesPage, AppError> {
+        let settings = self.get_settings().await?;
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
-        let capacity = capacity.unwrap_or(DailyCapacityMinutes::DEFAULT);
-        let facts = evaluate_nudges(&collected.tasks, date, capacity, zone, &[], None);
+        // Feature visibility is UI-owned; evaluation still uses persisted capacity/rules.
+        let capacity = match capacity {
+            Some(value) => value,
+            None => DailyCapacityMinutes::new(settings.planning.capacity_minutes)?,
+        };
+        let enabled: Vec<NudgeRuleKind> = settings
+            .planning
+            .nudge_rules
+            .iter()
+            .filter(|rule| rule.enabled)
+            .map(|rule| rule.kind)
+            .collect();
+        let stale_after_days = settings
+            .planning
+            .nudge_rules
+            .iter()
+            .find(|rule| rule.kind == NudgeRuleKind::StaleTask)
+            .and_then(|rule| rule.threshold);
+        let facts = evaluate_nudges(
+            &collected.tasks,
+            date,
+            capacity,
+            zone,
+            &enabled,
+            stale_after_days,
+        );
         let mut ids = Vec::new();
         for rule in &facts.rules {
             for id in &rule.task_ids {
@@ -1319,7 +2040,7 @@ where
         })
     }
 
-    /// Read-only Phase 3 temporal defaults (no durable settings mutation yet).
+    /// Static Phase 3-compatible defaults derived from [`AppSettings`].
     #[must_use]
     pub fn temporal_settings(zone: &TimeZone) -> TemporalSettings {
         default_temporal_settings(zone)
@@ -1330,6 +2051,7 @@ where
         date: Date,
         zone: &TimeZone,
     ) -> Result<EatTheFrogPage, AppError> {
+        // Feature visibility is UI-owned; always compute the selection from analysis tasks.
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
         let task = select_eat_the_frog(&collected.tasks)
@@ -1341,6 +2063,7 @@ where
     }
 
     pub async fn task_jar(&self, date: Date, zone: &TimeZone) -> Result<TaskJarPage, AppError> {
+        // Feature visibility is UI-owned; always compute candidates from analysis tasks.
         let as_of = TaskListAsOf::for_local_date(date, zone)?;
         let collected = self.load_analysis_tasks(as_of).await?;
         let task_ids = task_jar_candidates(&collected.tasks, date);
@@ -1368,6 +2091,450 @@ where
         })
     }
 
+    /// Inspect a cleanup-owning staged package without putting package bytes on
+    /// an asynchronous queue.
+    pub fn inspect_plugin_package(
+        &self,
+        staged: StagedFile,
+    ) -> Result<crate::PluginPackageAdmission, AppError> {
+        if staged.is_empty() || staged.len() > junban_plugin_sdk::PACKAGE_BYTES_MAX as u64 {
+            return Err(AppError::OperationTooLarge);
+        }
+        crate::PluginPackageAdmission::inspect(staged).map_err(|_| AppError::Conflict)
+    }
+
+    /// Publish a private staged package while the caller retains the global
+    /// staged-artifact permit through completion.
+    pub async fn publish_plugin_package(
+        &self,
+        staged: StagedFile,
+    ) -> Result<crate::PluginPackageAuthority, AppError> {
+        if staged.is_empty() || staged.len() > junban_plugin_sdk::PACKAGE_BYTES_MAX as u64 {
+            return Err(AppError::OperationTooLarge);
+        }
+        self.repository
+            .publish_plugin_package(staged)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn reconcile_plugin_packages(
+        &self,
+        now: Timestamp,
+    ) -> Result<crate::PluginPackageReconciliation, AppError> {
+        self.repository
+            .reconcile_plugin_packages(now)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn get_installed_plugin_profile(
+        &self,
+    ) -> Result<crate::InstalledPluginProfile, AppError> {
+        self.repository
+            .get_installed_plugin_profile()
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn get_installed_plugin(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+    ) -> Result<crate::InstalledPlugin, AppError> {
+        self.repository
+            .get_installed_plugin(plugin_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn install_plugin_admission(
+        &self,
+        operation_id: OperationId,
+        admission: crate::PluginPackageAdmission,
+        source: crate::PluginInstallSource,
+        replace_existing: bool,
+        allow_downgrade: bool,
+        now: Timestamp,
+    ) -> Result<crate::PluginMutationOutcome, AppError> {
+        let request = crate::InstallPluginRequest {
+            package: admission.package().clone(),
+            source,
+            replace_existing,
+            allow_downgrade,
+        };
+        let outcome = self
+            .repository
+            .install_plugin_admission(operation_id, admission, request, now)
+            .await
+            .map_err(AppError::from)?;
+        self.publish_plugin_outcome(&outcome);
+        Ok(outcome)
+    }
+
+    pub async fn install_plugin(
+        &self,
+        operation_id: OperationId,
+        request: crate::InstallPluginRequest,
+        now: Timestamp,
+    ) -> Result<crate::PluginMutationOutcome, AppError> {
+        let outcome = self
+            .repository
+            .install_plugin(operation_id, request, now)
+            .await
+            .map_err(AppError::from)?;
+        self.publish_plugin_outcome(&outcome);
+        Ok(outcome)
+    }
+
+    pub async fn uninstall_plugin(
+        &self,
+        operation_id: OperationId,
+        plugin_id: junban_plugin_sdk::PluginId,
+        now: Timestamp,
+    ) -> Result<crate::PluginMutationOutcome, AppError> {
+        let outcome = self
+            .repository
+            .uninstall_plugin(operation_id, plugin_id, now)
+            .await
+            .map_err(AppError::from)?;
+        self.publish_plugin_outcome(&outcome);
+        Ok(outcome)
+    }
+
+    pub async fn set_plugin_desired_enabled(
+        &self,
+        operation_id: OperationId,
+        plugin_id: junban_plugin_sdk::PluginId,
+        enabled: bool,
+        now: Timestamp,
+    ) -> Result<crate::PluginMutationOutcome, AppError> {
+        let outcome = self
+            .repository
+            .set_plugin_desired_enabled(operation_id, plugin_id, enabled, now)
+            .await
+            .map_err(AppError::from)?;
+        self.publish_plugin_outcome(&outcome);
+        Ok(outcome)
+    }
+
+    pub async fn retry_plugin(
+        &self,
+        operation_id: OperationId,
+        plugin_id: junban_plugin_sdk::PluginId,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .retry_plugin(operation_id, plugin_id, now)
+            .await;
+        self.commit(result)
+    }
+
+    pub async fn list_publisher_trust(&self) -> Result<Vec<crate::PublisherTrust>, AppError> {
+        self.repository
+            .list_publisher_trust()
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn trust_publisher(
+        &self,
+        operation_id: OperationId,
+        request: crate::TrustPublisherRequest,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .trust_publisher(operation_id, request, now)
+            .await;
+        self.commit(result)
+    }
+
+    pub async fn revoke_publisher(
+        &self,
+        operation_id: OperationId,
+        key_id: junban_plugin_sdk::Sha256Digest,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .revoke_publisher(operation_id, key_id, now)
+            .await;
+        self.commit(result)
+    }
+
+    pub async fn get_community_plugin_policy(
+        &self,
+    ) -> Result<crate::CommunityPluginPolicy, AppError> {
+        self.repository
+            .get_community_plugin_policy()
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn set_community_plugin_policy(
+        &self,
+        operation_id: OperationId,
+        enabled: bool,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .set_community_plugin_policy(operation_id, enabled, now)
+            .await;
+        self.commit(result)
+    }
+
+    pub async fn list_plugin_grants(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+    ) -> Result<Vec<crate::PluginGrant>, AppError> {
+        self.repository
+            .list_plugin_grants(plugin_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn replace_plugin_grants(
+        &self,
+        operation_id: OperationId,
+        request: crate::ReplacePluginGrantsRequest,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .replace_plugin_grants(operation_id, request, now)
+            .await;
+        self.commit(result)
+    }
+
+    pub async fn revoke_plugin_grants(
+        &self,
+        operation_id: OperationId,
+        request: crate::RevokePluginGrantsRequest,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .revoke_plugin_grants(operation_id, request, now)
+            .await;
+        self.commit(result)
+    }
+
+    pub async fn list_plugin_settings(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+    ) -> Result<Vec<crate::PluginSetting>, AppError> {
+        self.repository
+            .list_plugin_settings(plugin_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn set_plugin_setting(
+        &self,
+        operation_id: OperationId,
+        request: crate::SetPluginSettingRequest,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .set_plugin_setting(operation_id, request, now)
+            .await;
+        self.commit(result)
+    }
+
+    pub async fn delete_plugin_setting(
+        &self,
+        operation_id: OperationId,
+        request: crate::DeletePluginSettingRequest,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .delete_plugin_setting(operation_id, request, now)
+            .await;
+        self.commit(result)
+    }
+
+    pub async fn list_plugin_kv(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+    ) -> Result<Vec<crate::PluginKvEntry>, AppError> {
+        self.repository
+            .list_plugin_kv(plugin_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn patch_plugin_kv(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+        package_generation: u64,
+        activation_epoch: u64,
+        patch: crate::PluginKvPatch,
+        now: Timestamp,
+    ) -> Result<Vec<crate::PluginKvEntry>, AppError> {
+        self.repository
+            .patch_plugin_kv(plugin_id, package_generation, activation_epoch, patch, now)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn get_plugin_cursor(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+    ) -> Result<crate::PluginEventCursor, AppError> {
+        self.repository
+            .get_plugin_cursor(plugin_id)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn begin_plugin_resync(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+        package_generation: u64,
+        activation_epoch: u64,
+        operation_id: OperationId,
+        now: Timestamp,
+    ) -> Result<crate::PluginResyncSession, AppError> {
+        self.repository
+            .begin_plugin_resync(
+                crate::BeginPluginResyncRequest {
+                    operation_id,
+                    plugin_id,
+                    package_generation,
+                    activation_epoch,
+                },
+                now,
+            )
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn list_plugin_resync_page(
+        &self,
+        request: crate::PluginResyncPageRequest,
+        now: Timestamp,
+    ) -> Result<crate::PluginResyncPage, AppError> {
+        self.repository
+            .list_plugin_resync_page(request, now)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn advance_plugin_cursor(
+        &self,
+        request: crate::AdvancePluginCursorRequest,
+        now: Timestamp,
+    ) -> Result<crate::PluginEventCursor, AppError> {
+        self.repository
+            .advance_plugin_cursor(request, now)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn reserve_plugin_invocation(
+        &self,
+        request: crate::ReservePluginInvocationRequest,
+        now: Timestamp,
+    ) -> Result<crate::ReservedPluginInvocation, AppError> {
+        self.repository
+            .reserve_plugin_invocation(request, now)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn transition_plugin_invocation(
+        &self,
+        request: crate::TransitionPluginInvocationRequest,
+        now: Timestamp,
+    ) -> Result<crate::PluginInvocation, AppError> {
+        self.repository
+            .transition_plugin_invocation(request, now)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn list_plugin_invocations(&self) -> Result<Vec<crate::PluginInvocation>, AppError> {
+        self.repository
+            .list_plugin_invocations()
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn complete_plugin_invocation(
+        &self,
+        operation_id: OperationId,
+        plugin_id: junban_plugin_sdk::PluginId,
+        package_generation: u64,
+        activation_epoch: u64,
+        now: Timestamp,
+    ) -> Result<crate::CommittedPluginInvocation, AppError> {
+        self.repository
+            .complete_plugin_invocation(
+                operation_id,
+                plugin_id,
+                package_generation,
+                activation_epoch,
+                now,
+            )
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn commit_plugin_invocation(
+        &self,
+        request: crate::CommitPluginInvocationRequest,
+        now: Timestamp,
+    ) -> Result<crate::CommittedPluginInvocation, AppError> {
+        let planned = crate::plan_plugin_invocation_commit(request).map_err(AppError::from)?;
+        let committed = self
+            .repository
+            .commit_plugin_invocation(planned, now)
+            .await
+            .map_err(AppError::from)?;
+        if let Some(mutation) = &committed.mutation
+            && mutation.newly_committed
+        {
+            self.events.publish(mutation.event.clone());
+        }
+        Ok(committed)
+    }
+
+    pub async fn update_plugin_bookkeeping(
+        &self,
+        update: crate::PluginBookkeepingUpdate,
+        now: Timestamp,
+    ) -> Result<crate::InstalledPlugin, AppError> {
+        self.repository
+            .update_plugin_bookkeeping(update, now)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn transition_plugin_health(
+        &self,
+        operation_id: OperationId,
+        update: crate::PluginBookkeepingUpdate,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .transition_plugin_health(operation_id, update, now)
+            .await;
+        self.commit(result)
+    }
+
+    fn publish_plugin_outcome(&self, outcome: &crate::PluginMutationOutcome) {
+        if let Some(mutation) = outcome.committed()
+            && mutation.newly_committed
+        {
+            self.events.publish(mutation.event.clone());
+        }
+    }
+
     fn commit(
         &self,
         result: Result<CommittedMutation, RepositoryError>,
@@ -1387,17 +2554,44 @@ fn tasks_for_ids(tasks: &[Task], ids: &[TaskId]) -> Vec<Task> {
         .collect()
 }
 
-/// Phase 3 read-only temporal defaults until settings mutations land in Phase 4.
+/// Unique project IDs referenced by tasks, sorted by UUID, capped at [`MAX_BULK_IDS`].
+fn referenced_project_ids(tasks: &[Task]) -> (Vec<ProjectId>, bool) {
+    let mut ids = tasks
+        .iter()
+        .filter_map(|task| task.project_id)
+        .collect::<Vec<_>>();
+    ids.sort_by_key(|id| id.as_uuid());
+    ids.dedup();
+    let truncated = ids.len() > MAX_BULK_IDS;
+    if truncated {
+        ids.truncate(MAX_BULK_IDS);
+    }
+    (ids, truncated)
+}
+
+fn map_transfer_error(error: TransferError) -> AppError {
+    match error {
+        TransferError::ValidationError(error) => AppError::Validation(error),
+        TransferError::UnsupportedFormat => AppError::Validation(ValidationError::Invalid {
+            field: "format",
+            reason: "unsupported transfer format",
+        }),
+        TransferError::ParseError { .. } => AppError::Validation(ValidationError::Invalid {
+            field: "content",
+            reason: "invalid transfer content",
+        }),
+    }
+}
+
+/// Phase 3-compatible temporal defaults derived from [`AppSettings`].
+///
+/// Uses the caller-supplied zone name for the response projection only.
 #[must_use]
 pub fn default_temporal_settings(zone: &TimeZone) -> TemporalSettings {
-    TemporalSettings {
-        time_zone: zone.iana_name().unwrap_or("UTC").to_owned(),
-        capacity_minutes: DailyCapacityMinutes::DEFAULT.get(),
-        week_start: WeekStart::Sunday,
-        nudges_enabled: true,
-        eat_the_frog_enabled: false,
-        task_jar_enabled: false,
-    }
+    TemporalSettings::from_app_settings(
+        &AppSettings::default_settings(),
+        zone.iana_name().unwrap_or("UTC"),
+    )
 }
 
 // Re-export constructors used by tests without forcing callers to import domain pieces.
@@ -1453,6 +2647,7 @@ mod tests {
         /// When set, `list_tasks` pops pages in order (for collect-helper tests).
         list_pages: Mutex<Vec<TaskListPage>>,
         timeblocking_page: Mutex<TimeblockingRangePage>,
+        projects_by_ids: Mutex<crate::ProjectListPage>,
     }
 
     impl FakeRepository {
@@ -1465,6 +2660,11 @@ mod tests {
                     blocks: Vec::new(),
                     slots: Vec::new(),
                     revision: 0,
+                }),
+                projects_by_ids: Mutex::new(crate::ProjectListPage {
+                    projects: Vec::new(),
+                    revision: 0,
+                    truncated: false,
                 }),
             }
         }
@@ -1479,6 +2679,11 @@ mod tests {
                     slots: Vec::new(),
                     revision: 0,
                 }),
+                projects_by_ids: Mutex::new(crate::ProjectListPage {
+                    projects: Vec::new(),
+                    revision: 0,
+                    truncated: false,
+                }),
             }
         }
 
@@ -1488,12 +2693,45 @@ mod tests {
                 calls: Mutex::new(Vec::new()),
                 list_pages: Mutex::new(Vec::new()),
                 timeblocking_page: Mutex::new(page),
+                projects_by_ids: Mutex::new(crate::ProjectListPage {
+                    projects: Vec::new(),
+                    revision: 0,
+                    truncated: false,
+                }),
             }
         }
 
         fn response(&self, call: &'static str) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.calls.lock().unwrap().push(call);
             let result = self.result.lock().unwrap().clone();
+            Box::pin(async move { result })
+        }
+    }
+
+    impl crate::PluginRepository for FakeRepository {
+        fn retry_plugin(
+            &self,
+            _: OperationId,
+            _: junban_plugin_sdk::PluginId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("plugin-retry")
+        }
+
+        fn commit_plugin_invocation(
+            &self,
+            _: crate::PlannedPluginInvocationCommit,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, crate::CommittedPluginInvocation> {
+            self.calls.lock().unwrap().push("plugin-commit");
+            let result = self.result.lock().unwrap().clone().map(|mutation| {
+                crate::CommittedPluginInvocation {
+                    terminal_kind: crate::PluginInvocationTerminalKind::DomainEffect,
+                    mutation: Some(mutation),
+                    cursor: None,
+                    replayed: false,
+                }
+            });
             Box::pin(async move { result })
         }
     }
@@ -1637,6 +2875,48 @@ mod tests {
             })
         }
         fn list_catalog(&self) -> crate::RepositoryFuture<'_, CatalogSnapshot> {
+            self.calls.lock().unwrap().push("list_catalog");
+            Box::pin(async {
+                Ok(CatalogSnapshot {
+                    projects: Vec::new(),
+                    sections: Vec::new(),
+                    tags: Vec::new(),
+                    templates: Vec::new(),
+                    saved_filters: Vec::new(),
+                    revision: 0,
+                })
+            })
+        }
+        fn list_projects_bounded(
+            &self,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, crate::ProjectListPage> {
+            unimplemented!()
+        }
+        fn list_tags_bounded(&self, _: u32) -> crate::RepositoryFuture<'_, crate::TagListPage> {
+            unimplemented!()
+        }
+        fn get_project(&self, _: ProjectId) -> crate::RepositoryFuture<'_, junban_domain::Project> {
+            unimplemented!()
+        }
+        fn get_projects_by_ids(
+            &self,
+            _: Vec<ProjectId>,
+        ) -> crate::RepositoryFuture<'_, crate::ProjectListPage> {
+            self.calls.lock().unwrap().push("get_projects_by_ids");
+            let page = self.projects_by_ids.lock().unwrap().clone();
+            Box::pin(async move { Ok(page) })
+        }
+        fn get_project_by_name(
+            &self,
+            _: junban_domain::EntityName,
+        ) -> crate::RepositoryFuture<'_, junban_domain::Project> {
+            unimplemented!()
+        }
+        fn resolve_tags_by_names(
+            &self,
+            _: Vec<junban_domain::TagName>,
+        ) -> crate::RepositoryFuture<'_, Vec<junban_domain::Tag>> {
             unimplemented!()
         }
         fn create_project(
@@ -1847,6 +3127,15 @@ mod tests {
                     events: Vec::new(),
                     has_more: false,
                     latest_revision: 0,
+                })
+            })
+        }
+        fn get_sync_state(&self) -> crate::RepositoryFuture<'_, crate::SyncState> {
+            self.calls.lock().unwrap().push("get_sync_state");
+            Box::pin(async {
+                Ok(crate::SyncState {
+                    event_epoch: "test-event-epoch".to_owned(),
+                    revision: 0,
                 })
             })
         }
@@ -2067,6 +3356,370 @@ mod tests {
         ) -> crate::RepositoryFuture<'_, CommittedMutation> {
             self.response("replan_past_blocks")
         }
+        fn get_settings(&self) -> crate::RepositoryFuture<'_, AppSettings> {
+            self.calls.lock().unwrap().push("get_settings");
+            Box::pin(async { Ok(AppSettings::default_settings()) })
+        }
+        fn patch_settings(
+            &self,
+            _: OperationId,
+            _: SettingsPatch,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("patch_settings")
+        }
+        fn preview_import(
+            &self,
+            _: TransferFormat,
+            _: String,
+        ) -> crate::RepositoryFuture<'_, TransferPreview> {
+            self.calls.lock().unwrap().push("preview_import");
+            Box::pin(async {
+                Err(RepositoryError::Storage(
+                    "preview_import unused in unit fake".into(),
+                ))
+            })
+        }
+        fn apply_import(
+            &self,
+            _: OperationId,
+            _: TransferApply,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("apply_import")
+        }
+        fn create_export(&self, _: ExportFormat) -> crate::RepositoryFuture<'_, StagedFile> {
+            self.calls.lock().unwrap().push("create_export");
+            Box::pin(async {
+                Err(RepositoryError::Storage(
+                    "create_export unused in unit fake".into(),
+                ))
+            })
+        }
+        fn create_backup(&self) -> crate::RepositoryFuture<'_, StagedFile> {
+            self.calls.lock().unwrap().push("create_backup");
+            Box::pin(async {
+                Err(RepositoryError::Storage(
+                    "create_backup unused in unit fake".into(),
+                ))
+            })
+        }
+        fn prepare_restore(&self, _: StagedFile) -> crate::RepositoryFuture<'_, StagedFile> {
+            self.calls.lock().unwrap().push("prepare_restore");
+            Box::pin(async {
+                Err(RepositoryError::Storage(
+                    "prepare_restore unused in unit fake".into(),
+                ))
+            })
+        }
+        fn restore_backup(&self, _: StagedFile) -> crate::RepositoryFuture<'_, ()> {
+            self.calls.lock().unwrap().push("restore_backup");
+            Box::pin(async {
+                Err(RepositoryError::Storage(
+                    "restore_backup unused in unit fake".into(),
+                ))
+            })
+        }
+        fn create_ai_session(
+            &self,
+            _: OperationId,
+            _: AiSessionId,
+            _: String,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("create_ai_session")
+        }
+        fn rename_ai_session(
+            &self,
+            _: OperationId,
+            _: AiSessionId,
+            _: String,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("rename_ai_session")
+        }
+        fn delete_ai_session(
+            &self,
+            _: OperationId,
+            _: AiSessionId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("delete_ai_session")
+        }
+        fn clear_ai_session(
+            &self,
+            _: OperationId,
+            _: AiSessionId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("clear_ai_session")
+        }
+        fn get_ai_session(&self, _: AiSessionId) -> crate::RepositoryFuture<'_, AiSession> {
+            self.calls.lock().unwrap().push("get_ai_session");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn list_ai_sessions(
+            &self,
+            _: Option<crate::AiSessionCursor>,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, AiSessionListPage> {
+            self.calls.lock().unwrap().push("list_ai_sessions");
+            Box::pin(async {
+                Ok(AiSessionListPage {
+                    sessions: Vec::new(),
+                    next_cursor: None,
+                })
+            })
+        }
+        fn upsert_ai_message(
+            &self,
+            _: OperationId,
+            _: junban_domain::AiMessageId,
+            _: AiSessionId,
+            _: junban_domain::AiTurnId,
+            _: junban_domain::AiMessageRole,
+            _: junban_domain::AiMessageStatus,
+            _: junban_domain::AiMessageContent,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("upsert_ai_message")
+        }
+        fn get_ai_message(
+            &self,
+            _: junban_domain::AiMessageId,
+        ) -> crate::RepositoryFuture<'_, AiMessage> {
+            self.calls.lock().unwrap().push("get_ai_message");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+
+        fn list_ai_messages(
+            &self,
+            _: AiSessionId,
+            _: Option<u32>,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, Vec<AiMessage>> {
+            self.calls.lock().unwrap().push("list_ai_messages");
+            Box::pin(async { Ok(Vec::new()) })
+        }
+        fn create_ai_memory(
+            &self,
+            _: OperationId,
+            _: AiMemoryId,
+            _: String,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("create_ai_memory")
+        }
+        fn update_ai_memory(
+            &self,
+            _: OperationId,
+            _: AiMemoryId,
+            _: String,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("update_ai_memory")
+        }
+        fn delete_ai_memory(
+            &self,
+            _: OperationId,
+            _: AiMemoryId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("delete_ai_memory")
+        }
+        fn link_ai_session_memory(
+            &self,
+            _: OperationId,
+            _: AiSessionId,
+            _: AiMemoryId,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("link_ai_session_memory")
+        }
+        fn get_ai_memory(&self, _: AiMemoryId) -> crate::RepositoryFuture<'_, AiMemory> {
+            self.calls.lock().unwrap().push("get_ai_memory");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn list_ai_memories(
+            &self,
+            _: Option<crate::AiMemoryCursor>,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, AiMemoryListPage> {
+            self.calls.lock().unwrap().push("list_ai_memories");
+            Box::pin(async {
+                Ok(AiMemoryListPage {
+                    memories: Vec::new(),
+                    next_cursor: None,
+                })
+            })
+        }
+        fn select_ai_memories_for_context(
+            &self,
+            _: Option<AiSessionId>,
+            _: u32,
+        ) -> crate::RepositoryFuture<'_, Vec<AiMemory>> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push("select_ai_memories_for_context");
+            Box::pin(async { Ok(Vec::new()) })
+        }
+        fn propose_ai_approval(
+            &self,
+            _: OperationId,
+            _: AiApprovalId,
+            _: AiSessionId,
+            _: junban_domain::AiTurnId,
+            _: AiRunId,
+            _: u64,
+            _: String,
+            _: String,
+            _: junban_domain::AiMessageContent,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("propose_ai_approval")
+        }
+        fn set_ai_approval_status(
+            &self,
+            _: OperationId,
+            _: AiApprovalId,
+            _: junban_domain::AiApprovalStatus,
+            _: Option<String>,
+            _: Option<junban_domain::AiMessageContent>,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("set_ai_approval_status")
+        }
+        fn get_ai_approval(&self, _: AiApprovalId) -> crate::RepositoryFuture<'_, AiToolApproval> {
+            self.calls.lock().unwrap().push("get_ai_approval");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn list_dispatching_ai_approvals(
+            &self,
+        ) -> crate::RepositoryFuture<'_, Vec<AiToolApproval>> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push("list_dispatching_ai_approvals");
+            Box::pin(async { Ok(Vec::new()) })
+        }
+        fn recover_operation_receipt(
+            &self,
+            _: OperationId,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.calls.lock().unwrap().push("recover_operation_receipt");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn upsert_ai_run_state(
+            &self,
+            _: OperationId,
+            _: AiRunState,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("upsert_ai_run_state")
+        }
+        fn get_ai_run_state(&self, _: AiRunId) -> crate::RepositoryFuture<'_, AiRunState> {
+            self.calls.lock().unwrap().push("get_ai_run_state");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn get_ai_run_for_assistant(
+            &self,
+            _: AiMessageId,
+        ) -> crate::RepositoryFuture<'_, AiRunState> {
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn ensure_ai_response_current(&self, _: AiRunId) -> crate::RepositoryFuture<'_, ()> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push("ensure_ai_response_current");
+            Box::pin(async { Ok(()) })
+        }
+        fn reserve_daily_ai_response(
+            &self,
+            _: OperationId,
+            _: ReserveDailyAiResponseRequest,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, PreparedAiResponse> {
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn rewrite_ai_response(
+            &self,
+            _: OperationId,
+            _: RewriteAiResponseRequest,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, PreparedAiResponse> {
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+        fn cancel_ai_response(
+            &self,
+            _: OperationId,
+            _: junban_domain::AiMessageId,
+            _: AiSessionId,
+            _: junban_domain::AiTurnId,
+            _: AiRunId,
+            _: u64,
+            _: junban_domain::AiMessageContent,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("cancel_ai_response")
+        }
+        fn finish_ai_response(
+            &self,
+            _: OperationId,
+            _: junban_domain::AiMessageId,
+            _: AiSessionId,
+            _: junban_domain::AiTurnId,
+            _: AiRunId,
+            _: u64,
+            _: junban_domain::AiMessageStatus,
+            _: junban_domain::AiMessageContent,
+            _: junban_domain::AiRunPhase,
+            _: Option<String>,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("finish_ai_response")
+        }
+        fn list_ai_secret_metadata(
+            &self,
+        ) -> crate::RepositoryFuture<'_, Vec<junban_domain::AiSecretMetadata>> {
+            self.calls.lock().unwrap().push("list_ai_secret_metadata");
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn resolve_ai_secret(
+            &self,
+            _: junban_domain::AiCredentialId,
+        ) -> crate::RepositoryFuture<'_, crate::AiSecretBytes> {
+            self.calls.lock().unwrap().push("resolve_ai_secret");
+            Box::pin(async { Err(RepositoryError::NotFound) })
+        }
+
+        fn bind_ai_credential(
+            &self,
+            _: OperationId,
+            _: crate::AiCredentialBindingTarget,
+            _: junban_domain::AiSecretKind,
+            _: Option<crate::AiSecretBytes>,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, AiCredentialBindResult> {
+            self.calls.lock().unwrap().push("bind_ai_credential");
+            let mutation = self.result.lock().unwrap().clone();
+            Box::pin(async move {
+                mutation.map(|mutation| AiCredentialBindResult {
+                    mutation,
+                    credential_id: None,
+                })
+            })
+        }
+        fn clear_ai_credential_binding(
+            &self,
+            _: OperationId,
+            _: crate::AiCredentialBindingTarget,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("clear_ai_credential_binding")
+        }
     }
 
     #[derive(Default)]
@@ -2158,6 +3811,81 @@ mod tests {
             vec!["patch", "complete", "uncomplete", "delete"]
         );
         assert_eq!(sink.0.lock().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn plugin_mutations_publish_only_fresh_commits() {
+        let expected = mutation();
+        let repository = Arc::new(FakeRepository::new(Ok(expected.clone())));
+        let sink = Arc::new(RecordingSink::default());
+        let service = JunbanService::new(Arc::clone(&repository), Arc::clone(&sink));
+
+        assert_eq!(
+            service
+                .retry_plugin(
+                    OperationId::new(),
+                    junban_plugin_sdk::PluginId::parse("test-plugin").unwrap(),
+                    Timestamp::constant(1_700_000_000, 0),
+                )
+                .await
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            repository.calls.lock().unwrap().as_slice(),
+            &["plugin-retry"]
+        );
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+
+        *repository.result.lock().unwrap() = Ok(mutation_with_flag(false));
+        service
+            .retry_plugin(
+                OperationId::new(),
+                junban_plugin_sdk::PluginId::parse("test-plugin").unwrap(),
+                Timestamp::constant(1_700_000_001, 0),
+            )
+            .await
+            .unwrap();
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn plugin_invocation_commits_publish_only_fresh_events() {
+        let expected = mutation();
+        let repository = Arc::new(FakeRepository::new(Ok(expected.clone())));
+        let sink = Arc::new(RecordingSink::default());
+        let service = JunbanService::new(Arc::clone(&repository), Arc::clone(&sink));
+        let plugin_id = junban_plugin_sdk::PluginId::parse("test-plugin").unwrap();
+        let request = crate::CommitPluginInvocationRequest {
+            invocation_operation_id: OperationId::new(),
+            plugin_id,
+            package_generation: 1,
+            activation_epoch: 0,
+            child_operation_id: None,
+            domain_effect: None,
+            kv_patch: None,
+            cursor: None,
+            resync_session: None,
+            resync_kv: None,
+        };
+
+        let committed = service
+            .commit_plugin_invocation(request.clone(), Timestamp::constant(1_700_000_000, 0))
+            .await
+            .unwrap();
+        assert_eq!(committed.mutation, Some(expected.clone()));
+        assert_eq!(sink.0.lock().unwrap().as_slice(), &[expected.event]);
+
+        *repository.result.lock().unwrap() = Ok(mutation_with_flag(false));
+        service
+            .commit_plugin_invocation(request, Timestamp::constant(1_700_000_001, 0))
+            .await
+            .unwrap();
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+        assert_eq!(
+            repository.calls.lock().unwrap().as_slice(),
+            &["plugin-commit", "plugin-commit"]
+        );
     }
 
     #[tokio::test]
@@ -2342,7 +4070,10 @@ mod tests {
         );
         assert_eq!(page.tasks[0].tag_ids, vec![tag_a]);
         assert_eq!(page.tasks[1].tag_ids, vec![tag_b]);
-        assert_eq!(*repository.calls.lock().unwrap(), vec!["analysis"]);
+        assert_eq!(
+            *repository.calls.lock().unwrap(),
+            vec!["get_settings", "analysis"]
+        );
     }
 
     #[tokio::test]
@@ -2578,6 +4309,158 @@ mod tests {
                 .await,
             Err(AppError::ResultLimitExceeded)
         );
+    }
+
+    #[tokio::test]
+    async fn ai_session_create_publishes_once_and_replay_does_not() {
+        let repository = Arc::new(FakeRepository::new(Ok(mutation_with_flag(true))));
+        let sink = Arc::new(RecordingSink::default());
+        let service = JunbanService::new(repository.clone(), Arc::clone(&sink));
+        let first = service
+            .create_ai_session(
+                operation_id(),
+                CreateAiSessionRequest {
+                    title: "Planning".into(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(first.newly_committed);
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+
+        *repository.result.lock().unwrap() = Ok(mutation_with_flag(false));
+        let replay = service
+            .create_ai_session(
+                operation_id(),
+                CreateAiSessionRequest {
+                    title: "Planning".into(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!replay.newly_committed);
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+        assert_eq!(
+            repository.calls.lock().unwrap().as_slice(),
+            ["create_ai_session", "create_ai_session"]
+        );
+    }
+
+    #[tokio::test]
+    async fn ai_credential_bind_publishes_settings_event_once_on_fresh_commit() {
+        let repository = Arc::new(FakeRepository::new(Ok(mutation_with_flag(true))));
+        let sink = Arc::new(RecordingSink::default());
+        let service = JunbanService::new(repository.clone(), Arc::clone(&sink));
+        let result = service
+            .bind_ai_credential(
+                operation_id(),
+                BindAiCredentialRequest {
+                    target: crate::AiCredentialBindingTarget::AiProvider,
+                    kind: junban_domain::AiSecretKind::ApiKey,
+                    secret: Some(crate::AiSecretBytes::new("unit-test-secret-marker").unwrap()),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(result.mutation.newly_committed);
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+
+        *repository.result.lock().unwrap() = Ok(mutation_with_flag(false));
+        let replay = service
+            .bind_ai_credential(
+                operation_id(),
+                BindAiCredentialRequest {
+                    target: crate::AiCredentialBindingTarget::AiProvider,
+                    kind: junban_domain::AiSecretKind::ApiKey,
+                    secret: Some(crate::AiSecretBytes::new("unit-test-secret-marker").unwrap()),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!replay.mutation.newly_committed);
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn weekly_review_bounded_uses_projects_by_ids_not_list_catalog() {
+        let now: Timestamp = "2026-08-02T12:00:00Z".parse().unwrap();
+        let project_a = ProjectId::new();
+        let project_b = ProjectId::new();
+        let mut task_a = sample_task("A", 3);
+        task_a.project_id = Some(project_a);
+        let mut task_b = sample_task("B", 3);
+        task_b.project_id = Some(project_b);
+        let mut task_none = sample_task("C", 3);
+        task_none.project_id = None;
+
+        let repository = Arc::new(FakeRepository::with_list_pages(vec![list_page(
+            vec![task_a, task_b, task_none],
+            3,
+            None,
+        )]));
+        *repository.projects_by_ids.lock().unwrap() = crate::ProjectListPage {
+            projects: vec![
+                junban_domain::Project::new(
+                    project_a,
+                    EntityName::new("Alpha").unwrap(),
+                    HexColor::new("#112233").unwrap(),
+                    now,
+                ),
+                junban_domain::Project::new(
+                    project_b,
+                    EntityName::new("Beta").unwrap(),
+                    HexColor::new("#223344").unwrap(),
+                    now,
+                ),
+            ],
+            revision: 3,
+            truncated: false,
+        };
+
+        let sink = Arc::new(RecordingSink::default());
+        let service = JunbanService::new(Arc::clone(&repository), sink);
+        let zone = TimeZone::UTC;
+        let (page, truncated) = service
+            .weekly_review_bounded(date(2026, 8, 2), None, &zone)
+            .await
+            .unwrap();
+
+        assert!(!truncated);
+        assert_eq!(page.revision, 3);
+        let calls = repository.calls.lock().unwrap().clone();
+        assert!(
+            calls.contains(&"get_projects_by_ids"),
+            "expected get_projects_by_ids in {calls:?}"
+        );
+        assert!(
+            !calls.contains(&"list_catalog"),
+            "weekly_review_bounded must not call list_catalog: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn referenced_project_ids_are_unique_sorted_and_bounded() {
+        let mut tasks = Vec::new();
+        for index in 0..(MAX_BULK_IDS + 25) {
+            let mut task = sample_task(&format!("t{index}"), 1);
+            // Deterministic UUID payload via repeated construction is fine; uniqueness comes
+            // from ProjectId::new(). Force duplicates for the first ids to exercise dedupe.
+            task.project_id = Some(if index < 10 {
+                // ten tasks share one project id via fixed parse
+                ProjectId::parse("00112233-4455-6677-8899-aabbccddeeff").unwrap()
+            } else {
+                ProjectId::new()
+            });
+            tasks.push(task);
+        }
+        let (ids, truncated) = referenced_project_ids(&tasks);
+        assert!(truncated);
+        assert_eq!(ids.len(), MAX_BULK_IDS);
+        let mut sorted = ids.clone();
+        sorted.sort_by_key(|id| id.as_uuid());
+        assert_eq!(ids, sorted);
+        let unique = ids.iter().collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(unique.len(), ids.len());
     }
 
     fn date(year: i16, month: i8, day: i8) -> Date {

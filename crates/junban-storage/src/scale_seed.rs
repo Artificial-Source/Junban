@@ -423,12 +423,12 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
             id, title, description, due_date, due_time, due_timezone, deadline,
             status, priority, dread, estimated_minutes, actual_minutes,
             project_id, section_id, parent_id, sort_order, recurrence_rule, someday,
-            completed_at, created_at, updated_at, revision
+            completed_at, cancelled_at, created_at, updated_at, revision
         ) VALUES (
             ?1, ?2, ?3, ?4, NULL, NULL, NULL,
             ?5, ?6, ?7, ?8, NULL,
             ?9, ?10, ?11, ?12, ?13, ?14,
-            ?15, ?16, ?16, 1
+            ?15, ?16, ?17, ?17, 1
         )";
 
     // Near-cap complete tree: all pending so cascade complete hits the ceiling.
@@ -565,6 +565,11 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
             due_date = Some(as_of.to_string());
             priority = Some(1);
         }
+        let cancelled_at = if status == "cancelled" {
+            Some(now.to_owned())
+        } else {
+            None
+        };
 
         let title = if title_extra.is_empty() {
             format!("scale-task-{index:05}")
@@ -610,6 +615,7 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
                 recurrence,
                 someday,
                 completed_at,
+                cancelled_at,
                 now,
             ],
         )
@@ -681,6 +687,11 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
         ));
     }
 
+    // Seeded tasks use revision 1 while migrate leaves global_revision at 0. Complete-backup
+    // restore validation requires entity revision <= event head and a contiguous activity/
+    // retained-event spine for that head. Seal one settings.updated genesis revision.
+    seal_backup_compatible_revision_head(tx, now)?;
+
     Ok(SeedManifest {
         protocol: if config.temporal_fixture {
             "junban-phase3-temporal-v1"
@@ -713,6 +724,55 @@ fn insert_fixture(tx: &Transaction<'_>, config: &SeedConfig) -> Result<SeedManif
         search_miss: SEARCH_MISS_TOKEN,
         sqlite_path: String::new(),
     })
+}
+
+/// Align seeded entity revisions with a durable event head restore validation accepts.
+fn seal_backup_compatible_revision_head(tx: &Transaction<'_>, now: &str) -> Result<(), SeedError> {
+    // Deterministic synthetic operation id reserved for scale-seed genesis only.
+    const SEED_OPERATION_ID: &str = "00000000-0000-4000-8000-0000000000f1";
+    let event_json = serde_json::json!({
+        "revision": 1,
+        "operation_id": SEED_OPERATION_ID,
+        "event_type": "settings.updated",
+        "occurred_at": now,
+        "primary": {"resource_type": "settings", "id": "settings"},
+        "affected": {},
+        "resync": {"tasks": false, "catalog": false, "settings": true},
+    })
+    .to_string();
+
+    tx.execute(
+        "UPDATE app_state SET global_revision = 1 WHERE singleton = 1",
+        [],
+    )
+    .map_err(|e| SeedError::Database(e.to_string()))?;
+    let updated = tx
+        .execute(
+            "INSERT INTO activity(
+                revision, operation_id, kind, subject_type, subject_id, created_at
+             ) VALUES (1, ?1, 'settings.updated', 'settings', 'settings', ?2)",
+            params![SEED_OPERATION_ID, now],
+        )
+        .map_err(|e| SeedError::Database(e.to_string()))?;
+    if updated != 1 {
+        return Err(SeedError::Database(
+            "failed to insert seed genesis activity".into(),
+        ));
+    }
+    let updated = tx
+        .execute(
+            "INSERT INTO events(
+                revision, event_type, operation_id, event_json, occurred_at
+             ) VALUES (1, 'settings.updated', ?1, ?2, ?3)",
+            params![SEED_OPERATION_ID, event_json, now],
+        )
+        .map_err(|e| SeedError::Database(e.to_string()))?;
+    if updated != 1 {
+        return Err(SeedError::Database(
+            "failed to insert seed genesis event".into(),
+        ));
+    }
+    Ok(())
 }
 
 struct TreeSpec<'a> {
@@ -755,6 +815,7 @@ fn insert_tree(
             None::<String>,
             0_i64,
             None::<String>,
+            None::<String>,
             now,
         ],
     )
@@ -779,6 +840,7 @@ fn insert_tree(
                 i64::from(offset),
                 None::<String>,
                 0_i64,
+                None::<String>,
                 None::<String>,
                 now,
             ],
@@ -892,6 +954,56 @@ mod tests {
         assert!(SeedConfig::new(0, date).is_err());
         assert!(SeedConfig::new(10, date).is_err());
         assert!(SeedConfig::new(40, date).is_ok());
+    }
+
+    #[test]
+    fn seeder_fixture_is_backup_restore_compatible() {
+        let date = "2026-07-28".parse::<Date>().unwrap();
+        let config = SeedConfig::new(80, date).unwrap();
+        let profile = temp_profile();
+        seed_phase2_scale(&profile, &config).unwrap();
+        let connection = Connection::open(profile.join(DATABASE_FILE)).unwrap();
+        let head: i64 = connection
+            .query_row(
+                "SELECT global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let max_task_revision: i64 = connection
+            .query_row("SELECT MAX(revision) FROM tasks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(head, 1);
+        assert_eq!(max_task_revision, 1);
+        let activity: i64 = connection
+            .query_row("SELECT COUNT(*) FROM activity", [], |row| row.get(0))
+            .unwrap();
+        let events: i64 = connection
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(activity, head);
+        assert_eq!(events, head);
+        let bad_cancelled: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM tasks
+                 WHERE status = 'cancelled'
+                   AND (cancelled_at IS NULL OR completed_at IS NOT NULL)",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let bad_completed: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM tasks
+                 WHERE status = 'completed'
+                   AND (completed_at IS NULL OR cancelled_at IS NOT NULL)",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(bad_cancelled, 0);
+        assert_eq!(bad_completed, 0);
+        let _ = fs::remove_dir_all(&profile);
     }
 
     #[test]

@@ -51,6 +51,14 @@ The Windows implementation follows the official [`GetSecurityInfo`](https://lear
 
 Operator-facing AI/voice configuration and egress expectations: [`ai-and-voice.md`](ai-and-voice.md).
 
+## Plugin child sandbox checkpoint
+
+The optional `junban-plugin-host` is the only crate linked to Wasmtime. Slice 2B.1 revalidates actual component imports against the exact runtime profile and canonical grants before compilation, then builds a deny-by-default linker. TypeScript receives no WASI. Rust receives only `wasi:io/error`, `wasi:io/streams`, `wasi:cli/environment`, `wasi:cli/exit`, and `wasi:cli/stderr` at exact version 0.2.6, linked individually with empty environment/arguments, closed input, no stdout, and bounded sink stderr. Ambient WASI network, filesystem/preopens, random, clocks, processes, inherited stdio/environment, HTTP, and broad linker helpers are absent.
+
+One serial owner retains the limited Store/instance across successful calls. Each call receives finite profile-specific fuel; memory, table, instance, stack, IPC body, callback, and output limits remain bounded. Callback replies must exact-match the active generation/epoch/session/invocation/callback/kind authority. Guest WIT errors remain typed outcomes, while traps/runtime failures discard the Store. Active cancellation, unload, and shutdown fail closed rather than acknowledging work that has not stopped.
+
+This is not the complete hostile-runtime claim. Slice 2B.2 still owns wall-deadline epoch interruption, blocked host-future cancellation, hostile memory/table/stack/output/spin exhaustion, EOF/crash recovery, Store replacement, and the cross-platform containment matrix. `P7-DEP-001` and the Wave 2 security gate remain open until that later evidence and optimized replacement measurements pass.
+
 ## Supply chain
 
 - Pin GitHub Actions to full commit SHAs.

@@ -104,6 +104,15 @@ impl Guest for Component {
         let _ = junban::plugin::host_storage::get_kv(&[]);
         let _ = junban::plugin::host_storage::list_kv(None, 1);
         junban::plugin::host_log::log(LogLevel::Debug, "consumer", &[]);
+        Ok(())
+    }
+    fn deactivate(_context: InvocationContext) -> Result<(), PluginError> {
+        Ok(())
+    }
+    fn invoke_command(
+        _context: InvocationContext,
+        _call: CommandCall,
+    ) -> Result<PluginOutcome, PluginError> {
         let _ = junban::plugin::host_tasks::query_tasks(&TaskQuery {
             task_id: None,
             project_id: None,
@@ -118,15 +127,6 @@ impl Guest for Component {
             cursor: None,
             limit: 1,
         });
-        Ok(())
-    }
-    fn deactivate(_context: InvocationContext) -> Result<(), PluginError> {
-        Ok(())
-    }
-    fn invoke_command(
-        _context: InvocationContext,
-        _call: CommandCall,
-    ) -> Result<PluginOutcome, PluginError> {
         Ok(no_effect())
     }
     fn handle_event(

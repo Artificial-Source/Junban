@@ -29,8 +29,16 @@ pub const HOST_PROTOCOL_NAME: &str = "junban-plugin-host-v1";
 
 pub const RUST_LINEAR_MEMORY_BYTES: u64 = 64 * 1024 * 1024;
 pub const TYPESCRIPT_LINEAR_MEMORY_BYTES: u64 = 128 * 1024 * 1024;
+pub const RUST_INVOCATION_FUEL: u64 = 100_000_000;
+pub const TYPESCRIPT_INVOCATION_FUEL: u64 = 2_000_000_000;
 pub const GUEST_STACK_BYTES: u64 = 2 * 1024 * 1024;
 pub const TABLE_ELEMENTS_MAX: u32 = 10_000;
+pub const RUST_MEMORIES_MAX: u8 = 1;
+pub const RUST_TABLES_MAX: u8 = 2;
+pub const RUST_INSTANCES_MAX: u8 = 13;
+pub const TYPESCRIPT_MEMORIES_MAX: u8 = 1;
+pub const TYPESCRIPT_TABLES_MAX: u8 = 2;
+pub const TYPESCRIPT_INSTANCES_MAX: u8 = 8;
 pub const COMPILE_TIMEOUT_MS: u32 = 10_000;
 pub const COMMAND_TIMEOUT_MS: u32 = 1_000;
 pub const EVENT_RENDER_TIMEOUT_MS: u32 = 250;
@@ -130,6 +138,7 @@ pub struct RuntimeLimits {
     pub memories: u8,
     pub tables: u8,
     pub instances: u8,
+    pub fuel: u64,
     pub hostcall_copy_bytes: u32,
     pub output_bytes: u32,
     pub compile_timeout_ms: u32,
@@ -148,9 +157,22 @@ impl RuntimeLimits {
             },
             guest_stack_bytes: GUEST_STACK_BYTES,
             table_elements: TABLE_ELEMENTS_MAX,
-            memories: 1,
-            tables: 1,
-            instances: 1,
+            memories: match profile {
+                RuntimeProfile::Rust => RUST_MEMORIES_MAX,
+                RuntimeProfile::Typescript => TYPESCRIPT_MEMORIES_MAX,
+            },
+            tables: match profile {
+                RuntimeProfile::Rust => RUST_TABLES_MAX,
+                RuntimeProfile::Typescript => TYPESCRIPT_TABLES_MAX,
+            },
+            instances: match profile {
+                RuntimeProfile::Rust => RUST_INSTANCES_MAX,
+                RuntimeProfile::Typescript => TYPESCRIPT_INSTANCES_MAX,
+            },
+            fuel: match profile {
+                RuntimeProfile::Rust => RUST_INVOCATION_FUEL,
+                RuntimeProfile::Typescript => TYPESCRIPT_INVOCATION_FUEL,
+            },
             hostcall_copy_bytes: HOST_CALLBACK_BODY_BYTES_MAX as u32,
             output_bytes: HOST_OUTCOME_BODY_BYTES_MAX as u32,
             compile_timeout_ms: COMPILE_TIMEOUT_MS,

@@ -186,7 +186,7 @@ fn exact_wit_parses_and_valid_component_has_structural_guest_abi() {
     );
     assert_eq!(
         hex(&sha256(&component)),
-        "5fdaead67e8455ef7420af467f76338ca05753f62aec7b99b0dc04cd07c09372"
+        "73f7c8902ef58d244357ee5dda7bcadfe523c1b26b7ccc1fa320646ed56ddfdf"
     );
     let inspection = inspect_component(
         &component,
@@ -210,6 +210,23 @@ fn exact_wit_parses_and_valid_component_has_structural_guest_abi() {
     );
     assert_eq!(inspection.exports, [REQUIRED_GUEST_EXPORT]);
     assert_eq!(inspection.guest_abi_sha256.len(), 64);
+    let grants = consumer_permissions();
+    assert_eq!(
+        inspect_component_for_runtime(&component, RuntimeProfile::Rust, &grants)
+            .unwrap()
+            .import_export_fingerprint,
+        inspection.import_export_fingerprint
+    );
+    assert_eq!(
+        inspect_component_for_runtime(&component, RuntimeProfile::Rust, &grants[..3]),
+        Err(SdkError::Permission)
+    );
+    assert!(matches!(
+        inspect_component_for_runtime(&component, RuntimeProfile::Typescript, &grants),
+        Err(SdkError::ComponentAuthority {
+            field: "runtime profile imports"
+        })
+    ));
 
     let typescript = include_bytes!("../consumers/typescript/artifacts/typescript-consumer.wasm");
     assert!(typescript.len() <= COMPONENT_BYTES_MAX);
@@ -244,7 +261,7 @@ fn deterministic_valid_package_round_trips_and_full_inspects() {
     assert_eq!(first, second);
     assert_eq!(
         hex(&sha256(&first)),
-        "7e50dd8c68ae4b7ec7757c761b63da7151da774fe4dad9956c8425d86c8f7488"
+        "b7a3bead2d612abbdb1bee80dc222c5f2c9b574bd1b4306d3da899c3975c15f3"
     );
     let expected_key_id = hex(&sha256(&test_key().verifying_key().to_bytes()));
     let local_trust = [SignerTrustRecord {
@@ -1156,7 +1173,7 @@ fn component_rejects_core_malformed_export_signature_profile_undeclared_and_meta
     );
     assert_eq!(
         hex(&sha256(&rust_component)),
-        "5fdaead67e8455ef7420af467f76338ca05753f62aec7b99b0dc04cd07c09372"
+        "73f7c8902ef58d244357ee5dda7bcadfe523c1b26b7ccc1fa320646ed56ddfdf"
     );
     let mut wrong_wasi_abi = rust_component.clone();
     replace_all_equal(&mut wrong_wasi_abi, b"exit", b"exix");
@@ -1734,6 +1751,19 @@ fn protocol_callback_authority_binds_exact_load_activation_mode_and_grants() {
 
 #[test]
 fn protocol_load_callback_cancellation_and_limits_are_fenced() {
+    let rust_limits = RuntimeLimits::for_profile(RuntimeProfile::Rust);
+    let typescript_limits = RuntimeLimits::for_profile(RuntimeProfile::Typescript);
+    assert_eq!(rust_limits.fuel, RUST_INVOCATION_FUEL);
+    assert_eq!(typescript_limits.fuel, TYPESCRIPT_INVOCATION_FUEL);
+    assert_ne!(rust_limits.fuel, typescript_limits.fuel);
+    assert_eq!(
+        serde_json::to_string(&rust_limits).unwrap(),
+        format!(
+            "{{\"linear_memory_bytes\":67108864,\"guest_stack_bytes\":2097152,\"table_elements\":10000,\"memories\":1,\"tables\":2,\"instances\":13,\"fuel\":{},\"hostcall_copy_bytes\":4194304,\"output_bytes\":262144,\"compile_timeout_ms\":10000,\"command_timeout_ms\":1000,\"event_render_timeout_ms\":250,\"http_timeout_ms\":5000}}",
+            RUST_INVOCATION_FUEL
+        )
+    );
+
     let fence = AuthorityFence {
         plugin_id: "test-plugin".into(),
         package_generation: 7,

@@ -278,12 +278,25 @@ function exercisePublicTypes(): void {
   ];
 }
 
+let activationCount = 0n;
+
 export const guest = {
   activate(_context: T.InvocationContext): void {
     exercisePublicTypes();
+    activationCount += 1n;
   },
   deactivate(_context: T.InvocationContext): void {},
-  invokeCommand(_context: T.InvocationContext, _call: T.CommandCall): T.PluginOutcome {
+  invokeCommand(_context: T.InvocationContext, call: T.CommandCall): T.PluginOutcome {
+    if (call.commandId === "guest-error") {
+      throw {
+        code: "invalid-input",
+        field: "command-id",
+        message: "retained fixture guest error",
+      } satisfies T.PluginError;
+    }
+    if (call.commandId === "trap") {
+      throw new Error("retained fixture trap");
+    }
     return {};
   },
   handleEvent(_context: T.InvocationContext, _event: T.EventEnvelope): T.PluginOutcome {
@@ -327,6 +340,16 @@ export const guest = {
     }
   },
   callService(_context: T.InvocationContext, _call: T.ServiceCall): T.ServiceData {
-    return { values: [] };
+    return {
+      values: [
+        {
+          name: "activation-count",
+          value: {
+            tag: "scalar",
+            val: { tag: "integer-value", val: activationCount },
+          },
+        },
+      ],
+    };
   },
 } satisfies typeof import("junban:plugin/guest@0.1.0");

@@ -123,9 +123,9 @@ Initial Slice B database verdict: **blocked**. Focused database recheck found al
 
 ## Wave 2 dependency gate
 
-| ID           | Severity | Status | Finding                                                                                                                                                        | Required correction and focused evidence                                                                                                                                                                                                   |
-| ------------ | -------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `P7-DEP-001` | high     | open   | Newly issued `RUSTSEC-2026-0222` affects Wasmtime 45.0.3, the historical host-placement spike line; a production host cannot ship on it or carry an exception. | Pin production `wasmtime`/`wasmtime-wasi` 36.0.13 LTS with defaults off and Rust 1.93 retained; prove one exact line, clean audit/deny, selected features, selective imports, hostile containment and replacement active-runtime evidence. |
+| ID           | Severity | Status | Finding                                                                                                                                                        | Required correction and focused evidence                                                                                                                                                                                                                 |
+| ------------ | -------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `P7-DEP-001` | high     | open   | Newly issued `RUSTSEC-2026-0222` affects Wasmtime 45.0.3, the historical host-placement spike line; a production host cannot ship on it or carry an exception. | Exact 36.0.13 LTS remains isolated in the child. Slice 2B.1 now proves profile/grant-selective imports and real Rust/TypeScript execution, but hostile containment and replacement active-runtime evidence remain Slice 2B.2/2E; the finding stays open. |
 
 Dependency security verdict: **blocked on 45.0.3**. Exact 36.0.13 LTS is approved as the Wave 2 correction; no RustSec exception or Rust toolchain bump is approved.
 
@@ -138,6 +138,12 @@ Dependency security verdict: **blocked on 45.0.3**. Exact 36.0.13 LTS is approve
 Implementation checkpoint (2026-08-05): the checked-in generated authority and tests are recorded in [`phase-7-wave-2-slice-2a1.md`](phase-7-wave-2-slice-2a1.md). Focused API-contract recheck verified all nine invocation and eleven host-call mappings, strict canonical rejection, typed size/hash construction, exact error/cancel semantics, complete generated adapters, and WIT drift detection.
 
 Runtime-contract verdict: **accepted**. `P7-API-001` is fixed and Slice 2B guest execution is authorized.
+
+## Wave 2 Slice 2B implementation checkpoint
+
+Slice 2B.1 is implemented as the bounded selective-sandbox half recorded in [`phase-7-wave-2-slice-2b1.md`](phase-7-wave-2-slice-2b1.md). Exact import/grant reinspection, individual Rust WASI linkage, zero TypeScript WASI, one limited serial Store/instance, all nine generated-adapter exports, canonical callback rendezvous/rejection, guest state retention, busy/fail-closed active control, trap discard and idle cleanup pass against retained launched components.
+
+This is not the Wave 2 security gate. Slice 2B.2 still owns hostile exhaustion, advancing wall deadlines, cancellation/host-future interruption, failed-Store replacement and cross-platform recovery. No runtime finding is marked fixed and `P7-DEP-001` remains open.
 
 ## Required implementation gates
 
@@ -153,4 +159,4 @@ Runtime-contract verdict: **accepted**. `P7-API-001` is fixed and Slice 2B guest
 
 ## Current open findings
 
-`P7-DEP-001` remains open for Wave 2. Exact patched Wasmtime/`wasmtime-wasi` 36.0.13 is isolated in the child crate, but selective imports, hostile containment and replacement active-runtime evidence remain. `P7-API-001` is fixed: generated typed canonical hash-bound IPC bodies are approved and authorize Slice 2B guest execution. Wave 0 placement, SDK-first package/WIT/matched-memory, and Wave 1 schema/persistence authority remain accepted; `P7-DB-001`–`011` are fixed. Operator routes, registry UI, React UI, and reference plugins have not started.
+`P7-DEP-001` remains open for Wave 2. Exact patched Wasmtime/`wasmtime-wasi` 36.0.13 is isolated in the child crate and Slice 2B.1 now proves selective imports plus retained Rust/TypeScript execution, but the explicit Slice 2B.2 hostile containment/cancellation/recovery matrix and replacement active-runtime evidence remain. `P7-API-001` is fixed. Wave 0 placement, SDK-first package/WIT/matched-memory, and Wave 1 schema/persistence authority remain accepted; `P7-DB-001`–`011` are fixed. Operator routes, registry UI, React UI, and reference plugins have not started.

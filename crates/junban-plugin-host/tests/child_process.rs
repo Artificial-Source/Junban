@@ -107,7 +107,7 @@ fn child_frames(mut bytes: &[u8]) -> Vec<ChildFrame> {
 }
 
 #[test]
-fn process_loads_one_component_fences_calls_and_shuts_down_cleanly() {
+fn process_permits_one_load_attempt_fences_calls_and_shuts_down_cleanly() {
     let component = tiny_component();
     let mut input = Vec::new();
     append(&mut input, &hello(), &[]);
@@ -151,28 +151,41 @@ fn process_loads_one_component_fences_calls_and_shuts_down_cleanly() {
     let frames = child_frames(&output.stdout);
     assert_eq!(frames.len(), 8);
     assert!(matches!(frames[0], ChildFrame::Hello { .. }));
-    assert!(matches!(frames[1], ChildFrame::Loaded { .. }));
-    for frame in &frames[2..5] {
+    assert!(matches!(
+        frames[1],
+        ChildFrame::Failed {
+            code: HostFailureCode::InvalidComponent,
+            ..
+        }
+    ));
+    for frame in &frames[2..4] {
         assert!(matches!(
             frame,
             ChildFrame::Failed {
-                code: HostFailureCode::StaleAuthority,
+                code: HostFailureCode::Unavailable,
                 ..
             }
         ));
     }
+    assert!(matches!(
+        frames[4],
+        ChildFrame::Failed {
+            code: HostFailureCode::StaleAuthority,
+            ..
+        }
+    ));
     assert_eq!(
         frames[5],
         ChildFrame::Failed {
             fence: invocation.clone(),
-            code: HostFailureCode::Unavailable,
+            code: HostFailureCode::StaleAuthority,
         }
     );
     assert_eq!(
         frames[6],
         ChildFrame::Failed {
             fence: invocation,
-            code: HostFailureCode::Unavailable,
+            code: HostFailureCode::StaleAuthority,
         }
     );
     assert!(matches!(frames[7], ChildFrame::ShutdownComplete { .. }));

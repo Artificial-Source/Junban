@@ -1,6 +1,6 @@
 # Phase 7 Wave 2 — hostile plugin runtime plan
 
-Status: Slices 2A and 2A.1 accepted; Slices 2B–2E and the Wave 2 security gate remain
+Status: Slices 2A and 2A.1 accepted; bounded Slice 2B.1 implemented; Slice 2B.2, Slices 2C–2E, and the Wave 2 security gate remain
 
 ## Outcome and boundary
 
@@ -40,11 +40,21 @@ Implemented on 2026-08-05: the SDK now checks in WIT-parser-generated neutral se
 
 Accepted: every request/outcome/callback branch has exact byte/hash goldens; omitted option, unknown/duplicate field, noncanonical bytes, numeric boundary, wrong kind/result and over-limit fixtures fail; generated neutral and Wasmtime binding types have compile-time/round-trip adapters and WIT drift checks. Focused API-contract recheck marked `P7-API-001` fixed and authorized Slice 2B guest execution.
 
-### Slice 2B — selective linker and resource sandbox
+### Slice 2B.1 — selective linker and serial guest execution
 
-Compile and instantiate one exact verified component per loaded generation/epoch/session. Define only the five frozen Rust WASI 0.2.6 imports plus exact granted `junban:plugin` interfaces; do not call broad WASI linker helpers. Use one Engine per host process and one mutable Store owner per loaded plugin. Enforce Store limits, component memory/table/instance/stack bounds, fuel/epoch and wall deadlines, cancellation of async host futures, output/log/hostcall bounds, and serial execution per plugin.
+Implemented on 2026-08-05 as the bounded first half of Slice 2B. The child re-inspects the exact component against the runtime profile and canonical grants before compilation, constructs a linker containing only actual Junban imports with grants required for every capability-bearing interface, and adds only Rust's five exact frozen WASI 0.2.6 interfaces individually. TypeScript receives no WASI. Rust environment/arguments are empty, stdin is closed, stdout is absent, stderr is a bounded sink, and ambient WASI random, clocks, network, filesystem, processes and broad linker helpers are absent.
 
-Acceptance: allowed import goldens work; every forbidden WASI/network/filesystem/random/clock import fails before guest execution; trap, spin, bulk memory operation, grow, table/stack/output exhaustion, timeout, cancellation, store discard and clean re-instantiation all remain contained.
+One Engine and one load attempt remain process-owned. A dedicated serial runtime thread owns one mutable Store/instance for the loaded activation, applies profile-specific memory/table/instance limits, a 2-MiB Wasm stack, exact per-invocation fuel and epoch-interruption configuration, and retains guest state across successful calls. `Loaded` is emitted only after import/grant/fingerprint validation, selective linking and instantiation. All nine exports use generated neutral↔Wasmtime adapters. A bounded callback rendezvous emits canonical `CapabilityRequest`, routes only the exact pending fence/kind reply, and keeps protocol input live for busy/stale/wrong/duplicate rejection. Guest WIT errors remain `Outcome`; traps/runtime failures remain fenced `Failed` and discard the Store. Idle unload drops the Store/instance.
+
+Retained zero-WASI TypeScript executes every export, separates guest error from trap, retains activation state and unloads cleanly. Retained Rust executes legal settings/storage/log/task callbacks across lifecycle/effect invocations and proves success/error/cancel replies, stale/wrong/duplicate rejection, busy rejection, active cancel/unload/shutdown fail-closed behavior, exact grant denial before load, and idle cleanup. See [`phase-7-wave-2-slice-2b1.md`](phase-7-wave-2-slice-2b1.md).
+
+This checkpoint does **not** complete Slice 2B, the hostile runtime gate, Wave 2 or `P7-DEP-001`.
+
+### Slice 2B.2 — hostile exhaustion, interruption and recovery
+
+Finish wall-deadline epoch interruption, cancellation of blocked host futures, active cancel/drain ownership, bounded host-resource-table behavior, and deterministic Store discard/re-instantiation. Exercise trap, spin, bulk memory operation, grow, table/stack/output exhaustion, timeout, cancellation, EOF/child failure during callbacks, recovery and clean replacement against signed Rust and TypeScript hostile fixtures.
+
+Acceptance: every forbidden WASI/network/filesystem/random/clock import fails before guest execution; all hostile resource/cancellation cases remain contained; no failed or cancelled Store is reused; bounded clean re-instantiation and process cleanup pass on the required platforms. This matrix is explicitly not claimed by Slice 2B.1.
 
 ### Slice 2C — lazy parent supervisor and verified source bridge
 

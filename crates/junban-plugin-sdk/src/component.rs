@@ -15,8 +15,9 @@ use wit_parser::{
 use crate::{
     authority::import_authority,
     error::{Result, SdkError},
-    manifest::{Capability, RuntimeManifest, RuntimeProfile},
+    manifest::{Capability, Permission, RuntimeManifest, RuntimeProfile},
     package::COMPONENT_BYTES_MAX,
+    permission::permission_set_hash,
     util::{decode_hex_32, hex, put_u32},
 };
 
@@ -82,7 +83,41 @@ pub fn inspect_component(
         wit_parser::decoding::decode(component_bytes).map_err(|_| SdkError::ComponentMalformed)?;
     inspect_decoded_component(
         decoded,
-        manifest,
+        manifest.runtime_profile,
+        &manifest.requested_capabilities(),
+        MissingImportAuthority::Undeclared,
+        authority_metadata_bytes(component_bytes)?,
+    )
+}
+
+/// Re-inspect a parent-verified component at the child boundary and require
+/// every actual Junban import to be present in the exact canonical grant set.
+/// Package declaration checks remain the parent's authority; this narrower
+/// check prevents a stale or broadened load from reaching compilation/linking.
+pub fn inspect_component_for_runtime(
+    component_bytes: &[u8],
+    runtime_profile: RuntimeProfile,
+    grants: &[Permission],
+) -> Result<ComponentInspection> {
+    permission_set_hash(grants)?;
+    if component_bytes.is_empty() || component_bytes.len() > COMPONENT_BYTES_MAX {
+        return Err(SdkError::Length { field: "component" });
+    }
+    require_component_encoding_and_metadata_bounds(component_bytes)?;
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(component_bytes)
+        .map_err(|_| SdkError::ComponentMalformed)?;
+    let decoded =
+        wit_parser::decoding::decode(component_bytes).map_err(|_| SdkError::ComponentMalformed)?;
+    let granted = grants
+        .iter()
+        .map(|permission| permission.capability)
+        .collect();
+    inspect_decoded_component(
+        decoded,
+        runtime_profile,
+        &granted,
+        MissingImportAuthority::PermissionDenied,
         authority_metadata_bytes(component_bytes)?,
     )
 }
@@ -114,12 +149,26 @@ pub fn inspect_component_reader<R: Read + Seek>(
     reader
         .seek(SeekFrom::Start(start))
         .map_err(|_| SdkError::ComponentMalformed)?;
-    inspect_decoded_component(decoded, manifest, metadata_bytes)
+    inspect_decoded_component(
+        decoded,
+        manifest.runtime_profile,
+        &manifest.requested_capabilities(),
+        MissingImportAuthority::Undeclared,
+        metadata_bytes,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum MissingImportAuthority {
+    Undeclared,
+    PermissionDenied,
 }
 
 fn inspect_decoded_component(
     decoded: DecodedWasm,
-    manifest: &RuntimeManifest,
+    runtime_profile: RuntimeProfile,
+    capabilities: &BTreeSet<Capability>,
+    missing_authority: MissingImportAuthority,
     metadata_bytes: usize,
 ) -> Result<ComponentInspection> {
     let DecodedWasm::Component(resolve, world_id) = decoded else {
@@ -179,7 +228,7 @@ fn inspect_decoded_component(
     if actual_abi != expected_abi {
         return Err(SdkError::ComponentAuthority { field: "guest ABI" });
     }
-    validate_imports(&imports, manifest)?;
+    validate_imports(&imports, runtime_profile, capabilities, missing_authority)?;
 
     let guest_hash: [u8; 32] = Sha256::digest(&actual_abi).into();
     let mut combined = Vec::new();
@@ -416,8 +465,12 @@ fn authority_metadata_bytes(bytes: &[u8]) -> Result<usize> {
     Ok(total)
 }
 
-fn validate_imports(imports: &[String], manifest: &RuntimeManifest) -> Result<()> {
-    let capabilities = manifest.requested_capabilities();
+fn validate_imports(
+    imports: &[String],
+    runtime_profile: RuntimeProfile,
+    capabilities: &BTreeSet<Capability>,
+    missing_authority: MissingImportAuthority,
+) -> Result<()> {
     let mut wasi = Vec::new();
     for import in imports {
         if import.starts_with("wasi:") {
@@ -431,12 +484,15 @@ fn validate_imports(imports: &[String], manifest: &RuntimeManifest) -> Result<()
             .capability
             .is_some_and(|capability| !capabilities.contains(&capability))
         {
-            return Err(SdkError::ComponentAuthority {
-                field: "undeclared import",
+            return Err(match missing_authority {
+                MissingImportAuthority::Undeclared => SdkError::ComponentAuthority {
+                    field: "undeclared import",
+                },
+                MissingImportAuthority::PermissionDenied => SdkError::Permission,
             });
         }
     }
-    match manifest.runtime_profile {
+    match runtime_profile {
         RuntimeProfile::Typescript if wasi.is_empty() => Ok(()),
         RuntimeProfile::Rust if wasi == RUST_WASI_BASELINE => Ok(()),
         RuntimeProfile::Typescript | RuntimeProfile::Rust => Err(SdkError::ComponentAuthority {
@@ -735,6 +791,48 @@ mod tests {
 
     fn bare_component() -> Vec<u8> {
         b"\0asm\x0d\0\x01\0".to_vec()
+    }
+
+    fn core_resource_baseline(component: &[u8]) -> (u32, u32, u32, u64, u64) {
+        let mut instances = 0;
+        let mut memories = 0;
+        let mut tables = 0;
+        let mut largest_memory_pages = 0;
+        let mut largest_table = 0;
+        for payload in wasmparser::Parser::new(0).parse_all(component) {
+            match payload.unwrap() {
+                wasmparser::Payload::InstanceSection(section) => instances += section.count(),
+                wasmparser::Payload::MemorySection(section) => {
+                    memories += section.count();
+                    for memory in section {
+                        largest_memory_pages = largest_memory_pages.max(memory.unwrap().initial);
+                    }
+                }
+                wasmparser::Payload::TableSection(section) => {
+                    tables += section.count();
+                    for table in section {
+                        largest_table = largest_table.max(table.unwrap().ty.initial);
+                    }
+                }
+                _ => {}
+            }
+        }
+        (
+            instances,
+            memories,
+            tables,
+            largest_memory_pages,
+            largest_table,
+        )
+    }
+
+    #[test]
+    fn retained_consumers_prove_exact_core_resource_count_baselines() {
+        let rust = include_bytes!("../consumers/rust/rust-consumer.wasm");
+        let typescript =
+            include_bytes!("../consumers/typescript/artifacts/typescript-consumer.wasm");
+        assert_eq!(core_resource_baseline(rust), (13, 1, 2, 17, 44));
+        assert_eq!(core_resource_baseline(typescript), (8, 1, 2, 178, 7_692));
     }
 
     #[test]

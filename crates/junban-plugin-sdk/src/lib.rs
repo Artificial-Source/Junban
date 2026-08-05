@@ -30,7 +30,7 @@ pub use component::{
     COMPONENT_AUTHORITY_METADATA_MAX, COMPONENT_AUTHORITY_METADATA_SECTION_MAX,
     COMPONENT_NESTING_MAX, COMPONENT_SECTIONS_MAX, ComponentInspection, REQUIRED_GUEST_EXPORT,
     RUST_WASI_ABI_SHA256, RUST_WASI_BASELINE, WIT_SOURCE, capability_for_import, inspect_component,
-    inspect_component_reader,
+    inspect_component_for_runtime, inspect_component_reader,
 };
 pub use error::SdkError;
 pub use graph::{

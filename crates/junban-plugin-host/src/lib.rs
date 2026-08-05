@@ -2,48 +2,62 @@
 
 mod bindings;
 mod generated_body_adapters;
+mod runtime;
 
-use std::io::{self, Read, Write};
+use std::{
+    io::{self, Read, Write},
+    sync::{Arc, mpsc},
+};
 
 use junban_plugin_sdk::{
-    AuthorityFence, ChildFrame, HOST_FRAME_BYTES_MAX, HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION,
-    HostFailureCode, ParentFrame, decode_parent_frame, encode_child_frame, parent_body_len,
-    validate_child_body, validate_parent_body,
+    AuthorityFence, ChildFrame, GUEST_STACK_BYTES, HOST_FRAME_BYTES_MAX, HOST_PROTOCOL_NAME,
+    HOST_PROTOCOL_VERSION, HostFailureCode, ParentFrame, decode_parent_frame, encode_child_frame,
+    parent_body_len, validate_child_body, validate_parent_body,
 };
-use wasmtime::{
-    Config, Engine, InstanceAllocationStrategy, ProfilingStrategy, component::Component,
+use wasmtime::{Config, Engine, InstanceAllocationStrategy, ProfilingStrategy};
+
+use runtime::{
+    CallbackRouteError, InvokeRequest, LoadRequest, OutboundMessage, RuntimeCommand,
+    SharedRuntimeStatus, StartError,
 };
 
-/// One strict parent frame and its exact, hash-bound raw body.
-#[derive(Debug, Eq, PartialEq)]
-pub struct ParentMessage {
-    pub frame: ParentFrame,
-    pub body: Vec<u8>,
-}
+const RUNTIME_THREAD_STACK_BYTES: usize = 4 * 1024 * 1024;
+const OUTBOUND_CHANNEL_CAPACITY: usize = 8;
 
-/// Bounded protocol/runtime errors. Untrusted parser, guest, path, and body
-/// material is deliberately not retained or formatted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostError {
+    Engine,
     Input,
     Output,
-    Engine,
+    Runtime,
 }
 
 impl std::fmt::Display for HostError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
+            Self::Engine => "runtime initialization failed",
             Self::Input => "protocol input rejected",
             Self::Output => "protocol output failed",
-            Self::Engine => "runtime initialization failed",
+            Self::Runtime => "runtime worker failed",
         })
     }
 }
 
 impl std::error::Error for HostError {}
 
-/// Read canonical u32be-length-prefixed JSON and its exact raw body. Length
-/// ceilings are checked before either attacker-declared allocation.
+#[derive(Debug)]
+pub struct ParentMessage {
+    pub frame: ParentFrame,
+    pub body: Vec<u8>,
+}
+
+impl ParentMessage {
+    #[must_use]
+    pub fn new(frame: ParentFrame, body: Vec<u8>) -> Self {
+        Self { frame, body }
+    }
+}
+
 pub fn read_parent_message(reader: &mut impl Read) -> Result<Option<ParentMessage>, HostError> {
     let Some(prefix) = read_prefix(reader)? else {
         return Ok(None);
@@ -52,20 +66,29 @@ pub fn read_parent_message(reader: &mut impl Read) -> Result<Option<ParentMessag
     if header_len == 0 || header_len > HOST_FRAME_BYTES_MAX {
         return Err(HostError::Input);
     }
-
     let encoded_len = 4_usize.checked_add(header_len).ok_or(HostError::Input)?;
-    let mut encoded = vec![0_u8; encoded_len];
+    let mut encoded = vec![0; encoded_len];
     encoded[..4].copy_from_slice(&prefix);
     read_exact_input(reader, &mut encoded[4..])?;
     let frame = decode_parent_frame(&encoded).map_err(|_| HostError::Input)?;
     let body_len = parent_body_len(&frame).map_err(|_| HostError::Input)?;
-    let mut body = vec![0_u8; body_len];
+    let mut body = vec![0; body_len];
     read_exact_input(reader, &mut body)?;
     validate_parent_body(&frame, &body).map_err(|_| HostError::Input)?;
-    Ok(Some(ParentMessage { frame, body }))
+    match &frame {
+        ParentFrame::Invoke { kind, .. } => {
+            junban_plugin_sdk::decode_invocation_request(*kind, &body)
+                .map_err(|_| HostError::Input)?;
+        }
+        ParentFrame::CapabilityReply { kind, result, .. } => {
+            junban_plugin_sdk::decode_host_call_reply(*kind, *result, &body)
+                .map_err(|_| HostError::Input)?;
+        }
+        _ => {}
+    }
+    Ok(Some(ParentMessage::new(frame, body)))
 }
 
-/// Write only one SDK-canonical child frame and exact raw body.
 pub fn write_child_message(
     writer: &mut impl Write,
     frame: &ChildFrame,
@@ -79,7 +102,7 @@ pub fn write_child_message(
 }
 
 fn read_prefix(reader: &mut impl Read) -> Result<Option<[u8; 4]>, HostError> {
-    let mut prefix = [0_u8; 4];
+    let mut prefix = [0; 4];
     loop {
         match reader.read(&mut prefix[..1]) {
             Ok(0) => return Ok(None),
@@ -97,447 +120,391 @@ fn read_exact_input(reader: &mut impl Read, bytes: &mut [u8]) -> Result<(), Host
     reader.read_exact(bytes).map_err(|_| HostError::Input)
 }
 
-struct LoadedComponent {
+#[derive(Clone)]
+struct LoadedAuthority {
     fence: AuthorityFence,
     permission_hash: String,
-    _component: Component,
+    import_export_fingerprint: String,
 }
 
-/// One process-local runtime owner. It compiles at most one exact component and
-/// intentionally does not instantiate or link guest imports in Slice 2A.
-pub struct ChildHost {
-    engine: Engine,
+struct ProtocolState {
     host_session_id: Option<String>,
     load_attempted: bool,
-    loaded: Option<LoadedComponent>,
+    loaded: Option<LoadedAuthority>,
 }
 
-impl ChildHost {
-    pub fn new() -> Result<Self, HostError> {
-        let mut config = Config::new();
-        config
-            .wasm_component_model(true)
-            .wasm_component_model_gc(false)
-            .async_support(true)
-            .consume_fuel(true)
-            .epoch_interruption(true)
-            .allocation_strategy(InstanceAllocationStrategy::OnDemand)
-            .profiler(ProfilingStrategy::None);
-        let engine = Engine::new(&config).map_err(|_| HostError::Engine)?;
-        Ok(Self {
-            engine,
+impl ProtocolState {
+    fn new() -> Self {
+        Self {
             host_session_id: None,
             load_attempted: false,
             loaded: None,
-        })
-    }
-
-    fn handle(&mut self, message: ParentMessage) -> Result<(Option<ChildFrame>, bool), HostError> {
-        match message.frame {
-            ParentFrame::Hello {
-                protocol_name,
-                protocol_version,
-                host_session_id,
-            } if self.host_session_id.is_none() => {
-                debug_assert_eq!(protocol_name, HOST_PROTOCOL_NAME);
-                debug_assert_eq!(protocol_version, HOST_PROTOCOL_VERSION);
-                self.host_session_id = Some(host_session_id.clone());
-                Ok((
-                    Some(ChildFrame::Hello {
-                        protocol_name,
-                        protocol_version,
-                        host_session_id,
-                    }),
-                    false,
-                ))
-            }
-            ParentFrame::Load {
-                fence,
-                component_sha256: _,
-                import_export_fingerprint,
-                package_sha256: _,
-                runtime_profile: _,
-                component_size: _,
-                grants: _,
-                permission_hash,
-                limits: _,
-            } => {
-                if !self.session_matches(&fence) || self.load_attempted {
-                    return Ok((Some(failed(fence, HostFailureCode::StaleAuthority)), false));
-                }
-                self.load_attempted = true;
-                match Component::new(&self.engine, &message.body) {
-                    Ok(component) => {
-                        self.loaded = Some(LoadedComponent {
-                            fence: fence.clone(),
-                            permission_hash,
-                            _component: component,
-                        });
-                        Ok((
-                            Some(ChildFrame::Loaded {
-                                fence,
-                                import_export_fingerprint,
-                            }),
-                            false,
-                        ))
-                    }
-                    Err(_) => Ok((
-                        Some(failed(fence, HostFailureCode::InvalidComponent)),
-                        false,
-                    )),
-                }
-            }
-            ParentFrame::Invoke {
-                fence,
-                permission_hash,
-                ..
-            } => {
-                let code = if self.loaded_matches(&fence, Some(&permission_hash)) {
-                    HostFailureCode::Unavailable
-                } else {
-                    HostFailureCode::StaleAuthority
-                };
-                Ok((Some(failed(fence, code)), false))
-            }
-            ParentFrame::Cancel { fence } | ParentFrame::Unload { fence } => {
-                let code = if self.loaded_matches(&fence, None) {
-                    HostFailureCode::Unavailable
-                } else {
-                    HostFailureCode::StaleAuthority
-                };
-                Ok((Some(failed(fence, code)), false))
-            }
-            ParentFrame::CapabilityReply { callback, .. } => {
-                let fence = callback.authority();
-                let code = if self.loaded_matches(&fence, None) {
-                    HostFailureCode::Unavailable
-                } else {
-                    HostFailureCode::StaleAuthority
-                };
-                Ok((Some(failed(fence, code)), false))
-            }
-            ParentFrame::Shutdown { host_session_id }
-                if self.host_session_id.as_deref() == Some(host_session_id.as_str()) =>
-            {
-                self.loaded = None;
-                Ok((Some(ChildFrame::ShutdownComplete { host_session_id }), true))
-            }
-            ParentFrame::Hello { .. } | ParentFrame::Shutdown { .. } => Err(HostError::Input),
         }
     }
 
     fn session_matches(&self, fence: &AuthorityFence) -> bool {
-        self.host_session_id.as_deref() == Some(fence.host_session_id.as_str())
+        self.host_session_id
+            .as_ref()
+            .is_some_and(|session| session == &fence.host_session_id)
     }
 
-    fn loaded_matches(&self, fence: &AuthorityFence, permission_hash: Option<&str>) -> bool {
-        self.loaded.as_ref().is_some_and(|loaded| {
-            self.session_matches(fence)
-                && loaded.fence.same_activation(fence)
-                && permission_hash.is_none_or(|hash| hash == loaded.permission_hash)
-        })
+    fn loaded_matches(&self, fence: &AuthorityFence, status: &SharedRuntimeStatus) -> bool {
+        status.is_loaded()
+            && self.loaded.as_ref().is_some_and(|loaded| {
+                loaded.fence.same_activation(fence) && self.session_matches(fence)
+            })
     }
 }
 
-fn failed(fence: AuthorityFence, code: HostFailureCode) -> ChildFrame {
-    ChildFrame::Failed { fence, code }
-}
+pub fn run_child(
+    reader: &mut impl Read,
+    writer: &mut (impl Write + Send),
+) -> Result<(), HostError> {
+    let mut config = Config::new();
+    config
+        .wasm_component_model(true)
+        .wasm_component_model_gc(false)
+        .async_support(false)
+        .consume_fuel(true)
+        .epoch_interruption(true)
+        .allocation_strategy(InstanceAllocationStrategy::OnDemand)
+        .profiler(ProfilingStrategy::None)
+        .max_wasm_stack(usize::try_from(GUEST_STACK_BYTES).map_err(|_| HostError::Engine)?);
+    let engine = Engine::new(&config).map_err(|_| HostError::Engine)?;
 
-/// Run one bounded child session to shutdown or clean EOF.
-pub fn run_child(reader: &mut impl Read, writer: &mut impl Write) -> Result<(), HostError> {
-    let mut host = ChildHost::new()?;
-    while let Some(message) = read_parent_message(reader)? {
-        let (response, stop) = host.handle(message)?;
-        if let Some(response) = response {
-            write_child_message(writer, &response, &[])?;
+    let (outbound_sender, outbound_receiver) =
+        mpsc::sync_channel::<OutboundMessage>(OUTBOUND_CHANNEL_CAPACITY);
+    let (runtime_sender, runtime_receiver) = mpsc::sync_channel::<RuntimeCommand>(1);
+    let status = Arc::new(SharedRuntimeStatus::default());
+
+    std::thread::scope(|scope| {
+        let writer_handle = std::thread::Builder::new()
+            .name("junban-plugin-writer".into())
+            .spawn_scoped(scope, move || {
+                while let Ok(message) = outbound_receiver.recv() {
+                    write_child_message(writer, &message.frame, &message.body)?;
+                }
+                Ok::<(), HostError>(())
+            })
+            .map_err(|_| HostError::Runtime)?;
+
+        let runtime_status = status.clone();
+        let runtime_outbound = outbound_sender.clone();
+        let runtime_handle = std::thread::Builder::new()
+            .name("junban-plugin-runtime".into())
+            .stack_size(RUNTIME_THREAD_STACK_BYTES)
+            .spawn_scoped(scope, move || {
+                runtime::run_runtime(engine, runtime_receiver, runtime_outbound, runtime_status);
+            })
+            .map_err(|_| HostError::Runtime)?;
+
+        let protocol_result = run_protocol_loop(reader, &runtime_sender, &outbound_sender, &status);
+
+        status.cancel_pending_for_eof();
+        let (shutdown_sender, shutdown_receiver) = mpsc::sync_channel(1);
+        if runtime_sender
+            .send(RuntimeCommand::Shutdown {
+                reply: shutdown_sender,
+            })
+            .is_ok()
+        {
+            let _ = shutdown_receiver.recv();
         }
+        drop(runtime_sender);
+        runtime_handle.join().map_err(|_| HostError::Runtime)?;
+        drop(outbound_sender);
+        let writer_result = writer_handle.join().map_err(|_| HostError::Runtime)?;
+
+        protocol_result?;
+        writer_result
+    })
+}
+
+fn run_protocol_loop(
+    reader: &mut impl Read,
+    runtime: &mpsc::SyncSender<RuntimeCommand>,
+    outbound: &mpsc::SyncSender<OutboundMessage>,
+    status: &SharedRuntimeStatus,
+) -> Result<(), HostError> {
+    let mut state = ProtocolState::new();
+    while let Some(message) = read_parent_message(reader)? {
+        let stop = handle_message(message, &mut state, runtime, outbound, status)?;
         if stop {
-            break;
+            return Ok(());
         }
     }
     Ok(())
+}
+
+fn handle_message(
+    message: ParentMessage,
+    state: &mut ProtocolState,
+    runtime: &mpsc::SyncSender<RuntimeCommand>,
+    outbound: &mpsc::SyncSender<OutboundMessage>,
+    status: &SharedRuntimeStatus,
+) -> Result<bool, HostError> {
+    match message.frame {
+        ParentFrame::Hello {
+            protocol_name,
+            protocol_version,
+            host_session_id,
+        } => {
+            if state.host_session_id.is_some()
+                || protocol_name != HOST_PROTOCOL_NAME
+                || protocol_version != HOST_PROTOCOL_VERSION
+            {
+                return Err(HostError::Input);
+            }
+            state.host_session_id = Some(host_session_id.clone());
+            send_frame(
+                outbound,
+                ChildFrame::Hello {
+                    protocol_name: HOST_PROTOCOL_NAME.into(),
+                    protocol_version: HOST_PROTOCOL_VERSION,
+                    host_session_id,
+                },
+            )?;
+        }
+        ParentFrame::Load {
+            fence,
+            import_export_fingerprint,
+            runtime_profile,
+            grants,
+            permission_hash,
+            limits,
+            ..
+        } => {
+            if state.host_session_id.is_none() {
+                return Err(HostError::Input);
+            }
+            if state.load_attempted {
+                send_failed(outbound, fence, HostFailureCode::Unavailable)?;
+                return Ok(false);
+            }
+            state.load_attempted = true;
+            if !state.session_matches(&fence) {
+                send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
+                return Ok(false);
+            }
+            let loaded_authority = LoadedAuthority {
+                fence: fence.clone(),
+                permission_hash: permission_hash.clone(),
+                import_export_fingerprint: import_export_fingerprint.clone(),
+            };
+            let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
+            runtime
+                .send(RuntimeCommand::Load {
+                    request: LoadRequest {
+                        component: message.body,
+                        import_export_fingerprint,
+                        runtime_profile,
+                        grants,
+                        limits,
+                    },
+                    reply: reply_sender,
+                })
+                .map_err(|_| HostError::Runtime)?;
+            match reply_receiver.recv().map_err(|_| HostError::Runtime)? {
+                Ok(()) => {
+                    let loaded_fingerprint = loaded_authority.import_export_fingerprint.clone();
+                    state.loaded = Some(loaded_authority);
+                    send_frame(
+                        outbound,
+                        ChildFrame::Loaded {
+                            fence,
+                            import_export_fingerprint: loaded_fingerprint,
+                        },
+                    )?;
+                }
+                Err(code) => send_failed(outbound, fence, code)?,
+            }
+        }
+        ParentFrame::Invoke {
+            fence,
+            kind,
+            mode,
+            permission_hash,
+            ..
+        } => {
+            if !state.loaded_matches(&fence, status) {
+                send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
+                return Ok(false);
+            }
+            let loaded = state.loaded.as_ref().expect("loaded authority disappeared");
+            if permission_hash != loaded.permission_hash || mode != kind.mode() {
+                send_failed(outbound, fence, HostFailureCode::PermissionDenied)?;
+                return Ok(false);
+            }
+            match status.start(fence.clone()) {
+                Ok(()) => {
+                    if runtime
+                        .send(RuntimeCommand::Invoke(InvokeRequest {
+                            fence: fence.clone(),
+                            kind,
+                            mode,
+                            body: message.body,
+                        }))
+                        .is_err()
+                    {
+                        status.finish(&fence, false);
+                        return Err(HostError::Runtime);
+                    }
+                }
+                Err(StartError::Busy) => {
+                    send_failed(outbound, fence, HostFailureCode::ResourceLimit)?;
+                }
+                Err(StartError::NotLoaded) => {
+                    send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
+                }
+            }
+        }
+        ParentFrame::CapabilityReply { ref callback, .. } => {
+            let failure_fence = callback.authority();
+            let code = match status.route_callback(message) {
+                Ok(()) => return Ok(false),
+                Err(CallbackRouteError::Stale) => HostFailureCode::StaleAuthority,
+                Err(CallbackRouteError::Wrong) => HostFailureCode::InvalidFrame,
+            };
+            send_failed(outbound, failure_fence, code)?;
+        }
+        ParentFrame::Cancel { fence } => {
+            if !state.loaded_matches(&fence, status) {
+                send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
+            } else if status
+                .active()
+                .as_ref()
+                .is_some_and(|active| active.exact_matches(&fence))
+            {
+                // Slice 2B.2 owns interruption and recovery. Do not acknowledge
+                // cancellation before the guest has actually stopped.
+                send_failed(outbound, fence, HostFailureCode::Unavailable)?;
+            } else {
+                send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
+            }
+        }
+        ParentFrame::Unload { fence } => {
+            if !state.loaded_matches(&fence, status) {
+                send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
+            } else if status.active().is_some() {
+                send_failed(outbound, fence, HostFailureCode::Unavailable)?;
+            } else {
+                let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
+                runtime
+                    .send(RuntimeCommand::Unload {
+                        reply: reply_sender,
+                    })
+                    .map_err(|_| HostError::Runtime)?;
+                reply_receiver.recv().map_err(|_| HostError::Runtime)?;
+                state.loaded = None;
+                send_frame(outbound, ChildFrame::Unloaded { fence })?;
+            }
+        }
+        ParentFrame::Shutdown { host_session_id } => {
+            if state.host_session_id.as_deref() != Some(host_session_id.as_str()) {
+                return Err(HostError::Input);
+            }
+            if let Some(active) = status.active() {
+                send_failed(outbound, active, HostFailureCode::Unavailable)?;
+            } else {
+                let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
+                runtime
+                    .send(RuntimeCommand::Shutdown {
+                        reply: reply_sender,
+                    })
+                    .map_err(|_| HostError::Runtime)?;
+                reply_receiver.recv().map_err(|_| HostError::Runtime)?;
+                state.loaded = None;
+                send_frame(outbound, ChildFrame::ShutdownComplete { host_session_id })?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn send_frame(
+    outbound: &mpsc::SyncSender<OutboundMessage>,
+    frame: ChildFrame,
+) -> Result<(), HostError> {
+    outbound
+        .send(OutboundMessage::frame(frame))
+        .map_err(|_| HostError::Output)
+}
+
+fn send_failed(
+    outbound: &mpsc::SyncSender<OutboundMessage>,
+    fence: AuthorityFence,
+    code: HostFailureCode,
+) -> Result<(), HostError> {
+    send_frame(outbound, ChildFrame::Failed { fence, code })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use junban_plugin_sdk::{
-        InvocationRequest, RuntimeLimits, RuntimeProfile, SdkError, canonical_permission_hash,
-        encode_parent_frame, private_body_types as neutral,
+        CallbackFence, CapabilityReplyKind, HostCallKind, ParentFrame, RuntimeLimits,
+        RuntimeProfile, canonical_permission_hash, encode_parent_frame,
     };
+    use std::io::Cursor;
 
-    use crate::bindings::junban::plugin::types as binding;
-
-    const SESSION: &str = "00000000-0000-4000-8000-000000000001";
-    const INVOCATION: &str = "00000000-0000-4000-8000-000000000002";
-
-    fn fence() -> AuthorityFence {
+    fn fence(invocation: &str) -> AuthorityFence {
         AuthorityFence {
             plugin_id: "test-plugin".into(),
-            package_generation: 1,
-            activation_epoch: 2,
-            host_session_id: SESSION.into(),
-            invocation_id: INVOCATION.into(),
+            package_generation: 4,
+            activation_epoch: 8,
+            host_session_id: "00000000-0000-4000-8000-000000000001".into(),
+            invocation_id: invocation.into(),
         }
     }
 
-    fn tiny_component() -> Vec<u8> {
-        let mut component = Vec::with_capacity(8);
-        component.extend_from_slice(b"\0asm");
-        component.extend_from_slice(&[0x0d, 0x00, 0x01, 0x00]);
-        component
-    }
-
-    fn encode(frame: &ParentFrame, body: &[u8]) -> Vec<u8> {
-        let mut bytes = encode_parent_frame(frame).unwrap();
-        bytes.extend_from_slice(body);
-        bytes
-    }
-
-    fn hello() -> ParentFrame {
-        ParentFrame::Hello {
-            protocol_name: HOST_PROTOCOL_NAME.into(),
-            protocol_version: HOST_PROTOCOL_VERSION,
-            host_session_id: SESSION.into(),
-        }
-    }
-
-    fn load(component: &[u8]) -> ParentFrame {
-        ParentFrame::Load {
-            fence: fence(),
+    #[test]
+    fn message_codec_consumes_exact_raw_bodies() {
+        let component = b"component";
+        let frame = ParentFrame::Load {
+            fence: fence("00000000-0000-4000-8000-000000000002"),
             package_sha256: "1".repeat(64),
-            component_sha256: sha256_hex(component),
+            component_sha256: "6985ca1f4daa5a584a28eae043a239cb96689af1337ea13afb63e00c2bf512fa"
+                .into(),
             import_export_fingerprint: "2".repeat(64),
             runtime_profile: RuntimeProfile::Typescript,
             component_size: component.len() as u64,
             grants: Vec::new(),
             permission_hash: canonical_permission_hash(&[]).unwrap(),
             limits: RuntimeLimits::for_profile(RuntimeProfile::Typescript),
-        }
-    }
-
-    fn sha256_hex(bytes: &[u8]) -> String {
-        use sha2::{Digest, Sha256};
-        use std::fmt::Write as _;
-
-        let digest = Sha256::digest(bytes);
-        let mut encoded = String::with_capacity(64);
-        for byte in digest {
-            write!(&mut encoded, "{byte:02x}").unwrap();
-        }
-        encoded
-    }
-
-    fn assert_binding_round_trip<N, B>(value: N)
-    where
-        N: Clone + std::fmt::Debug + Eq + Into<B>,
-        B: TryInto<N, Error = SdkError>,
-    {
-        let binding: B = value.clone().into();
-        let actual = binding.try_into().unwrap();
-        assert_eq!(actual, value);
-    }
-
-    #[test]
-    fn generated_neutral_and_wasmtime_values_round_trip_and_bound_bytes() {
-        assert_binding_round_trip::<_, binding::InvocationContext>(neutral::InvocationContext {
-            plugin_id: "plugin".into(),
-            package_generation: 7,
-            activation_epoch: 9,
-            host_session_id: "session".into(),
-            invocation_id: "invocation".into(),
-            entry_id: Some("entry".into()),
-        });
-        assert_binding_round_trip::<_, binding::TaskQuery>(neutral::TaskQuery {
-            task_id: None,
-            project_id: Some("project".into()),
-            section_id: None,
-            parent_id: None,
-            tag_ids: vec!["tag".into()],
-            statuses: vec![neutral::TaskStatus::Pending],
-            priorities: vec![neutral::Priority::P1],
-            due_from: None,
-            due_before: Some("2030-01-02".into()),
-            search: None,
-            cursor: Some("cursor".into()),
-            limit: 10,
-        });
-        assert_binding_round_trip::<_, binding::StringChange>(neutral::StringChange::Unchanged(()));
-        assert_binding_round_trip::<_, binding::DomainMutation>(
-            neutral::DomainMutation::CompleteTask("task".into()),
-        );
-        assert_binding_round_trip::<_, binding::PluginOutcome>(neutral::PluginOutcome {
-            effect: Some(neutral::PluginEffect::KvPatch(neutral::KvPatch {
-                operations: vec![neutral::KvOperation::Set(neutral::KvSet {
-                    key: "key".into(),
-                    value: neutral::ByteList::new(vec![0xfb, 0xff]).unwrap(),
-                })],
-            })),
-        });
-        assert_binding_round_trip::<_, binding::HttpRequest>(neutral::HttpRequest {
-            method: neutral::HttpMethod::Post,
-            origin: "https://example.com".into(),
-            path_and_query: "/path".into(),
-            headers: vec![neutral::HttpHeader {
-                name: "accept".into(),
-                value: "application/json".into(),
-            }],
-            body: neutral::ByteList::new(vec![0xfb, 0xff]).unwrap(),
-        });
-        assert_binding_round_trip::<_, binding::ResyncPage>(neutral::ResyncPage::Finalize(
-            neutral::FinalizeResync {
-                session_id: "session".into(),
-            },
-        ));
-
-        let oversized = binding::HttpRequest {
-            method: binding::HttpMethod::Post,
-            origin: "https://example.com".into(),
-            path_and_query: "/path".into(),
-            headers: Vec::new(),
-            body: vec![0; neutral::BYTE_LIST_BYTES_MAX + 1],
         };
-        assert!(matches!(
-            neutral::HttpRequest::try_from(oversized),
-            Err(SdkError::Protocol {
-                field: "byte list length"
-            })
-        ));
-    }
-
-    #[test]
-    fn codec_rejects_noncanonical_duplicate_unknown_truncated_and_oversized_headers() {
-        let canonical = encode(&hello(), &[]);
-        assert!(
-            read_parent_message(&mut canonical.as_slice())
-                .unwrap()
-                .is_some()
-        );
-
-        for payload in [
-            br#"{ "type":"hello","protocol_name":"junban-plugin-host-v1","protocol_version":1,"host_session_id":"00000000-0000-4000-8000-000000000001"}"#.as_slice(),
-            br#"{"type":"hello","protocol_name":"junban-plugin-host-v1","protocol_version":1,"protocol_version":1,"host_session_id":"00000000-0000-4000-8000-000000000001"}"#.as_slice(),
-            br#"{"type":"hello","protocol_name":"junban-plugin-host-v1","protocol_version":1,"host_session_id":"00000000-0000-4000-8000-000000000001","unknown":true}"#.as_slice(),
-            br#"{"type":"unknown"}"#.as_slice(),
-        ] {
-            let mut bytes = (payload.len() as u32).to_be_bytes().to_vec();
-            bytes.extend_from_slice(payload);
-            assert_eq!(read_parent_message(&mut bytes.as_slice()), Err(HostError::Input));
-        }
-
-        assert_eq!(
-            read_parent_message(&mut canonical[..3].as_ref()),
-            Err(HostError::Input)
-        );
-        assert_eq!(
-            read_parent_message(&mut ((HOST_FRAME_BYTES_MAX as u32) + 1).to_be_bytes().as_ref()),
-            Err(HostError::Input)
-        );
-
-        let component = tiny_component();
-        let encoded_load = encode_parent_frame(&load(&component)).unwrap();
-        let payload = std::str::from_utf8(&encoded_load[4..])
+        let mut bytes = encode_parent_frame(&frame).unwrap();
+        bytes.extend_from_slice(component);
+        let message = read_parent_message(&mut Cursor::new(bytes))
             .unwrap()
-            .replace("\"component_size\":8", "\"component_size\":33554433");
-        assert!(payload.contains("\"component_size\":33554433"));
-        let mut oversized_body = (payload.len() as u32).to_be_bytes().to_vec();
-        oversized_body.extend_from_slice(payload.as_bytes());
-        assert_eq!(
-            read_parent_message(&mut oversized_body.as_slice()),
-            Err(HostError::Input)
-        );
-
-        let mut trailing = canonical;
-        trailing.push(0);
-        let mut trailing = trailing.as_slice();
-        assert!(read_parent_message(&mut trailing).unwrap().is_some());
-        assert_eq!(read_parent_message(&mut trailing), Err(HostError::Input));
-    }
-
-    #[test]
-    fn codec_rejects_bad_protocol_version_body_hash_length_and_truncation() {
-        let payload = br#"{"type":"hello","protocol_name":"not-junban","protocol_version":1,"host_session_id":"00000000-0000-4000-8000-000000000001"}"#.as_slice();
-        let mut bytes = (payload.len() as u32).to_be_bytes().to_vec();
-        bytes.extend_from_slice(payload);
-        assert_eq!(
-            read_parent_message(&mut bytes.as_slice()),
-            Err(HostError::Input)
-        );
-
-        let wrong_version_payload = br#"{"type":"hello","protocol_name":"junban-plugin-host-v1","protocol_version":2,"host_session_id":"00000000-0000-4000-8000-000000000001"}"#;
-        let mut wrong_version = (wrong_version_payload.len() as u32).to_be_bytes().to_vec();
-        wrong_version.extend_from_slice(wrong_version_payload);
-        assert_eq!(
-            read_parent_message(&mut wrong_version.as_slice()),
-            Err(HostError::Input)
-        );
-
-        let component = tiny_component();
-        let frame = load(&component);
-        let short = encode(&frame, &component[..component.len() - 1]);
-        assert_eq!(
-            read_parent_message(&mut short.as_slice()),
-            Err(HostError::Input)
-        );
-        let mut wrong_hash = frame.clone();
-        if let ParentFrame::Load {
-            component_sha256, ..
-        } = &mut wrong_hash
-        {
-            *component_sha256 = "0".repeat(64);
-        }
-        assert_eq!(
-            read_parent_message(&mut encode(&wrong_hash, &component).as_slice()),
-            Err(HostError::Input)
-        );
-    }
-
-    #[test]
-    fn valid_component_compiles_once_and_unsupported_calls_are_fenced() {
-        let component = tiny_component();
-        let mut input = encode(&hello(), &[]);
-        input.extend_from_slice(&encode(&load(&component), &component));
-        input.extend_from_slice(&encode(&load(&component), &component));
-        let invoke_fence = AuthorityFence {
-            invocation_id: "00000000-0000-4000-8000-000000000003".into(),
-            ..fence()
-        };
-        let request_message = InvocationRequest::activate(None)
-            .into_parent_message(invoke_fence, canonical_permission_hash(&[]).unwrap())
             .unwrap();
-        let (invoke, request) = request_message.into_parts();
-        input.extend_from_slice(&encode(&invoke, &request));
-        input.extend_from_slice(&encode(
-            &ParentFrame::Shutdown {
-                host_session_id: SESSION.into(),
-            },
-            &[],
-        ));
-
-        let mut output = Vec::new();
-        run_child(&mut input.as_slice(), &mut output).unwrap();
-        assert!(!output.is_empty());
+        assert_eq!(message.frame, frame);
+        assert_eq!(message.body, component);
     }
 
     #[test]
-    fn clean_eof_and_shutdown_are_bounded_and_panic_free() {
-        let mut output = Vec::new();
-        run_child(&mut io::empty(), &mut output).unwrap();
-        assert!(output.is_empty());
-
-        let mut input = encode(&hello(), &[]);
-        input.extend_from_slice(&encode(
-            &ParentFrame::Shutdown {
-                host_session_id: SESSION.into(),
-            },
-            &[],
+    fn message_codec_rejects_truncated_and_noncanonical_callback_bodies() {
+        let callback = CallbackFence {
+            plugin_id: "test-plugin".into(),
+            package_generation: 4,
+            activation_epoch: 8,
+            host_session_id: "00000000-0000-4000-8000-000000000001".into(),
+            invocation_id: "00000000-0000-4000-8000-000000000002".into(),
+            callback_id: 1,
+        };
+        let frame = ParentFrame::CapabilityReply {
+            callback,
+            kind: HostCallKind::Log,
+            result: CapabilityReplyKind::Success,
+            response_sha256: "2f05d4b689d270cafb02285f35f44866f7dc8a2d368a3f9d1124373eeab31fb1"
+                .into(),
+            response_size: 3,
+        };
+        let mut bytes = encode_parent_frame(&frame).unwrap();
+        bytes.extend_from_slice(b"bad");
+        assert!(matches!(
+            read_parent_message(&mut Cursor::new(bytes)),
+            Err(HostError::Input)
         ));
-        run_child(&mut input.as_slice(), &mut output).unwrap();
-        assert!(!output.is_empty());
-
-        for size in 0..512 {
-            let hostile = vec![0xa5; size];
-            let _ = read_parent_message(&mut hostile.as_slice());
-        }
     }
 }

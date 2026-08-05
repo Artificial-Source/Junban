@@ -4685,7 +4685,13 @@ mod tests {
 
     fn component_with_size(target: usize) -> Vec<u8> {
         let base = include_bytes!("../../junban-plugin-sdk/consumers/rust/rust-consumer.wasm");
-        let data_len = (target - base.len() - 64..target - base.len())
+        let available_padding = target
+            .checked_sub(base.len())
+            .expect("synthetic component target must exceed the retained component");
+        let search_start = available_padding
+            .checked_sub(64)
+            .expect("synthetic component target must leave room for encoded padding");
+        let data_len = (search_start..available_padding)
             .find(|data_len| {
                 let payload_len = 2 + leb_len(*data_len) + data_len;
                 let module_len = 8 + 1 + leb_len(payload_len) + payload_len;
@@ -9518,7 +9524,9 @@ mod tests {
         let component_size = if maximum_evidence {
             junban_plugin_sdk::COMPONENT_BYTES_MAX
         } else {
-            128 * 1024
+            // The retained fixture may grow; this ordinary target must still leave
+            // room for its encoded padding.
+            256 * 1024
         };
         let component = component_with_size(component_size);
         let (_, base, _) = package("maximum-plugin", "1.0.0");

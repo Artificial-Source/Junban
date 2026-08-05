@@ -2,7 +2,7 @@ import { getSettings } from "junban:plugin/host-settings@0.1.0";
 import type * as T from "junban:plugin/types@0.1.0";
 
 const CALIBRATION_WORKING_SET_BYTES = 64 * 1024 * 1024;
-const HOSTILE_CANONICAL_FLAT_LIST_ITEMS = 300_000;
+const HOSTILE_OVERSIZED_RESULT_STRING_BYTES = 4_464_641;
 let calibrationSink = 0;
 
 /** Exact `TaskDraft::new` defaults, before host/domain validation. */
@@ -326,12 +326,16 @@ export const guest = {
       return {};
     }
     if (call.commandId === "hostcall-oversized-output") {
-      const operation: T.KvOperation = { tag: "delete", val: "" };
       return {
         effect: {
           tag: "kv-patch",
           val: {
-            operations: new Array<T.KvOperation>(HOSTILE_CANONICAL_FLAT_LIST_ITEMS).fill(operation),
+            operations: [
+              {
+                tag: "delete",
+                val: "x".repeat(HOSTILE_OVERSIZED_RESULT_STRING_BYTES),
+              },
+            ],
           },
         },
       };

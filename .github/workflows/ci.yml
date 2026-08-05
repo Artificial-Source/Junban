@@ -66,7 +66,7 @@ jobs:
         shell: bash
         run: |
           cargo test --locked -p junban-plugin-host --test containment -- --test-threads=1
-          cargo test --locked -p junban-plugin-host --test process_host retained_typescript_invokes_all_exports_and_contains_hostcall_transfer -- --exact --test-threads=1
+          cargo test --locked -p junban-plugin-host --test process_host retained_typescript_invokes_all_exports_and_contains_oversized_result_string -- --exact --test-threads=1
 
   supply-chain:
     name: Rust supply chain

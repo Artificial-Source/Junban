@@ -189,7 +189,7 @@ fn expect_capability(
 }
 
 #[test]
-fn retained_typescript_invokes_all_exports_and_contains_hostcall_transfer() {
+fn retained_typescript_invokes_all_exports_and_contains_oversized_result_string() {
     let grants = permissions();
     let inspection =
         inspect_component_for_runtime(TYPESCRIPT_COMPONENT, RuntimeProfile::Typescript, &grants)

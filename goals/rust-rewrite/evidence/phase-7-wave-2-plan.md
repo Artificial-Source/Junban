@@ -32,6 +32,12 @@ The load frame now carries the already SDK-inspected import/export fingerprint t
 
 Acceptance at this checkpoint: focused SDK/host Clippy and tests, exact dependency/features/audit checks, malformed/truncated/oversized/hash/protocol/type/correlation process coverage, absolute sibling-process environment scrubbing and wait cleanup, and an unchanged Wasmtime-free `junban-server` tree. This does not close `P7-DEP-001` or the Wave 2 security gate.
 
+### Slice 2A.1 — generated typed private body authority
+
+Generate checked-in pure serde body types from the one `plugin.wit` authority and byte-compare regeneration in check mode. Freeze canonical child-private JSON, exhaustive `InvocationKind` and `HostCallKind` request/success/error mappings, invocation-context construction, typed-only size/hash helpers, and malformed/cross-kind/result-branch rejection. Options are explicit value-or-null, variants/results are closed tagged forms, byte lists are canonical unpadded base64url, and parse-then-reserialize equality rejects noncanonical material. This is private transport only; WIT remains the sole public guest ABI.
+
+Acceptance: every request/outcome/callback branch has exact byte/hash goldens; omitted option, unknown/duplicate field, noncanonical bytes, numeric boundary, wrong kind/result and over-limit fixtures fail; generated neutral and Wasmtime binding types have compile-time/round-trip adapters and WIT drift checks. `P7-API-001` receives focused API-contract recheck before guest execution starts.
+
 ### Slice 2B — selective linker and resource sandbox
 
 Compile and instantiate one exact verified component per loaded generation/epoch/session. Define only the five frozen Rust WASI 0.2.6 imports plus exact granted `junban:plugin` interfaces; do not call broad WASI linker helpers. Use one Engine per host process and one mutable Store owner per loaded plugin. Enforce Store limits, component memory/table/instance/stack bounds, fuel/epoch and wall deadlines, cancellation of async host futures, output/log/hostcall bounds, and serial execution per plugin.

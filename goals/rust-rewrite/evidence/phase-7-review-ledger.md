@@ -129,6 +129,14 @@ Initial Slice B database verdict: **blocked**. Focused database recheck found al
 
 Dependency security verdict: **blocked on 45.0.3**. Exact 36.0.13 LTS is approved as the Wave 2 correction; no RustSec exception or Rust toolchain bump is approved.
 
+## Wave 2 runtime-contract gate
+
+| ID           | Severity | Status | Finding                                                                                                                                                                                                    | Required correction and focused evidence                                                                                                                                                                                                                                              |
+| ------------ | -------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `P7-API-001` | blocker  | open   | Hash-bound child IPC bodies have no typed canonical serialization or exhaustive mapping to invocation/host-call WIT arguments and results, so Slice 2B would have to invent an ambiguous generic byte ABI. | Generate checked-in private serde body types from the one WIT authority; freeze canonical encoding, exhaustive kind/result/error mappings and context construction, typed-only hash helpers, drift check and Rust/TypeScript Wasmtime goldens. Keep public guest ABI exclusively WIT. |
+
+Runtime-contract verdict: **blocked**. Slice 2B guest execution cannot start until exact child-private body authority is generated, checked, and API-contract re-reviewed.
+
 ## Required implementation gates
 
 | Gate                          | Dominant reviewer      | Status   | Acceptance                                                                                                                                                                                            |
@@ -143,4 +151,4 @@ Dependency security verdict: **blocked on 45.0.3**. Exact 36.0.13 LTS is approve
 
 ## Current open findings
 
-`P7-DEP-001` remains open for Wave 2. Slice 2A introduces exact patched Wasmtime/`wasmtime-wasi` 36.0.13 only in the isolated child crate and records clean focused dependency/audit/protocol evidence, but selective imports, hostile runtime containment, and replacement active-runtime evidence remain Slices 2B–2E and are required before closure. Wave 0 placement, SDK-first package/WIT/matched-memory, and Wave 1 schema/persistence authority remain accepted; `P7-DB-001`–`011` are fixed. Operator routes, registry UI, React UI, and reference plugins have not started.
+`P7-DEP-001` and `P7-API-001` remain open for Wave 2. Slice 2A integrates exact patched Wasmtime/`wasmtime-wasi` 36.0.13 only in the child crate, but selective imports, hostile containment and replacement active-runtime evidence remain. Guest execution is blocked until hash-bound IPC bodies gain generated typed canonical WIT mappings and focused API recheck. Wave 0 placement, SDK-first package/WIT/matched-memory, and Wave 1 schema/persistence authority remain accepted; `P7-DB-001`–`011` are fixed. Operator routes, registry UI, React UI, and reference plugins have not started.

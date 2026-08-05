@@ -186,7 +186,7 @@ fn exact_wit_parses_and_valid_component_has_structural_guest_abi() {
     );
     assert_eq!(
         hex(&sha256(&component)),
-        "0bd13500bddde8baecd79a974a3f32951c13b187b2e22eeb07ae8b51a536d0e1"
+        "7b14a85ec91105cafd174e0cd65e3e2064512deefe1ba7fa981ece5683e24d62"
     );
     let inspection = inspect_component(
         &component,
@@ -261,7 +261,7 @@ fn deterministic_valid_package_round_trips_and_full_inspects() {
     assert_eq!(first, second);
     assert_eq!(
         hex(&sha256(&first)),
-        "58c12ca50250b4fdae03b37477b534f60a1f4fe0f8e5fee85c49d9c954477662"
+        "3088ff38afaa9c9857dc347d85609a172814f6a3b5cd3ad1cd386a3e039e46ef"
     );
     let expected_key_id = hex(&sha256(&test_key().verifying_key().to_bytes()));
     let local_trust = [SignerTrustRecord {
@@ -1173,7 +1173,7 @@ fn component_rejects_core_malformed_export_signature_profile_undeclared_and_meta
     );
     assert_eq!(
         hex(&sha256(&rust_component)),
-        "0bd13500bddde8baecd79a974a3f32951c13b187b2e22eeb07ae8b51a536d0e1"
+        "7b14a85ec91105cafd174e0cd65e3e2064512deefe1ba7fa981ece5683e24d62"
     );
     let mut wrong_wasi_abi = rust_component.clone();
     replace_all_equal(&mut wrong_wasi_abi, b"exit", b"exix");

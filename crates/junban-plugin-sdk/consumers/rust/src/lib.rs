@@ -13,6 +13,7 @@ use junban::plugin::types::*;
 struct Component;
 
 static ACTIVATION_COUNT: AtomicI64 = AtomicI64::new(0);
+const CALIBRATION_WORKING_SET_BYTES: usize = 48 * 1024 * 1024;
 
 fn no_effect() -> PluginOutcome {
     PluginOutcome { effect: None }
@@ -54,6 +55,15 @@ fn bounded_bulk_memory() {
 
 fn exhaust_memory_growth() {
     let _ = core::arch::wasm32::memory_grow::<0>(2_048);
+}
+
+fn calibration_working_set_barrier() {
+    let mut bytes = vec![0_u8; CALIBRATION_WORKING_SET_BYTES];
+    for (index, page) in bytes.chunks_mut(4 * 1024).enumerate() {
+        page[0] = index as u8;
+    }
+    let _ = junban::plugin::host_settings::get_settings();
+    std::hint::black_box(bytes);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -225,6 +235,10 @@ impl Guest for Component {
             "fuel" => exhaust_fuel(),
             "bulk-memory" => bounded_bulk_memory(),
             "memory-grow" => exhaust_memory_growth(),
+            "memory-calibration-barrier" => {
+                calibration_working_set_barrier();
+                return Ok(no_effect());
+            }
             "host-resources" => exhaust_host_resources(),
             "stack" => {
                 std::hint::black_box(exhaust_stack(0));

@@ -12,8 +12,9 @@ use std::{
 
 use junban_plugin_sdk::{
     AuthorityFence, ChildFrame, GUEST_STACK_BYTES, HOST_FRAME_BYTES_MAX, HOST_PROTOCOL_NAME,
-    HOST_PROTOCOL_VERSION, HostFailureCode, ParentFrame, decode_parent_frame, encode_child_frame,
-    parent_body_len, validate_child_body, validate_parent_body,
+    HOST_PROTOCOL_VERSION, HostFailureCode, ParentFrame, TYPESCRIPT_LINEAR_MEMORY_BYTES,
+    decode_parent_frame, encode_child_frame, parent_body_len, validate_child_body,
+    validate_parent_body,
 };
 use wasmtime::{Config, Engine, InstanceAllocationStrategy, ProfilingStrategy};
 
@@ -24,6 +25,13 @@ use runtime::{
 
 const RUNTIME_THREAD_STACK_BYTES: usize = 4 * 1024 * 1024;
 const OUTBOUND_CHANNEL_CAPACITY: usize = 8;
+
+/// One reservation matches the largest frozen one-memory guest profile. Wasmtime
+/// emits explicit bounds checks when this is below the 4-GiB wasm32 address space.
+pub const WASMTIME_MEMORY_RESERVATION_BYTES: u64 = TYPESCRIPT_LINEAR_MEMORY_BYTES;
+pub const WASMTIME_MEMORY_GUARD_BYTES: u64 = 0;
+pub const WASMTIME_MEMORY_RESERVATION_FOR_GROWTH_BYTES: u64 = 0;
+const _: () = assert!(WASMTIME_MEMORY_RESERVATION_BYTES < 4 * 1024 * 1024 * 1024);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostError {
@@ -170,6 +178,9 @@ pub fn run_child(
         .consume_fuel(true)
         .epoch_interruption(true)
         .allocation_strategy(InstanceAllocationStrategy::OnDemand)
+        .memory_reservation(WASMTIME_MEMORY_RESERVATION_BYTES)
+        .memory_guard_size(WASMTIME_MEMORY_GUARD_BYTES)
+        .memory_reservation_for_growth(WASMTIME_MEMORY_RESERVATION_FOR_GROWTH_BYTES)
         .profiler(ProfilingStrategy::None)
         .max_wasm_stack(usize::try_from(GUEST_STACK_BYTES).map_err(|_| HostError::Engine)?);
     let engine = Engine::new(&config).map_err(|_| HostError::Engine)?;
@@ -475,6 +486,17 @@ mod tests {
             host_session_id: "00000000-0000-4000-8000-000000000001".into(),
             invocation_id: invocation.into(),
         }
+    }
+
+    #[test]
+    fn engine_memory_tuning_matches_the_largest_one_memory_profile() {
+        assert_eq!(
+            WASMTIME_MEMORY_RESERVATION_BYTES,
+            RuntimeLimits::for_profile(RuntimeProfile::Typescript).linear_memory_bytes
+        );
+        assert_eq!(WASMTIME_MEMORY_RESERVATION_BYTES, 128 * 1024 * 1024);
+        assert_eq!(WASMTIME_MEMORY_GUARD_BYTES, 0);
+        assert_eq!(WASMTIME_MEMORY_RESERVATION_FOR_GROWTH_BYTES, 0);
     }
 
     #[test]

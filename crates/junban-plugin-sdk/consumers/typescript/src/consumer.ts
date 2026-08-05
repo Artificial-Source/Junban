@@ -1,4 +1,8 @@
+import { getSettings } from "junban:plugin/host-settings@0.1.0";
 import type * as T from "junban:plugin/types@0.1.0";
+
+const CALIBRATION_WORKING_SET_BYTES = 64 * 1024 * 1024;
+let calibrationSink = 0;
 
 /** Exact `TaskDraft::new` defaults, before host/domain validation. */
 function newTaskDraft(title: string): T.TaskDraft {
@@ -287,6 +291,15 @@ function spin(): never {
   }
 }
 
+function calibrationWorkingSetBarrier(): void {
+  const bytes = new Uint8Array(CALIBRATION_WORKING_SET_BYTES);
+  for (let offset = 0; offset < bytes.length; offset += 4 * 1024) {
+    bytes[offset] = (offset / (4 * 1024)) & 0xff;
+  }
+  getSettings();
+  calibrationSink ^= bytes[bytes.length - 4 * 1024]!;
+}
+
 export const guest = {
   activate(_context: T.InvocationContext): void {
     exercisePublicTypes();
@@ -306,6 +319,10 @@ export const guest = {
     }
     if (call.commandId === "spin") {
       spin();
+    }
+    if (call.commandId === "memory-calibration-barrier") {
+      calibrationWorkingSetBarrier();
+      return {};
     }
     if (call.commandId === "oversized-output") {
       return {

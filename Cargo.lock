@@ -1474,6 +1474,8 @@ name = "junban-plugin-host"
 version = "0.1.0"
 dependencies = [
  "junban-plugin-sdk",
+ "serde",
+ "serde_json",
  "sha2",
  "wasmtime",
  "wasmtime-wasi",

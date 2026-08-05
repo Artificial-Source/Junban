@@ -1,9 +1,9 @@
 # Phase 7 Wave 2 Slice 2A.1 — generated typed private body authority
 
 Date: 2026-08-05
-Status: implementation and focused validation passed; focused API-contract recheck pending
+Status: accepted — focused API-contract recheck fixed `P7-API-001` and authorized Slice 2B guest execution
 Parent: [`phase-7-wave-2-plan.md`](phase-7-wave-2-plan.md)
-Finding: `P7-API-001` remains open
+Finding: `P7-API-001` fixed
 
 ## Delivered boundary
 
@@ -53,6 +53,8 @@ cargo tree --locked -p junban-plugin-sdk -e normal  # no Wasmtime/wit-bindgen/No
 
 The default-parallel `cargo test --locked --workspace --all-features` run passed all changed SDK/child tests but twice encountered the existing load-sensitive two-second timeout in `junban-server` test `restore_waits_for_owned_reconfigure_commit_then_permanently_drains`. The exact test passed alone, the full workspace passed with one test thread, and the same parallel-suite timeout was reproduced without this slice at unchanged HEAD `478fb3f`; no unrelated server-test change is included here.
 
-## Remaining gate
+## API-contract recheck
 
-This document records implementation evidence only. The focused API-contract recheck has not yet occurred, so `P7-API-001` remains open and Slice 2B must not start. `P7-DEP-001` also remains open, and no Wave 2 security gate or hostile-runtime acceptance is claimed.
+Focused recheck verified that WIT remains the sole public guest ABI; code generation covers all named types and functions; canonical decoding rejects structural and byte alternates; all 9 invocation and 11 host-call request/result/error/cancel mappings are exhaustive; constructors inseparably derive kind, branch, size and hash; and all 104 generated neutral↔Wasmtime adapter pairs compile and round-trip. It marked `P7-API-001` fixed and authorized Slice 2B guest execution.
+
+`P7-DEP-001` remains open, and no Wave 2 security gate or hostile-runtime acceptance is claimed.

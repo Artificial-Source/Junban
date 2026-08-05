@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod bindings;
+mod generated_body_adapters;
+
 use std::io::{self, Read, Write};
 
 use junban_plugin_sdk::{
@@ -259,8 +262,11 @@ pub fn run_child(reader: &mut impl Read, writer: &mut impl Write) -> Result<(), 
 mod tests {
     use super::*;
     use junban_plugin_sdk::{
-        RuntimeLimits, RuntimeProfile, canonical_permission_hash, encode_parent_frame,
+        InvocationRequest, RuntimeLimits, RuntimeProfile, SdkError, canonical_permission_hash,
+        encode_parent_frame, private_body_types as neutral,
     };
+
+    use crate::bindings::junban::plugin::types as binding;
 
     const SESSION: &str = "00000000-0000-4000-8000-000000000001";
     const INVOCATION: &str = "00000000-0000-4000-8000-000000000002";
@@ -320,6 +326,83 @@ mod tests {
             write!(&mut encoded, "{byte:02x}").unwrap();
         }
         encoded
+    }
+
+    fn assert_binding_round_trip<N, B>(value: N)
+    where
+        N: Clone + std::fmt::Debug + Eq + Into<B>,
+        B: TryInto<N, Error = SdkError>,
+    {
+        let binding: B = value.clone().into();
+        let actual = binding.try_into().unwrap();
+        assert_eq!(actual, value);
+    }
+
+    #[test]
+    fn generated_neutral_and_wasmtime_values_round_trip_and_bound_bytes() {
+        assert_binding_round_trip::<_, binding::InvocationContext>(neutral::InvocationContext {
+            plugin_id: "plugin".into(),
+            package_generation: 7,
+            activation_epoch: 9,
+            host_session_id: "session".into(),
+            invocation_id: "invocation".into(),
+            entry_id: Some("entry".into()),
+        });
+        assert_binding_round_trip::<_, binding::TaskQuery>(neutral::TaskQuery {
+            task_id: None,
+            project_id: Some("project".into()),
+            section_id: None,
+            parent_id: None,
+            tag_ids: vec!["tag".into()],
+            statuses: vec![neutral::TaskStatus::Pending],
+            priorities: vec![neutral::Priority::P1],
+            due_from: None,
+            due_before: Some("2030-01-02".into()),
+            search: None,
+            cursor: Some("cursor".into()),
+            limit: 10,
+        });
+        assert_binding_round_trip::<_, binding::StringChange>(neutral::StringChange::Unchanged(()));
+        assert_binding_round_trip::<_, binding::DomainMutation>(
+            neutral::DomainMutation::CompleteTask("task".into()),
+        );
+        assert_binding_round_trip::<_, binding::PluginOutcome>(neutral::PluginOutcome {
+            effect: Some(neutral::PluginEffect::KvPatch(neutral::KvPatch {
+                operations: vec![neutral::KvOperation::Set(neutral::KvSet {
+                    key: "key".into(),
+                    value: neutral::ByteList::new(vec![0xfb, 0xff]).unwrap(),
+                })],
+            })),
+        });
+        assert_binding_round_trip::<_, binding::HttpRequest>(neutral::HttpRequest {
+            method: neutral::HttpMethod::Post,
+            origin: "https://example.com".into(),
+            path_and_query: "/path".into(),
+            headers: vec![neutral::HttpHeader {
+                name: "accept".into(),
+                value: "application/json".into(),
+            }],
+            body: neutral::ByteList::new(vec![0xfb, 0xff]).unwrap(),
+        });
+        assert_binding_round_trip::<_, binding::ResyncPage>(neutral::ResyncPage::Finalize(
+            neutral::FinalizeResync {
+                session_id: "session".into(),
+            },
+        ));
+
+        let oversized = binding::HttpRequest {
+            method: binding::HttpMethod::Post,
+            origin: "https://example.com".into(),
+            path_and_query: "/path".into(),
+            headers: Vec::new(),
+            body: vec![0; neutral::BYTE_LIST_BYTES_MAX + 1],
+        };
+        assert!(matches!(
+            neutral::HttpRequest::try_from(oversized),
+            Err(SdkError::Protocol {
+                field: "byte list length"
+            })
+        ));
     }
 
     #[test]
@@ -419,16 +502,11 @@ mod tests {
             invocation_id: "00000000-0000-4000-8000-000000000003".into(),
             ..fence()
         };
-        let request = b"request";
-        let invoke = ParentFrame::Invoke {
-            fence: invoke_fence,
-            kind: junban_plugin_sdk::InvocationKind::InvokeCommand,
-            mode: junban_plugin_sdk::InvocationMode::Effect,
-            permission_hash: canonical_permission_hash(&[]).unwrap(),
-            request_sha256: sha256_hex(request),
-            request_size: request.len() as u32,
-        };
-        input.extend_from_slice(&encode(&invoke, request));
+        let request_message = InvocationRequest::activate(None)
+            .into_parent_message(invoke_fence, canonical_permission_hash(&[]).unwrap())
+            .unwrap();
+        let (invoke, request) = request_message.into_parts();
+        input.extend_from_slice(&encode(&invoke, &request));
         input.extend_from_slice(&encode(
             &ParentFrame::Shutdown {
                 host_session_id: SESSION.into(),

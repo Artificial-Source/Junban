@@ -1516,35 +1516,28 @@ fn protocol_raw_bodies_are_exact_bounded_and_hash_verified() {
     assert_eq!(parent_body_len(&load).unwrap(), component.len());
     validate_parent_body(&load, component).unwrap();
 
-    let request = b"request bytes";
-    let invoke = ParentFrame::Invoke {
-        fence: fence.clone(),
-        kind: InvocationKind::InvokeCommand,
-        mode: InvocationMode::Effect,
-        permission_hash: canonical_permission_hash(&[]).unwrap(),
-        request_sha256: hex(&sha256(request)),
-        request_size: u32::try_from(request.len()).unwrap(),
-    };
+    let request_message = InvocationRequest::activate(None)
+        .into_parent_message(fence.clone(), canonical_permission_hash(&[]).unwrap())
+        .unwrap();
+    let (invoke, request) = request_message.into_parts();
     assert_eq!(parent_body_len(&invoke).unwrap(), request.len());
-    validate_parent_body(&invoke, request).unwrap();
+    validate_parent_body(&invoke, &request).unwrap();
 
-    let outcome = b"outcome bytes";
-    let outcome_frame = ChildFrame::Outcome {
-        fence: fence.clone(),
-        outcome_sha256: hex(&sha256(outcome)),
-        outcome_size: u32::try_from(outcome.len()).unwrap(),
-    };
+    let outcome_message = InvocationOutcome::Activate(private_body_types::WitResult::Ok(()))
+        .into_child_message(fence.clone())
+        .unwrap();
+    let (outcome_frame, outcome) = outcome_message.into_parts();
     assert_eq!(child_body_len(&outcome_frame).unwrap(), outcome.len());
-    validate_child_body(&outcome_frame, outcome).unwrap();
+    validate_child_body(&outcome_frame, &outcome).unwrap();
 
     let mut wrong_hash = invoke.clone();
     if let ParentFrame::Invoke { request_sha256, .. } = &mut wrong_hash {
         *request_sha256 = "0".repeat(64);
     }
-    assert!(validate_parent_body(&wrong_hash, request).is_err());
+    assert!(validate_parent_body(&wrong_hash, &request).is_err());
     assert!(validate_parent_body(&invoke, &request[..request.len() - 1]).is_err());
     assert!(validate_parent_body(&invoke, b"").is_err());
-    let mut trailing = request.to_vec();
+    let mut trailing = request.clone();
     trailing.push(0);
     assert!(validate_parent_body(&invoke, &trailing).is_err());
 
@@ -1578,12 +1571,14 @@ fn protocol_raw_bodies_are_exact_bounded_and_hash_verified() {
     assert!(validate_parent_body(&oversized_request, b"").is_err());
     let oversized_outcome = ChildFrame::Outcome {
         fence: fence.clone(),
+        kind: InvocationKind::Activate,
         outcome_sha256: "2".repeat(64),
         outcome_size: u32::try_from(HOST_OUTCOME_BODY_BYTES_MAX + 1).unwrap(),
     };
     assert!(validate_child_body(&oversized_outcome, b"").is_err());
     let empty_outcome = ChildFrame::Outcome {
         fence,
+        kind: InvocationKind::Activate,
         outcome_sha256: hex(&sha256(b"")),
         outcome_size: 0,
     };
@@ -1804,26 +1799,35 @@ fn protocol_load_callback_cancellation_and_limits_are_fenced() {
         invocation_id: fence.invocation_id.clone(),
         callback_id: 1,
     };
-    let large_body = vec![7; HOST_OUTCOME_BODY_BYTES_MAX + 1];
-    let request = ChildFrame::CapabilityRequest {
-        callback: callback.clone(),
-        kind: HostCallKind::HttpRequest,
-        request_sha256: hex(&sha256(&large_body)),
-        request_size: large_body.len() as u32,
-    };
-    validate_child_body(&request, &large_body).unwrap();
+    let large_bytes = vec![7; HOST_OUTCOME_BODY_BYTES_MAX + 1];
+    let request_message = HostCallRequest::HttpRequest(private_body_types::HttpRequest {
+        method: private_body_types::HttpMethod::Post,
+        origin: "https://example.com".into(),
+        path_and_query: "/callback".into(),
+        headers: Vec::new(),
+        body: private_body_types::ByteList::new(large_bytes.clone()).unwrap(),
+    })
+    .into_child_message(callback.clone())
+    .unwrap();
+    let (request, request_body) = request_message.into_parts();
+    assert!(request_body.len() > HOST_OUTCOME_BODY_BYTES_MAX);
+    validate_child_body(&request, &request_body).unwrap();
     validate_callback_correlation(&fence, 1, &callback).unwrap();
 
-    let reply = ParentFrame::CapabilityReply {
-        callback: callback.clone(),
-        kind: HostCallKind::HttpRequest,
-        result: CapabilityReplyKind::Success,
-        response_sha256: hex(&sha256(&large_body)),
-        response_size: large_body.len() as u32,
-    };
-    validate_parent_body(&reply, &large_body).unwrap();
+    let reply_message = HostCallReply::HttpRequest(private_body_types::WitResult::Ok(
+        private_body_types::HttpResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: private_body_types::ByteList::new(large_bytes).unwrap(),
+            truncated: false,
+        },
+    ))
+    .into_parent_message(callback.clone())
+    .unwrap();
+    let (reply, reply_body) = reply_message.into_parts();
+    validate_parent_body(&reply, &reply_body).unwrap();
     validate_capability_reply(&request, &reply, &fence).unwrap();
-    assert!(validate_parent_body(&reply, &large_body[..large_body.len() - 1]).is_err());
+    assert!(validate_parent_body(&reply, &reply_body[..reply_body.len() - 1]).is_err());
     let mut wrong_kind = reply.clone();
     if let ParentFrame::CapabilityReply { kind, .. } = &mut wrong_kind {
         *kind = HostCallKind::GetKv;

@@ -1483,6 +1483,7 @@ dependencies = [
 name = "junban-plugin-sdk"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "ed25519-dalek",
  "jiff",
  "proptest",

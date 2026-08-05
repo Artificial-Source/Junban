@@ -31,6 +31,9 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
+      - name: Check generated plugin private bodies
+        run: cargo run --locked -p junban-plugin-sdk --features codegen --bin junban-plugin-body-codegen -- --check
+
       - name: Clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 

@@ -9,10 +9,14 @@ mod linkage;
 mod manifest;
 mod package;
 mod permission;
+mod private_body;
+pub mod private_body_types;
 mod protocol;
 mod registry;
 mod util;
 
+#[cfg(test)]
+mod private_body_tests;
 #[cfg(test)]
 mod tests;
 mod trust;
@@ -55,6 +59,11 @@ pub use package::{
 pub use permission::{
     PERMISSIONS_MAX, PermissionGrantAuthority, permission_set_hash, scope_hash,
     validate_permission_grants,
+};
+pub use private_body::{
+    HostCallReply, HostCallRequest, InvocationOutcome, InvocationPayload, InvocationRequest,
+    TypedChildMessage, TypedParentMessage, decode_host_call_reply, decode_host_call_request,
+    decode_invocation_outcome, decode_invocation_request,
 };
 pub use protocol::*;
 pub use registry::{

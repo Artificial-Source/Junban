@@ -11,6 +11,10 @@ use crate::{
     error::{Result, SdkError},
     manifest::{Capability, Permission, RuntimeProfile},
     permission::permission_set_hash,
+    private_body::{
+        decode_host_call_reply, decode_host_call_request, decode_invocation_outcome,
+        decode_invocation_request,
+    },
     util::{decode_hex_32, hex, is_canonical_id, sha256},
 };
 
@@ -232,6 +236,7 @@ pub enum ChildFrame {
     },
     Outcome {
         fence: AuthorityFence,
+        kind: InvocationKind,
         outcome_sha256: String,
         outcome_size: u32,
     },
@@ -357,6 +362,11 @@ impl HostCallKind {
             Self::Log => Some(Capability::Logging),
             Self::CallService => Some(Capability::ServicesConsume),
         }
+    }
+
+    #[must_use]
+    pub const fn allows_error(self) -> bool {
+        !matches!(self, Self::WallNow | Self::MonotonicMs | Self::Log)
     }
 
     #[must_use]
@@ -663,12 +673,17 @@ pub fn validate_parent_frame(frame: &ParentFrame) -> Result<()> {
         }
         ParentFrame::CapabilityReply {
             callback,
-            kind: _,
+            kind,
             result,
             response_sha256,
             response_size,
         } => {
             callback.validate()?;
+            if *result == CapabilityReplyKind::Error && !kind.allows_error() {
+                return Err(SdkError::Protocol {
+                    field: "callback_result",
+                });
+            }
             if *result == CapabilityReplyKind::Cancelled && *response_size != 0 {
                 return Err(SdkError::Protocol {
                     field: "cancelled_response_size",
@@ -678,7 +693,7 @@ pub fn validate_parent_frame(frame: &ParentFrame) -> Result<()> {
                 response_sha256,
                 usize::try_from(*response_size).unwrap_or(usize::MAX),
                 HOST_CALLBACK_BODY_BYTES_MAX,
-                true,
+                *result == CapabilityReplyKind::Cancelled,
                 "response_size",
             )
         }
@@ -719,12 +734,13 @@ pub fn validate_child_frame(frame: &ChildFrame) -> Result<()> {
                 request_sha256,
                 usize::try_from(*request_size).unwrap_or(usize::MAX),
                 HOST_CALLBACK_BODY_BYTES_MAX,
-                true,
+                false,
                 "callback_request_size",
             )
         }
         ChildFrame::Outcome {
             fence,
+            kind: _,
             outcome_sha256,
             outcome_size,
         } => {
@@ -809,7 +825,21 @@ pub fn validate_parent_body(frame: &ParentFrame, body: &[u8]) -> Result<()> {
         | ParentFrame::Unload { .. }
         | ParentFrame::Shutdown { .. } => None,
     };
-    validate_body(expected_len, expected_hash, body)
+    validate_body(expected_len, expected_hash, body)?;
+    match frame {
+        ParentFrame::Invoke { kind, .. } => {
+            decode_invocation_request(*kind, body)?;
+        }
+        ParentFrame::CapabilityReply { kind, result, .. } => {
+            decode_host_call_reply(*kind, *result, body)?;
+        }
+        ParentFrame::Hello { .. }
+        | ParentFrame::Load { .. }
+        | ParentFrame::Cancel { .. }
+        | ParentFrame::Unload { .. }
+        | ParentFrame::Shutdown { .. } => {}
+    }
+    Ok(())
 }
 
 /// Validate a caller-owned child body without copying or encoding it.
@@ -825,7 +855,22 @@ pub fn validate_child_body(frame: &ChildFrame, body: &[u8]) -> Result<()> {
         | ChildFrame::Unloaded { .. }
         | ChildFrame::ShutdownComplete { .. } => None,
     };
-    validate_body(expected_len, expected_hash, body)
+    validate_body(expected_len, expected_hash, body)?;
+    match frame {
+        ChildFrame::CapabilityRequest { kind, .. } => {
+            decode_host_call_request(*kind, body)?;
+        }
+        ChildFrame::Outcome { kind, .. } => {
+            decode_invocation_outcome(*kind, body)?;
+        }
+        ChildFrame::Hello { .. }
+        | ChildFrame::Loaded { .. }
+        | ChildFrame::Cancelled { .. }
+        | ChildFrame::Failed { .. }
+        | ChildFrame::Unloaded { .. }
+        | ChildFrame::ShutdownComplete { .. } => {}
+    }
+    Ok(())
 }
 
 fn validate_body(expected_len: usize, expected_hash: Option<&str>, body: &[u8]) -> Result<()> {

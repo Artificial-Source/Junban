@@ -8,7 +8,12 @@ repository.workspace = true
 description = "Portable package, WIT, and protocol contracts for Junban plugins"
 publish = false
 
+[features]
+default = []
+codegen = []
+
 [dependencies]
+base64.workspace = true
 ed25519-dalek.workspace = true
 jiff.workspace = true
 semver.workspace = true
@@ -23,6 +28,11 @@ wit-parser.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+
+[[bin]]
+name = "junban-plugin-body-codegen"
+path = "src/bin/junban-plugin-body-codegen.rs"
+required-features = ["codegen"]
 
 [lints]
 workspace = true

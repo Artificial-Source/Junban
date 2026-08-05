@@ -6,8 +6,8 @@ use std::{
 
 use junban_plugin_sdk::{
     AuthorityFence, ChildFrame, HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION, HostFailureCode,
-    ParentFrame, RuntimeLimits, RuntimeProfile, canonical_permission_hash, child_body_len,
-    decode_child_frame, encode_parent_frame,
+    InvocationRequest, ParentFrame, RuntimeLimits, RuntimeProfile, canonical_permission_hash,
+    child_body_len, decode_child_frame, encode_parent_frame,
 };
 use sha2::{Digest, Sha256};
 
@@ -125,19 +125,11 @@ fn process_loads_one_component_fences_calls_and_shuts_down_cleanly() {
 
     let mut invocation = fence();
     invocation.invocation_id = "00000000-0000-4000-8000-000000000003".into();
-    let request = b"bounded request";
-    append(
-        &mut input,
-        &ParentFrame::Invoke {
-            fence: invocation.clone(),
-            kind: junban_plugin_sdk::InvocationKind::InvokeCommand,
-            mode: junban_plugin_sdk::InvocationMode::Effect,
-            permission_hash: canonical_permission_hash(&[]).unwrap(),
-            request_sha256: hash(request),
-            request_size: request.len() as u32,
-        },
-        request,
-    );
+    let request_message = InvocationRequest::activate(None)
+        .into_parent_message(invocation.clone(), canonical_permission_hash(&[]).unwrap())
+        .unwrap();
+    let (invoke, request) = request_message.into_parts();
+    append(&mut input, &invoke, &request);
     append(
         &mut input,
         &ParentFrame::Cancel {
@@ -188,19 +180,14 @@ fn process_loads_one_component_fences_calls_and_shuts_down_cleanly() {
 
 #[test]
 fn process_rejects_calls_before_load_and_component_compile_failure() {
-    let request = b"request";
-    let invoke = ParentFrame::Invoke {
-        fence: fence(),
-        kind: junban_plugin_sdk::InvocationKind::Activate,
-        mode: junban_plugin_sdk::InvocationMode::Lifecycle,
-        permission_hash: canonical_permission_hash(&[]).unwrap(),
-        request_sha256: hash(request),
-        request_size: request.len() as u32,
-    };
+    let request_message = InvocationRequest::activate(None)
+        .into_parent_message(fence(), canonical_permission_hash(&[]).unwrap())
+        .unwrap();
+    let (invoke, request) = request_message.into_parts();
     let core_module = b"\0asm\x01\0\0\0";
     let mut input = Vec::new();
     append(&mut input, &hello(), &[]);
-    append(&mut input, &invoke, request);
+    append(&mut input, &invoke, &request);
     append(&mut input, &load(core_module), core_module);
     append(
         &mut input,

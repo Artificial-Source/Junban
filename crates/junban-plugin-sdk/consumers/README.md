@@ -7,6 +7,14 @@ These are build/test authorities for `junban:plugin@0.1.0`, not shipped runtime 
 
 Both source consumers implement all required guest exports and compile exercises for public types, including P1–P4 nullable priority, every unchanged/clear/set form, bulk priority clear/set, all project views, closed resync snapshots, and exact `TaskDraft::new` defaults.
 
+The private parent↔child JSON body representation is separate from these guest consumers. Its checked-in pure Rust serde values and function adapters are generated from the same WIT without changing or supplementing the guest ABI. Check it without Node or runtime code generation:
+
+```text
+cargo run --locked -p junban-plugin-sdk --features codegen --bin junban-plugin-body-codegen -- --check
+```
+
+Omit `--check` only when intentionally regenerating SDK `src/private_body_types.rs` and the child host's generated neutral↔Wasmtime adapters; the command refuses a WIT SHA change until its frozen expected SHA is deliberately updated. CI byte-compares both regenerated artifacts.
+
 ## Regenerate and check
 
 Install the TypeScript build-only lock first, then use the cross-platform Python driver (it uses Python hashing, not `sha256sum`):

@@ -1,6 +1,6 @@
 # Phase 7 Wave 2 — hostile plugin runtime plan
 
-Status: Slice 2A implemented; Slices 2B–2E and the Wave 2 security gate remain
+Status: Slices 2A and 2A.1 implemented; the Slice 2A.1 focused API recheck, Slices 2B–2E, and the Wave 2 security gate remain
 
 ## Outcome and boundary
 
@@ -36,7 +36,9 @@ Acceptance at this checkpoint: focused SDK/host Clippy and tests, exact dependen
 
 Generate checked-in pure serde body types from the one `plugin.wit` authority and byte-compare regeneration in check mode. Freeze canonical child-private JSON, exhaustive `InvocationKind` and `HostCallKind` request/success/error mappings, invocation-context construction, typed-only size/hash helpers, and malformed/cross-kind/result-branch rejection. Options are explicit value-or-null, variants/results are closed tagged forms, byte lists are canonical unpadded base64url, and parse-then-reserialize equality rejects noncanonical material. This is private transport only; WIT remains the sole public guest ABI.
 
-Acceptance: every request/outcome/callback branch has exact byte/hash goldens; omitted option, unknown/duplicate field, noncanonical bytes, numeric boundary, wrong kind/result and over-limit fixtures fail; generated neutral and Wasmtime binding types have compile-time/round-trip adapters and WIT drift checks. `P7-API-001` receives focused API-contract recheck before guest execution starts.
+Implemented on 2026-08-05: the SDK now checks in WIT-parser-generated neutral serde types and generated function argument/result adapters, owns closed request/outcome/host-call envelopes and kind/branch-derived frame/body constructors, derives invocation context from the header fence plus body entry ID, and makes the protocol validator perform one bounded parse-then-reserialize canonical check after raw hash validation. The same generator emits exhaustive neutral↔Wasmtime binding adapters in the child, where compile-time bindgen types and bounded byte conversion round trips are tested without constructing a linker or executing a guest. `ChildFrame::Outcome` now carries its invocation kind. Load bytes remain raw and cancellation remains the only empty callback reply. See [`phase-7-wave-2-slice-2a1.md`](phase-7-wave-2-slice-2a1.md).
+
+Acceptance remains: every request/outcome/callback branch has exact byte/hash goldens; omitted option, unknown/duplicate field, noncanonical bytes, numeric boundary, wrong kind/result and over-limit fixtures fail; generated neutral and Wasmtime binding types have compile-time/round-trip adapters and WIT drift checks. The implementation evidence adds reordered/whitespace, result-branch and bounded-corpus panic-free rejection plus byte-for-byte generated artifact and WIT SHA checking. The focused API-contract recheck is still pending, so `P7-API-001` remains open and Slice 2B has not started.
 
 ### Slice 2B — selective linker and resource sandbox
 
@@ -77,6 +79,7 @@ Start is profile reconciliation → selected verified active graph → fresh ses
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-features
+cargo run --locked -p junban-plugin-sdk --features codegen --bin junban-plugin-body-codegen -- --check
 cargo audit
 cargo deny check
 cargo tree --locked -p junban-server -e normal

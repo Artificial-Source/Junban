@@ -71,10 +71,13 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
 ```
 
-The current backend crates are `junban-domain`, `junban-app`, `junban-storage`, `junban-server`, `junban-cli`, `junban-mcp`, `junban-ai`, and the pure `junban-plugin-sdk`. The plugin SDK has no runtime host, storage, HTTP, or Wasmtime dependency. Focused Phase 7 SDK checks are:
+The current backend crates are `junban-domain`, `junban-app`, `junban-storage`, `junban-server`, `junban-cli`, `junban-mcp`, `junban-ai`, the pure `junban-plugin-sdk`, and the isolated `junban-plugin-host` binary. The SDK has no runtime host, storage, HTTP, or Wasmtime dependency; Wasmtime is confined to the child binary crate. Focused Phase 7 SDK/host checks are:
 
 ```bash
-cargo test --locked -p junban-plugin-sdk
+cargo clippy --locked -p junban-plugin-sdk -p junban-plugin-host --all-targets --all-features -- -D warnings
+cargo test --locked -p junban-plugin-sdk -p junban-plugin-host --all-targets --all-features
+cargo tree --locked -p junban-plugin-host -e features
+cargo tree --locked -p junban-server -e normal
 python3 scripts/check-phase7-sdk-consumers.py
 # Intentional binding/golden update only:
 # python3 scripts/check-phase7-sdk-consumers.py --regenerate

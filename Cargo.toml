@@ -38,6 +38,8 @@ tracing-subscriber = { version = "0.3.22", default-features = false, features = 
 utoipa = { version = "5.5.0", default-features = false, features = ["jiff_0_2", "macros", "uuid"] }
 uuid = { version = "1.24.0", default-features = false, features = ["rng-getrandom", "serde", "std", "v4", "v7"] }
 wasmparser = { version = "=0.248.0", default-features = false, features = ["std", "component-model", "validate"] }
+wasmtime = { version = "=36.0.13", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
+wasmtime-wasi = { version = "=36.0.13", default-features = false }
 wit-parser = { version = "=0.248.0", default-features = false, features = ["decoding"] }
 windows-sys = { version = "=0.61.2", default-features = false }
 

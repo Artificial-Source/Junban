@@ -13,7 +13,7 @@ This repository contains a ground-up implementation with:
 
 ## Status
 
-Phases 1–5 deliver the hosted Rust server through backup/restore plus the native `junban` CLI and `junban-mcp` stdio server over one shared 87-tool automation catalog. Phase 6 adds optional cloud AI chat (tools, approvals, history, memories) and browser-local or cloud speech. AI and voice stay disabled by default and load lazily. Phase 7's production plugin SDK subgate defines package, WIT, trust, component-inspection, capability, and private-protocol authorities without adding schema, runtime, routes, registry, or UI. Plugin runtime and desktop packaging remain later work. There is no packaged product release yet.
+Phases 1–5 deliver the hosted Rust server through backup/restore plus the native `junban` CLI and `junban-mcp` stdio server over one shared 87-tool automation catalog. Phase 6 adds optional cloud AI chat (tools, approvals, history, memories) and browser-local or cloud speech. AI and voice stay disabled by default and load lazily. Phase 7 now has its package/WIT/trust SDK, schema-v7 persistence, and isolated compile-only plugin-host child foundation. Selective guest linking/execution, routes, registry, and UI remain later Phase 7 work; desktop packaging remains Phase 8. There is no packaged product release yet.
 
 Operator docs: [`docs/ai-and-voice.md`](docs/ai-and-voice.md), [`docs/cli.md`](docs/cli.md), [`docs/mcp.md`](docs/mcp.md). Phase 7 evidence starts with the [SDK matched-release protocol](goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md).
 

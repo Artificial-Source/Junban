@@ -1,7 +1,7 @@
 # Phase 7 context map and execution contract
 
 Date: 2026-08-04
-Status: Wave 0 host placement and Wave 1 SDK-first package/WIT/matched-memory subgate accepted; schema v7 implementation is authorized
+Status: Wave 0 and Wave 1 accepted; Wave 2 Slice 2A isolated child/protocol foundation implemented, later runtime slices remain
 Base: Phase 6 commit `18bea1b899108f218074714697759af02fa56670`
 
 ## Purpose and observable outcome
@@ -24,8 +24,8 @@ The phase ends only after the frozen Rust and TypeScript examples build and run 
 ### Current repository
 
 - Workspace crates: `junban-domain`, `junban-app`, `junban-storage`, `junban-server`, `junban-cli`, `junban-mcp`, lazy `junban-ai`, and pure `junban-plugin-sdk`.
-- `junban-plugin-sdk` now owns bounded package/WIT/trust/component/protocol authority without Wasmtime, storage or runtime construction; `junban-plugin-host` does not yet exist.
-- SQLite schema head is v7; accepted Wave 1 persistence now owns normalized plugin package, trust, grants, settings, KV, dependencies, cursors, invocations and health authority. `junban-plugin-host` does not yet exist.
+- `junban-plugin-sdk` owns bounded package/WIT/trust/component/protocol authority without Wasmtime, storage or runtime construction. The isolated `junban-plugin-host` Slice 2A child now owns strict protocol I/O, one Engine, and one hash-bound component compilation, but does not yet link, instantiate, or execute guests.
+- SQLite schema head is v7; accepted Wave 1 persistence owns normalized plugin package, trust, grants, settings, KV, dependencies, cursors, invocations and health authority.
 - `FeatureSettings` contains only six first-party feature toggles. `/settings/plugins` is intentionally rejected today, and `FeaturesTab` documents that plugin keys are unsupported.
 - `docs/architecture.md` reserves `junban-plugin-sdk` for WIT/package contracts and `junban-plugin-host` for the measured optional runtime.
 - `docs/performance.md` requires no Wasmtime initialization on ordinary startup.

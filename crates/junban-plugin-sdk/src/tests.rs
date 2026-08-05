@@ -1434,6 +1434,7 @@ fn protocol_frames_are_canonical_bounded_and_identity_fenced() {
     unknown_frame.extend_from_slice(unknown_payload);
     assert!(decode_parent_frame(&unknown_frame).is_err());
     let invalid = ParentFrame::Hello {
+        protocol_name: HOST_PROTOCOL_NAME.into(),
         protocol_version: HOST_PROTOCOL_VERSION + 1,
         host_session_id: "00000000-0000-4000-8000-000000000001".into(),
     };
@@ -1443,6 +1444,12 @@ fn protocol_frames_are_canonical_bounded_and_identity_fenced() {
     invalid_frame.extend_from_slice(&u32::try_from(invalid_payload.len()).unwrap().to_be_bytes());
     invalid_frame.extend_from_slice(&invalid_payload);
     assert!(decode_parent_frame(&invalid_frame).is_err());
+    let wrong_protocol = ParentFrame::Hello {
+        protocol_name: "not-junban".into(),
+        protocol_version: HOST_PROTOCOL_VERSION,
+        host_session_id: "00000000-0000-4000-8000-000000000001".into(),
+    };
+    assert!(encode_parent_frame(&wrong_protocol).is_err());
     let mut oversized_header = Vec::new();
     oversized_header.extend_from_slice(
         &u32::try_from(HOST_FRAME_BYTES_MAX + 1)
@@ -1499,6 +1506,7 @@ fn protocol_raw_bodies_are_exact_bounded_and_hash_verified() {
         fence: fence.clone(),
         package_sha256: "1".repeat(64),
         component_sha256: hex(&sha256(component)),
+        import_export_fingerprint: "3".repeat(64),
         runtime_profile: RuntimeProfile::Typescript,
         component_size: u64::try_from(component.len()).unwrap(),
         grants: Vec::new(),
@@ -1551,6 +1559,7 @@ fn protocol_raw_bodies_are_exact_bounded_and_hash_verified() {
         fence: fence.clone(),
         package_sha256: "1".repeat(64),
         component_sha256: "2".repeat(64),
+        import_export_fingerprint: "3".repeat(64),
         runtime_profile: RuntimeProfile::Typescript,
         component_size: u64::try_from(HOST_COMPONENT_BODY_BYTES_MAX + 1).unwrap(),
         grants: Vec::new(),
@@ -1668,6 +1677,7 @@ fn protocol_callback_authority_binds_exact_load_activation_mode_and_grants() {
         fence: load_fence.clone(),
         package_sha256: "1".repeat(64),
         component_sha256: "2".repeat(64),
+        import_export_fingerprint: "3".repeat(64),
         runtime_profile: RuntimeProfile::Rust,
         component_size: 1,
         grants,
@@ -1746,6 +1756,7 @@ fn protocol_load_callback_cancellation_and_limits_are_fenced() {
         fence: fence.clone(),
         package_sha256: "1".repeat(64),
         component_sha256: hex(&sha256(component)),
+        import_export_fingerprint: "3".repeat(64),
         runtime_profile: RuntimeProfile::Rust,
         component_size: component.len() as u64,
         grants: grants.clone(),
@@ -1754,6 +1765,15 @@ fn protocol_load_callback_cancellation_and_limits_are_fenced() {
     };
     validate_parent_body(&load, component).unwrap();
 
+    let mut wrong_fingerprint = load.clone();
+    if let ParentFrame::Load {
+        import_export_fingerprint,
+        ..
+    } = &mut wrong_fingerprint
+    {
+        *import_export_fingerprint = "not-a-hash".into();
+    }
+    assert!(validate_parent_frame(&wrong_fingerprint).is_err());
     let mut wrong_hash = load.clone();
     if let ParentFrame::Load {
         permission_hash, ..

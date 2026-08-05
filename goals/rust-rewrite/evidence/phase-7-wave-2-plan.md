@@ -1,6 +1,6 @@
 # Phase 7 Wave 2 — hostile plugin runtime plan
 
-Status: implementation-ready after dependency-security checkpoint
+Status: Slice 2A implemented; Slices 2B–2E and the Wave 2 security gate remain
 
 ## Outcome and boundary
 
@@ -26,9 +26,11 @@ Wave 2 keeps Rust 1.93.0 and pins exact `wasmtime`/`wasmtime-wasi` **36.0.13**:
 
 ### Slice 2A — isolated child and exact protocol
 
-Add `crates/junban-plugin-host` as a workspace binary. Wasmtime dependencies exist only there; `junban-server` must remain Wasmtime-free. Implement SDK-owned JRI1 framing over stdin/stdout with bounded headers/raw component bodies, exact correlation, protocol-version rejection, EOF handling, stdout purity, and fail-closed parsing. The child accepts only parent-selected load/call/cancel/shutdown identities and never receives a profile path, token, database handle, inherited environment, socket, filesystem preopen, or ambient stdio.
+Implemented by the focused Slice 2A checkpoint. `crates/junban-plugin-host` is the only crate that depends on exact `wasmtime`/`wasmtime-wasi` 36.0.13. Its reusable codec consumes the SDK's canonical u32be JSON/private-protocol types, exact protocol name/version, bounded raw bodies and full fences; the launched child constructs one configured Engine, re-hashes and compiles one parent-selected component, and never instantiates or links it. Process tests launch the absolute sibling binary with an empty environment, prove protocol-only stdout, bounded redacted stderr, compile failure, state/identity fencing, clean EOF/shutdown, and wait/reap cleanup.
 
-Acceptance: exact dependency/features/audit checks; malformed/truncated/oversized/hash/version/correlation tests; absolute sibling-process launch harness with environment scrubbing and kill/wait cleanup; no plugin/no host default proof remains unchanged.
+The load frame now carries the already SDK-inspected import/export fingerprint that `Loaded` must echo, and hello carries the existing SDK protocol name as its exact magic. These are minimal additions to the SDK-owned authority rather than a second envelope. Unsupported invoke/cancel/unload/callback cases use the frozen fenced `Failed` frame. Slice 2B must replace `Unavailable` with real selective-linker execution; it does not replace the codec, process loop, load identity, or Engine owner.
+
+Acceptance at this checkpoint: focused SDK/host Clippy and tests, exact dependency/features/audit checks, malformed/truncated/oversized/hash/protocol/type/correlation process coverage, absolute sibling-process environment scrubbing and wait cleanup, and an unchanged Wasmtime-free `junban-server` tree. This does not close `P7-DEP-001` or the Wave 2 security gate.
 
 ### Slice 2B — selective linker and resource sandbox
 

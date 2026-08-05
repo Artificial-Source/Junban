@@ -60,6 +60,7 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-7-wave-1-sdk-outcome.md`](../goals/rust-rewrite/evidence/phase-7-wave-1-sdk-outcome.md): accepted SDK/package/WIT/review/memory subgate and schema-v7 authorization
 - [`../goals/rust-rewrite/evidence/phase-7-wave-1-slice-b.md`](../goals/rust-rewrite/evidence/phase-7-wave-1-slice-b.md): accepted normalized plugin persistence, atomic effect, invocation, receipt, health and staged-package authority
 - [`../goals/rust-rewrite/evidence/phase-7-wave-2-plan.md`](../goals/rust-rewrite/evidence/phase-7-wave-2-plan.md): hostile child-runtime slices, patched Wasmtime LTS decision and Wave 2 validation boundary
+- [`../goals/rust-rewrite/evidence/phase-7-wave-2-slice-2a.md`](../goals/rust-rewrite/evidence/phase-7-wave-2-slice-2a.md): isolated child, strict private-protocol, exact dependency, process, and audit evidence
 - [`../goals/rust-rewrite/evidence/phase-7-review-ledger.md`](../goals/rust-rewrite/evidence/phase-7-review-ledger.md): Phase 7 specialist findings and closure evidence
 - [`../goals/rust-rewrite/evidence/phase-7-legacy-visual-baseline/README.md`](../goals/rust-rewrite/evidence/phase-7-legacy-visual-baseline/README.md): independent legacy-rendered Phase 7 Extensions/plugin visual authorities and manifest
 - [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings

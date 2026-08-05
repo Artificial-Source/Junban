@@ -143,4 +143,4 @@ Dependency security verdict: **blocked on 45.0.3**. Exact 36.0.13 LTS is approve
 
 ## Current open findings
 
-`P7-DEP-001` is open for Wave 2: vulnerable historical Wasmtime 45.0.3 is blocked, while exact patched 36.0.13 LTS is approved for implementation and must receive clean dependency/feature/hostile-runtime evidence before closure. Wave 0 placement, SDK-first package/WIT/matched-memory, and Wave 1 schema/persistence authority remain accepted; `P7-DB-001`–`011` are fixed. Runtime host, operator routes, registry UI, React UI, and reference plugins have not started.
+`P7-DEP-001` remains open for Wave 2. Slice 2A introduces exact patched Wasmtime/`wasmtime-wasi` 36.0.13 only in the isolated child crate and records clean focused dependency/audit/protocol evidence, but selective imports, hostile runtime containment, and replacement active-runtime evidence remain Slices 2B–2E and are required before closure. Wave 0 placement, SDK-first package/WIT/matched-memory, and Wave 1 schema/persistence authority remain accepted; `P7-DB-001`–`011` are fixed. Operator routes, registry UI, React UI, and reference plugins have not started.

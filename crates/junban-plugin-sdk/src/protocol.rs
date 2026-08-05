@@ -171,6 +171,7 @@ impl RuntimeLimits {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ParentFrame {
     Hello {
+        protocol_name: String,
         protocol_version: u16,
         host_session_id: String,
     },
@@ -178,6 +179,7 @@ pub enum ParentFrame {
         fence: AuthorityFence,
         package_sha256: String,
         component_sha256: String,
+        import_export_fingerprint: String,
         runtime_profile: RuntimeProfile,
         component_size: u64,
         grants: Vec<Permission>,
@@ -214,6 +216,7 @@ pub enum ParentFrame {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChildFrame {
     Hello {
+        protocol_name: String,
         protocol_version: u16,
         host_session_id: String,
     },
@@ -604,9 +607,11 @@ pub fn decode_child_frame(bytes: &[u8]) -> Result<ChildFrame> {
 pub fn validate_parent_frame(frame: &ParentFrame) -> Result<()> {
     match frame {
         ParentFrame::Hello {
+            protocol_name,
             protocol_version,
             host_session_id,
         } => {
+            validate_protocol_name(protocol_name)?;
             validate_version(*protocol_version)?;
             validate_uuid(host_session_id, "host_session_id")
         }
@@ -614,6 +619,7 @@ pub fn validate_parent_frame(frame: &ParentFrame) -> Result<()> {
             fence,
             package_sha256,
             component_sha256,
+            import_export_fingerprint,
             runtime_profile,
             component_size,
             grants,
@@ -623,6 +629,7 @@ pub fn validate_parent_frame(frame: &ParentFrame) -> Result<()> {
             fence.validate()?;
             decode_hex_32(package_sha256, "package_sha256")?;
             decode_hex_32(component_sha256, "component_sha256")?;
+            decode_hex_32(import_export_fingerprint, "import_export_fingerprint")?;
             if *component_size == 0 || *component_size > HOST_COMPONENT_BODY_BYTES_MAX as u64 {
                 return Err(SdkError::Protocol {
                     field: "component_size",
@@ -685,9 +692,11 @@ pub fn validate_parent_frame(frame: &ParentFrame) -> Result<()> {
 pub fn validate_child_frame(frame: &ChildFrame) -> Result<()> {
     match frame {
         ChildFrame::Hello {
+            protocol_name,
             protocol_version,
             host_session_id,
         } => {
+            validate_protocol_name(protocol_name)?;
             validate_version(*protocol_version)?;
             validate_uuid(host_session_id, "host_session_id")
         }
@@ -836,6 +845,14 @@ fn validate_body(expected_len: usize, expected_hash: Option<&str>, body: &[u8]) 
 #[must_use]
 pub fn canonical_permission_hash(grants: &[Permission]) -> Option<String> {
     permission_set_hash(grants).ok().map(|hash| hex(&hash))
+}
+
+fn validate_protocol_name(name: &str) -> Result<()> {
+    if name == HOST_PROTOCOL_NAME {
+        Ok(())
+    } else {
+        Err(SdkError::Protocol { field: "protocol" })
+    }
 }
 
 fn validate_version(version: u16) -> Result<()> {

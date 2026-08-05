@@ -2,7 +2,7 @@
 
 Date: 2026-08-05
 
-Status: **implemented, cross-platform campaign pending; calibration only**
+Status: **cross-platform calibration complete; macOS cap authority blocked; calibration only**
 
 Protocol: `junban-phase7-process-memory-calibration-v1`
 
@@ -64,16 +64,30 @@ Each canonical JSON campaign records:
 
 A run fails if the release assertion, component inspection, protocol flow, callback reply, invocation, shutdown/reap, empty diagnostics, or any required phase sample fails.
 
-## Single-machine Linux preliminary
+## Cross-platform calibration campaign
 
-The complete local Linux protocol ran from clean source commit `0bb0c039da0fe326a9b091d9ad5a98e134fd2159` with release executable SHA-256 `1493b40ef2f1952375af219b8c052ebb3ba87c29d7cad1c70f954dced67842b3`. The warm-up and all five measured runs per profile passed. Maxima across the five measured runs were:
+GitHub Actions run [`31008905408`](https://github.com/Artificial-Source/Junban/actions/runs/31008905408) ran from exact clean commit `9bb5941e42270d65798d86ec3b652bd1001b0744`. Ubuntu, macOS, and Windows each completed one warm-up plus five serial measured runs for both profiles. The canonical raw results are retained as:
 
-| Profile    |     VmSize |     VmPeak |        RSS |      VmHWM |
-| ---------- | ---------: | ---------: | ---------: | ---------: |
-| Rust       | 348.39 MiB | 348.39 MiB |  73.57 MiB |  73.57 MiB |
-| TypeScript | 771.54 MiB | 785.90 MiB | 536.71 MiB | 539.37 MiB |
+- [`phase-7-process-memory-calibration-linux.json`](phase-7-process-memory-calibration-linux.json)
+- [`phase-7-process-memory-calibration-macos.json`](phase-7-process-memory-calibration-macos.json)
+- [`phase-7-process-memory-calibration-windows.json`](phase-7-process-memory-calibration-windows.json)
 
-The canonical raw result is retained as [`phase-7-process-memory-calibration-linux-preliminary.json`](phase-7-process-memory-calibration-linux-preliminary.json). This one host is preliminary evidence only. It does not replace the pending Linux/macOS/Windows workflow campaign, establish ordinary variance, select a candidate cap, or close either finding.
+Authority maxima and the mechanical 125% minima are:
+
+| Platform/profile   |                    Authority maximum | `ceil(1.25 × maximum)` |
+| ------------------ | -----------------------------------: | ---------------------: |
+| Linux Rust         |     365,305,856-byte virtual address |      456,632,320 bytes |
+| Linux TypeScript   |     880,021,504-byte virtual address |    1,100,026,880 bytes |
+| macOS Rust         | 445,909,827,584-byte virtual address |  557,387,284,480 bytes |
+| macOS TypeScript   | 446,150,574,080-byte virtual address |  557,688,217,600 bytes |
+| Windows Rust       |       57,274,368-byte private commit |       71,592,960 bytes |
+| Windows TypeScript |      456,949,760-byte private commit |      571,187,200 bytes |
+
+The macOS result is a blocker, not a candidate 519-GiB cap. Modern macOS reported roughly 415 GiB of process virtual address for both otherwise-valid profiles. A process ceiling above 519 GiB would not materially contain a 64/128-MiB typed-lift amplification and therefore fails this protocol's separation rule. `P7-PLAN-RUNTIME-001` remains open while an effective public macOS authority or a narrower pre-lift/native-allocation defense is validated.
+
+The first campaign run `31007358850` passed Linux/macOS but failed Windows because a cold per-sample PowerShell process did not produce a sample within five seconds and the harness discarded sampling errors. Commit `9bb5941` retained current-generation errors with diagnostics and uses a 30-second first-sample deadline on Windows only; the exact rerun then passed all phases. No failed-run numbers informed this table.
+
+These three hosts establish the planned platform sample shape but do not select a cap, prove ordinary fleet variance, run the later hostile amplification fixture, or close either finding.
 
 ## Platform metrics
 

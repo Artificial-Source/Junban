@@ -665,15 +665,19 @@ fn validate_invocations(
             )
             .map_err(storage)?;
         let runtime_admits_invocation = state == "ambiguous_http"
-            || if hook_kind == "resync" {
-                plugin.row.runtime_state == "starting" && cursor_resync_required
-            } else {
-                plugin.row.runtime_state == "active" && !cursor_resync_required
+            || match hook_kind.as_str() {
+                "resync" => plugin.row.runtime_state == "starting" && cursor_resync_required,
+                "handle_event" => {
+                    matches!(plugin.row.runtime_state.as_str(), "starting" | "active")
+                        && !cursor_resync_required
+                }
+                _ => plugin.row.runtime_state == "active" && !cursor_resync_required,
             };
         if !runtime_admits_invocation
             || (state == "ambiguous_http") != (error_code.as_deref() == Some("http_ambiguous"))
             || (http_state
                 && (hook_kind == "resync"
+                    || (state == "dispatching_http" && plugin.row.runtime_state != "active")
                     || !http_requested
                     || (state == "dispatching_http" && !http_granted)))
             || (state != "ambiguous_http" && error_code.is_some())

@@ -2458,6 +2458,17 @@ where
             .map_err(AppError::from)
     }
 
+    pub async fn reserve_authorized_plugin_invocation(
+        &self,
+        request: crate::AuthorizedReservePluginInvocationRequest,
+        now: Timestamp,
+    ) -> Result<crate::ReservedPluginInvocation, AppError> {
+        self.repository
+            .reserve_authorized_plugin_invocation(request, now)
+            .await
+            .map_err(AppError::from)
+    }
+
     pub async fn transition_plugin_invocation(
         &self,
         request: crate::TransitionPluginInvocationRequest,
@@ -2465,6 +2476,17 @@ where
     ) -> Result<crate::PluginInvocation, AppError> {
         self.repository
             .transition_plugin_invocation(request, now)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn transition_authorized_plugin_invocation(
+        &self,
+        request: crate::AuthorizedTransitionPluginInvocationRequest,
+        now: Timestamp,
+    ) -> Result<crate::PluginInvocation, AppError> {
+        self.repository
+            .transition_authorized_plugin_invocation(request, now)
             .await
             .map_err(AppError::from)
     }
@@ -2496,6 +2518,17 @@ where
             .map_err(AppError::from)
     }
 
+    pub async fn complete_authorized_plugin_invocation(
+        &self,
+        request: crate::CompletePluginInvocationRequest,
+        now: Timestamp,
+    ) -> Result<crate::CommittedPluginInvocation, AppError> {
+        self.repository
+            .complete_authorized_plugin_invocation(request, now)
+            .await
+            .map_err(AppError::from)
+    }
+
     pub async fn commit_plugin_invocation(
         &self,
         request: crate::CommitPluginInvocationRequest,
@@ -2505,6 +2538,26 @@ where
         let committed = self
             .repository
             .commit_plugin_invocation(planned, now)
+            .await
+            .map_err(AppError::from)?;
+        if let Some(mutation) = &committed.mutation
+            && mutation.newly_committed
+        {
+            self.events.publish(mutation.event.clone());
+        }
+        Ok(committed)
+    }
+
+    pub async fn commit_authorized_plugin_invocation(
+        &self,
+        request: crate::AuthorizedCommitPluginInvocationRequest,
+        now: Timestamp,
+    ) -> Result<crate::CommittedPluginInvocation, AppError> {
+        let planned =
+            crate::plan_authorized_plugin_invocation_commit(request).map_err(AppError::from)?;
+        let committed = self
+            .repository
+            .commit_authorized_plugin_invocation(planned, now)
             .await
             .map_err(AppError::from)?;
         if let Some(mutation) = &committed.mutation

@@ -892,6 +892,15 @@ pub struct ReservePluginInvocationRequest {
     pub resync_session: Option<PluginResyncSession>,
 }
 
+/// Slice 2D authorization wrapper. The unwrapped request remains temporarily
+/// available to the pre-Slice-2D supervisor and must not be used by new delivery
+/// code.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthorizedReservePluginInvocationRequest {
+    pub request: ReservePluginInvocationRequest,
+    pub delivery: crate::PluginInvocationDelivery,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReservedPluginInvocation {
     Reserved(PluginInvocation),
@@ -930,6 +939,21 @@ pub struct TransitionPluginInvocationRequest {
     pub activation_epoch: u64,
     pub expected_state: PluginInvocationState,
     pub next_state: PluginInvocationState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthorizedTransitionPluginInvocationRequest {
+    pub request: TransitionPluginInvocationRequest,
+    pub delivery: crate::PluginInvocationDelivery,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompletePluginInvocationRequest {
+    pub operation_id: OperationId,
+    pub plugin_id: PluginId,
+    pub package_generation: u64,
+    pub activation_epoch: u64,
+    pub delivery: crate::PluginInvocationDelivery,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -1150,6 +1174,11 @@ pub struct CommitPluginInvocationRequest {
     pub resync_session: Option<PluginResyncSession>,
 }
 
+pub struct AuthorizedCommitPluginInvocationRequest {
+    pub request: CommitPluginInvocationRequest,
+    pub delivery: crate::PluginInvocationDelivery,
+}
+
 /// Transaction-local form of the first-party mutation repository. Storage
 /// implements this over its current SQLite transaction; application plans never
 /// receive a connection or storage-specific type.
@@ -1271,6 +1300,20 @@ pub struct PlannedPluginInvocationCommit {
     pub resync_kv: Option<PluginResyncKvCommit>,
     pub cursor: Option<AdvancePluginCursorRequest>,
     pub resync_session: Option<PluginResyncSession>,
+}
+
+pub struct AuthorizedPlannedPluginInvocationCommit {
+    pub planned: PlannedPluginInvocationCommit,
+    pub delivery: crate::PluginInvocationDelivery,
+}
+
+pub fn plan_authorized_plugin_invocation_commit(
+    request: AuthorizedCommitPluginInvocationRequest,
+) -> Result<AuthorizedPlannedPluginInvocationCommit, RepositoryError> {
+    Ok(AuthorizedPlannedPluginInvocationCommit {
+        planned: plan_plugin_invocation_commit(request.request)?,
+        delivery: request.delivery,
+    })
 }
 
 /// Select the exact first-party use case in the application layer. The selected
@@ -1705,9 +1748,25 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
+    fn reserve_authorized_plugin_invocation(
+        &self,
+        _request: AuthorizedReservePluginInvocationRequest,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, ReservedPluginInvocation> {
+        plugin_unavailable()
+    }
+
     fn transition_plugin_invocation(
         &self,
         _request: TransitionPluginInvocationRequest,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, PluginInvocation> {
+        plugin_unavailable()
+    }
+
+    fn transition_authorized_plugin_invocation(
+        &self,
+        _request: AuthorizedTransitionPluginInvocationRequest,
         _now: Timestamp,
     ) -> RepositoryFuture<'_, PluginInvocation> {
         plugin_unavailable()
@@ -1728,9 +1787,25 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
+    fn complete_authorized_plugin_invocation(
+        &self,
+        _request: CompletePluginInvocationRequest,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedPluginInvocation> {
+        plugin_unavailable()
+    }
+
     fn commit_plugin_invocation(
         &self,
         _request: PlannedPluginInvocationCommit,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedPluginInvocation> {
+        plugin_unavailable()
+    }
+
+    fn commit_authorized_plugin_invocation(
+        &self,
+        _request: AuthorizedPlannedPluginInvocationCommit,
         _now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedPluginInvocation> {
         plugin_unavailable()

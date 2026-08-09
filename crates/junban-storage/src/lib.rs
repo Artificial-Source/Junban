@@ -1377,6 +1377,16 @@ impl PluginRepository for SqliteRepository {
         })
     }
 
+    fn reserve_authorized_plugin_invocation(
+        &self,
+        request: junban_app::AuthorizedReservePluginInvocationRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::ReservedPluginInvocation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::reserve_authorized_plugin_invocation(connection, request, now)
+        })
+    }
+
     fn transition_plugin_invocation(
         &self,
         request: junban_app::TransitionPluginInvocationRequest,
@@ -1384,6 +1394,16 @@ impl PluginRepository for SqliteRepository {
     ) -> RepositoryFuture<'_, junban_app::PluginInvocation> {
         self.plugin_request(move |connection, _| {
             plugin_ops::transition_plugin_invocation(connection, request, now)
+        })
+    }
+
+    fn transition_authorized_plugin_invocation(
+        &self,
+        request: junban_app::AuthorizedTransitionPluginInvocationRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginInvocation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::transition_authorized_plugin_invocation(connection, request, now)
         })
     }
 
@@ -1411,6 +1431,16 @@ impl PluginRepository for SqliteRepository {
         })
     }
 
+    fn complete_authorized_plugin_invocation(
+        &self,
+        request: junban_app::CompletePluginInvocationRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::CommittedPluginInvocation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::complete_authorized_plugin_invocation(connection, request, now)
+        })
+    }
+
     fn commit_plugin_invocation(
         &self,
         request: junban_app::PlannedPluginInvocationCommit,
@@ -1418,6 +1448,16 @@ impl PluginRepository for SqliteRepository {
     ) -> RepositoryFuture<'_, junban_app::CommittedPluginInvocation> {
         self.plugin_request(move |connection, _| {
             plugin_ops::commit_plugin_invocation(connection, request, now)
+        })
+    }
+
+    fn commit_authorized_plugin_invocation(
+        &self,
+        request: junban_app::AuthorizedPlannedPluginInvocationCommit,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::CommittedPluginInvocation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::commit_authorized_plugin_invocation(connection, request, now)
         })
     }
 

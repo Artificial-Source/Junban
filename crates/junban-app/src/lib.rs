@@ -8,6 +8,7 @@ mod artifact;
 mod error;
 mod event;
 mod plugin;
+mod plugin_delivery;
 mod ports;
 mod requests;
 mod service;
@@ -31,6 +32,7 @@ pub use event::{
     EventType, ResourceRef, ResourceSnapshot, ResourceType, ResyncScope,
 };
 pub use plugin::*;
+pub use plugin_delivery::*;
 pub use ports::{Repository, RepositoryFuture, SyncState};
 pub use requests::{
     ACTIVITY_PAGE_DEFAULT, ACTIVITY_PAGE_MAX, AppSettings, BulkAction, BulkSchedule, BulkTagChange,

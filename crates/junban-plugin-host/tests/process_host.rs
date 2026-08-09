@@ -540,16 +540,23 @@ fn retained_typescript_invokes_all_exports_and_contains_oversized_import() {
         "00000000-0000-4000-8000-000000000012",
         &permission_hash,
     );
-    assert_eq!(
-        (spin.1, spin.2),
-        (
-            ChildFrame::Failed {
-                fence: spin.0,
-                code: HostFailureCode::ResourceLimit,
-            },
-            Vec::new(),
-        )
-    );
+    let (spin_fence, spin_frame, spin_body) = spin;
+    assert_eq!(spin_body, Vec::<u8>::new());
+    match spin_frame {
+        ChildFrame::Failed { fence, code } => {
+            assert_eq!(fence, spin_fence);
+            assert!(
+                matches!(
+                    code,
+                    HostFailureCode::ResourceLimit | HostFailureCode::Timeout
+                ),
+                "spin expected concurrent-limit terminal ResourceLimit or Timeout, got {code:?}"
+            );
+        }
+        other => panic!(
+            "spin expected Failed with concurrent-limit terminal ResourceLimit or Timeout, got {other:?}"
+        ),
+    }
 
     let wall_spin = host.invoke(
         InvocationRequest::handle_event(

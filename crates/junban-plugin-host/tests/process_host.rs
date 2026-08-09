@@ -5,11 +5,12 @@ use std::{
 
 use junban_plugin_sdk::{
     AuthorityFence, CallbackFence, Capability, ChildFrame, HOST_CALLBACK_BODY_BYTES_MAX,
-    HOST_FRAME_BYTES_MAX, HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION, HostCallKind, HostCallReply,
-    HostCallRequest, HostFailureCode, InvocationOutcome, InvocationRequest, ParentFrame,
-    Permission, PermissionScope, RuntimeLimits, RuntimeProfile, ServiceConsumeScope,
-    ServiceReference, UnscopedPermission, canonical_permission_hash, child_body_len,
-    decode_child_frame, decode_host_call_request, decode_invocation_outcome, encode_parent_frame,
+    HOST_CONCURRENT_INVOCATIONS_MAX, HOST_FRAME_BYTES_MAX, HOST_JUNBAN_VERSION, HOST_PROTOCOL_NAME,
+    HOST_PROTOCOL_VERSION, HOST_RUNTIME_ENTRIES_MAX, HostCallKind, HostCallReply, HostCallRequest,
+    HostFailureCode, InvocationOutcome, InvocationRequest, ParentFrame, Permission,
+    PermissionScope, RuntimeLimits, RuntimeProfile, ServiceConsumeScope, ServiceReference,
+    UnscopedPermission, canonical_permission_hash, child_body_len, decode_child_frame,
+    decode_host_call_request, decode_invocation_outcome, encode_parent_frame,
     inspect_component_for_runtime, private_body_types as body, validate_child_body,
 };
 use sha2::{Digest, Sha256};
@@ -46,10 +47,15 @@ impl HostProcess {
         }
     }
 
-    fn send(&mut self, frame: &ParentFrame, body: &[u8]) {
+    fn send_header(&mut self, frame: &ParentFrame) {
         self.stdin
             .write_all(&encode_parent_frame(frame).unwrap())
             .unwrap();
+        self.stdin.flush().unwrap();
+    }
+
+    fn send(&mut self, frame: &ParentFrame, body: &[u8]) {
+        self.send_header(frame);
         self.stdin.write_all(body).unwrap();
         self.stdin.flush().unwrap();
     }
@@ -74,6 +80,7 @@ impl HostProcess {
             &ParentFrame::Hello {
                 protocol_name: HOST_PROTOCOL_NAME.into(),
                 protocol_version: HOST_PROTOCOL_VERSION,
+                junban_version: HOST_JUNBAN_VERSION.into(),
                 host_session_id: SESSION.into(),
             },
             &[],
@@ -84,6 +91,7 @@ impl HostProcess {
                 ChildFrame::Hello {
                     protocol_name: HOST_PROTOCOL_NAME.into(),
                     protocol_version: HOST_PROTOCOL_VERSION,
+                    junban_version: HOST_JUNBAN_VERSION.into(),
                     host_session_id: SESSION.into(),
                 },
                 Vec::new(),
@@ -111,6 +119,32 @@ impl HostProcess {
         self.send(&frame, &request_body);
         let (frame, response_body) = self.receive();
         (invoke_fence, frame, response_body)
+    }
+
+    fn finish_with_status(mut self, expect_success: bool) -> Vec<u8> {
+        drop(self.stdin);
+        let status = self.child.wait().unwrap();
+        assert_eq!(status.success(), expect_success, "unexpected child status");
+        let mut stderr = Vec::new();
+        self.child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_end(&mut stderr)
+            .unwrap();
+        stderr
+    }
+
+    fn finish(self) {
+        assert!(
+            self.finish_with_status(true).is_empty(),
+            "child diagnostics were not empty"
+        );
+    }
+
+    fn send_malformed_frame(&mut self) {
+        self.stdin.write_all(&0_u32.to_be_bytes()).unwrap();
+        self.stdin.flush().unwrap();
     }
 
     fn shutdown(mut self) {
@@ -143,13 +177,21 @@ impl HostProcess {
 }
 
 fn fence(invocation_id: &str) -> AuthorityFence {
+    plugin_fence("test-plugin", invocation_id)
+}
+
+fn plugin_fence(plugin_id: &str, invocation_id: &str) -> AuthorityFence {
     AuthorityFence {
-        plugin_id: "test-plugin".into(),
+        plugin_id: plugin_id.into(),
         package_generation: 7,
         activation_epoch: 9,
         host_session_id: SESSION.into(),
         invocation_id: invocation_id.into(),
     }
+}
+
+fn invocation_id(value: usize) -> String {
+    format!("00000000-0000-4000-8000-{value:012}")
 }
 
 fn permissions() -> Vec<Permission> {
@@ -191,6 +233,58 @@ fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+fn load_rust_plugin(
+    host: &mut HostProcess,
+    plugin_id: &str,
+    invocation_id: &str,
+    import_export_fingerprint: &str,
+) -> String {
+    let grants = permissions();
+    let permission_hash = canonical_permission_hash(&grants).unwrap();
+    let fence = plugin_fence(plugin_id, invocation_id);
+    host.send(
+        &ParentFrame::Load {
+            fence: fence.clone(),
+            package_sha256: "4".repeat(64),
+            component_sha256: sha256(RUST_COMPONENT),
+            import_export_fingerprint: import_export_fingerprint.into(),
+            runtime_profile: RuntimeProfile::Rust,
+            component_size: RUST_COMPONENT.len() as u64,
+            grants,
+            permission_hash: permission_hash.clone(),
+            limits: RuntimeLimits::for_profile(RuntimeProfile::Rust),
+        },
+        RUST_COMPONENT,
+    );
+    assert_eq!(
+        host.receive(),
+        (
+            ChildFrame::Loaded {
+                fence,
+                import_export_fingerprint: import_export_fingerprint.into(),
+            },
+            Vec::new(),
+        )
+    );
+    permission_hash
+}
+
+fn send_plugin_request(
+    host: &mut HostProcess,
+    plugin_id: &str,
+    invocation_id: &str,
+    permission_hash: &str,
+    request: InvocationRequest,
+) -> AuthorityFence {
+    let fence = plugin_fence(plugin_id, invocation_id);
+    let message = request
+        .into_parent_message(fence.clone(), permission_hash.into())
+        .unwrap();
+    let (frame, body) = message.into_parts();
+    host.send(&frame, &body);
+    fence
+}
+
 fn expect_outcome(frame: ChildFrame, bytes: &[u8]) -> InvocationOutcome {
     let ChildFrame::Outcome { kind, .. } = frame else {
         panic!("expected typed outcome, got {frame:?}");
@@ -207,6 +301,71 @@ fn expect_capability(
     };
     let request = decode_host_call_request(kind, bytes).unwrap();
     (callback, request)
+}
+
+fn complete_activation(
+    host: &mut HostProcess,
+    plugin_id: &str,
+    invocation_id: &str,
+    permission_hash: &str,
+) {
+    send_plugin_request(
+        host,
+        plugin_id,
+        invocation_id,
+        permission_hash,
+        InvocationRequest::activate(None),
+    );
+    let (frame, bytes) = host.receive();
+    let (settings, request) = expect_capability(frame, &bytes);
+    assert_eq!(request, HostCallRequest::GetSettings(()));
+    host.reply(
+        settings,
+        HostCallReply::GetSettings(body::WitResult::Ok(Vec::new())),
+    );
+
+    let (frame, bytes) = host.receive();
+    let (get_kv, request) = expect_capability(frame, &bytes);
+    assert!(matches!(request, HostCallRequest::GetKv(_)));
+    host.reply(
+        get_kv,
+        HostCallReply::GetKv(body::WitResult::Ok(Vec::new())),
+    );
+
+    let (frame, bytes) = host.receive();
+    let (list_kv, request) = expect_capability(frame, &bytes);
+    assert!(matches!(request, HostCallRequest::ListKv(_)));
+    host.reply(
+        list_kv,
+        HostCallReply::ListKv(body::WitResult::Ok(body::KvPage {
+            entries: Vec::new(),
+            next_cursor: None,
+        })),
+    );
+
+    let (frame, bytes) = host.receive();
+    let (log, request) = expect_capability(frame, &bytes);
+    assert!(matches!(request, HostCallRequest::Log(_)));
+    host.reply(log, HostCallReply::Log(()));
+
+    let (frame, bytes) = host.receive();
+    assert_eq!(
+        expect_outcome(frame, &bytes),
+        InvocationOutcome::Activate(body::WitResult::Ok(()))
+    );
+}
+
+fn expect_service_state(host: &mut HostProcess, activation_count: i64) {
+    let (frame, bytes) = host.receive();
+    assert_eq!(
+        expect_outcome(frame, &bytes),
+        InvocationOutcome::CallService(body::WitResult::Ok(body::ServiceData {
+            values: vec![body::NamedValue {
+                name: "activation-count".into(),
+                value: body::DataValue::Scalar(body::ScalarValue::IntegerValue(activation_count)),
+            }],
+        }))
+    );
 }
 
 #[test]
@@ -649,7 +808,7 @@ fn retained_typescript_table_pressure_fails_at_the_store_limit() {
             Vec::new(),
         )
     );
-    host.shutdown();
+    host.finish();
 }
 
 #[test]
@@ -720,7 +879,7 @@ fn retained_rust_callbacks_reject_mismatch_and_preserve_serial_authority() {
         message: "not available".into(),
     }));
     let mut stale_callback = settings_callback.clone();
-    stale_callback.activation_epoch += 1;
+    stale_callback.invocation_id = "00000000-0000-4000-8000-000000000099".into();
     host.reply(stale_callback.clone(), settings_error.clone());
     assert_eq!(
         host.receive(),
@@ -845,8 +1004,8 @@ fn retained_rust_callbacks_reject_mismatch_and_preserve_serial_authority() {
     let stale = InvocationRequest::activate(None)
         .into_parent_message(stale_fence.clone(), permission_hash)
         .unwrap();
-    let (stale_frame, stale_body) = stale.into_parts();
-    host.send(&stale_frame, &stale_body);
+    let (stale_frame, _) = stale.into_parts();
+    host.send_header(&stale_frame);
     assert_eq!(
         host.receive(),
         (
@@ -857,6 +1016,470 @@ fn retained_rust_callbacks_reject_mismatch_and_preserve_serial_authority() {
             Vec::new(),
         )
     );
+    host.finish();
+}
+
+#[test]
+fn one_child_admits_sixteen_entries_rejects_the_seventeenth_and_reuses_unloaded_capacity() {
+    assert_eq!(HOST_RUNTIME_ENTRIES_MAX, 16);
+    let grants = permissions();
+    let inspection =
+        inspect_component_for_runtime(RUST_COMPONENT, RuntimeProfile::Rust, &grants).unwrap();
+    let fingerprint = inspection.import_export_fingerprint;
+    let mut host = HostProcess::spawn();
+    host.hello();
+
+    for index in 0..HOST_RUNTIME_ENTRIES_MAX {
+        load_rust_plugin(
+            &mut host,
+            &format!("plugin-{index:02}"),
+            &invocation_id(100 + index),
+            &fingerprint,
+        );
+    }
+
+    let unload_fence = plugin_fence("plugin-07", &invocation_id(200));
+    host.send(
+        &ParentFrame::Unload {
+            fence: unload_fence.clone(),
+        },
+        &[],
+    );
+    assert_eq!(
+        host.receive(),
+        (
+            ChildFrame::Unloaded {
+                fence: unload_fence,
+            },
+            Vec::new(),
+        )
+    );
+    load_rust_plugin(
+        &mut host,
+        "plugin-replacement",
+        &invocation_id(201),
+        &fingerprint,
+    );
+
+    let overflow_fence = plugin_fence("plugin-overflow", &invocation_id(202));
+    let overflow_grants = permissions();
+    host.send_header(&ParentFrame::Load {
+        fence: overflow_fence.clone(),
+        package_sha256: "4".repeat(64),
+        component_sha256: sha256(RUST_COMPONENT),
+        import_export_fingerprint: fingerprint.clone(),
+        runtime_profile: RuntimeProfile::Rust,
+        component_size: RUST_COMPONENT.len() as u64,
+        permission_hash: canonical_permission_hash(&overflow_grants).unwrap(),
+        grants: overflow_grants,
+        limits: RuntimeLimits::for_profile(RuntimeProfile::Rust),
+    });
+    assert_eq!(
+        host.receive(),
+        (
+            ChildFrame::Failed {
+                fence: overflow_fence,
+                code: HostFailureCode::ResourceLimit,
+            },
+            Vec::new(),
+        )
+    );
+    host.finish();
+}
+
+#[test]
+fn duplicate_and_stale_loads_fail_closed_for_the_complete_session() {
+    let grants = permissions();
+    let inspection =
+        inspect_component_for_runtime(RUST_COMPONENT, RuntimeProfile::Rust, &grants).unwrap();
+    let fingerprint = inspection.import_export_fingerprint;
+
+    let mut duplicate_host = HostProcess::spawn();
+    duplicate_host.hello();
+    load_rust_plugin(
+        &mut duplicate_host,
+        "duplicate-plugin",
+        &invocation_id(210),
+        &fingerprint,
+    );
+    let duplicate_fence = plugin_fence("duplicate-plugin", &invocation_id(211));
+    let duplicate_grants = permissions();
+    duplicate_host.send_header(&ParentFrame::Load {
+        fence: duplicate_fence.clone(),
+        package_sha256: "4".repeat(64),
+        component_sha256: sha256(RUST_COMPONENT),
+        import_export_fingerprint: fingerprint.clone(),
+        runtime_profile: RuntimeProfile::Rust,
+        component_size: RUST_COMPONENT.len() as u64,
+        permission_hash: canonical_permission_hash(&duplicate_grants).unwrap(),
+        grants: duplicate_grants,
+        limits: RuntimeLimits::for_profile(RuntimeProfile::Rust),
+    });
+    assert_eq!(
+        duplicate_host.receive(),
+        (
+            ChildFrame::Failed {
+                fence: duplicate_fence,
+                code: HostFailureCode::Unavailable,
+            },
+            Vec::new(),
+        )
+    );
+    duplicate_host.finish();
+
+    let mut stale_host = HostProcess::spawn();
+    stale_host.hello();
+    load_rust_plugin(
+        &mut stale_host,
+        "stale-plugin",
+        &invocation_id(212),
+        &fingerprint,
+    );
+    let mut stale_fence = plugin_fence("stale-plugin", &invocation_id(213));
+    stale_fence.activation_epoch += 1;
+    let stale_grants = permissions();
+    stale_host.send_header(&ParentFrame::Load {
+        fence: stale_fence.clone(),
+        package_sha256: "4".repeat(64),
+        component_sha256: sha256(RUST_COMPONENT),
+        import_export_fingerprint: fingerprint,
+        runtime_profile: RuntimeProfile::Rust,
+        component_size: RUST_COMPONENT.len() as u64,
+        permission_hash: canonical_permission_hash(&stale_grants).unwrap(),
+        grants: stale_grants,
+        limits: RuntimeLimits::for_profile(RuntimeProfile::Rust),
+    });
+    assert_eq!(
+        stale_host.receive(),
+        (
+            ChildFrame::Failed {
+                fence: stale_fence,
+                code: HostFailureCode::StaleAuthority,
+            },
+            Vec::new(),
+        )
+    );
+    stale_host.finish();
+}
+
+#[test]
+fn multi_entry_eof_and_malformed_input_join_every_worker() {
+    let grants = permissions();
+    let inspection =
+        inspect_component_for_runtime(RUST_COMPONENT, RuntimeProfile::Rust, &grants).unwrap();
+    let fingerprint = inspection.import_export_fingerprint;
+
+    let mut eof_host = HostProcess::spawn();
+    eof_host.hello();
+    load_rust_plugin(&mut eof_host, "eof-a", &invocation_id(220), &fingerprint);
+    load_rust_plugin(&mut eof_host, "eof-b", &invocation_id(221), &fingerprint);
+    eof_host.finish();
+
+    let mut malformed_host = HostProcess::spawn();
+    malformed_host.hello();
+    load_rust_plugin(
+        &mut malformed_host,
+        "malformed-a",
+        &invocation_id(222),
+        &fingerprint,
+    );
+    load_rust_plugin(
+        &mut malformed_host,
+        "malformed-b",
+        &invocation_id(223),
+        &fingerprint,
+    );
+    malformed_host.send_malformed_frame();
+    assert_eq!(
+        malformed_host.finish_with_status(false),
+        b"junban-plugin-host: protocol input rejected\n"
+    );
+}
+
+#[test]
+fn nested_and_parallel_invocations_obey_per_plugin_and_child_admission() {
+    assert_eq!(HOST_CONCURRENT_INVOCATIONS_MAX, 4);
+    let grants = permissions();
+    let inspection =
+        inspect_component_for_runtime(RUST_COMPONENT, RuntimeProfile::Rust, &grants).unwrap();
+    let fingerprint = inspection.import_export_fingerprint;
+    let mut host = HostProcess::spawn();
+    host.hello();
+    let mut hashes = Vec::new();
+    for plugin_id in [
+        "caller",
+        "dependency",
+        "parallel-2",
+        "parallel-3",
+        "parallel-4",
+    ] {
+        hashes.push((
+            plugin_id,
+            load_rust_plugin(
+                &mut host,
+                plugin_id,
+                &invocation_id(300 + hashes.len()),
+                &fingerprint,
+            ),
+        ));
+    }
+
+    let command = || {
+        InvocationRequest::invoke_command(
+            None,
+            body::CommandCall {
+                command_id: "normal".into(),
+                values: Vec::new(),
+            },
+        )
+    };
+    let caller = send_plugin_request(
+        &mut host,
+        "caller",
+        &invocation_id(310),
+        &hashes[0].1,
+        command(),
+    );
+    let (frame, bytes) = host.receive();
+    let (caller_callback, request) = expect_capability(frame, &bytes);
+    assert!(matches!(request, HostCallRequest::QueryTasks(_)));
+    assert_eq!(caller_callback.plugin_id, "caller");
+
+    // A dependency invocation arriving while its caller is blocked in a host
+    // callback is admitted on its own lane rather than serialized behind it.
+    let dependency = send_plugin_request(
+        &mut host,
+        "dependency",
+        &invocation_id(311),
+        &hashes[1].1,
+        command(),
+    );
+    let (frame, bytes) = host.receive();
+    let (dependency_callback, request) = expect_capability(frame, &bytes);
+    assert!(matches!(request, HostCallRequest::QueryTasks(_)));
+    assert_eq!(dependency_callback.plugin_id, "dependency");
+
+    for fence in [caller, dependency] {
+        host.send(
+            &ParentFrame::Cancel {
+                fence: fence.clone(),
+            },
+            &[],
+        );
+        assert_eq!(
+            host.receive(),
+            (ChildFrame::Cancelled { fence }, Vec::new())
+        );
+    }
+
+    let mut active = Vec::new();
+    for (offset, (plugin_id, permission_hash)) in hashes.iter().take(4).enumerate() {
+        let fence = send_plugin_request(
+            &mut host,
+            plugin_id,
+            &invocation_id(320 + offset),
+            permission_hash,
+            command(),
+        );
+        let (frame, bytes) = host.receive();
+        let (callback, request) = expect_capability(frame, &bytes);
+        assert!(matches!(request, HostCallRequest::QueryTasks(_)));
+        assert_eq!(callback.plugin_id, *plugin_id);
+        active.push(fence);
+    }
+
+    let fifth = send_plugin_request(
+        &mut host,
+        "parallel-4",
+        &invocation_id(330),
+        &hashes[4].1,
+        command(),
+    );
+    assert_eq!(
+        host.receive(),
+        (
+            ChildFrame::Failed {
+                fence: fifth,
+                code: HostFailureCode::ResourceLimit,
+            },
+            Vec::new(),
+        )
+    );
+    let same_plugin = send_plugin_request(
+        &mut host,
+        "caller",
+        &invocation_id(331),
+        &hashes[0].1,
+        command(),
+    );
+    assert_eq!(
+        host.receive(),
+        (
+            ChildFrame::Failed {
+                fence: same_plugin,
+                code: HostFailureCode::ResourceLimit,
+            },
+            Vec::new(),
+        )
+    );
+
+    host.send(
+        &ParentFrame::Shutdown {
+            host_session_id: SESSION.into(),
+        },
+        &[],
+    );
+    // BTreeMap ownership makes complete-child teardown deterministic by
+    // PluginId while each entry destroys its Store before its terminal frame.
+    for fence in active {
+        assert_eq!(
+            host.receive(),
+            (ChildFrame::Cancelled { fence }, Vec::new())
+        );
+    }
+    assert_eq!(
+        host.receive(),
+        (
+            ChildFrame::ShutdownComplete {
+                host_session_id: SESSION.into(),
+            },
+            Vec::new(),
+        )
+    );
+    host.finish();
+}
+
+#[test]
+fn timeout_epoch_and_trap_replacement_are_isolated_per_plugin() {
+    let grants = permissions();
+    let inspection =
+        inspect_component_for_runtime(RUST_COMPONENT, RuntimeProfile::Rust, &grants).unwrap();
+    let fingerprint = inspection.import_export_fingerprint;
+    let mut host = HostProcess::spawn();
+    host.hello();
+    let hash_a = load_rust_plugin(&mut host, "plugin-a", &invocation_id(400), &fingerprint);
+    let hash_b = load_rust_plugin(&mut host, "plugin-b", &invocation_id(401), &fingerprint);
+
+    complete_activation(&mut host, "plugin-b", &invocation_id(402), &hash_b);
+    send_plugin_request(
+        &mut host,
+        "plugin-b",
+        &invocation_id(403),
+        &hash_b,
+        InvocationRequest::call_service(
+            None,
+            body::ServiceCall {
+                plugin_id: "dependency".into(),
+                service_id: "state".into(),
+                values: Vec::new(),
+            },
+        ),
+    );
+    expect_service_state(&mut host, 1);
+
+    let trap = send_plugin_request(
+        &mut host,
+        "plugin-a",
+        &invocation_id(404),
+        &hash_a,
+        InvocationRequest::invoke_command(
+            None,
+            body::CommandCall {
+                command_id: "trap".into(),
+                values: Vec::new(),
+            },
+        ),
+    );
+    assert_eq!(
+        host.receive(),
+        (
+            ChildFrame::Failed {
+                fence: trap,
+                code: HostFailureCode::GuestError,
+            },
+            Vec::new(),
+        )
+    );
+    send_plugin_request(
+        &mut host,
+        "plugin-b",
+        &invocation_id(405),
+        &hash_b,
+        InvocationRequest::call_service(
+            None,
+            body::ServiceCall {
+                plugin_id: "dependency".into(),
+                service_id: "state".into(),
+                values: Vec::new(),
+            },
+        ),
+    );
+    expect_service_state(&mut host, 1);
+
+    let spin = send_plugin_request(
+        &mut host,
+        "plugin-a",
+        &invocation_id(406),
+        &hash_a,
+        InvocationRequest::handle_event(
+            None,
+            body::EventEnvelope {
+                event_epoch: "spin".into(),
+                revision: 1,
+                kind: body::EventKind::TaskDeleted,
+                subject: body::EventSubject::DeletedTask("task".into()),
+            },
+        ),
+    );
+    let sibling = send_plugin_request(
+        &mut host,
+        "plugin-b",
+        &invocation_id(407),
+        &hash_b,
+        InvocationRequest::invoke_command(
+            None,
+            body::CommandCall {
+                command_id: "normal".into(),
+                values: Vec::new(),
+            },
+        ),
+    );
+
+    let mut sibling_callback = None;
+    let mut saw_timeout = false;
+    for _ in 0..2 {
+        let (frame, bytes) = host.receive();
+        match frame {
+            ChildFrame::CapabilityRequest { .. } => {
+                let (callback, request) = expect_capability(frame, &bytes);
+                assert_eq!(callback.plugin_id, "plugin-b");
+                assert!(matches!(request, HostCallRequest::QueryTasks(_)));
+                sibling_callback = Some(callback);
+            }
+            ChildFrame::Failed { fence, code } => {
+                assert_eq!(fence, spin);
+                assert_eq!(code, HostFailureCode::Timeout);
+                assert!(bytes.is_empty());
+                saw_timeout = true;
+            }
+            other => panic!("unexpected parallel isolation frame {other:?}"),
+        }
+    }
+    assert!(saw_timeout);
+    host.reply(
+        sibling_callback.expect("sibling callback was emitted"),
+        HostCallReply::QueryTasks(body::WitResult::Ok(body::TaskPage {
+            items: Vec::new(),
+            next_cursor: None,
+            revision: 1,
+        })),
+    );
+    let (frame, bytes) = host.receive();
+    assert_eq!(
+        expect_outcome(frame, &bytes),
+        InvocationOutcome::InvokeCommand(body::WitResult::Ok(body::PluginOutcome { effect: None }))
+    );
+    assert!(matches!(sibling.plugin_id.as_str(), "plugin-b"));
     host.shutdown();
 }
 
@@ -894,5 +1517,5 @@ fn child_denies_an_import_missing_from_exact_grants_before_execution() {
             Vec::new(),
         )
     );
-    host.shutdown();
+    host.finish();
 }

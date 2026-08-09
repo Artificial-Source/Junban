@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 
 use junban_plugin_sdk::{
     AuthorityFence, CallbackFence, Capability, ChildFrame, HOST_CALLBACK_BODY_BYTES_MAX,
-    HOST_FRAME_BYTES_MAX, HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION, HostCallKind, HostCallReply,
-    HostCallRequest, HostFailureCode, InvocationOutcome, InvocationRequest, ParentFrame,
-    Permission, PermissionScope, RuntimeLimits, RuntimeProfile, TypedParentMessage,
-    UnscopedPermission, canonical_permission_hash, child_body_len, decode_child_frame,
-    decode_host_call_request, decode_invocation_outcome, encode_parent_frame,
+    HOST_FRAME_BYTES_MAX, HOST_JUNBAN_VERSION, HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION,
+    HostCallKind, HostCallReply, HostCallRequest, HostFailureCode, InvocationOutcome,
+    InvocationRequest, ParentFrame, Permission, PermissionScope, RuntimeLimits, RuntimeProfile,
+    TypedParentMessage, UnscopedPermission, canonical_permission_hash, child_body_len,
+    decode_child_frame, decode_host_call_request, decode_invocation_outcome, encode_parent_frame,
     inspect_component_for_runtime, private_body_types as body, validate_child_body,
 };
 use sha2::{Digest, Sha256};
@@ -92,6 +92,7 @@ impl HostProcess {
             &ParentFrame::Hello {
                 protocol_name: HOST_PROTOCOL_NAME.into(),
                 protocol_version: HOST_PROTOCOL_VERSION,
+                junban_version: HOST_JUNBAN_VERSION.into(),
                 host_session_id: SESSION.into(),
             },
             &[],
@@ -102,6 +103,7 @@ impl HostProcess {
                 ChildFrame::Hello {
                     protocol_name: HOST_PROTOCOL_NAME.into(),
                     protocol_version: HOST_PROTOCOL_VERSION,
+                    junban_version: HOST_JUNBAN_VERSION.into(),
                     host_session_id: SESSION.into(),
                 },
                 Vec::new(),
@@ -713,7 +715,7 @@ fn cancel_unload_shutdown_and_finish_races_drain_active_invocations() {
     );
     let stale = host.service();
     expect_failure(host.receive(), stale, HostFailureCode::StaleAuthority);
-    assert!(host.shutdown().is_empty());
+    assert!(host.close_and_wait(true).is_empty());
 
     let mut shutdown_host = HostProcess::spawn();
     shutdown_host.hello();
@@ -836,7 +838,8 @@ fn forbidden_wasi_authorities_are_rejected_before_compilation_or_execution() {
             &component,
         );
         expect_failure(host.receive(), load, HostFailureCode::InvalidComponent);
-        assert!(host.shutdown().is_empty());
+        assert!(host.close_and_wait(true).is_empty());
+        assert!(matches!(host.receive_event(), ReaderEvent::Eof));
     }
 }
 

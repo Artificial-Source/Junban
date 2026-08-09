@@ -1,14 +1,16 @@
 use std::{
+    collections::BTreeMap,
     sync::{Arc, Condvar, Mutex, mpsc},
     time::{Duration, Instant},
 };
 
 use junban_plugin_sdk::{
-    AuthorityFence, CallbackFence, ChildFrame, HostCallKind, HostCallReply, HostCallRequest,
-    HostFailureCode, InvocationKind, InvocationMode, InvocationOutcome, InvocationRequest,
-    ParentFrame, Permission, RuntimeLimits, RuntimeProfile, SdkError, TypedChildMessage,
-    decode_host_call_reply, decode_invocation_request, inspect_component_for_runtime,
-    private_body_types as neutral, validate_callback_correlation, validate_host_call_authority,
+    AuthorityFence, CallbackFence, ChildFrame, HOST_CONCURRENT_INVOCATIONS_MAX, HostCallKind,
+    HostCallReply, HostCallRequest, HostFailureCode, InvocationKind, InvocationMode,
+    InvocationOutcome, InvocationRequest, ParentFrame, Permission, RuntimeLimits, RuntimeProfile,
+    SdkError, TypedChildMessage, decode_host_call_reply, decode_invocation_request,
+    inspect_component_for_runtime, private_body_types as neutral, validate_callback_correlation,
+    validate_host_call_authority,
 };
 use wasmtime::{
     Engine, ResourceLimiter, Store, StoreLimits, StoreLimitsBuilder, Trap, component::Component,
@@ -68,7 +70,55 @@ struct RuntimeStatus {
 }
 
 #[derive(Default)]
+struct InvocationAdmission {
+    active: BTreeMap<String, AuthorityFence>,
+}
+
+#[derive(Default)]
+pub(crate) struct SharedInvocationAdmission {
+    inner: Mutex<InvocationAdmission>,
+}
+
+impl SharedInvocationAdmission {
+    fn lock(&self) -> std::sync::MutexGuard<'_, InvocationAdmission> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn try_reserve(&self, fence: &AuthorityFence) -> bool {
+        let mut admission = self.lock();
+        if admission.active.len() >= HOST_CONCURRENT_INVOCATIONS_MAX
+            || admission.active.contains_key(&fence.plugin_id)
+        {
+            return false;
+        }
+        admission
+            .active
+            .insert(fence.plugin_id.clone(), fence.clone());
+        true
+    }
+
+    fn release(&self, fence: &AuthorityFence) {
+        let mut admission = self.lock();
+        if admission
+            .active
+            .get(&fence.plugin_id)
+            .is_some_and(|active| active.exact_matches(fence))
+        {
+            admission.active.remove(&fence.plugin_id);
+        }
+    }
+
+    #[cfg(test)]
+    fn active_count(&self) -> usize {
+        self.lock().active.len()
+    }
+}
+
 pub(crate) struct SharedRuntimeStatus {
+    plugin_id: String,
+    admission: Arc<SharedInvocationAdmission>,
     inner: Mutex<RuntimeStatus>,
     changed: Condvar,
 }
@@ -94,6 +144,15 @@ pub(crate) enum CancelResult {
 }
 
 impl SharedRuntimeStatus {
+    pub fn new(plugin_id: String, admission: Arc<SharedInvocationAdmission>) -> Self {
+        Self {
+            plugin_id,
+            admission,
+            inner: Mutex::new(RuntimeStatus::default()),
+            changed: Condvar::new(),
+        }
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, RuntimeStatus> {
         self.inner
             .lock()
@@ -105,14 +164,17 @@ impl SharedRuntimeStatus {
     }
 
     pub fn mark_unloaded(&self) {
-        let pending = {
+        let (active, pending) = {
             let mut status = self.lock();
             status.loaded = false;
-            status.active = None;
+            let active = status.active.take();
             let pending = status.pending.take();
             self.changed.notify_all();
-            pending
+            (active, pending)
         };
+        if let Some(active) = active {
+            self.admission.release(&active.fence);
+        }
         cancel_pending(pending);
     }
 
@@ -120,17 +182,22 @@ impl SharedRuntimeStatus {
         self.lock().loaded
     }
 
+    pub fn worker_stopped_unexpectedly(&self) -> bool {
+        self.lock().worker_stopped
+    }
+
     pub fn start(&self, fence: AuthorityFence, timeout: Duration) -> Result<(), StartError> {
         let mut status = self.lock();
-        if !status.loaded {
+        if !status.loaded || fence.plugin_id != self.plugin_id {
             return Err(StartError::NotLoaded);
         }
-        if status.active.is_some() {
+        if status.active.is_some() || !self.admission.try_reserve(&fence) {
             return Err(StartError::Busy);
         }
-        let deadline = Instant::now()
-            .checked_add(timeout)
-            .ok_or(StartError::Busy)?;
+        let Some(deadline) = Instant::now().checked_add(timeout) else {
+            self.admission.release(&fence);
+            return Err(StartError::Busy);
+        };
         status.active = Some(ActiveInvocation {
             fence,
             deadline,
@@ -266,6 +333,7 @@ impl SharedRuntimeStatus {
         ) {
             (None, Ok(message)) => {
                 if outbound.try_send(OutboundMessage::typed(message)).is_ok() {
+                    self.admission.release(fence);
                     status.active = None;
                     let pending = status.pending.take();
                     self.changed.notify_all();
@@ -294,6 +362,7 @@ impl SharedRuntimeStatus {
                         .as_ref()
                         .is_some_and(|active| active.fence.exact_matches(fence))
                     {
+                        self.admission.release(fence);
                         status.active = None;
                     }
                     let pending = status.pending.take();
@@ -346,6 +415,7 @@ impl SharedRuntimeStatus {
             if message.is_some_and(|message| outbound.try_send(message).is_err()) {
                 status.loaded = false;
             }
+            self.admission.release(fence);
             status.active = None;
             let pending = status.pending.take();
             self.changed.notify_all();
@@ -423,9 +493,9 @@ impl SharedRuntimeStatus {
             .map_err(|_| CallbackRouteError::Stale)
     }
 
-    /// The only owner that advances the Engine epoch. It sleeps on a condition
-    /// variable while idle, wakes for control requests, and advances once for
-    /// an active deadline/cancel before returning to the idle state.
+    /// This entry's isolated deadline/cancel owner. An epoch increment is
+    /// Engine-wide, but every Store's deadline callback consults only its own
+    /// status and immediately extends an unrelated entry's deadline.
     pub fn run_watchdog(&self, engine: &Engine) {
         loop {
             let pending = {
@@ -481,6 +551,13 @@ impl SharedRuntimeStatus {
         }
     }
 
+    fn should_interrupt_store(&self) -> bool {
+        self.lock()
+            .active
+            .as_ref()
+            .is_some_and(|active| active.stop.is_some())
+    }
+
     pub fn shutdown_watchdog(&self) {
         let mut status = self.lock();
         status.watchdog_shutdown = true;
@@ -488,15 +565,18 @@ impl SharedRuntimeStatus {
     }
 
     pub fn worker_stopped(&self) {
-        let pending = {
+        let (active, pending) = {
             let mut status = self.lock();
             status.loaded = false;
             status.worker_stopped = true;
-            status.active = None;
+            let active = status.active.take();
             let pending = status.pending.take();
             self.changed.notify_all();
-            pending
+            (active, pending)
         };
+        if let Some(active) = active {
+            self.admission.release(&active.fence);
+        }
         cancel_pending(pending);
     }
 }
@@ -528,9 +608,6 @@ pub(crate) enum RuntimeCommand {
         reply: mpsc::SyncSender<Result<(), HostFailureCode>>,
     },
     Invoke(InvokeRequest),
-    Unload {
-        reply: mpsc::SyncSender<()>,
-    },
     Shutdown {
         reply: mpsc::SyncSender<()>,
     },
@@ -575,11 +652,6 @@ pub(crate) fn run_runtime(
                         runtime.discard_instance();
                     }
                 });
-            }
-            RuntimeCommand::Unload { reply } => {
-                loaded = None;
-                status.mark_unloaded();
-                let _ = reply.send(());
             }
             RuntimeCommand::Shutdown { reply } => {
                 drop(loaded.take());
@@ -1111,6 +1183,13 @@ impl LoadedRuntime {
             },
         );
         store.limiter(|state| &mut state.limiter);
+        store.epoch_deadline_callback(|context| {
+            if context.data().bridge.status.should_interrupt_store() {
+                Err(wasmtime::Error::msg("invocation interrupted"))
+            } else {
+                Ok(wasmtime::UpdateDeadline::Continue(1))
+            }
+        });
         store.set_hostcall_fuel(HOSTCALL_TRANSFER_FUEL);
         assert_eq!(store.hostcall_fuel(), HOSTCALL_TRANSFER_FUEL);
         store
@@ -1452,7 +1531,11 @@ fn add_actual_imports(linker: &mut Linker<StoreState>, imports: &[String]) -> wa
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::Cell, sync::mpsc, time::Duration};
+    use std::{
+        cell::Cell,
+        sync::{Arc, mpsc},
+        time::Duration,
+    };
 
     use junban_plugin_sdk::{
         AuthorityFence, CallbackFence, ChildFrame, HOST_CALL_KINDS, HostCallKind,
@@ -1461,7 +1544,8 @@ mod tests {
     use wasmtime::{Config, Engine, component::Linker};
 
     use super::{
-        OutboundMessage, PendingCallback, SharedRuntimeStatus, StoreState, add_actual_imports,
+        OutboundMessage, PendingCallback, SharedInvocationAdmission, SharedRuntimeStatus,
+        StoreState, add_actual_imports,
     };
 
     fn fence() -> AuthorityFence {
@@ -1502,7 +1586,8 @@ mod tests {
 
     #[test]
     fn full_writer_queue_rejects_callback_and_discards_unpublished_success() {
-        let status = SharedRuntimeStatus::default();
+        let admission = Arc::new(SharedInvocationAdmission::default());
+        let status = SharedRuntimeStatus::new("test-plugin".into(), admission.clone());
         status.mark_loaded();
         let fence = fence();
         status.start(fence.clone(), Duration::from_secs(1)).unwrap();
@@ -1540,6 +1625,7 @@ mod tests {
                 .is_err()
         );
         assert!(status.lock().pending.is_none());
+        assert_eq!(admission.active_count(), 1);
 
         let outcome = InvocationOutcome::Activate(neutral::WitResult::Ok(()))
             .into_child_message(fence.clone())
@@ -1550,5 +1636,6 @@ mod tests {
         assert!(discarded.get());
         assert!(!status.is_loaded());
         assert!(status.lock().active.is_none());
+        assert_eq!(admission.active_count(), 0);
     }
 }

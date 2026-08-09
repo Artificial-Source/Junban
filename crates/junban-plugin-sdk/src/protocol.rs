@@ -18,14 +18,17 @@ use crate::{
     util::{decode_hex_32, hex, is_canonical_id, sha256},
 };
 
-pub const HOST_PROTOCOL_VERSION: u16 = 1;
+pub const HOST_PROTOCOL_VERSION: u16 = 2;
+pub const HOST_PROTOCOL_NAME: &str = "junban-plugin-host-v2";
+pub const HOST_JUNBAN_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const HOST_RUNTIME_ENTRIES_MAX: usize = 16;
+pub const HOST_CONCURRENT_INVOCATIONS_MAX: usize = 4;
 pub const HOST_FRAME_BYTES_MAX: usize = 256 * 1024;
 pub const HOST_COMPONENT_BODY_BYTES_MAX: usize = crate::package::COMPONENT_BYTES_MAX;
 pub const HOST_REQUEST_BODY_BYTES_MAX: usize = 256 * 1024;
 pub const HOST_OUTCOME_BODY_BYTES_MAX: usize = 256 * 1024;
 pub const HOST_CALLBACK_BODY_BYTES_MAX: usize = 4 * 1024 * 1024;
 pub const HOST_CALLBACK_ID_MAX: u32 = 1_048_576;
-pub const HOST_PROTOCOL_NAME: &str = "junban-plugin-host-v1";
 
 pub const RUST_LINEAR_MEMORY_BYTES: u64 = 64 * 1024 * 1024;
 pub const TYPESCRIPT_LINEAR_MEMORY_BYTES: u64 = 128 * 1024 * 1024;
@@ -232,6 +235,7 @@ pub enum ParentFrame {
     Hello {
         protocol_name: String,
         protocol_version: u16,
+        junban_version: String,
         host_session_id: String,
     },
     Load {
@@ -277,6 +281,7 @@ pub enum ChildFrame {
     Hello {
         protocol_name: String,
         protocol_version: u16,
+        junban_version: String,
         host_session_id: String,
     },
     Loaded {
@@ -674,10 +679,12 @@ pub fn validate_parent_frame(frame: &ParentFrame) -> Result<()> {
         ParentFrame::Hello {
             protocol_name,
             protocol_version,
+            junban_version,
             host_session_id,
         } => {
             validate_protocol_name(protocol_name)?;
             validate_version(*protocol_version)?;
+            validate_junban_version(junban_version)?;
             validate_uuid(host_session_id, "host_session_id")
         }
         ParentFrame::Load {
@@ -759,15 +766,35 @@ pub fn validate_parent_frame(frame: &ParentFrame) -> Result<()> {
     }
 }
 
+/// Exact-match the child handshake before a parent sends any component bytes.
+pub fn validate_child_hello(frame: &ChildFrame, expected_host_session_id: &str) -> Result<()> {
+    validate_child_frame(frame)?;
+    let ChildFrame::Hello {
+        host_session_id, ..
+    } = frame
+    else {
+        return Err(SdkError::Protocol { field: "hello" });
+    };
+    validate_uuid(expected_host_session_id, "host_session_id")?;
+    if host_session_id != expected_host_session_id {
+        return Err(SdkError::Protocol {
+            field: "host_session_id",
+        });
+    }
+    Ok(())
+}
+
 pub fn validate_child_frame(frame: &ChildFrame) -> Result<()> {
     match frame {
         ChildFrame::Hello {
             protocol_name,
             protocol_version,
+            junban_version,
             host_session_id,
         } => {
             validate_protocol_name(protocol_name)?;
             validate_version(*protocol_version)?;
+            validate_junban_version(junban_version)?;
             validate_uuid(host_session_id, "host_session_id")
         }
         ChildFrame::Loaded {
@@ -960,6 +987,16 @@ fn validate_version(version: u16) -> Result<()> {
         Ok(())
     } else {
         Err(SdkError::Protocol { field: "version" })
+    }
+}
+
+fn validate_junban_version(version: &str) -> Result<()> {
+    if version == HOST_JUNBAN_VERSION {
+        Ok(())
+    } else {
+        Err(SdkError::Protocol {
+            field: "junban_version",
+        })
     }
 }
 

@@ -5,9 +5,9 @@ use std::{
 };
 
 use junban_plugin_sdk::{
-    AuthorityFence, ChildFrame, HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION, HostFailureCode,
-    InvocationRequest, ParentFrame, RuntimeLimits, RuntimeProfile, canonical_permission_hash,
-    child_body_len, decode_child_frame, encode_parent_frame,
+    AuthorityFence, ChildFrame, HOST_JUNBAN_VERSION, HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION,
+    HostFailureCode, InvocationRequest, ParentFrame, RuntimeLimits, RuntimeProfile,
+    canonical_permission_hash, child_body_len, decode_child_frame, encode_parent_frame,
 };
 use sha2::{Digest, Sha256};
 
@@ -42,6 +42,7 @@ fn hello() -> ParentFrame {
     ParentFrame::Hello {
         protocol_name: HOST_PROTOCOL_NAME.into(),
         protocol_version: HOST_PROTOCOL_VERSION,
+        junban_version: HOST_JUNBAN_VERSION.into(),
         host_session_id: SESSION.into(),
     }
 }
@@ -107,108 +108,72 @@ fn child_frames(mut bytes: &[u8]) -> Vec<ChildFrame> {
 }
 
 #[test]
-fn process_permits_one_load_attempt_fences_calls_and_shuts_down_cleanly() {
+fn process_compile_failure_terminates_the_complete_session() {
     let component = tiny_component();
     let mut input = Vec::new();
     append(&mut input, &hello(), &[]);
     append(&mut input, &load(&component), &component);
-    append(&mut input, &load(&component), &component);
-    let mut cross_identity = load(&component);
-    if let ParentFrame::Load { fence, .. } = &mut cross_identity {
-        fence.plugin_id = "other-plugin".into();
-    }
-    append(&mut input, &cross_identity, &component);
-
-    let mut stale = fence();
-    stale.activation_epoch += 1;
-    append(&mut input, &ParentFrame::Cancel { fence: stale }, &[]);
-
-    let mut invocation = fence();
-    invocation.invocation_id = "00000000-0000-4000-8000-000000000003".into();
-    let request_message = InvocationRequest::activate(None)
-        .into_parent_message(invocation.clone(), canonical_permission_hash(&[]).unwrap())
-        .unwrap();
-    let (invoke, request) = request_message.into_parts();
-    append(&mut input, &invoke, &request);
-    append(
-        &mut input,
-        &ParentFrame::Cancel {
-            fence: invocation.clone(),
-        },
-        &[],
-    );
-    append(
-        &mut input,
-        &ParentFrame::Shutdown {
-            host_session_id: SESSION.into(),
-        },
-        &[],
-    );
 
     let output = run(&input);
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     let frames = child_frames(&output.stdout);
-    assert_eq!(frames.len(), 8);
+    assert_eq!(frames.len(), 2);
     assert!(matches!(frames[0], ChildFrame::Hello { .. }));
-    assert!(matches!(
+    assert_eq!(
         frames[1],
         ChildFrame::Failed {
+            fence: fence(),
             code: HostFailureCode::InvalidComponent,
-            ..
-        }
-    ));
-    for frame in &frames[2..4] {
-        assert!(matches!(
-            frame,
-            ChildFrame::Failed {
-                code: HostFailureCode::Unavailable,
-                ..
-            }
-        ));
-    }
-    assert!(matches!(
-        frames[4],
-        ChildFrame::Failed {
-            code: HostFailureCode::StaleAuthority,
-            ..
-        }
-    ));
-    assert_eq!(
-        frames[5],
-        ChildFrame::Failed {
-            fence: invocation.clone(),
-            code: HostFailureCode::StaleAuthority,
         }
     );
-    assert_eq!(
-        frames[6],
-        ChildFrame::Failed {
-            fence: invocation,
-            code: HostFailureCode::StaleAuthority,
-        }
-    );
-    assert!(matches!(frames[7], ChildFrame::ShutdownComplete { .. }));
 }
 
 #[test]
-fn process_rejects_calls_before_load_and_component_compile_failure() {
+fn stale_session_is_rejected_before_component_bytes_and_terminates() {
+    let component = tiny_component();
+    let mut stale = load(&component);
+    let stale_fence = if let ParentFrame::Load { fence, .. } = &mut stale {
+        fence.host_session_id = "00000000-0000-4000-8000-000000000099".into();
+        fence.clone()
+    } else {
+        unreachable!()
+    };
+    let mut input = Vec::new();
+    append(&mut input, &hello(), &[]);
+    // Deliberately omit the declared component body. The coordinator must
+    // reject the stale session from the header instead of waiting for bytes.
+    input.extend_from_slice(&encode_parent_frame(&stale).unwrap());
+
+    let output = run(&input);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        child_frames(&output.stdout),
+        vec![
+            ChildFrame::Hello {
+                protocol_name: HOST_PROTOCOL_NAME.into(),
+                protocol_version: HOST_PROTOCOL_VERSION,
+                junban_version: HOST_JUNBAN_VERSION.into(),
+                host_session_id: SESSION.into(),
+            },
+            ChildFrame::Failed {
+                fence: stale_fence,
+                code: HostFailureCode::StaleAuthority,
+            },
+        ]
+    );
+}
+
+#[test]
+fn process_rejects_calls_before_load_without_reading_request_bytes() {
     let request_message = InvocationRequest::activate(None)
         .into_parent_message(fence(), canonical_permission_hash(&[]).unwrap())
         .unwrap();
-    let (invoke, request) = request_message.into_parts();
-    let core_module = b"\0asm\x01\0\0\0";
+    let (invoke, _) = request_message.into_parts();
     let mut input = Vec::new();
     append(&mut input, &hello(), &[]);
-    append(&mut input, &invoke, &request);
-    append(&mut input, &load(core_module), core_module);
-    append(
-        &mut input,
-        &ParentFrame::Shutdown {
-            host_session_id: SESSION.into(),
-        },
-        &[],
-    );
+    input.extend_from_slice(&encode_parent_frame(&invoke).unwrap());
 
     let output = run(&input);
     assert!(output.status.success());
@@ -221,14 +186,7 @@ fn process_rejects_calls_before_load_and_component_compile_failure() {
             ..
         }
     ));
-    assert!(matches!(
-        frames[2],
-        ChildFrame::Failed {
-            code: HostFailureCode::InvalidComponent,
-            ..
-        }
-    ));
-    assert!(matches!(frames[3], ChildFrame::ShutdownComplete { .. }));
+    assert_eq!(frames.len(), 2);
 }
 
 #[test]

@@ -6,22 +6,24 @@ mod runtime;
 mod transfer_bounds;
 
 use std::{
+    collections::BTreeMap,
     io::{self, Read, Write},
     sync::{Arc, mpsc},
+    thread::JoinHandle,
     time::Duration,
 };
 
 use junban_plugin_sdk::{
-    AuthorityFence, ChildFrame, GUEST_STACK_BYTES, HOST_FRAME_BYTES_MAX, HOST_PROTOCOL_NAME,
-    HOST_PROTOCOL_VERSION, HostFailureCode, ParentFrame, TYPESCRIPT_LINEAR_MEMORY_BYTES,
-    decode_parent_frame, encode_child_frame, parent_body_len, validate_child_body,
-    validate_parent_body,
+    AuthorityFence, ChildFrame, GUEST_STACK_BYTES, HOST_FRAME_BYTES_MAX, HOST_JUNBAN_VERSION,
+    HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION, HOST_RUNTIME_ENTRIES_MAX, HostFailureCode,
+    ParentFrame, TYPESCRIPT_LINEAR_MEMORY_BYTES, decode_parent_frame, encode_child_frame,
+    parent_body_len, validate_child_body, validate_parent_body,
 };
 use wasmtime::{Config, Engine, InstanceAllocationStrategy, ProfilingStrategy};
 
 use runtime::{
     CallbackRouteError, CancelResult, InvokeRequest, LoadRequest, OutboundMessage, RuntimeCommand,
-    SharedRuntimeStatus, StartError,
+    SharedInvocationAdmission, SharedRuntimeStatus, StartError,
 };
 
 const RUNTIME_THREAD_STACK_BYTES: usize = 4 * 1024 * 1024;
@@ -69,22 +71,10 @@ impl ParentMessage {
 }
 
 pub fn read_parent_message(reader: &mut impl Read) -> Result<Option<ParentMessage>, HostError> {
-    let Some(prefix) = read_prefix(reader)? else {
+    let Some(frame) = read_parent_header(reader)? else {
         return Ok(None);
     };
-    let header_len = u32::from_be_bytes(prefix) as usize;
-    if header_len == 0 || header_len > HOST_FRAME_BYTES_MAX {
-        return Err(HostError::Input);
-    }
-    let encoded_len = 4_usize.checked_add(header_len).ok_or(HostError::Input)?;
-    let mut encoded = vec![0; encoded_len];
-    encoded[..4].copy_from_slice(&prefix);
-    read_exact_input(reader, &mut encoded[4..])?;
-    let frame = decode_parent_frame(&encoded).map_err(|_| HostError::Input)?;
-    let body_len = parent_body_len(&frame).map_err(|_| HostError::Input)?;
-    let mut body = vec![0; body_len];
-    read_exact_input(reader, &mut body)?;
-    validate_parent_body(&frame, &body).map_err(|_| HostError::Input)?;
+    let body = read_parent_body(reader, &frame)?;
     match &frame {
         ParentFrame::Invoke { kind, .. } => {
             junban_plugin_sdk::decode_invocation_request(*kind, &body)
@@ -97,6 +87,31 @@ pub fn read_parent_message(reader: &mut impl Read) -> Result<Option<ParentMessag
         _ => {}
     }
     Ok(Some(ParentMessage::new(frame, body)))
+}
+
+fn read_parent_header(reader: &mut impl Read) -> Result<Option<ParentFrame>, HostError> {
+    let Some(prefix) = read_prefix(reader)? else {
+        return Ok(None);
+    };
+    let header_len = u32::from_be_bytes(prefix) as usize;
+    if header_len == 0 || header_len > HOST_FRAME_BYTES_MAX {
+        return Err(HostError::Input);
+    }
+    let encoded_len = 4_usize.checked_add(header_len).ok_or(HostError::Input)?;
+    let mut encoded = vec![0; encoded_len];
+    encoded[..4].copy_from_slice(&prefix);
+    read_exact_input(reader, &mut encoded[4..])?;
+    decode_parent_frame(&encoded)
+        .map(Some)
+        .map_err(|_| HostError::Input)
+}
+
+fn read_parent_body(reader: &mut impl Read, frame: &ParentFrame) -> Result<Vec<u8>, HostError> {
+    let body_len = parent_body_len(frame).map_err(|_| HostError::Input)?;
+    let mut body = vec![0; body_len];
+    read_exact_input(reader, &mut body)?;
+    validate_parent_body(frame, &body).map_err(|_| HostError::Input)?;
+    Ok(body)
 }
 
 pub fn write_child_message(
@@ -138,18 +153,168 @@ struct LoadedAuthority {
     limits: junban_plugin_sdk::RuntimeLimits,
 }
 
+struct RuntimeEntry {
+    authority: LoadedAuthority,
+    status: Arc<SharedRuntimeStatus>,
+    runtime: Option<mpsc::SyncSender<RuntimeCommand>>,
+    runtime_handle: Option<JoinHandle<()>>,
+    watchdog_handle: Option<JoinHandle<()>>,
+}
+
+impl RuntimeEntry {
+    fn load(
+        engine: &Engine,
+        admission: Arc<SharedInvocationAdmission>,
+        authority: LoadedAuthority,
+        request: LoadRequest,
+        outbound: mpsc::SyncSender<OutboundMessage>,
+    ) -> Result<Result<Self, HostFailureCode>, HostError> {
+        let status = Arc::new(SharedRuntimeStatus::new(
+            authority.fence.plugin_id.clone(),
+            admission,
+        ));
+        let watchdog_status = status.clone();
+        let watchdog_engine = engine.clone();
+        let watchdog_handle = std::thread::Builder::new()
+            .name(format!(
+                "junban-plugin-watchdog-{}",
+                authority.fence.plugin_id
+            ))
+            .spawn(move || watchdog_status.run_watchdog(&watchdog_engine))
+            .map_err(|_| HostError::Runtime)?;
+
+        let (runtime, commands) = mpsc::sync_channel(1);
+        let runtime_status = status.clone();
+        let runtime_engine = engine.clone();
+        let runtime_handle = match std::thread::Builder::new()
+            .name(format!(
+                "junban-plugin-runtime-{}",
+                authority.fence.plugin_id
+            ))
+            .stack_size(RUNTIME_THREAD_STACK_BYTES)
+            .spawn(move || {
+                runtime::run_runtime(runtime_engine, commands, outbound, runtime_status);
+            }) {
+            Ok(handle) => handle,
+            Err(_) => {
+                status.shutdown_watchdog();
+                let _ = watchdog_handle.join();
+                return Err(HostError::Runtime);
+            }
+        };
+
+        let mut entry = Self {
+            authority,
+            status,
+            runtime: Some(runtime),
+            runtime_handle: Some(runtime_handle),
+            watchdog_handle: Some(watchdog_handle),
+        };
+        let (reply, loaded) = mpsc::sync_channel(1);
+        if entry
+            .runtime
+            .as_ref()
+            .expect("runtime sender disappeared")
+            .send(RuntimeCommand::Load { request, reply })
+            .is_err()
+        {
+            let _ = entry.stop(true);
+            return Err(HostError::Runtime);
+        }
+        match loaded.recv() {
+            Ok(Ok(())) => Ok(Ok(entry)),
+            Ok(Err(code)) => {
+                entry.stop(true)?;
+                Ok(Err(code))
+            }
+            Err(_) => {
+                let _ = entry.stop(true);
+                Err(HostError::Runtime)
+            }
+        }
+    }
+
+    fn stop(&mut self, abort_active: bool) -> Result<(), HostError> {
+        if abort_active {
+            self.status.abort_active_and_wait();
+        } else {
+            self.status.cancel_active_and_wait();
+        }
+
+        let runtime_clean = if let Some(runtime) = self.runtime.take() {
+            let (reply, stopped) = mpsc::sync_channel(1);
+            runtime
+                .send(RuntimeCommand::Shutdown { reply })
+                .is_ok_and(|()| stopped.recv().is_ok())
+        } else {
+            true
+        };
+        let runtime_joined = self
+            .runtime_handle
+            .take()
+            .is_none_or(|handle| handle.join().is_ok());
+        self.status.shutdown_watchdog();
+        let watchdog_joined = self
+            .watchdog_handle
+            .take()
+            .is_none_or(|handle| handle.join().is_ok());
+        if runtime_clean && runtime_joined && watchdog_joined {
+            Ok(())
+        } else {
+            Err(HostError::Runtime)
+        }
+    }
+}
+
+impl Drop for RuntimeEntry {
+    fn drop(&mut self) {
+        let _ = self.stop(true);
+    }
+}
+
+struct RuntimeCoordinator {
+    engine: Engine,
+    admission: Arc<SharedInvocationAdmission>,
+    entries: BTreeMap<String, RuntimeEntry>,
+}
+
+impl RuntimeCoordinator {
+    fn new(engine: Engine) -> Self {
+        Self {
+            engine,
+            admission: Arc::new(SharedInvocationAdmission::default()),
+            entries: BTreeMap::new(),
+        }
+    }
+
+    fn abort_all(&mut self) -> Result<(), HostError> {
+        self.stop_all(true)
+    }
+
+    fn stop_all(&mut self, abort_active: bool) -> Result<(), HostError> {
+        let entries = std::mem::take(&mut self.entries);
+        let mut failed = false;
+        for (_, mut entry) in entries {
+            failed |= entry.stop(abort_active).is_err();
+        }
+        if failed {
+            Err(HostError::Runtime)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 struct ProtocolState {
     host_session_id: Option<String>,
-    load_attempted: bool,
-    loaded: Option<LoadedAuthority>,
+    coordinator: RuntimeCoordinator,
 }
 
 impl ProtocolState {
-    fn new() -> Self {
+    fn new(engine: Engine) -> Self {
         Self {
             host_session_id: None,
-            load_attempted: false,
-            loaded: None,
+            coordinator: RuntimeCoordinator::new(engine),
         }
     }
 
@@ -159,10 +324,14 @@ impl ProtocolState {
             .is_some_and(|session| session == &fence.host_session_id)
     }
 
-    fn loaded_matches(&self, fence: &AuthorityFence, status: &SharedRuntimeStatus) -> bool {
-        status.is_loaded()
-            && self.loaded.as_ref().is_some_and(|loaded| {
-                loaded.fence.same_activation(fence) && self.session_matches(fence)
+    fn loaded_matches(&self, fence: &AuthorityFence) -> bool {
+        self.coordinator
+            .entries
+            .get(&fence.plugin_id)
+            .is_some_and(|entry| {
+                entry.status.is_loaded()
+                    && entry.authority.fence.same_activation(fence)
+                    && self.session_matches(fence)
             })
     }
 }
@@ -189,9 +358,6 @@ pub fn run_child(
     std::thread::scope(|scope| {
         let (outbound_sender, outbound_receiver) =
             mpsc::sync_channel::<OutboundMessage>(OUTBOUND_CHANNEL_CAPACITY);
-        let (runtime_sender, runtime_receiver) = mpsc::sync_channel::<RuntimeCommand>(1);
-        let status = Arc::new(SharedRuntimeStatus::default());
-
         let writer_handle = std::thread::Builder::new()
             .name("junban-plugin-writer".into())
             .spawn_scoped(scope, move || {
@@ -202,90 +368,133 @@ pub fn run_child(
             })
             .map_err(|_| HostError::Runtime)?;
 
-        let watchdog_status = status.clone();
-        let watchdog_engine = engine.clone();
-        let watchdog_handle = std::thread::Builder::new()
-            .name("junban-plugin-watchdog".into())
-            .spawn_scoped(scope, move || {
-                watchdog_status.run_watchdog(&watchdog_engine);
-            })
-            .map_err(|_| HostError::Runtime)?;
-        struct WatchdogShutdown(Arc<SharedRuntimeStatus>);
-        impl Drop for WatchdogShutdown {
-            fn drop(&mut self) {
-                self.0.abort_active_and_wait();
-                self.0.shutdown_watchdog();
-            }
-        }
-        // Also releases the watchdog if a later scoped-thread spawn fails.
-        let _watchdog_shutdown = WatchdogShutdown(status.clone());
-
-        let runtime_status = status.clone();
-        let runtime_outbound = outbound_sender.clone();
-        let runtime_handle = std::thread::Builder::new()
-            .name("junban-plugin-runtime".into())
-            .stack_size(RUNTIME_THREAD_STACK_BYTES)
-            .spawn_scoped(scope, move || {
-                runtime::run_runtime(engine, runtime_receiver, runtime_outbound, runtime_status);
-            })
-            .map_err(|_| HostError::Runtime)?;
-
-        let protocol_result = run_protocol_loop(reader, &runtime_sender, &outbound_sender, &status);
-
-        status.abort_active_and_wait();
-        let (shutdown_sender, shutdown_receiver) = mpsc::sync_channel(1);
-        if runtime_sender
-            .send(RuntimeCommand::Shutdown {
-                reply: shutdown_sender,
-            })
-            .is_ok()
-        {
-            let _ = shutdown_receiver.recv();
-        }
-        drop(runtime_sender);
-        runtime_handle.join().map_err(|_| HostError::Runtime)?;
-        status.shutdown_watchdog();
-        watchdog_handle.join().map_err(|_| HostError::Runtime)?;
+        let mut state = ProtocolState::new(engine);
+        let protocol_result = run_protocol_loop(reader, &outbound_sender, &mut state);
+        let cleanup_result = state.coordinator.abort_all();
         drop(outbound_sender);
         let writer_result = writer_handle.join().map_err(|_| HostError::Runtime)?;
 
         protocol_result?;
+        cleanup_result?;
         writer_result
     })
 }
 
+enum HeaderDisposition {
+    Accept,
+    SessionFatal(AuthorityFence, HostFailureCode),
+}
+
 fn run_protocol_loop(
     reader: &mut impl Read,
-    runtime: &mpsc::SyncSender<RuntimeCommand>,
     outbound: &mpsc::SyncSender<OutboundMessage>,
-    status: &SharedRuntimeStatus,
+    state: &mut ProtocolState,
 ) -> Result<(), HostError> {
-    let mut state = ProtocolState::new();
-    while let Some(message) = read_parent_message(reader)? {
-        let stop = handle_message(message, &mut state, runtime, outbound, status)?;
-        if stop {
+    while let Some(frame) = read_parent_header(reader)? {
+        match check_header_before_body(&frame, state)? {
+            HeaderDisposition::Accept => {}
+            HeaderDisposition::SessionFatal(fence, code) => {
+                send_failed(outbound, fence, code)?;
+                return Ok(());
+            }
+        }
+        let body = read_parent_body(reader, &frame)?;
+        if handle_message(ParentMessage::new(frame, body), state, outbound)? {
             return Ok(());
         }
     }
     Ok(())
 }
 
+fn check_header_before_body(
+    frame: &ParentFrame,
+    state: &ProtocolState,
+) -> Result<HeaderDisposition, HostError> {
+    if state
+        .coordinator
+        .entries
+        .values()
+        .any(|entry| entry.status.worker_stopped_unexpectedly())
+    {
+        return Err(HostError::Runtime);
+    }
+
+    let Some(session) = state.host_session_id.as_deref() else {
+        return if matches!(frame, ParentFrame::Hello { .. }) {
+            Ok(HeaderDisposition::Accept)
+        } else {
+            Err(HostError::Input)
+        };
+    };
+
+    let fence = match frame {
+        ParentFrame::Hello { .. } => return Err(HostError::Input),
+        ParentFrame::Load { fence, .. }
+        | ParentFrame::Invoke { fence, .. }
+        | ParentFrame::Cancel { fence }
+        | ParentFrame::Unload { fence } => Some(fence.clone()),
+        ParentFrame::CapabilityReply { callback, .. } => Some(callback.authority()),
+        ParentFrame::Shutdown { host_session_id } => {
+            return if host_session_id == session {
+                Ok(HeaderDisposition::Accept)
+            } else {
+                Err(HostError::Input)
+            };
+        }
+    };
+    let fence = fence.expect("authority-bearing frame disappeared");
+    if fence.host_session_id != session {
+        return Ok(HeaderDisposition::SessionFatal(
+            fence,
+            HostFailureCode::StaleAuthority,
+        ));
+    }
+    if let Some(entry) = state.coordinator.entries.get(&fence.plugin_id) {
+        if !entry.authority.fence.same_activation(&fence) {
+            return Ok(HeaderDisposition::SessionFatal(
+                fence,
+                HostFailureCode::StaleAuthority,
+            ));
+        }
+        if matches!(frame, ParentFrame::Load { .. }) {
+            return Ok(HeaderDisposition::SessionFatal(
+                fence,
+                HostFailureCode::Unavailable,
+            ));
+        }
+    } else if matches!(frame, ParentFrame::Load { .. }) {
+        if state.coordinator.entries.len() >= HOST_RUNTIME_ENTRIES_MAX {
+            return Ok(HeaderDisposition::SessionFatal(
+                fence,
+                HostFailureCode::ResourceLimit,
+            ));
+        }
+    } else {
+        return Ok(HeaderDisposition::SessionFatal(
+            fence,
+            HostFailureCode::StaleAuthority,
+        ));
+    }
+    Ok(HeaderDisposition::Accept)
+}
+
 fn handle_message(
     message: ParentMessage,
     state: &mut ProtocolState,
-    runtime: &mpsc::SyncSender<RuntimeCommand>,
     outbound: &mpsc::SyncSender<OutboundMessage>,
-    status: &SharedRuntimeStatus,
 ) -> Result<bool, HostError> {
-    match message.frame {
+    let ParentMessage { frame, body } = message;
+    match frame {
         ParentFrame::Hello {
             protocol_name,
             protocol_version,
+            junban_version,
             host_session_id,
         } => {
             if state.host_session_id.is_some()
                 || protocol_name != HOST_PROTOCOL_NAME
                 || protocol_version != HOST_PROTOCOL_VERSION
+                || junban_version != HOST_JUNBAN_VERSION
             {
                 return Err(HostError::Input);
             }
@@ -295,6 +504,7 @@ fn handle_message(
                 ChildFrame::Hello {
                     protocol_name: HOST_PROTOCOL_NAME.into(),
                     protocol_version: HOST_PROTOCOL_VERSION,
+                    junban_version: HOST_JUNBAN_VERSION.into(),
                     host_session_id,
                 },
             )?;
@@ -308,41 +518,40 @@ fn handle_message(
             limits,
             ..
         } => {
-            if state.host_session_id.is_none() {
-                return Err(HostError::Input);
-            }
-            if state.load_attempted {
+            if state.coordinator.entries.contains_key(&fence.plugin_id) {
                 send_failed(outbound, fence, HostFailureCode::Unavailable)?;
-                return Ok(false);
+                return Ok(true);
             }
-            state.load_attempted = true;
-            if !state.session_matches(&fence) {
-                send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
-                return Ok(false);
+            if state.coordinator.entries.len() >= HOST_RUNTIME_ENTRIES_MAX {
+                send_failed(outbound, fence, HostFailureCode::ResourceLimit)?;
+                return Ok(true);
             }
-            let loaded_authority = LoadedAuthority {
+            let authority = LoadedAuthority {
                 fence: fence.clone(),
                 permission_hash: permission_hash.clone(),
                 import_export_fingerprint: import_export_fingerprint.clone(),
                 limits: limits.clone(),
             };
-            let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
-            runtime
-                .send(RuntimeCommand::Load {
-                    request: LoadRequest {
-                        component: message.body,
-                        import_export_fingerprint,
-                        runtime_profile,
-                        grants,
-                        limits,
-                    },
-                    reply: reply_sender,
-                })
-                .map_err(|_| HostError::Runtime)?;
-            match reply_receiver.recv().map_err(|_| HostError::Runtime)? {
-                Ok(()) => {
-                    let loaded_fingerprint = loaded_authority.import_export_fingerprint.clone();
-                    state.loaded = Some(loaded_authority);
+            let request = LoadRequest {
+                component: body,
+                import_export_fingerprint,
+                runtime_profile,
+                grants,
+                limits,
+            };
+            match RuntimeEntry::load(
+                &state.coordinator.engine,
+                state.coordinator.admission.clone(),
+                authority,
+                request,
+                outbound.clone(),
+            )? {
+                Ok(entry) => {
+                    let loaded_fingerprint = entry.authority.import_export_fingerprint.clone();
+                    state
+                        .coordinator
+                        .entries
+                        .insert(fence.plugin_id.clone(), entry);
                     send_frame(
                         outbound,
                         ChildFrame::Loaded {
@@ -351,7 +560,10 @@ fn handle_message(
                         },
                     )?;
                 }
-                Err(code) => send_failed(outbound, fence, code)?,
+                Err(code) => {
+                    send_failed(outbound, fence, code)?;
+                    return Ok(true);
+                }
             }
         }
         ParentFrame::Invoke {
@@ -361,29 +573,37 @@ fn handle_message(
             permission_hash,
             ..
         } => {
-            if !state.loaded_matches(&fence, status) {
+            if !state.loaded_matches(&fence) {
                 send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
                 return Ok(false);
             }
-            let loaded = state.loaded.as_ref().expect("loaded authority disappeared");
-            if permission_hash != loaded.permission_hash || mode != kind.mode() {
+            let entry = state
+                .coordinator
+                .entries
+                .get(&fence.plugin_id)
+                .expect("loaded runtime entry disappeared");
+            if permission_hash != entry.authority.permission_hash || mode != kind.mode() {
                 send_failed(outbound, fence, HostFailureCode::PermissionDenied)?;
                 return Ok(false);
             }
-            let timeout =
-                Duration::from_millis(u64::from(loaded.limits.invocation_timeout_ms(kind)));
-            match status.start(fence.clone(), timeout) {
+            let timeout = Duration::from_millis(u64::from(
+                entry.authority.limits.invocation_timeout_ms(kind),
+            ));
+            match entry.status.start(fence.clone(), timeout) {
                 Ok(()) => {
-                    if runtime
+                    if entry
+                        .runtime
+                        .as_ref()
+                        .expect("runtime sender disappeared")
                         .send(RuntimeCommand::Invoke(InvokeRequest {
                             fence: fence.clone(),
                             kind,
                             mode,
-                            body: message.body,
+                            body,
                         }))
                         .is_err()
                     {
-                        status.worker_stopped();
+                        entry.status.worker_stopped();
                         return Err(HostError::Runtime);
                     }
                 }
@@ -397,7 +617,11 @@ fn handle_message(
         }
         ParentFrame::CapabilityReply { ref callback, .. } => {
             let failure_fence = callback.authority();
-            let code = match status.route_callback(message) {
+            let Some(entry) = state.coordinator.entries.get(&callback.plugin_id) else {
+                send_failed(outbound, failure_fence, HostFailureCode::StaleAuthority)?;
+                return Ok(false);
+            };
+            let code = match entry.status.route_callback(ParentMessage::new(frame, body)) {
                 Ok(()) => return Ok(false),
                 Err(CallbackRouteError::Stale) => HostFailureCode::StaleAuthority,
                 Err(CallbackRouteError::Wrong) => HostFailureCode::InvalidFrame,
@@ -405,10 +629,15 @@ fn handle_message(
             send_failed(outbound, failure_fence, code)?;
         }
         ParentFrame::Cancel { fence } => {
-            if !state.loaded_matches(&fence, status) {
+            if !state.loaded_matches(&fence) {
                 send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
             } else {
-                match status.cancel_and_wait(&fence) {
+                let entry = state
+                    .coordinator
+                    .entries
+                    .get(&fence.plugin_id)
+                    .expect("loaded runtime entry disappeared");
+                match entry.status.cancel_and_wait(&fence) {
                     CancelResult::Won => {}
                     CancelResult::Lost | CancelResult::Stale => {
                         send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
@@ -418,34 +647,20 @@ fn handle_message(
             }
         }
         ParentFrame::Unload { fence } => {
-            if !state.loaded_matches(&fence, status) {
+            if !state.loaded_matches(&fence) {
                 send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
             } else {
-                status.cancel_active_and_wait();
-                let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
-                runtime
-                    .send(RuntimeCommand::Unload {
-                        reply: reply_sender,
-                    })
-                    .map_err(|_| HostError::Runtime)?;
-                reply_receiver.recv().map_err(|_| HostError::Runtime)?;
-                state.loaded = None;
+                let mut entry = state
+                    .coordinator
+                    .entries
+                    .remove(&fence.plugin_id)
+                    .expect("loaded runtime entry disappeared");
+                entry.stop(false)?;
                 send_frame(outbound, ChildFrame::Unloaded { fence })?;
             }
         }
         ParentFrame::Shutdown { host_session_id } => {
-            if state.host_session_id.as_deref() != Some(host_session_id.as_str()) {
-                return Err(HostError::Input);
-            }
-            status.cancel_active_and_wait();
-            let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
-            runtime
-                .send(RuntimeCommand::Shutdown {
-                    reply: reply_sender,
-                })
-                .map_err(|_| HostError::Runtime)?;
-            reply_receiver.recv().map_err(|_| HostError::Runtime)?;
-            state.loaded = None;
+            state.coordinator.stop_all(false)?;
             send_frame(outbound, ChildFrame::ShutdownComplete { host_session_id })?;
             return Ok(true);
         }

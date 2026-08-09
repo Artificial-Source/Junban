@@ -392,6 +392,7 @@ fn run_once(
         &ParentFrame::Hello {
             protocol_name: HOST_PROTOCOL_NAME.into(),
             protocol_version: HOST_PROTOCOL_VERSION,
+            junban_version: env!("CARGO_PKG_VERSION").into(),
             host_session_id: SESSION.into(),
         },
         &[],

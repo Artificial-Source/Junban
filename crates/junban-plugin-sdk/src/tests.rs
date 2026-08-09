@@ -1446,6 +1446,76 @@ fn jri1_rejects_unknown_duplicate_float_whitespace_root_and_entry_bounds() {
 }
 
 #[test]
+fn protocol_v2_hello_frames_are_exact_and_reject_every_mismatch() {
+    const SESSION: &str = "00000000-0000-4000-8000-000000000001";
+    assert_eq!(HOST_PROTOCOL_NAME, "junban-plugin-host-v2");
+    assert_eq!(HOST_PROTOCOL_VERSION, 2);
+    assert_eq!(HOST_JUNBAN_VERSION, "0.1.0");
+
+    let parent = ParentFrame::Hello {
+        protocol_name: HOST_PROTOCOL_NAME.into(),
+        protocol_version: HOST_PROTOCOL_VERSION,
+        junban_version: HOST_JUNBAN_VERSION.into(),
+        host_session_id: SESSION.into(),
+    };
+    let child = ChildFrame::Hello {
+        protocol_name: HOST_PROTOCOL_NAME.into(),
+        protocol_version: HOST_PROTOCOL_VERSION,
+        junban_version: HOST_JUNBAN_VERSION.into(),
+        host_session_id: SESSION.into(),
+    };
+    let expected = b"\0\0\0\x9f{\"type\":\"hello\",\"protocol_name\":\"junban-plugin-host-v2\",\"protocol_version\":2,\"junban_version\":\"0.1.0\",\"host_session_id\":\"00000000-0000-4000-8000-000000000001\"}";
+    assert_eq!(encode_parent_frame(&parent).unwrap(), expected);
+    assert_eq!(encode_child_frame(&child).unwrap(), expected);
+    assert_eq!(decode_parent_frame(expected).unwrap(), parent);
+    assert_eq!(decode_child_frame(expected).unwrap(), child);
+    validate_child_hello(&child, SESSION).unwrap();
+
+    let encoded_unchecked = |value: serde_json::Value| {
+        let payload = serde_json::to_vec(&value).unwrap();
+        let mut encoded = u32::try_from(payload.len()).unwrap().to_be_bytes().to_vec();
+        encoded.extend_from_slice(&payload);
+        encoded
+    };
+    for changed in [
+        serde_json::json!({
+            "type": "hello",
+            "protocol_name": "junban-plugin-host-v1",
+            "protocol_version": HOST_PROTOCOL_VERSION,
+            "junban_version": HOST_JUNBAN_VERSION,
+            "host_session_id": SESSION,
+        }),
+        serde_json::json!({
+            "type": "hello",
+            "protocol_name": HOST_PROTOCOL_NAME,
+            "protocol_version": 1,
+            "junban_version": HOST_JUNBAN_VERSION,
+            "host_session_id": SESSION,
+        }),
+        serde_json::json!({
+            "type": "hello",
+            "protocol_name": HOST_PROTOCOL_NAME,
+            "protocol_version": HOST_PROTOCOL_VERSION,
+            "junban_version": "9.9.9",
+            "host_session_id": SESSION,
+        }),
+    ] {
+        let encoded = encoded_unchecked(changed);
+        assert!(decode_parent_frame(&encoded).is_err());
+        assert!(decode_child_frame(&encoded).is_err());
+    }
+
+    let mut wrong_session = child;
+    if let ChildFrame::Hello {
+        host_session_id, ..
+    } = &mut wrong_session
+    {
+        *host_session_id = "00000000-0000-4000-8000-000000000099".into();
+    }
+    assert!(validate_child_hello(&wrong_session, SESSION).is_err());
+}
+
+#[test]
 fn protocol_frames_are_canonical_bounded_and_identity_fenced() {
     let fence = AuthorityFence {
         plugin_id: "test-plugin".into(),
@@ -1479,6 +1549,7 @@ fn protocol_frames_are_canonical_bounded_and_identity_fenced() {
     let invalid = ParentFrame::Hello {
         protocol_name: HOST_PROTOCOL_NAME.into(),
         protocol_version: HOST_PROTOCOL_VERSION + 1,
+        junban_version: HOST_JUNBAN_VERSION.into(),
         host_session_id: "00000000-0000-4000-8000-000000000001".into(),
     };
     assert!(encode_parent_frame(&invalid).is_err());
@@ -1490,6 +1561,7 @@ fn protocol_frames_are_canonical_bounded_and_identity_fenced() {
     let wrong_protocol = ParentFrame::Hello {
         protocol_name: "not-junban".into(),
         protocol_version: HOST_PROTOCOL_VERSION,
+        junban_version: HOST_JUNBAN_VERSION.into(),
         host_session_id: "00000000-0000-4000-8000-000000000001".into(),
     };
     assert!(encode_parent_frame(&wrong_protocol).is_err());

@@ -1,6 +1,6 @@
 # Phase 7 Wave 2 — hostile plugin runtime plan
 
-Status: Slice 2B implemented but security-blocked on native-memory amplification; process ceiling/recheck precede Slices 2C–2E
+Status: Slice 2B and hostcall-fuel security correction accepted; Slice 2C planning corrections fixed in writing and pending focused planning recheck; `P7-DEP-001` and macOS containment CI remain open
 
 ## Outcome and boundary
 
@@ -60,13 +60,43 @@ Implemented on 2026-08-05 at the child-only boundary. One watchdog now owns exac
 
 The protocol's exact 10-second compile/load authority is unchanged. It is deliberately enforced by the Slice 2C parent through child kill/reap because child-local Wasmtime compilation/initial instantiation is synchronous and not safely epoch-interruptible; Slice 2B.2 makes no false child-local timeout claim. Package signature verification and the opened verified-source bridge likewise remain parent-owned Slice 2C admission before these component bytes reach the child.
 
-Independent security review found `P7-RUNTIME-SEC-001`: typed canonical ABI lifting can allocate native Rust strings/lists/results from 64/128-MiB guest memory before post-lift 4-MiB callback and 256-KiB output serialization bounds run. Exact cross-platform calibration subsequently rejected the macOS `RLIMIT_AS` remedy: a valid process reserves roughly 415 GiB, so its mechanical 519-GiB minimum is not a meaningful backstop. The approved minimal correction instead configures Wasmtime 36.0.13 `Store::set_hostcall_fuel` to **4,464,640 bytes** before every initial and replacement instantiation, with readback asserted. This guest-to-host canonical-lift authority is separate from wasm execution fuel and does not meter host-to-guest values. The bound derives from the 4-MiB callback body plus the largest 139,264-byte valid nested ABI structure and an explicit 128-KiB margin; generated-adapter coverage spans all 11 imports and 9 exports. Rust maximum-valid/oversized imports and the retained TypeScript bulk typed-array oversized-import argument (one 558,081-element `BigInt64Array`, 4,464,648 flat bytes, invoked on the original healthy Store with no capability request published) prove pre-adapter/pre-allocation failure, normalized `resource-limit`, failed-Store destruction and same-process replacement. `P7-PLAN-RUNTIME-001`, `P7-RUNTIME-SEC-001`, and `P7-DEP-001` remain open pending focused recheck; Slice 2C remains unauthorized.
+Independent security review found `P7-RUNTIME-SEC-001`: typed canonical ABI lifting can allocate native Rust strings/lists/results from 64/128-MiB guest memory before post-lift 4-MiB callback and 256-KiB output serialization bounds run. Exact cross-platform calibration subsequently rejected the macOS `RLIMIT_AS` remedy: a valid process reserves roughly 415 GiB, so its mechanical 519-GiB minimum is not a meaningful backstop. The approved minimal correction instead configures Wasmtime 36.0.13 `Store::set_hostcall_fuel` to **4,464,640 bytes** before every initial and replacement instantiation, with readback asserted. This guest-to-host canonical-lift authority is separate from wasm execution fuel and does not meter host-to-guest values. The bound derives from the 4-MiB callback body plus the largest 139,264-byte valid nested ABI structure and an explicit 128-KiB margin; generated-adapter coverage spans all 11 imports and 9 exports. Rust maximum-valid/oversized imports and the retained TypeScript bulk typed-array oversized-import argument (one 558,081-element `BigInt64Array`, 4,464,648 flat bytes, invoked on the original healthy Store with no capability request published) prove pre-adapter/pre-allocation failure, normalized `resource-limit`, failed-Store destruction and same-process replacement.
+
+The approved focused hostcall-fuel recheck marks `P7-PLAN-RUNTIME-001` and `P7-RUNTIME-SEC-001` fixed and authorizes Slice 2C from that security gate. It does not close `P7-DEP-001`, waive the current macOS containment failure in CI run `31036645108`, or approve the corrected Slice 2C plan; focused planning recheck remains required before implementation.
 
 ### Slice 2C — lazy parent supervisor and verified source bridge
 
-Add parent-side supervisor/bridge modules that are constructible without spawning or touching Wasmtime. Storage yields only a strict opened/capped verified component source; no child message contains its filesystem path. The parent creates a fresh host session, loads dependency-first enabled graphs, fences every frame by plugin ID + package generation + activation epoch + host session + invocation ID, owns one-invocation/plugin and four-process-wide admission, and kills/reaps/clears the child on malformed output, stale identity, timeout, trap, EOF, exit, or resource exhaustion.
+Add parent-side supervisor/bridge modules that are constructible without spawning or touching Wasmtime. Storage yields only a strict opened/capped verified component source; no child message contains its filesystem path.
 
-Acceptance: zero construction/spawn for empty graph; deterministic dependency order; stale/late reply rejection; in-flight kill and replacement; drain/cancel/shutdown/no-orphan on Linux/macOS/Windows harnesses. Wave 3—not this slice—wires the supervisor into ordinary `ServerState` startup/restore/maintenance.
+#### One-child runtime topology and admission
+
+Retain exactly one on-demand child process. Its one Engine owns a bounded map of at most 16 activation-fenced plugin runtime entries. Every entry owns one serialized compiled Component, selective Linker, Store, generated instance and guest state. Graph loads are sequential and dependency-first; the child may execute different admitted entries concurrently only within the frozen process limit, while each entry remains serialized.
+
+The parent owner process independently enforces one active invocation per plugin and four active invocations total. The child independently enforces the same one/four bounds rather than trusting the parent. A nested dependency `Invoke` counts as another active invocation at both layers and fails immediately with a bounded stable admission error if its target plugin or the four-total pool is saturated; it never waits while holding the caller in an unbounded queue. Per-plugin child processes are rejected.
+
+The implemented Slice 2B child accepts one load. That code must be upgraded to the bounded runtime map as part of Slice 2C before parent composition; the parent must not compose around the one-load checkpoint and must not spawn one child per plugin.
+
+A plugin-local trap, invocation timeout or plugin resource failure destroys and replaces only that plugin's Store/instance from its retained Component/Linker; sibling plugin entries and the PID survive. Transport/process loss, malformed or stale protocol, and compile/load failure are child/session-fatal: close admission, kill/reap as required, invalidate the session and every late frame, persist the graph fence described below, then replace only after durable authority permits it.
+
+#### Product host discovery and protocol v2
+
+Product construction discovers exactly `current_exe()`'s sibling `junban-plugin-host{EXE_SUFFIX}`. It never searches `PATH` and accepts no CLI, configuration or runtime-environment executable override. The path must be absolute and its own metadata must identify a strict regular executable; symlinks and Windows reparse points fail closed, and Unix requires executable mode bits. Spawn clears the full environment. Missing, wrong-type, non-executable, symlink/reparse and wrong-host candidates return a stable actionable enable error without taking down ordinary Junban.
+
+Only tests may use a separate non-product explicit absolute-path constructor populated from Cargo's compile-time-known `env!("CARGO_BIN_EXE_junban-plugin-host")` binary path. That constructor is unavailable to ordinary product composition; no test convenience becomes shipped configuration.
+
+Before parent composition, bump the private protocol from v1 to **v2** with exact name `junban-plugin-host-v2` and numeric version `2`. Parent Hello and child Hello reply each carry the exact compiled `env!("CARGO_PKG_VERSION")` Junban product-version string as `junban_version`, and the parent exact-matches name, version, product version and fresh session before sending component bytes. Mismatch is session-fatal, with no v1 fallback or range negotiation. Canonical frame goldens cover both directions and wrong name/protocol/product/session.
+
+This is a private host correction only. WIT and its frozen SHA-256, generated invocation/callback bodies, JBP1/JRI1, permission/package hashes, OpenAPI, and schema version/table shape do not change. Same-epoch activation CAS and bounded crash graph-health transitions are internal persistence semantics.
+
+#### Durable lifecycle authority
+
+SQLite/AppService exclusively owns desired enablement, activation epochs, health, retry/backoff, dependent propagation, events and receipts. The supervisor requests typed transitions and owns only ephemeral child/session/admission mechanics; it cannot persist or invent a parallel lifecycle state.
+
+Enable, manual retry and a due automatic retry each increment the activation epoch exactly once while transactionally entering `starting`. A child `Loaded` frame is not `active`. Required restore/retention resync and retained-event catch-up complete first; then and only then AppService may same-epoch CAS `starting`→`active`. Consecutive failed attempts progress through `degraded`→`failed`→`suspended`; suspension clears desired enablement. Those health transitions use the attempt's epoch and do not each advance it. Material transitions produce exact bounded receipts/events; same-state counters and retry bookkeeping remain revision-neutral.
+
+A child/session-fatal failure closes admission, kills/reaps as required and invalidates the session. Before replacement, one AppService transaction advances every affected plugin epoch and records the bounded graph-health transitions, receipts and material events. Sequential dependency-first recovery skips every dependent whose prerequisite did not become active and records its bounded `dependency_failed` transition, receipt and event. A later retry enters a new `starting` epoch under the ordinary rule.
+
+Acceptance: zero construction/spawn for an empty graph; one PID loads a deterministic dependency graph; 16 runtime entries succeed and a 17th fails closed; parent and child each prove four-total/fifth, same-plugin and nested-saturation behavior; a sibling survives a plugin-local trap; child loss durably fences the complete graph before replacement; the 10-second compile/load timeout kills and reaps; stale/late frames cannot cross the session fence; the host-discovery rejection matrix and exact v2/product-version frame goldens pass; exact health/receipt/event/dependency transitions pass; and drain/cancel/shutdown/failure leave no orphan on Linux, macOS and Windows. Wave 3—not this slice—wires the supervisor into ordinary `ServerState` startup/restore/maintenance.
 
 ### Slice 2D — capability, effect, dependency, HTTP, and event callback authority
 
@@ -78,16 +108,20 @@ Acceptance: denial precedes guest input; one-effect atomicity/replay/changed con
 
 ### Slice 2E — hostile integrated gate and replacement evidence
 
-Build signed Rust and TypeScript hostile/golden components from pinned authoring toolchains. Run protocol, import, resource, crash, effects, dependency, HTTP, event, cancellation and no-orphan matrices. Build optimized server/host separately; prove server dependency tree contains no Wasmtime and disabled startup launches no host. Replace the selected-path 45.0.3 active-runtime projections with clean 36.0.13 Rust/TypeScript child measurements while retaining separate default/Rust/TypeScript reports. Obtain the Wave 2 security gate and close every named material finding before commit.
+Build signed Rust and TypeScript hostile/golden components from pinned authoring toolchains. Run protocol, import, resource, crash, effects, dependency, HTTP, event, cancellation and no-orphan matrices. Build optimized server/host separately; prove the server dependency tree contains no Wasmtime and disabled startup launches no host.
+
+Slice 2E may add exactly one non-shipped optimized integration/measurement harness. It constructs the real Slice 2C supervisor with real storage/AppService and the real sibling host; its only path injection is the tests-only absolute Cargo binary path. It runs Rust and TypeScript profiles separately and measures multi-runtime scaling at one, four and sixteen loaded runtimes, including dependency graphs, one/four invocation admission and cleanup. It replaces the selected-path 45.0.3 active-runtime projections with clean 36.0.13 evidence while retaining separate default/Rust/TypeScript reports.
+
+This harness is replacement runtime evidence only. It does not satisfy Wave 3 ordinary `ServerState` startup/restore/maintenance composition and cannot substitute for Wave 5 product-integrated default/Rust/TypeScript evidence. Obtain the Wave 2 security gate, make the current macOS containment job pass, and close `P7-DEP-001` plus every other named material finding before Wave 2 acceptance.
 
 ## Ownership and lifecycle
 
-- **SQLite/AppService:** durable package/grant/graph/epoch/invocation/receipt/effect/cursor/health authority.
-- **Parent supervisor:** child process, host session, admission, cancellation, dependency ancestry, callback authorization, HTTPS transport, event workers and late-reply fencing.
-- **Child host:** Wasmtime Engine/Linker/compiled components/Stores and typed guest execution only; no durable or product authority.
+- **SQLite/AppService:** exclusive durable package/grant/graph/desired-state/epoch/health/retry/backoff/dependent-propagation/invocation/receipt/event/effect/cursor authority and every typed lifecycle transition.
+- **Parent supervisor:** exact sibling discovery, child process, host session, admission, cancellation, dependency ancestry, callback authorization, HTTPS transport, event workers and late-reply fencing; it only requests durable transitions.
+- **Child host:** one Wasmtime Engine, at most 16 activation-fenced Component/Linker/Store/instance entries, independent admission and typed guest execution only; no durable or product authority.
 - **Guest:** untrusted component memory and returned values only.
 
-Start is profile reconciliation → selected verified active graph → fresh session → child spawn → dependency-order loads → admission. Stop is close admission → cancel callbacks/calls → bounded drain → shutdown frame → kill fallback → wait/reap → clear session. Any partial drain or ambiguous result stays fail-closed.
+Start is profile reconciliation → selected verified desired graph → each admitted attempt increments its epoch once into `starting` → fresh host session → child spawn → exact v2/product-version Hello/reply → sequential dependency-order loads → required resync/catch-up → same-epoch active CAS → admission. Stop is close admission → cancel callbacks/calls → bounded drain → shutdown frame → kill fallback → wait/reap → clear session. Plugin-local failure replaces one Store; child/session-fatal failure durably fences the complete affected graph before replacement. Any partial drain or ambiguous result stays fail-closed.
 
 ## Validation sequence
 

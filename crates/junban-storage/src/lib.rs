@@ -1412,24 +1412,46 @@ impl PluginRepository for SqliteRepository {
         })
     }
 
-    fn update_plugin_bookkeeping(
-        &self,
-        update: junban_app::PluginBookkeepingUpdate,
-        now: Timestamp,
-    ) -> RepositoryFuture<'_, junban_app::InstalledPlugin> {
-        self.plugin_request(move |connection, _| {
-            plugin_ops::update_plugin_bookkeeping(connection, update, now)
-        })
-    }
-
-    fn transition_plugin_health(
+    fn retry_due_plugin(
         &self,
         operation_id: OperationId,
-        update: junban_app::PluginBookkeepingUpdate,
+        request: junban_app::DuePluginRetryRequest,
         now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation> {
         self.plugin_request(move |connection, _| {
-            plugin_ops::transition_plugin_health(connection, operation_id, update, now)
+            plugin_ops::retry_due_plugin(connection, operation_id, request, now)
+        })
+    }
+
+    fn complete_plugin_activation(
+        &self,
+        operation_id: OperationId,
+        request: junban_app::CompletePluginActivationRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::complete_plugin_activation(connection, operation_id, request, now)
+        })
+    }
+
+    fn record_plugin_attempt_failure(
+        &self,
+        operation_id: OperationId,
+        request: junban_app::RecordPluginAttemptFailureRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::record_plugin_attempt_failure(connection, operation_id, request, now)
+        })
+    }
+
+    fn fence_plugin_graph(
+        &self,
+        request: junban_app::PluginGraphFenceRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginGraphFenceOutcome> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::fence_plugin_graph(connection, request, now)
         })
     }
 }

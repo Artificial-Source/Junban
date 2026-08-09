@@ -2503,28 +2503,59 @@ where
         Ok(committed)
     }
 
-    pub async fn update_plugin_bookkeeping(
-        &self,
-        update: crate::PluginBookkeepingUpdate,
-        now: Timestamp,
-    ) -> Result<crate::InstalledPlugin, AppError> {
-        self.repository
-            .update_plugin_bookkeeping(update, now)
-            .await
-            .map_err(AppError::from)
-    }
-
-    pub async fn transition_plugin_health(
+    pub async fn retry_due_plugin(
         &self,
         operation_id: OperationId,
-        update: crate::PluginBookkeepingUpdate,
+        request: crate::DuePluginRetryRequest,
         now: Timestamp,
     ) -> Result<CommittedMutation, AppError> {
         let result = self
             .repository
-            .transition_plugin_health(operation_id, update, now)
+            .retry_due_plugin(operation_id, request, now)
             .await;
         self.commit(result)
+    }
+
+    pub async fn complete_plugin_activation(
+        &self,
+        operation_id: OperationId,
+        request: crate::CompletePluginActivationRequest,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .complete_plugin_activation(operation_id, request, now)
+            .await;
+        self.commit(result)
+    }
+
+    pub async fn record_plugin_attempt_failure(
+        &self,
+        operation_id: OperationId,
+        request: crate::RecordPluginAttemptFailureRequest,
+        now: Timestamp,
+    ) -> Result<CommittedMutation, AppError> {
+        let result = self
+            .repository
+            .record_plugin_attempt_failure(operation_id, request, now)
+            .await;
+        self.commit(result)
+    }
+
+    pub async fn fence_plugin_graph(
+        &self,
+        request: crate::PluginGraphFenceRequest,
+        now: Timestamp,
+    ) -> Result<crate::PluginGraphFenceOutcome, AppError> {
+        let outcome = self
+            .repository
+            .fence_plugin_graph(request, now)
+            .await
+            .map_err(AppError::from)?;
+        if outcome.mutation.newly_committed {
+            self.events.publish(outcome.mutation.event.clone());
+        }
+        Ok(outcome)
     }
 
     fn publish_plugin_outcome(&self, outcome: &crate::PluginMutationOutcome) {
@@ -2709,6 +2740,49 @@ mod tests {
     }
 
     impl crate::PluginRepository for FakeRepository {
+        fn retry_due_plugin(
+            &self,
+            _: OperationId,
+            _: crate::DuePluginRetryRequest,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("plugin-due-retry")
+        }
+
+        fn complete_plugin_activation(
+            &self,
+            _: OperationId,
+            _: crate::CompletePluginActivationRequest,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("plugin-activate")
+        }
+
+        fn record_plugin_attempt_failure(
+            &self,
+            _: OperationId,
+            _: crate::RecordPluginAttemptFailureRequest,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, CommittedMutation> {
+            self.response("plugin-attempt-failure")
+        }
+
+        fn fence_plugin_graph(
+            &self,
+            request: crate::PluginGraphFenceRequest,
+            _: Timestamp,
+        ) -> crate::RepositoryFuture<'_, crate::PluginGraphFenceOutcome> {
+            self.calls.lock().unwrap().push("plugin-graph-fence");
+            let result = self.result.lock().unwrap().clone().map(|mutation| {
+                crate::PluginGraphFenceOutcome {
+                    host_session_id: request.host_session_id,
+                    results: Vec::new(),
+                    mutation,
+                }
+            });
+            Box::pin(async move { result })
+        }
+
         fn retry_plugin(
             &self,
             _: OperationId,
@@ -3847,6 +3921,99 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(sink.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn typed_plugin_lifecycle_mutations_publish_only_fresh_commits() {
+        let expected = mutation();
+        let repository = Arc::new(FakeRepository::new(Ok(expected.clone())));
+        let sink = Arc::new(RecordingSink::default());
+        let service = JunbanService::new(Arc::clone(&repository), Arc::clone(&sink));
+        let plugin_id = junban_plugin_sdk::PluginId::parse("test-plugin").unwrap();
+        let due_at = Timestamp::constant(1_700_000_100, 0);
+
+        service
+            .retry_due_plugin(
+                OperationId::new(),
+                crate::DuePluginRetryRequest {
+                    plugin_id: plugin_id.clone(),
+                    package_generation: 1,
+                    activation_epoch: 2,
+                    expected_runtime_state: crate::PluginRuntimeState::Degraded,
+                    expected_next_retry_at: due_at,
+                },
+                due_at,
+            )
+            .await
+            .unwrap();
+        service
+            .complete_plugin_activation(
+                OperationId::new(),
+                crate::CompletePluginActivationRequest {
+                    plugin_id: plugin_id.clone(),
+                    package_generation: 1,
+                    activation_epoch: 3,
+                },
+                due_at,
+            )
+            .await
+            .unwrap();
+        service
+            .record_plugin_attempt_failure(
+                OperationId::new(),
+                crate::RecordPluginAttemptFailureRequest {
+                    plugin_id: plugin_id.clone(),
+                    package_generation: 1,
+                    activation_epoch: 3,
+                    cause: crate::PluginAttemptFailureCause::Timeout,
+                },
+                due_at,
+            )
+            .await
+            .unwrap();
+        service
+            .fence_plugin_graph(
+                crate::PluginGraphFenceRequest {
+                    operation_id: OperationId::new(),
+                    host_session_id: OperationId::new().to_string(),
+                    entries: vec![crate::PluginGraphFenceEntry {
+                        plugin_id,
+                        package_generation: 1,
+                        activation_epoch: 3,
+                        cause: crate::PluginGraphFenceCause::ChildFatal,
+                        disposition: crate::PluginGraphFenceDisposition::Failing,
+                    }],
+                },
+                due_at,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repository.calls.lock().unwrap().as_slice(),
+            &[
+                "plugin-due-retry",
+                "plugin-activate",
+                "plugin-attempt-failure",
+                "plugin-graph-fence",
+            ]
+        );
+        assert_eq!(sink.0.lock().unwrap().len(), 4);
+
+        *repository.result.lock().unwrap() = Ok(mutation_with_flag(false));
+        service
+            .complete_plugin_activation(
+                OperationId::new(),
+                crate::CompletePluginActivationRequest {
+                    plugin_id: junban_plugin_sdk::PluginId::parse("test-plugin").unwrap(),
+                    package_generation: 1,
+                    activation_epoch: 3,
+                },
+                due_at,
+            )
+            .await
+            .unwrap();
+        assert_eq!(sink.0.lock().unwrap().len(), 4);
     }
 
     #[tokio::test]

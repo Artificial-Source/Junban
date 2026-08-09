@@ -39,6 +39,9 @@ pub const PLUGIN_INVOCATION_RETENTION_DAYS: i64 = 30;
 pub const PLUGIN_RESYNC_PAGE_ITEMS_MAX: usize = 100;
 pub const PLUGIN_RESYNC_PAGE_BYTES_MAX: usize = 256 * 1024;
 pub const PLUGIN_DEPENDENTS_MAX: usize = 64;
+pub const PLUGIN_GRAPH_FENCE_ENTRIES_MAX: usize = 16;
+pub const PLUGIN_FAILURE_BACKOFF_START_SECONDS: i64 = 30;
+pub const PLUGIN_FAILURE_BACKOFF_MAX_SECONDS: i64 = 60 * 60;
 
 /// Fully inspected package metadata. Construction verifies JBP1 signature,
 /// canonical manifest/hash identities, component shape, and Junban compatibility.
@@ -751,13 +754,118 @@ pub struct TransitionPluginInvocationRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct PluginBookkeepingUpdate {
+pub struct DuePluginRetryRequest {
     pub plugin_id: PluginId,
     pub package_generation: u64,
     pub activation_epoch: u64,
+    pub expected_runtime_state: PluginRuntimeState,
+    pub expected_next_retry_at: Timestamp,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct CompletePluginActivationRequest {
+    pub plugin_id: PluginId,
+    pub package_generation: u64,
+    pub activation_epoch: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginAttemptFailureCause {
+    GuestTrap,
+    Timeout,
+    ResourceLimit,
+    InvalidOutput,
+    ActivationFailed,
+    InternalError,
+}
+
+impl PluginAttemptFailureCause {
+    #[must_use]
+    pub const fn error_code(self) -> &'static str {
+        match self {
+            Self::GuestTrap => "guest_trap",
+            Self::Timeout => "timeout",
+            Self::ResourceLimit => "resource_limit",
+            Self::InvalidOutput => "invalid_output",
+            Self::ActivationFailed => "activation_failed",
+            Self::InternalError => "internal_error",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RecordPluginAttemptFailureRequest {
+    pub plugin_id: PluginId,
+    pub package_generation: u64,
+    pub activation_epoch: u64,
+    pub cause: PluginAttemptFailureCause,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginGraphFenceCause {
+    CompileLoad,
+    ChildFatal,
+    SessionLost,
+    DependencyFailed,
+}
+
+impl PluginGraphFenceCause {
+    #[must_use]
+    pub const fn error_code(self) -> &'static str {
+        match self {
+            Self::CompileLoad => "compile_load",
+            Self::ChildFatal => "child_fatal",
+            Self::SessionLost => "session_lost",
+            Self::DependencyFailed => "dependency_failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginGraphFenceDisposition {
+    Failing,
+    LoadedSibling,
+    SkippedDependent,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct PluginGraphFenceEntry {
+    pub plugin_id: PluginId,
+    pub package_generation: u64,
+    pub activation_epoch: u64,
+    pub cause: PluginGraphFenceCause,
+    pub disposition: PluginGraphFenceDisposition,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct PluginGraphFenceRequest {
+    pub operation_id: OperationId,
+    pub host_session_id: String,
+    pub entries: Vec<PluginGraphFenceEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PluginGraphFenceResult {
+    pub plugin_id: PluginId,
+    pub package_generation: u64,
+    pub expected_activation_epoch: u64,
+    pub new_activation_epoch: u64,
+    pub prior_runtime_state: PluginRuntimeState,
+    pub target_runtime_state: PluginRuntimeState,
     pub failure_count: u32,
-    pub last_error_code: Option<String>,
-    pub next_retry_at: Option<Timestamp>,
+    pub cause: PluginGraphFenceCause,
+    pub desired_enabled: bool,
+    pub disposition: PluginGraphFenceDisposition,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PluginGraphFenceOutcome {
+    pub host_session_id: String,
+    pub results: Vec<PluginGraphFenceResult>,
+    pub mutation: CommittedMutation,
 }
 
 #[derive(Clone, Debug)]
@@ -1439,20 +1547,38 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
-    fn update_plugin_bookkeeping(
+    fn retry_due_plugin(
         &self,
-        _update: PluginBookkeepingUpdate,
+        _operation_id: OperationId,
+        _request: DuePluginRetryRequest,
         _now: Timestamp,
-    ) -> RepositoryFuture<'_, InstalledPlugin> {
+    ) -> RepositoryFuture<'_, CommittedMutation> {
         plugin_unavailable()
     }
 
-    fn transition_plugin_health(
+    fn complete_plugin_activation(
         &self,
         _operation_id: OperationId,
-        _update: PluginBookkeepingUpdate,
+        _request: CompletePluginActivationRequest,
         _now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedMutation> {
+        plugin_unavailable()
+    }
+
+    fn record_plugin_attempt_failure(
+        &self,
+        _operation_id: OperationId,
+        _request: RecordPluginAttemptFailureRequest,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        plugin_unavailable()
+    }
+
+    fn fence_plugin_graph(
+        &self,
+        _request: PluginGraphFenceRequest,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, PluginGraphFenceOutcome> {
         plugin_unavailable()
     }
 }
@@ -1722,5 +1848,41 @@ mod tests {
             }),
             Err(RepositoryError::Conflict)
         ));
+    }
+
+    #[test]
+    fn lifecycle_failure_causes_have_closed_stable_codes() {
+        assert_eq!(
+            [
+                PluginAttemptFailureCause::GuestTrap.error_code(),
+                PluginAttemptFailureCause::Timeout.error_code(),
+                PluginAttemptFailureCause::ResourceLimit.error_code(),
+                PluginAttemptFailureCause::InvalidOutput.error_code(),
+                PluginAttemptFailureCause::ActivationFailed.error_code(),
+                PluginAttemptFailureCause::InternalError.error_code(),
+            ],
+            [
+                "guest_trap",
+                "timeout",
+                "resource_limit",
+                "invalid_output",
+                "activation_failed",
+                "internal_error",
+            ]
+        );
+        assert_eq!(
+            [
+                PluginGraphFenceCause::CompileLoad.error_code(),
+                PluginGraphFenceCause::ChildFatal.error_code(),
+                PluginGraphFenceCause::SessionLost.error_code(),
+                PluginGraphFenceCause::DependencyFailed.error_code(),
+            ],
+            [
+                "compile_load",
+                "child_fatal",
+                "session_lost",
+                "dependency_failed",
+            ]
+        );
     }
 }

@@ -11,24 +11,28 @@ use jiff::{Timestamp, ToSpan};
 use junban_app::{
     AdvancePluginCursorRequest, AffectedIds, ApplicationMutationUnitOfWork,
     BeginPluginResyncRequest, CommittedMutation, CommittedPluginInvocation, CommunityPluginPolicy,
-    DeletePluginSettingRequest, EventType, InstallPluginRequest, InstalledPlugin,
-    InstalledPluginProfile, PLUGIN_DEPENDENTS_MAX, PLUGIN_INVOCATION_MATERIAL_BYTES_MAX,
+    CompletePluginActivationRequest, DeletePluginSettingRequest, DuePluginRetryRequest, EventType,
+    InstallPluginRequest, InstalledPlugin, InstalledPluginProfile, PLUGIN_DEPENDENTS_MAX,
+    PLUGIN_FAILURE_BACKOFF_MAX_SECONDS, PLUGIN_FAILURE_BACKOFF_START_SECONDS,
+    PLUGIN_GRAPH_FENCE_ENTRIES_MAX, PLUGIN_INVOCATION_MATERIAL_BYTES_MAX,
     PLUGIN_INVOCATION_MATERIAL_PER_PLUGIN_BYTES_MAX, PLUGIN_INVOCATION_RETENTION_DAYS,
     PLUGIN_INVOCATIONS_MAX, PLUGIN_INVOCATIONS_PER_PLUGIN_MAX, PLUGIN_KV_BYTES_MAX,
     PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX, PLUGIN_RESYNC_PAGE_BYTES_MAX,
     PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX, PLUGIN_SETTINGS_KEYS_MAX,
     PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX, PlannedPluginInvocationCommit,
-    PluginBookkeepingUpdate, PluginCursorPosition, PluginEventCursor, PluginGrant,
-    PluginGraphRejection, PluginHookKind, PluginInstallSource, PluginInvocation,
-    PluginInvocationState, PluginInvocationTerminalKind, PluginKvEntry, PluginKvPatch,
-    PluginManifestEntry, PluginManifestEntrySelector, PluginMutationOutcome,
+    PluginCursorPosition, PluginEventCursor, PluginGrant, PluginGraphFenceCause,
+    PluginGraphFenceDisposition, PluginGraphFenceOutcome, PluginGraphFenceRequest,
+    PluginGraphFenceResult, PluginGraphRejection, PluginHookKind, PluginInstallSource,
+    PluginInvocation, PluginInvocationState, PluginInvocationTerminalKind, PluginKvEntry,
+    PluginKvPatch, PluginManifestEntry, PluginManifestEntrySelector, PluginMutationOutcome,
     PluginPackageAdmission, PluginPackageReconciliation, PluginResyncKvCommit, PluginResyncPage,
     PluginResyncPageRequest, PluginResyncSession, PluginRuntimeState, PluginSetting,
     PluginSnapshotItem, PluginSnapshotKind, PublisherTrust, PublisherTrustStatus,
-    ReplacePluginGrantsRequest, RepositoryError, ReservePluginInvocationRequest,
-    ReservedPluginInvocation, ResourceRef, ResourceSnapshot, ResyncScope,
-    RevokePluginGrantsRequest, SetPluginSettingRequest, TransitionPluginInvocationRequest,
-    TrustPublisherRequest, plugin_manifest_entry_authority, plugin_resync_request_hash,
+    RecordPluginAttemptFailureRequest, ReplacePluginGrantsRequest, RepositoryError,
+    ReservePluginInvocationRequest, ReservedPluginInvocation, ResourceRef, ResourceSnapshot,
+    ResyncScope, RevokePluginGrantsRequest, SetPluginSettingRequest,
+    TransitionPluginInvocationRequest, TrustPublisherRequest, plugin_manifest_entry_authority,
+    plugin_resync_request_hash,
 };
 use junban_domain::{OperationId, ProjectId, TagId, TaskId};
 use junban_plugin_sdk::{
@@ -38,7 +42,7 @@ use junban_plugin_sdk::{
     validate_permission_grants, version_matches,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -47,12 +51,11 @@ use crate::{
     rows::{load_project, load_tag, load_task, revision_to_i64, storage_error},
     task_ops,
     tx::{
-        MutationEffect, canonical_json, cleanup_expired_receipts, mutate, mutate_in_transaction,
-        prune_retained_events, read_receipt_response, write_receipt_response_in_transaction,
+        MutationEffect, RECEIPT_MATERIAL_MAX_BYTES, canonical_json, cleanup_expired_receipts,
+        mutate, mutate_in_transaction, prune_retained_events, read_receipt_response,
+        write_receipt_response_in_transaction,
     },
 };
-
-const FAILURE_CODE_BYTES_MAX: usize = 64;
 
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -376,11 +379,7 @@ fn validate_current_graph(
     if plugins
         .iter()
         .filter(|plugin| {
-            plugin.desired_enabled
-                && !matches!(
-                    plugin.runtime_state,
-                    PluginRuntimeState::Starting | PluginRuntimeState::Suspended
-                )
+            plugin.desired_enabled && plugin.runtime_state == PluginRuntimeState::Active
         })
         .any(|plugin| {
             plugin.manifest.dependencies.iter().any(|dependency| {
@@ -1294,8 +1293,13 @@ pub(crate) fn set_plugin_desired_enabled(
             .find(|value| value.plugin_id == plugin_id)
             .cloned()
             .ok_or(RepositoryError::NotFound)?;
+        if (enabled
+            && (plugin.desired_enabled || plugin.runtime_state != PluginRuntimeState::Disabled))
+            || (!enabled && !plugin.desired_enabled)
+        {
+            return Err(RepositoryError::Conflict);
+        }
         if enabled
-            && !plugin.desired_enabled
             && plugins.iter().filter(|value| value.desired_enabled).count() >= PLUGINS_ENABLED_MAX
         {
             return Err(RepositoryError::OperationTooLarge);
@@ -3973,235 +3977,377 @@ pub(crate) fn commit_plugin_invocation_with(
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum HealthUpdateMode {
-    Bookkeeping,
-    MaterialTransition,
-}
-
-fn validate_bookkeeping_update(update: &PluginBookkeepingUpdate) -> Result<(), RepositoryError> {
-    if update.last_error_code.as_ref().is_some_and(|code| {
-        code.is_empty()
-            || code.len() > FAILURE_CODE_BYTES_MAX
-            || !crate::plugin_validation::valid_error_code(code)
-    }) || update.failure_count > 3
-        || (update.failure_count == 0) != update.last_error_code.is_none()
-        || match update.failure_count {
-            0 | 3 => update.next_retry_at.is_some(),
-            1 | 2 => update.next_retry_at.is_none(),
-            _ => true,
+fn activation_attempt_authority_is_valid(plugin: &InstalledPlugin) -> bool {
+    match plugin.runtime_state {
+        PluginRuntimeState::Starting => {
+            plugin.next_retry_at.is_none()
+                && ((plugin.failure_count == 0 && plugin.last_error_code.is_none())
+                    || (matches!(plugin.failure_count, 1 | 2) && plugin.last_error_code.is_some()))
         }
-    {
-        return Err(RepositoryError::OperationTooLarge);
-    }
-    Ok(())
-}
-
-fn apply_plugin_health_update(
-    connection: &Connection,
-    update: &PluginBookkeepingUpdate,
-    now: Timestamp,
-    mode: HealthUpdateMode,
-) -> Result<(InstalledPlugin, Vec<PluginId>), RepositoryError> {
-    validate_bookkeeping_update(update)?;
-    let plugins = load_plugins(connection)?;
-    let plugin = plugins
-        .iter()
-        .find(|plugin| plugin.plugin_id == update.plugin_id)
-        .cloned()
-        .ok_or(RepositoryError::NotFound)?;
-    if plugin.package_generation != update.package_generation
-        || plugin.activation_epoch != update.activation_epoch
-        || !plugin.desired_enabled
-        || now < plugin.updated_at
-    {
-        return Err(RepositoryError::Conflict);
-    }
-    let cursor = load_plugin_cursor(connection, &update.plugin_id)?;
-    let legal_transition = match update.failure_count {
-        0 => {
-            matches!(
-                plugin.runtime_state,
-                PluginRuntimeState::Starting
-                    | PluginRuntimeState::Active
-                    | PluginRuntimeState::Degraded
-                    | PluginRuntimeState::Failed
-            ) && plugin.next_retry_at.is_none_or(|retry_at| retry_at <= now)
-        }
-        1 => matches!(plugin.failure_count, 0 | 1),
-        2 => {
-            plugin.failure_count == 1
-                && plugin.next_retry_at.is_some_and(|retry_at| retry_at <= now)
-                || plugin.failure_count == 2
-        }
-        3 => {
-            plugin.failure_count == 2
-                && plugin.next_retry_at.is_some_and(|retry_at| retry_at <= now)
+        PluginRuntimeState::Active => {
+            plugin.failure_count == 0
+                && plugin.last_error_code.is_none()
+                && plugin.next_retry_at.is_none()
         }
         _ => false,
-    };
-    let dependencies_active = plugin.manifest.dependencies.iter().all(|dependency| {
-        plugins
-            .iter()
-            .find(|candidate| candidate.plugin_id.as_str() == dependency.id)
-            .is_some_and(|dependency| {
-                dependency.desired_enabled
-                    && matches!(
-                        dependency.runtime_state,
-                        PluginRuntimeState::Active | PluginRuntimeState::Degraded
-                    )
-            })
-    });
-    if !legal_transition
-        || matches!(update.failure_count, 1 | 2)
-            && update.next_retry_at.is_none_or(|retry_at| retry_at <= now)
-        || update.failure_count == 0 && !cursor.resync_required && !dependencies_active
-    {
-        return Err(RepositoryError::Conflict);
     }
-    let target_state = match update.failure_count {
-        0 if cursor.resync_required => PluginRuntimeState::Starting,
-        0 => PluginRuntimeState::Active,
+}
+
+fn scheduled_retry_authority_is_valid(plugin: &InstalledPlugin) -> bool {
+    ((plugin.runtime_state == PluginRuntimeState::Degraded && plugin.failure_count == 1)
+        || (plugin.runtime_state == PluginRuntimeState::Failed && plugin.failure_count == 2))
+        && plugin.last_error_code.is_some()
+        && plugin.next_retry_at.is_some()
+}
+
+fn failure_progression(
+    current_count: u32,
+    now: Timestamp,
+) -> Result<(u32, PluginRuntimeState, Option<Timestamp>), RepositoryError> {
+    let next_count = current_count
+        .checked_add(1)
+        .filter(|count| *count <= 3)
+        .ok_or(RepositoryError::Conflict)?;
+    let target = match next_count {
         1 => PluginRuntimeState::Degraded,
         2 => PluginRuntimeState::Failed,
         3 => PluginRuntimeState::Suspended,
-        _ => unreachable!("validated failure count"),
+        _ => unreachable!("bounded failure progression"),
     };
-    let material = target_state != plugin.runtime_state;
-    if (mode == HealthUpdateMode::MaterialTransition) != material {
-        return Err(RepositoryError::Conflict);
-    }
-
-    let auto_disabled = target_state == PluginRuntimeState::Suspended;
-    let enabled_dependents: Vec<_> = if auto_disabled {
-        dependent_closure(&plugins, &update.plugin_id)
-            .into_iter()
-            .filter_map(|dependent| {
-                plugins
-                    .iter()
-                    .find(|candidate| candidate.plugin_id == dependent && candidate.desired_enabled)
-                    .cloned()
-            })
-            .collect()
+    let retry_at = if next_count < 3 {
+        let shift = next_count.saturating_sub(1);
+        let seconds = PLUGIN_FAILURE_BACKOFF_START_SECONDS
+            .saturating_mul(1_i64 << shift)
+            .min(PLUGIN_FAILURE_BACKOFF_MAX_SECONDS);
+        Some(now.checked_add(seconds.seconds()).map_err(storage_error)?)
     } else {
-        Vec::new()
+        None
     };
-    let activation_epoch = if material {
-        next_activation_epoch(plugin.activation_epoch)?
-    } else {
-        plugin.activation_epoch
-    };
-    for dependent in &enabled_dependents {
-        next_activation_epoch(dependent.activation_epoch)?;
-    }
-    if material {
-        // A crash after durable pre-send transition remains honestly ambiguous.
-        // Guest-local work is safe to abandon and deterministically retry.
-        connection
-            .execute(
-                "UPDATE plugin_invocations
-                 SET state = 'ambiguous_http', error_code = 'http_ambiguous'
-                 WHERE plugin_id = ?1 AND state = 'dispatching_http'",
-                [update.plugin_id.as_str()],
-            )
-            .map_err(storage_error)?;
-        connection
-            .execute(
-                "DELETE FROM plugin_invocations
-                 WHERE plugin_id = ?1 AND state IN ('reserved', 'effect_committing')",
-                [update.plugin_id.as_str()],
-            )
-            .map_err(storage_error)?;
-    }
-    connection
-        .execute(
-            "UPDATE plugins SET activation_epoch = ?2, desired_enabled = ?3,
-                runtime_state = ?4, failure_count = ?5, last_error_code = ?6,
-                next_retry_at = ?7, updated_at = ?8 WHERE plugin_id = ?1",
-            params![
-                update.plugin_id.as_str(),
-                as_i64(activation_epoch, "activation epoch")?,
-                i64::from(!auto_disabled),
-                runtime_state_name(target_state),
-                i64::from(update.failure_count),
-                update.last_error_code,
-                update.next_retry_at.map(|value| value.to_string()),
-                now.to_string(),
-            ],
-        )
-        .map_err(storage_error)?;
-    if material {
-        connection
-            .execute(
-                "UPDATE plugin_invocations SET activation_epoch = ?2
-                 WHERE plugin_id = ?1 AND state = 'ambiguous_http'",
-                params![
-                    update.plugin_id.as_str(),
-                    as_i64(activation_epoch, "activation epoch")?,
-                ],
-            )
-            .map_err(storage_error)?;
-    }
-    if auto_disabled {
-        connection
-            .execute(
-                "UPDATE plugin_event_cursors SET resync_required = 1, updated_at = ?2
-                 WHERE plugin_id = ?1",
-                params![update.plugin_id.as_str(), now.to_string()],
-            )
-            .map_err(storage_error)?;
-        for dependent in &enabled_dependents {
-            force_suspend_plugin(connection, dependent, "dependency_failed", now)?;
-        }
-    }
-    let stored = load_installed_plugin(connection, &update.plugin_id)?;
-    let mut affected = vec![update.plugin_id.clone()];
-    affected.extend(
-        enabled_dependents
-            .into_iter()
-            .map(|dependent| dependent.plugin_id),
-    );
-    Ok((stored, affected))
+    Ok((next_count, target, retry_at))
 }
 
-pub(crate) fn update_plugin_bookkeeping(
-    connection: &mut Connection,
-    update: PluginBookkeepingUpdate,
-    now: Timestamp,
-) -> Result<InstalledPlugin, RepositoryError> {
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
+fn abandon_plugin_attempt(
+    connection: &Connection,
+    plugin_id: &PluginId,
+) -> Result<(), RepositoryError> {
+    connection
+        .execute(
+            "UPDATE plugin_invocations
+             SET state = 'ambiguous_http', error_code = 'http_ambiguous'
+             WHERE plugin_id = ?1 AND state = 'dispatching_http'",
+            [plugin_id.as_str()],
+        )
         .map_err(storage_error)?;
-    transaction
-        .execute_batch("PRAGMA defer_foreign_keys = ON;")
+    connection
+        .execute(
+            "DELETE FROM plugin_invocations
+             WHERE plugin_id = ?1 AND state IN ('reserved', 'effect_committing')",
+            [plugin_id.as_str()],
+        )
         .map_err(storage_error)?;
-    let (stored, _) =
-        apply_plugin_health_update(&transaction, &update, now, HealthUpdateMode::Bookkeeping)?;
-    transaction.commit().map_err(storage_error)?;
-    Ok(stored)
+    Ok(())
 }
 
 #[derive(Serialize)]
-struct PluginHealthTransitionRequest<'a> {
+struct DuePluginRetryReceiptRequest<'a> {
     op: &'static str,
-    update: &'a PluginBookkeepingUpdate,
+    request: &'a DuePluginRetryRequest,
 }
 
-pub(crate) fn transition_plugin_health(
+pub(crate) fn retry_due_plugin(
     connection: &mut Connection,
     operation_id: OperationId,
-    update: PluginBookkeepingUpdate,
+    request: DuePluginRetryRequest,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
-    let request = canonical_json(&PluginHealthTransitionRequest {
-        op: "transition_plugin_health",
-        update: &update,
+    let request_json = canonical_json(&DuePluginRetryReceiptRequest {
+        op: "retry_due_plugin",
+        request: &request,
     })?;
-    mutate(connection, operation_id, request, now, move |tx, _| {
+    mutate(connection, operation_id, request_json, now, move |tx, _| {
         tx.execute_batch("PRAGMA defer_foreign_keys = ON;")
             .map_err(storage_error)?;
-        let (stored, affected) =
-            apply_plugin_health_update(tx, &update, now, HealthUpdateMode::MaterialTransition)?;
+        let plugins = load_plugins(tx)?;
+        validate_current_graph(tx, &plugins)?;
+        let plugin = plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == request.plugin_id)
+            .cloned()
+            .ok_or(RepositoryError::NotFound)?;
+        if !matches!(
+            request.expected_runtime_state,
+            PluginRuntimeState::Degraded | PluginRuntimeState::Failed
+        ) || plugin.package_generation != request.package_generation
+            || plugin.activation_epoch != request.activation_epoch
+            || plugin.runtime_state != request.expected_runtime_state
+            || plugin.next_retry_at != Some(request.expected_next_retry_at)
+            || request.expected_next_retry_at > now
+            || !plugin.desired_enabled
+            || !scheduled_retry_authority_is_valid(&plugin)
+            || now < plugin.updated_at
+        {
+            return Err(RepositoryError::Conflict);
+        }
+        let (invocations, ambiguous): (i64, i64) = tx
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(state = 'ambiguous_http'), 0)
+                 FROM plugin_invocations WHERE plugin_id = ?1",
+                [plugin.plugin_id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(storage_error)?;
+        if invocations != ambiguous {
+            return Err(RepositoryError::Conflict);
+        }
+        let epoch = next_activation_epoch(plugin.activation_epoch)?;
+        let changed = tx
+            .execute(
+                "UPDATE plugins SET activation_epoch = ?4, runtime_state = 'starting',
+                    next_retry_at = NULL, updated_at = ?5
+                 WHERE plugin_id = ?1 AND package_generation = ?2
+                   AND activation_epoch = ?3 AND runtime_state = ?6
+                   AND next_retry_at = ?7 AND desired_enabled = 1",
+                params![
+                    plugin.plugin_id.as_str(),
+                    as_i64(plugin.package_generation, "package generation")?,
+                    as_i64(plugin.activation_epoch, "activation epoch")?,
+                    as_i64(epoch, "activation epoch")?,
+                    now.to_string(),
+                    runtime_state_name(request.expected_runtime_state),
+                    request.expected_next_retry_at.to_string(),
+                ],
+            )
+            .map_err(storage_error)?;
+        if changed != 1 {
+            return Err(RepositoryError::Conflict);
+        }
+        tx.execute(
+            "UPDATE plugin_invocations SET activation_epoch = ?2
+             WHERE plugin_id = ?1 AND state = 'ambiguous_http'",
+            params![
+                plugin.plugin_id.as_str(),
+                as_i64(epoch, "activation epoch")?
+            ],
+        )
+        .map_err(storage_error)?;
+        let stored = load_installed_plugin(tx, &plugin.plugin_id)?;
+        Ok(plugin_effect(
+            EventType::PLUGIN_RETRY_REQUESTED,
+            Some(&stored),
+            vec![stored.plugin_id.clone()],
+            Some(stored.plugin_id.to_string()),
+        ))
+    })
+}
+
+#[derive(Serialize)]
+struct CompletePluginActivationReceiptRequest<'a> {
+    op: &'static str,
+    request: &'a CompletePluginActivationRequest,
+}
+
+pub(crate) fn complete_plugin_activation(
+    connection: &mut Connection,
+    operation_id: OperationId,
+    request: CompletePluginActivationRequest,
+    now: Timestamp,
+) -> Result<CommittedMutation, RepositoryError> {
+    let request_json = canonical_json(&CompletePluginActivationReceiptRequest {
+        op: "complete_plugin_activation",
+        request: &request,
+    })?;
+    mutate(
+        connection,
+        operation_id,
+        request_json,
+        now,
+        move |tx, revision| {
+            let plugins = load_plugins(tx)?;
+            validate_current_graph(tx, &plugins)?;
+            let plugin = plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == request.plugin_id)
+                .cloned()
+                .ok_or(RepositoryError::NotFound)?;
+            let cursor = load_plugin_cursor(tx, &plugin.plugin_id)?;
+            let (event_epoch, head): (String, i64) = tx
+                .query_row(
+                    "SELECT event_epoch, global_revision FROM app_state WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(storage_error)?;
+            let dependencies_active = plugin.manifest.dependencies.iter().all(|dependency| {
+                plugins
+                    .iter()
+                    .find(|candidate| candidate.plugin_id.as_str() == dependency.id)
+                    .is_some_and(|dependency| {
+                        dependency.desired_enabled
+                            && dependency.runtime_state == PluginRuntimeState::Active
+                    })
+            });
+            if plugin.package_generation != request.package_generation
+                || plugin.activation_epoch != request.activation_epoch
+                || plugin.runtime_state != PluginRuntimeState::Starting
+                || !plugin.desired_enabled
+                || !activation_attempt_authority_is_valid(&plugin)
+                || now < plugin.updated_at
+                || now < cursor.updated_at
+                || cursor.resync_required
+                || cursor.event_epoch != event_epoch
+                || as_i64(cursor.revision, "cursor revision")? != head
+                || !dependencies_active
+            {
+                return Err(RepositoryError::Conflict);
+            }
+            let changed = tx
+                .execute(
+                    "UPDATE plugins SET runtime_state = 'active', failure_count = 0,
+                        last_error_code = NULL, next_retry_at = NULL, updated_at = ?4
+                     WHERE plugin_id = ?1 AND package_generation = ?2
+                       AND activation_epoch = ?3 AND runtime_state = 'starting'
+                       AND desired_enabled = 1",
+                    params![
+                        plugin.plugin_id.as_str(),
+                        as_i64(plugin.package_generation, "package generation")?,
+                        as_i64(plugin.activation_epoch, "activation epoch")?,
+                        now.to_string(),
+                    ],
+                )
+                .map_err(storage_error)?;
+            if changed != 1 {
+                return Err(RepositoryError::Conflict);
+            }
+            let cursor_changed = tx
+                .execute(
+                    "UPDATE plugin_event_cursors SET revision = ?2, updated_at = ?3
+                     WHERE plugin_id = ?1 AND revision = ?4 AND resync_required = 0",
+                    params![
+                        plugin.plugin_id.as_str(),
+                        revision_to_i64(revision)?,
+                        now.to_string(),
+                        head,
+                    ],
+                )
+                .map_err(storage_error)?;
+            if cursor_changed != 1 {
+                return Err(RepositoryError::Conflict);
+            }
+            let stored = load_installed_plugin(tx, &plugin.plugin_id)?;
+            Ok(plugin_effect(
+                EventType::PLUGIN_HEALTH_CHANGED,
+                Some(&stored),
+                vec![stored.plugin_id.clone()],
+                Some(stored.plugin_id.to_string()),
+            ))
+        },
+    )
+}
+
+#[derive(Serialize)]
+struct PluginAttemptFailureReceiptRequest<'a> {
+    op: &'static str,
+    request: &'a RecordPluginAttemptFailureRequest,
+}
+
+pub(crate) fn record_plugin_attempt_failure(
+    connection: &mut Connection,
+    operation_id: OperationId,
+    request: RecordPluginAttemptFailureRequest,
+    now: Timestamp,
+) -> Result<CommittedMutation, RepositoryError> {
+    let request_json = canonical_json(&PluginAttemptFailureReceiptRequest {
+        op: "record_plugin_attempt_failure",
+        request: &request,
+    })?;
+    mutate(connection, operation_id, request_json, now, move |tx, _| {
+        tx.execute_batch("PRAGMA defer_foreign_keys = ON;")
+            .map_err(storage_error)?;
+        let plugins = load_plugins(tx)?;
+        validate_current_graph(tx, &plugins)?;
+        let plugin = plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == request.plugin_id)
+            .cloned()
+            .ok_or(RepositoryError::NotFound)?;
+        if plugin.package_generation != request.package_generation
+            || plugin.activation_epoch != request.activation_epoch
+            || !plugin.desired_enabled
+            || !matches!(
+                plugin.runtime_state,
+                PluginRuntimeState::Starting | PluginRuntimeState::Active
+            )
+            || !activation_attempt_authority_is_valid(&plugin)
+            || now < plugin.updated_at
+        {
+            return Err(RepositoryError::Conflict);
+        }
+        let (failure_count, target_state, retry_at) =
+            failure_progression(plugin.failure_count, now)?;
+        let suspended = target_state == PluginRuntimeState::Suspended;
+        let enabled_dependents: Vec<_> = if suspended {
+            dependent_closure(&plugins, &plugin.plugin_id)
+                .into_iter()
+                .filter_map(|dependent| {
+                    plugins
+                        .iter()
+                        .find(|candidate| {
+                            candidate.plugin_id == dependent && candidate.desired_enabled
+                        })
+                        .cloned()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        for dependent in &enabled_dependents {
+            next_activation_epoch(dependent.activation_epoch)?;
+        }
+        abandon_plugin_attempt(tx, &plugin.plugin_id)?;
+        let changed = tx
+            .execute(
+                "UPDATE plugins SET desired_enabled = ?4, runtime_state = ?5,
+                    failure_count = ?6, last_error_code = ?7, next_retry_at = ?8,
+                    updated_at = ?9
+                 WHERE plugin_id = ?1 AND package_generation = ?2
+                   AND activation_epoch = ?3 AND desired_enabled = 1
+                   AND runtime_state = ?10 AND failure_count = ?11",
+                params![
+                    plugin.plugin_id.as_str(),
+                    as_i64(plugin.package_generation, "package generation")?,
+                    as_i64(plugin.activation_epoch, "activation epoch")?,
+                    i64::from(!suspended),
+                    runtime_state_name(target_state),
+                    i64::from(failure_count),
+                    request.cause.error_code(),
+                    retry_at.map(|value| value.to_string()),
+                    now.to_string(),
+                    runtime_state_name(plugin.runtime_state),
+                    i64::from(plugin.failure_count),
+                ],
+            )
+            .map_err(storage_error)?;
+        if changed != 1 {
+            return Err(RepositoryError::Conflict);
+        }
+        if suspended {
+            tx.execute(
+                "UPDATE plugin_event_cursors SET resync_required = 1, updated_at = ?2
+                 WHERE plugin_id = ?1",
+                params![plugin.plugin_id.as_str(), now.to_string()],
+            )
+            .map_err(storage_error)?;
+            for dependent in &enabled_dependents {
+                force_suspend_plugin(tx, dependent, "dependency_failed", now)?;
+            }
+        }
+        let stored = load_installed_plugin(tx, &plugin.plugin_id)?;
+        let mut affected = vec![stored.plugin_id.clone()];
+        affected.extend(
+            enabled_dependents
+                .into_iter()
+                .map(|dependent| dependent.plugin_id),
+        );
         Ok(plugin_effect(
             EventType::PLUGIN_HEALTH_CHANGED,
             Some(&stored),
@@ -4209,6 +4355,325 @@ pub(crate) fn transition_plugin_health(
             Some(stored.plugin_id.to_string()),
         ))
     })
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PluginGraphFenceReceiptRequest {
+    op: String,
+    host_session_id: String,
+    results: Vec<PluginGraphFenceResult>,
+}
+
+fn graph_fence_entry_role_is_valid(
+    cause: PluginGraphFenceCause,
+    disposition: PluginGraphFenceDisposition,
+) -> bool {
+    matches!(
+        (cause, disposition),
+        (
+            PluginGraphFenceCause::CompileLoad | PluginGraphFenceCause::ChildFatal,
+            PluginGraphFenceDisposition::Failing
+        ) | (
+            PluginGraphFenceCause::SessionLost,
+            PluginGraphFenceDisposition::LoadedSibling
+        ) | (
+            PluginGraphFenceCause::DependencyFailed,
+            PluginGraphFenceDisposition::SkippedDependent
+        )
+    )
+}
+
+fn validate_graph_fence_request_shape(
+    request: &PluginGraphFenceRequest,
+) -> Result<(), RepositoryError> {
+    let session =
+        OperationId::parse(&request.host_session_id).map_err(|_| RepositoryError::Conflict)?;
+    if request.entries.len() > PLUGIN_GRAPH_FENCE_ENTRIES_MAX {
+        return Err(RepositoryError::OperationTooLarge);
+    }
+    if session.to_string() != request.host_session_id
+        || request.entries.is_empty()
+        || !request
+            .entries
+            .windows(2)
+            .all(|pair| pair[0].plugin_id < pair[1].plugin_id)
+        || !request
+            .entries
+            .iter()
+            .any(|entry| entry.disposition == PluginGraphFenceDisposition::Failing)
+        || request
+            .entries
+            .iter()
+            .any(|entry| !graph_fence_entry_role_is_valid(entry.cause, entry.disposition))
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    Ok(())
+}
+
+fn plugin_depends_on_any(
+    plugins: &[InstalledPlugin],
+    plugin: &InstalledPlugin,
+    roots: &BTreeSet<PluginId>,
+) -> bool {
+    let by_id: BTreeMap<&str, &InstalledPlugin> = plugins
+        .iter()
+        .map(|candidate| (candidate.plugin_id.as_str(), candidate))
+        .collect();
+    let mut pending: VecDeque<_> = plugin
+        .manifest
+        .dependencies
+        .iter()
+        .map(|dependency| dependency.id.as_str())
+        .collect();
+    let mut visited = BTreeSet::new();
+    while let Some(id) = pending.pop_front() {
+        if !visited.insert(id) {
+            continue;
+        }
+        if roots.iter().any(|root| root.as_str() == id) {
+            return true;
+        }
+        if let Some(dependency) = by_id.get(id) {
+            pending.extend(
+                dependency
+                    .manifest
+                    .dependencies
+                    .iter()
+                    .map(|nested| nested.id.as_str()),
+            );
+        }
+    }
+    false
+}
+
+fn graph_fence_request_matches_results(
+    request: &PluginGraphFenceRequest,
+    stored: &PluginGraphFenceReceiptRequest,
+) -> bool {
+    stored.op == "fence_plugin_graph"
+        && stored.host_session_id == request.host_session_id
+        && stored.results.len() == request.entries.len()
+        && request
+            .entries
+            .iter()
+            .zip(&stored.results)
+            .all(|(entry, result)| {
+                entry.plugin_id == result.plugin_id
+                    && entry.package_generation == result.package_generation
+                    && entry.activation_epoch == result.expected_activation_epoch
+                    && entry.cause == result.cause
+                    && entry.disposition == result.disposition
+                    && entry
+                        .activation_epoch
+                        .checked_add(1)
+                        .is_some_and(|epoch| epoch == result.new_activation_epoch)
+            })
+}
+
+fn read_graph_fence_replay(
+    connection: &Connection,
+    request: &PluginGraphFenceRequest,
+) -> Result<Option<PluginGraphFenceOutcome>, RepositoryError> {
+    let receipt = connection
+        .query_row(
+            "SELECT request_json, response_json FROM operation_receipts WHERE operation_id = ?1",
+            [request.operation_id.to_string()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(storage_error)?;
+    let Some((request_json, response_json)) = receipt else {
+        return Ok(None);
+    };
+    let stored: PluginGraphFenceReceiptRequest =
+        serde_json::from_str(&request_json).map_err(|_| RepositoryError::IdempotencyMismatch)?;
+    if canonical_json(&stored)? != request_json
+        || !graph_fence_request_matches_results(request, &stored)
+    {
+        return Err(RepositoryError::IdempotencyMismatch);
+    }
+    let mut outcome: PluginGraphFenceOutcome =
+        serde_json::from_str(&response_json).map_err(storage_error)?;
+    if outcome.host_session_id != stored.host_session_id
+        || outcome.results != stored.results
+        || outcome.mutation.event.operation_id != request.operation_id
+    {
+        return Err(RepositoryError::Storage(
+            "plugin graph fence receipt authority mismatch".to_owned(),
+        ));
+    }
+    outcome.mutation.newly_committed = false;
+    Ok(Some(outcome))
+}
+
+pub(crate) fn fence_plugin_graph(
+    connection: &mut Connection,
+    request: PluginGraphFenceRequest,
+    now: Timestamp,
+) -> Result<PluginGraphFenceOutcome, RepositoryError> {
+    validate_graph_fence_request_shape(&request)?;
+    cleanup_expired_receipts(connection, now)?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(storage_error)?;
+    if let Some(outcome) = read_graph_fence_replay(&transaction, &request)? {
+        transaction.commit().map_err(storage_error)?;
+        return Ok(outcome);
+    }
+    transaction
+        .execute_batch("PRAGMA defer_foreign_keys = ON;")
+        .map_err(storage_error)?;
+    let plugins = load_plugins(&transaction)?;
+    validate_current_graph(&transaction, &plugins)?;
+    let failing: BTreeSet<_> = request
+        .entries
+        .iter()
+        .filter(|entry| entry.disposition == PluginGraphFenceDisposition::Failing)
+        .map(|entry| entry.plugin_id.clone())
+        .collect();
+    let mut results = Vec::with_capacity(request.entries.len());
+    for entry in &request.entries {
+        let plugin = plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == entry.plugin_id)
+            .ok_or(RepositoryError::NotFound)?;
+        if plugin.package_generation != entry.package_generation
+            || plugin.activation_epoch != entry.activation_epoch
+            || !plugin.desired_enabled
+            || !matches!(
+                plugin.runtime_state,
+                PluginRuntimeState::Starting | PluginRuntimeState::Active
+            )
+            || !activation_attempt_authority_is_valid(plugin)
+            || now < plugin.updated_at
+            || (entry.disposition == PluginGraphFenceDisposition::SkippedDependent
+                && (plugin.runtime_state != PluginRuntimeState::Starting
+                    || !plugin_depends_on_any(&plugins, plugin, &failing)))
+        {
+            return Err(RepositoryError::Conflict);
+        }
+        let new_epoch = next_activation_epoch(plugin.activation_epoch)?;
+        let (failure_count, target_runtime_state, _) =
+            failure_progression(plugin.failure_count, now)?;
+        results.push(PluginGraphFenceResult {
+            plugin_id: plugin.plugin_id.clone(),
+            package_generation: plugin.package_generation,
+            expected_activation_epoch: plugin.activation_epoch,
+            new_activation_epoch: new_epoch,
+            prior_runtime_state: plugin.runtime_state,
+            target_runtime_state,
+            failure_count,
+            cause: entry.cause,
+            desired_enabled: target_runtime_state != PluginRuntimeState::Suspended,
+            disposition: entry.disposition,
+        });
+    }
+    let receipt_request = PluginGraphFenceReceiptRequest {
+        op: "fence_plugin_graph".to_owned(),
+        host_session_id: request.host_session_id.clone(),
+        results: results.clone(),
+    };
+    let request_json = canonical_json(&receipt_request)?;
+    let affected: Vec<_> = results
+        .iter()
+        .map(|result| result.plugin_id.clone())
+        .collect();
+    let primary_id = affected.first().cloned();
+    let applied_results = results.clone();
+    let mutation = mutate_in_transaction(
+        &transaction,
+        request.operation_id,
+        request_json.clone(),
+        now,
+        move |tx, _| {
+            for result in &applied_results {
+                abandon_plugin_attempt(tx, &result.plugin_id)?;
+                let (_, _, retry_at) =
+                    failure_progression(result.failure_count.saturating_sub(1), now)?;
+                let changed = tx
+                    .execute(
+                        "UPDATE plugins SET activation_epoch = ?4, desired_enabled = ?5,
+                            runtime_state = ?6, failure_count = ?7, last_error_code = ?8,
+                            next_retry_at = ?9, updated_at = ?10
+                         WHERE plugin_id = ?1 AND package_generation = ?2
+                           AND activation_epoch = ?3 AND desired_enabled = 1
+                           AND runtime_state = ?11",
+                        params![
+                            result.plugin_id.as_str(),
+                            as_i64(result.package_generation, "package generation")?,
+                            as_i64(result.expected_activation_epoch, "activation epoch")?,
+                            as_i64(result.new_activation_epoch, "activation epoch")?,
+                            i64::from(result.desired_enabled),
+                            runtime_state_name(result.target_runtime_state),
+                            i64::from(result.failure_count),
+                            result.cause.error_code(),
+                            retry_at.map(|value| value.to_string()),
+                            now.to_string(),
+                            runtime_state_name(result.prior_runtime_state),
+                        ],
+                    )
+                    .map_err(storage_error)?;
+                if changed != 1 {
+                    return Err(RepositoryError::Conflict);
+                }
+                tx.execute(
+                    "UPDATE plugin_invocations SET activation_epoch = ?2
+                     WHERE plugin_id = ?1 AND state = 'ambiguous_http'",
+                    params![
+                        result.plugin_id.as_str(),
+                        as_i64(result.new_activation_epoch, "activation epoch")?,
+                    ],
+                )
+                .map_err(storage_error)?;
+                if !result.desired_enabled {
+                    tx.execute(
+                        "UPDATE plugin_event_cursors SET resync_required = 1, updated_at = ?2
+                         WHERE plugin_id = ?1",
+                        params![result.plugin_id.as_str(), now.to_string()],
+                    )
+                    .map_err(storage_error)?;
+                }
+            }
+            let primary = primary_id
+                .as_ref()
+                .map(|plugin_id| load_installed_plugin(tx, plugin_id))
+                .transpose()?;
+            Ok(plugin_effect(
+                EventType::PLUGIN_HEALTH_CHANGED,
+                primary.as_ref(),
+                affected,
+                Some("plugin host session fenced".to_owned()),
+            ))
+        },
+    )?;
+    let outcome = PluginGraphFenceOutcome {
+        host_session_id: request.host_session_id,
+        results,
+        mutation,
+    };
+    let response_json = serde_json::to_string(&outcome).map_err(storage_error)?;
+    if request_json.len().saturating_add(response_json.len()) > RECEIPT_MATERIAL_MAX_BYTES {
+        return Err(RepositoryError::OperationTooLarge);
+    }
+    let changed = transaction
+        .execute(
+            "UPDATE operation_receipts SET response_json = ?3
+             WHERE operation_id = ?1 AND request_json = ?2",
+            params![
+                request.operation_id.to_string(),
+                request_json,
+                response_json
+            ],
+        )
+        .map_err(storage_error)?;
+    if changed != 1 {
+        return Err(RepositoryError::Conflict);
+    }
+    transaction.commit().map_err(storage_error)?;
+    let _ = prune_retained_events(connection);
+    Ok(outcome)
 }
 
 fn reconciliation_epoch_already_fenced(
@@ -4439,22 +4904,11 @@ pub(crate) fn reconcile_packages(
                     (false, "suspended", 3, Some("http_ambiguous"), None)
                 } else if dependency_unavailable {
                     (false, "suspended", 3, Some("dependency_failed"), None)
-                } else if lost_events {
-                    (
-                        plugin.desired_enabled,
-                        if plugin.desired_enabled {
-                            "starting"
-                        } else {
-                            "disabled"
-                        },
-                        0,
-                        None,
-                        None,
+                } else if plugin.desired_enabled
+                    && matches!(
+                        plugin.runtime_state,
+                        PluginRuntimeState::Degraded | PluginRuntimeState::Failed
                     )
-                } else if matches!(
-                    plugin.runtime_state,
-                    PluginRuntimeState::Degraded | PluginRuntimeState::Failed
-                ) && plugin.next_retry_at.is_some_and(|retry_at| retry_at > now)
                 {
                     (
                         true,
@@ -4466,6 +4920,17 @@ pub(crate) fn reconcile_packages(
                         i64::from(plugin.failure_count),
                         plugin.last_error_code.as_deref(),
                         plugin.next_retry_at.map(|retry_at| retry_at.to_string()),
+                    )
+                } else if plugin.desired_enabled
+                    && plugin.runtime_state == PluginRuntimeState::Starting
+                    && plugin.failure_count > 0
+                {
+                    (
+                        true,
+                        "starting",
+                        i64::from(plugin.failure_count),
+                        plugin.last_error_code.as_deref(),
+                        None,
                     )
                 } else {
                     (
@@ -4587,9 +5052,10 @@ mod tests {
 
     use ed25519_dalek::SigningKey;
     use junban_app::{
-        CommitPluginInvocationRequest, PlannedPluginInvocationCommit, PluginDomainEffect,
-        PluginPackageAuthority, PluginRepository, ProjectDraft, ProjectPatch, Repository,
-        SetPluginSettingRequest, StagedFile, plan_plugin_invocation_commit,
+        CommitPluginInvocationRequest, PlannedPluginInvocationCommit, PluginAttemptFailureCause,
+        PluginDomainEffect, PluginGraphFenceEntry, PluginPackageAuthority, PluginRepository,
+        ProjectDraft, ProjectPatch, Repository, SetPluginSettingRequest, StagedFile,
+        plan_plugin_invocation_commit,
     };
     use junban_domain::{
         EntityName, HexColor, ProjectId, SortOrder, TagId, TagName, TaskDraft, TaskId, TaskTitle,
@@ -4764,13 +5230,45 @@ mod tests {
         plan_plugin_invocation_commit(request).unwrap()
     }
 
-    fn transition_health(
+    fn record_failure(
         connection: &mut Connection,
-        update: PluginBookkeepingUpdate,
+        plugin: &InstalledPlugin,
+        cause: PluginAttemptFailureCause,
         now: Timestamp,
     ) -> Result<InstalledPlugin, RepositoryError> {
-        let plugin_id = update.plugin_id.clone();
-        transition_plugin_health(connection, OperationId::new(), update, now)?;
+        let plugin_id = plugin.plugin_id.clone();
+        record_plugin_attempt_failure(
+            connection,
+            OperationId::new(),
+            RecordPluginAttemptFailureRequest {
+                plugin_id: plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                cause,
+            },
+            now,
+        )?;
+        get_installed_plugin(connection, plugin_id)
+    }
+
+    fn retry_due(
+        connection: &mut Connection,
+        plugin: &InstalledPlugin,
+        now: Timestamp,
+    ) -> Result<InstalledPlugin, RepositoryError> {
+        let plugin_id = plugin.plugin_id.clone();
+        retry_due_plugin(
+            connection,
+            OperationId::new(),
+            DuePluginRetryRequest {
+                plugin_id: plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                expected_runtime_state: plugin.runtime_state,
+                expected_next_retry_at: plugin.next_retry_at.ok_or(RepositoryError::Conflict)?,
+            },
+            now,
+        )?;
         get_installed_plugin(connection, plugin_id)
     }
 
@@ -4971,15 +5469,17 @@ mod tests {
         plugin: &InstalledPlugin,
         now: Timestamp,
     ) -> InstalledPlugin {
-        set_plugin_desired_enabled(
-            connection,
-            store,
-            OperationId::new(),
-            plugin.plugin_id.clone(),
-            true,
-            now,
-        )
-        .unwrap();
+        if !plugin.desired_enabled {
+            set_plugin_desired_enabled(
+                connection,
+                store,
+                OperationId::new(),
+                plugin.plugin_id.clone(),
+                true,
+                now,
+            )
+            .unwrap();
+        }
         let starting = get_installed_plugin(connection, plugin.plugin_id.clone()).unwrap();
         connection
             .execute(
@@ -4990,16 +5490,13 @@ mod tests {
                 params![starting.plugin_id.as_str(), now.to_string()],
             )
             .unwrap();
-        transition_plugin_health(
+        complete_plugin_activation(
             connection,
             OperationId::new(),
-            PluginBookkeepingUpdate {
+            CompletePluginActivationRequest {
                 plugin_id: starting.plugin_id.clone(),
                 package_generation: starting.package_generation,
                 activation_epoch: starting.activation_epoch,
-                failure_count: 0,
-                last_error_code: None,
-                next_retry_at: None,
             },
             now,
         )
@@ -5041,16 +5538,36 @@ mod tests {
         store: &PluginPackageStore,
         now: Timestamp,
     ) -> InstalledPlugin {
-        let (bytes, authority, public_key) = package("test-plugin", "1.0.0");
+        install_named_fixture(connection, store, "test-plugin", Vec::new(), now)
+    }
+
+    fn install_named_fixture(
+        connection: &mut Connection,
+        store: &PluginPackageStore,
+        plugin_id: &str,
+        dependencies: Vec<Dependency>,
+        now: Timestamp,
+    ) -> InstalledPlugin {
+        let (bytes, authority, public_key) =
+            package_with_dependencies(plugin_id, "1.0.0", dependencies);
         assert_eq!(publish_bytes(store, &bytes).unwrap(), authority);
-        trust_publisher(
-            connection,
-            OperationId::new(),
-            TrustPublisherRequest::new(public_key),
-            now,
-        )
-        .unwrap();
-        set_community_plugin_policy(connection, OperationId::new(), true, now).unwrap();
+        let trusted: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM plugin_publisher_trust WHERE status = 'active')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if !trusted {
+            trust_publisher(
+                connection,
+                OperationId::new(),
+                TrustPublisherRequest::new(public_key),
+                now,
+            )
+            .unwrap();
+            set_community_plugin_policy(connection, OperationId::new(), true, now).unwrap();
+        }
         let result = install_plugin(
             connection,
             store,
@@ -5068,7 +5585,7 @@ mod tests {
             PluginMutationOutcome::Committed(_) => {}
             other => panic!("unexpected install outcome: {other:?}"),
         }
-        get_installed_plugin(connection, PluginId::parse("test-plugin").unwrap()).unwrap()
+        get_installed_plugin(connection, PluginId::parse(plugin_id).unwrap()).unwrap()
     }
 
     #[test]
@@ -6544,22 +7061,20 @@ mod tests {
 
         let mut failed =
             get_installed_plugin(&connection, PluginId::parse("base-plugin").unwrap()).unwrap();
-        for (failure_count, failure_now) in [
-            (1, now),
-            (2, now.checked_add(1.hours()).unwrap()),
-            (3, now.checked_add(3.hours()).unwrap()),
-        ] {
-            let retry_at = (failure_count < 3).then(|| failure_now.checked_add(1.hours()).unwrap());
-            failed = transition_health(
+        failed = record_failure(
+            &mut connection,
+            &failed,
+            PluginAttemptFailureCause::GuestTrap,
+            now,
+        )
+        .unwrap();
+        for _ in 0..2 {
+            let failure_now = failed.next_retry_at.unwrap();
+            failed = retry_due(&mut connection, &failed, failure_now).unwrap();
+            failed = record_failure(
                 &mut connection,
-                PluginBookkeepingUpdate {
-                    plugin_id: failed.plugin_id.clone(),
-                    package_generation: failed.package_generation,
-                    activation_epoch: failed.activation_epoch,
-                    failure_count,
-                    last_error_code: Some("guest_trap".to_owned()),
-                    next_retry_at: retry_at,
-                },
+                &failed,
+                PluginAttemptFailureCause::GuestTrap,
                 failure_now,
             )
             .unwrap();
@@ -6584,7 +7099,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap(),
-            revision_after + 3
+            revision_after + 5
         );
 
         connection
@@ -6685,7 +7200,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap(),
-            revision_before + 3
+            revision_before + 5
         );
         crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
     }
@@ -8095,16 +8610,13 @@ mod tests {
         assert_eq!(ambiguous.state, PluginInvocationState::AmbiguousHttp);
         assert_eq!(ambiguous.error_code.as_deref(), Some("http_ambiguous"));
         let starting = get_installed_plugin(&connection, plugin.plugin_id).unwrap();
-        transition_plugin_health(
+        complete_plugin_activation(
             &mut connection,
             OperationId::new(),
-            PluginBookkeepingUpdate {
+            CompletePluginActivationRequest {
                 plugin_id: starting.plugin_id.clone(),
                 package_generation: starting.package_generation,
                 activation_epoch: starting.activation_epoch,
-                failure_count: 0,
-                last_error_code: None,
-                next_retry_at: None,
             },
             now,
         )
@@ -8148,7 +8660,7 @@ mod tests {
     }
 
     #[test]
-    fn host_failure_fences_and_preserves_http_ambiguity_for_stable_retry() {
+    fn compile_load_graph_fence_preserves_http_ambiguity_for_stable_retry() {
         let profile = TestProfile::new();
         let mut connection = profile.connection();
         let store = PluginPackageStore::open(&profile.path).unwrap();
@@ -8201,22 +8713,28 @@ mod tests {
             now,
         )
         .unwrap();
-        let retry_at = now.checked_add(1.hours()).unwrap();
-        let degraded = transition_health(
+        let outcome = fence_plugin_graph(
             &mut connection,
-            PluginBookkeepingUpdate {
-                plugin_id: plugin.plugin_id.clone(),
-                package_generation: plugin.package_generation,
-                activation_epoch: plugin.activation_epoch,
-                failure_count: 1,
-                last_error_code: Some("host_crashed".to_owned()),
-                next_retry_at: Some(retry_at),
+            PluginGraphFenceRequest {
+                operation_id: OperationId::new(),
+                host_session_id: OperationId::new().to_string(),
+                entries: vec![PluginGraphFenceEntry {
+                    plugin_id: plugin.plugin_id.clone(),
+                    package_generation: plugin.package_generation,
+                    activation_epoch: plugin.activation_epoch,
+                    cause: PluginGraphFenceCause::CompileLoad,
+                    disposition: PluginGraphFenceDisposition::Failing,
+                }],
             },
             now,
         )
         .unwrap();
+        assert_eq!(outcome.results.len(), 1);
+        let degraded = get_installed_plugin(&connection, plugin.plugin_id.clone()).unwrap();
+        let retry_at = degraded.next_retry_at.unwrap();
         assert_eq!(degraded.activation_epoch, plugin.activation_epoch + 1);
         assert_eq!(degraded.runtime_state, PluginRuntimeState::Degraded);
+        assert_eq!(degraded.last_error_code.as_deref(), Some("compile_load"));
         let ambiguous = load_invocation(&connection, operation_id).unwrap();
         assert_eq!(ambiguous.state, PluginInvocationState::AmbiguousHttp);
         assert_eq!(ambiguous.activation_epoch, degraded.activation_epoch);
@@ -8332,20 +8850,14 @@ mod tests {
             now,
         )
         .unwrap();
-        let retry_at = now.checked_add(1.hours()).unwrap();
-        let degraded = transition_health(
+        let degraded = record_failure(
             &mut connection,
-            PluginBookkeepingUpdate {
-                plugin_id: plugin.plugin_id.clone(),
-                package_generation: plugin.package_generation,
-                activation_epoch: plugin.activation_epoch,
-                failure_count: 1,
-                last_error_code: Some("host_crashed".to_owned()),
-                next_retry_at: Some(retry_at),
-            },
+            &plugin,
+            PluginAttemptFailureCause::InternalError,
             now,
         )
         .unwrap();
+        let retry_at = degraded.next_retry_at.unwrap();
         revoke_plugin_grants(
             &mut connection,
             OperationId::new(),
@@ -8810,71 +9322,114 @@ mod tests {
     }
 
     #[test]
-    fn material_health_transitions_emit_revisions_while_bookkeeping_does_not() {
+    fn typed_failures_and_due_retries_derive_the_bounded_series() {
         let profile = TestProfile::new();
         let mut connection = profile.connection();
         let store = PluginPackageStore::open(&profile.path).unwrap();
         let now = Timestamp::constant(1_800_000_198, 0);
-        let plugin = install_fixture(&mut connection, &store, now);
-        let enabled = set_plugin_desired_enabled(
+        let installed = install_fixture(&mut connection, &store, now);
+        set_plugin_desired_enabled(
             &mut connection,
             &store,
             OperationId::new(),
-            plugin.plugin_id.clone(),
+            installed.plugin_id.clone(),
             true,
             now,
         )
         .unwrap();
-        assert!(enabled.committed().is_some());
-        let plugin = get_installed_plugin(&connection, plugin.plugin_id).unwrap();
-        let revision: i64 = connection
+        let starting = get_installed_plugin(&connection, installed.plugin_id).unwrap();
+        let revision_before: i64 = connection
             .query_row(
                 "SELECT global_revision FROM app_state WHERE singleton = 1",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        let retry_at = now.checked_add(1.hours()).unwrap();
-        let first_operation = OperationId::new();
-        let first_update = PluginBookkeepingUpdate {
-            plugin_id: plugin.plugin_id.clone(),
-            package_generation: plugin.package_generation,
-            activation_epoch: plugin.activation_epoch,
-            failure_count: 1,
-            last_error_code: Some("timeout".to_owned()),
-            next_retry_at: Some(retry_at),
+
+        let failure_operation = OperationId::new();
+        let first_request = RecordPluginAttemptFailureRequest {
+            plugin_id: starting.plugin_id.clone(),
+            package_generation: starting.package_generation,
+            activation_epoch: starting.activation_epoch,
+            cause: PluginAttemptFailureCause::Timeout,
         };
-        let first =
-            transition_plugin_health(&mut connection, first_operation, first_update.clone(), now)
-                .unwrap();
-        assert!(first.newly_committed);
-        let replay =
-            transition_plugin_health(&mut connection, first_operation, first_update.clone(), now)
-                .unwrap();
-        assert!(!replay.newly_committed);
-        let mut changed = first_update;
-        changed.last_error_code = Some("changed_timeout".to_owned());
-        assert_eq!(
-            transition_plugin_health(&mut connection, first_operation, changed, now).unwrap_err(),
-            RepositoryError::IdempotencyMismatch
-        );
-        let degraded = get_installed_plugin(&connection, plugin.plugin_id.clone()).unwrap();
-        assert_eq!(degraded.runtime_state, PluginRuntimeState::Degraded);
-        assert!(degraded.desired_enabled);
-        assert_eq!(degraded.activation_epoch, plugin.activation_epoch + 1);
-        let degraded = update_plugin_bookkeeping(
+        let first = record_plugin_attempt_failure(
             &mut connection,
-            PluginBookkeepingUpdate {
-                plugin_id: degraded.plugin_id,
-                package_generation: degraded.package_generation,
-                activation_epoch: degraded.activation_epoch,
-                failure_count: 1,
-                last_error_code: Some("timeout".to_owned()),
-                next_retry_at: Some(retry_at),
-            },
+            failure_operation,
+            first_request.clone(),
             now,
         )
         .unwrap();
+        assert!(first.newly_committed);
+        assert!(
+            !record_plugin_attempt_failure(
+                &mut connection,
+                failure_operation,
+                first_request.clone(),
+                now,
+            )
+            .unwrap()
+            .newly_committed
+        );
+        let mut changed_request = first_request;
+        changed_request.cause = PluginAttemptFailureCause::GuestTrap;
+        assert_eq!(
+            record_plugin_attempt_failure(
+                &mut connection,
+                failure_operation,
+                changed_request,
+                now,
+            )
+            .unwrap_err(),
+            RepositoryError::IdempotencyMismatch
+        );
+
+        let mut failed = get_installed_plugin(&connection, starting.plugin_id.clone()).unwrap();
+        assert_eq!(failed.runtime_state, PluginRuntimeState::Degraded);
+        assert_eq!(failed.failure_count, 1);
+        assert_eq!(failed.activation_epoch, starting.activation_epoch);
+        assert_eq!(failed.last_error_code.as_deref(), Some("timeout"));
+        let first_retry_at = now
+            .checked_add(PLUGIN_FAILURE_BACKOFF_START_SECONDS.seconds())
+            .unwrap();
+        assert_eq!(failed.next_retry_at, Some(first_retry_at));
+
+        let retry_request = DuePluginRetryRequest {
+            plugin_id: failed.plugin_id.clone(),
+            package_generation: failed.package_generation,
+            activation_epoch: failed.activation_epoch,
+            expected_runtime_state: failed.runtime_state,
+            expected_next_retry_at: first_retry_at,
+        };
+        for stale_request in [
+            DuePluginRetryRequest {
+                package_generation: retry_request.package_generation + 1,
+                ..retry_request.clone()
+            },
+            DuePluginRetryRequest {
+                activation_epoch: retry_request.activation_epoch + 1,
+                ..retry_request.clone()
+            },
+            DuePluginRetryRequest {
+                expected_runtime_state: PluginRuntimeState::Failed,
+                ..retry_request.clone()
+            },
+            DuePluginRetryRequest {
+                expected_next_retry_at: first_retry_at.checked_add(1.seconds()).unwrap(),
+                ..retry_request.clone()
+            },
+        ] {
+            assert_eq!(
+                retry_due_plugin(
+                    &mut connection,
+                    OperationId::new(),
+                    stale_request,
+                    first_retry_at,
+                )
+                .unwrap_err(),
+                RepositoryError::Conflict
+            );
+        }
         assert_eq!(
             connection
                 .query_row::<i64, _, _>(
@@ -8883,67 +9438,95 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap(),
-            revision + 1
+            revision_before + 1
         );
-        let second_retry_at = retry_at.checked_add(2.hours()).unwrap();
-        let degraded_again = transition_health(
+
+        let retry_operation = OperationId::new();
+        let retry_request = DuePluginRetryRequest {
+            plugin_id: failed.plugin_id.clone(),
+            package_generation: failed.package_generation,
+            activation_epoch: failed.activation_epoch,
+            expected_runtime_state: failed.runtime_state,
+            expected_next_retry_at: first_retry_at,
+        };
+        assert_eq!(
+            retry_due_plugin(&mut connection, retry_operation, retry_request.clone(), now,)
+                .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        let retry = retry_due_plugin(
             &mut connection,
-            PluginBookkeepingUpdate {
-                plugin_id: degraded.plugin_id.clone(),
-                package_generation: degraded.package_generation,
-                activation_epoch: degraded.activation_epoch,
-                failure_count: 2,
-                last_error_code: Some("timeout".to_owned()),
-                next_retry_at: Some(second_retry_at),
-            },
-            retry_at,
+            retry_operation,
+            retry_request.clone(),
+            first_retry_at,
         )
         .unwrap();
-        assert_eq!(
-            degraded_again.activation_epoch,
-            degraded.activation_epoch + 1
-        );
-        assert_eq!(degraded_again.runtime_state, PluginRuntimeState::Failed);
-        let failed = transition_health(
-            &mut connection,
-            PluginBookkeepingUpdate {
-                plugin_id: degraded_again.plugin_id.clone(),
-                package_generation: degraded_again.package_generation,
-                activation_epoch: degraded_again.activation_epoch,
-                failure_count: 3,
-                last_error_code: Some("timeout".to_owned()),
-                next_retry_at: None,
-            },
-            second_retry_at,
-        )
-        .unwrap();
-        assert_eq!(failed.runtime_state, PluginRuntimeState::Suspended);
-        assert!(!failed.desired_enabled);
-        assert_eq!(failed.activation_epoch, degraded_again.activation_epoch + 1);
-        reconcile_packages(&mut connection, &store, second_retry_at).unwrap();
-        let preserved_failure =
-            get_installed_plugin(&connection, failed.plugin_id.clone()).unwrap();
-        assert_eq!(
-            preserved_failure.runtime_state,
-            PluginRuntimeState::Suspended
-        );
-        assert_eq!(preserved_failure.activation_epoch, failed.activation_epoch);
-        assert_eq!(
-            update_plugin_bookkeeping(
+        assert!(retry.newly_committed);
+        assert!(
+            !retry_due_plugin(
                 &mut connection,
-                PluginBookkeepingUpdate {
+                retry_operation,
+                retry_request,
+                first_retry_at,
+            )
+            .unwrap()
+            .newly_committed
+        );
+        failed = get_installed_plugin(&connection, failed.plugin_id).unwrap();
+        assert_eq!(failed.runtime_state, PluginRuntimeState::Starting);
+        assert_eq!(failed.failure_count, 1);
+        assert_eq!(failed.last_error_code.as_deref(), Some("timeout"));
+        assert_eq!(failed.next_retry_at, None);
+        assert_eq!(failed.activation_epoch, starting.activation_epoch + 1);
+        assert_eq!(
+            retry_due_plugin(
+                &mut connection,
+                OperationId::new(),
+                DuePluginRetryRequest {
                     plugin_id: failed.plugin_id.clone(),
                     package_generation: failed.package_generation,
-                    activation_epoch: degraded.activation_epoch,
-                    failure_count: 0,
-                    last_error_code: None,
-                    next_retry_at: None,
+                    activation_epoch: starting.activation_epoch,
+                    expected_runtime_state: PluginRuntimeState::Degraded,
+                    expected_next_retry_at: first_retry_at,
                 },
-                now,
+                first_retry_at,
             )
             .unwrap_err(),
             RepositoryError::Conflict
         );
+
+        failed = record_failure(
+            &mut connection,
+            &failed,
+            PluginAttemptFailureCause::Timeout,
+            first_retry_at,
+        )
+        .unwrap();
+        assert_eq!(failed.runtime_state, PluginRuntimeState::Failed);
+        assert_eq!(failed.failure_count, 2);
+        assert_eq!(failed.activation_epoch, starting.activation_epoch + 1);
+        let second_retry_at = first_retry_at
+            .checked_add((PLUGIN_FAILURE_BACKOFF_START_SECONDS * 2).seconds())
+            .unwrap();
+        assert_eq!(failed.next_retry_at, Some(second_retry_at));
+
+        failed = retry_due(&mut connection, &failed, second_retry_at).unwrap();
+        let retry_epoch = failed.activation_epoch;
+        assert_eq!(failed.failure_count, 2);
+        failed = record_failure(
+            &mut connection,
+            &failed,
+            PluginAttemptFailureCause::Timeout,
+            second_retry_at,
+        )
+        .unwrap();
+        assert_eq!(failed.runtime_state, PluginRuntimeState::Suspended);
+        assert_eq!(failed.failure_count, 3);
+        assert_eq!(failed.activation_epoch, retry_epoch);
+        assert!(!failed.desired_enabled);
+        assert_eq!(failed.next_retry_at, None);
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+
         assert_eq!(
             connection
                 .query_row::<i64, _, _>(
@@ -8952,46 +9535,27 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap(),
-            revision + 3
+            revision_before + 5
         );
-        assert_eq!(
-            connection
-                .query_row::<i64, _, _>(
-                    "SELECT COUNT(*) FROM events WHERE event_type = ?1",
-                    [EventType::PLUGIN_HEALTH_CHANGED],
-                    |row| row.get(0),
-                )
-                .unwrap(),
-            3
-        );
-        assert_eq!(
-            connection
-                .query_row::<i64, _, _>(
-                    "SELECT COUNT(*) FROM operation_receipts
-                     WHERE request_json LIKE '%\"op\":\"transition_plugin_health\"%'",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap(),
-            3
-        );
-        let retried = retry_plugin(
+        let manual = retry_plugin(
             &mut connection,
             &store,
             OperationId::new(),
-            failed.plugin_id,
+            failed.plugin_id.clone(),
             second_retry_at,
         )
         .unwrap();
-        assert_eq!(retried.event.revision, revision as u64 + 4);
-        let retried =
-            get_installed_plugin(&connection, PluginId::parse("test-plugin").unwrap()).unwrap();
-        assert!(retried.desired_enabled);
-        assert_eq!(retried.runtime_state, PluginRuntimeState::Starting);
+        assert_eq!(manual.event.revision, (revision_before + 6) as u64);
+        let rearmed = get_installed_plugin(&connection, failed.plugin_id).unwrap();
+        assert_eq!(rearmed.runtime_state, PluginRuntimeState::Starting);
+        assert_eq!(rearmed.activation_epoch, failed.activation_epoch + 1);
+        assert_eq!(rearmed.failure_count, 0);
+        assert_eq!(rearmed.last_error_code, None);
+        assert_eq!(rearmed.next_retry_at, None);
     }
 
     #[test]
-    fn startup_reconciliation_preserves_degraded_backoff_and_fences_epoch() {
+    fn activation_requires_exact_starting_epoch_and_ready_cursor() {
         let profile = TestProfile::new();
         let mut connection = profile.connection();
         let store = PluginPackageStore::open(&profile.path).unwrap();
@@ -9006,21 +9570,97 @@ mod tests {
             now,
         )
         .unwrap();
-        let active = get_installed_plugin(&connection, installed.plugin_id).unwrap();
-        let retry_at = now.checked_add(2.hours()).unwrap();
-        let degraded = transition_health(
+        connection
+            .execute(
+                "UPDATE plugins SET failure_count = 1, last_error_code = 'timeout'
+                 WHERE plugin_id = ?1 AND runtime_state = 'starting'",
+                [installed.plugin_id.as_str()],
+            )
+            .unwrap();
+        let starting = get_installed_plugin(&connection, installed.plugin_id).unwrap();
+        let operation_id = OperationId::new();
+        let request = CompletePluginActivationRequest {
+            plugin_id: starting.plugin_id.clone(),
+            package_generation: starting.package_generation,
+            activation_epoch: starting.activation_epoch,
+        };
+        assert_eq!(
+            complete_plugin_activation(&mut connection, operation_id, request.clone(), now)
+                .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        connection
+            .execute(
+                "UPDATE plugin_event_cursors
+                 SET resync_required = 0, updated_at = ?2 WHERE plugin_id = ?1",
+                params![starting.plugin_id.as_str(), now.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            complete_plugin_activation(&mut connection, operation_id, request.clone(), now)
+                .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        connection
+            .execute(
+                "UPDATE plugin_event_cursors
+                 SET revision = (SELECT global_revision FROM app_state WHERE singleton = 1),
+                     updated_at = ?2 WHERE plugin_id = ?1",
+                params![starting.plugin_id.as_str(), now.to_string()],
+            )
+            .unwrap();
+        let completed =
+            complete_plugin_activation(&mut connection, operation_id, request.clone(), now)
+                .unwrap();
+        assert!(completed.newly_committed);
+        assert!(
+            !complete_plugin_activation(&mut connection, operation_id, request.clone(), now)
+                .unwrap()
+                .newly_committed
+        );
+        let mut changed_request = request;
+        changed_request.activation_epoch += 1;
+        assert_eq!(
+            complete_plugin_activation(&mut connection, operation_id, changed_request, now)
+                .unwrap_err(),
+            RepositoryError::IdempotencyMismatch
+        );
+        let active = get_installed_plugin(&connection, starting.plugin_id.clone()).unwrap();
+        assert_eq!(active.runtime_state, PluginRuntimeState::Active);
+        assert_eq!(active.activation_epoch, starting.activation_epoch);
+        assert_eq!(active.failure_count, 0);
+        assert_eq!(active.last_error_code, None);
+        assert_eq!(active.next_retry_at, None);
+        let cursor = get_plugin_cursor(&connection, starting.plugin_id).unwrap();
+        assert_eq!(cursor.revision, completed.event.revision);
+        assert!(!cursor.resync_required);
+    }
+
+    #[test]
+    fn startup_reconciliation_preserves_due_failure_series_before_retry() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_200, 0);
+        let installed = install_fixture(&mut connection, &store, now);
+        set_plugin_desired_enabled(
             &mut connection,
-            PluginBookkeepingUpdate {
-                plugin_id: active.plugin_id.clone(),
-                package_generation: active.package_generation,
-                activation_epoch: active.activation_epoch,
-                failure_count: 1,
-                last_error_code: Some("timeout".to_owned()),
-                next_retry_at: Some(retry_at),
-            },
+            &store,
+            OperationId::new(),
+            installed.plugin_id.clone(),
+            true,
             now,
         )
         .unwrap();
+        let starting = get_installed_plugin(&connection, installed.plugin_id).unwrap();
+        let degraded = record_failure(
+            &mut connection,
+            &starting,
+            PluginAttemptFailureCause::Timeout,
+            now,
+        )
+        .unwrap();
+        let retry_at = degraded.next_retry_at.unwrap();
         let revision_before: i64 = connection
             .query_row(
                 "SELECT global_revision FROM app_state WHERE singleton = 1",
@@ -9028,7 +9668,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let restart_at = now.checked_add(1.hours()).unwrap();
+        let restart_at = retry_at.checked_add(1.seconds()).unwrap();
         reconcile_packages(&mut connection, &store, restart_at).unwrap();
         let recovered = get_installed_plugin(&connection, degraded.plugin_id.clone()).unwrap();
         assert_eq!(recovered.runtime_state, PluginRuntimeState::Degraded);
@@ -9037,38 +9677,402 @@ mod tests {
         assert_eq!(recovered.next_retry_at, Some(retry_at));
         assert_eq!(recovered.activation_epoch, degraded.activation_epoch + 1);
         assert_eq!(
-            update_plugin_bookkeeping(
-                &mut connection,
-                PluginBookkeepingUpdate {
-                    plugin_id: recovered.plugin_id.clone(),
-                    package_generation: recovered.package_generation,
-                    activation_epoch: recovered.activation_epoch,
-                    failure_count: 0,
-                    last_error_code: None,
-                    next_retry_at: None,
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT global_revision FROM app_state WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            revision_before
+        );
+
+        drop(connection);
+        let mut connection = profile.connection();
+        let reopened = get_installed_plugin(&connection, recovered.plugin_id.clone()).unwrap();
+        assert_eq!(reopened, recovered);
+
+        let retried = retry_due(&mut connection, &reopened, restart_at).unwrap();
+        assert_eq!(retried.runtime_state, PluginRuntimeState::Starting);
+        assert_eq!(retried.failure_count, 1);
+        assert_eq!(retried.activation_epoch, recovered.activation_epoch + 1);
+        assert_eq!(retried.last_error_code.as_deref(), Some("timeout"));
+        assert_eq!(retried.next_retry_at, None);
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+    }
+
+    #[test]
+    fn graph_fence_is_atomic_sorted_replayable_and_preserves_http_ambiguity() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_201, 0);
+        let root = install_named_fixture(&mut connection, &store, "aaa-root", Vec::new(), now);
+        let sibling =
+            install_named_fixture(&mut connection, &store, "bbb-sibling", Vec::new(), now);
+        let sibling = grant_capabilities(
+            &mut connection,
+            &sibling,
+            &[Capability::Commands, Capability::Http],
+            now,
+        );
+        let dependent = install_named_fixture(
+            &mut connection,
+            &store,
+            "ccc-dependent",
+            vec![Dependency {
+                id: "aaa-root".to_owned(),
+                requirement: "^1.0".to_owned(),
+                services: Vec::new(),
+            }],
+            now,
+        );
+        let root = activate_plugin(&mut connection, &store, &root, now);
+        let sibling = activate_plugin(&mut connection, &store, &sibling, now);
+        set_plugin_desired_enabled(
+            &mut connection,
+            &store,
+            OperationId::new(),
+            dependent.plugin_id.clone(),
+            true,
+            now,
+        )
+        .unwrap();
+        let dependent = get_installed_plugin(&connection, dependent.plugin_id).unwrap();
+        connection
+            .execute(
+                "UPDATE plugins SET runtime_state = 'starting', failure_count = 2,
+                     last_error_code = 'timeout', next_retry_at = NULL
+                 WHERE plugin_id = ?1",
+                [root.plugin_id.as_str()],
+            )
+            .unwrap();
+        let root = get_installed_plugin(&connection, root.plugin_id).unwrap();
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+
+        let http_operation = OperationId::new();
+        let delivery_operation_id = OperationId::new();
+        reserve_plugin_invocation(
+            &mut connection,
+            ReservePluginInvocationRequest {
+                operation_id: http_operation,
+                plugin_id: sibling.plugin_id.clone(),
+                package_generation: sibling.package_generation,
+                activation_epoch: sibling.activation_epoch,
+                hook_kind: PluginHookKind::InvokeCommand,
+                entry: PluginManifestEntry::Command {
+                    command_id: PluginId::parse("run").unwrap(),
                 },
-                restart_at,
+                request_sha256: Sha256Digest::of(b"graph-fence-http"),
+                delivery_operation_id,
+                resync_session: None,
+            },
+            now,
+        )
+        .unwrap();
+        transition_plugin_invocation(
+            &mut connection,
+            TransitionPluginInvocationRequest {
+                operation_id: http_operation,
+                plugin_id: sibling.plugin_id.clone(),
+                package_generation: sibling.package_generation,
+                activation_epoch: sibling.activation_epoch,
+                expected_state: PluginInvocationState::Reserved,
+                next_state: PluginInvocationState::DispatchingHttp,
+            },
+            now,
+        )
+        .unwrap();
+
+        let entries = vec![
+            PluginGraphFenceEntry {
+                plugin_id: root.plugin_id.clone(),
+                package_generation: root.package_generation,
+                activation_epoch: root.activation_epoch,
+                cause: PluginGraphFenceCause::ChildFatal,
+                disposition: PluginGraphFenceDisposition::Failing,
+            },
+            PluginGraphFenceEntry {
+                plugin_id: sibling.plugin_id.clone(),
+                package_generation: sibling.package_generation,
+                activation_epoch: sibling.activation_epoch,
+                cause: PluginGraphFenceCause::SessionLost,
+                disposition: PluginGraphFenceDisposition::LoadedSibling,
+            },
+            PluginGraphFenceEntry {
+                plugin_id: dependent.plugin_id.clone(),
+                package_generation: dependent.package_generation,
+                activation_epoch: dependent.activation_epoch,
+                cause: PluginGraphFenceCause::DependencyFailed,
+                disposition: PluginGraphFenceDisposition::SkippedDependent,
+            },
+        ];
+        let revision_before: i64 = connection
+            .query_row(
+                "SELECT global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(
+            fence_plugin_graph(
+                &mut connection,
+                PluginGraphFenceRequest {
+                    operation_id: OperationId::new(),
+                    host_session_id: "not-a-session".to_owned(),
+                    entries: entries.clone(),
+                },
+                now,
             )
             .unwrap_err(),
             RepositoryError::Conflict
         );
-        transition_plugin_health(
-            &mut connection,
-            OperationId::new(),
-            PluginBookkeepingUpdate {
-                plugin_id: recovered.plugin_id.clone(),
-                package_generation: recovered.package_generation,
-                activation_epoch: recovered.activation_epoch,
-                failure_count: 0,
-                last_error_code: None,
-                next_retry_at: None,
-            },
-            retry_at,
-        )
-        .unwrap();
-        let resyncing = get_installed_plugin(&connection, recovered.plugin_id).unwrap();
-        assert_eq!(resyncing.runtime_state, PluginRuntimeState::Starting);
-        assert_eq!(resyncing.activation_epoch, recovered.activation_epoch + 1);
+        let mut invalid_role_entries = entries.clone();
+        invalid_role_entries[1].disposition = PluginGraphFenceDisposition::Failing;
+        assert_eq!(
+            fence_plugin_graph(
+                &mut connection,
+                PluginGraphFenceRequest {
+                    operation_id: OperationId::new(),
+                    host_session_id: OperationId::new().to_string(),
+                    entries: invalid_role_entries,
+                },
+                now,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        let mut duplicate_entries = entries.clone();
+        duplicate_entries[1] = duplicate_entries[0].clone();
+        assert_eq!(
+            fence_plugin_graph(
+                &mut connection,
+                PluginGraphFenceRequest {
+                    operation_id: OperationId::new(),
+                    host_session_id: OperationId::new().to_string(),
+                    entries: duplicate_entries,
+                },
+                now,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+
+        let mut stale_entries = entries.clone();
+        stale_entries[1].package_generation += 1;
+        assert_eq!(
+            fence_plugin_graph(
+                &mut connection,
+                PluginGraphFenceRequest {
+                    operation_id: OperationId::new(),
+                    host_session_id: OperationId::new().to_string(),
+                    entries: stale_entries,
+                },
+                now,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        let mut stale_entries = entries.clone();
+        stale_entries[1].activation_epoch += 1;
+        let stale_operation = OperationId::new();
+        assert_eq!(
+            fence_plugin_graph(
+                &mut connection,
+                PluginGraphFenceRequest {
+                    operation_id: stale_operation,
+                    host_session_id: OperationId::new().to_string(),
+                    entries: stale_entries,
+                },
+                now,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT global_revision FROM app_state WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            revision_before
+        );
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?1",
+                    [stale_operation.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            0
+        );
+        for expected in [&root, &sibling, &dependent] {
+            let stored = get_installed_plugin(&connection, expected.plugin_id.clone()).unwrap();
+            assert_eq!(stored.activation_epoch, expected.activation_epoch);
+            assert_eq!(stored.runtime_state, expected.runtime_state);
+            assert_eq!(stored.failure_count, expected.failure_count);
+        }
+
+        connection
+            .execute(
+                "UPDATE plugins SET activation_epoch = ?2 WHERE plugin_id = ?1",
+                params![dependent.plugin_id.as_str(), i64::MAX],
+            )
+            .unwrap();
+        let mut epoch_overflow_entries = entries.clone();
+        epoch_overflow_entries[2].activation_epoch = i64::MAX as u64;
+        assert!(matches!(
+            fence_plugin_graph(
+                &mut connection,
+                PluginGraphFenceRequest {
+                    operation_id: OperationId::new(),
+                    host_session_id: OperationId::new().to_string(),
+                    entries: epoch_overflow_entries,
+                },
+                now,
+            ),
+            Err(RepositoryError::Storage(_))
+        ));
+        connection
+            .execute(
+                "UPDATE plugins SET activation_epoch = ?2 WHERE plugin_id = ?1",
+                params![
+                    dependent.plugin_id.as_str(),
+                    as_i64(dependent.activation_epoch, "activation epoch").unwrap()
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT global_revision FROM app_state WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            revision_before
+        );
+
+        let mut invalid_dependency_entries = entries.clone();
+        invalid_dependency_entries[1].cause = PluginGraphFenceCause::DependencyFailed;
+        invalid_dependency_entries[1].disposition = PluginGraphFenceDisposition::SkippedDependent;
+        assert_eq!(
+            fence_plugin_graph(
+                &mut connection,
+                PluginGraphFenceRequest {
+                    operation_id: OperationId::new(),
+                    host_session_id: OperationId::new().to_string(),
+                    entries: invalid_dependency_entries,
+                },
+                now,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        let mut overflow_entries = entries.clone();
+        while overflow_entries.len() <= PLUGIN_GRAPH_FENCE_ENTRIES_MAX {
+            let index = overflow_entries.len();
+            overflow_entries.push(PluginGraphFenceEntry {
+                plugin_id: PluginId::parse(format!("overflow-{index:02}")).unwrap(),
+                package_generation: 1,
+                activation_epoch: 1,
+                cause: PluginGraphFenceCause::SessionLost,
+                disposition: PluginGraphFenceDisposition::LoadedSibling,
+            });
+        }
+        assert_eq!(
+            fence_plugin_graph(
+                &mut connection,
+                PluginGraphFenceRequest {
+                    operation_id: OperationId::new(),
+                    host_session_id: OperationId::new().to_string(),
+                    entries: overflow_entries,
+                },
+                now,
+            )
+            .unwrap_err(),
+            RepositoryError::OperationTooLarge
+        );
+
+        let operation_id = OperationId::new();
+        let host_session_id = OperationId::new().to_string();
+        let request = PluginGraphFenceRequest {
+            operation_id,
+            host_session_id: host_session_id.clone(),
+            entries,
+        };
+        let outcome = fence_plugin_graph(&mut connection, request.clone(), now).unwrap();
+        assert!(outcome.mutation.newly_committed);
+        assert_eq!(outcome.host_session_id, host_session_id);
+        assert_eq!(outcome.results.len(), 3);
+        assert!(
+            outcome
+                .results
+                .windows(2)
+                .all(|pair| pair[0].plugin_id < pair[1].plugin_id)
+        );
+        assert_eq!(
+            outcome.mutation.event.affected.plugin_ids,
+            outcome
+                .results
+                .iter()
+                .map(|result| result.plugin_id.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            outcome.mutation.event.revision,
+            (revision_before + 1) as u64
+        );
+        for entry in &outcome.results {
+            assert_eq!(
+                entry.new_activation_epoch,
+                entry.expected_activation_epoch + 1
+            );
+            if entry.plugin_id.as_str() == "aaa-root" {
+                assert_eq!(entry.prior_runtime_state, PluginRuntimeState::Starting);
+                assert_eq!(entry.target_runtime_state, PluginRuntimeState::Suspended);
+                assert_eq!(entry.failure_count, 3);
+                assert!(!entry.desired_enabled);
+            } else {
+                assert_eq!(entry.target_runtime_state, PluginRuntimeState::Degraded);
+                assert_eq!(entry.failure_count, 1);
+                assert!(entry.desired_enabled);
+            }
+        }
+        let ambiguous = load_invocation(&connection, http_operation).unwrap();
+        assert_eq!(ambiguous.state, PluginInvocationState::AmbiguousHttp);
+        assert_eq!(ambiguous.activation_epoch, sibling.activation_epoch + 1);
+        assert_eq!(ambiguous.delivery_operation_id, delivery_operation_id);
+        assert_eq!(ambiguous.error_code.as_deref(), Some("http_ambiguous"));
+
+        let (stored_request, stored_response): (String, String) = connection
+            .query_row(
+                "SELECT request_json, response_json FROM operation_receipts
+                 WHERE operation_id = ?1",
+                [operation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let stored_request: PluginGraphFenceReceiptRequest =
+            serde_json::from_str(&stored_request).unwrap();
+        let stored_response: PluginGraphFenceOutcome =
+            serde_json::from_str(&stored_response).unwrap();
+        assert_eq!(stored_request.results, stored_response.results);
+        assert_eq!(stored_request.results, outcome.results);
+
+        let replay = fence_plugin_graph(&mut connection, request.clone(), now).unwrap();
+        assert_eq!(replay, outcome);
+        assert!(!replay.mutation.newly_committed);
+        let mut changed_request = request.clone();
+        changed_request.host_session_id = OperationId::new().to_string();
+        assert_eq!(
+            fence_plugin_graph(&mut connection, changed_request, now).unwrap_err(),
+            RepositoryError::IdempotencyMismatch
+        );
         assert_eq!(
             connection
                 .query_row::<i64, _, _>(
@@ -9078,6 +10082,41 @@ mod tests {
                 )
                 .unwrap(),
             revision_before + 1
+        );
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+        drop(connection);
+        let mut connection = profile.connection();
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+        let reopened_replay = fence_plugin_graph(&mut connection, request, now).unwrap();
+        assert_eq!(reopened_replay, outcome);
+        assert!(!reopened_replay.mutation.newly_committed);
+
+        let dependent =
+            get_installed_plugin(&connection, PluginId::parse("ccc-dependent").unwrap()).unwrap();
+        let due = dependent.next_retry_at.unwrap();
+        let dependent = retry_due(&mut connection, &dependent, due).unwrap();
+        connection
+            .execute(
+                "UPDATE plugin_event_cursors
+                 SET event_epoch = (SELECT event_epoch FROM app_state WHERE singleton = 1),
+                     revision = (SELECT global_revision FROM app_state WHERE singleton = 1),
+                     resync_required = 0, updated_at = ?2 WHERE plugin_id = ?1",
+                params![dependent.plugin_id.as_str(), due.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            complete_plugin_activation(
+                &mut connection,
+                OperationId::new(),
+                CompletePluginActivationRequest {
+                    plugin_id: dependent.plugin_id,
+                    package_generation: dependent.package_generation,
+                    activation_epoch: dependent.activation_epoch,
+                },
+                due,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
         );
     }
 

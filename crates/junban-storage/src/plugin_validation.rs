@@ -192,7 +192,13 @@ fn load_plugins(
                     && row.last_error_code.is_none()
                     && row.next_retry_at.is_none()
             }
-            "starting" | "active" => {
+            "starting" => {
+                row.desired_enabled == 1
+                    && row.next_retry_at.is_none()
+                    && ((row.failure_count == 0 && row.last_error_code.is_none())
+                        || (matches!(row.failure_count, 1 | 2) && row.last_error_code.is_some()))
+            }
+            "active" => {
                 row.desired_enabled == 1
                     && row.failure_count == 0
                     && row.last_error_code.is_none()
@@ -203,7 +209,7 @@ fn load_plugins(
                     && ((row.runtime_state == "degraded" && row.failure_count == 1)
                         || (row.runtime_state == "failed" && row.failure_count == 2))
                     && row.last_error_code.is_some()
-                    && next_retry_at.is_some_and(|retry_at| retry_at > updated_at)
+                    && next_retry_at.is_some()
             }
             "suspended" => {
                 row.desired_enabled == 0
@@ -464,10 +470,10 @@ fn validate_locks(
             package_sha256: &plugin.row.package_sha256,
         })
         .collect();
-    for installed in plugins.iter().filter(|plugin| {
-        plugin.row.desired_enabled == 1
-            && !matches!(plugin.row.runtime_state.as_str(), "starting" | "suspended")
-    }) {
+    for installed in plugins
+        .iter()
+        .filter(|plugin| plugin.row.desired_enabled == 1 && plugin.row.runtime_state == "active")
+    {
         for dependency in &installed.manifest.dependencies {
             if plugin(plugins, &dependency.id)?.row.desired_enabled != 1 {
                 return invalid("plugin dependency lifecycle authority");
@@ -790,6 +796,9 @@ pub(crate) fn valid_error_code(code: &str) -> bool {
                 | "host_unavailable"
                 | "host_crashed"
                 | "activation_failed"
+                | "compile_load"
+                | "child_fatal"
+                | "session_lost"
                 | "guest_trap"
                 | "timeout"
                 | "resource_limit"

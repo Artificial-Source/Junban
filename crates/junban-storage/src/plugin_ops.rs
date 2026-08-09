@@ -4538,6 +4538,24 @@ fn graph_fence_entry_role_is_valid(
     )
 }
 
+fn graph_fence_role_set_is_valid(
+    roles: impl IntoIterator<Item = (PluginGraphFenceCause, PluginGraphFenceDisposition)>,
+) -> bool {
+    let mut failing_count = 0;
+    let mut has_skipped_dependent = false;
+    for (cause, disposition) in roles {
+        if !graph_fence_entry_role_is_valid(cause, disposition) {
+            return false;
+        }
+        match disposition {
+            PluginGraphFenceDisposition::Failing => failing_count += 1,
+            PluginGraphFenceDisposition::SkippedDependent => has_skipped_dependent = true,
+            PluginGraphFenceDisposition::LoadedSibling => {}
+        }
+    }
+    failing_count == 1 || (failing_count == 0 && !has_skipped_dependent)
+}
+
 fn graph_fence_receipt_error() -> RepositoryError {
     RepositoryError::Storage("plugin graph fence receipt authority mismatch".to_owned())
 }
@@ -4581,10 +4599,12 @@ pub(crate) fn validate_plugin_graph_fence_receipt(
             .results
             .windows(2)
             .all(|pair| pair[0].plugin_id < pair[1].plugin_id)
-        || !request
-            .results
-            .iter()
-            .any(|result| result.disposition == PluginGraphFenceDisposition::Failing)
+        || !graph_fence_role_set_is_valid(
+            request
+                .results
+                .iter()
+                .map(|result| (result.cause, result.disposition)),
+        )
         || request
             .results
             .iter()
@@ -4647,14 +4667,12 @@ fn validate_graph_fence_request_shape(
             .entries
             .windows(2)
             .all(|pair| pair[0].plugin_id < pair[1].plugin_id)
-        || !request
-            .entries
-            .iter()
-            .any(|entry| entry.disposition == PluginGraphFenceDisposition::Failing)
-        || request
-            .entries
-            .iter()
-            .any(|entry| !graph_fence_entry_role_is_valid(entry.cause, entry.disposition))
+        || !graph_fence_role_set_is_valid(
+            request
+                .entries
+                .iter()
+                .map(|entry| (entry.cause, entry.disposition)),
+        )
     {
         return Err(RepositoryError::Conflict);
     }
@@ -10635,6 +10653,267 @@ mod tests {
         crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
     }
 
+    #[tokio::test]
+    async fn triggerless_graph_fence_survives_replay_backup_restore_and_normal_open() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_700_000_100, 0);
+        let starting =
+            install_named_fixture(&mut connection, &store, "aaa-starting", Vec::new(), now);
+        let active = install_named_fixture(&mut connection, &store, "bbb-active", Vec::new(), now);
+        set_plugin_desired_enabled(
+            &mut connection,
+            &store,
+            OperationId::new(),
+            starting.plugin_id.clone(),
+            true,
+            now,
+        )
+        .unwrap();
+        let active = activate_plugin(&mut connection, &store, &active, now);
+        connection
+            .execute(
+                "UPDATE plugins SET failure_count = 1, last_error_code = 'timeout'
+                 WHERE plugin_id = ?1 AND runtime_state = 'starting'",
+                [starting.plugin_id.as_str()],
+            )
+            .unwrap();
+        let starting = get_installed_plugin(&connection, starting.plugin_id).unwrap();
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+
+        let operation_id = OperationId::new();
+        let host_session_id = OperationId::new().to_string();
+        let request = PluginGraphFenceRequest {
+            operation_id,
+            host_session_id: host_session_id.clone(),
+            entries: [&starting, &active]
+                .into_iter()
+                .map(|plugin| PluginGraphFenceEntry {
+                    plugin_id: plugin.plugin_id.clone(),
+                    package_generation: plugin.package_generation,
+                    activation_epoch: plugin.activation_epoch,
+                    cause: PluginGraphFenceCause::SessionLost,
+                    disposition: PluginGraphFenceDisposition::LoadedSibling,
+                })
+                .collect(),
+        };
+        let revision_before: i64 = connection
+            .query_row(
+                "SELECT global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let outcome = fence_plugin_graph(&mut connection, request.clone(), now).unwrap();
+        assert!(outcome.mutation.newly_committed);
+        assert_eq!(outcome.host_session_id, host_session_id);
+        assert_eq!(outcome.results.len(), 2);
+        assert_eq!(outcome.mutation.event.operation_id, operation_id);
+        assert_eq!(
+            outcome.mutation.event.event_type.as_str(),
+            EventType::PLUGIN_HEALTH_CHANGED
+        );
+        assert_eq!(
+            outcome.mutation.event.revision,
+            (revision_before + 1) as u64
+        );
+        assert_eq!(
+            outcome.mutation.event.affected.plugin_ids,
+            outcome
+                .results
+                .iter()
+                .map(|result| result.plugin_id.clone())
+                .collect::<Vec<_>>()
+        );
+        assert!(outcome.results.iter().all(|result| {
+            result.cause == PluginGraphFenceCause::SessionLost
+                && result.disposition == PluginGraphFenceDisposition::LoadedSibling
+                && result.new_activation_epoch == result.expected_activation_epoch + 1
+        }));
+        let starting_result = &outcome.results[0];
+        assert_eq!(starting_result.plugin_id, starting.plugin_id);
+        assert_eq!(
+            starting_result.prior_runtime_state,
+            PluginRuntimeState::Starting
+        );
+        assert_eq!(
+            starting_result.target_runtime_state,
+            PluginRuntimeState::Failed
+        );
+        assert_eq!(starting_result.failure_count, 2);
+        assert!(starting_result.desired_enabled);
+        let active_result = &outcome.results[1];
+        assert_eq!(active_result.plugin_id, active.plugin_id);
+        assert_eq!(
+            active_result.prior_runtime_state,
+            PluginRuntimeState::Active
+        );
+        assert_eq!(
+            active_result.target_runtime_state,
+            PluginRuntimeState::Degraded
+        );
+        assert_eq!(active_result.failure_count, 1);
+        assert!(active_result.desired_enabled);
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT global_revision FROM app_state WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            revision_before + 1
+        );
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT COUNT(*) FROM events WHERE operation_id = ?1",
+                    [operation_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?1",
+                    [operation_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            1
+        );
+        for result in &outcome.results {
+            let stored = get_installed_plugin(&connection, result.plugin_id.clone()).unwrap();
+            assert_eq!(stored.activation_epoch, result.new_activation_epoch);
+            assert_eq!(stored.runtime_state, result.target_runtime_state);
+            assert_eq!(stored.failure_count, result.failure_count);
+            assert_eq!(stored.desired_enabled, result.desired_enabled);
+            assert_eq!(
+                stored.last_error_code.as_deref(),
+                Some(PluginGraphFenceCause::SessionLost.error_code())
+            );
+        }
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+
+        let (canonical_request, canonical_response): (String, String) = connection
+            .query_row(
+                "SELECT request_json, response_json FROM operation_receipts
+                 WHERE operation_id = ?1",
+                [operation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let stored_request: PluginGraphFenceReceiptRequest =
+            serde_json::from_str(&canonical_request).unwrap();
+        let stored_response: PluginGraphFenceOutcome =
+            serde_json::from_str(&canonical_response).unwrap();
+        assert_eq!(canonical_json(&stored_request).unwrap(), canonical_request);
+        assert_eq!(
+            canonical_json(&stored_response).unwrap(),
+            canonical_response
+        );
+        assert_eq!(stored_request.results, outcome.results);
+        assert_eq!(stored_response.results, outcome.results);
+        validate_plugin_graph_fence_receipt(operation_id, &canonical_request, &canonical_response)
+            .unwrap();
+
+        let replay = fence_plugin_graph(&mut connection, request.clone(), now).unwrap();
+        assert_eq!(replay, outcome);
+        assert!(!replay.mutation.newly_committed);
+        let mut changed_request = request.clone();
+        changed_request.host_session_id = OperationId::new().to_string();
+        assert_eq!(
+            fence_plugin_graph(&mut connection, changed_request, now).unwrap_err(),
+            RepositoryError::IdempotencyMismatch
+        );
+
+        let mut skipped_request: PluginGraphFenceReceiptRequest =
+            serde_json::from_str(&canonical_request).unwrap();
+        let mut skipped_response: PluginGraphFenceOutcome =
+            serde_json::from_str(&canonical_response).unwrap();
+        skipped_request.results[1].cause = PluginGraphFenceCause::DependencyFailed;
+        skipped_request.results[1].disposition = PluginGraphFenceDisposition::SkippedDependent;
+        skipped_response.results[1].cause = PluginGraphFenceCause::DependencyFailed;
+        skipped_response.results[1].disposition = PluginGraphFenceDisposition::SkippedDependent;
+        let skipped_request = canonical_json(&skipped_request).unwrap();
+        let skipped_response = canonical_json(&skipped_response).unwrap();
+        assert!(
+            validate_plugin_graph_fence_receipt(operation_id, &skipped_request, &skipped_response,)
+                .is_err()
+        );
+        connection
+            .execute(
+                "UPDATE operation_receipts SET request_json = ?2, response_json = ?3
+                 WHERE operation_id = ?1",
+                params![operation_id.to_string(), skipped_request, skipped_response],
+            )
+            .unwrap();
+        assert!(crate::backup_ops::create_backup(&connection, &profile.path).is_err());
+        connection
+            .execute(
+                "UPDATE operation_receipts SET request_json = ?2, response_json = ?3
+                 WHERE operation_id = ?1",
+                params![
+                    operation_id.to_string(),
+                    &canonical_request,
+                    &canonical_response
+                ],
+            )
+            .unwrap();
+
+        let backup = crate::backup_ops::create_backup(&connection, &profile.path).unwrap();
+        let candidate = crate::backup_ops::prepare_restore(&profile.path, backup).unwrap();
+        let candidate_connection = Connection::open(candidate.path()).unwrap();
+        crate::plugin_validation::validate_plugin_authority(&candidate_connection).unwrap();
+        let candidate_receipt: (String, String) = candidate_connection
+            .query_row(
+                "SELECT request_json, response_json FROM operation_receipts
+                 WHERE operation_id = ?1",
+                [operation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            candidate_receipt,
+            (canonical_request.clone(), canonical_response.clone())
+        );
+        let candidate_backup =
+            crate::backup_ops::create_backup(&candidate_connection, &profile.path).unwrap();
+        drop(candidate_backup);
+        drop(candidate_connection);
+        crate::backup_ops::restore_backup(&mut connection, &profile.path, candidate).unwrap();
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+        let restored_receipt: (String, String) = connection
+            .query_row(
+                "SELECT request_json, response_json FROM operation_receipts
+                 WHERE operation_id = ?1",
+                [operation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            restored_receipt,
+            (canonical_request.clone(), canonical_response.clone())
+        );
+        let restored_backup = crate::backup_ops::create_backup(&connection, &profile.path).unwrap();
+        drop(restored_backup);
+        let restored_replay = fence_plugin_graph(&mut connection, request.clone(), now).unwrap();
+        assert_eq!(restored_replay, outcome);
+        assert!(!restored_replay.mutation.newly_committed);
+
+        drop(connection);
+        drop(store);
+        let owner = crate::ProfileOwner::open(profile.path.clone()).unwrap();
+        let repository = owner.repository();
+        let reopened_replay = repository.fence_plugin_graph(request, now).await.unwrap();
+        assert_eq!(reopened_replay, outcome);
+        assert!(!reopened_replay.mutation.newly_committed);
+    }
+
     #[test]
     fn graph_fence_is_atomic_sorted_replayable_and_preserves_http_ambiguity() {
         let profile = TestProfile::new();
@@ -10771,6 +11050,39 @@ mod tests {
                     operation_id: OperationId::new(),
                     host_session_id: OperationId::new().to_string(),
                     entries: invalid_role_entries,
+                },
+                now,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        let mut multiple_failing_entries = entries.clone();
+        multiple_failing_entries[1].cause = PluginGraphFenceCause::ChildFatal;
+        multiple_failing_entries[1].disposition = PluginGraphFenceDisposition::Failing;
+        assert_eq!(
+            fence_plugin_graph(
+                &mut connection,
+                PluginGraphFenceRequest {
+                    operation_id: OperationId::new(),
+                    host_session_id: OperationId::new().to_string(),
+                    entries: multiple_failing_entries,
+                },
+                now,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        let mut triggerless_with_skipped_entries = entries.clone();
+        triggerless_with_skipped_entries[0].cause = PluginGraphFenceCause::SessionLost;
+        triggerless_with_skipped_entries[0].disposition =
+            PluginGraphFenceDisposition::LoadedSibling;
+        assert_eq!(
+            fence_plugin_graph(
+                &mut connection,
+                PluginGraphFenceRequest {
+                    operation_id: OperationId::new(),
+                    host_session_id: OperationId::new().to_string(),
+                    entries: triggerless_with_skipped_entries,
                 },
                 now,
             )
@@ -11027,6 +11339,49 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
+
+        let mut multiple_failing_request: PluginGraphFenceReceiptRequest =
+            serde_json::from_str(&canonical_request).unwrap();
+        let mut multiple_failing_response: PluginGraphFenceOutcome =
+            serde_json::from_str(&canonical_response).unwrap();
+        multiple_failing_request.results[1].cause = PluginGraphFenceCause::ChildFatal;
+        multiple_failing_request.results[1].disposition = PluginGraphFenceDisposition::Failing;
+        multiple_failing_response.results[1].cause = PluginGraphFenceCause::ChildFatal;
+        multiple_failing_response.results[1].disposition = PluginGraphFenceDisposition::Failing;
+        let multiple_failing_request = canonical_json(&multiple_failing_request).unwrap();
+        let multiple_failing_response = canonical_json(&multiple_failing_response).unwrap();
+        assert!(
+            validate_plugin_graph_fence_receipt(
+                operation_id,
+                &multiple_failing_request,
+                &multiple_failing_response,
+            )
+            .is_err()
+        );
+        connection
+            .execute(
+                "UPDATE operation_receipts SET request_json = ?2, response_json = ?3
+                 WHERE operation_id = ?1",
+                params![
+                    operation_id.to_string(),
+                    multiple_failing_request,
+                    multiple_failing_response
+                ],
+            )
+            .unwrap();
+        assert!(crate::backup_ops::create_backup(&connection, &profile.path).is_err());
+        connection
+            .execute(
+                "UPDATE operation_receipts SET request_json = ?2, response_json = ?3
+                 WHERE operation_id = ?1",
+                params![
+                    operation_id.to_string(),
+                    &canonical_request,
+                    &canonical_response
+                ],
+            )
+            .unwrap();
+
         let mut corrupt_request: PluginGraphFenceReceiptRequest =
             serde_json::from_str(&canonical_request).unwrap();
         corrupt_request.host_session_id = OperationId::new().to_string();

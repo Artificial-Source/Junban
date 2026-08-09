@@ -9,7 +9,7 @@ use junban_plugin_sdk::{
 };
 
 use crate::{
-    CommittedEvent, PluginHookKind, PluginResyncSession, RepositoryError,
+    CommittedEvent, PluginCursorPosition, PluginHookKind, PluginResyncSession, RepositoryError,
     plugin_resync_request_hash,
 };
 
@@ -96,33 +96,167 @@ pub struct PluginInvocationDeliveryCheck<'a> {
     pub stored_request_sha256: &'a Sha256Digest,
 }
 
+/// Exact retained source bound to one represented event delivery.
+///
+/// This parent-owned material is deliberately not serializable and is never
+/// persisted inside the frozen [`PluginDeliveryAuthority`]. Storage reloads
+/// the retained event and rechecks every field at each durable boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginRetainedEventSource {
+    pub source_revision: u64,
+    pub event_content_sha256: Sha256Digest,
+    pub expected_cursor: PluginCursorPosition,
+    pub next_cursor: PluginCursorPosition,
+    private_body: Vec<u8>,
+}
+
+impl PluginRetainedEventSource {
+    pub fn new(
+        event: &CommittedEvent,
+        expected_cursor: PluginCursorPosition,
+        next_cursor: PluginCursorPosition,
+        private_body: Vec<u8>,
+    ) -> Result<Self, RepositoryError> {
+        let source = Self {
+            source_revision: event.revision,
+            event_content_sha256: plugin_committed_event_content_hash(event)?,
+            expected_cursor,
+            next_cursor,
+            private_body,
+        };
+        source.validate_position()?;
+        Ok(source)
+    }
+
+    #[must_use]
+    pub fn private_body(&self) -> &[u8] {
+        &self.private_body
+    }
+
+    fn validate_position(&self) -> Result<(), RepositoryError> {
+        if self.source_revision == 0
+            || self.source_revision > i64::MAX as u64
+            || self.expected_cursor.resync_required
+            || self.next_cursor.resync_required
+            || self.expected_cursor.event_epoch != self.next_cursor.event_epoch
+            || self.next_cursor.revision != self.source_revision
+            || self
+                .expected_cursor
+                .revision
+                .checked_add(1)
+                .is_none_or(|revision| revision != self.source_revision)
+        {
+            return Err(RepositoryError::Conflict);
+        }
+        Ok(())
+    }
+
+    fn verify_payload(
+        &self,
+        authority: &PluginDeliveryAuthority,
+        persisted_entry_id: &PluginId,
+    ) -> Result<(), RepositoryError> {
+        self.validate_position()?;
+        let request = decode_invocation_request(InvocationKind::HandleEvent, &self.private_body)
+            .map_err(|_| RepositoryError::Conflict)?;
+        let junban_plugin_sdk::InvocationRequest::HandleEvent(payload) = request
+        else {
+            return Err(RepositoryError::Conflict);
+        };
+        let event = payload.argument();
+        if event.revision != self.source_revision
+            || event.event_epoch != self.expected_cursor.event_epoch.as_str()
+        {
+            return Err(RepositoryError::Conflict);
+        }
+        let expected = plugin_retained_event_payload_hash(
+            &self.event_content_sha256,
+            persisted_entry_id.as_str(),
+            &self.private_body,
+        )?;
+        if authority.payload_sha256 != expected {
+            return Err(RepositoryError::Conflict);
+        }
+        Ok(())
+    }
+}
+
 /// Authority and final hash carried unchanged through every durable stage.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginInvocationDelivery {
     pub authority: PluginDeliveryAuthority,
     pub persisted_entry_id: PluginId,
     pub request_sha256: Sha256Digest,
+    pub retained_event_source: Option<PluginRetainedEventSource>,
 }
 
 impl PluginInvocationDelivery {
+    /// Construct a non-event delivery. `HandleEvent` is rejected because its
+    /// exact retained source must be supplied with [`Self::for_retained_event`].
     pub fn new(
         authority: PluginDeliveryAuthority,
         hook: PluginHookKind,
         persisted_entry_id: PluginId,
+    ) -> Result<Self, RepositoryError> {
+        Self::new_with_source(authority, hook, persisted_entry_id, None)
+    }
+
+    pub fn for_retained_event(
+        authority: PluginDeliveryAuthority,
+        persisted_entry_id: PluginId,
+        source: PluginRetainedEventSource,
+    ) -> Result<Self, RepositoryError> {
+        Self::new_with_source(
+            authority,
+            PluginHookKind::HandleEvent,
+            persisted_entry_id,
+            Some(source),
+        )
+    }
+
+    fn new_with_source(
+        authority: PluginDeliveryAuthority,
+        hook: PluginHookKind,
+        persisted_entry_id: PluginId,
+        retained_event_source: Option<PluginRetainedEventSource>,
     ) -> Result<Self, RepositoryError> {
         if !authority.mode.admits(hook) {
             return Err(RepositoryError::Conflict);
         }
         let request_sha256 =
             plugin_invocation_request_hash(hook, &persisted_entry_id, &authority.digest()?)?;
-        Ok(Self {
+        let delivery = Self {
             authority,
             persisted_entry_id,
             request_sha256,
-        })
+            retained_event_source,
+        };
+        delivery.verify_source(hook)?;
+        Ok(delivery)
+    }
+
+    #[must_use]
+    pub fn retained_event_source(&self) -> Option<&PluginRetainedEventSource> {
+        self.retained_event_source.as_ref()
+    }
+
+    fn verify_source(&self, hook: PluginHookKind) -> Result<(), RepositoryError> {
+        let event_delivery = hook == PluginHookKind::HandleEvent
+            && matches!(
+                self.authority.mode,
+                PluginDeliveryMode::StartingCatchUp | PluginDeliveryMode::Active
+            );
+        if event_delivery != self.retained_event_source.is_some() {
+            return Err(RepositoryError::Conflict);
+        }
+        if let Some(source) = &self.retained_event_source {
+            source.verify_payload(&self.authority, &self.persisted_entry_id)?;
+        }
+        Ok(())
     }
 
     pub fn verify(&self, check: PluginInvocationDeliveryCheck<'_>) -> Result<(), RepositoryError> {
+        self.verify_source(check.hook)?;
         if self.authority.invocation_id != check.operation_id
             || &self.authority.plugin_id != check.plugin_id
             || self.authority.package_generation != check.package_generation
@@ -135,6 +269,132 @@ impl PluginInvocationDelivery {
                 check.persisted_entry_id,
                 &self.authority.digest()?,
             )? != self.request_sha256
+        {
+            return Err(RepositoryError::Conflict);
+        }
+        Ok(())
+    }
+}
+
+/// Stable idempotency identity for an operator command or surface action.
+///
+/// It intentionally excludes runtime generation, activation epoch, host
+/// session, invocation fence, and HTTP delivery identity. The payload digest is
+/// over the exact canonical private body used to construct delivery authority.
+#[derive(Clone, Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginOperatorRequestIdentity {
+    pub operation_id: OperationId,
+    pub plugin_id: PluginId,
+    pub hook_kind: PluginHookKind,
+    pub persisted_entry_id: PluginId,
+    pub payload_sha256: Sha256Digest,
+}
+
+impl PluginOperatorRequestIdentity {
+    pub fn new(
+        operation_id: OperationId,
+        plugin_id: PluginId,
+        hook_kind: PluginHookKind,
+        persisted_entry_id: PluginId,
+        payload_sha256: Sha256Digest,
+    ) -> Result<Self, RepositoryError> {
+        let identity = Self {
+            operation_id,
+            plugin_id,
+            hook_kind,
+            persisted_entry_id,
+            payload_sha256,
+        };
+        identity.validate()?;
+        Ok(identity)
+    }
+
+    pub fn from_canonical_private_body(
+        operation_id: OperationId,
+        plugin_id: PluginId,
+        hook_kind: PluginHookKind,
+        persisted_entry_id: PluginId,
+        body_entry_id: &str,
+        private_body: &[u8],
+    ) -> Result<Self, RepositoryError> {
+        let kind = match hook_kind {
+            PluginHookKind::InvokeCommand => InvocationKind::InvokeCommand,
+            PluginHookKind::HandleSurfaceAction => InvocationKind::HandleSurfaceAction,
+            _ => return Err(RepositoryError::Conflict),
+        };
+        let payload_sha256 =
+            plugin_canonical_invocation_body_hash(kind, Some(body_entry_id), private_body)
+                .map_err(|_| RepositoryError::Conflict)?;
+        Self::new(
+            operation_id,
+            plugin_id,
+            hook_kind,
+            persisted_entry_id,
+            payload_sha256,
+        )
+    }
+
+    pub fn validate(&self) -> Result<(), RepositoryError> {
+        if !matches!(
+            self.hook_kind,
+            PluginHookKind::InvokeCommand | PluginHookKind::HandleSurfaceAction
+        ) {
+            return Err(RepositoryError::Conflict);
+        }
+        Ok(())
+    }
+}
+
+/// Runtime classification presented to the verified cursor-only skip path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PluginRetainedEventClassification {
+    Represented,
+    Irrelevant,
+    Invalidating,
+}
+
+/// Fresh runtime fence for one cursor-only retained-event decision.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginCursorSkipAuthority {
+    pub plugin_id: PluginId,
+    pub package_generation: u64,
+    pub activation_epoch: u64,
+    pub host_session_id: OperationId,
+    pub mode: PluginDeliveryMode,
+}
+
+/// One nonserialized request to skip exactly one verified irrelevant event.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedPluginCursorSkipRequest {
+    pub authority: PluginCursorSkipAuthority,
+    pub source_revision: u64,
+    pub event_content_sha256: Sha256Digest,
+    pub expected_cursor: PluginCursorPosition,
+    pub next_cursor: PluginCursorPosition,
+    pub classification: PluginRetainedEventClassification,
+}
+
+impl VerifiedPluginCursorSkipRequest {
+    pub fn validate(&self) -> Result<(), RepositoryError> {
+        if self.authority.package_generation == 0
+            || self.authority.activation_epoch == 0
+            || !matches!(
+                self.authority.mode,
+                PluginDeliveryMode::StartingCatchUp | PluginDeliveryMode::Active
+            )
+            || self.classification != PluginRetainedEventClassification::Irrelevant
+            || self.source_revision == 0
+            || self.source_revision > i64::MAX as u64
+            || self.expected_cursor.resync_required
+            || self.next_cursor.resync_required
+            || self.expected_cursor.event_epoch != self.next_cursor.event_epoch
+            || self.next_cursor.revision != self.source_revision
+            || self
+                .expected_cursor
+                .revision
+                .checked_add(1)
+                .is_none_or(|revision| revision != self.source_revision)
         {
             return Err(RepositoryError::Conflict);
         }

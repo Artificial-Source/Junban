@@ -22,8 +22,9 @@ use junban_plugin_sdk::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BulkAction, CommittedMutation, ProjectDraft, ProjectPatch, RepositoryError, RepositoryFuture,
-    TagDraft, TagPatch, TaskPatch, TemporalContext,
+    BulkAction, CommittedMutation, PluginOperatorRequestIdentity, ProjectDraft, ProjectPatch,
+    RepositoryError, RepositoryFuture, TagDraft, TagPatch, TaskPatch, TemporalContext,
+    VerifiedPluginCursorSkipRequest,
 };
 
 pub const PLUGINS_INSTALLED_MAX: usize = 64;
@@ -852,6 +853,28 @@ pub fn plugin_manifest_entry_authority(
     (matches.len() == 1).then(|| matches.into_iter().next().expect("one manifest entry"))
 }
 
+/// Derive the schema-v7 canonical persisted identity of one already-selected
+/// manifest entry without requiring the plugin to remain installed.
+#[must_use]
+pub fn plugin_manifest_entry_persisted_id(entry: &PluginManifestEntry) -> Option<PluginId> {
+    match entry {
+        PluginManifestEntry::Command { command_id }
+        | PluginManifestEntry::Event { event_id: command_id } => Some(command_id.clone()),
+        PluginManifestEntry::SurfaceAction {
+            surface_id,
+            action_id,
+        } => {
+            let mut material = b"junban.plugin.surface-action-entry.v1\0".to_vec();
+            for value in [surface_id.as_str(), action_id.as_str()] {
+                material.extend_from_slice(&u32::try_from(value.len()).ok()?.to_be_bytes());
+                material.extend_from_slice(value.as_bytes());
+            }
+            PluginId::parse(Sha256Digest::of(&material).into_string()).ok()
+        }
+        PluginManifestEntry::Resync => PluginId::parse("resync").ok(),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginInvocationState {
@@ -1318,6 +1341,9 @@ pub fn plan_authorized_plugin_invocation_commit(
 
 /// Select the exact first-party use case in the application layer. The selected
 /// closure later executes inside storage's caller-owned transaction.
+///
+/// P7-2D-DB-002 REMOVAL BLOCKER: the unwrapped planner remains only until the
+/// pre-integration supervisor uses `plan_authorized_plugin_invocation_commit`.
 pub fn plan_plugin_invocation_commit(
     request: CommitPluginInvocationRequest,
 ) -> Result<PlannedPluginInvocationCommit, RepositoryError> {
@@ -1732,6 +1758,9 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
+    // P7-2D-DB-002 REMOVAL BLOCKER: the pre-integration supervisor still calls
+    // this unwrapped cursor mutation. New event delivery must use the verified
+    // retained-event terminal or skip paths instead.
     fn advance_plugin_cursor(
         &self,
         _request: AdvancePluginCursorRequest,
@@ -1740,6 +1769,24 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
+    fn verified_skip_plugin_cursor(
+        &self,
+        _request: VerifiedPluginCursorSkipRequest,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, PluginEventCursor> {
+        plugin_unavailable()
+    }
+
+    fn replay_completed_plugin_operator(
+        &self,
+        _identity: PluginOperatorRequestIdentity,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, Option<CommittedPluginInvocation>> {
+        plugin_unavailable()
+    }
+
+    // P7-2D-DB-002 REMOVAL BLOCKER: remove after the supervisor migrates to
+    // `reserve_authorized_plugin_invocation`.
     fn reserve_plugin_invocation(
         &self,
         _request: ReservePluginInvocationRequest,
@@ -1756,6 +1803,8 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
+    // P7-2D-DB-002 REMOVAL BLOCKER: remove after the supervisor migrates to
+    // `transition_authorized_plugin_invocation`.
     fn transition_plugin_invocation(
         &self,
         _request: TransitionPluginInvocationRequest,
@@ -1776,6 +1825,8 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
+    // P7-2D-DB-002 REMOVAL BLOCKER: remove after the supervisor migrates to
+    // `complete_authorized_plugin_invocation`.
     fn complete_plugin_invocation(
         &self,
         _operation_id: OperationId,
@@ -1795,6 +1846,8 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
+    // P7-2D-DB-002 REMOVAL BLOCKER: remove after the supervisor migrates to
+    // `commit_authorized_plugin_invocation`.
     fn commit_plugin_invocation(
         &self,
         _request: PlannedPluginInvocationCommit,

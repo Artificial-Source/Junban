@@ -1367,6 +1367,27 @@ impl PluginRepository for SqliteRepository {
         })
     }
 
+    fn verified_skip_plugin_cursor(
+        &self,
+        request: junban_app::VerifiedPluginCursorSkipRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginEventCursor> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::verified_skip_plugin_cursor(connection, request, now)
+        })
+    }
+
+    fn replay_completed_plugin_operator(
+        &self,
+        identity: junban_app::PluginOperatorRequestIdentity,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, Option<junban_app::CommittedPluginInvocation>> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::replay_completed_plugin_operator(connection, identity, now)
+        })
+    }
+
+    // P7-2D-DB-002 REMOVAL BLOCKER: unwrapped supervisor path.
     fn reserve_plugin_invocation(
         &self,
         request: junban_app::ReservePluginInvocationRequest,
@@ -1387,6 +1408,7 @@ impl PluginRepository for SqliteRepository {
         })
     }
 
+    // P7-2D-DB-002 REMOVAL BLOCKER: unwrapped supervisor path.
     fn transition_plugin_invocation(
         &self,
         request: junban_app::TransitionPluginInvocationRequest,
@@ -1411,6 +1433,7 @@ impl PluginRepository for SqliteRepository {
         self.plugin_request(|connection, _| plugin_ops::list_plugin_invocations(connection))
     }
 
+    // P7-2D-DB-002 REMOVAL BLOCKER: unwrapped supervisor path.
     fn complete_plugin_invocation(
         &self,
         operation_id: OperationId,
@@ -1441,6 +1464,7 @@ impl PluginRepository for SqliteRepository {
         })
     }
 
+    // P7-2D-DB-002 REMOVAL BLOCKER: unwrapped supervisor path.
     fn commit_plugin_invocation(
         &self,
         request: junban_app::PlannedPluginInvocationCommit,

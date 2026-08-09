@@ -2447,6 +2447,33 @@ where
             .map_err(AppError::from)
     }
 
+    pub async fn verified_skip_plugin_cursor(
+        &self,
+        request: crate::VerifiedPluginCursorSkipRequest,
+        now: Timestamp,
+    ) -> Result<crate::PluginEventCursor, AppError> {
+        self.repository
+            .verified_skip_plugin_cursor(request, now)
+            .await
+            .map_err(AppError::from)
+    }
+
+    /// Replay one already-completed operator command/action before constructing
+    /// fresh host-session or generation authority. In-flight, abandoned, event,
+    /// and resync work never produces a result through this lookup.
+    pub async fn replay_completed_plugin_operator(
+        &self,
+        identity: crate::PluginOperatorRequestIdentity,
+        now: Timestamp,
+    ) -> Result<Option<crate::CommittedPluginInvocation>, AppError> {
+        self.repository
+            .replay_completed_plugin_operator(identity, now)
+            .await
+            .map_err(AppError::from)
+    }
+
+    // P7-2D-DB-002 REMOVAL BLOCKER: retained only for the pre-integration
+    // supervisor. New delivery code must use the authorized wrapper.
     pub async fn reserve_plugin_invocation(
         &self,
         request: crate::ReservePluginInvocationRequest,
@@ -2469,6 +2496,8 @@ where
             .map_err(AppError::from)
     }
 
+    // P7-2D-DB-002 REMOVAL BLOCKER: retained only for the pre-integration
+    // supervisor. New delivery code must use the authorized wrapper.
     pub async fn transition_plugin_invocation(
         &self,
         request: crate::TransitionPluginInvocationRequest,
@@ -2498,6 +2527,8 @@ where
             .map_err(AppError::from)
     }
 
+    // P7-2D-DB-002 REMOVAL BLOCKER: retained only for the pre-integration
+    // supervisor. New delivery code must use the authorized wrapper.
     pub async fn complete_plugin_invocation(
         &self,
         operation_id: OperationId,
@@ -2529,6 +2560,8 @@ where
             .map_err(AppError::from)
     }
 
+    // P7-2D-DB-002 REMOVAL BLOCKER: retained only for the pre-integration
+    // supervisor. New delivery code must use the authorized wrapper.
     pub async fn commit_plugin_invocation(
         &self,
         request: crate::CommitPluginInvocationRequest,

@@ -9,8 +9,8 @@ use std::{
 
 use jiff::{Timestamp, ToSpan};
 use junban_app::{
-    CommittedEvent, CommittedMutation, CommittedPluginInvocation, EventType, PluginHookKind,
-    PluginInvocationTerminalKind, PluginManifestEntry, RepositoryError, ResourceSnapshot,
+    CommittedEvent, CommittedMutation, CommittedPluginInvocation, EventType,
+    PluginInvocationTerminalKind, RepositoryError, ResourceSnapshot,
     ResourceType, StagedFile,
 };
 use junban_domain::{
@@ -30,7 +30,6 @@ use junban_domain::{
     ai_approval_action_hash, decode_sha256_hex, read_backup_header, sha256_bytes,
     validate_backup_header, validate_task_tags, write_backup_header,
 };
-use junban_plugin_sdk::{PluginId, Sha256Digest};
 use rusqlite::{Connection, MAIN_DB, OptionalExtension, Transaction, backup::Backup, params};
 use sha2::{Digest, Sha256};
 
@@ -1512,19 +1511,6 @@ fn validate_event_rows(tx: &Transaction<'_>, head: u64) -> Result<(), Repository
     Ok(())
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-struct BackupInvocationReceiptRequest {
-    op: String,
-    plugin_id: PluginId,
-    package_generation: u64,
-    activation_epoch: u64,
-    hook_kind: PluginHookKind,
-    entry: PluginManifestEntry,
-    request_sha256: Sha256Digest,
-    delivery_operation_id: OperationId,
-}
-
 fn validate_receipt_mutation(
     tx: &Transaction<'_>,
     response: &CommittedMutation,
@@ -1566,28 +1552,8 @@ fn validate_plugin_invocation_receipt(
     response_json: &str,
     head: u64,
 ) -> Result<(), RepositoryError> {
-    let request: BackupInvocationReceiptRequest =
-        serde_json::from_str(request_json).map_err(storage_error)?;
-    let operator_entry = matches!(
-        (&request.hook_kind, &request.entry),
-        (
-            PluginHookKind::InvokeCommand,
-            PluginManifestEntry::Command { .. }
-        ) | (
-            PluginHookKind::HandleSurfaceAction,
-            PluginManifestEntry::SurfaceAction { .. }
-        )
-    );
-    if serde_json::to_string(&request).map_err(storage_error)? != request_json
-        || request.op != "plugin_invocation_terminal"
-        || request.package_generation == 0
-        || request.activation_epoch == 0
-        || !operator_entry
-    {
-        return Err(RepositoryError::Storage(
-            "plugin invocation receipt request is not canonical".to_owned(),
-        ));
-    }
+    let _request =
+        crate::plugin_ops::parse_invocation_receipt_request(operation_id, request_json)?;
     let response: CommittedPluginInvocation =
         serde_json::from_str(response_json).map_err(storage_error)?;
     let in_flight: bool = tx
@@ -2020,7 +1986,9 @@ fn validate_subject(
     }
 }
 
-fn validate_committed_event(event: &CommittedEvent) -> Result<(), RepositoryError> {
+pub(crate) fn validate_committed_event(
+    event: &CommittedEvent,
+) -> Result<(), RepositoryError> {
     if event.revision == 0 {
         return Err(RepositoryError::Storage(
             "event revision is zero".to_owned(),

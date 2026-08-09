@@ -2137,6 +2137,18 @@ where
             .map_err(AppError::from)
     }
 
+    /// Internal runtime seam. Storage validates and opens the complete selected
+    /// authority in one worker snapshot; this layer publishes no event.
+    pub async fn open_plugin_component_sources(
+        &self,
+        selected: Vec<crate::PluginComponentSelection>,
+    ) -> Result<Vec<crate::OpenedPluginComponentSource>, AppError> {
+        self.repository
+            .open_plugin_component_sources(selected)
+            .await
+            .map_err(AppError::from)
+    }
+
     pub async fn get_installed_plugin(
         &self,
         plugin_id: junban_plugin_sdk::PluginId,

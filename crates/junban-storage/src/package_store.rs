@@ -9,7 +9,7 @@ use std::{
 };
 
 use junban_app::{PluginPackageAuthority, StagedFile};
-use junban_plugin_sdk::{PACKAGE_BYTES_MAX, Sha256Digest};
+use junban_plugin_sdk::{ComponentInspection, PACKAGE_BYTES_MAX, Sha256Digest};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -51,6 +51,15 @@ pub(crate) struct OrphanCleanup {
     pub truncated: bool,
 }
 
+/// Verified still-open package authority retained only long enough for storage
+/// to bind it to one SQLite runtime selection.
+pub(crate) struct OpenedStoredPluginPackage {
+    pub file: File,
+    pub authority: PluginPackageAuthority,
+    pub component: ComponentInspection,
+    pub component_offset: u64,
+}
+
 impl PluginPackageStore {
     pub fn open(profile_dir: &Path) -> Result<Self, PackageStoreError> {
         let store = Self::open_for_reconciliation(profile_dir)?;
@@ -84,6 +93,20 @@ impl PluginPackageStore {
         for component in PACKAGES_RELATIVE {
             current.push(component);
             ensure_strict_private_directory(&current)?;
+        }
+        Ok(())
+    }
+
+    fn validate_existing_root(&self) -> Result<(), PackageStoreError> {
+        let mut current = self.profile_dir.clone();
+        if !strict_private_directory_exists(&current)? {
+            return Err(PackageStoreError::UnsafePath);
+        }
+        for component in PACKAGES_RELATIVE {
+            current.push(component);
+            if !strict_private_directory_exists(&current)? {
+                return Err(PackageStoreError::UnsafePath);
+            }
         }
         Ok(())
     }
@@ -193,12 +216,22 @@ impl PluginPackageStore {
         &self,
         digest: &Sha256Digest,
     ) -> Result<PluginPackageAuthority, PackageStoreError> {
+        Ok(self.open_component_package(digest)?.authority)
+    }
+
+    /// Open and verify one content-addressed package while retaining the exact
+    /// handle used for package, signature and component inspection.
+    pub(crate) fn open_component_package(
+        &self,
+        digest: &Sha256Digest,
+    ) -> Result<OpenedStoredPluginPackage, PackageStoreError> {
+        self.validate_existing_root()?;
         let path = self.package_path(digest);
-        let authority = self.verify_exact_file(&path)?;
-        if authority.package_sha256() != digest {
+        let opened = self.open_verified_file(&path)?;
+        if opened.authority.package_sha256() != digest {
             return Err(PackageStoreError::AuthorityMismatch);
         }
-        Ok(authority)
+        Ok(opened)
     }
 
     /// Delete content only after metadata no longer references it.
@@ -288,16 +321,32 @@ impl PluginPackageStore {
         verify_stable_open_path(&file, path, &path_metadata)
     }
 
-    fn verify_exact_file(&self, path: &Path) -> Result<PluginPackageAuthority, PackageStoreError> {
+    fn open_verified_file(
+        &self,
+        path: &Path,
+    ) -> Result<OpenedStoredPluginPackage, PackageStoreError> {
         let path_metadata = strict_regular_metadata(path)?;
         if path_metadata.len() == 0 || path_metadata.len() > PACKAGE_BYTES_MAX as u64 {
             return Err(PackageStoreError::AuthorityMismatch);
         }
         let mut file = open_strict_regular(path, &path_metadata)?;
-        let authority = PluginPackageAuthority::inspect_reader(&mut file, path_metadata.len())
-            .map_err(|_| PackageStoreError::AuthorityMismatch)?;
+        let (authority, component) =
+            PluginPackageAuthority::inspect_reader_with_component(&mut file, path_metadata.len())
+                .map_err(|_| PackageStoreError::AuthorityMismatch)?;
+        let component_offset = path_metadata
+            .len()
+            .checked_sub(authority.component_size())
+            .ok_or(PackageStoreError::AuthorityMismatch)?;
+        if file.stream_position().map_err(|_| PackageStoreError::Io)? != component_offset {
+            return Err(PackageStoreError::AuthorityMismatch);
+        }
         verify_stable_open_path(&file, path, &path_metadata)?;
-        Ok(authority)
+        Ok(OpenedStoredPluginPackage {
+            file,
+            authority,
+            component,
+            component_offset,
+        })
     }
 }
 

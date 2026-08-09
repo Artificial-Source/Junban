@@ -6,16 +6,18 @@
 
 use std::{
     cmp::Ordering,
-    io::{Read, Seek},
+    fs::File,
+    io::{self, Read, Seek, SeekFrom},
 };
 
 use jiff::Timestamp;
 use junban_domain::{OperationId, Project, ProjectId, Tag, TagId, Task, TaskDraft, TaskId};
 use junban_plugin_sdk::{
-    Capability, DependencyLock, GraphError, InvocationKind, OutcomeKind, Permission, PluginId,
-    RuntimeManifest, SdkError, SettingValue, Sha256Digest, compare_versions, inspect_component,
-    inspect_component_reader, outcome_authority, parse_package, permission_set_hash, signer_key_id,
-    verify_package, verify_package_reader, version_matches,
+    Capability, ComponentInspection, DependencyLock, GraphError, InvocationKind, OutcomeKind,
+    Permission, PluginId, RuntimeManifest, RuntimeProfile, SdkError, SettingValue, Sha256Digest,
+    compare_versions, inspect_component, inspect_component_reader, outcome_authority,
+    parse_package, permission_set_hash, signer_key_id, verify_package, verify_package_reader,
+    version_matches,
 };
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +44,172 @@ pub const PLUGIN_DEPENDENTS_MAX: usize = 64;
 pub const PLUGIN_GRAPH_FENCE_ENTRIES_MAX: usize = 16;
 pub const PLUGIN_FAILURE_BACKOFF_START_SECONDS: i64 = 30;
 pub const PLUGIN_FAILURE_BACKOFF_MAX_SECONDS: i64 = 60 * 60;
+
+/// One exact runtime generation selected by the parent supervisor. Selections
+/// are accepted only as a strictly plugin-id-sorted, unique, nonempty list.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginComponentSelection {
+    pub plugin_id: PluginId,
+    pub package_generation: u64,
+    pub activation_epoch: u64,
+}
+
+/// Still-open, bounded authority for one verified component. The package file
+/// handle is intentionally encapsulated: callers can seek and read only within
+/// the verified component range and cannot recover a filesystem path.
+pub struct OpenedPluginComponentSource {
+    file: File,
+    plugin_id: PluginId,
+    package_generation: u64,
+    activation_epoch: u64,
+    component_offset: u64,
+    component_length: u64,
+    component_sha256: Sha256Digest,
+    runtime_profile: RuntimeProfile,
+    import_export_fingerprint: Sha256Digest,
+    permission_hash: Sha256Digest,
+    grants: Vec<Permission>,
+}
+
+impl OpenedPluginComponentSource {
+    /// Storage-only construction seam after the package path, open handle,
+    /// package authority, persisted rows, trust and grants have all matched.
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_verified_package_file(
+        mut file: File,
+        plugin_id: PluginId,
+        package_generation: u64,
+        activation_epoch: u64,
+        component_offset: u64,
+        component_length: u64,
+        component_sha256: Sha256Digest,
+        runtime_profile: RuntimeProfile,
+        import_export_fingerprint: Sha256Digest,
+        permission_hash: Sha256Digest,
+        grants: Vec<Permission>,
+    ) -> io::Result<Self> {
+        let component_end = component_offset
+            .checked_add(component_length)
+            .ok_or_else(|| io::Error::other("invalid plugin component authority"))?;
+        if package_generation == 0
+            || activation_epoch == 0
+            || component_offset == 0
+            || component_length == 0
+            || component_length > junban_plugin_sdk::COMPONENT_BYTES_MAX as u64
+            || file.metadata()?.len() != component_end
+        {
+            return Err(io::Error::other("invalid plugin component authority"));
+        }
+        file.seek(SeekFrom::Start(component_offset))?;
+        Ok(Self {
+            file,
+            plugin_id,
+            package_generation,
+            activation_epoch,
+            component_offset,
+            component_length,
+            component_sha256,
+            runtime_profile,
+            import_export_fingerprint,
+            permission_hash,
+            grants,
+        })
+    }
+
+    #[must_use]
+    pub fn plugin_id(&self) -> &PluginId {
+        &self.plugin_id
+    }
+
+    #[must_use]
+    pub const fn package_generation(&self) -> u64 {
+        self.package_generation
+    }
+
+    #[must_use]
+    pub const fn activation_epoch(&self) -> u64 {
+        self.activation_epoch
+    }
+
+    #[must_use]
+    pub const fn component_offset(&self) -> u64 {
+        self.component_offset
+    }
+
+    #[must_use]
+    pub const fn component_length(&self) -> u64 {
+        self.component_length
+    }
+
+    #[must_use]
+    pub fn component_sha256(&self) -> &Sha256Digest {
+        &self.component_sha256
+    }
+
+    #[must_use]
+    pub const fn runtime_profile(&self) -> RuntimeProfile {
+        self.runtime_profile
+    }
+
+    #[must_use]
+    pub fn import_export_fingerprint(&self) -> &Sha256Digest {
+        &self.import_export_fingerprint
+    }
+
+    #[must_use]
+    pub fn permission_hash(&self) -> &Sha256Digest {
+        &self.permission_hash
+    }
+
+    #[must_use]
+    pub fn grants(&self) -> &[Permission] {
+        &self.grants
+    }
+
+    fn relative_position(&mut self) -> io::Result<u64> {
+        self.file
+            .stream_position()?
+            .checked_sub(self.component_offset)
+            .filter(|position| *position <= self.component_length)
+            .ok_or_else(|| io::Error::other("invalid plugin component position"))
+    }
+}
+
+impl Read for OpenedPluginComponentSource {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let remaining = self
+            .component_length
+            .checked_sub(self.relative_position()?)
+            .ok_or_else(|| io::Error::other("invalid plugin component position"))?;
+        let limit = usize::try_from(remaining.min(buffer.len() as u64))
+            .map_err(|_| io::Error::other("invalid plugin component length"))?;
+        self.file.read(&mut buffer[..limit])
+    }
+}
+
+impl Seek for OpenedPluginComponentSource {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        let current = i128::from(self.relative_position()?);
+        let length = i128::from(self.component_length);
+        let target = match position {
+            SeekFrom::Start(offset) => i128::from(offset),
+            SeekFrom::End(offset) => length + i128::from(offset),
+            SeekFrom::Current(offset) => current + i128::from(offset),
+        };
+        if !(0..=length).contains(&target) {
+            return Err(io::Error::other("invalid plugin component seek"));
+        }
+        let target =
+            u64::try_from(target).map_err(|_| io::Error::other("invalid plugin component seek"))?;
+        self.file.seek(SeekFrom::Start(
+            self.component_offset
+                .checked_add(target)
+                .ok_or_else(|| io::Error::other("invalid plugin component seek"))?,
+        ))?;
+        Ok(target)
+    }
+}
 
 /// Fully inspected package metadata. Construction verifies JBP1 signature,
 /// canonical manifest/hash identities, component shape, and Junban compatibility.
@@ -72,13 +240,24 @@ impl PluginPackageAuthority {
         reader: &mut R,
         package_len: u64,
     ) -> Result<Self, SdkError> {
+        Self::inspect_reader_with_component(reader, package_len).map(|(package, _)| package)
+    }
+
+    /// Inspect a bounded seekable JBP1 source while retaining the exact
+    /// import/export authority derived during that same verification pass.
+    pub fn inspect_reader_with_component<R: Read + Seek>(
+        reader: &mut R,
+        package_len: u64,
+    ) -> Result<(Self, ComponentInspection), SdkError> {
         let package = verify_package_reader(reader, package_len)?;
-        inspect_component_reader(reader, package.identities.component_size, &package.manifest)?;
-        Self::from_verified(
+        let component =
+            inspect_component_reader(reader, package.identities.component_size, &package.manifest)?;
+        let authority = Self::from_verified(
             package.manifest,
             package.identities,
             package.publisher_public_key,
-        )
+        )?;
+        Ok((authority, component))
     }
 
     fn from_verified(
@@ -1342,6 +1521,16 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
+    /// Open one exact selected runtime graph from a single durable snapshot.
+    /// Successful values are dependency-ordered and retain only bounded
+    /// component readers plus runtime authority, never package paths or bytes.
+    fn open_plugin_component_sources(
+        &self,
+        _selected: Vec<PluginComponentSelection>,
+    ) -> RepositoryFuture<'_, Vec<OpenedPluginComponentSource>> {
+        plugin_unavailable()
+    }
+
     fn get_installed_plugin(&self, _plugin_id: PluginId) -> RepositoryFuture<'_, InstalledPlugin> {
         plugin_unavailable()
     }
@@ -1589,6 +1778,8 @@ pub fn is_plugin_downgrade(candidate: &str, installed: &str) -> Result<bool, Sdk
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, io::Write as _};
+
     use super::*;
     use junban_domain::{EntityName, HexColor, ProjectView, SortOrder, TagName, TaskTitle};
 
@@ -1848,6 +2039,42 @@ mod tests {
             }),
             Err(RepositoryError::Conflict)
         ));
+    }
+
+    #[test]
+    fn opened_component_source_exposes_only_its_bounded_component_range() {
+        let path =
+            std::env::temp_dir().join(format!("junban-opened-component-{}", OperationId::new()));
+        let mut file = File::create(&path).unwrap();
+        file.write_all(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        let file = File::open(&path).unwrap();
+        let digest = Sha256Digest::of(&[3, 4, 5, 6, 7, 8, 9]);
+        let mut source = OpenedPluginComponentSource::from_verified_package_file(
+            file,
+            PluginId::parse("bounded-reader").unwrap(),
+            1,
+            1,
+            3,
+            7,
+            digest,
+            RuntimeProfile::Rust,
+            Sha256Digest::of(b"imports"),
+            Sha256Digest::of(b"permissions"),
+            Vec::new(),
+        )
+        .unwrap();
+        fs::remove_file(path).unwrap();
+
+        let mut bytes = Vec::new();
+        source.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, [3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(source.seek(SeekFrom::Start(0)).unwrap(), 0);
+        assert!(source.seek(SeekFrom::Current(-1)).is_err());
+        let mut first = [0_u8; 1];
+        source.read_exact(&mut first).unwrap();
+        assert_eq!(first, [3]);
     }
 
     #[test]

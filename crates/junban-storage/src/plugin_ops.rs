@@ -12,27 +12,27 @@ use junban_app::{
     AdvancePluginCursorRequest, AffectedIds, ApplicationMutationUnitOfWork,
     BeginPluginResyncRequest, CommittedMutation, CommittedPluginInvocation, CommunityPluginPolicy,
     CompletePluginActivationRequest, DeletePluginSettingRequest, DuePluginRetryRequest, EventType,
-    InstallPluginRequest, InstalledPlugin, InstalledPluginProfile, PLUGIN_DEPENDENTS_MAX,
-    PLUGIN_FAILURE_BACKOFF_MAX_SECONDS, PLUGIN_FAILURE_BACKOFF_START_SECONDS,
-    PLUGIN_GRAPH_FENCE_ENTRIES_MAX, PLUGIN_INVOCATION_MATERIAL_BYTES_MAX,
-    PLUGIN_INVOCATION_MATERIAL_PER_PLUGIN_BYTES_MAX, PLUGIN_INVOCATION_RETENTION_DAYS,
-    PLUGIN_INVOCATIONS_MAX, PLUGIN_INVOCATIONS_PER_PLUGIN_MAX, PLUGIN_KV_BYTES_MAX,
-    PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX, PLUGIN_RESYNC_PAGE_BYTES_MAX,
-    PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX, PLUGIN_SETTINGS_KEYS_MAX,
-    PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX, PlannedPluginInvocationCommit,
-    PluginCursorPosition, PluginEventCursor, PluginGrant, PluginGraphFenceCause,
-    PluginGraphFenceDisposition, PluginGraphFenceOutcome, PluginGraphFenceRequest,
-    PluginGraphFenceResult, PluginGraphRejection, PluginHookKind, PluginInstallSource,
-    PluginInvocation, PluginInvocationState, PluginInvocationTerminalKind, PluginKvEntry,
-    PluginKvPatch, PluginManifestEntry, PluginManifestEntrySelector, PluginMutationOutcome,
-    PluginPackageAdmission, PluginPackageReconciliation, PluginResyncKvCommit, PluginResyncPage,
-    PluginResyncPageRequest, PluginResyncSession, PluginRuntimeState, PluginSetting,
-    PluginSnapshotItem, PluginSnapshotKind, PublisherTrust, PublisherTrustStatus,
-    RecordPluginAttemptFailureRequest, ReplacePluginGrantsRequest, RepositoryError,
-    ReservePluginInvocationRequest, ReservedPluginInvocation, ResourceRef, ResourceSnapshot,
-    ResyncScope, RevokePluginGrantsRequest, SetPluginSettingRequest,
-    TransitionPluginInvocationRequest, TrustPublisherRequest, plugin_manifest_entry_authority,
-    plugin_resync_request_hash,
+    InstallPluginRequest, InstalledPlugin, InstalledPluginProfile, OpenedPluginComponentSource,
+    PLUGIN_DEPENDENTS_MAX, PLUGIN_FAILURE_BACKOFF_MAX_SECONDS,
+    PLUGIN_FAILURE_BACKOFF_START_SECONDS, PLUGIN_GRAPH_FENCE_ENTRIES_MAX,
+    PLUGIN_INVOCATION_MATERIAL_BYTES_MAX, PLUGIN_INVOCATION_MATERIAL_PER_PLUGIN_BYTES_MAX,
+    PLUGIN_INVOCATION_RETENTION_DAYS, PLUGIN_INVOCATIONS_MAX, PLUGIN_INVOCATIONS_PER_PLUGIN_MAX,
+    PLUGIN_KV_BYTES_MAX, PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX,
+    PLUGIN_RESYNC_PAGE_BYTES_MAX, PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX,
+    PLUGIN_SETTINGS_KEYS_MAX, PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX,
+    PlannedPluginInvocationCommit, PluginComponentSelection, PluginCursorPosition,
+    PluginEventCursor, PluginGrant, PluginGraphFenceCause, PluginGraphFenceDisposition,
+    PluginGraphFenceOutcome, PluginGraphFenceRequest, PluginGraphFenceResult, PluginGraphRejection,
+    PluginHookKind, PluginInstallSource, PluginInvocation, PluginInvocationState,
+    PluginInvocationTerminalKind, PluginKvEntry, PluginKvPatch, PluginManifestEntry,
+    PluginManifestEntrySelector, PluginMutationOutcome, PluginPackageAdmission,
+    PluginPackageReconciliation, PluginResyncKvCommit, PluginResyncPage, PluginResyncPageRequest,
+    PluginResyncSession, PluginRuntimeState, PluginSetting, PluginSnapshotItem, PluginSnapshotKind,
+    PublisherTrust, PublisherTrustStatus, RecordPluginAttemptFailureRequest,
+    ReplacePluginGrantsRequest, RepositoryError, ReservePluginInvocationRequest,
+    ReservedPluginInvocation, ResourceRef, ResourceSnapshot, ResyncScope,
+    RevokePluginGrantsRequest, SetPluginSettingRequest, TransitionPluginInvocationRequest,
+    TrustPublisherRequest, plugin_manifest_entry_authority, plugin_resync_request_hash,
 };
 use junban_domain::{OperationId, ProjectId, TagId, TaskId};
 use junban_plugin_sdk::{
@@ -434,6 +434,164 @@ pub(crate) fn get_installed_plugin(
     plugin_id: PluginId,
 ) -> Result<InstalledPlugin, RepositoryError> {
     load_installed_plugin(connection, &plugin_id)
+}
+
+fn persisted_plugin_permission_hash(
+    connection: &Connection,
+    plugin_id: &PluginId,
+) -> Result<Sha256Digest, RepositoryError> {
+    let value: String = connection
+        .query_row(
+            "SELECT permission_hash FROM plugins WHERE plugin_id = ?1",
+            [plugin_id.as_str()],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    Sha256Digest::parse(value).map_err(storage_error)
+}
+
+fn active_publisher_key(
+    connection: &Connection,
+    key_id: &Sha256Digest,
+) -> Result<[u8; 32], RepositoryError> {
+    let public_key = connection
+        .query_row(
+            "SELECT public_key FROM plugin_publisher_trust
+             WHERE key_id = ?1 AND status = 'active'",
+            [key_id.as_str()],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .optional()
+        .map_err(storage_error)?
+        .ok_or(RepositoryError::Conflict)?;
+    public_key
+        .try_into()
+        .map_err(|_| RepositoryError::Storage("invalid publisher key authority".to_owned()))
+}
+
+/// Validate one exact selected graph and retain the same strict handles used to
+/// inspect its immutable packages. This read performs no revision, event,
+/// receipt, health or desired-state mutation.
+pub(crate) fn open_plugin_component_sources(
+    connection: &mut Connection,
+    store: &PluginPackageStore,
+    selected: Vec<PluginComponentSelection>,
+) -> Result<Vec<OpenedPluginComponentSource>, RepositoryError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Deferred)
+        .map_err(storage_error)?;
+    crate::plugin_validation::validate_plugin_authority(&transaction)?;
+    let profile = get_installed_plugin_profile(&transaction)?;
+
+    if selected.is_empty() {
+        return Err(RepositoryError::Conflict);
+    }
+    if selected.len() > PLUGINS_ENABLED_MAX {
+        return Err(RepositoryError::OperationTooLarge);
+    }
+    if selected
+        .windows(2)
+        .any(|pair| pair[0].plugin_id >= pair[1].plugin_id)
+    {
+        return Err(RepositoryError::Conflict);
+    }
+
+    let plugins_by_id: BTreeMap<&str, &InstalledPlugin> = profile
+        .plugins
+        .iter()
+        .map(|plugin| (plugin.plugin_id.as_str(), plugin))
+        .collect();
+    let selected_by_id: BTreeMap<&str, &PluginComponentSelection> = selected
+        .iter()
+        .map(|entry| (entry.plugin_id.as_str(), entry))
+        .collect();
+
+    for entry in &selected {
+        let plugin = plugins_by_id
+            .get(entry.plugin_id.as_str())
+            .ok_or(RepositoryError::Conflict)?;
+        if plugin.package_generation != entry.package_generation
+            || plugin.activation_epoch != entry.activation_epoch
+            || !plugin.desired_enabled
+            || !matches!(
+                plugin.runtime_state,
+                PluginRuntimeState::Starting | PluginRuntimeState::Active
+            )
+            || plugin
+                .manifest
+                .dependencies
+                .iter()
+                .any(|dependency| !selected_by_id.contains_key(dependency.id.as_str()))
+        {
+            return Err(RepositoryError::Conflict);
+        }
+    }
+
+    let dependency_order: Vec<&InstalledPlugin> = profile
+        .activation_order
+        .iter()
+        .filter_map(|plugin_id| {
+            selected_by_id
+                .contains_key(plugin_id.as_str())
+                .then(|| plugins_by_id.get(plugin_id.as_str()).copied())
+                .flatten()
+        })
+        .collect();
+    if dependency_order.len() != selected.len() {
+        return Err(RepositoryError::Conflict);
+    }
+
+    let mut opened = Vec::with_capacity(dependency_order.len());
+    for plugin in dependency_order {
+        let grants = list_plugin_grants(&transaction, plugin.plugin_id.clone())?;
+        let permissions: Vec<_> = grants.into_iter().map(|grant| grant.permission).collect();
+        let grant_authority =
+            validate_permission_grants(&plugin.manifest.permissions, &permissions)
+                .map_err(storage_error)?;
+        let permission_hash = persisted_plugin_permission_hash(&transaction, &plugin.plugin_id)?;
+        if permission_hash != Sha256Digest::from_bytes(grant_authority.requested_hash)
+            || permission_hash != manifest_permission_hash(&plugin.manifest)?
+        {
+            return Err(RepositoryError::Conflict);
+        }
+
+        let package = store
+            .open_component_package(&plugin.package_sha256)
+            .map_err(|_| RepositoryError::Conflict)?;
+        let authority = &package.authority;
+        if authority.plugin_id() != &plugin.plugin_id
+            || authority.manifest() != &plugin.manifest
+            || authority.package_sha256() != &plugin.package_sha256
+            || authority.component_sha256() != &plugin.component_sha256
+            || authority.publisher_key_id() != &plugin.publisher_key_id
+            || authority.publisher_public_key()
+                != &active_publisher_key(&transaction, &plugin.publisher_key_id)?
+        {
+            return Err(RepositoryError::Conflict);
+        }
+        let component_length = authority.component_size();
+        let import_export_fingerprint =
+            Sha256Digest::parse(package.component.import_export_fingerprint)
+                .map_err(storage_error)?;
+        opened.push(
+            OpenedPluginComponentSource::from_verified_package_file(
+                package.file,
+                plugin.plugin_id.clone(),
+                plugin.package_generation,
+                plugin.activation_epoch,
+                package.component_offset,
+                component_length,
+                plugin.component_sha256.clone(),
+                plugin.manifest.runtime_profile,
+                import_export_fingerprint,
+                permission_hash,
+                permissions,
+            )
+            .map_err(|_| RepositoryError::Conflict)?,
+        );
+    }
+    transaction.commit().map_err(storage_error)?;
+    Ok(opened)
 }
 
 fn dependent_closure(plugins: &[InstalledPlugin], target: &PluginId) -> Vec<PluginId> {
@@ -5132,14 +5290,18 @@ pub(crate) fn reconcile_packages(
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
+    use std::{
+        fs::{self, File},
+        io::{Read as _, Seek as _},
+        path::PathBuf,
+    };
 
     use ed25519_dalek::SigningKey;
     use junban_app::{
         CommitPluginInvocationRequest, PlannedPluginInvocationCommit, PluginAttemptFailureCause,
-        PluginDomainEffect, PluginGraphFenceEntry, PluginPackageAuthority, PluginRepository,
-        ProjectDraft, ProjectPatch, Repository, SetPluginSettingRequest, StagedFile,
-        plan_plugin_invocation_commit,
+        PluginComponentSelection, PluginDomainEffect, PluginGraphFenceEntry,
+        PluginPackageAuthority, PluginRepository, ProjectDraft, ProjectPatch, Repository,
+        SetPluginSettingRequest, StagedFile, plan_plugin_invocation_commit,
     };
     use junban_domain::{
         EntityName, HexColor, ProjectId, SortOrder, TagId, TagName, TaskDraft, TaskId, TaskTitle,
@@ -5670,6 +5832,518 @@ mod tests {
             other => panic!("unexpected install outcome: {other:?}"),
         }
         get_installed_plugin(connection, PluginId::parse(plugin_id).unwrap()).unwrap()
+    }
+
+    fn component_selection(plugin: &InstalledPlugin) -> PluginComponentSelection {
+        PluginComponentSelection {
+            plugin_id: plugin.plugin_id.clone(),
+            package_generation: plugin.package_generation,
+            activation_epoch: plugin.activation_epoch,
+        }
+    }
+
+    fn active_dependency_graph(
+        connection: &mut Connection,
+        store: &PluginPackageStore,
+        now: Timestamp,
+    ) -> (InstalledPlugin, InstalledPlugin) {
+        let dependency =
+            install_named_fixture(connection, store, "zzz-dependency", Vec::new(), now);
+        let dependent = install_named_fixture(
+            connection,
+            store,
+            "aaa-dependent",
+            vec![Dependency {
+                id: dependency.plugin_id.to_string(),
+                requirement: "^1.0".to_owned(),
+                services: Vec::new(),
+            }],
+            now,
+        );
+        let dependency = grant_capabilities(
+            connection,
+            &dependency,
+            &[Capability::Logging, Capability::TasksRead],
+            now,
+        );
+        let dependent = grant_capabilities(
+            connection,
+            &dependent,
+            &[Capability::Commands, Capability::TasksWrite],
+            now,
+        );
+        let dependency = activate_plugin(connection, store, &dependency, now);
+        let dependent = activate_plugin(connection, store, &dependent, now);
+        (dependent, dependency)
+    }
+
+    fn write_private_package(path: &std::path::Path, bytes: &[u8]) {
+        fs::write(path, bytes).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+    }
+
+    #[test]
+    fn opened_component_sources_bind_dependency_order_grants_and_exact_component() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_260, 0);
+        let (dependent, dependency) = active_dependency_graph(&mut connection, &store, now);
+        connection
+            .execute(
+                "UPDATE plugins SET runtime_state = 'starting'
+                 WHERE plugin_id = ?1",
+                [dependent.plugin_id.as_str()],
+            )
+            .unwrap();
+        let revision_before: i64 = connection
+            .query_row(
+                "SELECT global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let mut sources = open_plugin_component_sources(
+            &mut connection,
+            &store,
+            vec![
+                component_selection(&dependent),
+                component_selection(&dependency),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            sources
+                .iter()
+                .map(|source| source.plugin_id().as_str())
+                .collect::<Vec<_>>(),
+            ["zzz-dependency", "aaa-dependent"]
+        );
+        let component = include_bytes!("../../junban-plugin-sdk/consumers/rust/rust-consumer.wasm");
+        for source in &mut sources {
+            let installed = if source.plugin_id() == &dependency.plugin_id {
+                &dependency
+            } else {
+                &dependent
+            };
+            let expected_grants: Vec<_> = installed
+                .manifest
+                .permissions
+                .iter()
+                .filter(|permission| {
+                    if installed.plugin_id == dependency.plugin_id {
+                        matches!(
+                            permission.capability,
+                            Capability::Logging | Capability::TasksRead
+                        )
+                    } else {
+                        matches!(
+                            permission.capability,
+                            Capability::Commands | Capability::TasksWrite
+                        )
+                    }
+                })
+                .cloned()
+                .collect();
+            let inspection =
+                junban_plugin_sdk::inspect_component(component, &installed.manifest).unwrap();
+            assert_eq!(source.package_generation(), installed.package_generation);
+            assert_eq!(source.activation_epoch(), installed.activation_epoch);
+            assert_eq!(source.component_length(), component.len() as u64);
+            assert!(source.component_offset() > 0);
+            assert_eq!(source.component_sha256(), &Sha256Digest::of(component));
+            assert_eq!(source.runtime_profile(), installed.manifest.runtime_profile);
+            assert_eq!(
+                source.import_export_fingerprint().as_str(),
+                inspection.import_export_fingerprint
+            );
+            assert_eq!(
+                source.permission_hash(),
+                &manifest_permission_hash(&installed.manifest).unwrap()
+            );
+            assert_eq!(source.grants(), expected_grants);
+            assert_eq!(source.stream_position().unwrap(), 0);
+            let mut read = Vec::new();
+            source.read_to_end(&mut read).unwrap();
+            assert_eq!(read, component);
+            assert_eq!(&Sha256Digest::of(&read), source.component_sha256());
+        }
+        let revision_after: i64 = connection
+            .query_row(
+                "SELECT global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(revision_after, revision_before);
+    }
+
+    #[tokio::test]
+    async fn repository_opens_component_sources_in_one_worker_command() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_266, 0);
+        let (dependent, dependency) = active_dependency_graph(&mut connection, &store, now);
+        drop(connection);
+        drop(store);
+
+        let owner = crate::ProfileOwner::open(&profile.path).unwrap();
+        let repository = owner.repository();
+        let current = repository.get_installed_plugin_profile().await.unwrap();
+        let mut selected: Vec<_> = current.plugins.iter().map(component_selection).collect();
+        selected.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
+        let mut sources = repository
+            .open_plugin_component_sources(selected)
+            .await
+            .unwrap();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources.remove(0).plugin_id(), &dependency.plugin_id);
+        assert_eq!(sources.remove(0).plugin_id(), &dependent.plugin_id);
+    }
+
+    #[test]
+    fn component_source_selection_rejects_shape_staleness_and_incomplete_authority() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_261, 0);
+        let (dependent, dependency) = active_dependency_graph(&mut connection, &store, now);
+        let selected = vec![
+            component_selection(&dependent),
+            component_selection(&dependency),
+        ];
+
+        assert!(open_plugin_component_sources(&mut connection, &store, Vec::new()).is_err());
+        let mut seventeen = Vec::new();
+        for index in 0..=PLUGINS_ENABLED_MAX {
+            seventeen.push(PluginComponentSelection {
+                plugin_id: PluginId::parse(format!("entry-{index:02}")).unwrap(),
+                package_generation: 1,
+                activation_epoch: 1,
+            });
+        }
+        assert!(matches!(
+            open_plugin_component_sources(&mut connection, &store, seventeen),
+            Err(RepositoryError::OperationTooLarge)
+        ));
+        assert!(
+            open_plugin_component_sources(
+                &mut connection,
+                &store,
+                vec![selected[1].clone(), selected[0].clone()],
+            )
+            .is_err()
+        );
+        assert!(
+            open_plugin_component_sources(
+                &mut connection,
+                &store,
+                vec![selected[0].clone(), selected[0].clone()],
+            )
+            .is_err()
+        );
+        assert!(
+            open_plugin_component_sources(
+                &mut connection,
+                &store,
+                vec![PluginComponentSelection {
+                    plugin_id: PluginId::parse("missing-plugin").unwrap(),
+                    package_generation: 1,
+                    activation_epoch: 1,
+                }],
+            )
+            .is_err()
+        );
+        assert!(
+            open_plugin_component_sources(&mut connection, &store, vec![selected[0].clone()],)
+                .is_err()
+        );
+
+        let mut stale = selected.clone();
+        stale[0].package_generation += 1;
+        assert!(open_plugin_component_sources(&mut connection, &store, stale).is_err());
+        let mut stale = selected.clone();
+        stale[0].activation_epoch += 1;
+        assert!(open_plugin_component_sources(&mut connection, &store, stale).is_err());
+
+        connection
+            .execute(
+                "UPDATE plugins SET desired_enabled = 0, runtime_state = 'disabled',
+                    failure_count = 0, last_error_code = NULL, next_retry_at = NULL
+                 WHERE plugin_id = ?1",
+                [dependent.plugin_id.as_str()],
+            )
+            .unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        connection
+            .execute(
+                "UPDATE plugins SET desired_enabled = 1, runtime_state = 'active'
+                 WHERE plugin_id = ?1",
+                [dependent.plugin_id.as_str()],
+            )
+            .unwrap();
+
+        connection
+            .execute(
+                "UPDATE plugins SET runtime_state = 'degraded', failure_count = 1,
+                    last_error_code = 'timeout', next_retry_at = ?2
+                 WHERE plugin_id = ?1",
+                params![dependent.plugin_id.as_str(), now.to_string()],
+            )
+            .unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        connection
+            .execute(
+                "UPDATE plugins SET runtime_state = 'active', failure_count = 0,
+                    last_error_code = NULL, next_retry_at = NULL
+                 WHERE plugin_id = ?1",
+                [dependent.plugin_id.as_str()],
+            )
+            .unwrap();
+
+        connection
+            .execute(
+                "UPDATE plugins SET runtime_state = 'degraded', failure_count = 1,
+                    last_error_code = 'timeout', next_retry_at = ?2
+                 WHERE plugin_id = ?1",
+                params![dependency.plugin_id.as_str(), now.to_string()],
+            )
+            .unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        connection
+            .execute(
+                "UPDATE plugins SET runtime_state = 'active', failure_count = 0,
+                    last_error_code = NULL, next_retry_at = NULL
+                 WHERE plugin_id = ?1",
+                [dependency.plugin_id.as_str()],
+            )
+            .unwrap();
+
+        connection
+            .pragma_update(None, "foreign_keys", false)
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE plugin_dependency_locks
+                 SET dependency_package_generation = dependency_package_generation + 1
+                 WHERE plugin_id = ?1",
+                [dependent.plugin_id.as_str()],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected).is_err());
+    }
+
+    #[test]
+    fn component_source_rejects_grant_and_permission_hash_mismatch_without_repair() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_262, 0);
+        let (_, dependency) = active_dependency_graph(&mut connection, &store, now);
+        let selected = vec![component_selection(&dependency)];
+        let permission_hash = manifest_permission_hash(&dependency.manifest).unwrap();
+
+        connection
+            .pragma_update(None, "foreign_keys", false)
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE plugin_grants SET permission_hash = ?2 WHERE plugin_id = ?1",
+                params![dependency.plugin_id.as_str(), "00".repeat(32)],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        let retained: String = connection
+            .query_row(
+                "SELECT permission_hash FROM plugin_grants WHERE plugin_id = ?1 LIMIT 1",
+                [dependency.plugin_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, "00".repeat(32));
+        connection
+            .pragma_update(None, "foreign_keys", false)
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE plugin_grants SET permission_hash = ?2 WHERE plugin_id = ?1",
+                params![dependency.plugin_id.as_str(), permission_hash.as_str()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE plugins SET permission_hash = ?2 WHERE plugin_id = ?1",
+                params![dependency.plugin_id.as_str(), "11".repeat(32)],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        connection
+            .pragma_update(None, "foreign_keys", false)
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE plugins SET permission_hash = ?2 WHERE plugin_id = ?1",
+                params![dependency.plugin_id.as_str(), permission_hash.as_str()],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        assert_eq!(
+            open_plugin_component_sources(&mut connection, &store, selected)
+                .unwrap()
+                .len(),
+            1
+        );
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+        crate::backup_ops::create_backup(&connection, &profile.path).unwrap();
+    }
+
+    #[test]
+    fn component_source_rejects_package_identity_publisher_and_component_corruption() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_263, 0);
+        let (_, dependency) = active_dependency_graph(&mut connection, &store, now);
+        let selected = vec![component_selection(&dependency)];
+        let (bytes, authority, public_key) = package("zzz-dependency", "1.0.0");
+        assert_eq!(authority.package_sha256(), &dependency.package_sha256);
+        let path = store.package_path(&dependency.package_sha256);
+
+        write_private_package(&path, b"corrupt");
+        let error = match open_plugin_component_sources(&mut connection, &store, selected.clone()) {
+            Err(error) => error,
+            Ok(_) => panic!("corrupt package source was accepted"),
+        };
+        assert!(!error.to_string().contains(profile.path.to_str().unwrap()));
+        write_private_package(&path, &bytes);
+
+        let mut component_mismatch = bytes.clone();
+        *component_mismatch.last_mut().unwrap() ^= 1;
+        write_private_package(&path, &component_mismatch);
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        write_private_package(&path, &bytes);
+
+        let manifest_len =
+            usize::try_from(u32::from_be_bytes(bytes[8..12].try_into().unwrap())).unwrap();
+        let mut publisher_mismatch = bytes.clone();
+        publisher_mismatch[12 + manifest_len] ^= 1;
+        write_private_package(&path, &publisher_mismatch);
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        write_private_package(&path, &bytes);
+
+        let (other, _, _) = package("other-plugin", "1.0.0");
+        write_private_package(&path, &other);
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        write_private_package(&path, &bytes);
+
+        connection
+            .execute(
+                "UPDATE plugin_publisher_trust SET public_key = ?2 WHERE key_id = ?1",
+                params![dependency.publisher_key_id.as_str(), vec![99_u8; 32]],
+            )
+            .unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        connection
+            .execute(
+                "UPDATE plugin_publisher_trust SET public_key = ?2 WHERE key_id = ?1",
+                params![dependency.publisher_key_id.as_str(), public_key.to_vec()],
+            )
+            .unwrap();
+        assert_eq!(
+            open_plugin_component_sources(&mut connection, &store, selected)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn component_source_rejects_unsafe_file_objects_and_permissions() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_264, 0);
+        let (_, dependency) = active_dependency_graph(&mut connection, &store, now);
+        let selected = vec![component_selection(&dependency)];
+        let (bytes, _, _) = package("zzz-dependency", "1.0.0");
+        let path = store.package_path(&dependency.package_sha256);
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        fs::remove_dir(&path).unwrap();
+
+        let oversized = File::create(&path).unwrap();
+        oversized
+            .set_len(junban_plugin_sdk::PACKAGE_BYTES_MAX as u64 + 1)
+            .unwrap();
+        drop(oversized);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        fs::remove_file(&path).unwrap();
+
+        let target = profile.path.join("private-package-target");
+        write_private_package(&target, &bytes);
+        symlink(&target, &path).unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected.clone()).is_err());
+        fs::remove_file(&path).unwrap();
+
+        fs::hard_link(&target, &path).unwrap();
+        assert!(open_plugin_component_sources(&mut connection, &store, selected).is_err());
+    }
+
+    #[test]
+    fn opened_component_handle_survives_package_rename_replacement_and_unlink() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_265, 0);
+        let (_, dependency) = active_dependency_graph(&mut connection, &store, now);
+        let path = store.package_path(&dependency.package_sha256);
+        let mut source = open_plugin_component_sources(
+            &mut connection,
+            &store,
+            vec![component_selection(&dependency)],
+        )
+        .unwrap()
+        .pop()
+        .unwrap();
+        let detached = path.with_extension("opened");
+        fs::rename(&path, &detached).unwrap();
+        let (replacement, _, _) = package("replacement-plugin", "1.0.0");
+        write_private_package(&path, &replacement);
+        fs::remove_file(detached).unwrap();
+
+        let expected = include_bytes!("../../junban-plugin-sdk/consumers/rust/rust-consumer.wasm");
+        let mut component = Vec::new();
+        source.read_to_end(&mut component).unwrap();
+        assert_eq!(component, expected);
+        assert_eq!(component.len() as u64, source.component_length());
+        assert_eq!(&Sha256Digest::of(&component), source.component_sha256());
     }
 
     #[test]

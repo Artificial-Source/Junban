@@ -1126,6 +1126,15 @@ impl PluginRepository for SqliteRepository {
         self.plugin_request(|connection, _| plugin_ops::get_installed_plugin_profile(connection))
     }
 
+    fn open_plugin_component_sources(
+        &self,
+        selected: Vec<junban_app::PluginComponentSelection>,
+    ) -> RepositoryFuture<'_, Vec<junban_app::OpenedPluginComponentSource>> {
+        self.plugin_request(move |connection, store| {
+            plugin_ops::open_plugin_component_sources(connection, store, selected)
+        })
+    }
+
     fn get_installed_plugin(
         &self,
         plugin_id: junban_plugin_sdk::PluginId,

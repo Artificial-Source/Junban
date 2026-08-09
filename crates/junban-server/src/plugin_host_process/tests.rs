@@ -8,8 +8,11 @@ use std::{
 };
 
 use junban_plugin_sdk::{
-    ChildFrame, HOST_FRAME_BYTES_MAX, ParentFrame, RuntimeProfile, encode_child_frame,
-    read_parent_message, write_parent_message,
+    ChildFrame, HOST_FRAME_BYTES_MAX, HostCallReply, HostCallRequest, InvocationOutcome,
+    InvocationRequest, ParentFrame, ParentMessage, RuntimeProfile, canonical_permission_hash,
+    encode_child_frame,
+    private_body_types::{NamedSetting, SettingValue, WitResult},
+    read_parent_message, write_child_message, write_parent_message,
 };
 
 use super::*;
@@ -51,6 +54,12 @@ fn wire(frame: &ChildFrame) -> Vec<u8> {
     encode_child_frame(frame).unwrap()
 }
 
+fn child_wire(frame: &ChildFrame, body: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    write_child_message(&mut bytes, frame, body).unwrap();
+    bytes
+}
+
 fn shell_write(bytes: &[u8]) -> String {
     let escaped = bytes
         .iter()
@@ -60,8 +69,12 @@ fn shell_write(bytes: &[u8]) -> String {
 }
 
 fn parent_wire(frame: ParentFrame) -> Vec<u8> {
+    parent_message_wire(&ParentMessage::new(frame, Vec::new()))
+}
+
+fn parent_message_wire(message: &ParentMessage) -> Vec<u8> {
     let mut bytes = Vec::new();
-    write_parent_message(&mut bytes, &frame, &[]).unwrap();
+    write_parent_message(&mut bytes, &message.frame, &message.body).unwrap();
     bytes
 }
 
@@ -148,6 +161,88 @@ fn load(index: usize, component: Vec<u8>) -> PluginHostLoad {
     }
 }
 
+fn load_message(index: usize, component: Vec<u8>) -> ParentMessage {
+    let frame = ParentFrame::Load {
+        fence: fence(index),
+        package_sha256: "1".repeat(64),
+        component_sha256: Sha256Digest::of(&component).into_string(),
+        import_export_fingerprint: "2".repeat(64),
+        runtime_profile: RuntimeProfile::Typescript,
+        component_size: component.len() as u64,
+        grants: Vec::new(),
+        permission_hash: canonical_permission_hash(&[]).unwrap(),
+        limits: RuntimeLimits::for_profile(RuntimeProfile::Typescript),
+    };
+    ParentMessage::new(frame, component)
+}
+
+fn invocation_fence(index: usize, invocation: usize) -> AuthorityFence {
+    AuthorityFence {
+        invocation_id: format!("00000000-0000-4000-8001-{invocation:012}"),
+        ..fence(index)
+    }
+}
+
+fn invocation_message(index: usize, invocation: usize) -> ParentMessage {
+    let message = InvocationRequest::activate(None)
+        .into_parent_message(
+            invocation_fence(index, invocation),
+            canonical_permission_hash(&[]).unwrap(),
+        )
+        .unwrap();
+    let (frame, body) = message.into_parts();
+    ParentMessage::new(frame, body)
+}
+
+fn cancel_message(index: usize, invocation: usize) -> ParentMessage {
+    ParentMessage::new(
+        ParentFrame::Cancel {
+            fence: invocation_fence(index, invocation),
+        },
+        Vec::new(),
+    )
+}
+
+fn loaded_output(count: usize) -> Vec<u8> {
+    let mut output = wire(&hello(SESSION));
+    for index in 0..count {
+        output.extend_from_slice(&wire(&ChildFrame::Loaded {
+            fence: fence(index),
+            import_export_fingerprint: "2".repeat(64),
+        }));
+    }
+    output
+}
+
+#[cfg(unix)]
+fn connect_loaded_driver(
+    fixture: &Fixture,
+    count: usize,
+) -> (PluginHostRuntimeDriverHandle, PluginHostRuntimeEvents, u32) {
+    let mut process =
+        PluginHostProcess::connect_for_test(&fixture.executable, session(), test_deadlines())
+            .unwrap();
+    for index in 0..count {
+        process.load(load(index, vec![b'a' + index as u8])).unwrap();
+    }
+    process.finish_loading().unwrap();
+    let pid = process.process_id().unwrap();
+    let (driver, events) = process.into_runtime_driver().unwrap();
+    (driver, events, pid)
+}
+
+fn runtime_header(
+    events: &PluginHostRuntimeEvents,
+) -> (ChildFrame, Option<PendingPluginHostBodyToken>) {
+    match events.recv_timeout(Duration::from_secs(1)).unwrap() {
+        PluginHostRuntimeEvent::Header {
+            frame,
+            pending_body,
+        } => (frame, pending_body),
+        event => panic!("expected runtime header, got {event:?}"),
+    }
+}
+
 #[cfg(unix)]
 fn assert_process_absent(pid: u32) {
     let status = Command::new("/bin/kill")
@@ -170,6 +265,14 @@ fn product_deadlines_and_channel_bounds_are_exact() {
     assert_eq!(READER_CHANNEL_CAPACITY, 1);
     assert_eq!(READER_CONTROL_CHANNEL_CAPACITY, 1);
     assert_eq!(WORKER_STATUS_CHANNEL_CAPACITY, 3);
+    assert_eq!(RUNTIME_DRIVER_COMMAND_CAPACITY, 4);
+    assert_eq!(RUNTIME_DRIVER_EVENT_CAPACITY, 8);
+    assert_eq!(RUNTIME_DRIVER_DATA_EVENT_CAPACITY, 7);
+    assert_eq!(RUNTIME_DRIVER_WAKE_CAPACITY, 1);
+    assert_eq!(
+        RUNTIME_DRIVER_QUEUED_BODY_BYTES_MAX,
+        HOST_CALLBACK_BODY_BYTES_MAX
+    );
     assert_eq!(STDERR_BUFFER_BYTES, 8 * 1024);
     assert_eq!(CHILD_STATUS_POLL_INTERVAL, Duration::from_millis(10));
 }
@@ -827,6 +930,595 @@ fn raw_stderr_flood_is_drained_boundedly_and_never_enters_errors() {
     process.finish_loading().unwrap();
     process.shutdown().unwrap();
     process.shutdown().unwrap();
+}
+
+// Runtime-driver adaptation coverage exercises process transport and cleanup
+// only; it neither implements supervisor admission nor interprets outcomes.
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_wakes_for_four_sends_and_preserves_interleaved_typed_events() {
+    let _guard = process_test_guard();
+    let invocation_fences = [
+        invocation_fence(0, 100),
+        invocation_fence(1, 101),
+        invocation_fence(2, 102),
+        invocation_fence(3, 103),
+    ];
+    let cancelled = ChildFrame::Cancelled {
+        fence: invocation_fences[0].clone(),
+    };
+    let outcome = InvocationOutcome::Activate(WitResult::Ok(()))
+        .into_child_message(invocation_fences[1].clone())
+        .unwrap();
+    let (outcome_frame, outcome_body) = outcome.into_parts();
+    let callback_fence = junban_plugin_sdk::CallbackFence {
+        plugin_id: invocation_fences[2].plugin_id.clone(),
+        package_generation: invocation_fences[2].package_generation,
+        activation_epoch: invocation_fences[2].activation_epoch,
+        host_session_id: invocation_fences[2].host_session_id.clone(),
+        invocation_id: invocation_fences[2].invocation_id.clone(),
+        callback_id: 1,
+    };
+    let callback = HostCallRequest::MonotonicMs(())
+        .into_child_message(callback_fence)
+        .unwrap();
+    let (callback_frame, callback_body) = callback.into_parts();
+    let failed = ChildFrame::Failed {
+        fence: invocation_fences[3].clone(),
+        code: HostFailureCode::GuestError,
+    };
+
+    let mut output = loaded_output(4);
+    output.extend_from_slice(&wire(&cancelled));
+    output.extend_from_slice(&child_wire(&outcome_frame, &outcome_body));
+    output.extend_from_slice(&child_wire(&callback_frame, &callback_body));
+    output.extend_from_slice(&wire(&failed));
+    let invocation_messages = [100, 101, 102, 103]
+        .into_iter()
+        .enumerate()
+        .map(|(index, invocation)| invocation_message(index, invocation))
+        .collect::<Vec<_>>();
+    let parent_bytes = parent_wire(ParentFrame::Hello {
+        protocol_name: HOST_PROTOCOL_NAME.into(),
+        protocol_version: HOST_PROTOCOL_VERSION,
+        junban_version: HOST_JUNBAN_VERSION.into(),
+        host_session_id: SESSION.into(),
+    })
+    .len()
+        + (0..4)
+            .map(|index| parent_message_wire(&load_message(index, vec![b'a' + index as u8])).len())
+            .sum::<usize>()
+        + invocation_messages
+            .iter()
+            .map(|message| parent_message_wire(message).len())
+            .sum::<usize>()
+        + parent_wire(ParentFrame::Shutdown {
+            host_session_id: SESSION.into(),
+        })
+        .len();
+    let shutdown = wire(&ChildFrame::ShutdownComplete {
+        host_session_id: SESSION.into(),
+    });
+    let fixture = Fixture::new(
+        "driver-four-interleaved",
+        &format!(
+            "{}/bin/dd if=/dev/stdin of=capture.bin bs=1 count={} 2>/dev/null\n{}exit 0\n",
+            shell_write(&output),
+            parent_bytes,
+            shell_write(&shutdown),
+        ),
+    );
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 4);
+
+    let started = Instant::now();
+    for message in invocation_messages {
+        driver
+            .send(message, deadline_after(Duration::from_secs(1)))
+            .unwrap();
+    }
+
+    let (frame, token) = runtime_header(&events);
+    assert_eq!(frame, cancelled);
+    assert!(token.is_none());
+
+    let (frame, token) = runtime_header(&events);
+    assert_eq!(frame, outcome_frame);
+    driver
+        .authorize_body(
+            token.expect("outcome body token"),
+            deadline_after(Duration::from_secs(1)),
+        )
+        .unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Body {
+            frame: outcome_frame,
+            body: outcome_body,
+        }
+    );
+
+    let (frame, token) = runtime_header(&events);
+    assert_eq!(frame, callback_frame);
+    driver
+        .authorize_body(
+            token.expect("callback body token"),
+            deadline_after(Duration::from_secs(1)),
+        )
+        .unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Body {
+            frame: callback_frame,
+            body: callback_body,
+        }
+    );
+
+    let (frame, token) = runtime_header(&events);
+    assert_eq!(frame, failed);
+    assert!(token.is_none());
+    assert!(started.elapsed() < Duration::from_secs(1));
+
+    driver.shutdown().unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Ok(()))
+    );
+    assert_process_absent(pid);
+
+    let mut cursor = Cursor::new(fs::read(fixture.capture()).unwrap());
+    let mut invokes = Vec::new();
+    while let Some(message) = read_parent_message(&mut cursor).unwrap() {
+        if let ParentFrame::Invoke { fence, .. } = message.frame {
+            invokes.push(fence.invocation_id);
+        }
+    }
+    assert_eq!(
+        invokes,
+        invocation_fences
+            .iter()
+            .map(|fence| fence.invocation_id.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_stages_body_and_sends_while_unread_and_stalled() {
+    let _guard = process_test_guard();
+    let callback_fence = junban_plugin_sdk::CallbackFence {
+        plugin_id: fence(0).plugin_id,
+        package_generation: 7,
+        activation_epoch: 9,
+        host_session_id: SESSION.into(),
+        invocation_id: invocation_fence(0, 700).invocation_id,
+        callback_id: 1,
+    };
+    let callback = HostCallRequest::MonotonicMs(())
+        .into_child_message(callback_fence)
+        .unwrap();
+    let (callback_frame, callback_body) = callback.into_parts();
+    assert!(callback_body.len() > 1);
+
+    let invoke = invocation_message(0, 701);
+    let cancel = cancel_message(0, 702);
+    let parent_bytes = parent_wire(ParentFrame::Hello {
+        protocol_name: HOST_PROTOCOL_NAME.into(),
+        protocol_version: HOST_PROTOCOL_VERSION,
+        junban_version: HOST_JUNBAN_VERSION.into(),
+        host_session_id: SESSION.into(),
+    })
+    .len()
+        + parent_message_wire(&load_message(0, vec![b'a'])).len()
+        + parent_message_wire(&invoke).len()
+        + parent_message_wire(&cancel).len();
+
+    let mut headers = loaded_output(1);
+    headers.extend_from_slice(&wire(&callback_frame));
+    let fixture = Fixture::new(
+        "driver-staged-stall",
+        &format!(
+            "{}{}/bin/dd if=/dev/stdin of=capture.bin bs=1 count={} 2>/dev/null\n{}exec /bin/sleep 30\n",
+            shell_write(&headers),
+            shell_write(&callback_body[..1]),
+            parent_bytes,
+            shell_write(&callback_body[1..]),
+        ),
+    );
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    let (frame, token) = runtime_header(&events);
+    assert_eq!(frame, callback_frame);
+
+    // Command order is deterministic: the invocation is written while the
+    // body is unauthorized, then authorization starts the blocked read, and
+    // the cancel write lets the fixture release the remaining body bytes.
+    driver
+        .send(invoke, deadline_after(Duration::from_secs(1)))
+        .unwrap();
+    driver
+        .authorize_body(
+            token.expect("callback body token"),
+            deadline_after(Duration::from_secs(1)),
+        )
+        .unwrap();
+    driver
+        .send(cancel, deadline_after(Duration::from_secs(1)))
+        .unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Body {
+            frame: callback_frame,
+            body: callback_body,
+        }
+    );
+
+    driver.fatal_close().unwrap();
+    driver.fatal_close().unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Ok(()))
+    );
+    assert_process_absent(pid);
+
+    let mut cursor = Cursor::new(fs::read(fixture.capture()).unwrap());
+    let mut runtime_frames = Vec::new();
+    while let Some(message) = read_parent_message(&mut cursor).unwrap() {
+        if matches!(
+            message.frame,
+            ParentFrame::Invoke { .. } | ParentFrame::Cancel { .. }
+        ) {
+            runtime_frames.push(message.frame);
+        }
+    }
+    assert!(matches!(runtime_frames[0], ParentFrame::Invoke { .. }));
+    assert!(matches!(runtime_frames[1], ParentFrame::Cancel { .. }));
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_wrong_duplicate_and_stale_body_tokens_fail_closed() {
+    let _guard = process_test_guard();
+    for (label, duplicate) in [
+        ("driver-wrong-token", false),
+        ("driver-duplicate-token", true),
+    ] {
+        let callback_fence = junban_plugin_sdk::CallbackFence {
+            plugin_id: fence(0).plugin_id,
+            package_generation: 7,
+            activation_epoch: 9,
+            host_session_id: SESSION.into(),
+            invocation_id: invocation_fence(0, 710).invocation_id,
+            callback_id: 1,
+        };
+        let callback = HostCallRequest::MonotonicMs(())
+            .into_child_message(callback_fence)
+            .unwrap();
+        let (callback_frame, callback_body) = callback.into_parts();
+        let mut output = loaded_output(1);
+        output.extend_from_slice(&child_wire(&callback_frame, &callback_body));
+        let fixture = Fixture::new(
+            label,
+            &format!("{}exec /bin/sleep 30\n", shell_write(&output)),
+        );
+        let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+        let (_, token) = runtime_header(&events);
+        let token = token.expect("callback body token");
+        let repeated = PendingPluginHostBodyToken(token.0);
+        if duplicate {
+            driver
+                .authorize_body(token, deadline_after(Duration::from_secs(1)))
+                .unwrap();
+            assert!(matches!(
+                events.recv_timeout(Duration::from_secs(1)).unwrap(),
+                PluginHostRuntimeEvent::Body { .. }
+            ));
+            driver
+                .authorize_body(repeated, deadline_after(Duration::from_secs(1)))
+                .unwrap();
+        } else {
+            driver
+                .authorize_body(
+                    PendingPluginHostBodyToken(token.0 + 1),
+                    deadline_after(Duration::from_secs(1)),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ProtocolRejected)),
+            "unexpected {label} terminal"
+        );
+        assert_process_absent(pid);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_rejects_stale_session_and_nonruntime_type_before_publication() {
+    let _guard = process_test_guard();
+    let stale = ChildFrame::Cancelled {
+        fence: AuthorityFence {
+            host_session_id: OTHER_SESSION.into(),
+            ..invocation_fence(0, 720)
+        },
+    };
+    for (label, frame) in [
+        ("driver-stale-session", stale),
+        ("driver-extra-hello", hello(SESSION)),
+    ] {
+        let mut output = loaded_output(1);
+        output.extend_from_slice(&wire(&frame));
+        let fixture = Fixture::new(
+            label,
+            &format!("{}exec /bin/sleep 30\n", shell_write(&output)),
+        );
+        let (_driver, events, pid) = connect_loaded_driver(&fixture, 1);
+        assert_eq!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ProtocolRejected))
+        );
+        assert_process_absent(pid);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_event_pressure_reserves_one_post_reap_terminal_slot() {
+    let _guard = process_test_guard();
+    let mut output = loaded_output(1);
+    for invocation in 800..800 + RUNTIME_DRIVER_EVENT_CAPACITY {
+        output.extend_from_slice(&wire(&ChildFrame::Cancelled {
+            fence: invocation_fence(0, invocation),
+        }));
+    }
+    let fixture = Fixture::new(
+        "driver-event-pressure",
+        &format!("{}exec /bin/sleep 30\n", shell_write(&output)),
+    );
+    let (_driver, mut events, pid) = connect_loaded_driver(&fixture, 1);
+    events.driver_handle.take().unwrap().join().unwrap();
+
+    for _ in 0..RUNTIME_DRIVER_DATA_EVENT_CAPACITY {
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            PluginHostRuntimeEvent::Header {
+                pending_body: None,
+                ..
+            }
+        ));
+    }
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::Backpressure))
+    );
+    assert_process_absent(pid);
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_command_disconnect_fatal_repeat_and_event_drop_never_orphan() {
+    let _guard = process_test_guard();
+    let fixture = Fixture::new(
+        "driver-command-disconnect",
+        &format!(
+            "{}exec /bin/sleep 30\n",
+            shell_write(&wire(&hello(SESSION)))
+        ),
+    );
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 0);
+    drop(driver);
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Ok(()))
+    );
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    );
+    assert_process_absent(pid);
+
+    let fixture = Fixture::new(
+        "driver-event-drop",
+        &format!(
+            "{}exec /bin/sleep 30\n",
+            shell_write(&wire(&hello(SESSION)))
+        ),
+    );
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 0);
+    drop(events);
+    assert_process_absent(pid);
+    driver.fatal_close().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_writer_reader_driver_panic_and_reader_loss_reap() {
+    let _guard = process_test_guard();
+    for (label, panic_kind, expected) in [
+        (
+            "driver-panic",
+            "driver",
+            PluginHostProcessError::WorkerFailed,
+        ),
+        (
+            "driver-writer-panic",
+            "writer",
+            PluginHostProcessError::CleanupFailed,
+        ),
+    ] {
+        let fixture = Fixture::new(
+            label,
+            &format!(
+                "{}exec /bin/sleep 30\n",
+                shell_write(&wire(&hello(SESSION)))
+            ),
+        );
+        let (driver, events, pid) = connect_loaded_driver(&fixture, 0);
+        match panic_kind {
+            "driver" => driver.panic_driver_for_test().unwrap(),
+            "writer" => driver.panic_writer_for_test().unwrap(),
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            PluginHostRuntimeEvent::Closed(Err(expected)),
+            "unexpected {label} terminal"
+        );
+        assert_process_absent(pid);
+    }
+
+    let callback_fence = junban_plugin_sdk::CallbackFence {
+        plugin_id: fence(0).plugin_id,
+        package_generation: 7,
+        activation_epoch: 9,
+        host_session_id: SESSION.into(),
+        invocation_id: invocation_fence(0, 900).invocation_id,
+        callback_id: 1,
+    };
+    let callback = HostCallRequest::MonotonicMs(())
+        .into_child_message(callback_fence)
+        .unwrap();
+    let (callback_frame, _) = callback.into_parts();
+    let mut output = loaded_output(1);
+    output.extend_from_slice(&wire(&callback_frame));
+    let fixture = Fixture::new(
+        "driver-reader-panic",
+        &format!("{}exec /bin/sleep 30\n", shell_write(&output)),
+    );
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    let _ = runtime_header(&events);
+    driver.panic_reader_for_test().unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::CleanupFailed))
+    );
+    assert_process_absent(pid);
+
+    let fixture = Fixture::new(
+        "driver-reader-loss",
+        &format!("{}exit 0\n", shell_write(&wire(&hello(SESSION)))),
+    );
+    let (_driver, events, pid) = connect_loaded_driver(&fixture, 0);
+    assert!(matches!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Err(
+            PluginHostProcessError::TransportFailed | PluginHostProcessError::WorkerFailed
+        ))
+    ));
+    assert_process_absent(pid);
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_body_timeout_and_body_validation_are_fatal_before_publication() {
+    let _guard = process_test_guard();
+    for (label, body_mode, expected) in [
+        (
+            "driver-body-timeout",
+            "partial",
+            PluginHostProcessError::ControlTimeout,
+        ),
+        (
+            "driver-body-hash",
+            "tampered",
+            PluginHostProcessError::ProtocolRejected,
+        ),
+    ] {
+        let callback_fence = junban_plugin_sdk::CallbackFence {
+            plugin_id: fence(0).plugin_id,
+            package_generation: 7,
+            activation_epoch: 9,
+            host_session_id: SESSION.into(),
+            invocation_id: invocation_fence(0, 910).invocation_id,
+            callback_id: 1,
+        };
+        let callback = HostCallRequest::MonotonicMs(())
+            .into_child_message(callback_fence)
+            .unwrap();
+        let (callback_frame, mut callback_body) = callback.into_parts();
+        let mut output = loaded_output(1);
+        output.extend_from_slice(&wire(&callback_frame));
+        if body_mode == "partial" {
+            output.extend_from_slice(&callback_body[..1]);
+        } else {
+            callback_body[0] ^= 1;
+            output.extend_from_slice(&callback_body);
+        }
+        let fixture = Fixture::new(
+            label,
+            &format!("{}exec /bin/sleep 30\n", shell_write(&output)),
+        );
+        let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+        let (_, token) = runtime_header(&events);
+        driver
+            .authorize_body(
+                token.expect("callback body token"),
+                deadline_after(Duration::from_millis(50)),
+            )
+            .unwrap();
+        assert_eq!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            PluginHostRuntimeEvent::Closed(Err(expected)),
+            "unexpected {label} terminal"
+        );
+        assert_process_absent(pid);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_writer_completion_uses_the_command_deadline() {
+    let _guard = process_test_guard();
+    let fixture = Fixture::new(
+        "driver-writer-deadline",
+        &format!("{}exec /bin/sleep 30\n", shell_write(&loaded_output(1))),
+    );
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    let callback = junban_plugin_sdk::CallbackFence {
+        plugin_id: fence(0).plugin_id,
+        package_generation: 7,
+        activation_epoch: 9,
+        host_session_id: SESSION.into(),
+        invocation_id: invocation_fence(0, 920).invocation_id,
+        callback_id: 1,
+    };
+    let reply = HostCallReply::GetSettings(WitResult::Ok(vec![NamedSetting {
+        id: "large".into(),
+        value: SettingValue::Text("x".repeat(2 * 1024 * 1024)),
+    }]))
+    .into_parent_message(callback)
+    .unwrap();
+    let (frame, body) = reply.into_parts();
+    let deadline = deadline_after(Duration::from_millis(50));
+    driver
+        .send(ParentMessage::new(frame, body), deadline)
+        .unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ControlTimeout))
+    );
+    assert!(Instant::now() >= deadline);
+    assert_process_absent(pid);
+}
+
+#[test]
+fn runtime_driver_command_producer_pressure_is_immediate_and_fail_closed() {
+    let (commands, _receiver) = mpsc::sync_channel(RUNTIME_DRIVER_COMMAND_CAPACITY);
+    let (wake, _wake_receiver) = mpsc::sync_channel(RUNTIME_DRIVER_WAKE_CAPACITY);
+    let shared = Arc::new(RuntimeDriverShared::new());
+    let driver = PluginHostRuntimeDriverHandle {
+        commands: Some(commands),
+        wake,
+        shared: shared.clone(),
+    };
+    for _ in 0..RUNTIME_DRIVER_COMMAND_CAPACITY {
+        driver.shutdown().unwrap();
+    }
+    assert_eq!(driver.shutdown(), Err(PluginHostProcessError::Backpressure));
+    assert_eq!(
+        shared.violation.load(Ordering::Acquire),
+        DRIVER_VIOLATION_PRESSURE
+    );
 }
 
 #[cfg(unix)]

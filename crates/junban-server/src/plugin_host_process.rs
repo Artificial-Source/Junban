@@ -4,23 +4,33 @@
 //! and deterministic teardown. Durable plugin state, admission, capabilities,
 //! effects, and health remain outside this boundary.
 
+#![allow(
+    dead_code,
+    reason = "the additive runtime-driver handoff intentionally has no production caller before the Slice 2C supervisor"
+)]
+
 use std::{
     collections::BTreeMap,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
-    sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
+        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+    },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
 
 use junban_plugin_sdk::{
-    AuthorityFence, COMMAND_TIMEOUT_MS, COMPILE_TIMEOUT_MS, ChildFrame, HOST_JUNBAN_VERSION,
-    HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION, HOST_RUNTIME_ENTRIES_MAX, HostFailureCode,
-    ParentFrame, ParentMessage, Permission, RuntimeLimits, RuntimeProfile, Sha256Digest,
-    canonical_permission_hash, child_body_len, read_child_body, read_child_frame,
-    validate_child_hello, validate_parent_body, write_parent_message,
+    AuthorityFence, COMMAND_TIMEOUT_MS, COMPILE_TIMEOUT_MS, ChildFrame,
+    HOST_CALLBACK_BODY_BYTES_MAX, HOST_JUNBAN_VERSION, HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION,
+    HOST_RUNTIME_ENTRIES_MAX, HostFailureCode, ParentFrame, ParentMessage, Permission,
+    RuntimeLimits, RuntimeProfile, Sha256Digest, canonical_permission_hash, child_body_len,
+    read_child_body, read_child_frame, validate_child_hello, validate_parent_body,
+    write_parent_message,
 };
 use thiserror::Error;
 use uuid::Uuid;
@@ -29,10 +39,29 @@ const WRITER_CHANNEL_CAPACITY: usize = 1;
 const READER_CHANNEL_CAPACITY: usize = 1;
 const READER_CONTROL_CHANNEL_CAPACITY: usize = 1;
 const WORKER_STATUS_CHANNEL_CAPACITY: usize = 3;
+// Four command slots match the frozen process invocation ceiling. The driver
+// drains them independently of reader waits; a fifth producer fails closed.
+const RUNTIME_DRIVER_COMMAND_CAPACITY: usize = 4;
+// Seven data slots bound a burst of bodyless headers and reserve the eighth for
+// the post-reap terminal event. Staged authorization means at most one slot can
+// own a body allocation while the reader is unable to advance to another body.
+const RUNTIME_DRIVER_EVENT_CAPACITY: usize = 8;
+const RUNTIME_DRIVER_DATA_EVENT_CAPACITY: usize = RUNTIME_DRIVER_EVENT_CAPACITY - 1;
+// Wake notifications coalesce because every source remains in its own bounded
+// channel until the sole driver drains it.
+const RUNTIME_DRIVER_WAKE_CAPACITY: usize = 1;
+// Four ordinary invocation bodies fit, but at most one maximum-sized callback
+// reply can exist across the command queue and active writer. This prevents
+// queue slots from multiplying the SDK's largest body allocation.
+const RUNTIME_DRIVER_QUEUED_BODY_BYTES_MAX: usize = HOST_CALLBACK_BODY_BYTES_MAX;
 const STDERR_BUFFER_BYTES: usize = 8 * 1024;
 const CHILD_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const PRODUCT_CONTROL_DEADLINE: Duration = Duration::from_millis(COMMAND_TIMEOUT_MS as u64);
 const PRODUCT_COMPILE_LOAD_DEADLINE: Duration = Duration::from_millis(COMPILE_TIMEOUT_MS as u64);
+
+const DRIVER_VIOLATION_NONE: u8 = 0;
+const DRIVER_VIOLATION_PRESSURE: u8 = 1;
+const DRIVER_VIOLATION_PROTOCOL: u8 = 2;
 
 /// Stable, redacted failures from the plugin-host process boundary.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
@@ -63,6 +92,8 @@ pub enum PluginHostProcessError {
     TransportFailed,
     #[error("a plugin host transport worker failed")]
     WorkerFailed,
+    #[error("the plugin host runtime driver exceeded its bounded pressure")]
+    Backpressure,
     #[error("the plugin host process is closed")]
     Closed,
     #[error("the plugin host already contains sixteen runtimes")]
@@ -112,10 +143,14 @@ impl ProcessDeadlines {
 struct WriterCommand {
     message: ParentMessage,
     completed: SyncSender<Result<Instant, ()>>,
+    #[cfg(test)]
+    panic_for_test: bool,
 }
 
 enum ReaderControl {
     ReadBody,
+    #[cfg(test)]
+    PanicForTest,
 }
 
 enum ReaderEvent {
@@ -132,6 +167,261 @@ enum WorkerKind {
     Stderr,
 }
 
+/// Opaque authority to read the one SDK-bounded body following a runtime header.
+///
+/// The private field and lack of `Clone` make this a consume-on-authorization
+/// capability for the later single supervisor actor.
+#[derive(Eq, PartialEq)]
+pub(crate) struct PendingPluginHostBodyToken(u64);
+
+impl std::fmt::Debug for PendingPluginHostBodyToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("PendingPluginHostBodyToken(..)")
+    }
+}
+
+/// Validated process events consumed by the later single supervisor actor.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum PluginHostRuntimeEvent {
+    Header {
+        frame: ChildFrame,
+        pending_body: Option<PendingPluginHostBodyToken>,
+    },
+    Body {
+        frame: ChildFrame,
+        body: Vec<u8>,
+    },
+    /// Emitted only after the child is reaped and every transport worker joined.
+    Closed(Result<(), PluginHostProcessError>),
+}
+
+enum RuntimeDriverCommand {
+    Send {
+        message: Box<ParentMessage>,
+        deadline: Instant,
+    },
+    AuthorizeBody {
+        token: PendingPluginHostBodyToken,
+        deadline: Instant,
+    },
+    Shutdown,
+    #[cfg(test)]
+    PanicDriverForTest,
+    #[cfg(test)]
+    PanicWriterForTest,
+    #[cfg(test)]
+    PanicReaderForTest,
+}
+
+struct RuntimeDriverShared {
+    running: AtomicBool,
+    close_requested: AtomicBool,
+    event_consumer_alive: AtomicBool,
+    violation: AtomicU8,
+    queued_body_bytes: AtomicUsize,
+    queued_data_events: AtomicUsize,
+}
+
+impl RuntimeDriverShared {
+    fn new() -> Self {
+        Self {
+            running: AtomicBool::new(true),
+            close_requested: AtomicBool::new(false),
+            event_consumer_alive: AtomicBool::new(true),
+            violation: AtomicU8::new(DRIVER_VIOLATION_NONE),
+            queued_body_bytes: AtomicUsize::new(0),
+            queued_data_events: AtomicUsize::new(0),
+        }
+    }
+
+    fn reserve_body_bytes(&self, body_bytes: usize) -> bool {
+        let mut queued = self.queued_body_bytes.load(Ordering::Acquire);
+        loop {
+            let Some(updated) = queued.checked_add(body_bytes) else {
+                return false;
+            };
+            if updated > RUNTIME_DRIVER_QUEUED_BODY_BYTES_MAX {
+                return false;
+            }
+            match self.queued_body_bytes.compare_exchange_weak(
+                queued,
+                updated,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(actual) => queued = actual,
+            }
+        }
+    }
+
+    fn release_body_bytes(&self, body_bytes: usize) {
+        self.queued_body_bytes
+            .fetch_sub(body_bytes, Ordering::AcqRel);
+    }
+
+    fn mark_violation(&self, violation: u8) {
+        let _ = self.violation.compare_exchange(
+            DRIVER_VIOLATION_NONE,
+            violation,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+}
+
+/// Immediate, bounded command admission for one consumed runtime process.
+pub(crate) struct PluginHostRuntimeDriverHandle {
+    commands: Option<SyncSender<RuntimeDriverCommand>>,
+    wake: SyncSender<()>,
+    shared: Arc<RuntimeDriverShared>,
+}
+
+impl PluginHostRuntimeDriverHandle {
+    /// Admit one exact SDK runtime message without waiting on child I/O.
+    pub(crate) fn send(
+        &self,
+        message: ParentMessage,
+        deadline: Instant,
+    ) -> Result<(), PluginHostProcessError> {
+        if !runtime_parent_frame_allowed(&message.frame)
+            || validate_parent_body(&message.frame, &message.body).is_err()
+        {
+            self.shared.mark_violation(DRIVER_VIOLATION_PROTOCOL);
+            signal_driver(&self.wake);
+            return Err(PluginHostProcessError::ProtocolRejected);
+        }
+        let body_bytes = message.body.len();
+        if !self.shared.reserve_body_bytes(body_bytes) {
+            self.shared.mark_violation(DRIVER_VIOLATION_PRESSURE);
+            signal_driver(&self.wake);
+            return Err(PluginHostProcessError::Backpressure);
+        }
+        let result = self.enqueue(RuntimeDriverCommand::Send {
+            message: Box::new(message),
+            deadline,
+        });
+        if result.is_err() {
+            self.shared.release_body_bytes(body_bytes);
+        }
+        result
+    }
+
+    /// Consume the exact token emitted with a pending-body header.
+    pub(crate) fn authorize_body(
+        &self,
+        token: PendingPluginHostBodyToken,
+        deadline: Instant,
+    ) -> Result<(), PluginHostProcessError> {
+        self.enqueue(RuntimeDriverCommand::AuthorizeBody { token, deadline })
+    }
+
+    /// Request the security-reviewed graceful process shutdown path.
+    pub(crate) fn shutdown(&self) -> Result<(), PluginHostProcessError> {
+        self.enqueue(RuntimeDriverCommand::Shutdown)
+    }
+
+    /// Wake the driver and force kill/wait/reap. Repeated requests are safe.
+    pub(crate) fn fatal_close(&self) -> Result<(), PluginHostProcessError> {
+        if !self.shared.running.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        self.shared.close_requested.store(true, Ordering::Release);
+        signal_driver(&self.wake);
+        Ok(())
+    }
+
+    fn enqueue(&self, command: RuntimeDriverCommand) -> Result<(), PluginHostProcessError> {
+        if !self.shared.running.load(Ordering::Acquire) {
+            return Err(PluginHostProcessError::Closed);
+        }
+        let Some(commands) = self.commands.as_ref() else {
+            return Err(PluginHostProcessError::Closed);
+        };
+        match commands.try_send(command) {
+            Ok(()) => {
+                signal_driver(&self.wake);
+                Ok(())
+            }
+            Err(TrySendError::Full(_)) => {
+                self.shared.mark_violation(DRIVER_VIOLATION_PRESSURE);
+                signal_driver(&self.wake);
+                Err(PluginHostProcessError::Backpressure)
+            }
+            Err(TrySendError::Disconnected(_)) => Err(PluginHostProcessError::Closed),
+        }
+    }
+
+    #[cfg(test)]
+    fn panic_driver_for_test(&self) -> Result<(), PluginHostProcessError> {
+        self.enqueue(RuntimeDriverCommand::PanicDriverForTest)
+    }
+
+    #[cfg(test)]
+    fn panic_writer_for_test(&self) -> Result<(), PluginHostProcessError> {
+        self.enqueue(RuntimeDriverCommand::PanicWriterForTest)
+    }
+
+    #[cfg(test)]
+    fn panic_reader_for_test(&self) -> Result<(), PluginHostProcessError> {
+        self.enqueue(RuntimeDriverCommand::PanicReaderForTest)
+    }
+}
+
+impl Drop for PluginHostRuntimeDriverHandle {
+    fn drop(&mut self) {
+        self.commands.take();
+        self.shared.close_requested.store(true, Ordering::Release);
+        signal_driver(&self.wake);
+    }
+}
+
+/// Bounded runtime event receiver and owner of the joined driver thread.
+pub(crate) struct PluginHostRuntimeEvents {
+    events: Receiver<PluginHostRuntimeEvent>,
+    wake: SyncSender<()>,
+    shared: Arc<RuntimeDriverShared>,
+    driver_handle: Option<JoinHandle<()>>,
+}
+
+impl PluginHostRuntimeEvents {
+    pub(crate) fn recv(&self) -> Result<PluginHostRuntimeEvent, mpsc::RecvError> {
+        let event = self.events.recv()?;
+        self.release_event_slot(&event);
+        Ok(event)
+    }
+
+    pub(crate) fn recv_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<PluginHostRuntimeEvent, mpsc::RecvTimeoutError> {
+        let event = self.events.recv_timeout(timeout)?;
+        self.release_event_slot(&event);
+        Ok(event)
+    }
+
+    fn release_event_slot(&self, event: &PluginHostRuntimeEvent) {
+        if !matches!(event, PluginHostRuntimeEvent::Closed(_)) {
+            self.shared
+                .queued_data_events
+                .fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+}
+
+impl Drop for PluginHostRuntimeEvents {
+    fn drop(&mut self) {
+        self.shared
+            .event_consumer_alive
+            .store(false, Ordering::Release);
+        self.shared.close_requested.store(true, Ordering::Release);
+        signal_driver(&self.wake);
+        if let Some(handle) = self.driver_handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 /// One connected plugin-host process and every pipe/worker needed to own it.
 ///
 /// Product construction performs exact sibling discovery. The process is lazy
@@ -145,6 +435,8 @@ pub struct PluginHostProcess {
     writer_handle: Option<JoinHandle<()>>,
     reader_handle: Option<JoinHandle<()>>,
     stderr_handle: Option<JoinHandle<()>>,
+    wake_sender: SyncSender<()>,
+    wake_receiver: Option<Receiver<()>>,
     host_session_id: String,
     loaded: BTreeMap<String, AuthorityFence>,
     pending_body: Option<ChildFrame>,
@@ -246,6 +538,58 @@ impl PluginHostProcess {
         }
         self.phase = ProcessPhase::Running;
         Ok(())
+    }
+
+    /// Consume a loaded process into its sole wakeable runtime owner.
+    ///
+    /// The returned command handle performs bounded immediate admission. The
+    /// event receiver owns the driver join handle, so dropping either side
+    /// wakes cleanup and dropping the receiver cannot detach the owner thread.
+    pub(crate) fn into_runtime_driver(
+        mut self,
+    ) -> Result<(PluginHostRuntimeDriverHandle, PluginHostRuntimeEvents), PluginHostProcessError>
+    {
+        if self.phase != ProcessPhase::Running {
+            return self.fail(PluginHostProcessError::Closed);
+        }
+        let Some(wake_receiver) = self.wake_receiver.take() else {
+            return self.fail(PluginHostProcessError::WorkerFailed);
+        };
+        let wake = self.wake_sender.clone();
+        let (commands, command_receiver) = mpsc::sync_channel(RUNTIME_DRIVER_COMMAND_CAPACITY);
+        let (event_sender, events) = mpsc::sync_channel(RUNTIME_DRIVER_EVENT_CAPACITY);
+        let shared = Arc::new(RuntimeDriverShared::new());
+        let driver_shared = shared.clone();
+        let driver_handle = match std::thread::Builder::new()
+            .name("junban-plugin-runtime-driver".into())
+            .spawn(move || {
+                run_runtime_driver(
+                    self,
+                    command_receiver,
+                    event_sender,
+                    wake_receiver,
+                    driver_shared,
+                );
+            }) {
+            Ok(handle) => handle,
+            Err(_) => {
+                shared.running.store(false, Ordering::Release);
+                return Err(PluginHostProcessError::WorkerFailed);
+            }
+        };
+        Ok((
+            PluginHostRuntimeDriverHandle {
+                commands: Some(commands),
+                wake: wake.clone(),
+                shared: shared.clone(),
+            },
+            PluginHostRuntimeEvents {
+                events,
+                wake,
+                shared,
+                driver_handle: Some(driver_handle),
+            },
+        ))
     }
 
     /// Send one SDK-typed runtime/control message before the caller's deadline.
@@ -498,6 +842,7 @@ impl PluginHostProcess {
         let (reader_control, reader_controls) = mpsc::sync_channel(READER_CONTROL_CHANNEL_CAPACITY);
         let (worker_status_sender, worker_status) =
             mpsc::sync_channel(WORKER_STATUS_CHANNEL_CAPACITY);
+        let (wake_sender, wake_receiver) = mpsc::sync_channel(RUNTIME_DRIVER_WAKE_CAPACITY);
 
         let mut process = Self {
             child: Some(child),
@@ -508,6 +853,8 @@ impl PluginHostProcess {
             writer_handle: None,
             reader_handle: None,
             stderr_handle: None,
+            wake_sender: wake_sender.clone(),
+            wake_receiver: Some(wake_receiver),
             host_session_id: host_session_id.hyphenated().to_string(),
             loaded: BTreeMap::new(),
             pending_body: None,
@@ -516,24 +863,27 @@ impl PluginHostProcess {
         };
 
         let status = worker_status_sender.clone();
+        let wake = wake_sender.clone();
         process.writer_handle = match std::thread::Builder::new()
             .name("junban-plugin-parent-writer".into())
-            .spawn(move || run_writer(stdin, writer_commands, status))
+            .spawn(move || run_writer(stdin, writer_commands, status, wake))
         {
             Ok(handle) => Some(handle),
             Err(_) => return process.fail(PluginHostProcessError::SpawnFailed),
         };
         let status = worker_status_sender.clone();
+        let wake = wake_sender.clone();
         process.reader_handle = match std::thread::Builder::new()
             .name("junban-plugin-parent-reader".into())
-            .spawn(move || run_reader(stdout, reader_events_sender, reader_controls, status))
-        {
+            .spawn(move || {
+                run_reader(stdout, reader_events_sender, reader_controls, status, wake);
+            }) {
             Ok(handle) => Some(handle),
             Err(_) => return process.fail(PluginHostProcessError::SpawnFailed),
         };
         process.stderr_handle = match std::thread::Builder::new()
             .name("junban-plugin-parent-stderr".into())
-            .spawn(move || drain_stderr(stderr, worker_status_sender))
+            .spawn(move || drain_stderr(stderr, worker_status_sender, wake_sender))
         {
             Ok(handle) => Some(handle),
             Err(_) => return process.fail(PluginHostProcessError::SpawnFailed),
@@ -547,11 +897,29 @@ impl PluginHostProcess {
         deadline: Instant,
         timeout_error: PluginHostProcessError,
     ) -> Result<(), PluginHostProcessError> {
+        let completion = self.begin_send(message)?;
+        let result = recv_until(Some(&completion), deadline, timeout_error)?;
+        match result {
+            Ok(completed) if completed <= deadline => Ok(()),
+            Ok(_) => Err(timeout_error),
+            Err(()) => Err(PluginHostProcessError::TransportFailed),
+        }
+    }
+
+    fn begin_send(
+        &mut self,
+        message: ParentMessage,
+    ) -> Result<Receiver<Result<Instant, ()>>, PluginHostProcessError> {
         self.check_worker_health()?;
         validate_parent_body(&message.frame, &message.body)
             .map_err(|_| PluginHostProcessError::ProtocolRejected)?;
         let (completed, completion) = mpsc::sync_channel(1);
-        let command = WriterCommand { message, completed };
+        let command = WriterCommand {
+            message,
+            completed,
+            #[cfg(test)]
+            panic_for_test: false,
+        };
         let Some(writer) = self.writer.as_ref() else {
             return Err(PluginHostProcessError::WorkerFailed);
         };
@@ -561,12 +929,27 @@ impl PluginHostProcess {
                 return Err(PluginHostProcessError::WorkerFailed);
             }
         }
-        let result = recv_until(Some(&completion), deadline, timeout_error)?;
-        match result {
-            Ok(completed) if completed <= deadline => Ok(()),
-            Ok(_) => Err(timeout_error),
-            Err(()) => Err(PluginHostProcessError::TransportFailed),
-        }
+        Ok(completion)
+    }
+
+    #[cfg(test)]
+    fn begin_writer_panic(&mut self) -> Result<(), PluginHostProcessError> {
+        let (completed, _completion) = mpsc::sync_channel(1);
+        let Some(writer) = self.writer.as_ref() else {
+            return Err(PluginHostProcessError::WorkerFailed);
+        };
+        writer
+            .try_send(WriterCommand {
+                message: ParentMessage::new(
+                    ParentFrame::Shutdown {
+                        host_session_id: self.host_session_id.clone(),
+                    },
+                    Vec::new(),
+                ),
+                completed,
+                panic_for_test: true,
+            })
+            .map_err(|_| PluginHostProcessError::WorkerFailed)
     }
 
     fn receive_header_until(
@@ -789,6 +1172,394 @@ impl Drop for PluginHostProcess {
     }
 }
 
+struct PendingWriterCompletion {
+    completion: Receiver<Result<Instant, ()>>,
+    deadline: Instant,
+    body_bytes: usize,
+}
+
+enum RuntimeBodyState {
+    None,
+    AwaitingAuthorization {
+        frame: ChildFrame,
+        token: u64,
+    },
+    Reading {
+        frame: ChildFrame,
+        deadline: Instant,
+    },
+}
+
+fn run_runtime_driver(
+    mut process: PluginHostProcess,
+    commands: Receiver<RuntimeDriverCommand>,
+    events: SyncSender<PluginHostRuntimeEvent>,
+    wake: Receiver<()>,
+    shared: Arc<RuntimeDriverShared>,
+) {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        runtime_driver_loop(&mut process, &commands, &events, &wake, &shared)
+    }));
+    let mut result = match outcome {
+        Ok(result) => result,
+        Err(_) => match process.fatal_close() {
+            Ok(()) => Err(PluginHostProcessError::WorkerFailed),
+            Err(error) => Err(error),
+        },
+    };
+    if process.phase != ProcessPhase::Closed
+        && let Err(error) = process.fatal_close()
+    {
+        result = Err(error);
+    }
+    shared.running.store(false, Ordering::Release);
+    if shared.event_consumer_alive.load(Ordering::Acquire) {
+        // One channel slot is reserved for this post-reap terminal event.
+        let _ = events.try_send(PluginHostRuntimeEvent::Closed(result));
+    }
+}
+
+fn runtime_driver_loop(
+    process: &mut PluginHostProcess,
+    commands: &Receiver<RuntimeDriverCommand>,
+    events: &SyncSender<PluginHostRuntimeEvent>,
+    wake: &Receiver<()>,
+    shared: &RuntimeDriverShared,
+) -> Result<(), PluginHostProcessError> {
+    let mut writer_completion: Option<PendingWriterCompletion> = None;
+    let mut body_state = RuntimeBodyState::None;
+    let mut next_body_token = 1_u64;
+
+    loop {
+        if shared.close_requested.load(Ordering::Acquire)
+            || !shared.event_consumer_alive.load(Ordering::Acquire)
+        {
+            return process.fatal_close();
+        }
+        match shared.violation.load(Ordering::Acquire) {
+            DRIVER_VIOLATION_NONE => {}
+            DRIVER_VIOLATION_PRESSURE => {
+                return process.fail(PluginHostProcessError::Backpressure);
+            }
+            DRIVER_VIOLATION_PROTOCOL => {
+                return process.fail(PluginHostProcessError::ProtocolRejected);
+            }
+            _ => return process.fail(PluginHostProcessError::ProtocolRejected),
+        }
+
+        if let Some(pending) = writer_completion.as_ref() {
+            let completion = match pending.completion.try_recv() {
+                Ok(Ok(completed)) if completed <= pending.deadline => Some(Ok(())),
+                Ok(Ok(_)) => Some(Err(PluginHostProcessError::ControlTimeout)),
+                Ok(Err(())) => Some(Err(PluginHostProcessError::TransportFailed)),
+                Err(TryRecvError::Disconnected) => Some(Err(PluginHostProcessError::WorkerFailed)),
+                Err(TryRecvError::Empty) if Instant::now() >= pending.deadline => {
+                    Some(Err(PluginHostProcessError::ControlTimeout))
+                }
+                Err(TryRecvError::Empty) => None,
+            };
+            if let Some(completion) = completion {
+                shared.release_body_bytes(pending.body_bytes);
+                writer_completion = None;
+                match completion {
+                    Ok(()) => continue,
+                    Err(error) => return process.fail(error),
+                }
+            }
+        }
+
+        if let RuntimeBodyState::Reading { deadline, .. } = &body_state
+            && Instant::now() >= *deadline
+        {
+            return process.fail(PluginHostProcessError::ControlTimeout);
+        }
+
+        match process
+            .reader_events
+            .as_ref()
+            .ok_or(PluginHostProcessError::WorkerFailed)?
+            .try_recv()
+        {
+            Ok(event) => {
+                handle_runtime_reader_event(
+                    process,
+                    event,
+                    events,
+                    shared,
+                    &mut body_state,
+                    &mut next_body_token,
+                )?;
+                continue;
+            }
+            Err(TryRecvError::Disconnected) => {
+                return process.fail(PluginHostProcessError::WorkerFailed);
+            }
+            Err(TryRecvError::Empty) => {}
+        }
+
+        match process
+            .worker_status
+            .as_ref()
+            .ok_or(PluginHostProcessError::WorkerFailed)?
+            .try_recv()
+        {
+            Ok(_) | Err(TryRecvError::Disconnected) => {
+                return process.fail(PluginHostProcessError::WorkerFailed);
+            }
+            Err(TryRecvError::Empty) => {}
+        }
+
+        if writer_completion.is_none() {
+            match commands.try_recv() {
+                Ok(command) => {
+                    handle_runtime_driver_command(
+                        process,
+                        command,
+                        shared,
+                        &mut writer_completion,
+                        &mut body_state,
+                    )?;
+                    if process.phase == ProcessPhase::Closed {
+                        return Ok(());
+                    }
+                    continue;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    return process.fail(PluginHostProcessError::Closed);
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+
+        let deadline = driver_wait_deadline(writer_completion.as_ref(), &body_state);
+        let wake_result = match deadline {
+            Some(deadline) => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    continue;
+                }
+                wake.recv_timeout(remaining)
+            }
+            None => wake
+                .recv()
+                .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+        };
+        match wake_result {
+            Ok(()) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return process.fail(PluginHostProcessError::WorkerFailed);
+            }
+        }
+    }
+}
+
+fn driver_wait_deadline(
+    writer: Option<&PendingWriterCompletion>,
+    body: &RuntimeBodyState,
+) -> Option<Instant> {
+    let writer = writer.map(|pending| pending.deadline);
+    let body = match body {
+        RuntimeBodyState::Reading { deadline, .. } => Some(*deadline),
+        RuntimeBodyState::None | RuntimeBodyState::AwaitingAuthorization { .. } => None,
+    };
+    match (writer, body) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+        (None, None) => None,
+    }
+}
+
+fn handle_runtime_driver_command(
+    process: &mut PluginHostProcess,
+    command: RuntimeDriverCommand,
+    shared: &RuntimeDriverShared,
+    writer_completion: &mut Option<PendingWriterCompletion>,
+    body_state: &mut RuntimeBodyState,
+) -> Result<(), PluginHostProcessError> {
+    match command {
+        RuntimeDriverCommand::Send { message, deadline } => {
+            let body_bytes = message.body.len();
+            if process.phase != ProcessPhase::Running
+                || !runtime_parent_frame_allowed(&message.frame)
+                || !process.parent_authority_matches(&message.frame)
+                || validate_parent_body(&message.frame, &message.body).is_err()
+            {
+                shared.release_body_bytes(body_bytes);
+                return process.fail(PluginHostProcessError::ProtocolRejected);
+            }
+            let completion = match process.begin_send(*message) {
+                Ok(completion) => completion,
+                Err(error) => {
+                    shared.release_body_bytes(body_bytes);
+                    return process.fail(error);
+                }
+            };
+            *writer_completion = Some(PendingWriterCompletion {
+                completion,
+                deadline,
+                body_bytes,
+            });
+        }
+        RuntimeDriverCommand::AuthorizeBody { token, deadline } => {
+            let RuntimeBodyState::AwaitingAuthorization {
+                frame,
+                token: expected,
+            } = body_state
+            else {
+                return process.fail(PluginHostProcessError::ProtocolRejected);
+            };
+            if token.0 != *expected || Instant::now() >= deadline {
+                return process.fail(if token.0 == *expected {
+                    PluginHostProcessError::ControlTimeout
+                } else {
+                    PluginHostProcessError::ProtocolRejected
+                });
+            }
+            let Some(control) = process.reader_control.as_ref() else {
+                return process.fail(PluginHostProcessError::WorkerFailed);
+            };
+            match control.try_send(ReaderControl::ReadBody) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
+                    return process.fail(PluginHostProcessError::WorkerFailed);
+                }
+            }
+            *body_state = RuntimeBodyState::Reading {
+                frame: frame.clone(),
+                deadline,
+            };
+        }
+        RuntimeDriverCommand::Shutdown => return process.shutdown(),
+        #[cfg(test)]
+        RuntimeDriverCommand::PanicDriverForTest => panic!("deterministic driver panic"),
+        #[cfg(test)]
+        RuntimeDriverCommand::PanicWriterForTest => {
+            if let Err(error) = process.begin_writer_panic() {
+                return process.fail(error);
+            }
+        }
+        #[cfg(test)]
+        RuntimeDriverCommand::PanicReaderForTest => {
+            let Some(control) = process.reader_control.as_ref() else {
+                return process.fail(PluginHostProcessError::WorkerFailed);
+            };
+            if control.try_send(ReaderControl::PanicForTest).is_err() {
+                return process.fail(PluginHostProcessError::WorkerFailed);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_runtime_reader_event(
+    process: &mut PluginHostProcess,
+    event: ReaderEvent,
+    events: &SyncSender<PluginHostRuntimeEvent>,
+    shared: &RuntimeDriverShared,
+    body_state: &mut RuntimeBodyState,
+    next_body_token: &mut u64,
+) -> Result<(), PluginHostProcessError> {
+    match event {
+        ReaderEvent::Header(frame, _) => {
+            if !matches!(body_state, RuntimeBodyState::None)
+                || process.pending_body.is_some()
+                || !process.child_frame_allowed(&frame, ReceiveContext::Runtime)
+            {
+                return process.fail(PluginHostProcessError::ProtocolRejected);
+            }
+            if let ChildFrame::Unloaded { fence } = &frame {
+                process.loaded.remove(&fence.plugin_id);
+            }
+            let body_len = match child_body_len(&frame) {
+                Ok(body_len) => body_len,
+                Err(_) => return process.fail(PluginHostProcessError::ProtocolRejected),
+            };
+            let pending_body = if body_len == 0 {
+                None
+            } else {
+                let token = *next_body_token;
+                *next_body_token = match next_body_token.checked_add(1) {
+                    Some(next) => next,
+                    None => return process.fail(PluginHostProcessError::ProtocolRejected),
+                };
+                process.pending_body = Some(frame.clone());
+                *body_state = RuntimeBodyState::AwaitingAuthorization {
+                    frame: frame.clone(),
+                    token,
+                };
+                Some(PendingPluginHostBodyToken(token))
+            };
+            publish_runtime_event(
+                events,
+                shared,
+                PluginHostRuntimeEvent::Header {
+                    frame,
+                    pending_body,
+                },
+            )
+            .or_else(|error| process.fail(error))
+        }
+        ReaderEvent::Body(body, completed) => {
+            let RuntimeBodyState::Reading { frame, deadline } = body_state else {
+                return process.fail(PluginHostProcessError::WorkerFailed);
+            };
+            if completed > *deadline || process.pending_body.as_ref() != Some(frame) {
+                return process.fail(if completed > *deadline {
+                    PluginHostProcessError::ControlTimeout
+                } else {
+                    PluginHostProcessError::ProtocolRejected
+                });
+            }
+            let frame = frame.clone();
+            process.pending_body = None;
+            *body_state = RuntimeBodyState::None;
+            publish_runtime_event(events, shared, PluginHostRuntimeEvent::Body { frame, body })
+                .or_else(|error| process.fail(error))
+        }
+        ReaderEvent::Eof(_) => process.fail(PluginHostProcessError::TransportFailed),
+        ReaderEvent::ProtocolFailure => process.fail(PluginHostProcessError::ProtocolRejected),
+    }
+}
+
+fn publish_runtime_event(
+    events: &SyncSender<PluginHostRuntimeEvent>,
+    shared: &RuntimeDriverShared,
+    event: PluginHostRuntimeEvent,
+) -> Result<(), PluginHostProcessError> {
+    let mut queued = shared.queued_data_events.load(Ordering::Acquire);
+    loop {
+        if queued >= RUNTIME_DRIVER_DATA_EVENT_CAPACITY {
+            return Err(PluginHostProcessError::Backpressure);
+        }
+        match shared.queued_data_events.compare_exchange_weak(
+            queued,
+            queued + 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => break,
+            Err(actual) => queued = actual,
+        }
+    }
+    match events.try_send(event) {
+        Ok(()) => Ok(()),
+        Err(TrySendError::Full(_)) => {
+            shared.queued_data_events.fetch_sub(1, Ordering::AcqRel);
+            Err(PluginHostProcessError::Backpressure)
+        }
+        Err(TrySendError::Disconnected(_)) => {
+            shared.queued_data_events.fetch_sub(1, Ordering::AcqRel);
+            Err(PluginHostProcessError::Closed)
+        }
+    }
+}
+
+fn signal_driver(wake: &SyncSender<()>) {
+    match wake.try_send(()) {
+        Ok(()) | Err(TrySendError::Full(())) | Err(TrySendError::Disconnected(())) => {}
+    }
+}
+
 #[derive(Clone, Copy)]
 enum ReceiveContext {
     Handshake,
@@ -797,22 +1568,57 @@ enum ReceiveContext {
     Shutdown,
 }
 
+struct WorkerExitNotifier {
+    kind: WorkerKind,
+    status: SyncSender<WorkerKind>,
+    wake: SyncSender<()>,
+}
+
+impl Drop for WorkerExitNotifier {
+    fn drop(&mut self) {
+        let _ = self.status.send(self.kind);
+        signal_driver(&self.wake);
+    }
+}
+
 fn run_writer(
     mut stdin: impl Write,
     commands: Receiver<WriterCommand>,
     worker_status: SyncSender<WorkerKind>,
+    wake: SyncSender<()>,
 ) {
+    let _exit = WorkerExitNotifier {
+        kind: WorkerKind::Writer,
+        status: worker_status,
+        wake: wake.clone(),
+    };
     while let Ok(command) = commands.recv() {
+        #[cfg(test)]
+        if command.panic_for_test {
+            panic!("deterministic writer panic");
+        }
         let result =
             write_parent_message(&mut stdin, &command.message.frame, &command.message.body)
                 .map(|()| Instant::now())
                 .map_err(|_| ());
         let failed = result.is_err() || command.completed.send(result).is_err();
+        signal_driver(&wake);
         if failed {
             break;
         }
     }
-    let _ = worker_status.send(WorkerKind::Writer);
+}
+
+fn send_reader_event(
+    events: &SyncSender<ReaderEvent>,
+    wake: &SyncSender<()>,
+    event: ReaderEvent,
+) -> bool {
+    if events.send(event).is_err() {
+        return false;
+    }
+    signal_driver(wake);
+    true
 }
 
 fn run_reader(
@@ -820,57 +1626,72 @@ fn run_reader(
     events: SyncSender<ReaderEvent>,
     controls: Receiver<ReaderControl>,
     worker_status: SyncSender<WorkerKind>,
+    wake: SyncSender<()>,
 ) {
+    let _exit = WorkerExitNotifier {
+        kind: WorkerKind::Reader,
+        status: worker_status,
+        wake: wake.clone(),
+    };
     loop {
         let frame = match read_child_frame(&mut stdout) {
             Ok(Some(frame)) => frame,
             Ok(None) => {
-                let _ = events.send(ReaderEvent::Eof(Instant::now()));
+                let _ = send_reader_event(&events, &wake, ReaderEvent::Eof(Instant::now()));
                 break;
             }
             Err(_) => {
-                let _ = events.send(ReaderEvent::ProtocolFailure);
+                let _ = send_reader_event(&events, &wake, ReaderEvent::ProtocolFailure);
                 break;
             }
         };
         let body_len = match child_body_len(&frame) {
             Ok(body_len) => body_len,
             Err(_) => {
-                let _ = events.send(ReaderEvent::ProtocolFailure);
+                let _ = send_reader_event(&events, &wake, ReaderEvent::ProtocolFailure);
                 break;
             }
         };
-        if events
-            .send(ReaderEvent::Header(frame.clone(), Instant::now()))
-            .is_err()
-        {
+        if !send_reader_event(
+            &events,
+            &wake,
+            ReaderEvent::Header(frame.clone(), Instant::now()),
+        ) {
             break;
         }
         if body_len == 0 {
             continue;
         }
-        if !matches!(controls.recv(), Ok(ReaderControl::ReadBody)) {
-            break;
+        match controls.recv() {
+            Ok(ReaderControl::ReadBody) => {}
+            #[cfg(test)]
+            Ok(ReaderControl::PanicForTest) => panic!("deterministic reader panic"),
+            Err(_) => break,
         }
         match read_child_body(&mut stdout, &frame) {
             Ok(body) => {
-                if events
-                    .send(ReaderEvent::Body(body, Instant::now()))
-                    .is_err()
-                {
+                if !send_reader_event(&events, &wake, ReaderEvent::Body(body, Instant::now())) {
                     break;
                 }
             }
             Err(_) => {
-                let _ = events.send(ReaderEvent::ProtocolFailure);
+                let _ = send_reader_event(&events, &wake, ReaderEvent::ProtocolFailure);
                 break;
             }
         }
     }
-    let _ = worker_status.send(WorkerKind::Reader);
 }
 
-fn drain_stderr(mut stderr: impl Read, worker_status: SyncSender<WorkerKind>) {
+fn drain_stderr(
+    mut stderr: impl Read,
+    worker_status: SyncSender<WorkerKind>,
+    wake: SyncSender<()>,
+) {
+    let _exit = WorkerExitNotifier {
+        kind: WorkerKind::Stderr,
+        status: worker_status,
+        wake,
+    };
     let mut buffer = [0_u8; STDERR_BUFFER_BYTES];
     loop {
         match stderr.read(&mut buffer) {
@@ -878,7 +1699,6 @@ fn drain_stderr(mut stderr: impl Read, worker_status: SyncSender<WorkerKind>) {
             Ok(_) => {}
         }
     }
-    let _ = worker_status.send(WorkerKind::Stderr);
 }
 
 fn validate_shutdown_terminal_event(

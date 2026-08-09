@@ -1,6 +1,6 @@
 # Phase 7 Wave 2 — hostile plugin runtime plan
 
-Status: Slice 2B and hostcall-fuel security correction accepted; all `P7-PLAN-2C-001`–`004` plus `P7-PLAN-2C-004-EVENT-ATOMICITY` closed; Slice 2C authorized to implement from planning and security; `P7-DEP-001` open; Wave 2 in progress; clean replacement full CI at the current head pending
+Status: Slice 2B and hostcall-fuel security correction accepted; Slice 2C Packet B lifecycle authority commit `ae9cd24` integrated with its database gate approved at exact `e573cfe`, both high findings fixed/closed, schema v7 unchanged, and Packet C authorized to consume its APIs; Packet A protocol-v2/multi-runtime child commit `651cf75` integrated but not accepted, with hostile-runtime/security review pending; `P7-DEP-001` open; Wave 2 in progress
 
 ## Outcome and boundary
 
@@ -64,7 +64,7 @@ Independent security review found `P7-RUNTIME-SEC-001`: typed canonical ABI lift
 
 The approved focused hostcall-fuel recheck marks `P7-PLAN-RUNTIME-001` and `P7-RUNTIME-SEC-001` fixed. The focused Slice 2C planning verdict at exact reviewed HEAD `442ebdd61e71a19a3e906b33b54bf7857ad555f8` is **APPROVE**, with no blockers: `P7-PLAN-2C-001`–`003` remain closed, while `P7-PLAN-2C-004` and `P7-PLAN-2C-004-EVENT-ATOMICITY` are fixed and closed. Together the planning and security verdicts authorize Slice 2C implementation. They do not close `P7-DEP-001` or accept Wave 2.
 
-On exact code head `0220c8c67bd1da94f90fecc11aeabf87e784f777`, CI run `31294773893` jobs `93197967769`, `93197967800`, and `93197967814` passed Ubuntu, macOS, and Windows plugin-host containment, proving the competing `Timeout`/`ResourceLimit` assertion correction. The same run failed only unrelated storage test isolation and newly disclosed tooling advisories, both fixed at current head `ce80dead79c5ec2dadd95bddb8202ee7dbd2bf46`; a clean replacement full CI run is pending, so neither current-head full-CI green nor Wave 2 acceptance is claimed. Phase 7 process-memory calibration run `31294772199` at `0220c8c67bd1da94f90fecc11aeabf87e784f777` passed.
+Replacement CI run `31296663305` at exact head `ce80dead79c5ec2dadd95bddb8202ee7dbd2bf46` passed every Rust, Rust supply-chain, frontend/repository, release E2E, Ubuntu containment, Windows containment and macOS containment job. Process-memory calibration run `31296660062` at the same exact head passed. The macOS containment job passed three strict exact-head executions: original `93202756069`, rerun `93205509663`, and rerun `93207040552`. This fixes and closes both the old macOS containment blocker and the replacement-CI gate at `ce80dea`. These runs predate integrated Packet B `ae9cd24`, Packet A `651cf75` and database corrections `e573cfe`; they do not establish green CI for the current integrated head or accept Packet A, Packet B, Slice 2C or Wave 2.
 
 ### Slice 2C — lazy parent supervisor and verified source bridge
 
@@ -76,7 +76,7 @@ Retain exactly one on-demand child process. Its one Engine owns a bounded map of
 
 The parent owner process independently enforces one active invocation per plugin and four active invocations total. The child independently enforces the same one/four bounds rather than trusting the parent. A nested dependency `Invoke` counts as another active invocation at both layers and fails immediately with a bounded stable admission error if its target plugin or the four-total pool is saturated; it never waits while holding the caller in an unbounded queue. Per-plugin child processes are rejected.
 
-The implemented Slice 2B child accepts one load. That code must be upgraded to the bounded runtime map as part of Slice 2C before parent composition; the parent must not compose around the one-load checkpoint and must not spawn one child per plugin.
+Packet A commit `651cf75` integrates the protocol-v2/product-version handshake and upgrades the Slice 2B one-load child to the bounded runtime map before parent composition. The parent must not spawn one child per plugin. Packet A remains unaccepted until its hostile-runtime/security review passes.
 
 An ordinary plugin-local trap, invocation timeout or plugin resource failure is a same-attempt transition at that plugin's current activation epoch. It destroys and replaces only that plugin's Store/instance from its retained Component/Linker; sibling plugin entries remain active and the PID survives. Protocol or transport failure, EOF, process exit, worker loss, or a malformed or stale session is child/session-fatal. Any compile/load timeout or failure that requires killing and reaping the singular child is likewise child/session-fatal: close admission, kill/reap as required, invalidate the session and every late frame, persist the atomic graph fence described below, then replace only after durable authority permits it.
 
@@ -91,6 +91,8 @@ Before parent composition, bump the private protocol from v1 to **v2** with exac
 This is a private host correction only. WIT and its frozen SHA-256, generated invocation/callback bodies, JBP1/JRI1, permission/package hashes, OpenAPI, and schema version/table shape do not change. Same-epoch activation CAS and bounded crash graph-health transitions are internal persistence semantics.
 
 #### Durable lifecycle authority
+
+Packet B lifecycle authority commit `ae9cd24` integrates typed AppService/storage operations for due retry, activation completion, same-attempt failure and one-envelope graph fencing. The focused database recheck approved exact `e573cfe` with no material issues: high findings `P7-2C-B-DB-001` and `P7-2C-B-DB-002` are fixed/closed, schema v7 is unchanged, and Packet C may consume these APIs.
 
 SQLite/AppService exclusively owns desired enablement, activation epochs, health, retry/backoff, dependent propagation, events and receipts. The supervisor requests typed transitions and owns only ephemeral child/session/admission mechanics; it cannot persist or invent a parallel lifecycle state.
 
@@ -118,7 +120,7 @@ Build signed Rust and TypeScript hostile/golden components from pinned authoring
 
 Slice 2E may add exactly one non-shipped optimized integration/measurement harness. It constructs the real Slice 2C supervisor with real storage/AppService and the real sibling host; its only path injection is the tests-only absolute Cargo binary path. It runs Rust and TypeScript profiles separately and measures multi-runtime scaling at one, four and sixteen loaded runtimes, including dependency graphs, one/four invocation admission and cleanup. It replaces the selected-path 45.0.3 active-runtime projections with clean 36.0.13 evidence while retaining separate default/Rust/TypeScript reports.
 
-This harness is replacement runtime evidence only. It does not satisfy Wave 3 ordinary `ServerState` startup/restore/maintenance composition and cannot substitute for Wave 5 product-integrated default/Rust/TypeScript evidence. Obtain the complete Wave 2 security gate, retain the corrected cross-platform containment evidence, obtain a clean replacement full CI run at the current head, and close `P7-DEP-001` plus every other named material finding before Wave 2 acceptance.
+This harness is replacement runtime evidence only. It does not satisfy Wave 3 ordinary `ServerState` startup/restore/maintenance composition and cannot substitute for Wave 5 product-integrated default/Rust/TypeScript evidence. The replacement-CI and macOS containment gates are closed at `ce80dea`, and the Packet B database gate is approved at exact `e573cfe`; integrated Packet A/B exact-head CI, Packet A hostile-runtime/security review, the complete Wave 2 security gate, `P7-DEP-001`, and every other named material finding remain required before Wave 2 acceptance.
 
 ## Ownership and lifecycle
 

@@ -203,6 +203,25 @@ fn cancel_message(index: usize, invocation: usize) -> ParentMessage {
     )
 }
 
+fn large_capability_reply(invocation: usize) -> ParentMessage {
+    let callback = junban_plugin_sdk::CallbackFence {
+        plugin_id: fence(0).plugin_id,
+        package_generation: 7,
+        activation_epoch: 9,
+        host_session_id: SESSION.into(),
+        invocation_id: invocation_fence(0, invocation).invocation_id,
+        callback_id: 1,
+    };
+    let reply = HostCallReply::GetSettings(WitResult::Ok(vec![NamedSetting {
+        id: "large".into(),
+        value: SettingValue::Text("x".repeat(2 * 1024 * 1024)),
+    }]))
+    .into_parent_message(callback)
+    .unwrap();
+    let (frame, body) = reply.into_parts();
+    ParentMessage::new(frame, body)
+}
+
 fn loaded_output(count: usize) -> Vec<u8> {
     let mut output = wire(&hello(SESSION));
     for index in 0..count {
@@ -937,6 +956,30 @@ fn raw_stderr_flood_is_drained_boundedly_and_never_enters_errors() {
 
 #[cfg(unix)]
 #[test]
+fn runtime_driver_success_terminal_is_reserved_for_graceful_shutdown() {
+    let _guard = process_test_guard();
+    let acknowledgement = wire(&ChildFrame::ShutdownComplete {
+        host_session_id: SESSION.into(),
+    });
+    let fixture = Fixture::new(
+        "driver-graceful-shutdown",
+        &synchronized_shutdown_script(&acknowledgement, "exit 0\n"),
+    );
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 0);
+    driver.shutdown().unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Ok(()))
+    );
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    );
+    assert_process_absent(pid);
+}
+
+#[cfg(unix)]
+#[test]
 fn runtime_driver_wakes_for_four_sends_and_preserves_interleaved_typed_events() {
     let _guard = process_test_guard();
     let invocation_fences = [
@@ -1156,7 +1199,7 @@ fn runtime_driver_stages_body_and_sends_while_unread_and_stalled() {
     driver.fatal_close().unwrap();
     assert_eq!(
         events.recv_timeout(Duration::from_secs(1)).unwrap(),
-        PluginHostRuntimeEvent::Closed(Ok(()))
+        PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ForcedClosed))
     );
     assert_process_absent(pid);
 
@@ -1309,7 +1352,7 @@ fn runtime_driver_command_disconnect_fatal_repeat_and_event_drop_never_orphan() 
     drop(driver);
     assert_eq!(
         events.recv_timeout(Duration::from_secs(1)).unwrap(),
-        PluginHostRuntimeEvent::Closed(Ok(()))
+        PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ForcedClosed))
     );
     assert_eq!(
         events.recv_timeout(Duration::from_secs(1)),
@@ -1467,6 +1510,80 @@ fn runtime_driver_body_timeout_and_body_validation_are_fatal_before_publication(
 
 #[cfg(unix)]
 #[test]
+fn runtime_driver_explicit_fatal_during_blocked_body_and_writer_is_non_graceful() {
+    let _guard = process_test_guard();
+
+    let callback_fence = junban_plugin_sdk::CallbackFence {
+        plugin_id: fence(0).plugin_id,
+        package_generation: 7,
+        activation_epoch: 9,
+        host_session_id: SESSION.into(),
+        invocation_id: invocation_fence(0, 930).invocation_id,
+        callback_id: 1,
+    };
+    let callback = HostCallRequest::MonotonicMs(())
+        .into_child_message(callback_fence)
+        .unwrap();
+    let (callback_frame, callback_body) = callback.into_parts();
+    let mut output = loaded_output(1);
+    output.extend_from_slice(&wire(&callback_frame));
+    output.extend_from_slice(&callback_body[..1]);
+    let fixture = Fixture::new(
+        "driver-fatal-blocked-body",
+        &format!("{}exec /bin/sleep 30\n", shell_write(&output)),
+    );
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    let (_, token) = runtime_header(&events);
+    assert!(token.is_some());
+    driver.fatal_close().unwrap();
+    driver.fatal_close().unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ForcedClosed))
+    );
+    assert_process_absent(pid);
+
+    let reply = large_capability_reply(931);
+    let parent_prefix = parent_wire(ParentFrame::Hello {
+        protocol_name: HOST_PROTOCOL_NAME.into(),
+        protocol_version: HOST_PROTOCOL_VERSION,
+        junban_version: HOST_JUNBAN_VERSION.into(),
+        host_session_id: SESSION.into(),
+    })
+    .len()
+        + parent_message_wire(&load_message(0, vec![b'a'])).len()
+        + 64 * 1024;
+    assert!(parent_message_wire(&reply).len() > 64 * 1024);
+    let writer_started = wire(&ChildFrame::Cancelled {
+        fence: invocation_fence(0, 931),
+    });
+    let fixture = Fixture::new(
+        "driver-fatal-stalled-writer",
+        &format!(
+            "{}/bin/dd if=/dev/stdin of=/dev/null bs=1 count={} 2>/dev/null\n{}exec /bin/sleep 30\n",
+            shell_write(&loaded_output(1)),
+            parent_prefix,
+            shell_write(&writer_started),
+        ),
+    );
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    driver
+        .send(reply, deadline_after(Duration::from_secs(2)))
+        .unwrap();
+    let (frame, pending_body) = runtime_header(&events);
+    assert!(matches!(frame, ChildFrame::Cancelled { .. }));
+    assert!(pending_body.is_none());
+    driver.fatal_close().unwrap();
+    driver.fatal_close().unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ForcedClosed))
+    );
+    assert_process_absent(pid);
+}
+
+#[cfg(unix)]
+#[test]
 fn runtime_driver_writer_completion_uses_the_command_deadline() {
     let _guard = process_test_guard();
     let fixture = Fixture::new(
@@ -1474,25 +1591,8 @@ fn runtime_driver_writer_completion_uses_the_command_deadline() {
         &format!("{}exec /bin/sleep 30\n", shell_write(&loaded_output(1))),
     );
     let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
-    let callback = junban_plugin_sdk::CallbackFence {
-        plugin_id: fence(0).plugin_id,
-        package_generation: 7,
-        activation_epoch: 9,
-        host_session_id: SESSION.into(),
-        invocation_id: invocation_fence(0, 920).invocation_id,
-        callback_id: 1,
-    };
-    let reply = HostCallReply::GetSettings(WitResult::Ok(vec![NamedSetting {
-        id: "large".into(),
-        value: SettingValue::Text("x".repeat(2 * 1024 * 1024)),
-    }]))
-    .into_parent_message(callback)
-    .unwrap();
-    let (frame, body) = reply.into_parts();
     let deadline = deadline_after(Duration::from_millis(50));
-    driver
-        .send(ParentMessage::new(frame, body), deadline)
-        .unwrap();
+    driver.send(large_capability_reply(920), deadline).unwrap();
     assert_eq!(
         events.recv_timeout(Duration::from_secs(1)).unwrap(),
         PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ControlTimeout))

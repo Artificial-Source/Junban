@@ -94,6 +94,8 @@ pub enum PluginHostProcessError {
     WorkerFailed,
     #[error("the plugin host runtime driver exceeded its bounded pressure")]
     Backpressure,
+    #[error("the plugin host runtime driver was forcibly closed")]
+    ForcedClosed,
     #[error("the plugin host process is closed")]
     Closed,
     #[error("the plugin host already contains sixteen runtimes")]
@@ -316,12 +318,14 @@ impl PluginHostRuntimeDriverHandle {
         self.enqueue(RuntimeDriverCommand::AuthorizeBody { token, deadline })
     }
 
-    /// Request the security-reviewed graceful process shutdown path.
+    /// Admit the security-reviewed graceful process shutdown request.
+    /// `Ok` confirms admission only; the terminal event reports its outcome.
     pub(crate) fn shutdown(&self) -> Result<(), PluginHostProcessError> {
         self.enqueue(RuntimeDriverCommand::Shutdown)
     }
 
-    /// Wake the driver and force kill/wait/reap. Repeated requests are safe.
+    /// Admit a forced kill/wait/reap request. Repeated requests are safe.
+    /// `Ok` confirms admission only; the terminal event reports its outcome.
     pub(crate) fn fatal_close(&self) -> Result<(), PluginHostProcessError> {
         if !self.shared.running.load(Ordering::Acquire) {
             return Ok(());
@@ -1190,6 +1194,13 @@ enum RuntimeBodyState {
     },
 }
 
+struct GracefulRuntimeShutdown;
+
+enum RuntimeDriverCommandOutcome {
+    Continue,
+    GracefulShutdown,
+}
+
 fn run_runtime_driver(
     mut process: PluginHostProcess,
     commands: Receiver<RuntimeDriverCommand>,
@@ -1201,22 +1212,22 @@ fn run_runtime_driver(
         runtime_driver_loop(&mut process, &commands, &events, &wake, &shared)
     }));
     let mut result = match outcome {
-        Ok(result) => result,
-        Err(_) => match process.fatal_close() {
-            Ok(()) => Err(PluginHostProcessError::WorkerFailed),
-            Err(error) => Err(error),
-        },
+        Ok(Ok(GracefulRuntimeShutdown)) => Ok(()),
+        Ok(Err(error)) => Err(error),
+        Err(_) => forced_close(&mut process, PluginHostProcessError::WorkerFailed),
     };
-    if process.phase != ProcessPhase::Closed
-        && let Err(error) = process.fatal_close()
-    {
-        result = Err(error);
+    if process.phase != ProcessPhase::Closed {
+        match process.fatal_close() {
+            Ok(()) if result.is_ok() => result = Err(PluginHostProcessError::ForcedClosed),
+            Ok(()) => {}
+            Err(error) => result = Err(error),
+        }
     }
     shared.running.store(false, Ordering::Release);
-    if shared.event_consumer_alive.load(Ordering::Acquire) {
-        // One channel slot is reserved for this post-reap terminal event.
-        let _ = events.try_send(PluginHostRuntimeEvent::Closed(result));
-    }
+    // One channel slot is reserved for this post-reap terminal event. During
+    // receiver Drop the channel remains connected until this driver is joined,
+    // so consumer loss also publishes its non-graceful cause before teardown.
+    let _ = events.try_send(PluginHostRuntimeEvent::Closed(result));
 }
 
 fn runtime_driver_loop(
@@ -1225,7 +1236,7 @@ fn runtime_driver_loop(
     events: &SyncSender<PluginHostRuntimeEvent>,
     wake: &Receiver<()>,
     shared: &RuntimeDriverShared,
-) -> Result<(), PluginHostProcessError> {
+) -> Result<GracefulRuntimeShutdown, PluginHostProcessError> {
     let mut writer_completion: Option<PendingWriterCompletion> = None;
     let mut body_state = RuntimeBodyState::None;
     let mut next_body_token = 1_u64;
@@ -1234,7 +1245,7 @@ fn runtime_driver_loop(
         if shared.close_requested.load(Ordering::Acquire)
             || !shared.event_consumer_alive.load(Ordering::Acquire)
         {
-            return process.fatal_close();
+            return forced_close(process, PluginHostProcessError::ForcedClosed);
         }
         match shared.violation.load(Ordering::Acquire) {
             DRIVER_VIOLATION_NONE => {}
@@ -1312,17 +1323,18 @@ fn runtime_driver_loop(
         if writer_completion.is_none() {
             match commands.try_recv() {
                 Ok(command) => {
-                    handle_runtime_driver_command(
+                    match handle_runtime_driver_command(
                         process,
                         command,
                         shared,
                         &mut writer_completion,
                         &mut body_state,
-                    )?;
-                    if process.phase == ProcessPhase::Closed {
-                        return Ok(());
+                    )? {
+                        RuntimeDriverCommandOutcome::Continue => continue,
+                        RuntimeDriverCommandOutcome::GracefulShutdown => {
+                            return Ok(GracefulRuntimeShutdown);
+                        }
                     }
-                    continue;
                 }
                 Err(TryRecvError::Disconnected) => {
                     return process.fail(PluginHostProcessError::Closed);
@@ -1375,7 +1387,7 @@ fn handle_runtime_driver_command(
     shared: &RuntimeDriverShared,
     writer_completion: &mut Option<PendingWriterCompletion>,
     body_state: &mut RuntimeBodyState,
-) -> Result<(), PluginHostProcessError> {
+) -> Result<RuntimeDriverCommandOutcome, PluginHostProcessError> {
     match command {
         RuntimeDriverCommand::Send { message, deadline } => {
             let body_bytes = message.body.len();
@@ -1429,7 +1441,10 @@ fn handle_runtime_driver_command(
                 deadline,
             };
         }
-        RuntimeDriverCommand::Shutdown => return process.shutdown(),
+        RuntimeDriverCommand::Shutdown => {
+            process.shutdown()?;
+            return Ok(RuntimeDriverCommandOutcome::GracefulShutdown);
+        }
         #[cfg(test)]
         RuntimeDriverCommand::PanicDriverForTest => panic!("deterministic driver panic"),
         #[cfg(test)]
@@ -1448,7 +1463,17 @@ fn handle_runtime_driver_command(
             }
         }
     }
-    Ok(())
+    Ok(RuntimeDriverCommandOutcome::Continue)
+}
+
+fn forced_close<T>(
+    process: &mut PluginHostProcess,
+    cause: PluginHostProcessError,
+) -> Result<T, PluginHostProcessError> {
+    match process.fatal_close() {
+        Ok(()) => Err(cause),
+        Err(cleanup) => Err(cleanup),
+    }
 }
 
 fn handle_runtime_reader_event(

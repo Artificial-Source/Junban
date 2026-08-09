@@ -1,14 +1,14 @@
 # Phase 7 ordinary plugin-query capability contract
 
 Date: 2026-08-09
-Status: planning authority only — `P7-PLAN-2D-005` and subsidiary `P7-PLAN-2D-005-UUID` are high/fixed-in-plan; focused recheck pending
+Status: focused planning recheck **APPROVED** at exact `dbf63a58f38df245b0b62337b29c644b8054984c` — `P7-PLAN-2D-005` and `P7-PLAN-2D-005-UUID` are fixed/closed and authorize app/storage coding only
 Parent authorities: [`phase-7-context-map.md`](phase-7-context-map.md), [`phase-7-wit-contract.md`](phase-7-wit-contract.md), [`phase-7-schema-contract.md`](phase-7-schema-contract.md)
 
 ## Finding and implementation gate
 
 `P7-PLAN-2D-005` found that the frozen WIT described ordinary task/project/tag reads broadly but did not specify the internal AppService/SQLite query authority strongly enough to implement the server callback safely. The server-only callback implementation correctly stopped rather than inventing a cursor, snapshot, secret, or byte-limit contract. Query-authority review of exact `b4905b1d7afdd0ef8f95b6739eb8f5bebe34d1d1` then raised subsidiary high `P7-PLAN-2D-005-UUID`: the cursor plan incorrectly rejected non-RFC UUID variants even though existing Junban authority accepts every UUID that parses and canonical lowercase round-trips, and schema-v7 `TEXT` resource IDs and `event_epoch` impose no variant or version constraint.
 
-This document freezes the smallest implementation authority that satisfies the existing WIT and corrects that UUID rule. It changes no WIT or generated body, JBP1/JRI1/package hash, schema SQL/version/migration, public DTO/OpenAPI route, or dependency package. Query/callback coding is blocked until one focused review approves `P7-PLAN-2D-005`, including its `P7-PLAN-2D-005-UUID` correction. Existing resync implementation and remaining Slice 2C supervisor fixes are independent and may continue. No Slice 2D, Slice 2C, Wave 2, supervisor, resync, or callback acceptance is claimed.
+This document freezes the smallest implementation authority that satisfies the existing WIT and corrects that UUID rule. The focused recheck at exact `dbf63a58f38df245b0b62337b29c644b8054984c` **APPROVED** it, closing `P7-PLAN-2D-005` and `P7-PLAN-2D-005-UUID` and authorizing app/storage coding. It preserves every UUID octet, nil/non-RFC/version-bit semantics, the fixed 122-byte envelope, MAC, and error mapping. It changes no WIT or generated body, JBP1/JRI1/package hash, schema SQL/version/migration, public DTO/OpenAPI route, or dependency package. This planning approval does not accept an implementation or callback composition, nor Slice 2D, Slice 2C, Wave 2, supervisor, or resync.
 
 ## Capability and ownership matrix
 
@@ -134,7 +134,7 @@ The API is not the existing `TaskQuery` cursor and cannot replace resync's fixed
 
 ## Focused implementation and review matrix
 
-Before query/callback coding resumes, one focused reviewer must approve this written authority. The later implementation must retain focused tests for:
+The focused reviewer approved this written authority at exact `dbf63a58f38df245b0b62337b29c644b8054984c`; later app/storage implementation must retain focused tests for:
 
 - validation bounds, pre-normalization collection ceilings, sorted/deduplicated set normalization, and normalized-query hash goldens/one-field changes;
 - exact task/project/section/parent ID predicates, all-of tags, status/priority membership, half-open due boundaries, and literal `%`, `_`, and `\` search escaping across title/description;
@@ -148,4 +148,4 @@ Before query/callback coding resumes, one focused reviewer must approve this wri
 - project/tag sampled-global-revision presentation and task row revisions;
 - ordinary default startup and a profile with no plugin query creating no `ai-secrets.json`, AI/provider runtime, Wasmtime engine, or plugin-host process.
 
-Approval of this plan would authorize only the ordinary query/callback implementation. It would not accept that implementation, final callback composition, resync, the supervisor, Slice 2C, Slice 2D, or Wave 2.
+This approval authorizes app/storage coding only. It does not accept an implementation, callback composition, resync, the supervisor, Slice 2C, Slice 2D, or Wave 2.

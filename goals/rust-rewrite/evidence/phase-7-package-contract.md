@@ -1,7 +1,7 @@
 # Phase 7 JBP1 package and registry contract
 
 Date: 2026-08-04
-Status: frozen Wave 1 production authority; package implementation and focused security review accepted; Slice 2D HTTP bridge clarification is fixed in plan under `P7-PLAN-2D-003` but pending focused API/planning recheck and changes no JBP1/JRI1/package hash
+Status: frozen Wave 1 production authority; package implementation and focused security review accepted; focused Slice 2D review at exact `08c42c5b44411fdb4b81545c993a60a80960682d` accepted the HTTP bridge and fixed/closed `P7-PLAN-2D-003`; the overall **REVISE** concerns `P7-PLAN-2D-001`, `002`, and `004` only and changes no JBP1/JRI1/package hash
 Parent authority: [`phase-7-context-map.md`](phase-7-context-map.md)
 Schema authority: [`phase-7-schema-contract.md`](phase-7-schema-contract.md)
 WIT authority: [`phase-7-wit-contract.md`](phase-7-wit-contract.md)
@@ -282,7 +282,7 @@ SQLite publication/reconciliation ordering, orphan cleanup, restore behavior and
 - Rust/TypeScript golden package byte/signature/import vectors on Linux/macOS/Windows;
 - parser fuzz/property corpus with no panic/unbounded allocation; signature verification always after structural/length bounds and before publication;
 - diagnostics/logs/API responses contain no package bytes, signature, private key, bearer, DB path or unrestricted guest metadata;
-- Slice 2D HTTP fixtures cover every exact request/response allowlist name; lowercase token, sort, duplicate, per-name/value, internal-HTAB, edge-OWS/control, count and 64-KiB aggregate boundaries; omitted nonallowlisted response headers; duplicate/invalid allowlisted and oversized raw response metadata as `invalid-response`; every forbidden authorization/cookie/Host/content-length/forwarding/proxy/hop-by-hop/`x-junban-*` name; transport-owned Host/content length/one delivery ID/identity encoding; no cookies/redirects/proxies/retries; zero/one callback with second-call no-send; durable pre-send `DispatchingHttp`; exact same-memory ambiguous resend; and process-restart unresolved with no guest rerun.
+- Slice 2D HTTP fixtures retained for focused-review-fixed/closed `P7-PLAN-2D-003` cover every exact request/response allowlist name; lowercase token, sort, duplicate, per-name/value, internal-HTAB, edge-OWS/control, count and 64-KiB aggregate boundaries; omitted nonallowlisted response headers; duplicate/invalid allowlisted and oversized raw response metadata as `invalid-response`; every forbidden authorization/cookie/Host/content-length/forwarding/proxy/hop-by-hop/`x-junban-*` name; transport-owned Host/content length/one delivery ID/identity encoding; no cookies/redirects/proxies/retries; zero/one callback with second-call no-send; durable pre-send `DispatchingHttp`; exact same-memory ambiguous resend; and process-restart unresolved with no guest rerun.
 
 ## Security review gate
 

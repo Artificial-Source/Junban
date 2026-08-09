@@ -8,7 +8,7 @@
 use std::{
     error::Error as StdError,
     io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     time::Duration,
 };
 
@@ -101,8 +101,8 @@ impl DispatchingHttpPermit {
 
 /// Stateless plugin HTTPS transport.
 ///
-/// A fresh DNS answer and a fresh one-destination client are used for every
-/// call. There is no internal retry or connection reuse across calls.
+/// A fresh DNS answer set and a fresh pinned client are used for every call.
+/// There is no internal retry or connection reuse across calls.
 #[derive(Debug, Default)]
 pub struct PluginHttpTransport;
 
@@ -465,7 +465,7 @@ fn request_method(method: GuestHttpMethod) -> Method {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PinnedDestination {
     host: String,
-    address: SocketAddr,
+    addresses: Vec<SocketAddrV4>,
 }
 
 async fn resolve_destination(request: &ValidatedRequest) -> Result<PinnedDestination, HttpError> {
@@ -490,25 +490,25 @@ fn pin_destination(
     if answers.is_empty() || answers.len() > PLUGIN_HTTP_DNS_ANSWERS_MAX {
         return Err(dns_denied());
     }
+    let mut addresses = Vec::with_capacity(answers.len());
     for answer in answers {
-        if answer.port() != port
-            || matches!(answer, SocketAddr::V6(address) if address.scope_id() != 0)
-            || !is_public_destination(answer.ip())
-        {
+        // Portable route-aware Prefix64 and tunnel discovery is unavailable,
+        // so IPv6 answers are omitted rather than guessed or classified.
+        let SocketAddr::V4(address) = answer else {
+            continue;
+        };
+        if address.port() != port || !is_public_ipv4(*address.ip()) {
             return Err(dns_denied());
         }
+        addresses.push(*address);
+    }
+    if addresses.is_empty() {
+        return Err(dns_denied());
     }
     Ok(PinnedDestination {
         host: host.to_owned(),
-        address: answers[0],
+        addresses,
     })
-}
-
-fn is_public_destination(address: IpAddr) -> bool {
-    match address {
-        IpAddr::V4(address) => is_public_ipv4(address),
-        IpAddr::V6(address) => is_public_ipv6(address),
-    }
 }
 
 fn is_public_ipv4(address: Ipv4Addr) -> bool {
@@ -546,34 +546,13 @@ fn ipv4_in_prefix(address: Ipv4Addr, network: Ipv4Addr, prefix: u8) -> bool {
     u32::from(address) & mask == u32::from(network) & mask
 }
 
-fn is_public_ipv6(address: Ipv6Addr) -> bool {
-    // Fail closed outside the currently allocated global-unicast 2000::/3.
-    if !ipv6_in_prefix(address, Ipv6Addr::new(0x2000, 0, 0, 0, 0, 0, 0, 0), 3) {
-        return false;
-    }
-    let denied = [
-        (Ipv6Addr::new(0x2001, 0, 0, 0, 0, 0, 0, 0), 23),
-        (Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), 32),
-        (Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16),
-        (Ipv6Addr::new(0x2620, 0x004f, 0x8000, 0, 0, 0, 0, 0), 48),
-        (Ipv6Addr::new(0x3ffe, 0, 0, 0, 0, 0, 0, 0), 16),
-        (Ipv6Addr::new(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20),
-    ];
-    !denied
-        .iter()
-        .any(|(network, prefix)| ipv6_in_prefix(address, *network, *prefix))
-}
-
-fn ipv6_in_prefix(address: Ipv6Addr, network: Ipv6Addr, prefix: u8) -> bool {
-    let mask = if prefix == 0 {
-        0
-    } else {
-        u128::MAX << (128 - u32::from(prefix))
-    };
-    u128::from(address) & mask == u128::from(network) & mask
-}
-
 fn build_pinned_client(destination: &PinnedDestination) -> Result<Client, HttpError> {
+    let addresses = destination
+        .addresses
+        .iter()
+        .copied()
+        .map(SocketAddr::V4)
+        .collect::<Vec<_>>();
     Client::builder()
         .redirect(Policy::none())
         .no_proxy()
@@ -586,7 +565,7 @@ fn build_pinned_client(destination: &PinnedDestination) -> Result<Client, HttpEr
         .no_brotli()
         .no_zstd()
         .no_deflate()
-        .resolve(&destination.host, destination.address)
+        .resolve_to_addrs(&destination.host, &addresses)
         .build()
         .map_err(|_| {
             http_error(
@@ -1328,7 +1307,7 @@ mod tests {
     }
 
     #[test]
-    fn public_address_policy_rejects_special_ipv4_and_ipv6_ranges() {
+    fn public_address_policy_rejects_every_special_ipv4_range() {
         for address in [
             "0.0.0.0",
             "10.0.0.1",
@@ -1350,73 +1329,103 @@ mod tests {
             "239.255.255.255",
             "240.0.0.1",
             "255.255.255.255",
-            "::",
-            "::1",
-            "::ffff:8.8.8.8",
-            "::8.8.8.8",
-            "64:ff9b::808:808",
-            "64:ff9b:1::1",
-            "100::1",
-            "2001::1",
-            "2001:2::1",
-            "2001:db8::1",
-            "2002:0808:0808::1",
-            "2620:4f:8000::1",
-            "3ffe::1",
-            "3fff::1",
-            "5f00::1",
-            "fc00::1",
-            "fe80::1",
-            "ff02::1",
         ] {
-            let address: IpAddr = address.parse().unwrap();
-            assert!(!is_public_destination(address), "{address}");
+            let address: Ipv4Addr = address.parse().unwrap();
+            assert!(!is_public_ipv4(address), "{address}");
         }
-        for address in ["8.8.8.8", "93.184.216.34", "2606:4700:4700::1111"] {
-            let address: IpAddr = address.parse().unwrap();
-            assert!(is_public_destination(address), "{address}");
+        for address in ["8.8.8.8", "93.184.216.34"] {
+            let address: Ipv4Addr = address.parse().unwrap();
+            assert!(is_public_ipv4(address), "{address}");
         }
     }
 
     #[test]
-    fn all_dns_answers_are_checked_and_exactly_one_is_pinned() {
-        let public_a: SocketAddr = "93.184.216.34:443".parse().unwrap();
-        let public_b: SocketAddr = "8.8.8.8:443".parse().unwrap();
-        let private: SocketAddr = "127.0.0.1:443".parse().unwrap();
-        let pinned = pin_destination("api.example.com", 443, &[public_a, public_b]).unwrap();
-        assert_eq!(pinned.host, "api.example.com");
-        assert_eq!(pinned.address, public_a);
-        assert!(pin_destination("api.example.com", 443, &[public_a, private]).is_err());
-        assert!(pin_destination("api.example.com", 443, &[]).is_err());
-        assert!(pin_destination("api.example.com", 8443, &[public_a]).is_err());
-        assert!(
-            pin_destination(
+    fn ipv6_only_dns_answers_fail_not_sent_for_every_translation_form() {
+        let cases = [
+            ("ordinary GUA", "[2606:4700:4700::1111]:443"),
+            ("well-known NAT64 /96", "[64:ff9b::c000:221]:443"),
+            ("network-specific /32", "[2001:db8:c000:221::]:443"),
+            ("network-specific /40", "[2001:db8:1c0:2:21::]:443"),
+            ("network-specific /48", "[2001:db8:122:c000:2:2100::]:443"),
+            ("network-specific /56", "[2001:db8:122:3c0:0:221::]:443"),
+            ("network-specific /64", "[2001:db8:122:344:c0:2:2100::]:443"),
+            ("network-specific /96", "[2001:db8:122:344::192.0.2.33]:443"),
+            ("ISATAP", "[2001:db8:1:2:0:5efe:c000:221]:443"),
+            ("6rd", "[2001:db8:c000:221::]:443"),
+            ("6to4", "[2002:c000:221::]:443"),
+            ("IPv4-mapped", "[::ffff:192.0.2.33]:443"),
+            ("IPv4-compatible", "[::192.0.2.33]:443"),
+        ];
+        for (name, address) in cases {
+            let error = pin_destination(
                 "api.example.com",
                 443,
-                &vec![public_a; PLUGIN_HTTP_DNS_ANSWERS_MAX + 1],
+                &[address.parse::<SocketAddr>().unwrap()],
             )
-            .is_err()
-        );
+            .expect_err(name);
+            assert_error(error, HttpErrorCode::DnsDenied, DeliveryState::NotSent);
+        }
     }
 
     #[test]
-    fn scoped_ipv6_and_rebinding_answers_fail_closed_without_re_resolution() {
-        let scoped = SocketAddr::V6(std::net::SocketAddrV6::new(
+    fn mixed_dns_answers_pin_only_exact_public_ipv4_destinations() {
+        let public_a = "93.184.216.34:443".parse::<SocketAddrV4>().unwrap();
+        let public_b = "8.8.8.8:443".parse::<SocketAddrV4>().unwrap();
+        let scoped_ipv6 = SocketAddr::V6(std::net::SocketAddrV6::new(
             "2606:4700:4700::1111".parse().unwrap(),
             443,
             0,
             2,
         ));
-        assert!(pin_destination("api.example.com", 443, &[scoped]).is_err());
+        let answers = [
+            scoped_ipv6,
+            SocketAddr::V4(public_a),
+            "[64:ff9b::808:808]:443".parse().unwrap(),
+            SocketAddr::V4(public_b),
+            "[fc00::1]:443".parse().unwrap(),
+        ];
+        let pinned = pin_destination("api.example.com", 443, &answers).unwrap();
+        assert_eq!(pinned.host, "api.example.com");
+        assert_eq!(pinned.addresses, vec![public_a, public_b]);
+        build_pinned_client(&pinned).unwrap();
+    }
 
-        let first: SocketAddr = "93.184.216.34:443".parse().unwrap();
-        let rebound: SocketAddr = "8.8.8.8:443".parse().unwrap();
-        let denied: SocketAddr = "169.254.169.254:443".parse().unwrap();
-        let first_pin = pin_destination("api.example.com", 443, &[first]).unwrap();
-        let second_pin = pin_destination("api.example.com", 443, &[rebound]).unwrap();
-        assert_eq!(first_pin.address, first);
-        assert_eq!(second_pin.address, rebound);
-        assert!(pin_destination("api.example.com", 443, &[denied]).is_err());
+    #[test]
+    fn any_unsafe_ipv4_rejects_the_whole_mixed_dns_answer() {
+        let public: SocketAddr = "93.184.216.34:443".parse().unwrap();
+        let private: SocketAddr = "127.0.0.1:443".parse().unwrap();
+        let ipv6: SocketAddr = "[2606:4700:4700::1111]:443".parse().unwrap();
+        for answers in [[public, ipv6, private], [private, ipv6, public]] {
+            let error = pin_destination("api.example.com", 443, &answers).unwrap_err();
+            assert_error(error, HttpErrorCode::DnsDenied, DeliveryState::NotSent);
+        }
+    }
+
+    #[test]
+    fn dns_answer_bounds_ports_and_rebinding_remain_fail_closed() {
+        let first = "93.184.216.34:443".parse::<SocketAddrV4>().unwrap();
+        let rebound = "8.8.8.8:443".parse::<SocketAddrV4>().unwrap();
+        let first_pin = pin_destination("api.example.com", 443, &[SocketAddr::V4(first)]).unwrap();
+        let second_pin =
+            pin_destination("api.example.com", 443, &[SocketAddr::V4(rebound)]).unwrap();
+        assert_eq!(first_pin.addresses, vec![first]);
+        assert_eq!(second_pin.addresses, vec![rebound]);
+
+        let no_addresses = pin_destination("api.example.com", 443, &[]).unwrap_err();
+        assert_error(
+            no_addresses,
+            HttpErrorCode::DnsDenied,
+            DeliveryState::NotSent,
+        );
+        assert!(pin_destination("api.example.com", 8443, &[SocketAddr::V4(first)],).is_err());
+        assert!(
+            pin_destination(
+                "api.example.com",
+                443,
+                &vec![SocketAddr::V4(first); PLUGIN_HTTP_DNS_ANSWERS_MAX + 1],
+            )
+            .is_err()
+        );
     }
 
     #[test]

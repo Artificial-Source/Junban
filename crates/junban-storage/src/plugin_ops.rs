@@ -3226,38 +3226,22 @@ pub(crate) struct InvocationReceiptRequest {
 
 fn invocation_receipt_request_json(
     operation_id: OperationId,
-    plugin_id: &PluginId,
-    package_generation: u64,
-    activation_epoch: u64,
-    hook_kind: PluginHookKind,
-    entry: &PluginManifestEntry,
     payload_sha256: Sha256Digest,
-    host_session_id: Option<OperationId>,
-    request_sha256: &Sha256Digest,
-    delivery_operation_id: OperationId,
+    executed: InvocationReceiptExecution,
 ) -> Result<String, RepositoryError> {
-    let persisted_entry_id =
-        junban_app::plugin_manifest_entry_persisted_id(entry).ok_or(RepositoryError::Conflict)?;
+    let persisted_entry_id = junban_app::plugin_manifest_entry_persisted_id(&executed.entry)
+        .ok_or(RepositoryError::Conflict)?;
     let stable = PluginOperatorRequestIdentity::new(
         operation_id,
-        plugin_id.clone(),
-        hook_kind,
+        executed.plugin_id.clone(),
+        executed.hook_kind,
         persisted_entry_id,
         payload_sha256,
     )?;
     canonical_json(&InvocationReceiptRequest {
         op: "plugin_invocation_terminal".to_owned(),
         stable,
-        executed: InvocationReceiptExecution {
-            plugin_id: plugin_id.clone(),
-            package_generation,
-            host_session_id,
-            activation_epoch,
-            hook_kind,
-            entry: entry.clone(),
-            request_sha256: request_sha256.clone(),
-            delivery_operation_id,
-        },
+        executed,
     })
 }
 
@@ -3271,15 +3255,17 @@ fn reservation_receipt_request_json(
     );
     invocation_receipt_request_json(
         request.operation_id,
-        &request.plugin_id,
-        request.package_generation,
-        request.activation_epoch,
-        request.hook_kind,
-        &request.entry,
         payload_sha256,
-        delivery.map(|delivery| delivery.authority.host_session_id),
-        &request.request_sha256,
-        request.delivery_operation_id,
+        InvocationReceiptExecution {
+            plugin_id: request.plugin_id.clone(),
+            package_generation: request.package_generation,
+            host_session_id: delivery.map(|delivery| delivery.authority.host_session_id),
+            activation_epoch: request.activation_epoch,
+            hook_kind: request.hook_kind,
+            entry: request.entry.clone(),
+            request_sha256: request.request_sha256.clone(),
+            delivery_operation_id: request.delivery_operation_id,
+        },
     )
 }
 
@@ -3293,15 +3279,17 @@ fn stored_invocation_receipt_request_json(
     );
     invocation_receipt_request_json(
         invocation.operation_id,
-        &invocation.plugin_id,
-        invocation.package_generation,
-        invocation.activation_epoch,
-        invocation.hook_kind,
-        &invocation.entry,
         payload_sha256,
-        delivery.map(|delivery| delivery.authority.host_session_id),
-        &invocation.request_sha256,
-        invocation.delivery_operation_id,
+        InvocationReceiptExecution {
+            plugin_id: invocation.plugin_id.clone(),
+            package_generation: invocation.package_generation,
+            host_session_id: delivery.map(|delivery| delivery.authority.host_session_id),
+            activation_epoch: invocation.activation_epoch,
+            hook_kind: invocation.hook_kind,
+            entry: invocation.entry.clone(),
+            request_sha256: invocation.request_sha256.clone(),
+            delivery_operation_id: invocation.delivery_operation_id,
+        },
     )
 }
 

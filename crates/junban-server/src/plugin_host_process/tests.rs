@@ -574,6 +574,16 @@ fn spawn_failed_retry_is_bounded_and_preserves_other_errors() {
 #[test]
 fn wrong_hello_wrong_type_partial_oversize_and_eof_fail_closed() {
     let _guard = process_test_guard();
+    let parent_hello_len = parent_wire(ParentFrame::Hello {
+        protocol_name: HOST_PROTOCOL_NAME.into(),
+        protocol_version: HOST_PROTOCOL_VERSION,
+        junban_version: HOST_JUNBAN_VERSION.into(),
+        host_session_id: SESSION.into(),
+    })
+    .len();
+    let synchronized_eof = format!(
+        "/bin/dd if=/dev/stdin of=/dev/null bs=1 count={parent_hello_len} 2>/dev/null\nexit 0\n"
+    );
     let cases = [
         (
             "wrong-session",
@@ -608,7 +618,7 @@ fn wrong_hello_wrong_type_partial_oversize_and_eof_fail_closed() {
         (
             "eof",
             String::new(),
-            "exit 0\n",
+            synchronized_eof.as_str(),
             PluginHostProcessError::TransportFailed,
         ),
     ];

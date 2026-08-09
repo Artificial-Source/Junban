@@ -2,7 +2,7 @@ use std::{
     cell::Cell,
     fs,
     io::Cursor,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant, SystemTime},
 };
@@ -96,6 +96,50 @@ fn synchronized_shutdown_script(terminal: &[u8], tail: &str) -> String {
         parent_shutdown.len(),
         shell_write(terminal),
     )
+}
+
+#[cfg(unix)]
+fn paused_shutdown_fixture(label: &str) -> (Fixture, PathBuf, PathBuf) {
+    let parent_hello = parent_wire(ParentFrame::Hello {
+        protocol_name: HOST_PROTOCOL_NAME.into(),
+        protocol_version: HOST_PROTOCOL_VERSION,
+        junban_version: HOST_JUNBAN_VERSION.into(),
+        host_session_id: SESSION.into(),
+    });
+    let parent_before_shutdown =
+        parent_hello.len() + parent_message_wire(&load_message(0, vec![b'a'])).len();
+    let parent_shutdown = parent_wire(ParentFrame::Shutdown {
+        host_session_id: SESSION.into(),
+    });
+    let acknowledgement = wire(&ChildFrame::ShutdownComplete {
+        host_session_id: SESSION.into(),
+    });
+    let fixture = Fixture::new(
+        label,
+        &format!(
+            "{}/bin/dd if=/dev/stdin of=before-shutdown.bin bs=1 count={} 2>/dev/null\n/bin/dd if=/dev/stdin of=shutdown.bin bs=1 count={} 2>/dev/null\nprintf x > shutdown-entered\n/bin/dd if=shutdown-release of=/dev/null bs=1 count=1 2>/dev/null\n{}exit 0\n",
+            shell_write(&loaded_output(1)),
+            parent_before_shutdown,
+            parent_shutdown.len(),
+            shell_write(&acknowledgement),
+        ),
+    );
+    let entered = fixture.root.join("shutdown-entered");
+    let release = fixture.root.join("shutdown-release");
+    for fifo in [&entered, &release] {
+        assert!(Command::new("mkfifo").arg(fifo).status().unwrap().success());
+    }
+    (fixture, entered, release)
+}
+
+#[cfg(unix)]
+fn wait_for_paused_shutdown(entered: &Path) {
+    assert_eq!(fs::read(entered).unwrap(), b"x");
+}
+
+#[cfg(unix)]
+fn release_paused_shutdown(release: &Path) {
+    fs::write(release, b"x").unwrap();
 }
 
 #[cfg(unix)]
@@ -966,16 +1010,155 @@ fn runtime_driver_success_terminal_is_reserved_for_graceful_shutdown() {
         &synchronized_shutdown_script(&acknowledgement, "exit 0\n"),
     );
     let (driver, events, pid) = connect_loaded_driver(&fixture, 0);
+    let shared = driver.shared.clone();
     driver.shutdown().unwrap();
     assert_eq!(
         events.recv_timeout(Duration::from_secs(1)).unwrap(),
         PluginHostRuntimeEvent::Closed(Ok(()))
+    );
+    driver.fatal_close().unwrap();
+    assert_eq!(
+        shared.terminal_state(),
+        RuntimeDriverTerminalState::GracefulCommitted
     );
     assert_eq!(
         events.recv_timeout(Duration::from_secs(1)),
         Err(mpsc::RecvTimeoutError::Disconnected)
     );
     assert_process_absent(pid);
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_fatal_wins_paused_graceful_and_closes_late_admission() {
+    let _guard = process_test_guard();
+    let (fixture, entered, release) = paused_shutdown_fixture("driver-shutdown-fatal-race");
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    let shared = driver.shared.clone();
+
+    driver.shutdown().unwrap();
+    wait_for_paused_shutdown(&entered);
+    let late_send = driver.send(
+        large_capability_reply(940),
+        deadline_after(Duration::from_secs(1)),
+    );
+    let late_body = driver.authorize_body(
+        PendingPluginHostBodyToken(1),
+        deadline_after(Duration::from_secs(1)),
+    );
+    let late_shutdown = driver.shutdown();
+    driver.fatal_close().unwrap();
+    driver.fatal_close().unwrap();
+    release_paused_shutdown(&release);
+
+    assert_eq!(late_send, Err(PluginHostProcessError::Closed));
+    assert_eq!(late_body, Err(PluginHostProcessError::Closed));
+    assert_eq!(late_shutdown, Err(PluginHostProcessError::Closed));
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ForcedClosed))
+    );
+    assert_eq!(shared.queued_body_bytes.load(Ordering::Acquire), 0);
+    assert_process_absent(pid);
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_handle_drop_wins_paused_graceful_shutdown() {
+    let _guard = process_test_guard();
+    let (fixture, entered, release) = paused_shutdown_fixture("driver-shutdown-handle-drop-race");
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    let shared = driver.shared.clone();
+
+    driver.shutdown().unwrap();
+    wait_for_paused_shutdown(&entered);
+    drop(driver);
+    release_paused_shutdown(&release);
+
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ForcedClosed))
+    );
+    assert_eq!(shared.queued_body_bytes.load(Ordering::Acquire), 0);
+    assert_process_absent(pid);
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_protocol_violation_wins_paused_graceful_shutdown() {
+    let _guard = process_test_guard();
+    let (fixture, entered, release) = paused_shutdown_fixture("driver-shutdown-protocol-race");
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    let shared = driver.shared.clone();
+
+    driver.shutdown().unwrap();
+    wait_for_paused_shutdown(&entered);
+    let violation = driver.send(
+        ParentMessage::new(
+            ParentFrame::Hello {
+                protocol_name: HOST_PROTOCOL_NAME.into(),
+                protocol_version: HOST_PROTOCOL_VERSION,
+                junban_version: HOST_JUNBAN_VERSION.into(),
+                host_session_id: SESSION.into(),
+            },
+            Vec::new(),
+        ),
+        deadline_after(Duration::from_secs(1)),
+    );
+    release_paused_shutdown(&release);
+
+    assert_eq!(violation, Err(PluginHostProcessError::ProtocolRejected));
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ProtocolRejected))
+    );
+    assert_eq!(shared.queued_body_bytes.load(Ordering::Acquire), 0);
+    assert_process_absent(pid);
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_pressure_wins_paused_graceful_shutdown() {
+    let _guard = process_test_guard();
+    let (fixture, entered, release) = paused_shutdown_fixture("driver-shutdown-pressure-race");
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    let shared = driver.shared.clone();
+
+    driver.shutdown().unwrap();
+    wait_for_paused_shutdown(&entered);
+    shared.force_terminal(RuntimeDriverTerminalState::ForcedPressure);
+    signal_driver(&driver.wake);
+    release_paused_shutdown(&release);
+
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::Backpressure))
+    );
+    assert_eq!(shared.queued_body_bytes.load(Ordering::Acquire), 0);
+    assert_process_absent(pid);
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_driver_event_drop_wins_paused_graceful_without_an_orphan() {
+    let _guard = process_test_guard();
+    let (fixture, entered, release) = paused_shutdown_fixture("driver-shutdown-event-drop-race");
+    let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    let shared = events.shared.clone();
+
+    driver.shutdown().unwrap();
+    wait_for_paused_shutdown(&entered);
+    let dropper = std::thread::spawn(move || drop(events));
+    release_paused_shutdown(&release);
+    dropper.join().unwrap();
+
+    assert_eq!(
+        shared.terminal_state(),
+        RuntimeDriverTerminalState::ForcedClosed
+    );
+    assert_eq!(shared.queued_body_bytes.load(Ordering::Acquire), 0);
+    assert_process_absent(pid);
+    driver.fatal_close().unwrap();
 }
 
 #[cfg(unix)]
@@ -1533,6 +1716,7 @@ fn runtime_driver_explicit_fatal_during_blocked_body_and_writer_is_non_graceful(
         &format!("{}exec /bin/sleep 30\n", shell_write(&output)),
     );
     let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    let shared = driver.shared.clone();
     let (_, token) = runtime_header(&events);
     assert!(token.is_some());
     driver.fatal_close().unwrap();
@@ -1541,6 +1725,7 @@ fn runtime_driver_explicit_fatal_during_blocked_body_and_writer_is_non_graceful(
         events.recv_timeout(Duration::from_secs(1)).unwrap(),
         PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ForcedClosed))
     );
+    assert_eq!(shared.queued_body_bytes.load(Ordering::Acquire), 0);
     assert_process_absent(pid);
 
     let reply = large_capability_reply(931);
@@ -1567,6 +1752,7 @@ fn runtime_driver_explicit_fatal_during_blocked_body_and_writer_is_non_graceful(
         ),
     );
     let (driver, events, pid) = connect_loaded_driver(&fixture, 1);
+    let shared = driver.shared.clone();
     driver
         .send(reply, deadline_after(Duration::from_secs(2)))
         .unwrap();
@@ -1579,6 +1765,7 @@ fn runtime_driver_explicit_fatal_during_blocked_body_and_writer_is_non_graceful(
         events.recv_timeout(Duration::from_secs(1)).unwrap(),
         PluginHostRuntimeEvent::Closed(Err(PluginHostProcessError::ForcedClosed))
     );
+    assert_eq!(shared.queued_body_bytes.load(Ordering::Acquire), 0);
     assert_process_absent(pid);
 }
 
@@ -1612,12 +1799,15 @@ fn runtime_driver_command_producer_pressure_is_immediate_and_fail_closed() {
         shared: shared.clone(),
     };
     for _ in 0..RUNTIME_DRIVER_COMMAND_CAPACITY {
-        driver.shutdown().unwrap();
+        driver.panic_driver_for_test().unwrap();
     }
-    assert_eq!(driver.shutdown(), Err(PluginHostProcessError::Backpressure));
     assert_eq!(
-        shared.violation.load(Ordering::Acquire),
-        DRIVER_VIOLATION_PRESSURE
+        driver.panic_driver_for_test(),
+        Err(PluginHostProcessError::Backpressure)
+    );
+    assert_eq!(
+        shared.terminal_state(),
+        RuntimeDriverTerminalState::ForcedPressure
     );
 }
 

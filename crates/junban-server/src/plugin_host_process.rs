@@ -16,8 +16,8 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicU8, AtomicUsize, Ordering},
         mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
     },
     thread::JoinHandle,
@@ -58,10 +58,6 @@ const STDERR_BUFFER_BYTES: usize = 8 * 1024;
 const CHILD_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const PRODUCT_CONTROL_DEADLINE: Duration = Duration::from_millis(COMMAND_TIMEOUT_MS as u64);
 const PRODUCT_COMPILE_LOAD_DEADLINE: Duration = Duration::from_millis(COMPILE_TIMEOUT_MS as u64);
-
-const DRIVER_VIOLATION_NONE: u8 = 0;
-const DRIVER_VIOLATION_PRESSURE: u8 = 1;
-const DRIVER_VIOLATION_PROTOCOL: u8 = 2;
 
 /// Stable, redacted failures from the plugin-host process boundary.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
@@ -197,9 +193,85 @@ pub(crate) enum PluginHostRuntimeEvent {
     Closed(Result<(), PluginHostProcessError>),
 }
 
+// The sole terminal authority has only monotonic CAS transitions:
+// Open -> GracefulInProgress -> GracefulCommitted, while every forced state
+// may win from Open or GracefulInProgress and no committed state is rewritten.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+enum RuntimeDriverTerminalState {
+    Open = 0,
+    GracefulInProgress = 1,
+    GracefulCommitted = 2,
+    ForcedClosed = 3,
+    ForcedPressure = 4,
+    ForcedProtocol = 5,
+    ForcedWorker = 6,
+}
+
+impl RuntimeDriverTerminalState {
+    fn from_raw(raw: u8) -> Self {
+        match raw {
+            0 => Self::Open,
+            1 => Self::GracefulInProgress,
+            2 => Self::GracefulCommitted,
+            3 => Self::ForcedClosed,
+            4 => Self::ForcedPressure,
+            5 => Self::ForcedProtocol,
+            6 => Self::ForcedWorker,
+            _ => Self::ForcedProtocol,
+        }
+    }
+
+    const fn is_forced(self) -> bool {
+        matches!(
+            self,
+            Self::ForcedClosed | Self::ForcedPressure | Self::ForcedProtocol | Self::ForcedWorker
+        )
+    }
+
+    const fn error(self) -> Option<PluginHostProcessError> {
+        match self {
+            Self::ForcedClosed => Some(PluginHostProcessError::ForcedClosed),
+            Self::ForcedPressure => Some(PluginHostProcessError::Backpressure),
+            Self::ForcedProtocol => Some(PluginHostProcessError::ProtocolRejected),
+            Self::ForcedWorker => Some(PluginHostProcessError::WorkerFailed),
+            Self::Open | Self::GracefulInProgress | Self::GracefulCommitted => None,
+        }
+    }
+
+    const fn for_error(error: PluginHostProcessError) -> Self {
+        match error {
+            PluginHostProcessError::Backpressure => Self::ForcedPressure,
+            PluginHostProcessError::ProtocolRejected => Self::ForcedProtocol,
+            PluginHostProcessError::WorkerFailed | PluginHostProcessError::CleanupFailed => {
+                Self::ForcedWorker
+            }
+            _ => Self::ForcedClosed,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RuntimeDriverTerminalTransition {
+    state: RuntimeDriverTerminalState,
+    won: bool,
+}
+
+struct RuntimeBodyReservation {
+    shared: Arc<RuntimeDriverShared>,
+    body_bytes: usize,
+}
+
+impl Drop for RuntimeBodyReservation {
+    fn drop(&mut self) {
+        self.shared.release_body_bytes(self.body_bytes);
+    }
+}
+
 enum RuntimeDriverCommand {
     Send {
         message: Box<ParentMessage>,
+        reservation: RuntimeBodyReservation,
         deadline: Instant,
     },
     AuthorizeBody {
@@ -216,10 +288,8 @@ enum RuntimeDriverCommand {
 }
 
 struct RuntimeDriverShared {
-    running: AtomicBool,
-    close_requested: AtomicBool,
-    event_consumer_alive: AtomicBool,
-    violation: AtomicU8,
+    terminal_state: AtomicU8,
+    admission: Mutex<()>,
     queued_body_bytes: AtomicUsize,
     queued_data_events: AtomicUsize,
 }
@@ -227,23 +297,77 @@ struct RuntimeDriverShared {
 impl RuntimeDriverShared {
     fn new() -> Self {
         Self {
-            running: AtomicBool::new(true),
-            close_requested: AtomicBool::new(false),
-            event_consumer_alive: AtomicBool::new(true),
-            violation: AtomicU8::new(DRIVER_VIOLATION_NONE),
+            terminal_state: AtomicU8::new(RuntimeDriverTerminalState::Open as u8),
+            admission: Mutex::new(()),
             queued_body_bytes: AtomicUsize::new(0),
             queued_data_events: AtomicUsize::new(0),
         }
     }
 
-    fn reserve_body_bytes(&self, body_bytes: usize) -> bool {
+    fn terminal_state(&self) -> RuntimeDriverTerminalState {
+        RuntimeDriverTerminalState::from_raw(self.terminal_state.load(Ordering::Acquire))
+    }
+
+    fn begin_graceful(&self) -> bool {
+        self.terminal_state
+            .compare_exchange(
+                RuntimeDriverTerminalState::Open as u8,
+                RuntimeDriverTerminalState::GracefulInProgress as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    fn commit_graceful(&self) -> Result<(), RuntimeDriverTerminalState> {
+        self.terminal_state
+            .compare_exchange(
+                RuntimeDriverTerminalState::GracefulInProgress as u8,
+                RuntimeDriverTerminalState::GracefulCommitted as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .map(|_| ())
+            .map_err(RuntimeDriverTerminalState::from_raw)
+    }
+
+    fn force_terminal(
+        &self,
+        forced: RuntimeDriverTerminalState,
+    ) -> RuntimeDriverTerminalTransition {
+        debug_assert!(forced.is_forced());
+        let mut observed = self.terminal_state.load(Ordering::Acquire);
+        loop {
+            let state = RuntimeDriverTerminalState::from_raw(observed);
+            if !matches!(
+                state,
+                RuntimeDriverTerminalState::Open | RuntimeDriverTerminalState::GracefulInProgress
+            ) {
+                return RuntimeDriverTerminalTransition { state, won: false };
+            }
+            match self.terminal_state.compare_exchange_weak(
+                observed,
+                forced as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return RuntimeDriverTerminalTransition {
+                        state: forced,
+                        won: true,
+                    };
+                }
+                Err(actual) => observed = actual,
+            }
+        }
+    }
+
+    fn reserve_body_bytes(self: &Arc<Self>, body_bytes: usize) -> Option<RuntimeBodyReservation> {
         let mut queued = self.queued_body_bytes.load(Ordering::Acquire);
         loop {
-            let Some(updated) = queued.checked_add(body_bytes) else {
-                return false;
-            };
+            let updated = queued.checked_add(body_bytes)?;
             if updated > RUNTIME_DRIVER_QUEUED_BODY_BYTES_MAX {
-                return false;
+                return None;
             }
             match self.queued_body_bytes.compare_exchange_weak(
                 queued,
@@ -251,7 +375,12 @@ impl RuntimeDriverShared {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => return true,
+                Ok(_) => {
+                    return Some(RuntimeBodyReservation {
+                        shared: self.clone(),
+                        body_bytes,
+                    });
+                }
                 Err(actual) => queued = actual,
             }
         }
@@ -260,15 +389,6 @@ impl RuntimeDriverShared {
     fn release_body_bytes(&self, body_bytes: usize) {
         self.queued_body_bytes
             .fetch_sub(body_bytes, Ordering::AcqRel);
-    }
-
-    fn mark_violation(&self, violation: u8) {
-        let _ = self.violation.compare_exchange(
-            DRIVER_VIOLATION_NONE,
-            violation,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        );
     }
 }
 
@@ -289,24 +409,31 @@ impl PluginHostRuntimeDriverHandle {
         if !runtime_parent_frame_allowed(&message.frame)
             || validate_parent_body(&message.frame, &message.body).is_err()
         {
-            self.shared.mark_violation(DRIVER_VIOLATION_PROTOCOL);
+            self.shared
+                .force_terminal(RuntimeDriverTerminalState::ForcedProtocol);
             signal_driver(&self.wake);
             return Err(PluginHostProcessError::ProtocolRejected);
         }
-        let body_bytes = message.body.len();
-        if !self.shared.reserve_body_bytes(body_bytes) {
-            self.shared.mark_violation(DRIVER_VIOLATION_PRESSURE);
+
+        let _admission = self
+            .shared
+            .admission
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.shared.terminal_state() != RuntimeDriverTerminalState::Open {
+            return Err(PluginHostProcessError::Closed);
+        }
+        let Some(reservation) = self.shared.reserve_body_bytes(message.body.len()) else {
+            self.shared
+                .force_terminal(RuntimeDriverTerminalState::ForcedPressure);
             signal_driver(&self.wake);
             return Err(PluginHostProcessError::Backpressure);
-        }
-        let result = self.enqueue(RuntimeDriverCommand::Send {
+        };
+        self.enqueue_admitted(RuntimeDriverCommand::Send {
             message: Box::new(message),
+            reservation,
             deadline,
-        });
-        if result.is_err() {
-            self.shared.release_body_bytes(body_bytes);
-        }
-        result
+        })
     }
 
     /// Consume the exact token emitted with a pending-body header.
@@ -315,31 +442,52 @@ impl PluginHostRuntimeDriverHandle {
         token: PendingPluginHostBodyToken,
         deadline: Instant,
     ) -> Result<(), PluginHostProcessError> {
-        self.enqueue(RuntimeDriverCommand::AuthorizeBody { token, deadline })
+        self.enqueue_open(RuntimeDriverCommand::AuthorizeBody { token, deadline })
     }
 
     /// Admit the security-reviewed graceful process shutdown request.
     /// `Ok` confirms admission only; the terminal event reports its outcome.
     pub(crate) fn shutdown(&self) -> Result<(), PluginHostProcessError> {
-        self.enqueue(RuntimeDriverCommand::Shutdown)
+        let _admission = self
+            .shared
+            .admission
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !self.shared.begin_graceful() {
+            return Err(PluginHostProcessError::Closed);
+        }
+        self.enqueue_admitted(RuntimeDriverCommand::Shutdown)
     }
 
     /// Admit a forced kill/wait/reap request. Repeated requests are safe.
     /// `Ok` confirms admission only; the terminal event reports its outcome.
     pub(crate) fn fatal_close(&self) -> Result<(), PluginHostProcessError> {
-        if !self.shared.running.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        self.shared.close_requested.store(true, Ordering::Release);
+        self.shared
+            .force_terminal(RuntimeDriverTerminalState::ForcedClosed);
         signal_driver(&self.wake);
         Ok(())
     }
 
-    fn enqueue(&self, command: RuntimeDriverCommand) -> Result<(), PluginHostProcessError> {
-        if !self.shared.running.load(Ordering::Acquire) {
+    fn enqueue_open(&self, command: RuntimeDriverCommand) -> Result<(), PluginHostProcessError> {
+        let _admission = self
+            .shared
+            .admission
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.shared.terminal_state() != RuntimeDriverTerminalState::Open {
             return Err(PluginHostProcessError::Closed);
         }
+        self.enqueue_admitted(command)
+    }
+
+    fn enqueue_admitted(
+        &self,
+        command: RuntimeDriverCommand,
+    ) -> Result<(), PluginHostProcessError> {
         let Some(commands) = self.commands.as_ref() else {
+            self.shared
+                .force_terminal(RuntimeDriverTerminalState::ForcedClosed);
+            signal_driver(&self.wake);
             return Err(PluginHostProcessError::Closed);
         };
         match commands.try_send(command) {
@@ -348,34 +496,46 @@ impl PluginHostRuntimeDriverHandle {
                 Ok(())
             }
             Err(TrySendError::Full(_)) => {
-                self.shared.mark_violation(DRIVER_VIOLATION_PRESSURE);
+                self.shared
+                    .force_terminal(RuntimeDriverTerminalState::ForcedPressure);
                 signal_driver(&self.wake);
                 Err(PluginHostProcessError::Backpressure)
             }
-            Err(TrySendError::Disconnected(_)) => Err(PluginHostProcessError::Closed),
+            Err(TrySendError::Disconnected(_)) => {
+                self.shared
+                    .force_terminal(RuntimeDriverTerminalState::ForcedClosed);
+                signal_driver(&self.wake);
+                Err(PluginHostProcessError::Closed)
+            }
         }
     }
 
     #[cfg(test)]
     fn panic_driver_for_test(&self) -> Result<(), PluginHostProcessError> {
-        self.enqueue(RuntimeDriverCommand::PanicDriverForTest)
+        self.enqueue_open(RuntimeDriverCommand::PanicDriverForTest)
     }
 
     #[cfg(test)]
     fn panic_writer_for_test(&self) -> Result<(), PluginHostProcessError> {
-        self.enqueue(RuntimeDriverCommand::PanicWriterForTest)
+        self.enqueue_open(RuntimeDriverCommand::PanicWriterForTest)
     }
 
     #[cfg(test)]
     fn panic_reader_for_test(&self) -> Result<(), PluginHostProcessError> {
-        self.enqueue(RuntimeDriverCommand::PanicReaderForTest)
+        self.enqueue_open(RuntimeDriverCommand::PanicReaderForTest)
     }
 }
 
 impl Drop for PluginHostRuntimeDriverHandle {
     fn drop(&mut self) {
+        let _admission = self
+            .shared
+            .admission
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.shared
+            .force_terminal(RuntimeDriverTerminalState::ForcedClosed);
         self.commands.take();
-        self.shared.close_requested.store(true, Ordering::Release);
         signal_driver(&self.wake);
     }
 }
@@ -416,9 +576,7 @@ impl PluginHostRuntimeEvents {
 impl Drop for PluginHostRuntimeEvents {
     fn drop(&mut self) {
         self.shared
-            .event_consumer_alive
-            .store(false, Ordering::Release);
-        self.shared.close_requested.store(true, Ordering::Release);
+            .force_terminal(RuntimeDriverTerminalState::ForcedClosed);
         signal_driver(&self.wake);
         if let Some(handle) = self.driver_handle.take() {
             let _ = handle.join();
@@ -577,7 +735,7 @@ impl PluginHostProcess {
             }) {
             Ok(handle) => handle,
             Err(_) => {
-                shared.running.store(false, Ordering::Release);
+                shared.force_terminal(RuntimeDriverTerminalState::ForcedWorker);
                 return Err(PluginHostProcessError::WorkerFailed);
             }
         };
@@ -1179,7 +1337,7 @@ impl Drop for PluginHostProcess {
 struct PendingWriterCompletion {
     completion: Receiver<Result<Instant, ()>>,
     deadline: Instant,
-    body_bytes: usize,
+    _reservation: RuntimeBodyReservation,
 }
 
 enum RuntimeBodyState {
@@ -1213,17 +1371,43 @@ fn run_runtime_driver(
     }));
     let mut result = match outcome {
         Ok(Ok(GracefulRuntimeShutdown)) => Ok(()),
-        Ok(Err(error)) => Err(error),
-        Err(_) => forced_close(&mut process, PluginHostProcessError::WorkerFailed),
+        Ok(Err(error)) => {
+            let transition = shared.force_terminal(RuntimeDriverTerminalState::for_error(error));
+            Err(resolve_terminal_error(transition, error))
+        }
+        Err(_) => {
+            let transition = shared.force_terminal(RuntimeDriverTerminalState::ForcedWorker);
+            forced_close(
+                &mut process,
+                resolve_terminal_error(transition, PluginHostProcessError::WorkerFailed),
+            )
+        }
     };
     if process.phase != ProcessPhase::Closed {
-        match process.fatal_close() {
-            Ok(()) if result.is_ok() => result = Err(PluginHostProcessError::ForcedClosed),
-            Ok(()) => {}
-            Err(error) => result = Err(error),
-        }
+        let transition = shared.force_terminal(RuntimeDriverTerminalState::ForcedClosed);
+        let cause = result.map_or_else(
+            |error| resolve_terminal_error(transition, error),
+            |()| {
+                transition
+                    .state
+                    .error()
+                    .unwrap_or(PluginHostProcessError::ForcedClosed)
+            },
+        );
+        result = forced_close(&mut process, cause);
     }
-    shared.running.store(false, Ordering::Release);
+
+    // Terminal state closes admission. Taking this tiny lock waits out any
+    // producer already inside its nonblocking try-send critical section; then
+    // receiver drop releases every queued body reservation before publication.
+    let admission = shared
+        .admission
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    drop(commands);
+    drop(admission);
+    debug_assert_eq!(shared.queued_body_bytes.load(Ordering::Acquire), 0);
+
     // One channel slot is reserved for this post-reap terminal event. During
     // receiver Drop the channel remains connected until this driver is joined,
     // so consumer loss also publishes its non-graceful cause before teardown.
@@ -1242,20 +1426,19 @@ fn runtime_driver_loop(
     let mut next_body_token = 1_u64;
 
     loop {
-        if shared.close_requested.load(Ordering::Acquire)
-            || !shared.event_consumer_alive.load(Ordering::Acquire)
-        {
-            return forced_close(process, PluginHostProcessError::ForcedClosed);
-        }
-        match shared.violation.load(Ordering::Acquire) {
-            DRIVER_VIOLATION_NONE => {}
-            DRIVER_VIOLATION_PRESSURE => {
-                return process.fail(PluginHostProcessError::Backpressure);
+        match shared.terminal_state() {
+            RuntimeDriverTerminalState::Open | RuntimeDriverTerminalState::GracefulInProgress => {}
+            RuntimeDriverTerminalState::GracefulCommitted => {
+                return Ok(GracefulRuntimeShutdown);
             }
-            DRIVER_VIOLATION_PROTOCOL => {
-                return process.fail(PluginHostProcessError::ProtocolRejected);
+            forced => {
+                return forced_close(
+                    process,
+                    forced
+                        .error()
+                        .unwrap_or(PluginHostProcessError::ProtocolRejected),
+                );
             }
-            _ => return process.fail(PluginHostProcessError::ProtocolRejected),
         }
 
         if let Some(pending) = writer_completion.as_ref() {
@@ -1270,7 +1453,6 @@ fn runtime_driver_loop(
                 Err(TryRecvError::Empty) => None,
             };
             if let Some(completion) = completion {
-                shared.release_body_bytes(pending.body_bytes);
                 writer_completion = None;
                 match completion {
                     Ok(()) => continue,
@@ -1389,27 +1571,26 @@ fn handle_runtime_driver_command(
     body_state: &mut RuntimeBodyState,
 ) -> Result<RuntimeDriverCommandOutcome, PluginHostProcessError> {
     match command {
-        RuntimeDriverCommand::Send { message, deadline } => {
-            let body_bytes = message.body.len();
+        RuntimeDriverCommand::Send {
+            message,
+            reservation,
+            deadline,
+        } => {
             if process.phase != ProcessPhase::Running
                 || !runtime_parent_frame_allowed(&message.frame)
                 || !process.parent_authority_matches(&message.frame)
                 || validate_parent_body(&message.frame, &message.body).is_err()
             {
-                shared.release_body_bytes(body_bytes);
                 return process.fail(PluginHostProcessError::ProtocolRejected);
             }
             let completion = match process.begin_send(*message) {
                 Ok(completion) => completion,
-                Err(error) => {
-                    shared.release_body_bytes(body_bytes);
-                    return process.fail(error);
-                }
+                Err(error) => return process.fail(error),
             };
             *writer_completion = Some(PendingWriterCompletion {
                 completion,
                 deadline,
-                body_bytes,
+                _reservation: reservation,
             });
         }
         RuntimeDriverCommand::AuthorizeBody { token, deadline } => {
@@ -1442,8 +1623,19 @@ fn handle_runtime_driver_command(
             };
         }
         RuntimeDriverCommand::Shutdown => {
+            let state = shared.terminal_state();
+            if state != RuntimeDriverTerminalState::GracefulInProgress {
+                return Err(state
+                    .error()
+                    .unwrap_or(PluginHostProcessError::ForcedClosed));
+            }
             process.shutdown()?;
-            return Ok(RuntimeDriverCommandOutcome::GracefulShutdown);
+            return match shared.commit_graceful() {
+                Ok(()) => Ok(RuntimeDriverCommandOutcome::GracefulShutdown),
+                Err(winner) => Err(winner
+                    .error()
+                    .unwrap_or(PluginHostProcessError::ForcedClosed)),
+            };
         }
         #[cfg(test)]
         RuntimeDriverCommand::PanicDriverForTest => panic!("deterministic driver panic"),
@@ -1473,6 +1665,17 @@ fn forced_close<T>(
     match process.fatal_close() {
         Ok(()) => Err(cause),
         Err(cleanup) => Err(cleanup),
+    }
+}
+
+fn resolve_terminal_error(
+    transition: RuntimeDriverTerminalTransition,
+    fallback: PluginHostProcessError,
+) -> PluginHostProcessError {
+    if fallback == PluginHostProcessError::CleanupFailed || transition.won {
+        fallback
+    } else {
+        transition.state.error().unwrap_or(fallback)
     }
 }
 

@@ -668,11 +668,7 @@ fn validate_invocations(
             || if hook_kind == "resync" {
                 plugin.row.runtime_state == "starting" && cursor_resync_required
             } else {
-                !cursor_resync_required
-                    && matches!(
-                        plugin.row.runtime_state.as_str(),
-                        "active" | "degraded" | "failed"
-                    )
+                plugin.row.runtime_state == "active" && !cursor_resync_required
             };
         if !runtime_admits_invocation
             || (state == "ambiguous_http") != (error_code.as_deref() == Some("http_ambiguous"))
@@ -707,18 +703,6 @@ fn validate_invocations(
         let created = canonical_timestamp(&created_at)?;
         let updated = canonical_timestamp(&updated_at)?;
         let retained = canonical_timestamp(&retain_until)?;
-        if state != "ambiguous_http"
-            && matches!(plugin.row.runtime_state.as_str(), "degraded" | "failed")
-            && plugin
-                .row
-                .next_retry_at
-                .as_deref()
-                .map(canonical_timestamp)
-                .transpose()?
-                .is_none_or(|retry_at| updated < retry_at)
-        {
-            return invalid("plugin invocation retry authority");
-        }
         let retention_limit = created
             .checked_add((30 * 24).hours())
             .map_err(|_| invalid_error("plugin invocation retention"))?;

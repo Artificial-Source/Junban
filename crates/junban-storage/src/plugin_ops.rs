@@ -3103,12 +3103,7 @@ fn has_other_active_invocation(
 }
 
 fn runtime_admits_ordinary(plugin: &InstalledPlugin, now: Timestamp) -> bool {
-    now >= plugin.updated_at
-        && (plugin.runtime_state == PluginRuntimeState::Active
-            || (matches!(
-                plugin.runtime_state,
-                PluginRuntimeState::Degraded | PluginRuntimeState::Failed
-            ) && plugin.next_retry_at.is_some_and(|retry_at| retry_at <= now)))
+    now >= plugin.updated_at && plugin.runtime_state == PluginRuntimeState::Active
 }
 
 fn invocation_request_material(request: &ReservePluginInvocationRequest, now: Timestamp) -> usize {
@@ -3417,29 +3412,23 @@ pub(crate) fn transition_plugin_invocation(
     {
         return Err(RepositoryError::Conflict);
     }
+    let records_http_ambiguity = request.expected_state == PluginInvocationState::DispatchingHttp
+        && request.next_state == PluginInvocationState::AmbiguousHttp;
+    let runtime_admits_transition = records_http_ambiguity
+        || (plugin.desired_enabled
+            && if invocation.hook_kind == PluginHookKind::Resync {
+                plugin.runtime_state == PluginRuntimeState::Starting
+            } else {
+                runtime_admits_ordinary(&plugin, now)
+            });
+    if !runtime_admits_transition {
+        return Err(RepositoryError::Conflict);
+    }
     if invocation.state == request.next_state {
         transaction.commit().map_err(storage_error)?;
         return Ok(invocation);
     }
-    if invocation.state != request.expected_state {
-        return Err(RepositoryError::Conflict);
-    }
-    let runtime_admits_transition = plugin.desired_enabled
-        && match (request.expected_state, request.next_state) {
-            (PluginInvocationState::AmbiguousHttp, PluginInvocationState::DispatchingHttp) => {
-                plugin.runtime_state == PluginRuntimeState::Active
-                    || (matches!(
-                        plugin.runtime_state,
-                        PluginRuntimeState::Degraded | PluginRuntimeState::Failed
-                    ) && plugin.next_retry_at.is_some_and(|retry_at| retry_at <= now))
-            }
-            _ => {
-                runtime_admits_ordinary(&plugin, now)
-                    || (invocation.hook_kind == PluginHookKind::Resync
-                        && plugin.runtime_state == PluginRuntimeState::Starting)
-            }
-        };
-    if !runtime_admits_transition
+    if invocation.state != request.expected_state
         || (request.expected_state == PluginInvocationState::AmbiguousHttp
             && request.next_state == PluginInvocationState::DispatchingHttp
             && has_other_active_invocation(
@@ -3555,14 +3544,21 @@ fn complete_plugin_invocation_with(
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(storage_error)?;
-    let (_, invocation) = verify_invocation_fence(
+    let (plugin, invocation) = verify_invocation_fence(
         &transaction,
         operation_id,
         &plugin_id,
         package_generation,
         activation_epoch,
     )?;
-    if !operator_origin(invocation.hook_kind)
+    let runtime_admits_terminal = match invocation.hook_kind {
+        PluginHookKind::Resync => plugin.runtime_state == PluginRuntimeState::Starting,
+        _ => runtime_admits_ordinary(&plugin, now),
+    };
+    if !plugin.desired_enabled
+        || now < plugin.updated_at
+        || !runtime_admits_terminal
+        || !operator_origin(invocation.hook_kind)
         || !matches!(
             invocation.state,
             PluginInvocationState::Reserved | PluginInvocationState::DispatchingHttp
@@ -4384,6 +4380,101 @@ fn graph_fence_entry_role_is_valid(
     )
 }
 
+fn graph_fence_receipt_error() -> RepositoryError {
+    RepositoryError::Storage("plugin graph fence receipt authority mismatch".to_owned())
+}
+
+fn graph_fence_result_shape_is_valid(result: &PluginGraphFenceResult) -> bool {
+    let target_matches_count = matches!(
+        (result.failure_count, result.target_runtime_state),
+        (1, PluginRuntimeState::Degraded)
+            | (2, PluginRuntimeState::Failed)
+            | (3, PluginRuntimeState::Suspended)
+    );
+    result.package_generation > 0
+        && result
+            .expected_activation_epoch
+            .checked_add(1)
+            .is_some_and(|epoch| epoch == result.new_activation_epoch && epoch <= i64::MAX as u64)
+        && matches!(
+            result.prior_runtime_state,
+            PluginRuntimeState::Starting | PluginRuntimeState::Active
+        )
+        && target_matches_count
+        && result.desired_enabled == (result.target_runtime_state != PluginRuntimeState::Suspended)
+        && graph_fence_entry_role_is_valid(result.cause, result.disposition)
+}
+
+pub(crate) fn validate_plugin_graph_fence_receipt(
+    operation_id: OperationId,
+    request_json: &str,
+    response_json: &str,
+) -> Result<PluginGraphFenceOutcome, RepositoryError> {
+    let request: PluginGraphFenceReceiptRequest =
+        serde_json::from_str(request_json).map_err(|_| graph_fence_receipt_error())?;
+    let session =
+        OperationId::parse(&request.host_session_id).map_err(|_| graph_fence_receipt_error())?;
+    if canonical_json(&request)? != request_json
+        || request.op != "fence_plugin_graph"
+        || session.to_string() != request.host_session_id
+        || request.results.is_empty()
+        || request.results.len() > PLUGIN_GRAPH_FENCE_ENTRIES_MAX
+        || !request
+            .results
+            .windows(2)
+            .all(|pair| pair[0].plugin_id < pair[1].plugin_id)
+        || !request
+            .results
+            .iter()
+            .any(|result| result.disposition == PluginGraphFenceDisposition::Failing)
+        || request
+            .results
+            .iter()
+            .any(|result| !graph_fence_result_shape_is_valid(result))
+    {
+        return Err(graph_fence_receipt_error());
+    }
+
+    let outcome: PluginGraphFenceOutcome =
+        serde_json::from_str(response_json).map_err(|_| graph_fence_receipt_error())?;
+    let affected = AffectedIds {
+        plugin_ids: request
+            .results
+            .iter()
+            .map(|result| result.plugin_id.clone())
+            .collect(),
+        ..AffectedIds::default()
+    };
+    let first = request
+        .results
+        .first()
+        .ok_or_else(graph_fence_receipt_error)?;
+    let snapshot_matches = matches!(
+        outcome.mutation.event.snapshot.as_ref(),
+        Some(ResourceSnapshot::Plugin { plugin })
+            if plugin.plugin_id == first.plugin_id
+                && plugin.package_generation == first.package_generation
+                && plugin.activation_epoch == first.new_activation_epoch
+                && plugin.desired_enabled == first.desired_enabled
+                && plugin.runtime_state == first.target_runtime_state
+                && plugin.last_error_code.as_deref() == Some(first.cause.error_code())
+    );
+    if canonical_json(&outcome)? != response_json
+        || outcome.host_session_id != request.host_session_id
+        || outcome.results != request.results
+        || outcome.mutation.event.operation_id != operation_id
+        || outcome.mutation.event.event_type.as_str() != EventType::PLUGIN_HEALTH_CHANGED
+        || outcome.mutation.event.primary != Some(ResourceRef::plugin(&first.plugin_id))
+        || !snapshot_matches
+        || outcome.mutation.event.affected != affected
+        || outcome.mutation.event.resync != ResyncScope::PLUGINS
+        || outcome.mutation.uncomplete_outcome.is_some()
+    {
+        return Err(graph_fence_receipt_error());
+    }
+    Ok(outcome)
+}
+
 fn validate_graph_fence_request_shape(
     request: &PluginGraphFenceRequest,
 ) -> Result<(), RepositoryError> {
@@ -4494,16 +4585,8 @@ fn read_graph_fence_replay(
     {
         return Err(RepositoryError::IdempotencyMismatch);
     }
-    let mut outcome: PluginGraphFenceOutcome =
-        serde_json::from_str(&response_json).map_err(storage_error)?;
-    if outcome.host_session_id != stored.host_session_id
-        || outcome.results != stored.results
-        || outcome.mutation.event.operation_id != request.operation_id
-    {
-        return Err(RepositoryError::Storage(
-            "plugin graph fence receipt authority mismatch".to_owned(),
-        ));
-    }
+    let mut outcome =
+        validate_plugin_graph_fence_receipt(request.operation_id, &request_json, &response_json)?;
     outcome.mutation.newly_committed = false;
     Ok(Some(outcome))
 }
@@ -4640,11 +4723,12 @@ pub(crate) fn fence_plugin_graph(
                 .as_ref()
                 .map(|plugin_id| load_installed_plugin(tx, plugin_id))
                 .transpose()?;
+            let subject = primary_id.as_ref().map(ToString::to_string);
             Ok(plugin_effect(
                 EventType::PLUGIN_HEALTH_CHANGED,
                 primary.as_ref(),
                 affected,
-                Some("plugin host session fenced".to_owned()),
+                subject,
             ))
         },
     )?;
@@ -8660,7 +8744,7 @@ mod tests {
     }
 
     #[test]
-    fn compile_load_graph_fence_preserves_http_ambiguity_for_stable_retry() {
+    fn due_retry_requires_active_epoch_before_ambiguous_http_redispatch() {
         let profile = TestProfile::new();
         let mut connection = profile.connection();
         let store = PluginPackageStore::open(&profile.path).unwrap();
@@ -8682,24 +8766,20 @@ mod tests {
             .unwrap();
         let operation_id = OperationId::new();
         let delivery_operation_id = OperationId::new();
-        reserve_plugin_invocation(
-            &mut connection,
-            ReservePluginInvocationRequest {
-                operation_id,
-                plugin_id: plugin.plugin_id.clone(),
-                package_generation: plugin.package_generation,
-                activation_epoch: plugin.activation_epoch,
-                hook_kind: PluginHookKind::InvokeCommand,
-                entry: PluginManifestEntry::Command {
-                    command_id: PluginId::parse("run").unwrap(),
-                },
-                request_sha256: Sha256Digest::of(b"host-failure-http"),
-                delivery_operation_id,
-                resync_session: None,
+        let reservation = ReservePluginInvocationRequest {
+            operation_id,
+            plugin_id: plugin.plugin_id.clone(),
+            package_generation: plugin.package_generation,
+            activation_epoch: plugin.activation_epoch,
+            hook_kind: PluginHookKind::InvokeCommand,
+            entry: PluginManifestEntry::Command {
+                command_id: PluginId::parse("run").unwrap(),
             },
-            now,
-        )
-        .unwrap();
+            request_sha256: Sha256Digest::of(b"host-failure-http"),
+            delivery_operation_id,
+            resync_session: None,
+        };
+        reserve_plugin_invocation(&mut connection, reservation.clone(), now).unwrap();
         transition_plugin_invocation(
             &mut connection,
             TransitionPluginInvocationRequest {
@@ -8740,6 +8820,15 @@ mod tests {
         assert_eq!(ambiguous.activation_epoch, degraded.activation_epoch);
         assert_eq!(ambiguous.delivery_operation_id, delivery_operation_id);
         assert_eq!(ambiguous.error_code.as_deref(), Some("http_ambiguous"));
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+
+        let mut due_reservation = reservation.clone();
+        due_reservation.operation_id = OperationId::new();
+        due_reservation.activation_epoch = degraded.activation_epoch;
+        assert_eq!(
+            reserve_plugin_invocation(&mut connection, due_reservation, retry_at).unwrap_err(),
+            RepositoryError::Conflict
+        );
         assert_eq!(
             transition_plugin_invocation(
                 &mut connection,
@@ -8751,46 +8840,217 @@ mod tests {
                     expected_state: PluginInvocationState::AmbiguousHttp,
                     next_state: PluginInvocationState::DispatchingHttp,
                 },
-                now,
+                retry_at,
             )
             .unwrap_err(),
             RepositoryError::Conflict
         );
+
+        connection
+            .execute(
+                "UPDATE plugin_invocations
+                 SET state = 'reserved', error_code = NULL, updated_at = ?2
+                 WHERE operation_id = ?1",
+                params![operation_id.to_string(), retry_at.to_string()],
+            )
+            .unwrap();
+        for next_state in [
+            PluginInvocationState::DispatchingHttp,
+            PluginInvocationState::EffectCommitting,
+        ] {
+            assert_eq!(
+                transition_plugin_invocation(
+                    &mut connection,
+                    TransitionPluginInvocationRequest {
+                        operation_id,
+                        plugin_id: degraded.plugin_id.clone(),
+                        package_generation: degraded.package_generation,
+                        activation_epoch: degraded.activation_epoch,
+                        expected_state: PluginInvocationState::Reserved,
+                        next_state,
+                    },
+                    retry_at,
+                )
+                .unwrap_err(),
+                RepositoryError::Conflict
+            );
+        }
+        assert_eq!(
+            complete_plugin_invocation(
+                &mut connection,
+                operation_id,
+                degraded.plugin_id.clone(),
+                degraded.package_generation,
+                degraded.activation_epoch,
+                retry_at,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        assert!(crate::plugin_validation::validate_plugin_authority(&connection).is_err());
+        connection
+            .execute(
+                "UPDATE plugin_invocations
+                 SET state = 'ambiguous_http', error_code = 'http_ambiguous'
+                 WHERE operation_id = ?1",
+                [operation_id.to_string()],
+            )
+            .unwrap();
+
+        let starting = retry_due(&mut connection, &degraded, retry_at).unwrap();
+        assert_eq!(starting.runtime_state, PluginRuntimeState::Starting);
+        assert_eq!(starting.activation_epoch, degraded.activation_epoch + 1);
+        assert_eq!(starting.failure_count, degraded.failure_count);
+        let advanced = load_invocation(&connection, operation_id).unwrap();
+        assert_eq!(advanced.state, PluginInvocationState::AmbiguousHttp);
+        assert_eq!(advanced.activation_epoch, starting.activation_epoch);
+        assert_eq!(advanced.delivery_operation_id, delivery_operation_id);
         crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
 
-        transition_plugin_invocation(
+        for activation_epoch in [degraded.activation_epoch, starting.activation_epoch] {
+            assert_eq!(
+                transition_plugin_invocation(
+                    &mut connection,
+                    TransitionPluginInvocationRequest {
+                        operation_id,
+                        plugin_id: starting.plugin_id.clone(),
+                        package_generation: starting.package_generation,
+                        activation_epoch,
+                        expected_state: PluginInvocationState::AmbiguousHttp,
+                        next_state: PluginInvocationState::DispatchingHttp,
+                    },
+                    retry_at,
+                )
+                .unwrap_err(),
+                RepositoryError::Conflict
+            );
+        }
+        connection
+            .execute(
+                "UPDATE plugin_invocations
+                 SET state = 'dispatching_http', error_code = NULL
+                 WHERE operation_id = ?1",
+                [operation_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            complete_plugin_invocation(
+                &mut connection,
+                operation_id,
+                starting.plugin_id.clone(),
+                starting.package_generation,
+                starting.activation_epoch,
+                retry_at,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        assert_eq!(
+            commit_plugin_invocation(
+                &mut connection,
+                plan(CommitPluginInvocationRequest {
+                    invocation_operation_id: operation_id,
+                    plugin_id: starting.plugin_id.clone(),
+                    package_generation: starting.package_generation,
+                    activation_epoch: starting.activation_epoch,
+                    child_operation_id: None,
+                    domain_effect: None,
+                    kv_patch: None,
+                    resync_kv: None,
+                    cursor: None,
+                    resync_session: None,
+                }),
+                retry_at,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        assert!(crate::plugin_validation::validate_plugin_authority(&connection).is_err());
+        connection
+            .execute(
+                "UPDATE plugin_invocations
+                 SET state = 'ambiguous_http', error_code = 'http_ambiguous'
+                 WHERE operation_id = ?1",
+                [operation_id.to_string()],
+            )
+            .unwrap();
+
+        connection
+            .execute(
+                "UPDATE plugin_event_cursors
+                 SET event_epoch = (SELECT event_epoch FROM app_state WHERE singleton = 1),
+                     revision = (SELECT global_revision FROM app_state WHERE singleton = 1),
+                     resync_required = 0, updated_at = ?2 WHERE plugin_id = ?1",
+                params![starting.plugin_id.as_str(), retry_at.to_string()],
+            )
+            .unwrap();
+        complete_plugin_activation(
+            &mut connection,
+            OperationId::new(),
+            CompletePluginActivationRequest {
+                plugin_id: starting.plugin_id.clone(),
+                package_generation: starting.package_generation,
+                activation_epoch: starting.activation_epoch,
+            },
+            retry_at,
+        )
+        .unwrap();
+        let active = get_installed_plugin(&connection, starting.plugin_id.clone()).unwrap();
+        assert_eq!(active.runtime_state, PluginRuntimeState::Active);
+        assert_eq!(active.activation_epoch, starting.activation_epoch);
+        assert_eq!(
+            transition_plugin_invocation(
+                &mut connection,
+                TransitionPluginInvocationRequest {
+                    operation_id,
+                    plugin_id: active.plugin_id.clone(),
+                    package_generation: active.package_generation,
+                    activation_epoch: degraded.activation_epoch,
+                    expected_state: PluginInvocationState::AmbiguousHttp,
+                    next_state: PluginInvocationState::DispatchingHttp,
+                },
+                retry_at,
+            )
+            .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        let dispatch = transition_plugin_invocation(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id,
-                plugin_id: degraded.plugin_id.clone(),
-                package_generation: degraded.package_generation,
-                activation_epoch: degraded.activation_epoch,
+                plugin_id: active.plugin_id.clone(),
+                package_generation: active.package_generation,
+                activation_epoch: active.activation_epoch,
                 expected_state: PluginInvocationState::AmbiguousHttp,
                 next_state: PluginInvocationState::DispatchingHttp,
             },
             retry_at,
         )
         .unwrap();
-        commit_plugin_invocation(
+        assert_eq!(dispatch.delivery_operation_id, delivery_operation_id);
+        let terminal = complete_plugin_invocation(
             &mut connection,
-            plan(CommitPluginInvocationRequest {
-                invocation_operation_id: operation_id,
-                plugin_id: degraded.plugin_id,
-                package_generation: degraded.package_generation,
-                activation_epoch: degraded.activation_epoch,
-                child_operation_id: None,
-                domain_effect: None,
-                kv_patch: None,
-                resync_kv: None,
-                cursor: None,
-                resync_session: None,
-            }),
+            operation_id,
+            active.plugin_id.clone(),
+            active.package_generation,
+            active.activation_epoch,
             retry_at,
         )
         .unwrap();
+        assert_eq!(terminal.terminal_kind, PluginInvocationTerminalKind::Http);
+
+        let mut replay_request = reservation.clone();
+        replay_request.activation_epoch = active.activation_epoch;
+        let replay = reserve_plugin_invocation(&mut connection, replay_request, retry_at)
+            .unwrap()
+            .terminal()
+            .unwrap()
+            .clone();
+        assert!(replay.replayed);
+        assert_eq!(replay.terminal_kind, PluginInvocationTerminalKind::Http);
         assert_eq!(
-            load_invocation(&connection, operation_id).unwrap_err(),
-            RepositoryError::NotFound
+            reserve_plugin_invocation(&mut connection, reservation, retry_at).unwrap_err(),
+            RepositoryError::IdempotencyMismatch
         );
         assert_eq!(
             connection
@@ -8800,7 +9060,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap(),
-            revision_before + 1
+            revision_before + 3
         );
     }
 
@@ -9706,7 +9966,7 @@ mod tests {
         let profile = TestProfile::new();
         let mut connection = profile.connection();
         let store = PluginPackageStore::open(&profile.path).unwrap();
-        let now = Timestamp::constant(1_800_000_201, 0);
+        let now = Timestamp::constant(1_700_000_000, 0);
         let root = install_named_fixture(&mut connection, &store, "aaa-root", Vec::new(), now);
         let sibling =
             install_named_fixture(&mut connection, &store, "bbb-sibling", Vec::new(), now);
@@ -10084,6 +10344,92 @@ mod tests {
             revision_before + 1
         );
         crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+
+        let (canonical_request, canonical_response): (String, String) = connection
+            .query_row(
+                "SELECT request_json, response_json FROM operation_receipts
+                 WHERE operation_id = ?1",
+                [operation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let mut corrupt_request: PluginGraphFenceReceiptRequest =
+            serde_json::from_str(&canonical_request).unwrap();
+        corrupt_request.host_session_id = OperationId::new().to_string();
+        connection
+            .execute(
+                "UPDATE operation_receipts SET request_json = ?2 WHERE operation_id = ?1",
+                params![
+                    operation_id.to_string(),
+                    canonical_json(&corrupt_request).unwrap()
+                ],
+            )
+            .unwrap();
+        assert!(crate::backup_ops::create_backup(&connection, &profile.path).is_err());
+        connection
+            .execute(
+                "UPDATE operation_receipts SET request_json = ?2 WHERE operation_id = ?1",
+                params![operation_id.to_string(), canonical_request],
+            )
+            .unwrap();
+
+        let mut corrupt_response: PluginGraphFenceOutcome =
+            serde_json::from_str(&canonical_response).unwrap();
+        corrupt_response.results[0].new_activation_epoch += 1;
+        connection
+            .execute(
+                "UPDATE operation_receipts SET response_json = ?2 WHERE operation_id = ?1",
+                params![
+                    operation_id.to_string(),
+                    canonical_json(&corrupt_response).unwrap()
+                ],
+            )
+            .unwrap();
+        assert!(crate::backup_ops::create_backup(&connection, &profile.path).is_err());
+        connection
+            .execute(
+                "UPDATE operation_receipts SET response_json = ?2 WHERE operation_id = ?1",
+                params![operation_id.to_string(), &canonical_response],
+            )
+            .unwrap();
+
+        let mut corrupt_response_event: PluginGraphFenceOutcome =
+            serde_json::from_str(&canonical_response).unwrap();
+        corrupt_response_event.mutation.event.operation_id = OperationId::new();
+        connection
+            .execute(
+                "UPDATE operation_receipts SET response_json = ?2 WHERE operation_id = ?1",
+                params![
+                    operation_id.to_string(),
+                    canonical_json(&corrupt_response_event).unwrap()
+                ],
+            )
+            .unwrap();
+        assert!(crate::backup_ops::create_backup(&connection, &profile.path).is_err());
+        connection
+            .execute(
+                "UPDATE operation_receipts SET response_json = ?2 WHERE operation_id = ?1",
+                params![operation_id.to_string(), canonical_response],
+            )
+            .unwrap();
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+        let (validated_request, validated_response): (String, String) = connection
+            .query_row(
+                "SELECT request_json, response_json FROM operation_receipts
+                 WHERE operation_id = ?1",
+                [operation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        validate_plugin_graph_fence_receipt(operation_id, &validated_request, &validated_response)
+            .unwrap();
+        let backup = crate::backup_ops::create_backup(&connection, &profile.path).unwrap();
+        let candidate = crate::backup_ops::prepare_restore(&profile.path, backup).unwrap();
+        let candidate_connection = Connection::open(candidate.path()).unwrap();
+        crate::backup_ops::create_backup(&candidate_connection, &profile.path).unwrap();
+        drop(candidate_connection);
+        drop(candidate);
+
         drop(connection);
         let mut connection = profile.connection();
         crate::plugin_validation::validate_plugin_authority(&connection).unwrap();

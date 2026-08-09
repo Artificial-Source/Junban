@@ -1656,18 +1656,27 @@ fn validate_receipt_rows(tx: &Transaction<'_>, head: u64) -> Result<(), Reposito
                     "receipt request is not a contract object".to_owned(),
                 ));
             }
-            match serde_json::from_str::<CommittedMutation>(response_json) {
-                Ok(response) => {
-                    validate_receipt_mutation(tx, &response, head, Some(operation_id))?;
-                }
-                Err(_) => {
-                    validate_plugin_invocation_receipt(
-                        tx,
-                        operation_id,
-                        request_json,
-                        response_json,
-                        head,
-                    )?;
+            if request.get("op").and_then(serde_json::Value::as_str) == Some("fence_plugin_graph") {
+                let outcome = crate::plugin_ops::validate_plugin_graph_fence_receipt(
+                    operation_id,
+                    request_json,
+                    response_json,
+                )?;
+                validate_receipt_mutation(tx, &outcome.mutation, head, Some(operation_id))?;
+            } else {
+                match serde_json::from_str::<CommittedMutation>(response_json) {
+                    Ok(response) => {
+                        validate_receipt_mutation(tx, &response, head, Some(operation_id))?;
+                    }
+                    Err(_) => {
+                        validate_plugin_invocation_receipt(
+                            tx,
+                            operation_id,
+                            request_json,
+                            response_json,
+                            head,
+                        )?;
+                    }
                 }
             }
             match (created_at, expires_at) {
@@ -3019,8 +3028,9 @@ mod tests {
         OperationId, TaskDraft, TaskTitle, frame_backup_envelope, parse_backup_envelope, sha256_hex,
     };
     use junban_plugin_sdk::{
-        Capability, CommandDeclaration, Permission, PermissionScope, Publisher, RuntimeManifest,
-        RuntimeProfile, UnscopedPermission, WitAuthority, scope_hash,
+        Capability, CommandDeclaration, HttpMethod, HttpOrigin, HttpScope, Permission,
+        PermissionScope, Publisher, RuntimeManifest, RuntimeProfile, UnscopedPermission,
+        WitAuthority, scope_hash,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -3460,10 +3470,19 @@ mod tests {
             },
             runtime_profile: RuntimeProfile::Typescript,
             component_sha256: "11".repeat(32),
-            permissions: vec![Permission {
-                capability: Capability::Commands,
-                scope: PermissionScope::Unscoped(UnscopedPermission::default()),
-            }],
+            permissions: vec![
+                Permission {
+                    capability: Capability::Commands,
+                    scope: PermissionScope::Unscoped(UnscopedPermission::default()),
+                },
+                Permission {
+                    capability: Capability::Http,
+                    scope: PermissionScope::Http(HttpScope {
+                        origins: vec![HttpOrigin("https://example.test".to_owned())],
+                        methods: vec![HttpMethod::Post],
+                    }),
+                },
+            ],
             dependencies: Vec::new(),
             commands: vec![CommandDeclaration {
                 id: "run".into(),
@@ -3576,11 +3595,11 @@ mod tests {
                 .execute(
                     "INSERT INTO plugin_invocations(
                         operation_id, plugin_id, package_generation, activation_epoch,
-                        hook_kind, entry_id, request_hash, delivery_id, state,
+                        hook_kind, entry_id, request_hash, delivery_id, state, error_code,
                         created_at, updated_at, retain_until
                      ) VALUES (?1, 'restore-plugin', 1, ?2, 'invoke_command', 'run', ?3, ?4,
-                        'reserved', '2020-08-04T12:00:00Z', '2020-08-04T12:01:00Z',
-                        '2020-09-03T12:00:00Z')",
+                        'ambiguous_http', 'http_ambiguous', '2020-08-04T12:00:00Z',
+                        '2020-08-04T12:01:00Z', '2020-09-03T12:00:00Z')",
                     params![
                         uuid::Uuid::new_v4().to_string(),
                         activation_epoch,

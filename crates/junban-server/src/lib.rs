@@ -20,6 +20,8 @@ mod owner_runtime;
 #[cfg(feature = "plugin-sdk")]
 pub mod plugin_host_process;
 #[cfg(feature = "plugin-sdk")]
+pub mod plugin_http;
+#[cfg(feature = "plugin-sdk")]
 pub mod plugin_runtime;
 mod reminder_wake;
 mod routes;

@@ -2,8 +2,12 @@
 //!
 //! The supervisor is deliberately not composed into ordinary server startup or
 //! restore yet. It owns the bounded parent actor, the selected child process,
-//! runtime admission, invocation correlation, and graph-failure fencing. Guest
-//! capabilities and concrete effects remain outside this slice.
+//! runtime admission, invocation correlation, and graph-failure fencing. The
+//! additive resync driver below remains runtime-local until Packet B composes it
+//! with callback/effect authority and production ownership.
+
+#[allow(dead_code)] // Packet B composes this runtime-local driver with production ownership.
+pub(crate) mod resync;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, hash_map::Entry},
@@ -423,8 +427,10 @@ pub trait PluginCallbackDispatcher: Send + Sync {
     fn dispatch(&self, request: HostCallRequest) -> CallbackFuture;
 }
 
+#[cfg(test)]
 struct DenyCallbacks;
 
+#[cfg(test)]
 impl PluginCallbackDispatcher for DenyCallbacks {
     fn dispatch(&self, _request: HostCallRequest) -> CallbackFuture {
         Box::pin(async { Err(CallbackDenial::Deferred) })
@@ -452,8 +458,12 @@ pub struct PluginRuntimeSupervisor {
 }
 
 impl PluginRuntimeSupervisor {
-    pub fn new(service: AppService, launch_policy: PluginHostLaunchPolicy) -> Self {
-        Self::from_parts(Arc::new(service), launch_policy, Arc::new(DenyCallbacks))
+    pub fn new(
+        service: AppService,
+        launch_policy: PluginHostLaunchPolicy,
+        callback_dispatcher: Arc<dyn PluginCallbackDispatcher>,
+    ) -> Self {
+        Self::from_parts(Arc::new(service), launch_policy, callback_dispatcher)
     }
 
     fn from_parts(

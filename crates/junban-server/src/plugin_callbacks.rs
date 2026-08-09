@@ -1,0 +1,3028 @@
+//! Pure parent-side plugin callback and effect authority.
+//!
+//! This module deliberately does not own the plugin process or server lifecycle.
+//! Packet B composes these typed actions with the runtime actor; Packet C owns the
+//! product lifecycle. All guest bodies cross this boundary through the SDK's
+//! canonical codecs.
+
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    time::Instant,
+};
+
+use jiff::{Timestamp, civil::Date};
+use junban_app::{
+    AdvancePluginCursorRequest, AppError, AuthorizedCommitPluginInvocationRequest,
+    AuthorizedTransitionPluginInvocationRequest, CommitPluginInvocationRequest, InstalledPlugin,
+    InstalledPluginProfile, PluginDeliveryMode, PluginDomainEffect, PluginInvocationDelivery,
+    PluginInvocationState, PluginKvEntry, PluginKvPatch, PluginManifestEntry,
+    PluginManifestEntrySelector, PluginSetting, RepositoryError, TemporalContext,
+    TransitionPluginInvocationRequest, plugin_manifest_entry_authority,
+};
+use junban_domain::{
+    ActualMinutes, DreadLevel, EntityName, EstimatedMinutes, HexColor, IconText, LocalDueTime,
+    MarkdownText, MonthlyAnchorDay, OperationId, Priority, ProjectId, ProjectView, RecurrenceRule,
+    SectionId, SortOrder, TagId, TagName, TaskDraft, TaskId, TaskTitle,
+};
+use junban_plugin_sdk::{
+    CallbackFence, Capability, ChildFrame, HostCallKind, HostCallReply, HostCallRequest, HttpScope,
+    InvocationKind, InvocationMode, InvocationOutcome, Permission, PermissionScope, PluginId,
+    RuntimeManifest, Sha256Digest, canonical_permission_hash, decode_host_call_request,
+    decode_invocation_outcome, private_body_types as wit, validate_child_body,
+    validate_host_call_authority,
+};
+use sha2::{Digest as _, Sha256};
+use uuid::Uuid;
+
+use crate::{
+    diagnostics::redact_secrets,
+    plugin_http::{DispatchingHttpPermit, PluginHttpTransport},
+    sse::AppService,
+};
+
+pub const PLUGIN_KV_GET_KEYS_MAX: usize = 64;
+pub const PLUGIN_KV_GET_REPLY_BYTES_MAX: usize = 64 * 1024;
+pub const PLUGIN_KV_LIST_LIMIT_MAX: u8 = 64;
+pub const PLUGIN_KV_LIST_REPLY_BYTES_MAX: usize = 256 * 1024;
+pub const PLUGIN_KV_PATCH_OPERATIONS_MAX: usize = 64;
+pub const PLUGIN_KV_PATCH_VALUE_BYTES_MAX: usize = 64 * 1024;
+pub const PLUGIN_SETTINGS_MAX: usize = 64;
+pub const PLUGIN_SETTINGS_BYTES_MAX: usize = 64 * 1024;
+pub const PLUGIN_SERVICE_DATA_BYTES_MAX: usize = 64 * 1024;
+pub const PLUGIN_LOG_INVOCATION_BYTES_MAX: usize =
+    junban_plugin_sdk::GUEST_LOG_INVOCATION_BYTES_MAX as usize;
+pub const PLUGIN_SERVICE_DEPTH_MAX: u8 = 8;
+
+const EFFECT_ID_DOMAIN: &[u8] = b"junban.plugin.effect.v1\0";
+const KV_CURSOR_DOMAIN: &[u8] = b"junban.plugin.invocation-kv-cursor.v1\0";
+
+pub type PluginCallbackFuture<T> =
+    Pin<Box<dyn Future<Output = Result<T, PluginCallbackError>> + Send + 'static>>;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PluginCallbackError {
+    InvalidBody,
+    InvalidInput,
+    PermissionDenied,
+    StaleAuthority,
+    CursorStale,
+    Unavailable,
+    OperationTooLarge,
+}
+
+impl PluginCallbackError {
+    fn host(self) -> wit::HostError {
+        let (code, message) = match self {
+            Self::InvalidBody | Self::InvalidInput => (
+                wit::ErrorCode::InvalidInput,
+                "plugin callback input is invalid",
+            ),
+            Self::OperationTooLarge => (
+                wit::ErrorCode::Internal,
+                "plugin callback operation is too large",
+            ),
+            Self::PermissionDenied => (
+                wit::ErrorCode::PermissionDenied,
+                "plugin callback is not permitted",
+            ),
+            Self::StaleAuthority | Self::CursorStale => (
+                wit::ErrorCode::CursorStale,
+                "plugin callback authority is stale",
+            ),
+            Self::Unavailable => (
+                wit::ErrorCode::Unavailable,
+                "plugin callback is unavailable",
+            ),
+        };
+        wit::HostError {
+            code,
+            field: None,
+            message: message.to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginLiveAuthority {
+    pub plugin: InstalledPlugin,
+    pub grants: Vec<Permission>,
+    pub profile: InstalledPluginProfile,
+}
+
+pub trait PluginCallbackPort: Send + Sync + 'static {
+    fn authority(&self, plugin_id: PluginId) -> PluginCallbackFuture<PluginLiveAuthority>;
+    fn query_tasks(&self, request: wit::TaskQuery) -> PluginCallbackFuture<wit::TaskPage>;
+    fn query_projects(&self, request: wit::CatalogQuery) -> PluginCallbackFuture<wit::ProjectPage>;
+    fn query_tags(&self, request: wit::CatalogQuery) -> PluginCallbackFuture<wit::TagPage>;
+    fn settings(&self, plugin_id: PluginId) -> PluginCallbackFuture<Vec<PluginSetting>>;
+    fn kv(&self, plugin_id: PluginId) -> PluginCallbackFuture<Vec<PluginKvEntry>>;
+    fn transition_invocation(
+        &self,
+        request: AuthorizedTransitionPluginInvocationRequest,
+    ) -> PluginCallbackFuture<()>;
+}
+
+impl PluginCallbackPort for AppService {
+    fn authority(&self, plugin_id: PluginId) -> PluginCallbackFuture<PluginLiveAuthority> {
+        let service = self.clone();
+        Box::pin(async move {
+            let profile = service
+                .get_installed_plugin_profile()
+                .await
+                .map_err(map_app_error)?;
+            let plugin = profile
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == plugin_id)
+                .cloned()
+                .ok_or(PluginCallbackError::StaleAuthority)?;
+            let grants = service
+                .list_plugin_grants(plugin_id)
+                .await
+                .map_err(map_app_error)?
+                .into_iter()
+                .map(|grant| grant.permission)
+                .collect();
+            Ok(PluginLiveAuthority {
+                plugin,
+                grants,
+                profile,
+            })
+        })
+    }
+
+    fn query_tasks(&self, request: wit::TaskQuery) -> PluginCallbackFuture<wit::TaskPage> {
+        let service = self.clone();
+        Box::pin(async move {
+            service
+                .query_plugin_tasks(request)
+                .await
+                .map_err(map_query_error)
+        })
+    }
+
+    fn query_projects(&self, request: wit::CatalogQuery) -> PluginCallbackFuture<wit::ProjectPage> {
+        let service = self.clone();
+        Box::pin(async move {
+            service
+                .query_plugin_projects(request)
+                .await
+                .map_err(map_query_error)
+        })
+    }
+
+    fn query_tags(&self, request: wit::CatalogQuery) -> PluginCallbackFuture<wit::TagPage> {
+        let service = self.clone();
+        Box::pin(async move {
+            service
+                .query_plugin_tags(request)
+                .await
+                .map_err(map_query_error)
+        })
+    }
+
+    fn settings(&self, plugin_id: PluginId) -> PluginCallbackFuture<Vec<PluginSetting>> {
+        let service = self.clone();
+        Box::pin(async move {
+            service
+                .list_plugin_settings(plugin_id)
+                .await
+                .map_err(map_app_error)
+        })
+    }
+
+    fn kv(&self, plugin_id: PluginId) -> PluginCallbackFuture<Vec<PluginKvEntry>> {
+        let service = self.clone();
+        Box::pin(async move {
+            service
+                .list_plugin_kv(plugin_id)
+                .await
+                .map_err(map_app_error)
+        })
+    }
+
+    fn transition_invocation(
+        &self,
+        request: AuthorizedTransitionPluginInvocationRequest,
+    ) -> PluginCallbackFuture<()> {
+        let service = self.clone();
+        Box::pin(async move {
+            service
+                .transition_authorized_plugin_invocation(request, Timestamp::now())
+                .await
+                .map_err(map_app_error)?;
+            Ok(())
+        })
+    }
+}
+
+pub trait PluginCallbackHttp: Send + Sync + 'static {
+    fn send(
+        &self,
+        grant: HttpScope,
+        request: wit::HttpRequest,
+        delivery_id: String,
+    ) -> Pin<Box<dyn Future<Output = Result<wit::HttpResponse, wit::HttpError>> + Send + 'static>>;
+}
+
+impl PluginCallbackHttp for PluginHttpTransport {
+    fn send(
+        &self,
+        grant: HttpScope,
+        request: wit::HttpRequest,
+        delivery_id: String,
+    ) -> Pin<Box<dyn Future<Output = Result<wit::HttpResponse, wit::HttpError>> + Send + 'static>>
+    {
+        Box::pin(async move {
+            let mut permit = DispatchingHttpPermit::after_durable_transition();
+            PluginHttpTransport::new()
+                .request(&mut permit, &grant, request, &delivery_id)
+                .await
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginCallbackAuthority {
+    pub delivery: PluginInvocationDelivery,
+    pub callback: CallbackFence,
+    pub invocation_kind: InvocationKind,
+    pub invocation_mode: InvocationMode,
+    pub manifest_entry: PluginManifestEntry,
+    pub plugin: InstalledPlugin,
+    pub grants: Vec<Permission>,
+    pub ancestry: Vec<PluginId>,
+    pub service_depth: u8,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginLogRecord {
+    pub level: wit::LogLevel,
+    pub message: String,
+    pub fields: Vec<wit::LogField>,
+}
+
+#[derive(Clone)]
+struct RetainedHttp {
+    canonical_request: Vec<u8>,
+    request: wit::HttpRequest,
+    delivery_id: String,
+    resend_used: bool,
+    resend_allowed: bool,
+    process_lost: bool,
+}
+
+pub struct PluginInvocationCallbackState {
+    authority: PluginCallbackAuthority,
+    wall_now: Timestamp,
+    effect_temporal: TemporalContext,
+    monotonic_origin: Instant,
+    http: Option<RetainedHttp>,
+    logs: Vec<PluginLogRecord>,
+    log_bytes: usize,
+    kv_snapshot: Option<BTreeMap<String, Vec<u8>>>,
+    kv_cursors: BTreeMap<String, String>,
+    next_kv_cursor: u32,
+    next_callback_id: u32,
+}
+
+impl PluginInvocationCallbackState {
+    pub fn new(authority: PluginCallbackAuthority) -> Result<Self, PluginCallbackError> {
+        Self::new_at(
+            authority,
+            Timestamp::now(),
+            TemporalContext::sample_now(),
+            Instant::now(),
+        )
+    }
+
+    pub fn new_at(
+        authority: PluginCallbackAuthority,
+        wall_now: Timestamp,
+        effect_temporal: TemporalContext,
+        monotonic_origin: Instant,
+    ) -> Result<Self, PluginCallbackError> {
+        validate_static_authority(&authority)?;
+        let next_callback_id = authority.callback.callback_id;
+        Ok(Self {
+            authority,
+            wall_now,
+            effect_temporal,
+            monotonic_origin,
+            http: None,
+            logs: Vec::new(),
+            log_bytes: 0,
+            kv_snapshot: None,
+            kv_cursors: BTreeMap::new(),
+            next_kv_cursor: 0,
+            next_callback_id,
+        })
+    }
+
+    #[must_use]
+    pub fn authority(&self) -> &PluginCallbackAuthority {
+        &self.authority
+    }
+
+    #[must_use]
+    pub fn http_consumed(&self) -> bool {
+        self.http.is_some()
+    }
+
+    #[must_use]
+    pub fn logs(&self) -> &[PluginLogRecord] {
+        &self.logs
+    }
+
+    pub fn mark_process_lost(&mut self) {
+        if let Some(retained) = &mut self.http {
+            retained.process_lost = true;
+            retained.canonical_request.clear();
+        }
+    }
+
+    fn verify_live(&self, live: &PluginLiveAuthority) -> Result<(), PluginCallbackError> {
+        let expected = &self.authority.plugin;
+        let current = &live.plugin;
+        if current.plugin_id != expected.plugin_id
+            || current.package_generation != expected.package_generation
+            || current.activation_epoch != expected.activation_epoch
+            || current.manifest != expected.manifest
+            || current.runtime_state != expected.runtime_state
+            || current.desired_enabled != expected.desired_enabled
+            || canonical_grants(&live.grants) != canonical_grants(&self.authority.grants)
+            || current.granted_capabilities != expected.granted_capabilities
+        {
+            return Err(PluginCallbackError::StaleAuthority);
+        }
+        validate_static_authority(&self.authority)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidatedPluginServiceCall {
+    pub callback: CallbackFence,
+    pub caller_plugin_id: PluginId,
+    pub target_plugin_id: PluginId,
+    pub target_package_generation: u64,
+    pub target_activation_epoch: u64,
+    pub service_id: PluginId,
+    pub call: wit::ServiceCall,
+    pub ancestry: Vec<PluginId>,
+    pub service_depth: u8,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EncodedPluginCallbackReply {
+    pub reply: HostCallReply,
+    pub frame: junban_plugin_sdk::ParentFrame,
+    pub canonical_body: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PluginCallbackDispatch {
+    Reply(EncodedPluginCallbackReply),
+    CallService(ValidatedPluginServiceCall),
+}
+
+enum PendingPluginCallbackDispatch {
+    Reply(HostCallReply),
+    CallService(Box<ValidatedPluginServiceCall>),
+}
+
+pub struct PluginCallbackAdapter {
+    port: Arc<dyn PluginCallbackPort>,
+    http: Arc<dyn PluginCallbackHttp>,
+}
+
+impl PluginCallbackAdapter {
+    #[must_use]
+    pub fn new(port: Arc<dyn PluginCallbackPort>, http: Arc<dyn PluginCallbackHttp>) -> Self {
+        Self { port, http }
+    }
+
+    /// Validate one exact child frame/body pair, decode its canonical SDK body,
+    /// and route it to exactly one typed path.
+    pub async fn dispatch_message(
+        &self,
+        state: &mut PluginInvocationCallbackState,
+        frame: &ChildFrame,
+        body: &[u8],
+    ) -> Result<PluginCallbackDispatch, PluginCallbackError> {
+        let (callback, kind) = match frame {
+            ChildFrame::CapabilityRequest { callback, kind, .. } => (callback, *kind),
+            _ => return Err(PluginCallbackError::InvalidBody),
+        };
+        let expected = &state.authority.callback;
+        if callback.plugin_id != expected.plugin_id
+            || callback.package_generation != expected.package_generation
+            || callback.activation_epoch != expected.activation_epoch
+            || callback.host_session_id != expected.host_session_id
+            || callback.invocation_id != expected.invocation_id
+            || callback.callback_id != state.next_callback_id
+        {
+            return Err(PluginCallbackError::StaleAuthority);
+        }
+        validate_child_body(frame, body).map_err(|_| PluginCallbackError::InvalidBody)?;
+        let request =
+            decode_host_call_request(kind, body).map_err(|_| PluginCallbackError::InvalidBody)?;
+        state.next_callback_id = state
+            .next_callback_id
+            .checked_add(1)
+            .ok_or(PluginCallbackError::OperationTooLarge)?;
+        self.dispatch(state, callback.clone(), request, body).await
+    }
+
+    async fn dispatch(
+        &self,
+        state: &mut PluginInvocationCallbackState,
+        callback: CallbackFence,
+        request: HostCallRequest,
+        canonical_body: &[u8],
+    ) -> Result<PluginCallbackDispatch, PluginCallbackError> {
+        let live = self
+            .port
+            .authority(state.authority.plugin.plugin_id.clone())
+            .await?;
+        state.verify_live(&live)?;
+        authorize_request(state, &request)?;
+
+        let dispatch = match request {
+            HostCallRequest::QueryTasks(query) => {
+                let page = self.port.query_tasks(query).await;
+                PendingPluginCallbackDispatch::Reply(HostCallReply::QueryTasks(map_wit(page)))
+            }
+            HostCallRequest::QueryProjects(query) => {
+                let page = self.port.query_projects(query).await;
+                PendingPluginCallbackDispatch::Reply(HostCallReply::QueryProjects(map_wit(page)))
+            }
+            HostCallRequest::QueryTags(query) => {
+                let page = self.port.query_tags(query).await;
+                PendingPluginCallbackDispatch::Reply(HostCallReply::QueryTags(map_wit(page)))
+            }
+            HostCallRequest::GetSettings(()) => {
+                let settings = self
+                    .port
+                    .settings(state.authority.plugin.plugin_id.clone())
+                    .await
+                    .and_then(|values| merge_settings(&state.authority.plugin.manifest, values));
+                PendingPluginCallbackDispatch::Reply(HostCallReply::GetSettings(map_wit(settings)))
+            }
+            HostCallRequest::GetKv(keys) => {
+                ensure_kv_snapshot(self.port.as_ref(), state).await?;
+                let result = get_kv(state, keys);
+                PendingPluginCallbackDispatch::Reply(HostCallReply::GetKv(map_wit(result)))
+            }
+            HostCallRequest::ListKv(arguments) => {
+                ensure_kv_snapshot(self.port.as_ref(), state).await?;
+                let result = list_kv(state, arguments);
+                PendingPluginCallbackDispatch::Reply(HostCallReply::ListKv(map_wit(result)))
+            }
+            HostCallRequest::WallNow(()) => PendingPluginCallbackDispatch::Reply(
+                HostCallReply::WallNow(state.wall_now.to_string()),
+            ),
+            HostCallRequest::MonotonicMs(()) => {
+                let elapsed = state.monotonic_origin.elapsed().as_millis();
+                PendingPluginCallbackDispatch::Reply(HostCallReply::MonotonicMs(
+                    u64::try_from(elapsed).unwrap_or(u64::MAX),
+                ))
+            }
+            HostCallRequest::Log(log) => {
+                retain_log(state, log)?;
+                PendingPluginCallbackDispatch::Reply(HostCallReply::Log(()))
+            }
+            HostCallRequest::HttpRequest(request) => {
+                let reply = self.http(state, request, canonical_body).await;
+                PendingPluginCallbackDispatch::Reply(HostCallReply::HttpRequest(reply))
+            }
+            HostCallRequest::CallService(call) => {
+                PendingPluginCallbackDispatch::CallService(Box::new(validate_service_call(
+                    state,
+                    callback.clone(),
+                    &live.profile,
+                    call,
+                )?))
+            }
+        };
+
+        let current = self
+            .port
+            .authority(state.authority.plugin.plugin_id.clone())
+            .await?;
+        state.verify_live(&current)?;
+        if let PendingPluginCallbackDispatch::CallService(action) = &dispatch {
+            let current_action = validate_service_call(
+                state,
+                action.callback.clone(),
+                &current.profile,
+                action.call.clone(),
+            )?;
+            if current_action != **action {
+                return Err(PluginCallbackError::StaleAuthority);
+            }
+        }
+        match dispatch {
+            PendingPluginCallbackDispatch::Reply(reply) => {
+                let (frame, canonical_body) = Self::encode_reply(callback, reply.clone())?;
+                if matches!(&reply, HostCallReply::GetSettings(wit::WitResult::Ok(_)))
+                    && canonical_body.len() > PLUGIN_SETTINGS_BYTES_MAX
+                {
+                    return Err(PluginCallbackError::OperationTooLarge);
+                }
+                Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
+                    reply,
+                    frame,
+                    canonical_body,
+                }))
+            }
+            PendingPluginCallbackDispatch::CallService(call) => {
+                Ok(PluginCallbackDispatch::CallService(*call))
+            }
+        }
+    }
+
+    async fn http(
+        &self,
+        state: &mut PluginInvocationCallbackState,
+        request: wit::HttpRequest,
+        canonical_body: &[u8],
+    ) -> wit::WitResult<wit::HttpResponse, wit::HttpError> {
+        let scope = http_scope(&state.authority.grants).cloned();
+        let Some(scope) = scope else {
+            return wit::WitResult::Err(http_denied("plugin HTTP scope is unavailable"));
+        };
+
+        let resend = if let Some(retained) = &mut state.http {
+            if retained.process_lost
+                || retained.resend_used
+                || !retained.resend_allowed
+                || retained.canonical_request != canonical_body
+                || retained.request != request
+            {
+                return wit::WitResult::Err(http_denied(
+                    "plugin HTTP callback was already consumed",
+                ));
+            }
+            retained.resend_used = true;
+            retained.resend_allowed = false;
+            true
+        } else {
+            let delivery_id = derive_delivery_id(&state.authority.delivery);
+            state.http = Some(RetainedHttp {
+                canonical_request: canonical_body.to_vec(),
+                request: request.clone(),
+                delivery_id,
+                resend_used: false,
+                resend_allowed: false,
+                process_lost: false,
+            });
+            false
+        };
+
+        let Some(retained) = state.http.as_ref() else {
+            return wit::WitResult::Err(http_denied("plugin HTTP state is unavailable"));
+        };
+        let delivery_id = retained.delivery_id.clone();
+        let expected_state = if resend {
+            PluginInvocationState::AmbiguousHttp
+        } else {
+            PluginInvocationState::Reserved
+        };
+        if self
+            .port
+            .transition_invocation(http_transition(
+                &state.authority,
+                expected_state,
+                PluginInvocationState::DispatchingHttp,
+            ))
+            .await
+            .is_err()
+        {
+            return wit::WitResult::Err(http_denied("plugin HTTP durable transition failed"));
+        }
+        let authority_current = self
+            .port
+            .authority(state.authority.plugin.plugin_id.clone())
+            .await
+            .and_then(|live| state.verify_live(&live));
+        if authority_current.is_err() {
+            return wit::WitResult::Err(http_denied(
+                "plugin HTTP authority changed before dispatch",
+            ));
+        }
+
+        match self.http.send(scope, request, delivery_id).await {
+            Ok(response) => wit::WitResult::Ok(response),
+            Err(error) => {
+                if error.delivery == wit::DeliveryState::MayHaveBeenSent {
+                    let recorded = self
+                        .port
+                        .transition_invocation(http_transition(
+                            &state.authority,
+                            PluginInvocationState::DispatchingHttp,
+                            PluginInvocationState::AmbiguousHttp,
+                        ))
+                        .await
+                        .is_ok();
+                    if recorded
+                        && !resend
+                        && let Some(retained) = state.http.as_mut()
+                    {
+                        retained.resend_allowed = true;
+                    }
+                }
+                wit::WitResult::Err(error)
+            }
+        }
+    }
+
+    /// Encode a reply only through the SDK's canonical reply constructor.
+    pub fn encode_reply(
+        callback: CallbackFence,
+        reply: HostCallReply,
+    ) -> Result<(junban_plugin_sdk::ParentFrame, Vec<u8>), PluginCallbackError> {
+        reply
+            .into_parent_message(callback)
+            .map(junban_plugin_sdk::TypedParentMessage::into_parts)
+            .map_err(|_| PluginCallbackError::OperationTooLarge)
+    }
+}
+
+fn validate_static_authority(
+    authority: &PluginCallbackAuthority,
+) -> Result<(), PluginCallbackError> {
+    let delivery = &authority.delivery.authority;
+    let callback = &authority.callback;
+    let nested_service = authority.invocation_mode == InvocationMode::Service;
+    let unique_ancestry =
+        authority.ancestry.iter().collect::<BTreeSet<_>>().len() == authority.ancestry.len();
+    let service_chain_valid = if nested_service {
+        authority.service_depth > 0
+            && authority.service_depth <= PLUGIN_SERVICE_DEPTH_MAX
+            && authority.ancestry.len() == usize::from(authority.service_depth)
+            && unique_ancestry
+            && !authority.ancestry.contains(&authority.plugin.plugin_id)
+    } else {
+        authority.service_depth == 0 && authority.ancestry.is_empty()
+    };
+    let mode_matches_kind = authority.invocation_kind.mode() == authority.invocation_mode;
+    let delivery_mode_matches = match delivery.mode {
+        PluginDeliveryMode::StartingResync => authority.invocation_kind == InvocationKind::Resync,
+        PluginDeliveryMode::StartingCatchUp => {
+            authority.invocation_kind == InvocationKind::HandleEvent
+        }
+        PluginDeliveryMode::Active => authority.invocation_kind != InvocationKind::Resync,
+    };
+    if !mode_matches_kind
+        || !delivery_mode_matches
+        || callback.package_generation == 0
+        || callback.activation_epoch == 0
+        || callback.callback_id == 0
+        || callback.host_session_id != delivery.host_session_id.to_string()
+        || !service_chain_valid
+        || authority.plugin.plugin_id.as_str() != callback.plugin_id
+        || authority.plugin.package_generation != callback.package_generation
+        || authority.plugin.activation_epoch != callback.activation_epoch
+        || (!nested_service
+            && (callback.plugin_id != delivery.plugin_id.as_str()
+                || callback.invocation_id != delivery.invocation_id.to_string()))
+    {
+        return Err(PluginCallbackError::StaleAuthority);
+    }
+    if !nested_service && let Some(hook) = authority.durable_delivery_hook() {
+        let entry = plugin_manifest_entry_authority(
+            &authority.plugin.manifest,
+            hook,
+            PluginManifestEntrySelector::Requested(&authority.manifest_entry),
+        )
+        .ok_or(PluginCallbackError::StaleAuthority)?;
+        if entry.persisted_id != authority.delivery.persisted_entry_id {
+            return Err(PluginCallbackError::StaleAuthority);
+        }
+    }
+    let granted: BTreeSet<_> = authority
+        .grants
+        .iter()
+        .map(|grant| grant.capability)
+        .collect();
+    let reported: BTreeSet<_> = authority
+        .plugin
+        .granted_capabilities
+        .iter()
+        .copied()
+        .collect();
+    if granted != reported
+        || reported.len() != authority.plugin.granted_capabilities.len()
+        || canonical_permission_hash(&authority.grants).is_none()
+    {
+        return Err(PluginCallbackError::StaleAuthority);
+    }
+    Ok(())
+}
+
+impl PluginCallbackAuthority {
+    fn durable_delivery_hook(&self) -> Option<junban_app::PluginHookKind> {
+        match self.delivery.authority.mode {
+            PluginDeliveryMode::StartingResync => Some(junban_app::PluginHookKind::Resync),
+            PluginDeliveryMode::StartingCatchUp => Some(junban_app::PluginHookKind::HandleEvent),
+            PluginDeliveryMode::Active => match self.invocation_kind {
+                InvocationKind::InvokeCommand => Some(junban_app::PluginHookKind::InvokeCommand),
+                InvocationKind::HandleEvent => Some(junban_app::PluginHookKind::HandleEvent),
+                InvocationKind::HandleSurfaceAction => {
+                    Some(junban_app::PluginHookKind::HandleSurfaceAction)
+                }
+                InvocationKind::Activate
+                | InvocationKind::Deactivate
+                | InvocationKind::RenderSurface
+                | InvocationKind::ValidateSettings
+                | InvocationKind::CallService => None,
+                InvocationKind::Resync => Some(junban_app::PluginHookKind::Resync),
+            },
+        }
+    }
+}
+
+fn authorize_request(
+    state: &PluginInvocationCallbackState,
+    request: &HostCallRequest,
+) -> Result<(), PluginCallbackError> {
+    let kind = request.kind();
+    validate_host_call_authority(
+        kind,
+        state.authority.invocation_mode,
+        &state.authority.grants,
+    )
+    .map_err(|_| PluginCallbackError::PermissionDenied)?;
+    if kind == HostCallKind::HttpRequest
+        && state.authority.delivery.authority.mode != PluginDeliveryMode::Active
+    {
+        return Err(PluginCallbackError::PermissionDenied);
+    }
+    Ok(())
+}
+
+fn has_grant(grants: &[Permission], capability: Capability) -> bool {
+    grants.iter().any(|grant| grant.capability == capability)
+}
+
+fn http_scope(grants: &[Permission]) -> Option<&HttpScope> {
+    grants.iter().find_map(|grant| {
+        if grant.capability == Capability::Http {
+            match &grant.scope {
+                PermissionScope::Http(scope) => Some(scope),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    })
+}
+
+fn canonical_grants(grants: &[Permission]) -> Vec<Permission> {
+    let mut grants = grants.to_vec();
+    grants.sort_by_key(|grant| grant.capability);
+    grants
+}
+
+async fn ensure_kv_snapshot(
+    port: &dyn PluginCallbackPort,
+    state: &mut PluginInvocationCallbackState,
+) -> Result<(), PluginCallbackError> {
+    if state.kv_snapshot.is_some() {
+        return Ok(());
+    }
+    let entries = port.kv(state.authority.plugin.plugin_id.clone()).await?;
+    let mut map = BTreeMap::new();
+    let mut bytes = 0_usize;
+    for entry in entries {
+        if !valid_kv_key(&entry.key)
+            || entry.value.len() > junban_app::PLUGIN_KV_VALUE_BYTES_MAX
+            || map.insert(entry.key, entry.value.clone()).is_some()
+        {
+            return Err(PluginCallbackError::StaleAuthority);
+        }
+        bytes = bytes
+            .checked_add(entry.value.len())
+            .ok_or(PluginCallbackError::OperationTooLarge)?;
+    }
+    if map.len() > junban_app::PLUGIN_KV_KEYS_MAX || bytes > junban_app::PLUGIN_KV_BYTES_MAX {
+        return Err(PluginCallbackError::OperationTooLarge);
+    }
+    state.kv_snapshot = Some(map);
+    Ok(())
+}
+
+fn get_kv(
+    state: &PluginInvocationCallbackState,
+    keys: Vec<String>,
+) -> Result<Vec<wit::KvEntry>, PluginCallbackError> {
+    if keys.len() > PLUGIN_KV_GET_KEYS_MAX
+        || keys.iter().any(|key| !valid_kv_key(key))
+        || keys.iter().collect::<BTreeSet<_>>().len() != keys.len()
+    {
+        return Err(PluginCallbackError::InvalidInput);
+    }
+    let snapshot = state
+        .kv_snapshot
+        .as_ref()
+        .ok_or(PluginCallbackError::Unavailable)?;
+    let mut bytes = 0_usize;
+    let mut entries = Vec::new();
+    for key in keys {
+        if let Some(value) = snapshot.get(&key) {
+            bytes = bytes
+                .checked_add(value.len())
+                .ok_or(PluginCallbackError::OperationTooLarge)?;
+            if bytes > PLUGIN_KV_GET_REPLY_BYTES_MAX {
+                return Err(PluginCallbackError::OperationTooLarge);
+            }
+            entries.push(wit::KvEntry {
+                key,
+                value: wit::ByteList::new(value.clone())
+                    .map_err(|_| PluginCallbackError::OperationTooLarge)?,
+            });
+        }
+    }
+    Ok(entries)
+}
+
+fn list_kv(
+    state: &mut PluginInvocationCallbackState,
+    arguments: wit::HostStorageListKvArguments,
+) -> Result<wit::KvPage, PluginCallbackError> {
+    if arguments.limit == 0 || arguments.limit > PLUGIN_KV_LIST_LIMIT_MAX {
+        return Err(PluginCallbackError::InvalidInput);
+    }
+    let after = match arguments.cursor {
+        Some(cursor) => state
+            .kv_cursors
+            .get(&cursor)
+            .cloned()
+            .ok_or(PluginCallbackError::InvalidInput)?,
+        None => String::new(),
+    };
+    let snapshot = state
+        .kv_snapshot
+        .as_ref()
+        .ok_or(PluginCallbackError::Unavailable)?;
+    let mut entries = Vec::new();
+    let mut bytes = 0_usize;
+    let limit = usize::from(arguments.limit);
+    for (key, value) in
+        snapshot.range((std::ops::Bound::Excluded(after), std::ops::Bound::Unbounded))
+    {
+        if entries.len() == limit {
+            break;
+        }
+        bytes = bytes
+            .checked_add(key.len())
+            .and_then(|count| count.checked_add(value.len()))
+            .ok_or(PluginCallbackError::OperationTooLarge)?;
+        if bytes > PLUGIN_KV_LIST_REPLY_BYTES_MAX {
+            return Err(PluginCallbackError::OperationTooLarge);
+        }
+        entries.push(wit::KvEntry {
+            key: key.clone(),
+            value: wit::ByteList::new(value.clone())
+                .map_err(|_| PluginCallbackError::OperationTooLarge)?,
+        });
+    }
+    let next_cursor = entries.last().and_then(|last| {
+        snapshot
+            .range((
+                std::ops::Bound::Excluded(last.key.clone()),
+                std::ops::Bound::Unbounded,
+            ))
+            .next()
+            .map(|_| last.key.clone())
+    });
+    let next_cursor = next_cursor
+        .map(|last_key| {
+            if state.kv_cursors.len() >= junban_app::PLUGIN_KV_KEYS_MAX {
+                return Err(PluginCallbackError::OperationTooLarge);
+            }
+            state.next_kv_cursor = state
+                .next_kv_cursor
+                .checked_add(1)
+                .ok_or(PluginCallbackError::OperationTooLarge)?;
+            let cursor = derive_kv_cursor(state, &last_key, state.next_kv_cursor);
+            state.kv_cursors.insert(cursor.clone(), last_key);
+            Ok(cursor)
+        })
+        .transpose()?;
+    Ok(wit::KvPage {
+        entries,
+        next_cursor,
+    })
+}
+
+fn derive_kv_cursor(state: &PluginInvocationCallbackState, last_key: &str, index: u32) -> String {
+    let mut material = Vec::new();
+    material.extend_from_slice(KV_CURSOR_DOMAIN);
+    material.extend_from_slice(state.authority.callback.host_session_id.as_bytes());
+    material.extend_from_slice(state.authority.callback.invocation_id.as_bytes());
+    material.extend_from_slice(&index.to_be_bytes());
+    material.extend_from_slice(last_key.as_bytes());
+    Sha256Digest::of(&material).into_string()
+}
+
+fn merge_settings(
+    manifest: &RuntimeManifest,
+    persisted: Vec<PluginSetting>,
+) -> Result<Vec<wit::NamedSetting>, PluginCallbackError> {
+    let mut persisted_values = BTreeMap::new();
+    for setting in persisted {
+        if persisted_values
+            .insert(setting.key.to_string(), setting.value)
+            .is_some()
+        {
+            return Err(PluginCallbackError::StaleAuthority);
+        }
+    }
+    let persisted = persisted_values;
+    if manifest.settings.len() > PLUGIN_SETTINGS_MAX
+        || persisted.len() > manifest.settings.len()
+        || persisted
+            .keys()
+            .any(|key| !manifest.settings.iter().any(|setting| setting.id == *key))
+    {
+        return Err(PluginCallbackError::StaleAuthority);
+    }
+    let values: Vec<_> = manifest
+        .settings
+        .iter()
+        .map(|declaration| {
+            let value = match persisted.get(&declaration.id) {
+                Some(value) => {
+                    manifest
+                        .validate_persisted_setting(&declaration.id, value)
+                        .map_err(|_| PluginCallbackError::StaleAuthority)?;
+                    value.clone()
+                }
+                None => setting_default(&declaration.schema),
+            };
+            Ok(wit::NamedSetting {
+                id: declaration.id.clone(),
+                value: setting_value(value, &declaration.schema),
+            })
+        })
+        .collect::<Result<_, PluginCallbackError>>()?;
+    let bytes = values
+        .iter()
+        .try_fold(0_usize, |total, setting: &wit::NamedSetting| {
+            total
+                .checked_add(setting.id.len())
+                .and_then(|total| total.checked_add(setting_value_bytes(&setting.value)))
+                .ok_or(PluginCallbackError::OperationTooLarge)
+        })?;
+    if bytes > PLUGIN_SETTINGS_BYTES_MAX {
+        return Err(PluginCallbackError::OperationTooLarge);
+    }
+    Ok(values)
+}
+
+fn setting_default(schema: &junban_plugin_sdk::SettingSchema) -> junban_plugin_sdk::SettingValue {
+    use junban_plugin_sdk::{SettingSchema as S, SettingValue as V};
+    match schema {
+        S::Text { default, .. } | S::Select { default, .. } => V::Text(default.clone()),
+        S::Integer { default, .. } => V::Integer(*default),
+        S::Boolean { default } => V::Boolean(*default),
+    }
+}
+
+fn setting_value(
+    value: junban_plugin_sdk::SettingValue,
+    schema: &junban_plugin_sdk::SettingSchema,
+) -> wit::SettingValue {
+    match (value, schema) {
+        (
+            junban_plugin_sdk::SettingValue::Text(value),
+            junban_plugin_sdk::SettingSchema::Select { .. },
+        ) => wit::SettingValue::OptionId(value),
+        (junban_plugin_sdk::SettingValue::Text(value), _) => wit::SettingValue::Text(value),
+        (junban_plugin_sdk::SettingValue::Integer(value), _) => wit::SettingValue::Integer(value),
+        (junban_plugin_sdk::SettingValue::Boolean(value), _) => wit::SettingValue::Boolean(value),
+    }
+}
+
+fn setting_value_bytes(value: &wit::SettingValue) -> usize {
+    match value {
+        wit::SettingValue::Text(value) | wit::SettingValue::OptionId(value) => value.len(),
+        wit::SettingValue::Integer(_) => size_of::<i64>(),
+        wit::SettingValue::Boolean(_) => 1,
+    }
+}
+
+fn retain_log(
+    state: &mut PluginInvocationCallbackState,
+    mut log: wit::HostLogLogArguments,
+) -> Result<(), PluginCallbackError> {
+    if log.message.len() > usize::from(junban_plugin_sdk::GUEST_LOG_MESSAGE_BYTES_MAX)
+        || log.fields.len() > usize::from(junban_plugin_sdk::GUEST_LOG_FIELDS_MAX)
+        || log
+            .fields
+            .windows(2)
+            .any(|pair| pair[0].name >= pair[1].name)
+        || log.fields.iter().any(|field| {
+            PluginId::parse(field.name.clone()).is_err() || !valid_scalar_value(&field.value)
+        })
+    {
+        return Err(PluginCallbackError::InvalidInput);
+    }
+    log.message = redact_secrets(&log.message, "");
+    for field in &mut log.fields {
+        redact_scalar(&mut field.value);
+    }
+    let size = serde_json::to_vec(&log)
+        .map_err(|_| PluginCallbackError::InvalidInput)?
+        .len();
+    let projected = state
+        .log_bytes
+        .checked_add(size)
+        .ok_or(PluginCallbackError::OperationTooLarge)?;
+    if projected <= PLUGIN_LOG_INVOCATION_BYTES_MAX {
+        state.log_bytes = projected;
+        state.logs.push(PluginLogRecord {
+            level: log.level,
+            message: log.message,
+            fields: log.fields,
+        });
+    }
+    Ok(())
+}
+
+fn valid_scalar_value(value: &wit::ScalarValue) -> bool {
+    match value {
+        wit::ScalarValue::StringValue(_)
+        | wit::ScalarValue::IntegerValue(_)
+        | wit::ScalarValue::BooleanValue(_) => true,
+        wit::ScalarValue::DateValue(value) => canonical_date(value),
+        wit::ScalarValue::TimestampValue(value) => canonical_timestamp(value),
+        wit::ScalarValue::TaskId(value) => canonical_typed_id(value, TaskId::parse),
+        wit::ScalarValue::ProjectId(value) => canonical_typed_id(value, ProjectId::parse),
+        wit::ScalarValue::TagId(value) => canonical_typed_id(value, TagId::parse),
+        wit::ScalarValue::PluginId(value) | wit::ScalarValue::OptionId(value) => {
+            PluginId::parse(value).is_ok()
+        }
+    }
+}
+
+fn redact_scalar(value: &mut wit::ScalarValue) {
+    match value {
+        wit::ScalarValue::StringValue(value)
+        | wit::ScalarValue::DateValue(value)
+        | wit::ScalarValue::TimestampValue(value)
+        | wit::ScalarValue::TaskId(value)
+        | wit::ScalarValue::ProjectId(value)
+        | wit::ScalarValue::TagId(value)
+        | wit::ScalarValue::PluginId(value)
+        | wit::ScalarValue::OptionId(value) => *value = redact_secrets(value, ""),
+        wit::ScalarValue::IntegerValue(_) | wit::ScalarValue::BooleanValue(_) => {}
+    }
+}
+
+fn validate_service_call(
+    state: &PluginInvocationCallbackState,
+    callback: CallbackFence,
+    profile: &InstalledPluginProfile,
+    call: wit::ServiceCall,
+) -> Result<ValidatedPluginServiceCall, PluginCallbackError> {
+    if state.authority.service_depth >= PLUGIN_SERVICE_DEPTH_MAX {
+        return Err(PluginCallbackError::InvalidInput);
+    }
+    let caller = &state.authority.plugin;
+    let target_id =
+        PluginId::parse(call.plugin_id.clone()).map_err(|_| PluginCallbackError::Unavailable)?;
+    let service_id =
+        PluginId::parse(call.service_id.clone()).map_err(|_| PluginCallbackError::Unavailable)?;
+    if target_id == caller.plugin_id || state.authority.ancestry.contains(&target_id) {
+        return Err(PluginCallbackError::PermissionDenied);
+    }
+    let dependency = caller
+        .manifest
+        .dependencies
+        .iter()
+        .find(|dependency| {
+            dependency.id == call.plugin_id && dependency.services.contains(&call.service_id)
+        })
+        .ok_or(PluginCallbackError::Unavailable)?;
+    let allowed = state.authority.grants.iter().any(|grant| {
+        grant.capability == Capability::ServicesConsume
+            && matches!(&grant.scope, PermissionScope::Services(scope)
+                if scope.services.iter().any(|service|
+                    service.plugin_id == call.plugin_id && service.service_id == call.service_id))
+    });
+    if !allowed {
+        return Err(PluginCallbackError::PermissionDenied);
+    }
+    let target = profile
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id == target_id)
+        .ok_or(PluginCallbackError::Unavailable)?;
+    if !target.desired_enabled
+        || target.runtime_state != junban_app::PluginRuntimeState::Active
+        || !target.dependencies_satisfied
+        || !target
+            .granted_capabilities
+            .contains(&Capability::ServicesProvide)
+        || !junban_plugin_sdk::version_matches(&dependency.requirement, &target.version)
+            .unwrap_or(false)
+    {
+        return Err(PluginCallbackError::Unavailable);
+    }
+    let declaration = target
+        .manifest
+        .services
+        .iter()
+        .find(|service| service.id == call.service_id)
+        .ok_or(PluginCallbackError::Unavailable)?;
+    validate_named_values(&call.values, &declaration.request)?;
+    let mut ancestry = state.authority.ancestry.clone();
+    if ancestry.last() != Some(&caller.plugin_id) {
+        ancestry.push(caller.plugin_id.clone());
+    }
+    Ok(ValidatedPluginServiceCall {
+        callback,
+        caller_plugin_id: caller.plugin_id.clone(),
+        target_plugin_id: target.plugin_id.clone(),
+        target_package_generation: target.package_generation,
+        target_activation_epoch: target.activation_epoch,
+        service_id,
+        call,
+        ancestry,
+        service_depth: state.authority.service_depth + 1,
+    })
+}
+
+pub fn validate_service_response(
+    target: &InstalledPlugin,
+    service_id: &PluginId,
+    data: &wit::ServiceData,
+) -> Result<(), PluginCallbackError> {
+    if !target.desired_enabled
+        || target.runtime_state != junban_app::PluginRuntimeState::Active
+        || !target.dependencies_satisfied
+        || !target
+            .granted_capabilities
+            .contains(&Capability::ServicesProvide)
+    {
+        return Err(PluginCallbackError::StaleAuthority);
+    }
+    let declaration = target
+        .manifest
+        .services
+        .iter()
+        .find(|service| service.id == service_id.as_str())
+        .ok_or(PluginCallbackError::Unavailable)?;
+    validate_named_values(&data.values, &declaration.response)
+}
+
+fn validate_named_values(
+    values: &[wit::NamedValue],
+    fields: &[junban_plugin_sdk::ServiceField],
+) -> Result<(), PluginCallbackError> {
+    if service_data_bytes(values) > PLUGIN_SERVICE_DATA_BYTES_MAX
+        || serde_json::to_vec(values)
+            .map_err(|_| PluginCallbackError::InvalidInput)?
+            .len()
+            > PLUGIN_SERVICE_DATA_BYTES_MAX
+    {
+        return Err(PluginCallbackError::OperationTooLarge);
+    }
+    if values.windows(2).any(|pair| pair[0].name >= pair[1].name) {
+        return Err(PluginCallbackError::InvalidInput);
+    }
+    for field in fields {
+        let value = values.iter().find(|value| value.name == field.id);
+        if field.required && value.is_none() {
+            return Err(PluginCallbackError::InvalidInput);
+        }
+        if let Some(value) = value {
+            validate_data_value(&value.value, field.kind)?;
+        }
+    }
+    if values
+        .iter()
+        .any(|value| !fields.iter().any(|field| field.id == value.name))
+    {
+        return Err(PluginCallbackError::InvalidInput);
+    }
+    Ok(())
+}
+
+fn service_data_bytes(values: &[wit::NamedValue]) -> usize {
+    values.iter().fold(0_usize, |total, value| {
+        total
+            .saturating_add(value.name.len())
+            .saturating_add(data_value_bytes(&value.value))
+    })
+}
+
+fn data_value_bytes(value: &wit::DataValue) -> usize {
+    use wit::{DataValue as V, ScalarValue as S};
+    match value {
+        V::Scalar(value) => match value {
+            S::StringValue(value)
+            | S::DateValue(value)
+            | S::TimestampValue(value)
+            | S::TaskId(value)
+            | S::ProjectId(value)
+            | S::TagId(value)
+            | S::PluginId(value)
+            | S::OptionId(value) => value.len(),
+            S::IntegerValue(_) => size_of::<i64>(),
+            S::BooleanValue(_) => 1,
+        },
+        V::StringList(values)
+        | V::DateList(values)
+        | V::TimestampList(values)
+        | V::TaskIdList(values)
+        | V::ProjectIdList(values)
+        | V::TagIdList(values)
+        | V::PluginIdList(values)
+        | V::OptionIdList(values) => values.iter().map(String::len).sum(),
+        V::IntegerList(values) => values.len().saturating_mul(size_of::<i64>()),
+        V::BooleanList(values) => values.len(),
+    }
+}
+
+fn validate_data_value(
+    value: &wit::DataValue,
+    kind: junban_plugin_sdk::DataKind,
+) -> Result<(), PluginCallbackError> {
+    use junban_plugin_sdk::DataKind as K;
+    use wit::{DataValue as V, ScalarValue as S};
+
+    let valid = match (value, kind) {
+        (V::Scalar(S::StringValue(_)), K::String)
+        | (V::Scalar(S::IntegerValue(_)), K::Integer)
+        | (V::Scalar(S::BooleanValue(_)), K::Boolean)
+        | (V::StringList(_), K::StringList)
+        | (V::IntegerList(_), K::IntegerList)
+        | (V::BooleanList(_), K::BooleanList) => true,
+        (V::Scalar(S::DateValue(value)), K::Date) => canonical_date(value),
+        (V::Scalar(S::TimestampValue(value)), K::Timestamp) => canonical_timestamp(value),
+        (V::Scalar(S::TaskId(value)), K::TaskId) => canonical_typed_id(value, TaskId::parse),
+        (V::Scalar(S::ProjectId(value)), K::ProjectId) => {
+            canonical_typed_id(value, ProjectId::parse)
+        }
+        (V::Scalar(S::TagId(value)), K::TagId) => canonical_typed_id(value, TagId::parse),
+        (V::Scalar(S::PluginId(value)), K::PluginId)
+        | (V::Scalar(S::OptionId(value)), K::OptionId) => PluginId::parse(value).is_ok(),
+        (V::DateList(values), K::DateList) => values.iter().all(|value| canonical_date(value)),
+        (V::TimestampList(values), K::TimestampList) => {
+            values.iter().all(|value| canonical_timestamp(value))
+        }
+        (V::TaskIdList(values), K::TaskIdList) => values
+            .iter()
+            .all(|value| canonical_typed_id(value, TaskId::parse)),
+        (V::ProjectIdList(values), K::ProjectIdList) => values
+            .iter()
+            .all(|value| canonical_typed_id(value, ProjectId::parse)),
+        (V::TagIdList(values), K::TagIdList) => values
+            .iter()
+            .all(|value| canonical_typed_id(value, TagId::parse)),
+        (V::PluginIdList(values), K::PluginIdList) | (V::OptionIdList(values), K::OptionIdList) => {
+            values.iter().all(|value| PluginId::parse(value).is_ok())
+        }
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(PluginCallbackError::InvalidInput)
+    }
+}
+
+fn canonical_date(value: &str) -> bool {
+    value
+        .parse::<Date>()
+        .is_ok_and(|parsed| parsed.to_string() == value)
+}
+
+fn canonical_timestamp(value: &str) -> bool {
+    value
+        .parse::<Timestamp>()
+        .is_ok_and(|parsed| parsed.to_string() == value)
+}
+
+fn canonical_typed_id<T: ToString>(
+    value: &str,
+    parse: impl Fn(&str) -> Result<T, junban_domain::ValidationError>,
+) -> bool {
+    parse(value).is_ok_and(|parsed| parsed.to_string() == value)
+}
+
+/// Validate an exact guest outcome frame/body and translate one successful
+/// effect into the existing authorized atomic commit seam. Packet B adds the
+/// exact retained-event cursor before commit.
+pub fn adapt_plugin_effect_message(
+    state: &PluginInvocationCallbackState,
+    frame: &ChildFrame,
+    body: &[u8],
+    cursor: Option<AdvancePluginCursorRequest>,
+) -> Result<AuthorizedCommitPluginInvocationRequest, PluginCallbackError> {
+    let expected = junban_plugin_sdk::AuthorityFence {
+        plugin_id: state.authority.callback.plugin_id.clone(),
+        package_generation: state.authority.callback.package_generation,
+        activation_epoch: state.authority.callback.activation_epoch,
+        host_session_id: state.authority.callback.host_session_id.clone(),
+        invocation_id: state.authority.callback.invocation_id.clone(),
+    };
+    let kind = state.authority.invocation_kind;
+    if !matches!(frame, ChildFrame::Outcome { fence, kind: frame_kind, .. }
+        if fence == &expected && *frame_kind == kind)
+    {
+        return Err(PluginCallbackError::StaleAuthority);
+    }
+    validate_child_body(frame, body).map_err(|_| PluginCallbackError::InvalidBody)?;
+    let outcome =
+        decode_invocation_outcome(kind, body).map_err(|_| PluginCallbackError::InvalidBody)?;
+    adapt_decoded_plugin_effect(state, &outcome, body, cursor)
+}
+
+fn adapt_decoded_plugin_effect(
+    state: &PluginInvocationCallbackState,
+    outcome: &InvocationOutcome,
+    canonical_body: &[u8],
+    cursor: Option<AdvancePluginCursorRequest>,
+) -> Result<AuthorizedCommitPluginInvocationRequest, PluginCallbackError> {
+    validate_static_authority(&state.authority)?;
+    if state.authority.invocation_mode != InvocationMode::Effect {
+        return Err(PluginCallbackError::PermissionDenied);
+    }
+    let effect = match (state.authority.invocation_kind, outcome) {
+        (
+            InvocationKind::InvokeCommand,
+            InvocationOutcome::InvokeCommand(wit::WitResult::Ok(outcome)),
+        )
+        | (
+            InvocationKind::HandleEvent,
+            InvocationOutcome::HandleEvent(wit::WitResult::Ok(outcome)),
+        )
+        | (
+            InvocationKind::HandleSurfaceAction,
+            InvocationOutcome::HandleSurfaceAction(wit::WitResult::Ok(outcome)),
+        ) => outcome.effect.clone(),
+        _ => return Err(PluginCallbackError::InvalidInput),
+    };
+    if effect.is_some()
+        && (state.http_consumed()
+            || state.authority.delivery.authority.mode != PluginDeliveryMode::Active)
+    {
+        return Err(PluginCallbackError::PermissionDenied);
+    }
+    let mut request = CommitPluginInvocationRequest {
+        invocation_operation_id: state.authority.delivery.authority.invocation_id,
+        plugin_id: state.authority.delivery.authority.plugin_id.clone(),
+        package_generation: state.authority.delivery.authority.package_generation,
+        activation_epoch: state.authority.delivery.authority.activation_epoch,
+        child_operation_id: None,
+        domain_effect: None,
+        kv_patch: None,
+        resync_kv: None,
+        cursor,
+        resync_session: None,
+    };
+    if let Some(effect) = effect {
+        let child = derive_effect_operation(&state.authority, canonical_body)?;
+        match effect {
+            wit::PluginEffect::DomainMutation(mutation) => {
+                let domain = convert_domain_mutation(mutation, child, &state.effect_temporal)?;
+                if !has_grant(&state.authority.grants, domain.required_capability()) {
+                    return Err(PluginCallbackError::PermissionDenied);
+                }
+                request.child_operation_id = Some(child);
+                request.domain_effect = Some(domain);
+            }
+            wit::PluginEffect::KvPatch(patch) => {
+                if !has_grant(&state.authority.grants, Capability::Storage) {
+                    return Err(PluginCallbackError::PermissionDenied);
+                }
+                request.kv_patch = Some(convert_kv_patch(patch)?);
+            }
+        }
+    }
+    Ok(AuthorizedCommitPluginInvocationRequest {
+        request,
+        delivery: state.authority.delivery.clone(),
+    })
+}
+
+#[cfg(test)]
+fn adapt_plugin_effect(
+    state: &PluginInvocationCallbackState,
+    outcome: &InvocationOutcome,
+    cursor: Option<AdvancePluginCursorRequest>,
+) -> Result<AuthorizedCommitPluginInvocationRequest, PluginCallbackError> {
+    let canonical = canonical_outcome_body(&state.authority, outcome.clone())?;
+    adapt_decoded_plugin_effect(state, outcome, &canonical, cursor)
+}
+
+#[cfg(test)]
+fn canonical_outcome_body(
+    authority: &PluginCallbackAuthority,
+    outcome: InvocationOutcome,
+) -> Result<Vec<u8>, PluginCallbackError> {
+    outcome
+        .into_child_message(junban_plugin_sdk::AuthorityFence {
+            plugin_id: authority.callback.plugin_id.clone(),
+            package_generation: authority.callback.package_generation,
+            activation_epoch: authority.callback.activation_epoch,
+            host_session_id: authority.callback.host_session_id.clone(),
+            invocation_id: authority.callback.invocation_id.clone(),
+        })
+        .map(junban_plugin_sdk::TypedChildMessage::into_parts)
+        .map(|(_, body)| body)
+        .map_err(|_| PluginCallbackError::OperationTooLarge)
+}
+
+fn derive_effect_operation(
+    authority: &PluginCallbackAuthority,
+    effect: &[u8],
+) -> Result<OperationId, PluginCallbackError> {
+    let delivery_sha256 = authority
+        .delivery
+        .authority
+        .digest()
+        .map_err(|_| PluginCallbackError::StaleAuthority)?;
+    let mut material = Vec::new();
+    material.extend_from_slice(EFFECT_ID_DOMAIN);
+    put_bytes(&mut material, delivery_sha256.as_str().as_bytes());
+    put_bytes(&mut material, effect);
+    OperationId::parse(&uuid_from_hash(material).to_string())
+        .map_err(|_| PluginCallbackError::Unavailable)
+}
+
+fn derive_entity_id(operation: OperationId, label: &[u8]) -> String {
+    let mut material = Vec::new();
+    material.extend_from_slice(EFFECT_ID_DOMAIN);
+    material.extend_from_slice(operation.as_uuid().as_bytes());
+    put_bytes(&mut material, label);
+    uuid_from_hash(material).to_string()
+}
+
+fn uuid_from_hash(material: Vec<u8>) -> Uuid {
+    let digest = Sha256::digest(material);
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
+}
+
+fn put_bytes(material: &mut Vec<u8>, bytes: &[u8]) {
+    material.extend_from_slice(&u32::try_from(bytes.len()).unwrap_or(u32::MAX).to_be_bytes());
+    material.extend_from_slice(bytes);
+}
+
+fn convert_domain_mutation(
+    mutation: wit::DomainMutation,
+    operation: OperationId,
+    temporal: &TemporalContext,
+) -> Result<PluginDomainEffect, PluginCallbackError> {
+    use wit::DomainMutation as M;
+    Ok(match mutation {
+        M::CreateTask(value) => {
+            let task_id = TaskId::parse(&derive_entity_id(operation, b"task"))
+                .map_err(|_| PluginCallbackError::InvalidInput)?;
+            PluginDomainEffect::CreateTask {
+                task_id,
+                draft: convert_task_draft(value, task_id)?,
+            }
+        }
+        M::PatchTask(value) => PluginDomainEffect::PatchTask {
+            task_id: parse_task(&value.task_id)?,
+            patch: convert_task_patch(value.patch)?,
+        },
+        M::CompleteTask(id) => PluginDomainEffect::CompleteTask {
+            task_id: parse_task(&id)?,
+            temporal: temporal.clone(),
+        },
+        M::UncompleteTask(id) => PluginDomainEffect::UncompleteTask {
+            task_id: parse_task(&id)?,
+            temporal: temporal.clone(),
+        },
+        M::CancelTask(id) => PluginDomainEffect::CancelTask {
+            task_id: parse_task(&id)?,
+        },
+        M::ReopenTask(id) => PluginDomainEffect::ReopenTask {
+            task_id: parse_task(&id)?,
+        },
+        M::DeleteTask(id) => PluginDomainEffect::DeleteTask {
+            task_id: parse_task(&id)?,
+        },
+        M::BulkTasks(value) => {
+            if value.task_ids.is_empty() {
+                return Err(PluginCallbackError::InvalidInput);
+            }
+            PluginDomainEffect::BulkTasks {
+                task_ids: parse_unique_ids(&value.task_ids, TaskId::parse)?,
+                action: convert_bulk_action(value.action)?,
+                temporal: temporal.clone(),
+            }
+        }
+        M::CreateProject(draft) => PluginDomainEffect::CreateProject {
+            project_id: ProjectId::parse(&derive_entity_id(operation, b"project"))
+                .map_err(|_| PluginCallbackError::InvalidInput)?,
+            draft: convert_project_draft(draft)?,
+        },
+        M::PatchProject(value) => PluginDomainEffect::PatchProject {
+            project_id: parse_project(&value.project_id)?,
+            patch: convert_project_patch(value.patch)?,
+        },
+        M::DeleteProject(id) => PluginDomainEffect::DeleteProject {
+            project_id: parse_project(&id)?,
+        },
+        M::CreateTag(draft) => PluginDomainEffect::CreateTag {
+            tag_id: TagId::parse(&derive_entity_id(operation, b"tag"))
+                .map_err(|_| PluginCallbackError::InvalidInput)?,
+            draft: convert_tag_draft(draft)?,
+        },
+        M::PatchTag(value) => PluginDomainEffect::PatchTag {
+            tag_id: parse_tag(&value.tag_id)?,
+            patch: convert_tag_patch(value.patch)?,
+        },
+        M::DeleteTag(id) => PluginDomainEffect::DeleteTag {
+            tag_id: parse_tag(&id)?,
+        },
+    })
+}
+
+fn convert_task_draft(
+    value: wit::TaskDraft,
+    task_id: TaskId,
+) -> Result<TaskDraft, PluginCallbackError> {
+    let draft = TaskDraft {
+        title: TaskTitle::new(value.title).map_err(invalid)?,
+        description: MarkdownText::new(value.description).map_err(invalid)?,
+        priority: value.priority.map(convert_priority).transpose()?,
+        due_date: value.due_date.map(parse_date).transpose()?,
+        due_time: value.due_time.map(convert_due_time).transpose()?,
+        deadline: value.deadline.map(parse_timestamp).transpose()?,
+        someday: value.someday,
+        estimated_minutes: value
+            .estimated_minutes
+            .map(|v| EstimatedMinutes::new(v).map_err(invalid))
+            .transpose()?,
+        actual_minutes: value
+            .actual_minutes
+            .map(|v| ActualMinutes::new(v).map_err(invalid))
+            .transpose()?,
+        dread: value
+            .dread
+            .map(|v| DreadLevel::new(v).map_err(invalid))
+            .transpose()?,
+        project_id: value.project_id.as_deref().map(parse_project).transpose()?,
+        section_id: value.section_id.as_deref().map(parse_section).transpose()?,
+        parent_id: value.parent_id.as_deref().map(parse_task).transpose()?,
+        tag_ids: parse_unique_ids(&value.tag_ids, TagId::parse)?,
+        sort_order: SortOrder::new(value.sort_order),
+        recurrence_rule: value
+            .recurrence_rule
+            .map(|v| RecurrenceRule::new(v).map_err(invalid))
+            .transpose()?,
+        remind_at: value.remind_at.map(parse_timestamp).transpose()?,
+        recurrence_anchor_day: value
+            .recurrence_anchor_day
+            .map(|v| MonthlyAnchorDay::new(v).map_err(invalid))
+            .transpose()?,
+    };
+    // Reuse the domain entity constructor for cross-field draft validation.
+    junban_domain::Task::from_draft(task_id, draft.clone(), Timestamp::constant(0, 0), 1)
+        .map_err(invalid)?;
+    Ok(draft)
+}
+
+fn convert_task_patch(value: wit::TaskPatch) -> Result<junban_app::TaskPatch, PluginCallbackError> {
+    Ok(junban_app::TaskPatch {
+        title: string_change(value.title, |v| TaskTitle::new(v).map_err(invalid))?,
+        description: string_change(value.description, |v| MarkdownText::new(v).map_err(invalid))?,
+        priority: optional_change(value.priority, convert_priority)?,
+        due_date: optional_change(value.due_date, parse_date)?,
+        due_time: optional_change(value.due_time, convert_due_time)?,
+        deadline: optional_change(value.deadline, parse_timestamp)?,
+        someday: bool_change(value.someday),
+        estimated_minutes: optional_change(value.estimated_minutes, |v| {
+            EstimatedMinutes::new(v).map_err(invalid)
+        })?,
+        actual_minutes: optional_change(value.actual_minutes, |v| {
+            ActualMinutes::new(v).map_err(invalid)
+        })?,
+        dread: optional_change(value.dread, |v| DreadLevel::new(v).map_err(invalid))?,
+        project_id: optional_change(value.project_id, |v| parse_project(&v))?,
+        section_id: optional_change(value.section_id, |v| parse_section(&v))?,
+        parent_id: optional_change(value.parent_id, |v| parse_task(&v))?,
+        tag_ids: match value.tag_ids {
+            wit::IdListChange::Unchanged(()) => None,
+            wit::IdListChange::Replace(ids) => Some(parse_unique_ids(&ids, TagId::parse)?),
+        },
+        sort_order: match value.sort_order {
+            wit::S64Change::Unchanged(()) => None,
+            wit::S64Change::Set(v) => Some(SortOrder::new(v)),
+        },
+        recurrence_rule: optional_change(value.recurrence_rule, |v| {
+            RecurrenceRule::new(v).map_err(invalid)
+        })?,
+        remind_at: optional_change(value.remind_at, parse_timestamp)?,
+        recurrence_anchor_day: optional_change(value.recurrence_anchor_day, |v| {
+            MonthlyAnchorDay::new(v).map_err(invalid)
+        })?,
+    })
+}
+
+fn convert_project_draft(
+    value: wit::ProjectDraft,
+) -> Result<junban_app::ProjectDraft, PluginCallbackError> {
+    Ok(junban_app::ProjectDraft {
+        name: EntityName::new(value.name).map_err(invalid)?,
+        color: HexColor::new(value.color).map_err(invalid)?,
+        icon: value
+            .icon
+            .map(|v| IconText::new(v).map_err(invalid))
+            .transpose()?,
+        parent_id: value.parent_id.as_deref().map(parse_project).transpose()?,
+        favorite: value.favorite,
+        archived: value.archived,
+        view: convert_view(value.view),
+        sort_order: SortOrder::new(value.sort_order),
+    })
+}
+
+fn convert_project_patch(
+    value: wit::ProjectPatch,
+) -> Result<junban_app::ProjectPatch, PluginCallbackError> {
+    Ok(junban_app::ProjectPatch {
+        name: string_change(value.name, |v| EntityName::new(v).map_err(invalid))?,
+        color: string_change(value.color, |v| HexColor::new(v).map_err(invalid))?,
+        icon: optional_change(value.icon, |v| IconText::new(v).map_err(invalid))?,
+        parent_id: optional_change(value.parent_id, |v| parse_project(&v))?,
+        favorite: bool_change(value.favorite),
+        archived: bool_change(value.archived),
+        view: match value.view {
+            wit::ProjectViewChange::Unchanged(()) => None,
+            wit::ProjectViewChange::Set(v) => Some(convert_view(v)),
+        },
+        sort_order: match value.sort_order {
+            wit::S64Change::Unchanged(()) => None,
+            wit::S64Change::Set(v) => Some(SortOrder::new(v)),
+        },
+    })
+}
+
+fn convert_tag_draft(value: wit::TagDraft) -> Result<junban_app::TagDraft, PluginCallbackError> {
+    Ok(junban_app::TagDraft {
+        name: TagName::new(value.name).map_err(invalid)?,
+        color: HexColor::new(value.color).map_err(invalid)?,
+    })
+}
+
+fn convert_tag_patch(value: wit::TagPatch) -> Result<junban_app::TagPatch, PluginCallbackError> {
+    Ok(junban_app::TagPatch {
+        name: string_change(value.name, |v| TagName::new(v).map_err(invalid))?,
+        color: string_change(value.color, |v| HexColor::new(v).map_err(invalid))?,
+    })
+}
+
+fn convert_bulk_action(
+    value: wit::BulkAction,
+) -> Result<junban_app::BulkAction, PluginCallbackError> {
+    use wit::BulkAction as A;
+    Ok(match value {
+        A::Complete(()) => junban_app::BulkAction::Complete,
+        A::Uncomplete(()) => junban_app::BulkAction::Uncomplete,
+        A::Cancel(()) => junban_app::BulkAction::Cancel,
+        A::Reopen(()) => junban_app::BulkAction::Reopen,
+        A::Delete(()) => junban_app::BulkAction::Delete,
+        A::Move(value) => junban_app::BulkAction::Move {
+            target: junban_app::MoveTarget {
+                project_id: optional_change(value.project_id, |v| parse_project(&v))?,
+                section_id: optional_change(value.section_id, |v| parse_section(&v))?,
+                parent_id: optional_change(value.parent_id, |v| parse_task(&v))?,
+                order: junban_app::OrderAnchor::Keep,
+            },
+        },
+        A::Tag(value) => {
+            let add = parse_unique_ids(&value.add, TagId::parse)?;
+            let remove = parse_unique_ids(&value.remove, TagId::parse)?;
+            let removed: BTreeSet<_> = remove.iter().copied().collect();
+            if add.iter().any(|tag_id| removed.contains(tag_id)) {
+                return Err(PluginCallbackError::InvalidInput);
+            }
+            junban_app::BulkAction::Tag {
+                change: junban_app::BulkTagChange { add, remove },
+            }
+        }
+        A::Schedule(value) => junban_app::BulkAction::Schedule {
+            schedule: junban_app::BulkSchedule {
+                due_date: optional_change(value.due_date, parse_date)?,
+                due_time: optional_change(value.due_time, convert_due_time)?,
+                deadline: optional_change(value.deadline, parse_timestamp)?,
+                someday: bool_change(value.someday),
+            },
+        },
+        A::Priority(value) => junban_app::BulkAction::Priority {
+            priority: match value {
+                wit::BulkPriority::Clear(()) => None,
+                wit::BulkPriority::Set(v) => Some(convert_priority(v)?),
+            },
+        },
+    })
+}
+
+fn convert_kv_patch(value: wit::KvPatch) -> Result<PluginKvPatch, PluginCallbackError> {
+    if value.operations.is_empty() {
+        return Err(PluginCallbackError::InvalidInput);
+    }
+    if value.operations.len() > PLUGIN_KV_PATCH_OPERATIONS_MAX {
+        return Err(PluginCallbackError::OperationTooLarge);
+    }
+    let mut set = Vec::new();
+    let mut delete = Vec::new();
+    let mut prior_key: Option<String> = None;
+    let mut value_bytes = 0_usize;
+    for operation in value.operations {
+        let key = match &operation {
+            wit::KvOperation::Set(value) => &value.key,
+            wit::KvOperation::Delete(key) => key,
+        };
+        if !valid_kv_key(key) || prior_key.as_ref().is_some_and(|prior| prior >= key) {
+            return Err(PluginCallbackError::InvalidInput);
+        }
+        prior_key = Some(key.clone());
+        match operation {
+            wit::KvOperation::Set(value) => {
+                let bytes = value.value.into_vec();
+                value_bytes = value_bytes
+                    .checked_add(bytes.len())
+                    .ok_or(PluginCallbackError::OperationTooLarge)?;
+                if bytes.len() > junban_app::PLUGIN_KV_VALUE_BYTES_MAX
+                    || value_bytes > PLUGIN_KV_PATCH_VALUE_BYTES_MAX
+                {
+                    return Err(PluginCallbackError::OperationTooLarge);
+                }
+                set.push((value.key, bytes));
+            }
+            wit::KvOperation::Delete(key) => delete.push(key),
+        }
+    }
+    Ok(PluginKvPatch { set, delete })
+}
+
+fn parse_unique_ids<T>(
+    values: &[String],
+    parse: impl Fn(&str) -> Result<T, junban_domain::ValidationError>,
+) -> Result<Vec<T>, PluginCallbackError>
+where
+    T: Copy + Ord,
+{
+    if values.len() > junban_domain::MAX_BULK_IDS {
+        return Err(PluginCallbackError::OperationTooLarge);
+    }
+    let parsed = values
+        .iter()
+        .map(|value| parse(value).map_err(invalid))
+        .collect::<Result<Vec<_>, _>>()?;
+    if parsed.iter().copied().collect::<BTreeSet<_>>().len() != parsed.len() {
+        return Err(PluginCallbackError::InvalidInput);
+    }
+    Ok(parsed)
+}
+
+fn string_change<T>(
+    value: wit::StringChange,
+    convert: impl FnOnce(String) -> Result<T, PluginCallbackError>,
+) -> Result<Option<T>, PluginCallbackError> {
+    match value {
+        wit::StringChange::Unchanged(()) => Ok(None),
+        wit::StringChange::Set(v) => convert(v).map(Some),
+    }
+}
+
+trait OptionalChange {
+    type Value;
+
+    fn into_option(self) -> Option<Option<Self::Value>>;
+}
+macro_rules! optional_change_impl {
+    ($type:ty, $value:ty) => {
+        impl OptionalChange for $type {
+            type Value = $value;
+
+            fn into_option(self) -> Option<Option<Self::Value>> {
+                match self {
+                    Self::Unchanged(()) => None,
+                    Self::Clear(()) => Some(None),
+                    Self::Set(value) => Some(Some(value)),
+                }
+            }
+        }
+    };
+}
+optional_change_impl!(wit::OptionalStringChange, String);
+optional_change_impl!(wit::OptionalIdChange, String);
+optional_change_impl!(wit::OptionalDateChange, String);
+optional_change_impl!(wit::OptionalTimestampChange, String);
+optional_change_impl!(wit::OptionalLocalDueTimeChange, wit::LocalDueTime);
+optional_change_impl!(wit::OptionalU32Change, u32);
+optional_change_impl!(wit::OptionalU8Change, u8);
+optional_change_impl!(wit::OptionalPriorityChange, wit::Priority);
+
+fn optional_change<S, T>(
+    value: S,
+    convert: impl Fn(S::Value) -> Result<T, PluginCallbackError>,
+) -> Result<Option<Option<T>>, PluginCallbackError>
+where
+    S: OptionalChange,
+{
+    value
+        .into_option()
+        .map(|value| value.map(&convert).transpose())
+        .transpose()
+}
+
+fn bool_change(value: wit::BoolChange) -> Option<bool> {
+    match value {
+        wit::BoolChange::Unchanged(()) => None,
+        wit::BoolChange::Set(v) => Some(v),
+    }
+}
+
+fn convert_priority(value: wit::Priority) -> Result<Priority, PluginCallbackError> {
+    Priority::new(match value {
+        wit::Priority::P1 => 1,
+        wit::Priority::P2 => 2,
+        wit::Priority::P3 => 3,
+        wit::Priority::P4 => 4,
+    })
+    .map_err(invalid)
+}
+
+fn convert_view(value: wit::ProjectView) -> ProjectView {
+    match value {
+        wit::ProjectView::List => ProjectView::List,
+        wit::ProjectView::Board => ProjectView::Board,
+        wit::ProjectView::Calendar => ProjectView::Calendar,
+    }
+}
+
+fn convert_due_time(value: wit::LocalDueTime) -> Result<LocalDueTime, PluginCallbackError> {
+    LocalDueTime::parse(&value.time, &value.time_zone).map_err(invalid)
+}
+fn parse_date(value: String) -> Result<Date, PluginCallbackError> {
+    value.parse().map_err(|_| PluginCallbackError::InvalidInput)
+}
+fn parse_timestamp(value: String) -> Result<Timestamp, PluginCallbackError> {
+    value.parse().map_err(|_| PluginCallbackError::InvalidInput)
+}
+fn parse_task(value: &str) -> Result<TaskId, PluginCallbackError> {
+    TaskId::parse(value).map_err(invalid)
+}
+fn parse_project(value: &str) -> Result<ProjectId, PluginCallbackError> {
+    ProjectId::parse(value).map_err(invalid)
+}
+fn parse_section(value: &str) -> Result<SectionId, PluginCallbackError> {
+    SectionId::parse(value).map_err(invalid)
+}
+fn parse_tag(value: &str) -> Result<TagId, PluginCallbackError> {
+    TagId::parse(value).map_err(invalid)
+}
+fn invalid(_: junban_domain::ValidationError) -> PluginCallbackError {
+    PluginCallbackError::InvalidInput
+}
+
+fn valid_kv_key(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && !value.chars().any(|character| {
+            character.is_control()
+                || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+}
+
+fn http_transition(
+    authority: &PluginCallbackAuthority,
+    expected_state: PluginInvocationState,
+    next_state: PluginInvocationState,
+) -> AuthorizedTransitionPluginInvocationRequest {
+    AuthorizedTransitionPluginInvocationRequest {
+        request: TransitionPluginInvocationRequest {
+            operation_id: authority.delivery.authority.invocation_id,
+            plugin_id: authority.delivery.authority.plugin_id.clone(),
+            package_generation: authority.delivery.authority.package_generation,
+            activation_epoch: authority.delivery.authority.activation_epoch,
+            expected_state,
+            next_state,
+        },
+        delivery: authority.delivery.clone(),
+    }
+}
+
+fn derive_delivery_id(delivery: &PluginInvocationDelivery) -> String {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"junban.plugin.http-delivery.v1\0");
+    bytes.extend_from_slice(delivery.authority.invocation_id.as_uuid().as_bytes());
+    bytes.extend_from_slice(delivery.authority.plugin_id.as_str().as_bytes());
+    Sha256Digest::of(&bytes).into_string()
+}
+
+fn http_denied(message: &str) -> wit::HttpError {
+    wit::HttpError {
+        code: wit::HttpErrorCode::PermissionDenied,
+        delivery: wit::DeliveryState::NotSent,
+        retryable: false,
+        message: message.to_owned(),
+    }
+}
+
+fn map_wit<T>(result: Result<T, PluginCallbackError>) -> wit::WitResult<T, wit::HostError> {
+    match result {
+        Ok(value) => wit::WitResult::Ok(value),
+        Err(error) => wit::WitResult::Err(error.host()),
+    }
+}
+
+fn map_app_error(error: AppError) -> PluginCallbackError {
+    match error {
+        AppError::NotFound => PluginCallbackError::StaleAuthority,
+        AppError::Conflict => PluginCallbackError::StaleAuthority,
+        AppError::OperationTooLarge => PluginCallbackError::OperationTooLarge,
+        _ => PluginCallbackError::Unavailable,
+    }
+}
+
+fn map_query_error(error: junban_app::PluginQueryError) -> PluginCallbackError {
+    match error {
+        junban_app::PluginQueryError::InvalidInput => PluginCallbackError::InvalidInput,
+        junban_app::PluginQueryError::CursorStale => PluginCallbackError::CursorStale,
+        junban_app::PluginQueryError::Unavailable => PluginCallbackError::Unavailable,
+        junban_app::PluginQueryError::OperationTooLarge => PluginCallbackError::OperationTooLarge,
+    }
+}
+
+impl From<RepositoryError> for PluginCallbackError {
+    fn from(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::Conflict => Self::StaleAuthority,
+            RepositoryError::OperationTooLarge => Self::OperationTooLarge,
+            _ => Self::Unavailable,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::VecDeque,
+        sync::{
+            Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    use super::*;
+    use junban_app::{
+        CommunityPluginPolicy, PluginDeliveryAuthority, PluginHookKind, PluginRuntimeState,
+    };
+    use junban_plugin_sdk::{
+        CommandDeclaration, DataKind, Dependency, HttpMethod as ManifestHttpMethod, HttpOrigin,
+        Publisher, RuntimeProfile, ServiceConsumeScope, ServiceDeclaration, ServiceField,
+        ServiceReference, UnscopedPermission, WitAuthority,
+        private_body_types::{PluginOutcome, WitResult},
+    };
+
+    fn timestamp(raw: &str) -> Timestamp {
+        raw.parse().expect("timestamp")
+    }
+
+    fn operation(index: u64) -> OperationId {
+        OperationId::parse(&format!("00000000-0000-4000-8000-{index:012}")).expect("operation")
+    }
+
+    fn permission(capability: Capability) -> Permission {
+        Permission {
+            capability,
+            scope: PermissionScope::Unscoped(UnscopedPermission {}),
+        }
+    }
+
+    fn plugin(capabilities: &[Capability]) -> InstalledPlugin {
+        let component_sha256 = Sha256Digest::of(b"component");
+        let manifest = RuntimeManifest {
+            schema_version: junban_plugin_sdk::MANIFEST_SCHEMA_VERSION,
+            id: "callback-plugin".to_owned(),
+            name: "Callback Plugin".to_owned(),
+            description: "fixture".to_owned(),
+            version: "1.0.0".to_owned(),
+            publisher: Publisher {
+                id: "fixture-publisher".to_owned(),
+                name: "Fixture Publisher".to_owned(),
+                key_id: "1".repeat(64),
+            },
+            license: "MIT".to_owned(),
+            junban_compatibility: "^0.1.0".to_owned(),
+            wit: WitAuthority {
+                package: "junban:plugin".to_owned(),
+                world: "plugin".to_owned(),
+                version: "0.1.0".to_owned(),
+            },
+            runtime_profile: RuntimeProfile::Rust,
+            component_sha256: component_sha256.to_string(),
+            permissions: capabilities.iter().copied().map(permission).collect(),
+            dependencies: Vec::new(),
+            commands: vec![CommandDeclaration {
+                id: "command".to_owned(),
+                title: "Command".to_owned(),
+                description: "fixture".to_owned(),
+                icon: None,
+                inputs: Vec::new(),
+            }],
+            subscriptions: Vec::new(),
+            surfaces: Vec::new(),
+            settings: Vec::new(),
+            services: Vec::new(),
+        };
+        InstalledPlugin {
+            plugin_id: PluginId::parse("callback-plugin").expect("plugin id"),
+            manifest,
+            version: "1.0.0".to_owned(),
+            package_sha256: Sha256Digest::of(b"package"),
+            component_sha256,
+            publisher_key_id: Sha256Digest::parse("1".repeat(64)).expect("digest"),
+            package_generation: 3,
+            activation_epoch: 5,
+            desired_enabled: true,
+            runtime_state: PluginRuntimeState::Active,
+            granted_capabilities: capabilities.to_vec(),
+            dependencies_satisfied: true,
+            failure_count: 0,
+            last_error_code: None,
+            next_retry_at: None,
+            installed_at: timestamp("2026-01-01T00:00:00Z"),
+            updated_at: timestamp("2026-01-01T00:00:00Z"),
+        }
+    }
+
+    fn callback_state(capabilities: &[Capability]) -> PluginInvocationCallbackState {
+        callback_state_with_grants(capabilities.iter().copied().map(permission).collect())
+    }
+
+    fn callback_state_with_grants(grants: Vec<Permission>) -> PluginInvocationCallbackState {
+        let capabilities: Vec<_> = grants.iter().map(|grant| grant.capability).collect();
+        let mut plugin = plugin(&capabilities);
+        plugin.manifest.permissions.clone_from(&grants);
+        let invocation_id = operation(7);
+        let host_session_id = operation(8);
+        let entry = PluginManifestEntry::Command {
+            command_id: PluginId::parse("command").expect("command id"),
+        };
+        let delivery = PluginInvocationDelivery::new(
+            PluginDeliveryAuthority {
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                host_session_id,
+                invocation_id,
+                payload_sha256: Sha256Digest::of(b"request"),
+                mode: PluginDeliveryMode::Active,
+            },
+            PluginHookKind::InvokeCommand,
+            PluginId::parse("command").expect("persisted entry id"),
+        )
+        .expect("delivery");
+        PluginInvocationCallbackState::new(PluginCallbackAuthority {
+            delivery,
+            callback: CallbackFence {
+                plugin_id: plugin.plugin_id.to_string(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                host_session_id: host_session_id.to_string(),
+                invocation_id: invocation_id.to_string(),
+                callback_id: 1,
+            },
+            invocation_kind: InvocationKind::InvokeCommand,
+            invocation_mode: InvocationMode::Effect,
+            manifest_entry: entry,
+            grants,
+            plugin,
+            ancestry: Vec::new(),
+            service_depth: 0,
+        })
+        .expect("callback state")
+    }
+
+    fn create_task_outcome(title: &str) -> InvocationOutcome {
+        InvocationOutcome::InvokeCommand(WitResult::Ok(PluginOutcome {
+            effect: Some(wit::PluginEffect::DomainMutation(
+                wit::DomainMutation::CreateTask(wit::TaskDraft {
+                    title: title.to_owned(),
+                    description: String::new(),
+                    priority: None,
+                    due_date: None,
+                    due_time: None,
+                    deadline: None,
+                    someday: false,
+                    estimated_minutes: None,
+                    actual_minutes: None,
+                    dread: None,
+                    project_id: None,
+                    section_id: None,
+                    parent_id: None,
+                    tag_ids: Vec::new(),
+                    sort_order: 0,
+                    recurrence_rule: None,
+                    remind_at: None,
+                    recurrence_anchor_day: None,
+                }),
+            )),
+        }))
+    }
+
+    #[test]
+    fn plugin_callback_authority_rejects_cross_session_and_missing_grants() {
+        let mut state = callback_state(&[Capability::TasksWrite]);
+        state.authority.callback.host_session_id = operation(99).to_string();
+        assert_eq!(
+            validate_static_authority(state.authority()),
+            Err(PluginCallbackError::StaleAuthority)
+        );
+
+        let state = callback_state(&[Capability::TasksWrite]);
+        assert_eq!(
+            authorize_request(
+                &state,
+                &HostCallRequest::QueryTasks(wit::TaskQuery {
+                    task_id: None,
+                    project_id: None,
+                    section_id: None,
+                    parent_id: None,
+                    tag_ids: Vec::new(),
+                    statuses: Vec::new(),
+                    priorities: Vec::new(),
+                    due_from: None,
+                    due_before: None,
+                    search: None,
+                    cursor: None,
+                    limit: 1,
+                })
+            ),
+            Err(PluginCallbackError::PermissionDenied)
+        );
+    }
+
+    #[test]
+    fn plugin_callback_enforces_the_complete_sdk_mode_matrix() {
+        let grants = vec![
+            Permission {
+                capability: Capability::Http,
+                scope: PermissionScope::Http(HttpScope {
+                    origins: vec![HttpOrigin("https://example.com".to_owned())],
+                    methods: vec![ManifestHttpMethod::Get],
+                }),
+            },
+            permission(Capability::Logging),
+            permission(Capability::ProjectsRead),
+            Permission {
+                capability: Capability::ServicesConsume,
+                scope: PermissionScope::Services(junban_plugin_sdk::ServiceConsumeScope {
+                    services: vec![junban_plugin_sdk::ServiceReference {
+                        plugin_id: "target-plugin".to_owned(),
+                        service_id: "service".to_owned(),
+                    }],
+                }),
+            },
+            permission(Capability::Settings),
+            permission(Capability::Storage),
+            permission(Capability::TagsRead),
+            permission(Capability::TasksRead),
+        ];
+        let requests = vec![
+            HostCallRequest::QueryTasks(wit::TaskQuery {
+                task_id: None,
+                project_id: None,
+                section_id: None,
+                parent_id: None,
+                tag_ids: Vec::new(),
+                statuses: Vec::new(),
+                priorities: Vec::new(),
+                due_from: None,
+                due_before: None,
+                search: None,
+                cursor: None,
+                limit: 1,
+            }),
+            HostCallRequest::QueryProjects(wit::CatalogQuery {
+                cursor: None,
+                limit: 1,
+            }),
+            HostCallRequest::QueryTags(wit::CatalogQuery {
+                cursor: None,
+                limit: 1,
+            }),
+            HostCallRequest::GetSettings(()),
+            HostCallRequest::GetKv(Vec::new()),
+            HostCallRequest::ListKv(wit::HostStorageListKvArguments {
+                cursor: None,
+                limit: 1,
+            }),
+            HostCallRequest::WallNow(()),
+            HostCallRequest::MonotonicMs(()),
+            http_request(),
+            HostCallRequest::Log(wit::HostLogLogArguments {
+                level: wit::LogLevel::Info,
+                message: String::new(),
+                fields: Vec::new(),
+            }),
+            HostCallRequest::CallService(wit::ServiceCall {
+                plugin_id: "target-plugin".to_owned(),
+                service_id: "service".to_owned(),
+                values: Vec::new(),
+            }),
+        ];
+        let mut state = callback_state_with_grants(grants);
+        for mode in [
+            InvocationMode::Lifecycle,
+            InvocationMode::Effect,
+            InvocationMode::Render,
+            InvocationMode::ValidateSettings,
+            InvocationMode::Resync,
+            InvocationMode::Service,
+        ] {
+            state.authority.invocation_mode = mode;
+            for request in &requests {
+                assert_eq!(
+                    authorize_request(&state, request).is_ok(),
+                    request.kind().allowed_in(mode),
+                    "mode {mode:?}, callback {:?}",
+                    request.kind()
+                );
+            }
+        }
+        for (kind, mode) in [
+            (InvocationKind::Activate, InvocationMode::Lifecycle),
+            (InvocationKind::Deactivate, InvocationMode::Lifecycle),
+            (InvocationKind::RenderSurface, InvocationMode::Render),
+            (
+                InvocationKind::ValidateSettings,
+                InvocationMode::ValidateSettings,
+            ),
+            (InvocationKind::CallService, InvocationMode::Service),
+        ] {
+            state.authority.invocation_kind = kind;
+            state.authority.invocation_mode = mode;
+            if mode == InvocationMode::Service {
+                state.authority.ancestry = vec![PluginId::parse("root-plugin").expect("root id")];
+                state.authority.service_depth = 1;
+            } else {
+                state.authority.ancestry.clear();
+                state.authority.service_depth = 0;
+            }
+            assert_eq!(validate_static_authority(&state.authority), Ok(()));
+        }
+    }
+
+    #[tokio::test]
+    async fn plugin_callback_rejects_cross_session_child_frames_before_app_access() {
+        let mut state = callback_state(&[Capability::TasksRead]);
+        let request = HostCallRequest::QueryTasks(wit::TaskQuery {
+            task_id: None,
+            project_id: None,
+            section_id: None,
+            parent_id: None,
+            tag_ids: Vec::new(),
+            statuses: Vec::new(),
+            priorities: Vec::new(),
+            due_from: None,
+            due_before: None,
+            search: None,
+            cursor: None,
+            limit: 1,
+        });
+        let (mut frame, body) = callback_message(&state, request);
+        let ChildFrame::CapabilityRequest { callback, .. } = &mut frame else {
+            panic!("expected capability frame");
+        };
+        callback.host_session_id = operation(99).to_string();
+        let (adapter, port, _) = fixture_adapter(&state, Vec::new(), false);
+        assert_eq!(
+            adapter.dispatch_message(&mut state, &frame, &body).await,
+            Err(PluginCallbackError::StaleAuthority)
+        );
+        assert_eq!(port.authority_reads.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn plugin_callback_kv_snapshot_cursors_are_bounded_and_invocation_local() {
+        let mut state = callback_state(&[Capability::Storage]);
+        state.kv_snapshot = Some(BTreeMap::from([
+            ("a".to_owned(), vec![1]),
+            ("b".to_owned(), vec![2]),
+        ]));
+        let first = list_kv(
+            &mut state,
+            wit::HostStorageListKvArguments {
+                cursor: None,
+                limit: 1,
+            },
+        )
+        .expect("first page");
+        let cursor = first.next_cursor.expect("cursor");
+        assert_eq!(first.entries[0].key, "a");
+        let second = list_kv(
+            &mut state,
+            wit::HostStorageListKvArguments {
+                cursor: Some(cursor.clone()),
+                limit: 1,
+            },
+        )
+        .expect("second page");
+        assert_eq!(second.entries[0].key, "b");
+
+        let mut other = callback_state(&[Capability::Storage]);
+        other.kv_snapshot = state.kv_snapshot.clone();
+        assert_eq!(
+            list_kv(
+                &mut other,
+                wit::HostStorageListKvArguments {
+                    cursor: Some(cursor),
+                    limit: 1,
+                }
+            ),
+            Err(PluginCallbackError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn plugin_callback_logs_are_redacted_and_capped() {
+        let mut state = callback_state(&[Capability::Logging]);
+        retain_log(
+            &mut state,
+            wit::HostLogLogArguments {
+                level: wit::LogLevel::Info,
+                message: "Authorization: Bearer top-secret?token=hidden".to_owned(),
+                fields: Vec::new(),
+            },
+        )
+        .expect("log");
+        assert!(!state.logs()[0].message.contains("top-secret"));
+        assert!(!state.logs()[0].message.contains("hidden"));
+    }
+
+    #[test]
+    fn plugin_effect_identity_is_deterministic_and_validates_domain_input() {
+        let state = callback_state(&[Capability::TasksWrite]);
+        let first =
+            adapt_plugin_effect(&state, &create_task_outcome("Task"), None).expect("first effect");
+        let second =
+            adapt_plugin_effect(&state, &create_task_outcome("Task"), None).expect("second effect");
+        assert_eq!(
+            first.request.child_operation_id,
+            second.request.child_operation_id
+        );
+        let first_task_id = match first.request.domain_effect {
+            Some(PluginDomainEffect::CreateTask { task_id, .. }) => task_id,
+            _ => panic!("expected create task"),
+        };
+        let second_task_id = match second.request.domain_effect {
+            Some(PluginDomainEffect::CreateTask { task_id, .. }) => task_id,
+            _ => panic!("expected create task"),
+        };
+        assert_eq!(first_task_id, second_task_id);
+        assert!(matches!(
+            adapt_plugin_effect(&state, &create_task_outcome("  "), None),
+            Err(PluginCallbackError::InvalidInput)
+        ));
+    }
+
+    fn unchanged_task_patch() -> wit::TaskPatch {
+        wit::TaskPatch {
+            title: wit::StringChange::Unchanged(()),
+            description: wit::StringChange::Unchanged(()),
+            priority: wit::OptionalPriorityChange::Unchanged(()),
+            due_date: wit::OptionalDateChange::Unchanged(()),
+            due_time: wit::OptionalLocalDueTimeChange::Unchanged(()),
+            deadline: wit::OptionalTimestampChange::Unchanged(()),
+            someday: wit::BoolChange::Unchanged(()),
+            estimated_minutes: wit::OptionalU32Change::Unchanged(()),
+            actual_minutes: wit::OptionalU32Change::Unchanged(()),
+            dread: wit::OptionalU8Change::Unchanged(()),
+            project_id: wit::OptionalIdChange::Unchanged(()),
+            section_id: wit::OptionalIdChange::Unchanged(()),
+            parent_id: wit::OptionalIdChange::Unchanged(()),
+            tag_ids: wit::IdListChange::Unchanged(()),
+            sort_order: wit::S64Change::Unchanged(()),
+            recurrence_rule: wit::OptionalStringChange::Unchanged(()),
+            remind_at: wit::OptionalTimestampChange::Unchanged(()),
+            recurrence_anchor_day: wit::OptionalU8Change::Unchanged(()),
+        }
+    }
+
+    fn unchanged_project_patch() -> wit::ProjectPatch {
+        wit::ProjectPatch {
+            name: wit::StringChange::Unchanged(()),
+            color: wit::StringChange::Unchanged(()),
+            icon: wit::OptionalStringChange::Unchanged(()),
+            parent_id: wit::OptionalIdChange::Unchanged(()),
+            favorite: wit::BoolChange::Unchanged(()),
+            archived: wit::BoolChange::Unchanged(()),
+            view: wit::ProjectViewChange::Unchanged(()),
+            sort_order: wit::S64Change::Unchanged(()),
+        }
+    }
+
+    #[test]
+    fn plugin_effect_adapter_covers_every_frozen_domain_mutation_family() {
+        let task = operation(20).to_string();
+        let project = operation(21).to_string();
+        let tag = operation(22).to_string();
+        let effects = vec![
+            wit::DomainMutation::CreateTask(match create_task_outcome("Task") {
+                InvocationOutcome::InvokeCommand(WitResult::Ok(PluginOutcome {
+                    effect:
+                        Some(wit::PluginEffect::DomainMutation(wit::DomainMutation::CreateTask(draft))),
+                })) => draft,
+                _ => unreachable!(),
+            }),
+            wit::DomainMutation::PatchTask(wit::PatchTask {
+                task_id: task.clone(),
+                patch: unchanged_task_patch(),
+            }),
+            wit::DomainMutation::CompleteTask(task.clone()),
+            wit::DomainMutation::UncompleteTask(task.clone()),
+            wit::DomainMutation::CancelTask(task.clone()),
+            wit::DomainMutation::ReopenTask(task.clone()),
+            wit::DomainMutation::DeleteTask(task.clone()),
+            wit::DomainMutation::BulkTasks(wit::BulkTasks {
+                task_ids: vec![task.clone()],
+                action: wit::BulkAction::Cancel(()),
+            }),
+            wit::DomainMutation::CreateProject(wit::ProjectDraft {
+                name: "Project".to_owned(),
+                color: "#112233".to_owned(),
+                icon: None,
+                parent_id: None,
+                favorite: false,
+                archived: false,
+                view: wit::ProjectView::List,
+                sort_order: 0,
+            }),
+            wit::DomainMutation::PatchProject(wit::PatchProject {
+                project_id: project.clone(),
+                patch: unchanged_project_patch(),
+            }),
+            wit::DomainMutation::DeleteProject(project),
+            wit::DomainMutation::CreateTag(wit::TagDraft {
+                name: "tag".to_owned(),
+                color: "#445566".to_owned(),
+            }),
+            wit::DomainMutation::PatchTag(wit::PatchTag {
+                tag_id: tag.clone(),
+                patch: wit::TagPatch {
+                    name: wit::StringChange::Unchanged(()),
+                    color: wit::StringChange::Unchanged(()),
+                },
+            }),
+            wit::DomainMutation::DeleteTag(tag),
+        ];
+        let temporal = TemporalContext::sample_now();
+        for (index, effect) in effects.into_iter().enumerate() {
+            assert!(
+                convert_domain_mutation(
+                    effect,
+                    operation(100 + u64::try_from(index).expect("effect index")),
+                    &temporal,
+                )
+                .is_ok(),
+                "effect family {index}"
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_effect_kv_patch_requires_bounded_sorted_unique_operations() {
+        let patch = convert_kv_patch(wit::KvPatch {
+            operations: vec![
+                wit::KvOperation::Set(wit::KvSet {
+                    key: "a".to_owned(),
+                    value: wit::ByteList::new(vec![1]).expect("value"),
+                }),
+                wit::KvOperation::Set(wit::KvSet {
+                    key: "b".to_owned(),
+                    value: wit::ByteList::new(vec![2]).expect("value"),
+                }),
+            ],
+        })
+        .expect("KV patch");
+        assert_eq!(patch.set[0].0, "a");
+        assert_eq!(patch.set[1].0, "b");
+        for operations in [
+            vec![
+                wit::KvOperation::Delete("a".to_owned()),
+                wit::KvOperation::Delete("a".to_owned()),
+            ],
+            vec![
+                wit::KvOperation::Delete("b".to_owned()),
+                wit::KvOperation::Delete("a".to_owned()),
+            ],
+            Vec::new(),
+        ] {
+            assert_eq!(
+                convert_kv_patch(wit::KvPatch { operations }),
+                Err(PluginCallbackError::InvalidInput)
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_effect_message_requires_the_exact_outcome_fence_and_body() {
+        let state = callback_state(&[Capability::TasksWrite]);
+        let outcome = create_task_outcome("Task");
+        let (mut frame, body) = outcome
+            .into_child_message(junban_plugin_sdk::AuthorityFence {
+                plugin_id: state.authority.callback.plugin_id.clone(),
+                package_generation: state.authority.callback.package_generation,
+                activation_epoch: state.authority.callback.activation_epoch,
+                host_session_id: state.authority.callback.host_session_id.clone(),
+                invocation_id: state.authority.callback.invocation_id.clone(),
+            })
+            .expect("outcome message")
+            .into_parts();
+        assert!(adapt_plugin_effect_message(&state, &frame, &body, None).is_ok());
+        let ChildFrame::Outcome { fence, .. } = &mut frame else {
+            panic!("expected outcome frame");
+        };
+        fence.host_session_id = operation(99).to_string();
+        assert!(matches!(
+            adapt_plugin_effect_message(&state, &frame, &body, None),
+            Err(PluginCallbackError::StaleAuthority)
+        ));
+    }
+
+    #[test]
+    fn plugin_effect_is_rejected_after_http_consumption_or_outside_effect_mode() {
+        let mut state = callback_state_with_grants(vec![
+            Permission {
+                capability: Capability::Http,
+                scope: PermissionScope::Http(HttpScope {
+                    origins: vec![HttpOrigin("https://example.com".to_owned())],
+                    methods: vec![ManifestHttpMethod::Get],
+                }),
+            },
+            permission(Capability::TasksWrite),
+        ]);
+        state.http = Some(RetainedHttp {
+            canonical_request: vec![1],
+            request: wit::HttpRequest {
+                method: wit::HttpMethod::Get,
+                origin: "https://example.com".to_owned(),
+                path_and_query: "/".to_owned(),
+                headers: Vec::new(),
+                body: wit::ByteList::new(Vec::new()).expect("empty body"),
+            },
+            delivery_id: "delivery".to_owned(),
+            resend_used: false,
+            resend_allowed: false,
+            process_lost: false,
+        });
+        assert!(matches!(
+            adapt_plugin_effect(&state, &create_task_outcome("Task"), None),
+            Err(PluginCallbackError::PermissionDenied)
+        ));
+        assert!(
+            adapt_plugin_effect(
+                &state,
+                &InvocationOutcome::InvokeCommand(WitResult::Ok(PluginOutcome { effect: None })),
+                None,
+            )
+            .is_ok()
+        );
+        state.http = None;
+        state.authority.invocation_mode = InvocationMode::Render;
+        assert!(matches!(
+            adapt_plugin_effect(&state, &create_task_outcome("Task"), None),
+            Err(PluginCallbackError::PermissionDenied | PluginCallbackError::StaleAuthority)
+        ));
+    }
+
+    struct FixturePort {
+        live: PluginLiveAuthority,
+        stale_on_second_read: bool,
+        authority_reads: AtomicUsize,
+        transitions: Mutex<Vec<(PluginInvocationState, PluginInvocationState)>>,
+    }
+
+    impl PluginCallbackPort for FixturePort {
+        fn authority(&self, _plugin_id: PluginId) -> PluginCallbackFuture<PluginLiveAuthority> {
+            let mut live = self.live.clone();
+            let read = self.authority_reads.fetch_add(1, Ordering::SeqCst);
+            if self.stale_on_second_read && read > 0 {
+                live.plugin.activation_epoch += 1;
+            }
+            Box::pin(async move { Ok(live) })
+        }
+
+        fn query_tasks(&self, _request: wit::TaskQuery) -> PluginCallbackFuture<wit::TaskPage> {
+            Box::pin(async {
+                Ok(wit::TaskPage {
+                    items: Vec::new(),
+                    next_cursor: None,
+                    revision: 1,
+                })
+            })
+        }
+
+        fn query_projects(
+            &self,
+            _request: wit::CatalogQuery,
+        ) -> PluginCallbackFuture<wit::ProjectPage> {
+            Box::pin(async {
+                Ok(wit::ProjectPage {
+                    items: Vec::new(),
+                    next_cursor: None,
+                    revision: 1,
+                })
+            })
+        }
+
+        fn query_tags(&self, _request: wit::CatalogQuery) -> PluginCallbackFuture<wit::TagPage> {
+            Box::pin(async {
+                Ok(wit::TagPage {
+                    items: Vec::new(),
+                    next_cursor: None,
+                    revision: 1,
+                })
+            })
+        }
+
+        fn settings(&self, _plugin_id: PluginId) -> PluginCallbackFuture<Vec<PluginSetting>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn kv(&self, _plugin_id: PluginId) -> PluginCallbackFuture<Vec<PluginKvEntry>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn transition_invocation(
+            &self,
+            request: AuthorizedTransitionPluginInvocationRequest,
+        ) -> PluginCallbackFuture<()> {
+            self.transitions
+                .lock()
+                .expect("transitions")
+                .push((request.request.expected_state, request.request.next_state));
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    struct FixtureHttp {
+        outcomes: Mutex<VecDeque<Result<wit::HttpResponse, wit::HttpError>>>,
+        sends: AtomicUsize,
+    }
+
+    impl PluginCallbackHttp for FixtureHttp {
+        fn send(
+            &self,
+            _grant: HttpScope,
+            _request: wit::HttpRequest,
+            _delivery_id: String,
+        ) -> Pin<Box<dyn Future<Output = Result<wit::HttpResponse, wit::HttpError>> + Send + 'static>>
+        {
+            self.sends.fetch_add(1, Ordering::SeqCst);
+            let result = self
+                .outcomes
+                .lock()
+                .expect("HTTP outcomes")
+                .pop_front()
+                .expect("fixture outcome");
+            Box::pin(async move { result })
+        }
+    }
+
+    fn fixture_adapter(
+        state: &PluginInvocationCallbackState,
+        outcomes: Vec<Result<wit::HttpResponse, wit::HttpError>>,
+        stale_on_second_read: bool,
+    ) -> (PluginCallbackAdapter, Arc<FixturePort>, Arc<FixtureHttp>) {
+        let plugin = state.authority.plugin.clone();
+        let port = Arc::new(FixturePort {
+            live: PluginLiveAuthority {
+                profile: InstalledPluginProfile {
+                    plugins: vec![plugin.clone()],
+                    activation_order: vec![plugin.plugin_id.clone()],
+                    community_policy: CommunityPluginPolicy {
+                        community_registry_enabled: false,
+                        updated_at: timestamp("2026-01-01T00:00:00Z"),
+                    },
+                },
+                plugin,
+                grants: state.authority.grants.clone(),
+            },
+            stale_on_second_read,
+            authority_reads: AtomicUsize::new(0),
+            transitions: Mutex::new(Vec::new()),
+        });
+        let http = Arc::new(FixtureHttp {
+            outcomes: Mutex::new(outcomes.into()),
+            sends: AtomicUsize::new(0),
+        });
+        (
+            PluginCallbackAdapter::new(port.clone(), http.clone()),
+            port,
+            http,
+        )
+    }
+
+    fn http_state() -> PluginInvocationCallbackState {
+        callback_state_with_grants(vec![Permission {
+            capability: Capability::Http,
+            scope: PermissionScope::Http(HttpScope {
+                origins: vec![HttpOrigin("https://example.com".to_owned())],
+                methods: vec![ManifestHttpMethod::Get],
+            }),
+        }])
+    }
+
+    fn http_request() -> HostCallRequest {
+        HostCallRequest::HttpRequest(wit::HttpRequest {
+            method: wit::HttpMethod::Get,
+            origin: "https://example.com".to_owned(),
+            path_and_query: "/resource".to_owned(),
+            headers: Vec::new(),
+            body: wit::ByteList::new(Vec::new()).expect("empty body"),
+        })
+    }
+
+    fn callback_message(
+        state: &PluginInvocationCallbackState,
+        request: HostCallRequest,
+    ) -> (ChildFrame, Vec<u8>) {
+        let mut callback = state.authority.callback.clone();
+        callback.callback_id = state.next_callback_id;
+        request
+            .into_child_message(callback)
+            .expect("callback body")
+            .into_parts()
+    }
+
+    fn success_response() -> wit::HttpResponse {
+        wit::HttpResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: wit::ByteList::new(Vec::new()).expect("empty body"),
+            truncated: false,
+        }
+    }
+
+    fn ambiguous_error() -> wit::HttpError {
+        wit::HttpError {
+            code: wit::HttpErrorCode::DeliveryAmbiguous,
+            delivery: wit::DeliveryState::MayHaveBeenSent,
+            retryable: false,
+            message: "delivery is ambiguous".to_owned(),
+        }
+    }
+
+    #[tokio::test]
+    async fn plugin_callback_http_is_consume_once_after_success() {
+        let mut state = http_state();
+        let request = http_request();
+        let (frame, body) = callback_message(&state, request.clone());
+        let (adapter, port, http) = fixture_adapter(&state, vec![Ok(success_response())], false);
+        let first = adapter
+            .dispatch_message(&mut state, &frame, &body)
+            .await
+            .expect("first callback");
+        let PluginCallbackDispatch::Reply(encoded) = first else {
+            panic!("expected encoded callback reply");
+        };
+        let junban_plugin_sdk::ParentFrame::CapabilityReply { kind, result, .. } = encoded.frame
+        else {
+            panic!("expected capability reply frame");
+        };
+        assert!(matches!(
+            &encoded.reply,
+            HostCallReply::HttpRequest(WitResult::Ok(_))
+        ));
+        assert_eq!(
+            junban_plugin_sdk::decode_host_call_reply(kind, result, &encoded.canonical_body)
+                .expect("decode callback reply"),
+            encoded.reply
+        );
+        let (second_frame, second_body) = callback_message(&state, request);
+        assert!(matches!(
+            adapter
+                .dispatch_message(&mut state, &second_frame, &second_body)
+                .await,
+            Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
+                reply: HostCallReply::HttpRequest(WitResult::Err(_)),
+                ..
+            }))
+        ));
+        assert_eq!(http.sends.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *port.transitions.lock().expect("transitions"),
+            vec![(
+                PluginInvocationState::Reserved,
+                PluginInvocationState::DispatchingHttp
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn plugin_callback_http_allows_one_identical_same_process_ambiguous_resend() {
+        let mut state = http_state();
+        let request = http_request();
+        let (frame, body) = callback_message(&state, request.clone());
+        let (adapter, port, http) = fixture_adapter(
+            &state,
+            vec![Err(ambiguous_error()), Ok(success_response())],
+            false,
+        );
+        let first = adapter.dispatch_message(&mut state, &frame, &body).await;
+        assert!(matches!(
+            first,
+            Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
+                reply: HostCallReply::HttpRequest(WitResult::Err(_)),
+                ..
+            }))
+        ));
+        let (second_frame, second_body) = callback_message(&state, request.clone());
+        let second = adapter
+            .dispatch_message(&mut state, &second_frame, &second_body)
+            .await;
+        assert!(matches!(
+            second,
+            Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
+                reply: HostCallReply::HttpRequest(WitResult::Ok(_)),
+                ..
+            }))
+        ));
+        let (third_frame, third_body) = callback_message(&state, request);
+        let third = adapter
+            .dispatch_message(&mut state, &third_frame, &third_body)
+            .await;
+        assert!(matches!(
+            third,
+            Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
+                reply: HostCallReply::HttpRequest(WitResult::Err(_)),
+                ..
+            }))
+        ));
+        assert_eq!(http.sends.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            *port.transitions.lock().expect("transitions"),
+            vec![
+                (
+                    PluginInvocationState::Reserved,
+                    PluginInvocationState::DispatchingHttp
+                ),
+                (
+                    PluginInvocationState::DispatchingHttp,
+                    PluginInvocationState::AmbiguousHttp
+                ),
+                (
+                    PluginInvocationState::AmbiguousHttp,
+                    PluginInvocationState::DispatchingHttp
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn plugin_callback_rejects_authority_that_changes_mid_query() {
+        let mut state = callback_state(&[Capability::TasksRead]);
+        let request = HostCallRequest::QueryTasks(wit::TaskQuery {
+            task_id: None,
+            project_id: None,
+            section_id: None,
+            parent_id: None,
+            tag_ids: Vec::new(),
+            statuses: Vec::new(),
+            priorities: Vec::new(),
+            due_from: None,
+            due_before: None,
+            search: None,
+            cursor: None,
+            limit: 1,
+        });
+        let (frame, body) = callback_message(&state, request);
+        let (adapter, _, _) = fixture_adapter(&state, Vec::new(), true);
+        assert_eq!(
+            adapter.dispatch_message(&mut state, &frame, &body).await,
+            Err(PluginCallbackError::StaleAuthority)
+        );
+    }
+
+    #[test]
+    fn plugin_callback_service_call_validates_dependency_scope_schema_depth_and_cycles() {
+        let grant = Permission {
+            capability: Capability::ServicesConsume,
+            scope: PermissionScope::Services(ServiceConsumeScope {
+                services: vec![ServiceReference {
+                    plugin_id: "target-plugin".to_owned(),
+                    service_id: "lookup".to_owned(),
+                }],
+            }),
+        };
+        let mut state = callback_state_with_grants(vec![grant]);
+        state.authority.plugin.manifest.dependencies = vec![Dependency {
+            id: "target-plugin".to_owned(),
+            requirement: "^1.0.0".to_owned(),
+            services: vec!["lookup".to_owned()],
+        }];
+        let mut target = plugin(&[Capability::ServicesProvide]);
+        target.plugin_id = PluginId::parse("target-plugin").expect("target id");
+        target.manifest.id = target.plugin_id.to_string();
+        target.manifest.name = "Target".to_owned();
+        target.manifest.services = vec![ServiceDeclaration {
+            id: "lookup".to_owned(),
+            title: "Lookup".to_owned(),
+            request: vec![ServiceField {
+                id: "query".to_owned(),
+                kind: DataKind::String,
+                required: true,
+            }],
+            response: vec![ServiceField {
+                id: "found".to_owned(),
+                kind: DataKind::Boolean,
+                required: true,
+            }],
+        }];
+        let profile = InstalledPluginProfile {
+            plugins: vec![state.authority.plugin.clone(), target.clone()],
+            activation_order: vec![
+                target.plugin_id.clone(),
+                state.authority.plugin.plugin_id.clone(),
+            ],
+            community_policy: CommunityPluginPolicy {
+                community_registry_enabled: false,
+                updated_at: timestamp("2026-01-01T00:00:00Z"),
+            },
+        };
+        let call = wit::ServiceCall {
+            plugin_id: target.plugin_id.to_string(),
+            service_id: "lookup".to_owned(),
+            values: vec![wit::NamedValue {
+                name: "query".to_owned(),
+                value: wit::DataValue::Scalar(wit::ScalarValue::StringValue("term".to_owned())),
+            }],
+        };
+        let validated = validate_service_call(
+            &state,
+            state.authority.callback.clone(),
+            &profile,
+            call.clone(),
+        )
+        .expect("validated service call");
+        assert_eq!(validated.target_plugin_id, target.plugin_id);
+        assert_eq!(validated.service_depth, 1);
+        assert!(
+            validate_service_response(
+                &target,
+                &PluginId::parse("lookup").expect("service id"),
+                &wit::ServiceData {
+                    values: vec![wit::NamedValue {
+                        name: "found".to_owned(),
+                        value: wit::DataValue::Scalar(wit::ScalarValue::BooleanValue(true)),
+                    }],
+                }
+            )
+            .is_ok()
+        );
+
+        state.authority.ancestry.push(target.plugin_id.clone());
+        assert_eq!(
+            validate_service_call(
+                &state,
+                state.authority.callback.clone(),
+                &profile,
+                call.clone()
+            ),
+            Err(PluginCallbackError::PermissionDenied)
+        );
+        state.authority.ancestry.clear();
+        state.authority.service_depth = PLUGIN_SERVICE_DEPTH_MAX;
+        assert_eq!(
+            validate_service_call(&state, state.authority.callback.clone(), &profile, call),
+            Err(PluginCallbackError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn plugin_callback_profile_fixture_is_self_consistent() {
+        let plugin = plugin(&[Capability::TasksWrite]);
+        let profile = InstalledPluginProfile {
+            plugins: vec![plugin.clone()],
+            activation_order: vec![plugin.plugin_id.clone()],
+            community_policy: CommunityPluginPolicy {
+                community_registry_enabled: false,
+                updated_at: timestamp("2026-01-01T00:00:00Z"),
+            },
+        };
+        assert_eq!(profile.plugins[0], plugin);
+    }
+}

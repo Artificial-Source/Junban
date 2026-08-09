@@ -18,6 +18,9 @@ mod error;
 mod maintenance;
 mod owner_runtime;
 #[cfg(feature = "plugin-sdk")]
+#[allow(dead_code)] // Packet B composes this reviewed typed authority with the runtime actor.
+pub(crate) mod plugin_callbacks;
+#[cfg(feature = "plugin-sdk")]
 pub mod plugin_host_process;
 #[cfg(feature = "plugin-sdk")]
 pub mod plugin_http;

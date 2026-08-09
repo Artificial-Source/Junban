@@ -535,6 +535,42 @@ fn hello_timeout_sends_only_parent_hello_then_kills_and_reaps() {
 }
 
 #[cfg(unix)]
+const SPAWN_FAILED_RETRY_LIMIT: usize = 2;
+
+#[cfg(unix)]
+fn retry_spawn_failed<T>(
+    mut operation: impl FnMut() -> Result<T, PluginHostProcessError>,
+) -> Result<T, PluginHostProcessError> {
+    for attempt in 0..=SPAWN_FAILED_RETRY_LIMIT {
+        match operation() {
+            Err(PluginHostProcessError::SpawnFailed) if attempt < SPAWN_FAILED_RETRY_LIMIT => {}
+            result => return result,
+        }
+    }
+    unreachable!("the final retry attempt always returns")
+}
+
+#[cfg(unix)]
+#[test]
+fn spawn_failed_retry_is_bounded_and_preserves_other_errors() {
+    let attempts = Cell::new(0);
+    let result: Result<(), _> = retry_spawn_failed(|| {
+        attempts.set(attempts.get() + 1);
+        Err(PluginHostProcessError::SpawnFailed)
+    });
+    assert_eq!(result, Err(PluginHostProcessError::SpawnFailed));
+    assert_eq!(attempts.get(), SPAWN_FAILED_RETRY_LIMIT + 1);
+
+    let attempts = Cell::new(0);
+    let result: Result<(), _> = retry_spawn_failed(|| {
+        attempts.set(attempts.get() + 1);
+        Err(PluginHostProcessError::ProtocolRejected)
+    });
+    assert_eq!(result, Err(PluginHostProcessError::ProtocolRejected));
+    assert_eq!(attempts.get(), 1);
+}
+
+#[cfg(unix)]
 #[test]
 fn wrong_hello_wrong_type_partial_oversize_and_eof_fail_closed() {
     let _guard = process_test_guard();
@@ -578,8 +614,9 @@ fn wrong_hello_wrong_type_partial_oversize_and_eof_fail_closed() {
     ];
     for (label, output, tail, expected) in cases {
         let fixture = Fixture::new(label, &format!("{output}{tail}"));
-        let result =
-            PluginHostProcess::connect_for_test(&fixture.executable, session(), test_deadlines());
+        let result = retry_spawn_failed(|| {
+            PluginHostProcess::connect_for_test(&fixture.executable, session(), test_deadlines())
+        });
         assert!(
             matches!(result, Err(error) if error == expected),
             "unexpected {label} result"

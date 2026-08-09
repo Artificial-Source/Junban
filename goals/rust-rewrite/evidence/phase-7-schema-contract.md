@@ -1,7 +1,7 @@
 # Phase 7 schema-v7 contract
 
 Date: 2026-08-04
-Status: frozen schema-v7 authority; accepted Wave 1 persistence remains intact; focused Slice 2D review at exact `08c42c5b44411fdb4b81545c993a60a80960682d` returned **REVISE**, fixed/closed HTTP-only `P7-PLAN-2D-003`, and required the now-written schema-neutral corrections for `P7-PLAN-2D-001`, `002`, and `004`; those three remain fixed-in-plan/narrow-recheck-pending with no schema SQL, row, table, version, or migration change
+Status: frozen schema-v7 authority; accepted Wave 1 persistence remains intact. Narrow Slice 2D planning recheck at exact `073f00d98dac4b9110ec028da01d0fb71eaa3ae3` approved/closed `P7-PLAN-2D-001`–`004`. Delivery persistence recheck at exact `d641d69ac89436eb39624ca3eeca7dd6b90d795d` closed `P7-2D-DB-001`/`003` and accepted the persistence portion of `P7-2D-DB-002`, but that finding remains an open **REMOVAL BLOCKER** until server migration and deletion of every legacy unwrapped API. High schema-neutral `P7-PLAN-2D-005` is fixed in plan with focused recheck pending; query/callback coding alone waits on it while resync and supervisor fixes remain independent. No schema SQL, row, table, version, or migration change is authorized, and no Slice 2D/Wave 2 acceptance is claimed.
 Parent authority: [`phase-7-context-map.md`](phase-7-context-map.md)
 
 ## Purpose
@@ -153,6 +153,16 @@ Every resync segment accepts canonical SET operations only; a delete from the un
 One final transaction revalidates transcript/session/delivery authority, matching invocation final request hash/state, candidate digest and bounds, package generation/activation epoch/current host session, classified contiguous retained tail after `R`, and the expected cursor. It applies the final KV choice, CASes the cursor to `(E,R,false)`, and deletes the invocation row atomically. Crash before commit loses runtime transcript/candidate and restarts fresh; crash after commit is recognized by the cursor. Catch-up then follows the exact `Represented`/`Irrelevant`/`Invalidating` rule above, reaches head, and only afterward permits same-epoch activation. No transcript row or schema migration exists. Resync denies HTTP, domain effects, and dependency service calls.
 
 Restore cutover rotates the global event epoch, sets every cursor to that new epoch/current restored revision with `resync_required = 1`, and never replays pre-restore hooks. Explicit enable follows the same snapshot/revision/CAS/catch-up handoff.
+
+### Ordinary plugin queries are schema-neutral
+
+[`phase-7-capability-matrix.md`](phase-7-capability-matrix.md) freezes high `P7-PLAN-2D-005` without adding durable plugin-query state. A new internal AppService/repository path performs each ordinary task/project/tag page in one SQLite read transaction with canonical resource-ID ascending keyset predicates. The first page samples existing global revision and existing event epoch; a continuation authenticates and rechecks both in the same page transaction before reading. No transaction survives across a page or guest call.
+
+The cursor stores no SQLite row. Its fixed binary v1 bytes bind kind, five-minute issue/expiry, sampled revision/event epoch, normalized-query hash, and last canonical resource UUID under a domain-separated profile-private HMAC. The HMAC reuses the existing strict private `ai-secrets.json` verification key through dedicated-worker operations; the file remains outside SQLite, events, receipts, and complete backups. Lazy key creation on first plugin query is a private-file operation only and does not initialize AI/provider runtime. Missing/malformed/private-file failures fail closed as scrubbed unavailable.
+
+Storage greedily forms canonical-ID pages under a 256-KiB ceiling measured over the complete canonical successful SDK reply, including page revision and authenticated next cursor. It never truncates rows. Task replies carry persisted task row revisions. Project and Tag tables do not gain row-revision columns; each item and page present the first-page sampled global revision under the existing WIT field. Ordinary cursors do not replace `plugin_event_cursors`, resync sessions, general task cursors, or retained-event authority.
+
+This authority adds no table, column, index, trigger, schema SQL, schema version, migration, backup content, receipt, event, public DTO/OpenAPI route, WIT/generated body, package hash, or dependency declaration. It awaits focused planning recheck and authorizes no implementation acceptance.
 
 ### `plugin_dependency_locks`
 

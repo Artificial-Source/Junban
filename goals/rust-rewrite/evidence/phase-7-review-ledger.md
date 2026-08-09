@@ -243,7 +243,7 @@ Focused wakeable-driver security recheck verdict: **APPROVE** at exact `c9474bce
 | `P7-API-2D-001`–`004` | high     | fixed                      | Focused API-contract recheck approved exact retained-event conversion at `ff76e01abec9fb7377210833a48e409d694b6b1b`: complete represented/irrelevant/invalidating classification, bounded canonical affected IDs, fail-closed snapshot invariants, and retained revision authority. Final callback composition is not accepted. |
 | `P7-2D-SEC-001`       | high     | fixed                      | Focused security recheck approved exact HTTPS correction `71aad742cf33ab256a70142858b720146f7dc439`. IPv6 answers and translation forms are never usable; request transport proceeds only through a freshly resolved, validated, pinned public IPv4 set.                                                                        |
 
-These focused verdicts approve only their reviewed correction boundaries. Resync implementation and final callback composition remain in progress and unaccepted. `P7-2D-DB-002` and fixed-in-plan/focused-recheck-pending `P7-PLAN-2D-005`, including `P7-PLAN-2D-005-UUID`, remain blockers for their exact scopes.
+These focused verdicts approve only their reviewed correction boundaries. Resync implementation and final callback composition remain in progress and unaccepted. `P7-2D-DB-002` remains the server migration/removal blocker. Focused recheck **APPROVED** `P7-PLAN-2D-005` and `P7-PLAN-2D-005-UUID` at exact `dbf63a58f38df245b0b62337b29c644b8054984c`, authorizing ordinary app/storage query coding only; implementation remains unaccepted.
 
 ## Supervisor implementation recheck and exact-head evidence
 

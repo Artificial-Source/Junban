@@ -213,7 +213,7 @@ The existing WIT task/project/tag query shapes remain unchanged, but their inter
 
 The private key remains in strict `ai-secrets.json`, is lazily created through the dedicated SQLite worker on the first ordinary plugin query, and never initializes AI/provider runtime. Cross-query/kind/profile/tampered/replaced-key cursors are invalid input; authenticated expiry/revision/event-epoch drift is cursor stale; missing/malformed/private-file failures are scrubbed unavailable. Project/Tag items present the sampled global revision because schema v7 has no row-revision column; tasks retain row revisions. No field truncation, offset cursor, long-lived transaction, public route, public DTO, WIT/generated/package hash, schema/migration, or new dependency package is authorized.
 
-`P7-PLAN-2D-005` is high and fixed in plan, but focused recheck is pending. Only ordinary query/callback coding is paused for it. Resync implementation and supervisor fixes are independent. Approval would authorize implementation only, not accept callback composition, resync, the supervisor, Slice 2C, Slice 2D, or Wave 2.
+Focused recheck **APPROVED** `P7-PLAN-2D-005` and its UUID subsidiary at exact `dbf63a58f38df245b0b62337b29c644b8054984c`, authorizing ordinary app/storage query coding. This approval does not accept the implementation, callback composition, resync, the supervisor, Slice 2C, Slice 2D, or Wave 2.
 
 #### Required focused tests and recheck
 

@@ -1,7 +1,7 @@
 # Phase 7 schema-v7 contract
 
 Date: 2026-08-04
-Status: frozen schema-v7 authority; accepted Wave 1 persistence remains intact. Narrow Slice 2D planning recheck at exact `073f00d98dac4b9110ec028da01d0fb71eaa3ae3` approved/closed `P7-PLAN-2D-001`–`004`. Delivery persistence recheck at exact `d641d69ac89436eb39624ca3eeca7dd6b90d795d` closed `P7-2D-DB-001`/`003` and accepted the persistence portion of `P7-2D-DB-002`, but that finding remains an open **REMOVAL BLOCKER** until server migration and deletion of every legacy unwrapped API. High schema-neutral `P7-PLAN-2D-005` is fixed in plan with focused recheck pending; query/callback coding alone waits on it while resync and supervisor fixes remain independent. No schema SQL, row, table, version, or migration change is authorized, and no Slice 2D/Wave 2 acceptance is claimed.
+Status: frozen schema-v7 authority; accepted Wave 1 persistence remains intact. Narrow Slice 2D planning recheck at exact `073f00d98dac4b9110ec028da01d0fb71eaa3ae3` approved/closed `P7-PLAN-2D-001`–`004`. Delivery persistence recheck at exact `d641d69ac89436eb39624ca3eeca7dd6b90d795d` closed `P7-2D-DB-001`/`003` and accepted the persistence portion of `P7-2D-DB-002`, but that finding remains an open **REMOVAL BLOCKER** until server migration and deletion of every legacy unwrapped API. Focused recheck **APPROVED** schema-neutral `P7-PLAN-2D-005` and its UUID subsidiary at exact `dbf63a58f38df245b0b62337b29c644b8054984c`, authorizing ordinary app/storage query coding; implementation and callback composition remain unaccepted. No schema SQL, row, table, version, or migration change is authorized, and no Slice 2D/Wave 2 acceptance is claimed.
 Parent authority: [`phase-7-context-map.md`](phase-7-context-map.md)
 
 ## Purpose

@@ -1,14 +1,14 @@
 # Phase 7 ordinary plugin-query capability contract
 
 Date: 2026-08-09
-Status: planning authority only — `P7-PLAN-2D-005` is high/fixed-in-plan; focused recheck pending
+Status: planning authority only — `P7-PLAN-2D-005` and subsidiary `P7-PLAN-2D-005-UUID` are high/fixed-in-plan; focused recheck pending
 Parent authorities: [`phase-7-context-map.md`](phase-7-context-map.md), [`phase-7-wit-contract.md`](phase-7-wit-contract.md), [`phase-7-schema-contract.md`](phase-7-schema-contract.md)
 
 ## Finding and implementation gate
 
-`P7-PLAN-2D-005` found that the frozen WIT described ordinary task/project/tag reads broadly but did not specify the internal AppService/SQLite query authority strongly enough to implement the server callback safely. The server-only callback implementation correctly stopped rather than inventing a cursor, snapshot, secret, or byte-limit contract.
+`P7-PLAN-2D-005` found that the frozen WIT described ordinary task/project/tag reads broadly but did not specify the internal AppService/SQLite query authority strongly enough to implement the server callback safely. The server-only callback implementation correctly stopped rather than inventing a cursor, snapshot, secret, or byte-limit contract. Query-authority review of exact `b4905b1d7afdd0ef8f95b6739eb8f5bebe34d1d1` then raised subsidiary high `P7-PLAN-2D-005-UUID`: the cursor plan incorrectly rejected non-RFC UUID variants even though existing Junban authority accepts every UUID that parses and canonical lowercase round-trips, and schema-v7 `TEXT` resource IDs and `event_epoch` impose no variant or version constraint.
 
-This document freezes the smallest implementation authority that satisfies the existing WIT. It changes no WIT or generated body, JBP1/JRI1/package hash, schema SQL/version/migration, public DTO/OpenAPI route, or dependency package. Query/callback coding is blocked only until one focused review approves this finding. Existing resync implementation and remaining Slice 2C supervisor fixes are independent and may continue. No Slice 2D, Slice 2C, Wave 2, supervisor, resync, or callback acceptance is claimed.
+This document freezes the smallest implementation authority that satisfies the existing WIT and corrects that UUID rule. It changes no WIT or generated body, JBP1/JRI1/package hash, schema SQL/version/migration, public DTO/OpenAPI route, or dependency package. Query/callback coding is blocked until one focused review approves `P7-PLAN-2D-005`, including its `P7-PLAN-2D-005-UUID` correction. Existing resync implementation and remaining Slice 2C supervisor fixes are independent and may continue. No Slice 2D, Slice 2C, Wave 2, supervisor, resync, or callback acceptance is claimed.
 
 ## Capability and ownership matrix
 
@@ -77,13 +77,15 @@ offset  size  field
 2       8     issued_at: unsigned Unix seconds
 10      8     expires_at: unsigned Unix seconds
 18      8     sampled global revision
-26      16    sampled event_epoch UUID bytes
+26      16    sampled event_epoch exact UUID bytes
 42      32    normalized-query SHA-256 bytes
-74      16    last canonical resource UUID bytes
+74      16    last_id exact resource UUID bytes
 90      32    HMAC-SHA256 tag over the first 90 bytes
 ```
 
-The encoded cursor is therefore 163 ASCII bytes and remains below the existing WIT 512-byte ceiling. Other decoded/encoded lengths, padded base64, noncanonical base64url, unknown version/kind, invalid UUID variant, a sampled revision above SQLite's `i64::MAX`, time arithmetic overflow, `expires_at != issued_at + 300`, or trailing bytes are `invalid-input`.
+Both 16-byte UUID fields use the exact UUID bytes for any value accepted by Junban's existing canonical parse/round-trip authority. Encoding parses the already-authorized canonical lowercase UUID text and copies, with no integer or field endianness swap, the 16 octets represented left-to-right after removing the hyphens (two hex digits per octet). Decoding constructs the UUID from those exact 16 octets and renders canonical lowercase text. Nil UUIDs, non-RFC UUID variants, and every version-bit pattern accepted by that existing authority are valid in both `sampled event_epoch` and `last_id`; the cursor codec adds no variant or version restriction. Schema-v7 `TEXT` resource IDs and `event_epoch` add none either.
+
+Malformed or noncanonical external UUID text still fails at its existing request, persistence-open, or other owning authority boundary, before cursor creation. A malformed cursor envelope length still fails at the cursor boundary. The encoded cursor remains exactly 163 ASCII bytes and below the existing WIT 512-byte ceiling. Other decoded/encoded lengths, padded base64, noncanonical base64url, unknown version/kind, a sampled revision above SQLite's `i64::MAX`, time arithmetic overflow, `expires_at != issued_at + 300`, or trailing bytes are `invalid-input`.
 
 The MAC is:
 
@@ -96,7 +98,7 @@ HMAC-SHA256(
 
 Creation uses the current Unix second and sets `expires_at` to exactly 300 seconds later. The TTL is non-configurable. Continuation requires `issued_at <= now < expires_at`; an otherwise authentic cursor at or after expiry returns `cursor-stale`. The MAC, kind, normalized-query hash, event epoch, and current global revision are verified before reads. A valid MAC under another query kind or normalized query is still `invalid-input`; event-epoch or revision drift is `cursor-stale`.
 
-Tampered, cross-kind, cross-query, cross-profile, malformed, oversized, and validly replaced-key cursors return the existing WIT `invalid-input` error without exposing which authentication check failed. Expired cursors and authenticated current-state revision/event-epoch drift return `cursor-stale`. Cursor bytes, decoded keys, query hashes, MACs, and the profile verification key never enter logs, events, receipts, diagnostics, test failure values, or public errors.
+Tampered, cross-kind, cross-query, cross-profile, malformed, oversized, and validly replaced-key cursors return the existing WIT `invalid-input` error without exposing which authentication check failed. Accepting all UUID variant/version bit patterns does not change that rule: changing any bit of either UUID field without recomputing the profile-private tag is tampering and fails MAC verification exactly as before. Expired cursors and authenticated current-state revision/event-epoch drift return `cursor-stale`. Cursor bytes, decoded keys, query hashes, MACs, and the profile verification key never enter logs, events, receipts, diagnostics, test failure values, or public errors.
 
 ## Profile-private MAC authority
 
@@ -138,8 +140,9 @@ Before query/callback coding resumes, one focused reviewer must approve this wri
 - exact task/project/section/parent ID predicates, all-of tags, status/priority membership, half-open due boundaries, and literal `%`, `_`, and `\` search escaping across title/description;
 - canonical UUID ordering, zero/one/limit/count boundaries, 256-KiB exact edges, no field truncation, first-record operation-too-large, and exact complete-SDK-reply byte measurement;
 - empty, one-page, and multi-page traversal for tasks, projects, and tags, including proof that `next_cursor` means another matching row exists;
+- cursor encode/decode/re-encode round trips for nil and non-nil non-RFC-variant UUIDs in both `sampled event_epoch` and `last_id`, plus task/project/tag keyset traversal boundaries whose resource IDs are nil or non-RFC-variant UUIDs, with no variant/version rejection;
 - mutation between continuation pages returning `cursor-stale` for global revision drift and event-epoch drift;
-- tampered, noncanonical/padded, cross-query, cross-kind, cross-profile, expired, oversized, malformed, and replaced-key cursors with the exact `invalid-input` versus `cursor-stale` mapping;
+- tampered UUID-field bits, noncanonical/padded, cross-query, cross-kind, cross-profile, expired, oversized, malformed, and replaced-key cursors with unchanged MAC behavior and the exact `invalid-input` versus `cursor-stale` mapping;
 - profile-MAC domain separation from AI receipt verification, lazy first-query creation through the dedicated worker, serialized secret-file operations, private-file failures as unavailable, and no cursor/key/secret leakage;
 - one SQLite read transaction per page, same-transaction state check plus keyset selection, and snapshot consistency under a concurrent writer;
 - project/tag sampled-global-revision presentation and task row revisions;

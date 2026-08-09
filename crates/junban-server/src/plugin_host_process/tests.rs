@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     fs,
     io::Cursor,
     path::Path,
@@ -8,7 +9,7 @@ use std::{
 
 use junban_plugin_sdk::{
     ChildFrame, HOST_FRAME_BYTES_MAX, ParentFrame, RuntimeProfile, encode_child_frame,
-    read_parent_message,
+    read_parent_message, write_parent_message,
 };
 
 use super::*;
@@ -56,6 +57,32 @@ fn shell_write(bytes: &[u8]) -> String {
         .map(|byte| format!("\\{:03o}", byte))
         .collect::<String>();
     format!("printf '{escaped}'\n")
+}
+
+fn parent_wire(frame: ParentFrame) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    write_parent_message(&mut bytes, &frame, &[]).unwrap();
+    bytes
+}
+
+#[cfg(unix)]
+fn synchronized_shutdown_script(terminal: &[u8], tail: &str) -> String {
+    let parent_hello = parent_wire(ParentFrame::Hello {
+        protocol_name: HOST_PROTOCOL_NAME.into(),
+        protocol_version: HOST_PROTOCOL_VERSION,
+        junban_version: HOST_JUNBAN_VERSION.into(),
+        host_session_id: SESSION.into(),
+    });
+    let parent_shutdown = parent_wire(ParentFrame::Shutdown {
+        host_session_id: SESSION.into(),
+    });
+    format!(
+        "{}/bin/dd if=/dev/stdin of=hello.bin bs=1 count={} 2>/dev/null\n/bin/dd if=/dev/stdin of=shutdown.bin bs=1 count={} 2>/dev/null\n{}{tail}",
+        shell_write(&wire(&hello(SESSION))),
+        parent_hello.len(),
+        parent_shutdown.len(),
+        shell_write(terminal),
+    )
 }
 
 #[cfg(unix)]
@@ -144,6 +171,79 @@ fn product_deadlines_and_channel_bounds_are_exact() {
     assert_eq!(READER_CONTROL_CHANNEL_CAPACITY, 1);
     assert_eq!(WORKER_STATUS_CHANNEL_CAPACITY, 3);
     assert_eq!(STDERR_BUFFER_BYTES, 8 * 1024);
+    assert_eq!(CHILD_STATUS_POLL_INTERVAL, Duration::from_millis(10));
+}
+
+#[test]
+fn child_status_polling_rejects_expiry_and_has_a_bounded_sleeping_cadence() {
+    let started = Instant::now();
+    let elapsed = Cell::new(Duration::ZERO);
+    let polls = Cell::new(0_u32);
+    let sleeps = Cell::new(0_u32);
+    let result = wait_for_child_status_until::<()>(
+        started + PRODUCT_CONTROL_DEADLINE,
+        || started + elapsed.get(),
+        || {
+            polls.set(polls.get() + 1);
+            Ok(None)
+        },
+        |duration| {
+            assert!(!duration.is_zero());
+            assert!(duration <= CHILD_STATUS_POLL_INTERVAL);
+            sleeps.set(sleeps.get() + 1);
+            elapsed.set(elapsed.get() + duration);
+        },
+    )
+    .unwrap();
+    assert_eq!(result, None);
+    assert_eq!(polls.get(), 100);
+    assert_eq!(sleeps.get(), 100);
+
+    let elapsed = Cell::new(PRODUCT_CONTROL_DEADLINE - Duration::from_nanos(1));
+    let polls = Cell::new(0_u32);
+    let late = wait_for_child_status_until(
+        started + PRODUCT_CONTROL_DEADLINE,
+        || started + elapsed.get(),
+        || {
+            polls.set(polls.get() + 1);
+            elapsed.set(PRODUCT_CONTROL_DEADLINE);
+            Ok(Some(()))
+        },
+        |_| unreachable!("a status was returned"),
+    )
+    .unwrap();
+    assert_eq!(late, None);
+    assert_eq!(polls.get(), 1);
+
+    let polls = Cell::new(0_u32);
+    let expired = wait_for_child_status_until::<()>(
+        started + PRODUCT_CONTROL_DEADLINE,
+        || started + PRODUCT_CONTROL_DEADLINE,
+        || {
+            polls.set(polls.get() + 1);
+            Ok(Some(()))
+        },
+        |_| unreachable!("an expired deadline cannot sleep"),
+    )
+    .unwrap();
+    assert_eq!(expired, None);
+    assert_eq!(polls.get(), 0);
+}
+
+#[test]
+fn shutdown_eof_observation_is_strictly_inside_the_control_deadline() {
+    let deadline = deadline_after(Duration::from_secs(1));
+    assert_eq!(
+        validate_shutdown_terminal_event(
+            ReaderEvent::Eof(deadline - Duration::from_nanos(1)),
+            deadline,
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        validate_shutdown_terminal_event(ReaderEvent::Eof(deadline), deadline),
+        Err(PluginHostProcessError::ControlTimeout)
+    );
 }
 
 #[cfg(unix)]
@@ -565,6 +665,138 @@ fn malformed_body_wrong_runtime_session_and_extra_hello_are_fatal() {
         } else {
             assert_eq!(received, Err(PluginHostProcessError::ProtocolRejected));
         }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn shutdown_accepts_only_timely_ack_exit_and_clean_reader_eof() {
+    let _guard = process_test_guard();
+    let acknowledgement = wire(&ChildFrame::ShutdownComplete {
+        host_session_id: SESSION.into(),
+    });
+    let fixture = Fixture::new(
+        "shutdown-clean-eof",
+        &synchronized_shutdown_script(&acknowledgement, "exit 0\n"),
+    );
+    let mut process =
+        PluginHostProcess::connect_for_test(&fixture.executable, session(), test_deadlines())
+            .unwrap();
+    process.finish_loading().unwrap();
+    let pid = process.process_id().unwrap();
+    process.shutdown().unwrap();
+    process.shutdown().unwrap();
+    assert_process_absent(pid);
+
+    let mut hello_capture = Cursor::new(fs::read(fixture.root.join("hello.bin")).unwrap());
+    assert!(matches!(
+        read_parent_message(&mut hello_capture)
+            .unwrap()
+            .unwrap()
+            .frame,
+        ParentFrame::Hello { .. }
+    ));
+    assert_eq!(read_parent_message(&mut hello_capture).unwrap(), None);
+    let mut shutdown_capture = Cursor::new(fs::read(fixture.root.join("shutdown.bin")).unwrap());
+    assert!(matches!(
+        read_parent_message(&mut shutdown_capture)
+            .unwrap()
+            .unwrap()
+            .frame,
+        ParentFrame::Shutdown { .. }
+    ));
+    assert_eq!(read_parent_message(&mut shutdown_capture).unwrap(), None);
+}
+
+#[cfg(unix)]
+#[test]
+fn shutdown_timeout_after_ack_kills_reaps_and_closes_repeatedly() {
+    let _guard = process_test_guard();
+    let acknowledgement = wire(&ChildFrame::ShutdownComplete {
+        host_session_id: SESSION.into(),
+    });
+    let fixture = Fixture::new(
+        "shutdown-late-exit",
+        &synchronized_shutdown_script(&acknowledgement, "exec /bin/sleep 30\n"),
+    );
+    let mut process = PluginHostProcess::connect_for_test(
+        &fixture.executable,
+        session(),
+        ProcessDeadlines {
+            control: Duration::from_millis(250),
+            compile_load: Duration::from_millis(500),
+        },
+    )
+    .unwrap();
+    process.finish_loading().unwrap();
+    let pid = process.process_id().unwrap();
+    assert_eq!(
+        process.shutdown(),
+        Err(PluginHostProcessError::ControlTimeout)
+    );
+    assert_process_absent(pid);
+    process.shutdown().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn shutdown_rejects_every_post_ack_protocol_byte_and_reaps() {
+    let _guard = process_test_guard();
+    let acknowledgement = ChildFrame::ShutdownComplete {
+        host_session_id: SESSION.into(),
+    };
+    let mut duplicate = wire(&acknowledgement);
+    duplicate.extend_from_slice(&wire(&acknowledgement));
+
+    let callback = junban_plugin_sdk::CallbackFence {
+        plugin_id: "plugin-00".into(),
+        package_generation: 7,
+        activation_epoch: 9,
+        host_session_id: SESSION.into(),
+        invocation_id: "00000000-0000-4000-8000-000000000500".into(),
+        callback_id: 1,
+    };
+    let extra_body_header = ChildFrame::CapabilityRequest {
+        callback,
+        kind: junban_plugin_sdk::HostCallKind::GetSettings,
+        request_sha256: Sha256Digest::of(b"abc").into_string(),
+        request_size: 3,
+    };
+    let mut header_and_body = wire(&acknowledgement);
+    header_and_body.extend_from_slice(&wire(&extra_body_header));
+    header_and_body.extend_from_slice(b"abc");
+
+    let mut malformed = wire(&acknowledgement);
+    malformed.extend_from_slice(&[0, 0, 0, 1, b'{']);
+    let mut truncated = wire(&acknowledgement);
+    truncated.extend_from_slice(&[0, 0, 0]);
+    let mut oversized = wire(&acknowledgement);
+    oversized.extend_from_slice(
+        &u32::try_from(HOST_FRAME_BYTES_MAX + 1)
+            .unwrap()
+            .to_be_bytes(),
+    );
+
+    for (label, terminal) in [
+        ("shutdown-duplicate-ack", duplicate),
+        ("shutdown-extra-header-body", header_and_body),
+        ("shutdown-malformed", malformed),
+        ("shutdown-truncated", truncated),
+        ("shutdown-oversized", oversized),
+    ] {
+        let fixture = Fixture::new(label, &synchronized_shutdown_script(&terminal, "exit 0\n"));
+        let mut process =
+            PluginHostProcess::connect_for_test(&fixture.executable, session(), test_deadlines())
+                .unwrap();
+        process.finish_loading().unwrap();
+        let pid = process.process_id().unwrap();
+        assert_eq!(
+            process.shutdown(),
+            Err(PluginHostProcessError::ProtocolRejected),
+            "unexpected {label} result"
+        );
+        assert_process_absent(pid);
+        process.shutdown().unwrap();
     }
 }
 

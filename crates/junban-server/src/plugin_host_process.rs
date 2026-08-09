@@ -30,6 +30,7 @@ const READER_CHANNEL_CAPACITY: usize = 1;
 const READER_CONTROL_CHANNEL_CAPACITY: usize = 1;
 const WORKER_STATUS_CHANNEL_CAPACITY: usize = 3;
 const STDERR_BUFFER_BYTES: usize = 8 * 1024;
+const CHILD_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const PRODUCT_CONTROL_DEADLINE: Duration = Duration::from_millis(COMMAND_TIMEOUT_MS as u64);
 const PRODUCT_COMPILE_LOAD_DEADLINE: Duration = Duration::from_millis(COMPILE_TIMEOUT_MS as u64);
 
@@ -120,7 +121,7 @@ enum ReaderControl {
 enum ReaderEvent {
     Header(ChildFrame, Instant),
     Body(Vec<u8>, Instant),
-    Eof,
+    Eof(Instant),
     ProtocolFailure,
 }
 
@@ -338,7 +339,7 @@ impl PluginHostProcess {
             }
             ReaderEvent::Body(_, _) => self.fail(PluginHostProcessError::ControlTimeout),
             ReaderEvent::ProtocolFailure => self.fail(PluginHostProcessError::ProtocolRejected),
-            ReaderEvent::Eof => self.fail(PluginHostProcessError::TransportFailed),
+            ReaderEvent::Eof(_) => self.fail(PluginHostProcessError::TransportFailed),
             ReaderEvent::Header(_, _) => self.fail(PluginHostProcessError::WorkerFailed),
         }
     }
@@ -390,36 +391,40 @@ impl PluginHostProcess {
             return self.fail(PluginHostProcessError::ProtocolRejected);
         }
 
-        // Closing stdin allows deterministic fixture and child exit. Waiting is
-        // bounded by the remainder of the same control deadline.
+        // Closing stdin allows deterministic child exit. Exit, reap, and the
+        // reader's exact clean EOF must all fit in this same control deadline.
         self.writer.take();
-        let status = self.wait_until(deadline);
-        match status {
-            Ok(Some(status)) => {
-                let waited = self
-                    .child
-                    .as_mut()
-                    .is_some_and(|child| child.wait().is_ok());
-                if !waited {
-                    let _ = self.finish_after_wait();
-                    return Err(PluginHostProcessError::CleanupFailed);
-                }
-                self.finish_after_wait()?;
-                if status.success() {
-                    Ok(())
-                } else {
-                    Err(PluginHostProcessError::TransportFailed)
-                }
-            }
+        let status = match self.wait_until(deadline) {
+            Ok(Some(status)) => status,
             Ok(None) => {
-                let _ = self.terminate(true);
-                Err(PluginHostProcessError::ControlTimeout)
+                let error = match self.receive_shutdown_eof_until(deadline) {
+                    Err(PluginHostProcessError::ProtocolRejected) => {
+                        PluginHostProcessError::ProtocolRejected
+                    }
+                    Ok(()) | Err(_) => PluginHostProcessError::ControlTimeout,
+                };
+                return self.fail(error);
             }
             Err(()) => {
-                let _ = self.terminate(true);
-                Err(PluginHostProcessError::CleanupFailed)
+                let _ = self.receive_shutdown_eof_until(deadline);
+                return self.fail(PluginHostProcessError::CleanupFailed);
             }
+        };
+        let waited = self
+            .child
+            .as_mut()
+            .is_some_and(|child| child.wait().is_ok());
+        let terminal = self.receive_shutdown_eof_until(deadline);
+        if !waited {
+            return self.fail(PluginHostProcessError::CleanupFailed);
         }
+        if let Err(error) = terminal {
+            return self.fail(error);
+        }
+        if !status.success() {
+            return self.fail(PluginHostProcessError::TransportFailed);
+        }
+        self.finish_after_wait()
     }
 
     fn connect_validated(
@@ -590,9 +595,21 @@ impl PluginHostProcess {
                 Ok(frame)
             }
             ReaderEvent::Body(_, _) => Err(PluginHostProcessError::WorkerFailed),
-            ReaderEvent::Eof => Err(PluginHostProcessError::TransportFailed),
+            ReaderEvent::Eof(_) => Err(PluginHostProcessError::TransportFailed),
             ReaderEvent::ProtocolFailure => Err(PluginHostProcessError::ProtocolRejected),
         }
+    }
+
+    fn receive_shutdown_eof_until(
+        &mut self,
+        deadline: Instant,
+    ) -> Result<(), PluginHostProcessError> {
+        let event = recv_until(
+            self.reader_events.as_ref(),
+            deadline,
+            PluginHostProcessError::ControlTimeout,
+        )?;
+        validate_shutdown_terminal_event(event, deadline)
     }
 
     fn child_frame_allowed(&self, frame: &ChildFrame, context: ReceiveContext) -> bool {
@@ -679,14 +696,12 @@ impl PluginHostProcess {
         let Some(child) = self.child.as_mut() else {
             return Ok(None);
         };
-        loop {
-            match child.try_wait() {
-                Ok(Some(status)) => return Ok(Some(status)),
-                Ok(None) if Instant::now() < deadline => std::thread::yield_now(),
-                Ok(None) => return Ok(None),
-                Err(_) => return Err(()),
-            }
-        }
+        wait_for_child_status_until(
+            deadline,
+            Instant::now,
+            || child.try_wait(),
+            std::thread::sleep,
+        )
     }
 
     fn terminate(&mut self, kill: bool) -> Result<(), PluginHostProcessError> {
@@ -810,7 +825,7 @@ fn run_reader(
         let frame = match read_child_frame(&mut stdout) {
             Ok(Some(frame)) => frame,
             Ok(None) => {
-                let _ = events.send(ReaderEvent::Eof);
+                let _ = events.send(ReaderEvent::Eof(Instant::now()));
                 break;
             }
             Err(_) => {
@@ -864,6 +879,41 @@ fn drain_stderr(mut stderr: impl Read, worker_status: SyncSender<WorkerKind>) {
         }
     }
     let _ = worker_status.send(WorkerKind::Stderr);
+}
+
+fn validate_shutdown_terminal_event(
+    event: ReaderEvent,
+    deadline: Instant,
+) -> Result<(), PluginHostProcessError> {
+    match event {
+        ReaderEvent::Eof(observed) if observed < deadline => Ok(()),
+        ReaderEvent::Eof(_) => Err(PluginHostProcessError::ControlTimeout),
+        ReaderEvent::Header(_, _) | ReaderEvent::Body(_, _) | ReaderEvent::ProtocolFailure => {
+            Err(PluginHostProcessError::ProtocolRejected)
+        }
+    }
+}
+
+fn wait_for_child_status_until<T>(
+    deadline: Instant,
+    mut now: impl FnMut() -> Instant,
+    mut poll: impl FnMut() -> std::io::Result<Option<T>>,
+    mut sleep: impl FnMut(Duration),
+) -> Result<Option<T>, ()> {
+    loop {
+        if now() >= deadline {
+            return Ok(None);
+        }
+        let status = poll().map_err(|_| ())?;
+        let observed_at = now();
+        if observed_at >= deadline {
+            return Ok(None);
+        }
+        if status.is_some() {
+            return Ok(status);
+        }
+        sleep(CHILD_STATUS_POLL_INTERVAL.min(deadline.duration_since(observed_at)));
+    }
 }
 
 fn recv_until<T>(
